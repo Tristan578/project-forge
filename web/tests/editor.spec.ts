@@ -82,8 +82,6 @@ test.describe('Editor Scene', () => {
       expect(hasPosition).toBe(true);
     } else {
       console.log('Player node not found in hierarchy - checking what IS visible');
-      const pageContent = await page.content();
-      // Log relevant parts of the page
       const bodyText = await page.locator('body').innerText();
       console.log('Page text (first 2000 chars):', bodyText.substring(0, 2000));
       expect(false).toBe(true); // Fail with context

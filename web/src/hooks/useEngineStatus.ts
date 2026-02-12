@@ -153,7 +153,7 @@ export function useEngineStatus(): EngineStatus & {
     }
 
     return clearTimeouts;
-  }, [currentPhase, isReady, hasError, isTimedOut, clearTimeouts, logEvent]);
+  }, [currentPhase, isReady, hasError, isTimedOut, clearTimeouts, logEvent, events]);
 
   // Build phase status list
   const phases: PhaseStatus[] = PHASE_ORDER.map((phase) => {

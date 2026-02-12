@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Key, Plus, Trash2, Eye, EyeOff, Copy, Check } from 'lucide-react';
+import { Key, Plus, Trash2, Copy, Check } from 'lucide-react';
 
 type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno';
 

@@ -1,7 +1,7 @@
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { users, providerKeys } from '../db/schema';
-import type { Provider, Tier } from '../db/schema';
+import type { Provider } from '../db/schema';
 import { decryptProviderKey } from './encryption';
 import { deductTokens } from '../tokens/service';
 

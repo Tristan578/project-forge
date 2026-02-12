@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { useEditorStore, type AmbientLightData, type EnvironmentData, type BloomData, type ChromaticAberrationData, type ColorGradingData, type ColorGradingGlobalData, type ColorGradingSectionData, type SharpeningData } from '@/stores/editorStore';
+import { useEditorStore, type AmbientLightData, type EnvironmentData, type ColorGradingSectionData } from '@/stores/editorStore';
 
 /** Convert linear RGB [0-1] to sRGB hex string. */
 function linearToHex(r: number, g: number, b: number): string {

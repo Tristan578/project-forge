@@ -15,7 +15,7 @@ interface BundledScripts {
 export function bundleScripts(
   allScripts: Record<string, ScriptData>
 ): BundledScripts {
-  const enabledScripts = Object.entries(allScripts).filter(([_, s]) => s.enabled);
+  const enabledScripts = Object.entries(allScripts).filter(([, s]) => s.enabled);
 
   if (enabledScripts.length === 0) {
     return { code: '', count: 0 };

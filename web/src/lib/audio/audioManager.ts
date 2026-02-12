@@ -217,7 +217,6 @@ class AudioManager {
     // Route through bus
     const busName = instance.bus ?? 'sfx';
     const bus = this.buses.get(busName) ?? this.buses.get('sfx')!;
-    const lastEntityNode = instance.pannerNode ?? instance.gainNode;
 
     // Connect: source → gain → panner (if spatial) → busGainNode
     if (instance.pannerNode) {
@@ -555,11 +554,6 @@ class AudioManager {
 
     // Disconnect current chain
     this.disconnectBusChain(bus);
-
-    // Destroy old effect instances
-    for (const fx of bus.effects) {
-      // No explicit cleanup needed for Web Audio nodes
-    }
 
     // Create new effect instances
     bus.effects = effectDefs

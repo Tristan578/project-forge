@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
-import { FolderOpen, Upload, Image, Trash2, Box, Music } from 'lucide-react';
+import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 
 function fileToBase64(file: File): Promise<string> {
@@ -28,7 +28,7 @@ function AssetCard({ asset }: { asset: AssetMetadata }) {
   const placeAsset = useEditorStore((s) => s.placeAsset);
   const deleteAsset = useEditorStore((s) => s.deleteAsset);
 
-  const icon = asset.kind === 'gltf_model' ? <Box size={20} /> : asset.kind === 'audio' ? <Music size={20} /> : <Image size={20} />;
+  const icon = asset.kind === 'gltf_model' ? <Box size={20} /> : asset.kind === 'audio' ? <Music size={20} /> : <ImageIcon size={20} />;
   const canPlace = asset.kind === 'gltf_model';
 
   return (
@@ -148,7 +148,7 @@ export function AssetPanel() {
             onClick={() => textureInputRef.current?.click()}
             title="Import texture (.png/.jpg)"
           >
-            <Image size={14} />
+            <ImageIcon size={14} />
           </button>
           <button
             className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"

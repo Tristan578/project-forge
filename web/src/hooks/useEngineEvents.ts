@@ -344,13 +344,13 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           break;
 
         case 'MATERIAL_CHANGED': {
-          const { entityId: _matEntityId, ...matData } = event.payload;
+          const { entityId: _matId, ...matData } = event.payload;
           setPrimaryMaterialRef.current(matData as MaterialData);
           break;
         }
 
         case 'LIGHT_CHANGED': {
-          const { entityId: _lightEntityId, ...lightData } = event.payload;
+          const { entityId: _lightId, ...lightData } = event.payload;
           setPrimaryLightRef.current(lightData as LightData);
           break;
         }
@@ -381,7 +381,7 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           break;
 
         case 'PHYSICS_CHANGED': {
-          const { entityId: _physEntityId, enabled, ...physData } = event.payload;
+          const { entityId: _physId, enabled, ...physData } = event.payload;
           useEditorStore.getState().setPrimaryPhysics(physData as PhysicsData, enabled);
           break;
         }

@@ -20,7 +20,7 @@ export function DashboardLayout() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewDialog, setShowNewDialog] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [_showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     fetchProjects();

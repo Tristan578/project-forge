@@ -29,6 +29,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
       {message.images && message.images.length > 0 && (
         <div className="mb-1.5 flex gap-1.5">
           {message.images.map((img, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               key={i}
               src={img}

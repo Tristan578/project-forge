@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef } from 'react';
-import { Image, X } from 'lucide-react';
+import { Image as ImageIcon, X } from 'lucide-react';
 import { useEditorStore, type MaterialData } from '@/stores/editorStore';
 
 /** Convert linear RGB [0-1] to sRGB hex string. */
@@ -89,7 +89,7 @@ function TextureSlot({ label, slot, textureRef, entityId }: TextureSlotProps) {
         onClick={() => fileRef.current?.click()}
         title={`Select ${label.toLowerCase()} texture`}
       >
-        <Image size={12} />
+        <ImageIcon size={12} />
         <span>Select</span>
       </button>
       {textureRef && (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback } from 'react';
-import { useEditorStore, type ParticleData, type ParticlePreset, type SpawnerMode, type EmissionShape, type GradientStop } from '@/stores/editorStore';
+import { useEditorStore, type ParticleData, type ParticlePreset, type EmissionShape, type GradientStop } from '@/stores/editorStore';
 import { Play, StopCircle, Zap, Trash2, Plus, Minus } from 'lucide-react';
 
 interface SliderRowProps {
