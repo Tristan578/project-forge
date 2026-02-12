@@ -334,3 +334,13 @@ pub fn emit_particle_changed(
         particle: particle_data,
     });
 }
+
+/// Emit an animation state changed event.
+pub fn emit_animation_state_changed(state: &crate::core::animation::AnimationPlaybackState) {
+    emit_event("ANIMATION_STATE_CHANGED", state);
+}
+
+/// Emit an animation list changed event (when clips are first discovered).
+pub fn emit_animation_list_changed(state: &crate::core::animation::AnimationPlaybackState) {
+    emit_event("ANIMATION_LIST_CHANGED", state);
+}

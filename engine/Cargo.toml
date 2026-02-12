@@ -34,6 +34,9 @@ features = [
     "tonemapping_luts",
     "bevy_picking",
     "bevy_mesh_picking_backend",
+    "bevy_animation",
+    "bevy_gltf",
+    "bevy_scene",
 ]
 
 [dependencies.web-sys]

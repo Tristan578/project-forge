@@ -35,6 +35,7 @@ pub enum QueryRequest {
     PostProcessingState,
     AudioBuses,
     ParticleState { entity_id: String },
+    AnimationState { entity_id: String },
 }
 
 /// A pending glTF import request.
@@ -219,6 +220,35 @@ pub struct ParticlePlayback {
     pub burst_count: Option<u32>,
 }
 
+/// A pending animation playback request.
+#[derive(Debug, Clone)]
+pub struct AnimationRequest {
+    pub entity_id: String,
+    pub action: AnimationAction,
+}
+
+/// The specific animation action to perform.
+#[derive(Debug, Clone)]
+pub enum AnimationAction {
+    /// Start playing a clip by name. If crossfade_secs > 0, blend from current.
+    Play {
+        clip_name: String,
+        crossfade_secs: f32,
+    },
+    /// Pause the currently playing animation.
+    Pause,
+    /// Resume a paused animation.
+    Resume,
+    /// Stop all animations on this entity.
+    Stop,
+    /// Seek to a specific time in the current animation.
+    Seek { time_secs: f32 },
+    /// Set playback speed.
+    SetSpeed { speed: f32 },
+    /// Set loop mode.
+    SetLoop { looping: bool },
+}
+
 /// A pending force/impulse application (Play mode only).
 #[derive(Debug, Clone)]
 pub struct ForceApplication {
@@ -294,6 +324,7 @@ pub struct PendingCommands {
     pub particle_removals: Vec<ParticleRemoval>,
     pub particle_preset_requests: Vec<ParticlePresetRequest>,
     pub particle_playback: Vec<ParticlePlayback>,
+    pub animation_requests: Vec<AnimationRequest>,
 }
 
 /// A pending selection request from the hierarchy panel.
@@ -708,6 +739,11 @@ impl PendingCommands {
     /// Queue a particle playback action.
     pub fn queue_particle_playback(&mut self, playback: ParticlePlayback) {
         self.particle_playback.push(playback);
+    }
+
+    /// Queue an animation request.
+    pub fn queue_animation_request(&mut self, request: AnimationRequest) {
+        self.animation_requests.push(request);
     }
 }
 
@@ -1411,6 +1447,20 @@ pub fn queue_particle_playback_from_bridge(playback: ParticlePlayback) -> bool {
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_particle_playback(playback);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation request from the bridge layer.
+pub fn queue_animation_request_from_bridge(request: AnimationRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_request(request);
             }
             true
         } else {

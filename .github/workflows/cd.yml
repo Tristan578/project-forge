@@ -165,10 +165,11 @@ jobs:
         working-directory: web
         run: npm run build
         env:
-          # Stub env vars so Next.js build doesn't fail on missing secrets
+          # Real Clerk keys required — Clerk validates key format during prerender
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
+          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
+          # Stubs for services not called during build
           DATABASE_URL: postgresql://stub:stub@localhost/stub
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_stub
-          CLERK_SECRET_KEY: sk_test_stub
           STRIPE_SECRET_KEY: sk_test_stub
           NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_stub
           ENCRYPTION_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000

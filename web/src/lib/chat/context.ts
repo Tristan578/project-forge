@@ -1,4 +1,4 @@
-import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef } from '@/stores/editorStore';
+import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState } from '@/stores/editorStore';
 
 
 interface EditorSnapshot {
@@ -25,6 +25,7 @@ interface EditorSnapshot {
   primaryAudio?: AudioData | null;
   primaryParticle?: ParticleData | null;
   particleEnabled?: boolean;
+  primaryAnimation?: AnimationPlaybackState | null;
   postProcessing?: PostProcessingData;
   audioBuses?: AudioBusDef[];
 }
@@ -230,6 +231,17 @@ export function buildSceneContext(state: EditorSnapshot): string {
       return `${bus.name}: vol=${(bus.volume * 100).toFixed(0)}%${statusStr}`;
     }).join(', ');
     sections.push(`\n## Audio Buses\n${busesInfo}`);
+  }
+
+  // Animation (selected entity)
+  if (state.primaryAnimation && state.primaryAnimation.availableClips.length > 0) {
+    const anim = state.primaryAnimation;
+    const clipNames = anim.availableClips.map((c) => `${c.name} (${c.durationSecs.toFixed(1)}s)`).join(', ');
+    const statusParts: string[] = [`${anim.availableClips.length} clips: ${clipNames}`];
+    if (anim.activeClipName) {
+      statusParts.push(`active: "${anim.activeClipName}", ${anim.isPlaying ? (anim.isPaused ? 'paused' : 'playing') : 'stopped'}, speed=${anim.speed}x, loop=${anim.isLooping}`);
+    }
+    sections.push(`\n## Animation\n${statusParts.join('\n')}`);
   }
 
   // Input bindings

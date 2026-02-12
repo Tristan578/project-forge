@@ -35,6 +35,8 @@ use super::pending_commands::{
     queue_particle_update_from_bridge, queue_particle_toggle_from_bridge,
     queue_particle_removal_from_bridge, queue_particle_preset_from_bridge,
     queue_particle_playback_from_bridge,
+    queue_animation_request_from_bridge,
+    AnimationRequest, AnimationAction,
     TransformUpdate, RenameRequest, CameraFocusRequest, SpawnRequest, DeleteRequest, DuplicateRequest,
     ReparentRequest, SnapSettingsUpdate, CameraPresetRequest, MaterialUpdate, LightUpdate,
     AmbientLightUpdate, EnvironmentUpdate, PostProcessingUpdate, EntityType, SceneLoadRequest,
@@ -183,6 +185,21 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
                 .ok_or("Missing entityId")?
                 .to_string();
             handle_query(QueryRequest::ParticleState { entity_id })
+        },
+        // Animation commands
+        "play_animation" => handle_play_animation(payload),
+        "pause_animation" => handle_pause_animation(payload),
+        "resume_animation" => handle_resume_animation(payload),
+        "stop_animation" => handle_stop_animation(payload),
+        "seek_animation" => handle_seek_animation(payload),
+        "set_animation_speed" => handle_set_animation_speed(payload),
+        "set_animation_loop" => handle_set_animation_loop(payload),
+        "get_animation_state" | "list_animations" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::AnimationState { entity_id })
         },
         // Query commands (MCP resources)
         "get_scene_graph" => handle_query(QueryRequest::SceneGraph),
@@ -1738,6 +1755,167 @@ fn handle_burst_particle(payload: serde_json::Value) -> CommandResult {
     };
 
     if queue_particle_playback_from_bridge(playback) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Animation handlers
+// ---------------------------------------------------------------------------
+
+/// Handle play_animation command.
+/// Payload: { entityId: string, clipName: string, crossfadeSecs?: number }
+fn handle_play_animation(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+    let clip_name = payload.get("clipName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing clipName")?
+        .to_string();
+    let crossfade_secs = payload.get("crossfadeSecs")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.3) as f32;
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::Play { clip_name, crossfade_secs },
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued play_animation for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle pause_animation command.
+fn handle_pause_animation(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::Pause,
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued pause_animation for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle resume_animation command.
+fn handle_resume_animation(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::Resume,
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued resume_animation for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle stop_animation command.
+fn handle_stop_animation(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::Stop,
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued stop_animation for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle seek_animation command.
+fn handle_seek_animation(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+    let time_secs = payload.get("timeSecs")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing timeSecs")? as f32;
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::Seek { time_secs },
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued seek_animation for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_animation_speed command.
+fn handle_set_animation_speed(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+    let speed = payload.get("speed")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing speed")? as f32;
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::SetSpeed { speed: speed.max(0.01) },
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued set_animation_speed for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_animation_loop command.
+fn handle_set_animation_loop(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+    let looping = payload.get("looping")
+        .and_then(|v| v.as_bool())
+        .ok_or("Missing looping")?;
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::SetLoop { looping },
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued set_animation_loop for entity: {}", entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

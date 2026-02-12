@@ -75,6 +75,23 @@ declare namespace forge {
     function burst(entityId: string): void;
   }
 
+  namespace animation {
+    /** Play an animation clip by name */
+    function play(entityId: string, clipName: string, crossfadeSecs?: number): void;
+    /** Pause the current animation */
+    function pause(entityId: string): void;
+    /** Resume a paused animation */
+    function resume(entityId: string): void;
+    /** Stop all animations */
+    function stop(entityId: string): void;
+    /** Set playback speed (1.0 = normal) */
+    function setSpeed(entityId: string, speed: number): void;
+    /** Enable or disable looping */
+    function setLoop(entityId: string, looping: boolean): void;
+    /** List available clip names */
+    function listClips(entityId: string): string[];
+  }
+
   namespace time {
     /** Seconds since last frame */
     const delta: number;

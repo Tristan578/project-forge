@@ -192,6 +192,27 @@ export interface AudioEffectDef {
   enabled: boolean;
 }
 
+// Animation clip info matching Rust's AnimationClipInfo
+export interface AnimationClipInfo {
+  name: string;
+  nodeIndex: number;
+  durationSecs: number;
+}
+
+// Animation playback state matching Rust's AnimationPlaybackState
+export interface AnimationPlaybackState {
+  entityId: string;
+  availableClips: AnimationClipInfo[];
+  activeClipName: string | null;
+  activeNodeIndex: number | null;
+  isPlaying: boolean;
+  isPaused: boolean;
+  elapsedSecs: number;
+  speed: number;
+  isLooping: boolean;
+  isFinished: boolean;
+}
+
 // Particle blend mode
 export type ParticleBlendMode = 'additive' | 'alpha_blend' | 'premultiply';
 
@@ -412,6 +433,9 @@ export interface EditorState {
   primaryParticle: ParticleData | null;
   particleEnabled: boolean;
 
+  // Animation state
+  primaryAnimation: AnimationPlaybackState | null;
+
   // Post-processing state
   postProcessing: PostProcessingData;
 
@@ -558,6 +582,17 @@ export interface EditorState {
   setEntityParticle: (entityId: string, data: ParticleData | null, enabled: boolean) => void;
   setPrimaryParticle: (data: ParticleData | null, enabled: boolean) => void;
 
+  // Animation actions
+  playAnimation: (entityId: string, clipName: string, crossfadeSecs?: number) => void;
+  pauseAnimation: (entityId: string) => void;
+  resumeAnimation: (entityId: string) => void;
+  stopAnimation: (entityId: string) => void;
+  seekAnimation: (entityId: string, timeSecs: number) => void;
+  setAnimationSpeed: (entityId: string, speed: number) => void;
+  setAnimationLoop: (entityId: string, looping: boolean) => void;
+  setEntityAnimation: (entityId: string, state: AnimationPlaybackState | null) => void;
+  setPrimaryAnimation: (state: AnimationPlaybackState | null) => void;
+
   // Asset actions
   importGltf: (dataBase64: string, name: string) => void;
   loadTexture: (dataBase64: string, name: string, entityId: string, slot: string) => void;
@@ -663,6 +698,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   mixerPanelOpen: false,
   primaryParticle: null,
   particleEnabled: false,
+  primaryAnimation: null,
   sceneName: 'Untitled',
   sceneModified: false,
   autoSaveEnabled: true,
@@ -1636,5 +1672,59 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   setPrimaryParticle: (data, enabled) => {
     set({ primaryParticle: data, particleEnabled: enabled });
+  },
+
+  // Animation actions
+  playAnimation: (entityId, clipName, crossfadeSecs) => {
+    if (dispatchCommand) {
+      dispatchCommand('play_animation', { entityId, clipName, crossfadeSecs: crossfadeSecs ?? 0.3 });
+    }
+  },
+
+  pauseAnimation: (entityId) => {
+    if (dispatchCommand) {
+      dispatchCommand('pause_animation', { entityId });
+    }
+  },
+
+  resumeAnimation: (entityId) => {
+    if (dispatchCommand) {
+      dispatchCommand('resume_animation', { entityId });
+    }
+  },
+
+  stopAnimation: (entityId) => {
+    if (dispatchCommand) {
+      dispatchCommand('stop_animation', { entityId });
+    }
+  },
+
+  seekAnimation: (entityId, timeSecs) => {
+    if (dispatchCommand) {
+      dispatchCommand('seek_animation', { entityId, timeSecs });
+    }
+  },
+
+  setAnimationSpeed: (entityId, speed) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_animation_speed', { entityId, speed });
+    }
+  },
+
+  setAnimationLoop: (entityId, looping) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_animation_loop', { entityId, looping });
+    }
+  },
+
+  setEntityAnimation: (entityId, state) => {
+    const current = get();
+    if (current.primaryId === entityId) {
+      set({ primaryAnimation: state });
+    }
+  },
+
+  setPrimaryAnimation: (state) => {
+    set({ primaryAnimation: state });
   },
 }));

@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, setCommandDispatcher } from '@/stores/editorStore';
+import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, setCommandDispatcher } from '@/stores/editorStore';
 
 // Event types matching Rust's event emission
 interface SelectionChangedEvent {
@@ -213,7 +213,17 @@ interface ParticleChangedEvent {
   };
 }
 
-type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent;
+interface AnimationStateChangedEvent {
+  type: 'ANIMATION_STATE_CHANGED';
+  payload: AnimationPlaybackState;
+}
+
+interface AnimationListChangedEvent {
+  type: 'ANIMATION_LIST_CHANGED';
+  payload: AnimationPlaybackState;
+}
+
+type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent;
 
 // Debounced auto-save: triggers export_scene command after 2s of inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -417,6 +427,7 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
             primaryLight: null,
             primaryPhysics: null,
             physicsEnabled: false,
+            primaryAnimation: null,
           });
           break;
         }
@@ -522,6 +533,18 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
         case 'PARTICLE_CHANGED': {
           const { entityId, enabled, particle } = event.payload;
           useEditorStore.getState().setEntityParticle(entityId, particle, enabled);
+          break;
+        }
+
+        case 'ANIMATION_STATE_CHANGED': {
+          const animState = event.payload as AnimationPlaybackState;
+          useEditorStore.getState().setEntityAnimation(animState.entityId, animState);
+          break;
+        }
+
+        case 'ANIMATION_LIST_CHANGED': {
+          const animState = event.payload as AnimationPlaybackState;
+          useEditorStore.getState().setEntityAnimation(animState.entityId, animState);
           break;
         }
 

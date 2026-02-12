@@ -589,6 +589,83 @@ export async function executeToolCall(
         return { success: true, result: { particle, enabled } };
       }
 
+      // --- Animation commands ---
+      case 'play_animation': {
+        const entityId = input.entityId as string;
+        const clipName = input.clipName as string;
+        if (!entityId || !clipName) return { success: false, error: 'Missing entityId or clipName' };
+        const crossfadeSecs = (input.crossfadeSecs as number) ?? 0.3;
+        store.playAnimation(entityId, clipName, crossfadeSecs);
+        return { success: true, result: { message: `Playing animation "${clipName}" on ${entityId}` } };
+      }
+
+      case 'pause_animation': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        store.pauseAnimation(entityId);
+        return { success: true, result: { message: `Paused animation on ${entityId}` } };
+      }
+
+      case 'resume_animation': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        store.resumeAnimation(entityId);
+        return { success: true, result: { message: `Resumed animation on ${entityId}` } };
+      }
+
+      case 'stop_animation': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        store.stopAnimation(entityId);
+        return { success: true, result: { message: `Stopped animation on ${entityId}` } };
+      }
+
+      case 'seek_animation': {
+        const entityId = input.entityId as string;
+        const timeSecs = input.timeSecs as number;
+        if (!entityId || timeSecs === undefined) return { success: false, error: 'Missing entityId or timeSecs' };
+        store.seekAnimation(entityId, timeSecs);
+        return { success: true, result: { message: `Seeked to ${timeSecs}s on ${entityId}` } };
+      }
+
+      case 'set_animation_speed': {
+        const entityId = input.entityId as string;
+        const speed = input.speed as number;
+        if (!entityId || speed === undefined) return { success: false, error: 'Missing entityId or speed' };
+        store.setAnimationSpeed(entityId, speed);
+        return { success: true, result: { message: `Set animation speed to ${speed}x on ${entityId}` } };
+      }
+
+      case 'set_animation_loop': {
+        const entityId = input.entityId as string;
+        const looping = input.looping as boolean;
+        if (!entityId || looping === undefined) return { success: false, error: 'Missing entityId or looping' };
+        store.setAnimationLoop(entityId, looping);
+        return { success: true, result: { message: `Set animation loop=${looping} on ${entityId}` } };
+      }
+
+      case 'get_animation_state': {
+        const anim = store.primaryAnimation;
+        if (!anim) return { success: true, result: { hasAnimation: false } };
+        return { success: true, result: { hasAnimation: true, ...anim } };
+      }
+
+      case 'list_animations': {
+        const anim = store.primaryAnimation;
+        if (!anim || anim.availableClips.length === 0) {
+          return { success: true, result: { clips: [], count: 0 } };
+        }
+        return {
+          success: true,
+          result: {
+            clips: anim.availableClips.map((c) => ({ name: c.name, duration: c.durationSecs })),
+            count: anim.availableClips.length,
+            activeClip: anim.activeClipName,
+            isPlaying: anim.isPlaying,
+          },
+        };
+      }
+
       // --- Scene file commands ---
       case 'export_scene': {
         store.saveScene();

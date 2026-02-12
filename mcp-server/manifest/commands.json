@@ -1203,6 +1203,137 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "play_animation",
+      "description": "Play a named animation clip on an entity. Uses crossfade blending for smooth transitions between clips.",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with animation clips (glTF model)" },
+          "clipName": { "type": "string", "description": "Name of the animation clip to play" },
+          "crossfadeSecs": { "type": "number", "description": "Crossfade duration in seconds (default: 0.3)" }
+        },
+        "required": ["entityId", "clipName"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "pause_animation",
+      "description": "Pause the currently playing animation on an entity",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with playing animation" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "resume_animation",
+      "description": "Resume a paused animation on an entity",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with paused animation" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_animation",
+      "description": "Stop all animations on an entity and reset to bind pose",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with playing animation" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "seek_animation",
+      "description": "Seek to a specific time in the current animation clip",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with animation" },
+          "timeSecs": { "type": "number", "description": "Time to seek to in seconds" }
+        },
+        "required": ["entityId", "timeSecs"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_animation_speed",
+      "description": "Set the playback speed of animation on an entity",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with animation" },
+          "speed": { "type": "number", "description": "Playback speed multiplier (1.0 = normal, 2.0 = double speed, 0.5 = half speed)" }
+        },
+        "required": ["entityId", "speed"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_animation_loop",
+      "description": "Enable or disable looping for the current animation on an entity",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with animation" },
+          "looping": { "type": "boolean", "description": "Whether animation should loop" }
+        },
+        "required": ["entityId", "looping"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_animation_state",
+      "description": "Get the current animation playback state for an entity, including active clip, speed, elapsed time, and loop status",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to query" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_animations",
+      "description": "List all available animation clips on an entity. Returns clip names and durations.",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to query (must be a glTF model with animations)" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "export_game",
       "description": "Export the current scene as a standalone HTML game file",
       "category": "export",

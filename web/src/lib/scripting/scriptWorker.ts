@@ -119,6 +119,30 @@ function buildForgeApi(scriptEntityId: string) {
         pendingCommands.push({ cmd: 'burst_particle', entityId: eid });
       },
     },
+    animation: {
+      play: (eid: string, clipName: string, crossfadeSecs?: number) => {
+        pendingCommands.push({ cmd: 'play_animation', entityId: eid, clipName, crossfadeSecs: crossfadeSecs ?? 0.3 });
+      },
+      pause: (eid: string) => {
+        pendingCommands.push({ cmd: 'pause_animation', entityId: eid });
+      },
+      resume: (eid: string) => {
+        pendingCommands.push({ cmd: 'resume_animation', entityId: eid });
+      },
+      stop: (eid: string) => {
+        pendingCommands.push({ cmd: 'stop_animation', entityId: eid });
+      },
+      setSpeed: (eid: string, speed: number) => {
+        pendingCommands.push({ cmd: 'set_animation_speed', entityId: eid, speed });
+      },
+      setLoop: (eid: string, looping: boolean) => {
+        pendingCommands.push({ cmd: 'set_animation_loop', entityId: eid, looping });
+      },
+      listClips: (_eid: string) => {
+        // In worker, we don't have access to animation registry — return empty
+        return [] as string[];
+      },
+    },
     audio: {
       play: (eid: string) => {
         pendingCommands.push({ cmd: 'play_audio', entityId: eid });

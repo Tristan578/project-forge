@@ -3,6 +3,7 @@
 //! This module contains all game engine logic that is platform-agnostic.
 //! All browser/JS interop must go through the bridge module.
 
+pub mod animation;
 pub mod asset_manager;
 pub mod audio;
 pub mod camera;

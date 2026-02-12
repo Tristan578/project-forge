@@ -12,6 +12,7 @@ import { InputBindingsPanel } from './InputBindingsPanel';
 import { PhysicsInspector } from './PhysicsInspector';
 import { AudioInspector } from './AudioInspector';
 import { ParticleInspector } from './ParticleInspector';
+import { AnimationInspector } from './AnimationInspector';
 import {
   copyTransformProperty,
   copyFullTransform,
@@ -302,6 +303,9 @@ export function InspectorPanel() {
 
       {/* Particle section (for all entities) */}
       <ParticleInspector />
+
+      {/* Animation section (for glTF entities with animations) */}
+      <AnimationInspector />
 
       {/* Script section */}
       <div className="border-t border-zinc-800 pt-4 mt-4">
