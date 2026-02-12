@@ -1,4 +1,5 @@
-import manifestJson from '../../../../mcp-server/manifest/commands.json';
+// Sourced from mcp-server/manifest/commands.json — keep in sync when adding MCP commands
+import manifestJson from '@/data/commands.json';
 
 interface ManifestCommand {
   name: string;
