@@ -10,7 +10,7 @@
         "properties": {
           "entityType": {
             "type": "string",
-            "enum": ["cube", "sphere", "plane", "cylinder", "point_light", "directional_light", "spot_light"],
+            "enum": ["cube", "sphere", "plane", "cylinder", "cone", "torus", "capsule", "point_light", "directional_light", "spot_light"],
             "description": "Type of entity to spawn"
           },
           "name": {

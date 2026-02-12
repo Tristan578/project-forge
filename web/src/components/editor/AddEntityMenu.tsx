@@ -1,9 +1,9 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Box, Circle, Square, Cylinder, Lightbulb, Sun, Cone } from 'lucide-react';
+import { Plus, Box, Circle, Square, Cylinder, Triangle, Donut, Pill, Lightbulb, Sun, Flashlight } from 'lucide-react';
 
-export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'point_light' | 'directional_light' | 'spot_light';
+export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'point_light' | 'directional_light' | 'spot_light';
 
 interface AddEntityMenuProps {
   onSpawn: (type: EntityType) => void;
@@ -20,12 +20,15 @@ const meshItems: MenuItem[] = [
   { type: 'sphere', label: 'Sphere', icon: <Circle size={16} /> },
   { type: 'plane', label: 'Plane', icon: <Square size={16} /> },
   { type: 'cylinder', label: 'Cylinder', icon: <Cylinder size={16} /> },
+  { type: 'cone', label: 'Cone', icon: <Triangle size={16} /> },
+  { type: 'torus', label: 'Torus', icon: <Donut size={16} /> },
+  { type: 'capsule', label: 'Capsule', icon: <Pill size={16} /> },
 ];
 
 const lightItems: MenuItem[] = [
   { type: 'point_light', label: 'Point Light', icon: <Lightbulb size={16} /> },
   { type: 'directional_light', label: 'Directional Light', icon: <Sun size={16} /> },
-  { type: 'spot_light', label: 'Spot Light', icon: <Cone size={16} /> },
+  { type: 'spot_light', label: 'Spot Light', icon: <Flashlight size={16} /> },
 ];
 
 export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {

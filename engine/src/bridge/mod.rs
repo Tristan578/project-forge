@@ -36,7 +36,7 @@ use crate::core::{
     scripting::ScriptData,
     selection::{Selection, SelectionChangedEvent},
 };
-use bevy::animation::{AnimationPlayer, AnimationTransitions, RepeatAnimation, graph::AnimationNodeIndex};
+use bevy::animation::{AnimationClip, AnimationPlayer, AnimationTransitions, RepeatAnimation, graph::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex}};
 use bevy::gltf::Gltf;
 
 // Editor-only imports
@@ -2167,7 +2167,7 @@ fn build_animation_state(
         Some(AnimationClipInfo {
             name: name.clone(),
             node_index: node_index.index() as u32,
-            duration_secs: duration.clone(),
+            duration_secs: *duration,
         })
     }).collect();
 
@@ -2223,8 +2223,6 @@ fn register_gltf_animations(
     mut commands: Commands,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
-    use bevy::animation::AnimationGraph;
-
     for (player_entity, _player) in player_query.iter() {
         // Walk up the hierarchy to find the ancestor with our EntityId component
         let mut ancestor = player_entity;
@@ -2318,7 +2316,7 @@ fn register_gltf_animations(
 
         // Insert AnimationGraphHandle and AnimationTransitions on the player entity
         commands.entity(player_entity)
-            .insert(graph_handle.clone())
+            .insert(AnimationGraphHandle(graph_handle.clone()))
             .insert(AnimationTransitions::new())
             .insert(HasAnimations);
 
@@ -2379,7 +2377,7 @@ fn apply_animation_requests(
             }
         };
 
-        let (mut player, transitions_opt) = match player_query.get_mut(entry.player_entity) {
+        let (mut player, mut transitions_opt) = match player_query.get_mut(entry.player_entity) {
             Ok(p) => p,
             Err(_) => {
                 tracing::warn!("AnimationPlayer not found for entity: {}", request.entity_id);
@@ -2391,7 +2389,7 @@ fn apply_animation_requests(
             AnimationAction::Play { clip_name, crossfade_secs } => {
                 if let Some((node_index, _duration)) = entry.clips.get(&clip_name) {
                     if crossfade_secs > 0.0 {
-                        if let Some(ref mut transitions) = transitions_opt {
+                        if let Some(transitions) = transitions_opt.as_mut() {
                             transitions.play(
                                 &mut player,
                                 *node_index,

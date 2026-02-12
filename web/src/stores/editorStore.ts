@@ -35,7 +35,7 @@ export interface TransformData {
 export type GizmoMode = 'translate' | 'rotate' | 'scale';
 
 // Entity types that can be spawned
-export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'point_light' | 'directional_light' | 'spot_light';
+export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'point_light' | 'directional_light' | 'spot_light';
 
 // Snap settings
 export interface SnapSettings {

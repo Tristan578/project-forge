@@ -58,6 +58,9 @@ pub fn apply_spawn_requests(
             EntityType::Sphere => spawn_sphere_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
             EntityType::Plane => spawn_plane_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
             EntityType::Cylinder => spawn_cylinder_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
+            EntityType::Cone => spawn_cone_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
+            EntityType::Torus => spawn_torus_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
+            EntityType::Capsule => spawn_capsule_with_id(&mut commands, &mut meshes, &mut materials, &name, request.position),
             EntityType::PointLight => spawn_point_light_with_id(&mut commands, &name, request.position),
             EntityType::DirectionalLight => spawn_directional_light_with_id(&mut commands, &name),
             EntityType::SpotLight => spawn_spot_light_with_id(&mut commands, &name, request.position),
@@ -484,6 +487,90 @@ fn spawn_cylinder_with_id(
     (entity, entity_id_str, pos)
 }
 
+fn spawn_cone_with_id(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    name: &str,
+    position: Option<Vec3>,
+) -> (Entity, String, Vec3) {
+    let pos = position.unwrap_or(Vec3::new(0.0, 0.5, 0.0));
+    let entity_id = EntityId::default();
+    let entity_id_str = entity_id.0.clone();
+
+    let entity = commands.spawn((
+        EntityType::Cone,
+        entity_id,
+        EntityName::new(name),
+        EntityVisible::default(),
+        MaterialData::default(),
+        Mesh3d(meshes.add(Cone::new(0.5, 1.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            ..default()
+        })),
+        Transform::from_translation(pos),
+    )).id();
+
+    (entity, entity_id_str, pos)
+}
+
+fn spawn_torus_with_id(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    name: &str,
+    position: Option<Vec3>,
+) -> (Entity, String, Vec3) {
+    let pos = position.unwrap_or(Vec3::new(0.0, 0.5, 0.0));
+    let entity_id = EntityId::default();
+    let entity_id_str = entity_id.0.clone();
+
+    let entity = commands.spawn((
+        EntityType::Torus,
+        entity_id,
+        EntityName::new(name),
+        EntityVisible::default(),
+        MaterialData::default(),
+        Mesh3d(meshes.add(Torus::new(0.15, 0.5))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            ..default()
+        })),
+        Transform::from_translation(pos),
+    )).id();
+
+    (entity, entity_id_str, pos)
+}
+
+fn spawn_capsule_with_id(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    name: &str,
+    position: Option<Vec3>,
+) -> (Entity, String, Vec3) {
+    let pos = position.unwrap_or(Vec3::new(0.0, 0.75, 0.0));
+    let entity_id = EntityId::default();
+    let entity_id_str = entity_id.0.clone();
+
+    let entity = commands.spawn((
+        EntityType::Capsule,
+        entity_id,
+        EntityName::new(name),
+        EntityVisible::default(),
+        MaterialData::default(),
+        Mesh3d(meshes.add(Capsule3d::new(0.25, 1.0))),
+        MeshMaterial3d(materials.add(StandardMaterial {
+            base_color: Color::srgb(0.5, 0.5, 0.5),
+            ..default()
+        })),
+        Transform::from_translation(pos),
+    )).id();
+
+    (entity, entity_id_str, pos)
+}
+
 fn spawn_point_light_with_id(
     commands: &mut Commands,
     name: &str,
@@ -651,6 +738,51 @@ pub fn spawn_from_snapshot(
                 EntityVisible(snapshot.visible),
                 mat_data,
                 Mesh3d(meshes.add(Cylinder::new(0.5, 1.0))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.5, 0.5, 0.5),
+                    ..default()
+                })),
+                transform,
+            )).id()
+        }
+        EntityType::Cone => {
+            commands.spawn((
+                snapshot.entity_type,
+                entity_id,
+                EntityName::new(&snapshot.name),
+                EntityVisible(snapshot.visible),
+                mat_data,
+                Mesh3d(meshes.add(Cone::new(0.5, 1.0))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.5, 0.5, 0.5),
+                    ..default()
+                })),
+                transform,
+            )).id()
+        }
+        EntityType::Torus => {
+            commands.spawn((
+                snapshot.entity_type,
+                entity_id,
+                EntityName::new(&snapshot.name),
+                EntityVisible(snapshot.visible),
+                mat_data,
+                Mesh3d(meshes.add(Torus::new(0.15, 0.5))),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgb(0.5, 0.5, 0.5),
+                    ..default()
+                })),
+                transform,
+            )).id()
+        }
+        EntityType::Capsule => {
+            commands.spawn((
+                snapshot.entity_type,
+                entity_id,
+                EntityName::new(&snapshot.name),
+                EntityVisible(snapshot.visible),
+                mat_data,
+                Mesh3d(meshes.add(Capsule3d::new(0.25, 1.0))),
                 MeshMaterial3d(materials.add(StandardMaterial {
                     base_color: Color::srgb(0.5, 0.5, 0.5),
                     ..default()

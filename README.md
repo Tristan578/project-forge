@@ -7,7 +7,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Features
 
 ### AI & Automation
-- **MCP Server** — 81 commands across 15 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 90 commands across 16 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 
@@ -18,12 +18,13 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Physics** — Rigid body dynamics, colliders, forces, and constraints powered by Rapier
 - **Audio** — Spatial 3D audio, bus mixer with effect chains (reverb, delay, EQ, compressor), and per-entity controls
 - **GPU Particles** — 9 built-in presets (fire, smoke, sparks, rain, snow, explosions, and more) with full customization via WebGPU compute shaders
+- **Skeletal Animation** — glTF animation playback with transport controls, crossfade transitions, speed/loop settings, and script API
 - **Post-Processing** — Bloom, chromatic aberration, color grading, and contrast-adaptive sharpening
 
 ### Editor
 - **3D Scene Editor** — Transform gizmos, multi-select, snapping, scene hierarchy, and inspector panels
 - **TypeScript Scripting** — Sandboxed scripting API (`forge.*`), starter templates, and a built-in editor with console output
-- **Asset Pipeline** — Import glTF models, textures, and audio files via drag-and-drop
+- **Asset Pipeline** — Import glTF models (with animations), textures, and audio files via drag-and-drop
 - **Play Mode** — Test your game instantly with play/pause/stop and scene snapshot restore
 - **Input System** — Configurable key bindings with 4 presets (FPS, Platformer, Top-Down, Racing)
 - **Save/Load** — JSON scene format, local storage auto-save, and cloud project storage
@@ -32,7 +33,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Architecture
 
 ```
-MCP Server (81 commands)                      AI agents + LLM tool use
+MCP Server (90 commands)                      AI agents + LLM tool use
     ↕  JSON commands
 React Shell (Next.js, Zustand, Tailwind)      Visual editor UI
     ↕  JSON events via wasm-bindgen
