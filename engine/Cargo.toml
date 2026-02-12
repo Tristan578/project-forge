@@ -1,0 +1,79 @@
+[package]
+name = "forge-engine"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+webgl2 = ["bevy/webgl2"]
+webgpu = ["bevy/webgpu", "dep:bevy_hanabi"]
+runtime = []
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+tracing = "0.1"
+
+[dependencies.bevy]
+version = "0.16"
+default-features = false
+features = [
+    "bevy_winit",
+    "bevy_render",
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_asset",
+    "bevy_gizmos",
+    "bevy_log",
+    "tonemapping_luts",
+    "bevy_picking",
+    "bevy_mesh_picking_backend",
+]
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+]
+
+[dependencies.js-sys]
+version = "0.3"
+
+[dependencies.getrandom]
+version = "0.3"
+features = ["wasm_js"]
+
+[dependencies.uuid]
+version = "1.20"
+features = ["js"]
+
+[dependencies.transform-gizmo-bevy]
+version = "0.8"
+
+[dependencies.bevy_panorbit_camera]
+version = "0.28"
+default-features = false
+
+[dependencies.bevy_rapier3d]
+version = "0.30"
+default-features = false
+features = ["dim3", "async-collider", "debug-render-3d"]
+
+[dependencies.bevy_hanabi]
+version = "0.16"
+optional = true
+default-features = false
+features = ["3d"]
+
+[profile.release]
+opt-level = "z"
+lto = true

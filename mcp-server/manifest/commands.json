@@ -1,0 +1,1253 @@
+{
+  "version": "1.0",
+  "commands": [
+    {
+      "name": "spawn_entity",
+      "description": "Create a new entity in the scene (mesh primitive or light)",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "enum": ["cube", "sphere", "plane", "cylinder", "point_light", "directional_light", "spot_light"],
+            "description": "Type of entity to spawn"
+          },
+          "name": {
+            "type": "string",
+            "description": "Display name (auto-generated if omitted)"
+          },
+          "position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World position [x, y, z]"
+          }
+        },
+        "required": ["entityType"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "despawn_entity",
+      "description": "Remove an entity from the scene by ID",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID to remove" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_entities",
+      "description": "Delete one or more entities by their IDs",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Array of entity IDs to delete"
+          }
+        },
+        "required": ["entityIds"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "duplicate_entity",
+      "description": "Duplicate an entity (creates a copy with offset position)",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID to duplicate" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_transform",
+      "description": "Set the position, rotation, and/or scale of an entity",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string" },
+          "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[x, y, z]" },
+          "rotation": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[rx, ry, rz] in degrees" },
+          "scale": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[sx, sy, sz]" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "rename_entity",
+      "description": "Change the display name of an entity",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string" },
+          "name": { "type": "string", "description": "New display name" }
+        },
+        "required": ["entityId", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "reparent_entity",
+      "description": "Move an entity to a new parent in the hierarchy",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to move" },
+          "newParentId": { "type": "string", "description": "New parent entity ID (null for root)" },
+          "index": { "type": "integer", "description": "Position among siblings (optional)" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_visibility",
+      "description": "Show or hide an entity",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string" },
+          "visible": { "type": "boolean" }
+        },
+        "required": ["entityId", "visible"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "select_entity",
+      "description": "Select an entity in the viewport",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string" },
+          "mode": { "type": "string", "enum": ["replace", "add", "toggle"], "description": "Selection mode (default: replace)" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "select_entities",
+      "description": "Select multiple entities at once",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityIds": { "type": "array", "items": { "type": "string" } },
+          "mode": { "type": "string", "enum": ["replace", "add"], "description": "Selection mode (default: replace)" }
+        },
+        "required": ["entityIds"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "clear_selection",
+      "description": "Deselect all entities",
+      "category": "scene",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "update_material",
+      "description": "Update PBR material properties on an entity",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string" },
+          "baseColor": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "[r, g, b, a] 0-1" },
+          "metallic": { "type": "number", "minimum": 0, "maximum": 1 },
+          "roughness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "reflectance": { "type": "number", "minimum": 0, "maximum": 1 },
+          "emissive": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "[r, g, b, a] 0-1" },
+          "emissiveExposureWeight": { "type": "number", "minimum": 0, "maximum": 1 },
+          "alphaMode": { "type": "string", "enum": ["Opaque", "Blend", "Mask"] },
+          "alphaCutoff": { "type": "number", "minimum": 0, "maximum": 1 },
+          "doubleSided": { "type": "boolean" },
+          "unlit": { "type": "boolean" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_light",
+      "description": "Update light properties on a light entity",
+      "category": "lighting",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string" },
+          "color": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[r, g, b] 0-1" },
+          "intensity": { "type": "number", "minimum": 0, "description": "Light intensity in lumens" },
+          "shadowsEnabled": { "type": "boolean" },
+          "shadowDepthBias": { "type": "number" },
+          "shadowNormalBias": { "type": "number" },
+          "range": { "type": "number", "description": "Point/Spot light range" },
+          "radius": { "type": "number", "description": "Point/Spot light radius" },
+          "innerAngle": { "type": "number", "description": "Spot light inner cone angle (radians)" },
+          "outerAngle": { "type": "number", "description": "Spot light outer cone angle (radians)" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_ambient_light",
+      "description": "Update the scene's ambient light",
+      "category": "lighting",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "color": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[r, g, b] 0-1" },
+          "brightness": { "type": "number", "minimum": 0, "description": "Ambient brightness multiplier" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_environment",
+      "description": "Update environment settings (clear color, fog)",
+      "category": "environment",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "clearColor": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[r, g, b] 0-1" },
+          "fogEnabled": { "type": "boolean" },
+          "fogColor": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+          "fogStart": { "type": "number" },
+          "fogEnd": { "type": "number" },
+          "skyboxBrightness": { "type": "number" },
+          "iblIntensity": { "type": "number" },
+          "iblRotation": { "type": "number" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_post_processing",
+      "description": "Update post-processing visual effects (bloom, chromatic aberration, color grading, sharpening). Send only the effects you want to change.",
+      "category": "rendering",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "bloom": {
+            "type": "object",
+            "description": "Bloom (glow) settings",
+            "properties": {
+              "enabled": { "type": "boolean", "description": "Enable/disable bloom" },
+              "intensity": { "type": "number", "description": "Bloom intensity (0.0-1.0, default 0.15)" },
+              "lowFrequencyBoost": { "type": "number", "description": "Low frequency boost (0.0-1.0)" },
+              "lowFrequencyBoostCurvature": { "type": "number", "description": "Boost curvature (0.0-1.0)" },
+              "highPassFrequency": { "type": "number", "description": "High pass filter (0.0-1.0)" },
+              "prefilterThreshold": { "type": "number", "description": "Brightness threshold for bloom extraction" },
+              "prefilterThresholdSoftness": { "type": "number", "description": "Threshold softness (0.0-1.0)" },
+              "compositeMode": { "type": "string", "enum": ["energy_conserving", "additive"], "description": "How bloom layers combine" },
+              "maxMipDimension": { "type": "integer", "description": "Max mip texture dimension" }
+            }
+          },
+          "chromaticAberration": {
+            "type": "object",
+            "description": "Chromatic aberration (color fringe) settings",
+            "properties": {
+              "enabled": { "type": "boolean", "description": "Enable/disable chromatic aberration" },
+              "intensity": { "type": "number", "description": "Aberration intensity (0.0-0.2)" },
+              "maxSamples": { "type": "integer", "description": "Max texture samples (2-32)" }
+            }
+          },
+          "colorGrading": {
+            "type": "object",
+            "description": "Color grading settings (exposure, temperature, saturation, etc.)",
+            "properties": {
+              "enabled": { "type": "boolean", "description": "Enable/disable color grading" },
+              "global": {
+                "type": "object",
+                "properties": {
+                  "exposure": { "type": "number", "description": "Exposure in EV stops (-3 to 3)" },
+                  "temperature": { "type": "number", "description": "Color temperature shift (-1 to 1)" },
+                  "tint": { "type": "number", "description": "Color tint shift (-1 to 1)" },
+                  "hue": { "type": "number", "description": "Hue rotation in radians" },
+                  "postSaturation": { "type": "number", "description": "Post-tonemapping saturation (0-2)" }
+                }
+              },
+              "shadows": {
+                "type": "object",
+                "properties": {
+                  "saturation": { "type": "number" },
+                  "contrast": { "type": "number" },
+                  "gamma": { "type": "number" },
+                  "gain": { "type": "number" },
+                  "lift": { "type": "number" }
+                }
+              },
+              "midtones": {
+                "type": "object",
+                "properties": {
+                  "saturation": { "type": "number" },
+                  "contrast": { "type": "number" },
+                  "gamma": { "type": "number" },
+                  "gain": { "type": "number" },
+                  "lift": { "type": "number" }
+                }
+              },
+              "highlights": {
+                "type": "object",
+                "properties": {
+                  "saturation": { "type": "number" },
+                  "contrast": { "type": "number" },
+                  "gamma": { "type": "number" },
+                  "gain": { "type": "number" },
+                  "lift": { "type": "number" }
+                }
+              }
+            }
+          },
+          "sharpening": {
+            "type": "object",
+            "description": "Contrast adaptive sharpening settings",
+            "properties": {
+              "enabled": { "type": "boolean", "description": "Enable/disable sharpening" },
+              "sharpeningStrength": { "type": "number", "description": "Sharpening strength (0.0-1.0)" },
+              "denoise": { "type": "boolean", "description": "Avoid sharpening noisy areas" }
+            }
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "rendering:write"
+    },
+    {
+      "name": "get_post_processing",
+      "description": "Get current post-processing settings (bloom, chromatic aberration, color grading, sharpening)",
+      "category": "rendering",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "rendering:read"
+    },
+    {
+      "name": "set_gizmo_mode",
+      "description": "Change the transform gizmo mode",
+      "category": "editor",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["translate", "rotate", "scale"] }
+        },
+        "required": ["mode"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_coordinate_mode",
+      "description": "Toggle between world and local coordinate systems",
+      "category": "editor",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["world", "local"] }
+        },
+        "required": ["mode"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_snap_settings",
+      "description": "Configure grid snapping parameters",
+      "category": "editor",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "translationSnap": { "type": "number", "description": "Snap grid size in world units" },
+          "rotationSnapDegrees": { "type": "number" },
+          "scaleSnap": { "type": "number" },
+          "gridVisible": { "type": "boolean" },
+          "gridSize": { "type": "number" },
+          "gridExtent": { "type": "integer" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_grid",
+      "description": "Show or hide the editor grid",
+      "category": "editor",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_camera_preset",
+      "description": "Move the editor camera to a preset view",
+      "category": "camera",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "preset": { "type": "string", "enum": ["top", "front", "right", "perspective"], "description": "Camera preset" }
+        },
+        "required": ["preset"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "focus_camera",
+      "description": "Frame the camera on the selected entity",
+      "category": "camera",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to focus on (defaults to current selection)" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "undo",
+      "description": "Undo the last action",
+      "category": "history",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "redo",
+      "description": "Redo the last undone action",
+      "category": "history",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_scene_graph",
+      "description": "Get the full scene hierarchy as JSON",
+      "category": "query",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_entity_details",
+      "description": "Get all component data for a specific entity",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_selection",
+      "description": "Get the currently selected entity IDs",
+      "category": "query",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_camera_state",
+      "description": "Get the current editor camera position, target, and orientation",
+      "category": "query",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "play",
+      "description": "Enter play mode — starts game simulation, snapshots scene state",
+      "category": "runtime",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop",
+      "description": "Stop play mode — restores scene to pre-play state",
+      "category": "runtime",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "pause",
+      "description": "Pause play mode — freezes simulation",
+      "category": "runtime",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "resume",
+      "description": "Resume play mode from paused state",
+      "category": "runtime",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_mode",
+      "description": "Get current engine mode (edit, play, or paused)",
+      "category": "runtime",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "set_input_binding",
+      "description": "Create or update an input action binding (e.g. map 'jump' to Space key)",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "actionName": { "type": "string", "description": "Name of the input action (e.g. 'jump', 'move_forward')" },
+          "actionType": { "type": "string", "enum": ["digital", "axis"], "description": "digital = on/off, axis = -1..+1" },
+          "sources": { "type": "array", "items": { "type": "string" }, "description": "Key codes for digital actions (e.g. ['Space', 'KeyW'])" },
+          "positiveKeys": { "type": "array", "items": { "type": "string" }, "description": "Positive direction keys for axis actions" },
+          "negativeKeys": { "type": "array", "items": { "type": "string" }, "description": "Negative direction keys for axis actions" },
+          "deadZone": { "type": "number", "description": "Dead zone for axis (default 0.1)" }
+        },
+        "required": ["actionName", "actionType"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_input_binding",
+      "description": "Remove an input action binding by name",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "actionName": { "type": "string", "description": "Name of the action to remove" }
+        },
+        "required": ["actionName"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_input_preset",
+      "description": "Apply a built-in input preset (replaces all bindings)",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "preset": { "type": "string", "enum": ["fps", "platformer", "topdown", "racing"], "description": "Preset name" }
+        },
+        "required": ["preset"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_input_bindings",
+      "description": "Get all current input action bindings and active preset",
+      "category": "query",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_input_state",
+      "description": "Get current per-frame input state (only meaningful during Play mode)",
+      "category": "query",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "update_physics",
+      "description": "Set physics properties on an entity (body type, collider, restitution, friction, density, gravity, locked axes)",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID to configure" },
+          "bodyType": { "type": "string", "enum": ["dynamic", "fixed", "kinematic_position", "kinematic_velocity"], "description": "Rigid body type" },
+          "colliderShape": { "type": "string", "enum": ["auto", "cuboid", "ball", "cylinder", "capsule"], "description": "Collider shape" },
+          "restitution": { "type": "number", "minimum": 0, "maximum": 1, "description": "Bounciness (0-1)" },
+          "friction": { "type": "number", "minimum": 0, "maximum": 1, "description": "Surface friction (0-1)" },
+          "density": { "type": "number", "minimum": 0.01, "description": "Mass density" },
+          "gravityScale": { "type": "number", "description": "Gravity multiplier (-10 to 10)" },
+          "lockTranslationX": { "type": "boolean" },
+          "lockTranslationY": { "type": "boolean" },
+          "lockTranslationZ": { "type": "boolean" },
+          "lockRotationX": { "type": "boolean" },
+          "lockRotationY": { "type": "boolean" },
+          "lockRotationZ": { "type": "boolean" },
+          "isSensor": { "type": "boolean", "description": "If true, detects overlap without blocking" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_physics",
+      "description": "Enable or disable physics simulation on an entity",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID" },
+          "enabled": { "type": "boolean", "description": "true to enable, false to disable" }
+        },
+        "required": ["entityId", "enabled"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_debug_physics",
+      "description": "Toggle debug wireframe rendering of physics colliders",
+      "category": "editor",
+      "parameters": { "type": "object", "properties": {} },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_physics",
+      "description": "Get physics configuration for the selected entity",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID (defaults to primary selection)" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "apply_force",
+      "description": "Apply a force or impulse to an entity during Play mode",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID to apply force to" },
+          "force": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Force vector [x, y, z]" },
+          "impulse": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Impulse vector [x, y, z] (instant)" },
+          "torque": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Torque vector [x, y, z]" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "export_scene",
+      "description": "Export the current scene as a JSON string (.forge format). Triggers a SCENE_EXPORTED event with the full scene data.",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "load_scene",
+      "description": "Load a scene from a JSON string (.forge format). Replaces the entire current scene.",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "json": { "type": "string", "description": "Complete scene JSON in .forge format" }
+        },
+        "required": ["json"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "new_scene",
+      "description": "Clear the current scene and start fresh with default settings",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_scene_name",
+      "description": "Get the current scene name and modification status",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "import_gltf",
+      "description": "Import a glTF/GLB 3D model file (base64-encoded data) into the asset registry and scene",
+      "category": "asset",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataBase64": { "type": "string", "description": "Base64-encoded glTF/GLB file data" },
+          "name": { "type": "string", "description": "Display name for the imported model" }
+        },
+        "required": ["dataBase64", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "load_texture",
+      "description": "Load a texture image and assign it to a material slot on an entity",
+      "category": "asset",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataBase64": { "type": "string", "description": "Base64-encoded image data (PNG/JPG)" },
+          "name": { "type": "string", "description": "Display name for the texture" },
+          "entityId": { "type": "string", "description": "Entity to apply texture to" },
+          "slot": { "type": "string", "enum": ["base_color", "normal_map", "metallic_roughness", "emissive", "occlusion"], "description": "Material texture slot" }
+        },
+        "required": ["dataBase64", "name", "entityId", "slot"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_texture",
+      "description": "Remove a texture from a material slot on an entity",
+      "category": "asset",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to remove texture from" },
+          "slot": { "type": "string", "enum": ["base_color", "normal_map", "metallic_roughness", "emissive", "occlusion"], "description": "Material texture slot to clear" }
+        },
+        "required": ["entityId", "slot"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "place_asset",
+      "description": "Spawn a new instance of a previously imported asset in the scene",
+      "category": "asset",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": { "type": "string", "description": "Asset ID from the registry" }
+        },
+        "required": ["assetId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_asset",
+      "description": "Remove an asset from the registry (does not affect entities already placed in scene)",
+      "category": "asset",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": { "type": "string", "description": "Asset ID to remove" }
+        },
+        "required": ["assetId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_assets",
+      "description": "List all assets currently in the registry with their metadata",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "set_script",
+      "description": "Set or update TypeScript script source on an entity (lifecycle: onStart, onUpdate, onDestroy)",
+      "category": "scripting",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to attach script to" },
+          "source": { "type": "string", "description": "TypeScript source code with onStart/onUpdate/onDestroy functions" },
+          "enabled": { "type": "boolean", "description": "Whether script is active (default: true)" }
+        },
+        "required": ["entityId", "source"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_script",
+      "description": "Remove a script from an entity",
+      "category": "scripting",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to remove script from" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_script",
+      "description": "Get the script source and status for an entity",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to get script from" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "list_script_templates",
+      "description": "List available script templates (Character Controller, Collectible, Rotating Object, Follow Camera)",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "apply_script_template",
+      "description": "Apply a named script template to an entity",
+      "category": "scripting",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to apply template to" },
+          "template": { "type": "string", "enum": ["character_controller", "collectible", "rotating_object", "follow_camera"], "description": "Template name" }
+        },
+        "required": ["entityId", "template"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_audio",
+      "description": "Set or update audio component on an entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to attach audio to" },
+          "assetId": { "type": "string", "description": "Audio asset ID (optional)" },
+          "volume": { "type": "number", "minimum": 0, "maximum": 1, "description": "Volume (0-1)" },
+          "pitch": { "type": "number", "minimum": 0.25, "maximum": 4, "description": "Playback rate (0.25-4.0)" },
+          "loopAudio": { "type": "boolean", "description": "Loop playback" },
+          "spatial": { "type": "boolean", "description": "Enable 3D spatial audio" },
+          "maxDistance": { "type": "number", "description": "Max distance for spatial falloff" },
+          "refDistance": { "type": "number", "description": "Reference distance for spatial audio" },
+          "rolloffFactor": { "type": "number", "description": "Rolloff factor for distance attenuation" },
+          "autoplay": { "type": "boolean", "description": "Auto-play when entering Play mode" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_audio",
+      "description": "Remove audio component from an entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to remove audio from" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_audio",
+      "description": "Play audio on an entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with audio component" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_audio",
+      "description": "Stop audio playback on an entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with audio component" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "pause_audio",
+      "description": "Pause audio playback on an entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with audio component" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_audio",
+      "description": "Get audio data for an entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to query" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "import_audio",
+      "description": "Import an audio file into the asset registry",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "dataBase64": { "type": "string", "description": "Base64-encoded audio file data" },
+          "name": { "type": "string", "description": "Filename (e.g., 'music.mp3')" }
+        },
+        "required": ["dataBase64", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_audio_bus",
+      "description": "Update volume, mute, or solo state of an audio bus",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "busName": { "type": "string", "description": "Name of the audio bus" },
+          "volume": { "type": "number", "description": "Volume (0.0-1.0)" },
+          "muted": { "type": "boolean", "description": "Mute state" },
+          "soloed": { "type": "boolean", "description": "Solo state" }
+        },
+        "required": ["busName"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_audio_bus",
+      "description": "Create a new audio bus",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Name of the new bus" },
+          "volume": { "type": "number", "description": "Initial volume (0.0-1.0, default 1.0)" }
+        },
+        "required": ["name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_audio_bus",
+      "description": "Delete a custom audio bus (cannot delete master/default buses)",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "busName": { "type": "string", "description": "Name of the bus to delete" }
+        },
+        "required": ["busName"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_audio_buses",
+      "description": "Query the current audio bus configuration",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "set_bus_effects",
+      "description": "Set the effects chain for an audio bus",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "busName": { "type": "string", "description": "Name of the audio bus" },
+          "effects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "effectType": { "type": "string", "enum": ["reverb", "lowpass", "highpass", "compressor", "delay"] },
+                "params": { "type": "object", "additionalProperties": { "type": "number" } },
+                "enabled": { "type": "boolean" }
+              },
+              "required": ["effectType", "params", "enabled"]
+            },
+            "description": "Array of effect definitions"
+          }
+        },
+        "required": ["busName", "effects"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_particle",
+      "description": "Set or update particle effect on an entity. Creates a GPU particle emitter with configurable emission, velocity, color gradient, and rendering options.",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to attach particles to" },
+          "preset": { "type": "string", "enum": ["fire", "smoke", "sparks", "rain", "snow", "explosion", "magic_sparkle", "dust", "trail", "custom"], "description": "Preset name (overrides all other fields)" },
+          "maxParticles": { "type": "integer", "description": "Max GPU particles (100-50000)" },
+          "lifetimeMin": { "type": "number", "description": "Min particle lifetime in seconds" },
+          "lifetimeMax": { "type": "number", "description": "Max particle lifetime in seconds" },
+          "velocityMin": { "type": "array", "items": { "type": "number" }, "description": "Min velocity [x, y, z]" },
+          "velocityMax": { "type": "array", "items": { "type": "number" }, "description": "Max velocity [x, y, z]" },
+          "acceleration": { "type": "array", "items": { "type": "number" }, "description": "Acceleration [x, y, z] (gravity = [0, -9.8, 0])" },
+          "linearDrag": { "type": "number", "description": "Linear drag coefficient" },
+          "sizeStart": { "type": "number", "description": "Particle start size" },
+          "sizeEnd": { "type": "number", "description": "Particle end size" },
+          "blendMode": { "type": "string", "enum": ["additive", "alpha_blend", "premultiply"], "description": "Blend mode" },
+          "orientation": { "type": "string", "enum": ["billboard", "velocity_aligned", "fixed"], "description": "Particle orientation" },
+          "worldSpace": { "type": "boolean", "description": "Emit in world space (true) or local space (false)" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_particle",
+      "description": "Remove particle effect from an entity",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to remove particles from" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "toggle_particle",
+      "description": "Enable or disable particle emission on an entity without removing configuration",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Target entity" },
+          "enabled": { "type": "boolean", "description": "Enable/disable emission" }
+        },
+        "required": ["entityId", "enabled"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_particle_preset",
+      "description": "Apply a named particle preset to an entity. Replaces all particle configuration with preset defaults. Presets: fire, smoke, sparks, rain, snow, explosion, magic_sparkle, dust, trail.",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Target entity" },
+          "preset": { "type": "string", "enum": ["fire", "smoke", "sparks", "rain", "snow", "explosion", "magic_sparkle", "dust", "trail"], "description": "Preset name" }
+        },
+        "required": ["entityId", "preset"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_particle",
+      "description": "Start/resume particle emission on an entity",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with particle component" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_particle",
+      "description": "Stop particle emission on an entity",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with particle component" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "burst_particle",
+      "description": "Trigger an immediate burst of particles on an entity",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with particle component" },
+          "count": { "type": "integer", "description": "Number of particles to emit (default: 100)" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_particle",
+      "description": "Get particle configuration for an entity",
+      "category": "particles",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to query" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "export_game",
+      "description": "Export the current scene as a standalone HTML game file",
+      "category": "export",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "description": "Game title (defaults to scene name)" },
+          "mode": { "type": "string", "enum": ["single-html", "zip"], "description": "Export mode (default: single-html)" },
+          "resolution": { "type": "string", "description": "Canvas resolution: 'responsive', '1920x1080', '1280x720' (default: responsive)" }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_export_status",
+      "description": "Check if an export operation is currently in progress",
+      "category": "export",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    }
+  ],
+  "resources": [
+    {
+      "uri": "forge://scene/graph",
+      "name": "Scene Graph",
+      "description": "Current scene hierarchy with all entities",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "forge://scene/selection",
+      "name": "Current Selection",
+      "description": "Currently selected entity IDs and primary selection",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "forge://project/info",
+      "name": "Project Info",
+      "description": "Project metadata and settings",
+      "mimeType": "application/json"
+    }
+  ]
+}
