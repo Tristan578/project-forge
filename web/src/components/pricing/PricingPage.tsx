@@ -68,7 +68,7 @@ export function PricingPage() {
       <div className="px-6 py-16 text-center">
         <h2 className="mb-4 text-5xl font-bold">Build Games with AI</h2>
         <p className="text-xl text-zinc-400">
-          Choose the plan that's right for you
+          Choose the plan that&apos;s right for you
         </p>
       </div>
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { MoreVertical, FolderOpen, Edit, Trash2 } from 'lucide-react';
 
 interface ProjectCardProps {
@@ -22,11 +22,10 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
   const [editValue, setEditValue] = useState(project.name);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  const formatRelativeTime = (dateString: string) => {
-    const now = Date.now();
-    const then = new Date(dateString).getTime();
-    const diffMinutes = Math.round((now - then) / 60000);
-
+  const relativeTime = useMemo(() => {
+    const then = new Date(project.updatedAt).getTime();
+    // eslint-disable-next-line react-hooks/purity -- relative time inherently requires current time
+    const diffMinutes = Math.round((Date.now() - then) / 60000);
     if (diffMinutes < 1) return 'just now';
     if (diffMinutes < 60) return `${diffMinutes}m ago`;
     const diffHours = Math.round(diffMinutes / 60);
@@ -35,7 +34,7 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
     if (diffDays < 30) return `${diffDays}d ago`;
     const diffMonths = Math.round(diffDays / 30);
     return `${diffMonths}mo ago`;
-  };
+  }, [project.updatedAt]);
 
   const handleRename = () => {
     if (editValue.trim() && editValue !== project.name) {
@@ -94,7 +93,7 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
         {/* Metadata */}
         <div className="mt-2 flex items-center justify-between text-xs text-[var(--color-text-secondary)]">
           <span>{project.entityCount} entities</span>
-          <span>{formatRelativeTime(project.updatedAt)}</span>
+          <span>{relativeTime}</span>
         </div>
       </div>
 

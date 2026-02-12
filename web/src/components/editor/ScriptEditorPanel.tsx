@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { Play, Trash2, Save, FileCode } from 'lucide-react';
-import { useEditorStore, type ScriptData } from '@/stores/editorStore';
+import { Trash2, Save, FileCode } from 'lucide-react';
+import { useEditorStore } from '@/stores/editorStore';
 import { SCRIPT_TEMPLATES } from '@/lib/scripting/scriptTemplates';
 
 const DEFAULT_SCRIPT = `function onStart() {
@@ -32,23 +32,19 @@ export function ScriptEditorPanel() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
 
-  // Sync local state when selection or script changes
-  useEffect(() => {
-    if (primaryId && allScripts[primaryId]) {
-      const script = allScripts[primaryId];
-      setLocalSource(script.source);
-      setLocalEnabled(script.enabled);
-      setIsDirty(false);
-    } else if (primaryScript) {
-      setLocalSource(primaryScript.source);
-      setLocalEnabled(primaryScript.enabled);
-      setIsDirty(false);
-    } else {
-      setLocalSource('');
-      setLocalEnabled(true);
-      setIsDirty(false);
-    }
-  }, [primaryId, primaryScript, allScripts]);
+  // Derive local state from selection/script changes
+  const currentScript = primaryId ? allScripts[primaryId] ?? primaryScript : null;
+  const derivedSource = currentScript?.source ?? '';
+  const derivedEnabled = currentScript?.enabled ?? true;
+
+  // Reset local state when the derived values change (React-documented pattern)
+  const [prevDerived, setPrevDerived] = useState({ source: derivedSource, enabled: derivedEnabled });
+  if (prevDerived.source !== derivedSource || prevDerived.enabled !== derivedEnabled) {
+    setPrevDerived({ source: derivedSource, enabled: derivedEnabled });
+    if (localSource !== derivedSource) setLocalSource(derivedSource);
+    if (localEnabled !== derivedEnabled) setLocalEnabled(derivedEnabled);
+    if (isDirty) setIsDirty(false);
+  }
 
   // Auto-scroll console
   useEffect(() => {

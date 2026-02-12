@@ -3,7 +3,7 @@
  * Runs client-side in the browser to go through the wasm-bindgen bridge.
  */
 
-import type { EditorState, MaterialData, LightData, PhysicsData, EntityType, InputBinding } from '@/stores/editorStore';
+import type { EditorState, MaterialData, LightData, PhysicsData, EntityType, InputBinding, ParticlePreset } from '@/stores/editorStore';
 
 interface ToolCallInput {
   [key: string]: unknown;
@@ -559,8 +559,8 @@ export async function executeToolCall(
 
       case 'set_particle_preset': {
         const entityId = input.entityId as string;
-        const preset = input.preset as string;
-        store.setParticlePreset(entityId, preset as any);
+        const preset = input.preset as ParticlePreset;
+        store.setParticlePreset(entityId, preset);
         return { success: true, result: { message: `Applied ${preset} preset to entity: ${entityId}` } };
       }
 

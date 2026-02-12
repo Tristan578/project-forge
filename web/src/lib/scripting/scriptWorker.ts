@@ -31,7 +31,7 @@ interface EngineCommand {
 let pendingCommands: EngineCommand[] = [];
 let entityStates: Record<string, EntityState> = {};
 let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
-let timeData = { delta: 0, elapsed: 0 };
+const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
 let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;

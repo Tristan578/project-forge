@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Generated WASM bindings
     "public/engine-pkg/**",
+    "public/engine-pkg-webgl2/**",
+    "public/engine-pkg-webgpu/**",
   ]),
 ]);
 

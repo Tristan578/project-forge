@@ -21,10 +21,12 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [bgColor, setBgColor] = useState('#18181b');
   const [includeDebug, setIncludeDebug] = useState(false);
 
-  // Sync title with scene name when dialog opens
-  useState(() => {
+  // Sync title with scene name when it changes (React-documented pattern)
+  const [prevSceneName, setPrevSceneName] = useState(sceneName);
+  if (prevSceneName !== sceneName) {
+    setPrevSceneName(sceneName);
     setTitle(sceneName);
-  });
+  }
 
   const handleExport = async () => {
     setExporting(true);
@@ -114,7 +116,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
             <label className="mb-1 block text-xs font-medium text-zinc-300">Resolution</label>
             <select
               value={resolution}
-              onChange={(e) => setResolution(e.target.value as any)}
+              onChange={(e) => setResolution(e.target.value as 'responsive' | '1920x1080' | '1280x720')}
               disabled={isExporting}
               className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             >

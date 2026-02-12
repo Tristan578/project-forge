@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 
 interface NewProjectDialogProps {
@@ -12,25 +12,24 @@ interface NewProjectDialogProps {
 export function NewProjectDialog({ isOpen, onClose, onCreate }: NewProjectDialogProps) {
   const [name, setName] = useState('My Game');
 
-  useEffect(() => {
-    if (isOpen) {
-      setName('My Game');
-    }
-  }, [isOpen]);
+  const handleClose = useCallback(() => {
+    setName('My Game');
+    onClose();
+  }, [onClose]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') handleClose();
       if (e.key === 'Enter' && name.trim()) {
         onCreate(name.trim());
-        onClose();
+        handleClose();
       }
     };
     if (isOpen) {
       window.addEventListener('keydown', handler);
       return () => window.removeEventListener('keydown', handler);
     }
-  }, [isOpen, name, onCreate, onClose]);
+  }, [isOpen, name, onCreate, handleClose]);
 
   if (!isOpen) return null;
 
