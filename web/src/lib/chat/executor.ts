@@ -4,6 +4,7 @@
  */
 
 import type { EditorState, MaterialData, LightData, PhysicsData, EntityType, InputBinding, ParticlePreset } from '@/stores/editorStore';
+import { getPresetById, MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
 
 interface ToolCallInput {
   [key: string]: unknown;
@@ -109,17 +110,65 @@ export async function executeToolCall(
           alphaCutoff: 0.5,
           doubleSided: false,
           unlit: false,
+          uvOffset: [0, 0],
+          uvScale: [1, 1],
+          uvRotation: 0,
+          parallaxDepthScale: 0.1,
+          parallaxMappingMethod: 'occlusion',
+          maxParallaxLayerCount: 16,
+          parallaxReliefMaxSteps: 5,
+          clearcoat: 0,
+          clearcoatPerceptualRoughness: 0.5,
+          specularTransmission: 0,
+          diffuseTransmission: 0,
+          ior: 1.5,
+          thickness: 0,
+          attenuationDistance: null,
+          attenuationColor: [1, 1, 1],
         };
 
         const merged: MaterialData = { ...baseMaterial };
         for (const [key, value] of Object.entries(matInput)) {
-          if (key in merged) {
-            (merged as unknown as Record<string, unknown>)[key] = value;
-          }
+          (merged as unknown as Record<string, unknown>)[key] = value;
         }
 
         store.updateMaterial(entityId, merged);
         return { success: true };
+      }
+
+      case 'apply_material_preset': {
+        const entityId = input.entityId as string;
+        const presetId = input.presetId as string;
+        const preset = getPresetById(presetId);
+        if (!preset) {
+          return { success: false, error: `Unknown material preset: ${presetId}` };
+        }
+        store.updateMaterial(entityId, preset.data);
+        return { success: true };
+      }
+
+      case 'set_custom_shader': {
+        const { entityId, shaderType, ...params } = input;
+        store.updateShaderEffect(entityId as string, { shaderType: shaderType as string, ...params as Record<string, unknown> } as Parameters<typeof store.updateShaderEffect>[1]);
+        return { success: true, result: { message: `Applied ${shaderType} shader to ${entityId}` } };
+      }
+
+      case 'remove_custom_shader': {
+        const { entityId } = input;
+        store.removeShaderEffect(entityId as string);
+        return { success: true, result: { message: `Removed custom shader from ${entityId}` } };
+      }
+
+      case 'list_shaders': {
+        const shaders = [
+          { type: 'dissolve', name: 'Dissolve', description: 'Dissolve / burn away effect with glowing edges' },
+          { type: 'hologram', name: 'Hologram', description: 'Holographic scan lines with transparency' },
+          { type: 'force_field', name: 'Force Field', description: 'Energy shield with Fresnel glow and noise' },
+          { type: 'lava_flow', name: 'Lava / Flow', description: 'Flowing liquid with scrolling UVs and distortion' },
+          { type: 'toon', name: 'Toon', description: 'Cel-shaded cartoon bands' },
+          { type: 'fresnel_glow', name: 'Fresnel Glow', description: 'Rim lighting glow effect' },
+        ];
+        return { success: true, result: { shaders, count: shaders.length } };
       }
 
       // --- Lighting commands ---
@@ -535,6 +584,79 @@ export async function executeToolCall(
         return { success: true, result: { message: `Set effects on bus: ${busName}`, effectCount: effects.length } };
       }
 
+      // --- Audio layering/transition commands (JS-only) ---
+      case 'audio_crossfade': {
+        const fromEntityId = input.fromEntityId as string;
+        const toEntityId = input.toEntityId as string;
+        const durationMs = input.durationMs as number;
+        if (!fromEntityId || !toEntityId) return { success: false, error: 'Missing fromEntityId or toEntityId' };
+        store.crossfadeAudio(fromEntityId, toEntityId, durationMs ?? 1000);
+        return { success: true, result: { message: `Crossfading from ${fromEntityId} to ${toEntityId}` } };
+      }
+
+      case 'audio_fade_in': {
+        const entityId = input.entityId as string;
+        const durationMs = input.durationMs as number;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        store.fadeInAudio(entityId, durationMs ?? 1000);
+        return { success: true, result: { message: `Fading in audio on ${entityId}` } };
+      }
+
+      case 'audio_fade_out': {
+        const entityId = input.entityId as string;
+        const durationMs = input.durationMs as number;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        store.fadeOutAudio(entityId, durationMs ?? 1000);
+        return { success: true, result: { message: `Fading out audio on ${entityId}` } };
+      }
+
+      case 'audio_play_one_shot': {
+        const assetId = input.assetId as string;
+        if (!assetId) return { success: false, error: 'Missing assetId' };
+        store.playOneShotAudio(assetId, {
+          position: input.position as [number, number, number] | undefined,
+          bus: input.bus as string | undefined,
+          volume: input.volume as number | undefined,
+          pitch: input.pitch as number | undefined,
+        });
+        return { success: true, result: { message: `Playing one-shot: ${assetId}` } };
+      }
+
+      case 'audio_add_layer': {
+        const entityId = input.entityId as string;
+        const slotName = input.slotName as string;
+        const assetId = input.assetId as string;
+        if (!entityId || !slotName || !assetId) return { success: false, error: 'Missing required params' };
+        store.addAudioLayer(entityId, slotName, assetId, {
+          volume: input.volume as number | undefined,
+          loop: input.loop as boolean | undefined,
+          bus: input.bus as string | undefined,
+        });
+        return { success: true, result: { message: `Added audio layer "${slotName}" to ${entityId}` } };
+      }
+
+      case 'audio_remove_layer': {
+        const entityId = input.entityId as string;
+        const slotName = input.slotName as string;
+        if (!entityId || !slotName) return { success: false, error: 'Missing entityId or slotName' };
+        store.removeAudioLayer(entityId, slotName);
+        return { success: true, result: { message: `Removed audio layer "${slotName}" from ${entityId}` } };
+      }
+
+      case 'set_ducking_rule': {
+        const triggerBus = input.triggerBus as string;
+        const targetBus = input.targetBus as string;
+        if (!triggerBus || !targetBus) return { success: false, error: 'Missing triggerBus or targetBus' };
+        store.setDuckingRule({
+          triggerBus,
+          targetBus,
+          duckLevel: input.duckLevel as number | undefined,
+          attackMs: input.attackMs as number | undefined,
+          releaseMs: input.releaseMs as number | undefined,
+        });
+        return { success: true, result: { message: `Ducking rule set: ${triggerBus} -> ${targetBus}` } };
+      }
+
       // --- Particle commands ---
       case 'set_particle': {
         const entityId = input.entityId as string;
@@ -666,6 +788,35 @@ export async function executeToolCall(
         };
       }
 
+      case 'set_animation_blend_weight': {
+        const entityId = input.entityId as string;
+        const clipName = input.clipName as string;
+        const weight = input.weight as number;
+        if (!entityId || !clipName || weight === undefined) {
+          return { success: false, error: 'Missing entityId, clipName, or weight' };
+        }
+        store.setAnimationBlendWeight(entityId, clipName, weight);
+        return { success: true, result: { message: `Set blend weight for "${clipName}" to ${weight.toFixed(2)} on ${entityId}` } };
+      }
+
+      case 'set_clip_speed': {
+        const entityId = input.entityId as string;
+        const clipName = input.clipName as string;
+        const speed = input.speed as number;
+        if (!entityId || !clipName || speed === undefined) {
+          return { success: false, error: 'Missing entityId, clipName, or speed' };
+        }
+        store.setClipSpeed(entityId, clipName, speed);
+        return { success: true, result: { message: `Set speed for "${clipName}" to ${speed}x on ${entityId}` } };
+      }
+
+      case 'get_animation_graph': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        // Query will be handled via QUERY_ANIMATION_GRAPH event
+        return { success: true, result: { message: `Querying animation graph for ${entityId}` } };
+      }
+
       // --- Scene file commands ---
       case 'export_scene': {
         store.saveScene();
@@ -731,6 +882,149 @@ export async function executeToolCall(
         };
       }
 
+      // --- CSG commands ---
+      case 'csg_union':
+      case 'csg_subtract':
+      case 'csg_intersect': {
+        const entityIdA = input.entityIdA as string;
+        const entityIdB = input.entityIdB as string;
+        if (!entityIdA || !entityIdB) return { success: false, error: 'Missing entityIdA or entityIdB' };
+        const deleteSources = (input.deleteSources as boolean) ?? true;
+
+        if (toolName === 'csg_union') store.csgUnion(entityIdA, entityIdB, deleteSources);
+        else if (toolName === 'csg_subtract') store.csgSubtract(entityIdA, entityIdB, deleteSources);
+        else if (toolName === 'csg_intersect') store.csgIntersect(entityIdA, entityIdB, deleteSources);
+
+        return { success: true, result: { message: `CSG ${toolName.replace('csg_', '')} queued` } };
+      }
+
+      // --- Terrain commands ---
+      case 'spawn_terrain': {
+        store.spawnTerrain({
+          noiseType: input.noiseType as 'perlin' | 'simplex' | 'value' | undefined,
+          octaves: input.octaves as number | undefined,
+          frequency: input.frequency as number | undefined,
+          amplitude: input.amplitude as number | undefined,
+          heightScale: input.heightScale as number | undefined,
+          seed: input.seed as number | undefined,
+          resolution: input.resolution as number | undefined,
+          size: input.size as number | undefined,
+        });
+        return { success: true, result: { message: 'Terrain spawned' } };
+      }
+
+      case 'update_terrain': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        const terrainData = store.terrainData[entityId];
+        if (!terrainData) return { success: false, error: 'Entity is not a terrain' };
+
+        const updated = {
+          noiseType: (input.noiseType as 'perlin' | 'simplex' | 'value' | undefined) ?? terrainData.noiseType,
+          octaves: (input.octaves as number | undefined) ?? terrainData.octaves,
+          frequency: (input.frequency as number | undefined) ?? terrainData.frequency,
+          amplitude: (input.amplitude as number | undefined) ?? terrainData.amplitude,
+          heightScale: (input.heightScale as number | undefined) ?? terrainData.heightScale,
+          seed: (input.seed as number | undefined) ?? terrainData.seed,
+          resolution: (input.resolution as number | undefined) ?? terrainData.resolution,
+          size: (input.size as number | undefined) ?? terrainData.size,
+        };
+
+        store.updateTerrain(entityId, updated);
+        return { success: true, result: { message: 'Terrain updated' } };
+      }
+
+      case 'sculpt_terrain': {
+        const entityId = input.entityId as string;
+        const position = input.position as [number, number] | undefined;
+        const radius = input.radius as number | undefined;
+        const strength = input.strength as number | undefined;
+        if (!entityId || !position || radius === undefined || strength === undefined) {
+          return { success: false, error: 'Missing required parameters' };
+        }
+        store.sculptTerrain(entityId, position, radius, strength);
+        return { success: true, result: { message: 'Terrain sculpted' } };
+      }
+
+      case 'get_terrain': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        const terrainData = store.terrainData[entityId];
+        if (!terrainData) return { success: false, error: 'Entity is not a terrain' };
+        return { success: true, result: { terrainData } };
+      }
+
+      // --- Procedural mesh commands ---
+      case 'extrude_shape': {
+        const shape = input.shape as string;
+        if (!shape) return { success: false, error: 'Missing shape parameter' };
+        if (!['circle', 'square', 'hexagon', 'star'].includes(shape)) {
+          return { success: false, error: 'Invalid shape. Must be: circle, square, hexagon, or star' };
+        }
+
+        store.extrudeShape(shape, {
+          radius: input.radius as number | undefined,
+          length: input.length as number | undefined,
+          segments: input.segments as number | undefined,
+          innerRadius: input.innerRadius as number | undefined,
+          starPoints: input.starPoints as number | undefined,
+          size: input.size as number | undefined,
+          name: input.name as string | undefined,
+          position: input.position as [number, number, number] | undefined,
+        });
+        return { success: true, result: { message: `Extruding ${shape} shape` } };
+      }
+
+      case 'lathe_shape': {
+        const profile = input.profile as [number, number][];
+        if (!profile || !Array.isArray(profile) || profile.length < 2) {
+          return { success: false, error: 'Invalid profile. Must be an array of [radius, height] points (minimum 2 points)' };
+        }
+
+        store.latheShape(profile, {
+          segments: input.segments as number | undefined,
+          name: input.name as string | undefined,
+          position: input.position as [number, number, number] | undefined,
+        });
+        return { success: true, result: { message: 'Lathing profile' } };
+      }
+
+      case 'array_entity': {
+        const entityId = input.entityId as string;
+        const pattern = input.pattern as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        if (!pattern || !['grid', 'circle'].includes(pattern)) {
+          return { success: false, error: 'Invalid pattern. Must be: grid or circle' };
+        }
+
+        store.arrayEntity(entityId, {
+          pattern: pattern as 'grid' | 'circle',
+          countX: input.countX as number | undefined,
+          countY: input.countY as number | undefined,
+          countZ: input.countZ as number | undefined,
+          spacingX: input.spacingX as number | undefined,
+          spacingY: input.spacingY as number | undefined,
+          spacingZ: input.spacingZ as number | undefined,
+          circleCount: input.circleCount as number | undefined,
+          circleRadius: input.circleRadius as number | undefined,
+        });
+        return { success: true, result: { message: `Creating ${pattern} array` } };
+      }
+
+      case 'combine_meshes': {
+        const entityIds = input.entityIds as string[];
+        if (!entityIds || !Array.isArray(entityIds) || entityIds.length < 2) {
+          return { success: false, error: 'Must provide at least 2 entity IDs to combine' };
+        }
+
+        store.combineMeshes(
+          entityIds,
+          input.deleteSources as boolean | undefined,
+          input.name as string | undefined
+        );
+        return { success: true, result: { message: `Combining ${entityIds.length} meshes` } };
+      }
+
       // --- Export commands ---
       case 'export_game': {
         // Import dynamically to avoid circular dependency
@@ -767,6 +1061,62 @@ export async function executeToolCall(
           result: { isExporting: store.isExporting, engineMode: store.engineMode },
         };
       }
+
+      // --- Material library commands ---
+      case 'list_material_presets': {
+        const category = input.category as string | undefined;
+        const presets = category
+          ? getPresetsByCategory(category)
+          : MATERIAL_PRESETS;
+        return {
+          success: true,
+          result: presets.map((p) => ({ id: p.id, name: p.name, category: p.category, description: p.description })),
+        };
+      }
+
+      case 'save_material_to_library': {
+        const name = input.name as string;
+        if (!name) return { success: false, error: 'name is required' };
+        const entityId = input.entityId as string || store.primaryId;
+        if (!entityId) return { success: false, error: 'No entity selected' };
+        const mat = store.primaryMaterial;
+        if (!mat) return { success: false, error: 'Selected entity has no material' };
+        const saved = saveCustomMaterial(name, mat);
+        return { success: true, result: { id: saved.id, name: saved.name } };
+      }
+
+      case 'delete_library_material': {
+        const materialId = input.materialId as string;
+        if (!materialId) return { success: false, error: 'materialId is required' };
+        deleteCustomMaterial(materialId);
+        return { success: true, result: `Deleted custom material ${materialId}` };
+      }
+
+      case 'list_custom_materials': {
+        const customs = loadCustomMaterials();
+        return {
+          success: true,
+          result: customs.map((m) => ({ id: m.id, name: m.name })),
+        };
+      }
+
+      // --- Quality preset tools ---
+      case 'set_quality_preset': {
+        const preset = input.preset as string;
+        if (!preset) return { success: false, error: 'preset is required' };
+        store.setQualityPreset(preset as import('@/stores/editorStore').QualityPreset);
+        return { success: true, result: `Quality preset set to ${preset}` };
+      }
+
+      case 'get_quality_settings': {
+        return { success: true, result: { preset: store.qualityPreset } };
+      }
+
+      // --- Documentation tools (handled server-side via MCP) ---
+      case 'search_docs':
+      case 'get_doc':
+      case 'list_doc_topics':
+        return { success: true, result: { message: `Documentation tool "${toolName}" is handled by the MCP server` } };
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

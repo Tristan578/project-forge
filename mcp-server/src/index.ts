@@ -4,6 +4,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { registerTools } from './tools/generated.js';
 import { registerResources } from './resources/index.js';
+import { registerDocs } from './docs/index.js';
 import { EditorBridge } from './transport/websocket.js';
 
 async function main() {
@@ -21,6 +22,9 @@ async function main() {
 
   // Register MCP resources (scene graph, selection, etc.)
   registerResources(server, bridge);
+
+  // Register documentation resources and tools
+  registerDocs(server);
 
   // Connect via stdio (for Claude Desktop / Claude Code)
   const transport = new StdioServerTransport();

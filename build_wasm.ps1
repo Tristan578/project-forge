@@ -7,6 +7,28 @@ $webPublic = Join-Path (Join-Path $projectRoot "web") "public"
 $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
 $env:PATH = "$(Join-Path $cargoHome 'bin');$env:PATH"
 
+# Ensure Windows SDK and MSVC lib paths are available for native proc-macro compilation.
+# Some crates (e.g. doc-image-embed used by csgrs) compile as proc-macros for the host
+# and need ucrt.lib / um libs / MSVC libs to link.
+if (-not $env:LIB) {
+    # Find a Windows SDK version that has ucrt\x64\ucrt.lib
+    $sdkRoot = "C:\Program Files (x86)\Windows Kits\10\Lib"
+    $msvcVer = "14.44.35207"
+    $msvcBase = "C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Tools\MSVC\$msvcVer\lib\x64"
+    $sdkVer = $null
+    foreach ($ver in @("10.0.22621.0", "10.0.26100.0", "10.0.19041.0")) {
+        if (Test-Path "$sdkRoot\$ver\ucrt\x64\ucrt.lib") {
+            $sdkVer = $ver
+            break
+        }
+    }
+    if ($sdkVer) {
+        $sdkBase = "$sdkRoot\$sdkVer"
+        $env:LIB = "$sdkBase\ucrt\x64;$sdkBase\um\x64;$msvcBase"
+        Write-Host "Set LIB (SDK $sdkVer) for native proc-macro linking" -ForegroundColor DarkGray
+    }
+}
+
 $wasmBindgen = Join-Path (Join-Path $cargoHome "bin") "wasm-bindgen.exe"
 $wasmTarget = "wasm32-unknown-unknown"
 $wasmBinary = Join-Path (Join-Path (Join-Path (Join-Path $engineDir "target") $wasmTarget) "release") "forge_engine.wasm"

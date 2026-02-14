@@ -1,6 +1,6 @@
 // Web Worker for sandboxed script execution.
 // Receives: init (scripts + entity states), tick (dt + states), stop
-// Sends: commands (engine commands), log (console output), error (runtime errors)
+// Sends: commands (engine commands), log (console output), error (runtime errors), ui (HUD updates)
 
 interface ScriptInstance {
   entityId: string;
@@ -15,6 +15,12 @@ interface EntityState {
   scale: [number, number, number];
 }
 
+interface EntityInfo {
+  name: string;
+  type: string;
+  colliderRadius: number;
+}
+
 interface InputState {
   pressed: Record<string, boolean>;
   justPressed: Record<string, boolean>;
@@ -27,14 +33,34 @@ interface EngineCommand {
   [key: string]: unknown;
 }
 
+interface UIElement {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  fontSize?: number;
+  color?: string;
+  visible: boolean;
+}
+
 // Accumulated commands from forge.* calls
 let pendingCommands: EngineCommand[] = [];
 let entityStates: Record<string, EntityState> = {};
+let entityInfos: Record<string, EntityInfo> = {};
 let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
 const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
 let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;
+const uiElements: Map<string, UIElement> = new Map();
+let uiDirty = false;
+
+function distanceBetween(a: [number, number, number], b: [number, number, number]): number {
+  const dx = a[0] - b[0];
+  const dy = a[1] - b[1];
+  const dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
 
 // Build the forge API object that scripts can call
 function buildForgeApi(scriptEntityId: string) {
@@ -88,6 +114,53 @@ function buildForgeApi(scriptEntityId: string) {
     error: (msg: string) => {
       (self as unknown as Worker).postMessage({ type: 'log', level: 'error', entityId: scriptEntityId, message: String(msg) });
     },
+
+    // --- Visual control ---
+    setColor: (eid: string, r: number, g: number, b: number, a?: number) => {
+      pendingCommands.push({ cmd: 'update_material', entityId: eid, baseColor: [r, g, b, a ?? 1.0] });
+    },
+    setVisibility: (eid: string, visible: boolean) => {
+      pendingCommands.push({ cmd: 'set_visibility', entityId: eid, visible });
+    },
+    setEmissive: (eid: string, r: number, g: number, b: number, intensity?: number) => {
+      pendingCommands.push({ cmd: 'update_material', entityId: eid, emissive: [r, g, b, intensity ?? 1.0] });
+    },
+
+    // --- Scene queries ---
+    scene: {
+      getEntities: () => {
+        return Object.entries(entityInfos).map(([id, info]) => ({
+          id,
+          name: info.name,
+          type: info.type,
+          position: entityStates[id]?.position ?? [0, 0, 0],
+        }));
+      },
+      findByName: (name: string) => {
+        const results: string[] = [];
+        for (const [id, info] of Object.entries(entityInfos)) {
+          if (info.name.toLowerCase().includes(name.toLowerCase())) {
+            results.push(id);
+          }
+        }
+        return results;
+      },
+      getEntityName: (eid: string) => entityInfos[eid]?.name ?? null,
+      getEntityType: (eid: string) => entityInfos[eid]?.type ?? null,
+      getEntitiesInRadius: (position: [number, number, number], radius: number) => {
+        const results: string[] = [];
+        for (const [id, state] of Object.entries(entityStates)) {
+          if (distanceBetween(position, state.position) <= radius) {
+            results.push(id);
+          }
+        }
+        return results;
+      },
+      reset: () => {
+        pendingCommands.push({ cmd: 'stop' });
+      },
+    },
+
     input: {
       isPressed: (action: string) => !!currentInput.pressed[action],
       justPressed: (action: string) => !!currentInput.justPressed[action],
@@ -103,6 +176,30 @@ function buildForgeApi(scriptEntityId: string) {
       },
       setVelocity: (eid: string, vx: number, vy: number, vz: number) => {
         pendingCommands.push({ cmd: 'set_velocity', entityId: eid, velocity: [vx, vy, vz] });
+      },
+      getContacts: (eid: string, radius?: number) => {
+        const state = entityStates[eid];
+        if (!state) return [];
+        const info = entityInfos[eid];
+        const colliderR = info?.colliderRadius ?? 0.5;
+        const checkRadius = radius ?? colliderR;
+        const contacts: string[] = [];
+        for (const [otherId, otherState] of Object.entries(entityStates)) {
+          if (otherId === eid) continue;
+          const otherInfo = entityInfos[otherId];
+          const otherR = otherInfo?.colliderRadius ?? 0.5;
+          const dist = distanceBetween(state.position, otherState.position);
+          if (dist <= checkRadius + otherR) {
+            contacts.push(otherId);
+          }
+        }
+        return contacts;
+      },
+      distanceTo: (eidA: string, eidB: string) => {
+        const a = entityStates[eidA];
+        const b = entityStates[eidB];
+        if (!a || !b) return Infinity;
+        return distanceBetween(a.position, b.position);
       },
     },
     particles: {
@@ -138,6 +235,12 @@ function buildForgeApi(scriptEntityId: string) {
       setLoop: (eid: string, looping: boolean) => {
         pendingCommands.push({ cmd: 'set_animation_loop', entityId: eid, looping });
       },
+      setBlendWeight: (eid: string, clipName: string, weight: number) => {
+        pendingCommands.push({ cmd: 'set_animation_blend_weight', entityId: eid, clipName, weight });
+      },
+      setClipSpeed: (eid: string, clipName: string, speed: number) => {
+        pendingCommands.push({ cmd: 'set_clip_speed', entityId: eid, clipName, speed });
+      },
       listClips: (_eid: string) => {
         // In worker, we don't have access to animation registry — return empty
         return [] as string[];
@@ -160,8 +263,6 @@ function buildForgeApi(scriptEntityId: string) {
         pendingCommands.push({ cmd: 'set_audio', entityId: eid, pitch });
       },
       isPlaying: (_eid: string) => {
-        // In worker, we don't have access to audioManager state — return false
-        // Real state tracking would need to be sent from main thread
         return false;
       },
       setBusVolume: (busName: string, volume: number) => {
@@ -171,14 +272,96 @@ function buildForgeApi(scriptEntityId: string) {
         pendingCommands.push({ cmd: 'update_audio_bus', busName, muted });
       },
       getBusVolume: (_busName: string) => {
-        // In worker, we don't have access to audioManager state
         return 1.0;
       },
       isBusMuted: (_busName: string) => {
-        // In worker, we don't have access to audioManager state
         return false;
       },
+      addLayer: (eid: string, slotName: string, assetId: string, options?: {
+        volume?: number; pitch?: number; loop?: boolean; spatial?: boolean; bus?: string;
+      }) => {
+        pendingCommands.push({
+          cmd: 'audio_add_layer', entityId: eid, slotName, assetId,
+          volume: options?.volume, pitch: options?.pitch, loop: options?.loop,
+          spatial: options?.spatial, bus: options?.bus,
+        });
+      },
+      removeLayer: (eid: string, slotName: string) => {
+        pendingCommands.push({ cmd: 'audio_remove_layer', entityId: eid, slotName });
+      },
+      removeAllLayers: (eid: string) => {
+        pendingCommands.push({ cmd: 'audio_remove_all_layers', entityId: eid });
+      },
+      crossfade: (fromEid: string, toEid: string, durationMs: number) => {
+        pendingCommands.push({ cmd: 'audio_crossfade', fromEntityId: fromEid, toEntityId: toEid, durationMs });
+      },
+      playOneShot: (assetId: string, options?: {
+        position?: [number, number, number]; bus?: string; volume?: number; pitch?: number;
+      }) => {
+        pendingCommands.push({
+          cmd: 'audio_play_one_shot', assetId,
+          position: options?.position, bus: options?.bus,
+          volume: options?.volume, pitch: options?.pitch,
+        });
+      },
+      fadeIn: (eid: string, durationMs: number) => {
+        pendingCommands.push({ cmd: 'audio_fade_in', entityId: eid, durationMs });
+      },
+      fadeOut: (eid: string, durationMs: number) => {
+        pendingCommands.push({ cmd: 'audio_fade_out', entityId: eid, durationMs });
+      },
     },
+
+    // --- UI/HUD system ---
+    ui: {
+      showText: (id: string, text: string, x: number, y: number, options?: {
+        fontSize?: number; color?: string;
+      }) => {
+        uiElements.set(id, {
+          id, text, x, y,
+          fontSize: options?.fontSize ?? 24,
+          color: options?.color ?? 'white',
+          visible: true,
+        });
+        uiDirty = true;
+      },
+      updateText: (id: string, text: string) => {
+        const el = uiElements.get(id);
+        if (el) {
+          el.text = text;
+          uiDirty = true;
+        }
+      },
+      removeText: (id: string) => {
+        uiElements.delete(id);
+        uiDirty = true;
+      },
+      clear: () => {
+        uiElements.clear();
+        uiDirty = true;
+      },
+    },
+
+    // --- Camera control ---
+    camera: {
+      follow: (eid: string, offset?: [number, number, number]) => {
+        pendingCommands.push({
+          cmd: 'camera_follow',
+          entityId: eid,
+          offset: offset ?? [0, 2, -5],
+        });
+      },
+      stopFollow: () => {
+        pendingCommands.push({ cmd: 'camera_stop_follow' });
+      },
+      setPosition: (x: number, y: number, z: number) => {
+        pendingCommands.push({ cmd: 'camera_set_position', position: [x, y, z] });
+      },
+      lookAt: (x: number, y: number, z: number) => {
+        pendingCommands.push({ cmd: 'camera_look_at', target: [x, y, z] });
+      },
+    },
+
     time: {
       get delta() { return timeData.delta; },
       get elapsed() { return timeData.elapsed; },
@@ -212,6 +395,20 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
   return instance;
 }
 
+function flushCommands() {
+  if (pendingCommands.length > 0) {
+    (self as unknown as Worker).postMessage({ type: 'commands', commands: pendingCommands });
+    pendingCommands = [];
+  }
+  if (uiDirty) {
+    (self as unknown as Worker).postMessage({
+      type: 'ui',
+      elements: Array.from(uiElements.values()),
+    });
+    uiDirty = false;
+  }
+}
+
 self.onmessage = (e: MessageEvent) => {
   const msg = e.data;
 
@@ -222,7 +419,10 @@ self.onmessage = (e: MessageEvent) => {
       sharedState = {};
       spawnCounter = 0;
       entityStates = msg.entities || {};
+      entityInfos = msg.entityInfos || {};
       currentInput = msg.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+      uiElements.clear();
+      uiDirty = false;
 
       for (const s of msg.scripts) {
         if (!s.enabled) continue;
@@ -243,11 +443,7 @@ self.onmessage = (e: MessageEvent) => {
         }
       }
 
-      // Send any commands from onStart
-      if (pendingCommands.length > 0) {
-        (self as unknown as Worker).postMessage({ type: 'commands', commands: pendingCommands });
-        pendingCommands = [];
-      }
+      flushCommands();
       break;
     }
 
@@ -255,6 +451,7 @@ self.onmessage = (e: MessageEvent) => {
       timeData.delta = msg.dt || 0;
       timeData.elapsed = msg.elapsed || 0;
       entityStates = msg.entities || {};
+      entityInfos = msg.entityInfos || entityInfos;
       currentInput = msg.inputState || currentInput;
 
       pendingCommands = [];
@@ -269,10 +466,7 @@ self.onmessage = (e: MessageEvent) => {
         }
       }
 
-      if (pendingCommands.length > 0) {
-        (self as unknown as Worker).postMessage({ type: 'commands', commands: pendingCommands });
-        pendingCommands = [];
-      }
+      flushCommands();
       break;
     }
 
@@ -289,6 +483,8 @@ self.onmessage = (e: MessageEvent) => {
       }
       scripts = [];
       sharedState = {};
+      // Send final UI clear
+      (self as unknown as Worker).postMessage({ type: 'ui', elements: [] });
       break;
     }
   }

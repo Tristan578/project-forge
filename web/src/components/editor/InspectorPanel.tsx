@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, memo } from 'react';
 import { Copy, ClipboardPaste } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -13,6 +13,7 @@ import { PhysicsInspector } from './PhysicsInspector';
 import { AudioInspector } from './AudioInspector';
 import { ParticleInspector } from './ParticleInspector';
 import { AnimationInspector } from './AnimationInspector';
+import { TerrainInspector } from './TerrainInspector';
 import {
   copyTransformProperty,
   copyFullTransform,
@@ -30,7 +31,7 @@ function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
 }
 
-export function InspectorPanel() {
+export const InspectorPanel = memo(function InspectorPanel() {
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryName = useEditorStore((s) => s.primaryName);
   const primaryTransform = useEditorStore((s) => s.primaryTransform);
@@ -298,6 +299,9 @@ export function InspectorPanel() {
       {/* Physics section (for all entities) */}
       <PhysicsInspector />
 
+      {/* Terrain section (for terrain entities) */}
+      <TerrainInspector />
+
       {/* Audio section (for all entities) */}
       <AudioInspector />
 
@@ -325,13 +329,18 @@ export function InspectorPanel() {
         </button>
       </div>
 
-      {/* Show loading state if we have selection but no transform yet */}
+      {/* Show skeleton if we have selection but no transform yet */}
       {!primaryTransform && (
-        <p className="text-xs text-zinc-500">Loading transform...</p>
+        <div className="mt-4 space-y-3">
+          <div className="h-3 w-24 animate-pulse rounded bg-zinc-800" />
+          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
+          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
+          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
+        </div>
       )}
 
       {/* Input bindings section */}
       <InputBindingsPanel />
     </div>
   );
-}
+});

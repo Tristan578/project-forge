@@ -30,6 +30,7 @@ export function ScriptEditorPanel() {
   const [isDirty, setIsDirty] = useState(false);
   const [showConsole, setShowConsole] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const gutterRef = useRef<HTMLDivElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
 
   // Derive local state from selection/script changes
@@ -230,8 +231,18 @@ export function ScriptEditorPanel() {
         </div>
       </div>
 
-      {/* Code editor (textarea fallback — Monaco added later when package installed) */}
-      <div className="flex-1 overflow-hidden">
+      {/* Code editor (textarea with line numbers) */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Line numbers gutter */}
+        <div
+          ref={gutterRef}
+          className="flex-shrink-0 select-none overflow-hidden bg-zinc-950 py-3 pl-2 pr-1 text-right font-mono text-[11px] leading-[18px] text-zinc-700"
+          aria-hidden="true"
+        >
+          {localSource.split('\n').map((_line, i) => (
+            <div key={i}>{i + 1}</div>
+          ))}
+        </div>
         <textarea
           ref={textareaRef}
           value={localSource}
@@ -239,9 +250,14 @@ export function ScriptEditorPanel() {
             setLocalSource(e.target.value);
             setIsDirty(true);
           }}
+          onScroll={() => {
+            if (textareaRef.current && gutterRef.current) {
+              gutterRef.current.scrollTop = textareaRef.current.scrollTop;
+            }
+          }}
           onBlur={handleSave}
           spellCheck={false}
-          className="h-full w-full resize-none bg-zinc-950 p-3 font-mono text-xs text-zinc-300 outline-none"
+          className="h-full w-full resize-none bg-zinc-950 py-3 pl-2 pr-3 font-mono text-[11px] leading-[18px] text-zinc-300 outline-none"
           placeholder="// Write your script here..."
         />
       </div>

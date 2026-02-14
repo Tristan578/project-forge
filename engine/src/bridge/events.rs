@@ -344,3 +344,143 @@ pub fn emit_animation_state_changed(state: &crate::core::animation::AnimationPla
 pub fn emit_animation_list_changed(state: &crate::core::animation::AnimationPlaybackState) {
     emit_event("ANIMATION_LIST_CHANGED", state);
 }
+
+/// Emit a shader effect changed event for an entity.
+pub fn emit_shader_changed(entity_id: &str, data: Option<&crate::core::shader_effects::ShaderEffectData>) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ShaderPayload<'a> {
+        entity_id: &'a str,
+        data: Option<&'a crate::core::shader_effects::ShaderEffectData>,
+    }
+    emit_event("SHADER_CHANGED", &ShaderPayload { entity_id, data });
+}
+
+/// Emit a terrain changed event for an entity.
+pub fn emit_terrain_changed(entity_id: &str, data: &crate::core::terrain::TerrainData) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TerrainPayload<'a> {
+        entity_id: &'a str,
+        #[serde(flatten)]
+        data: &'a crate::core::terrain::TerrainData,
+    }
+    emit_event("TERRAIN_CHANGED", &TerrainPayload { entity_id, data });
+}
+
+/// Emit a CSG operation completed event.
+pub fn emit_csg_completed(entity_id: &str, name: &str, operation: crate::core::csg::CsgOperation) {
+    use crate::core::csg::CsgOperation;
+    let op_str = match operation {
+        CsgOperation::Union => "union",
+        CsgOperation::Subtract => "subtract",
+        CsgOperation::Intersect => "intersect",
+    };
+    emit_event("CSG_COMPLETED", &serde_json::json!({
+        "entityId": entity_id,
+        "name": name,
+        "operation": op_str,
+    }));
+}
+
+/// Emit a CSG operation error event.
+pub fn emit_csg_error(message: &str) {
+    emit_event("CSG_ERROR", &serde_json::json!({
+        "message": message,
+    }));
+}
+
+/// Emit a procedural mesh created event.
+pub fn emit_procedural_mesh_created(entity_id: &str, name: &str, operation: &str) {
+    emit_event("PROCEDURAL_MESH_CREATED", &serde_json::json!({
+        "entityId": entity_id,
+        "name": name,
+        "operation": operation,
+    }));
+}
+
+/// Emit a procedural mesh error event.
+pub fn emit_procedural_mesh_error(message: &str) {
+    emit_event("PROCEDURAL_MESH_ERROR", &serde_json::json!({
+        "message": message,
+    }));
+}
+
+/// Emit an array completed event.
+pub fn emit_array_completed(source_id: &str, created_ids: &[String]) {
+    emit_event("ARRAY_COMPLETED", &serde_json::json!({
+        "sourceId": source_id,
+        "createdIds": created_ids,
+    }));
+}
+
+/// Emit a play tick event with all entity states for the script runtime.
+pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String, String, f32)], input_state: &crate::core::input::InputState) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EntityState {
+        position: [f32; 3],
+        rotation: [f32; 3],
+        scale: [f32; 3],
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EntityInfo {
+        name: String,
+        #[serde(rename = "type")]
+        entity_type: String,
+        collider_radius: f32,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PlayTickPayload {
+        entities: std::collections::HashMap<String, EntityState>,
+        entity_infos: std::collections::HashMap<String, EntityInfo>,
+        input_state: InputStatePayload,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct InputStatePayload {
+        pressed: std::collections::HashMap<String, bool>,
+        just_pressed: std::collections::HashMap<String, bool>,
+        just_released: std::collections::HashMap<String, bool>,
+        axes: std::collections::HashMap<String, f32>,
+    }
+
+    let mut entity_states = std::collections::HashMap::new();
+    let mut entity_infos = std::collections::HashMap::new();
+
+    for (id, pos, rot, scale, name, etype, collider_r) in entities {
+        entity_states.insert(id.clone(), EntityState {
+            position: *pos,
+            rotation: *rot,
+            scale: *scale,
+        });
+        entity_infos.insert(id.clone(), EntityInfo {
+            name: name.clone(),
+            entity_type: etype.clone(),
+            collider_radius: *collider_r,
+        });
+    }
+
+    let input_payload = InputStatePayload {
+        pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.pressed)).collect(),
+        just_pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_pressed)).collect(),
+        just_released: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_released)).collect(),
+        axes: input_state.actions.iter().map(|(k, v)| (k.clone(), v.axis_value)).collect(),
+    };
+
+    emit_event("PLAY_TICK", &PlayTickPayload {
+        entities: entity_states,
+        entity_infos,
+        input_state: input_payload,
+    });
+}
+
+/// Emit a quality settings changed event.
+pub fn emit_quality_changed(settings: &crate::core::quality::QualitySettings) {
+    emit_event("QUALITY_CHANGED", settings);
+}

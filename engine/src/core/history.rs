@@ -8,12 +8,15 @@ use serde::{Deserialize, Serialize};
 
 use super::asset_manager::AssetRef;
 use super::audio::AudioData;
+use super::csg::CsgMeshData;
 use super::lighting::LightData;
 use super::material::MaterialData;
 use super::particles::ParticleData;
 use super::pending_commands::EntityType;
 use super::physics::PhysicsData;
 use super::scripting::ScriptData;
+use super::shader_effects::ShaderEffectData;
+use super::terrain::{TerrainData, TerrainMeshData};
 
 /// Snapshot of transform data for undo/redo.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,6 +92,21 @@ pub struct EntitySnapshot {
     /// Whether particle emission is enabled on this entity
     #[serde(default)]
     pub particle_enabled: bool,
+    /// Shader effect data (if entity has custom shader)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shader_effect_data: Option<ShaderEffectData>,
+    /// CSG mesh vertex/index data (for CsgResult entities, needed for undo restore)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub csg_mesh_data: Option<CsgMeshData>,
+    /// Terrain data (if entity is a terrain)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain_data: Option<TerrainData>,
+    /// Terrain mesh (heightmap) data for reconstruction
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain_mesh_data: Option<TerrainMeshData>,
+    /// Procedural mesh data (for extrude/lathe/combine results)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub procedural_mesh_data: Option<super::procedural_mesh::ProceduralMeshData>,
 }
 
 /// An action that can be undone/redone.
@@ -178,6 +196,56 @@ pub enum UndoableAction {
         old_particle: Option<ParticleData>,
         new_particle: Option<ParticleData>,
     },
+
+    /// Shader effect configuration changed
+    ShaderChange {
+        entity_id: String,
+        old_shader: Option<ShaderEffectData>,
+        new_shader: Option<ShaderEffectData>,
+    },
+
+    /// CSG boolean operation performed
+    CsgOperation {
+        /// Snapshot of entity A (for restore on undo if deleted)
+        source_a_snapshot: Option<EntitySnapshot>,
+        /// Snapshot of entity B (for restore on undo if deleted)
+        source_b_snapshot: Option<EntitySnapshot>,
+        /// Snapshot of the result entity (for delete on undo)
+        result_snapshot: EntitySnapshot,
+        /// Whether source entities were deleted
+        sources_deleted: bool,
+    },
+
+    /// Terrain noise parameters or sculpt operation changed
+    TerrainChange {
+        entity_id: String,
+        old_terrain: TerrainData,
+        new_terrain: TerrainData,
+        old_mesh_data: TerrainMeshData,
+        new_mesh_data: TerrainMeshData,
+    },
+
+    /// Extrude operation performed
+    ExtrudeShape {
+        snapshot: EntitySnapshot,
+    },
+
+    /// Lathe operation performed
+    LatheShape {
+        snapshot: EntitySnapshot,
+    },
+
+    /// Array operation performed
+    ArrayEntity {
+        source_id: String,
+        created_snapshots: Vec<EntitySnapshot>,
+    },
+
+    /// Combine operation performed
+    CombineMeshes {
+        source_snapshots: Vec<EntitySnapshot>,
+        result_snapshot: EntitySnapshot,
+    },
 }
 
 impl UndoableAction {
@@ -205,6 +273,23 @@ impl UndoableAction {
             UndoableAction::ScriptChange { .. } => "Script Change".to_string(),
             UndoableAction::AudioChange { .. } => "Audio Change".to_string(),
             UndoableAction::ParticleChange { .. } => "Particle Change".to_string(),
+            UndoableAction::ShaderChange { .. } => "Shader Effect Change".to_string(),
+            UndoableAction::CsgOperation { result_snapshot, .. } => {
+                format!("CSG '{}'", result_snapshot.name)
+            }
+            UndoableAction::TerrainChange { .. } => "Terrain Change".to_string(),
+            UndoableAction::ExtrudeShape { snapshot } => {
+                format!("Extrude '{}'", snapshot.name)
+            }
+            UndoableAction::LatheShape { snapshot } => {
+                format!("Lathe '{}'", snapshot.name)
+            }
+            UndoableAction::ArrayEntity { created_snapshots, .. } => {
+                format!("Array {} copies", created_snapshots.len())
+            }
+            UndoableAction::CombineMeshes { result_snapshot, .. } => {
+                format!("Combine '{}'", result_snapshot.name)
+            }
         }
     }
 }

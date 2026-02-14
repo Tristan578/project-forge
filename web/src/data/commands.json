@@ -179,7 +179,7 @@
     },
     {
       "name": "update_material",
-      "description": "Update PBR material properties on an entity",
+      "description": "Update PBR material properties on an entity. Supports core PBR, UV transform, parallax, clearcoat, and transmission.",
       "category": "materials",
       "parameters": {
         "type": "object",
@@ -194,12 +194,101 @@
           "alphaMode": { "type": "string", "enum": ["Opaque", "Blend", "Mask"] },
           "alphaCutoff": { "type": "number", "minimum": 0, "maximum": 1 },
           "doubleSided": { "type": "boolean" },
-          "unlit": { "type": "boolean" }
+          "unlit": { "type": "boolean" },
+          "uvOffset": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "[x, y] UV offset" },
+          "uvScale": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "[x, y] UV scale" },
+          "uvRotation": { "type": "number", "description": "UV rotation in radians" },
+          "parallaxDepthScale": { "type": "number", "minimum": 0, "maximum": 0.5 },
+          "parallaxMappingMethod": { "type": "string", "enum": ["occlusion", "relief"] },
+          "maxParallaxLayerCount": { "type": "number", "minimum": 1, "maximum": 128 },
+          "parallaxReliefMaxSteps": { "type": "integer", "minimum": 1, "maximum": 32 },
+          "clearcoat": { "type": "number", "minimum": 0, "maximum": 1 },
+          "clearcoatPerceptualRoughness": { "type": "number", "minimum": 0, "maximum": 1 },
+          "specularTransmission": { "type": "number", "minimum": 0, "maximum": 1 },
+          "diffuseTransmission": { "type": "number", "minimum": 0, "maximum": 1 },
+          "ior": { "type": "number", "minimum": 1.0, "maximum": 3.0, "description": "Index of refraction (1.0=air, 1.33=water, 1.5=glass, 2.42=diamond)" },
+          "thickness": { "type": "number", "minimum": 0, "description": "Optical depth for transmission" },
+          "attenuationDistance": { "type": "number", "minimum": 0, "description": "Distance light travels before being attenuated. Use null for infinity." },
+          "attenuationColor": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "[r, g, b] 0-1 attenuation tint" }
         },
         "required": ["entityId"]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_material_preset",
+      "description": "Apply a predefined material preset to an entity by name",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to apply the preset to" },
+          "presetId": {
+            "type": "string",
+            "enum": ["default_gray", "matte_white", "matte_black", "chalk_white", "clay", "plastic_basic", "polished_metal", "brushed_metal", "gold", "silver", "copper", "bronze", "iron", "chrome", "titanium", "aluminum", "concrete", "marble", "granite", "sand", "dirt", "brick", "leather", "ice", "glass", "water", "frosted_glass", "crystal", "diamond", "ceramic", "car_paint", "neon_glow", "lava", "holographic", "mirror", "cotton", "silk", "velvet", "denim", "wool", "canvas", "glossy_plastic", "matte_plastic", "rubber_soft", "acrylic", "resin", "slate", "limestone", "obsidian", "sandstone", "cobblestone", "oak", "pine", "walnut", "bamboo", "plywood"],
+            "description": "Preset identifier"
+          }
+        },
+        "required": ["entityId", "presetId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_custom_shader",
+      "description": "Apply a custom shader effect to an entity, extending its PBR material with visual effects",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Target entity ID" },
+          "shaderType": {
+            "type": "string",
+            "enum": ["none", "dissolve", "hologram", "force_field", "lava_flow", "toon", "fresnel_glow"],
+            "description": "Shader effect type"
+          },
+          "customColor": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "Custom tint color [r,g,b,a] 0-1" },
+          "noiseScale": { "type": "number", "description": "Noise pattern scale (0.5-20)" },
+          "emissionStrength": { "type": "number", "description": "Glow intensity (0-10)" },
+          "dissolveThreshold": { "type": "number", "description": "Dissolve amount 0-1" },
+          "dissolveEdgeWidth": { "type": "number", "description": "Edge glow width (0-0.2)" },
+          "scanLineFrequency": { "type": "number", "description": "Hologram scan line count (10-200)" },
+          "scanLineSpeed": { "type": "number", "description": "Hologram scan line speed (0.5-10)" },
+          "scrollSpeed": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "UV scroll speed [x,y]" },
+          "distortionStrength": { "type": "number", "description": "Flow distortion amount (0-1)" },
+          "toonBands": { "type": "integer", "description": "Cel-shade band count (2-8)" },
+          "fresnelPower": { "type": "number", "description": "Rim light falloff (1-10)" }
+        },
+        "required": ["entityId", "shaderType"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_custom_shader",
+      "description": "Remove custom shader effect from an entity, reverting to standard PBR rendering",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Target entity ID" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_shaders",
+      "description": "List all available built-in shader effects with their descriptions",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     },
     {
       "name": "update_light",
@@ -1075,6 +1164,128 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "audio_crossfade",
+      "description": "Crossfade audio between two entities over a duration",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "fromEntityId": { "type": "string", "description": "Entity to fade out" },
+          "toEntityId": { "type": "string", "description": "Entity to fade in" },
+          "durationMs": { "type": "number", "minimum": 0, "description": "Crossfade duration in milliseconds" }
+        },
+        "required": ["fromEntityId", "toEntityId", "durationMs"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_fade_in",
+      "description": "Fade in audio on an entity from silence to current volume",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with audio" },
+          "durationMs": { "type": "number", "minimum": 0, "description": "Fade duration in milliseconds" }
+        },
+        "required": ["entityId", "durationMs"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_fade_out",
+      "description": "Fade out audio on an entity from current volume to silence",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with audio" },
+          "durationMs": { "type": "number", "minimum": 0, "description": "Fade duration in milliseconds" }
+        },
+        "required": ["entityId", "durationMs"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_play_one_shot",
+      "description": "Play a fire-and-forget one-shot sound (no entity attachment needed)",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": { "type": "string", "description": "Audio asset ID to play" },
+          "position": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Optional world position for spatial audio [x, y, z]"
+          },
+          "bus": { "type": "string", "description": "Audio bus to route to (default: sfx)" },
+          "volume": { "type": "number", "minimum": 0, "maximum": 1, "description": "Volume (0-1)" },
+          "pitch": { "type": "number", "minimum": 0.25, "maximum": 4, "description": "Playback rate" }
+        },
+        "required": ["assetId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_add_layer",
+      "description": "Add a layered audio source to an entity (runtime only, for multi-source)",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to add layer to" },
+          "slotName": { "type": "string", "description": "Unique slot name for this layer" },
+          "assetId": { "type": "string", "description": "Audio asset ID" },
+          "volume": { "type": "number", "minimum": 0, "maximum": 1, "description": "Volume (0-1)" },
+          "loop": { "type": "boolean", "description": "Loop playback" },
+          "bus": { "type": "string", "description": "Audio bus (default: sfx)" }
+        },
+        "required": ["entityId", "slotName", "assetId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "audio_remove_layer",
+      "description": "Remove a layered audio source from an entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to remove layer from" },
+          "slotName": { "type": "string", "description": "Slot name to remove" }
+        },
+        "required": ["entityId", "slotName"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_ducking_rule",
+      "description": "Set an audio ducking rule (target bus volume ducks when trigger bus plays)",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "triggerBus": { "type": "string", "description": "Bus that triggers ducking when playing" },
+          "targetBus": { "type": "string", "description": "Bus whose volume is reduced" },
+          "duckLevel": { "type": "number", "minimum": 0, "maximum": 1, "description": "Volume fraction during duck (0.3 = 30%)" },
+          "attackMs": { "type": "number", "minimum": 0, "description": "Ramp-down duration in ms" },
+          "releaseMs": { "type": "number", "minimum": 0, "description": "Ramp-up duration in ms" }
+        },
+        "required": ["triggerBus", "targetBus"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_particle",
       "description": "Set or update particle effect on an entity. Creates a GPU particle emitter with configurable emission, velocity, color gradient, and rendering options.",
       "category": "particles",
@@ -1334,6 +1545,52 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "set_animation_blend_weight",
+      "description": "Set the blend weight for a specific animation clip (0.0-1.0). Used to blend multiple animations together.",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with animation" },
+          "clipName": { "type": "string", "description": "Name of the clip to control" },
+          "weight": { "type": "number", "description": "Blend weight (0.0 = no influence, 1.0 = full influence)", "minimum": 0.0, "maximum": 1.0 }
+        },
+        "required": ["entityId", "clipName", "weight"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_clip_speed",
+      "description": "Set the playback speed for a specific animation clip",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity with animation" },
+          "clipName": { "type": "string", "description": "Name of the clip to control" },
+          "speed": { "type": "number", "description": "Playback speed multiplier (1.0 = normal, 2.0 = double speed)" }
+        },
+        "required": ["entityId", "clipName", "speed"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_animation_graph",
+      "description": "Get the animation graph state showing all node weights and speeds for an entity",
+      "category": "animation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to query" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "export_game",
       "description": "Export the current scene as a standalone HTML game file",
       "category": "export",
@@ -1359,6 +1616,332 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "csg_union",
+      "description": "Combine two mesh entities using CSG union (boolean add)",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityIdA": { "type": "string", "description": "Entity ID of first mesh (A)" },
+          "entityIdB": { "type": "string", "description": "Entity ID of second mesh (B)" },
+          "deleteSources": { "type": "boolean", "description": "Delete source entities after operation (default: true)" },
+          "name": { "type": "string", "description": "Name for result entity (auto-generated if omitted)" }
+        },
+        "required": ["entityIdA", "entityIdB"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "csg_subtract",
+      "description": "Subtract mesh B from mesh A using CSG boolean subtraction",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityIdA": { "type": "string", "description": "Entity ID of first mesh (A)" },
+          "entityIdB": { "type": "string", "description": "Entity ID of second mesh (B)" },
+          "deleteSources": { "type": "boolean", "description": "Delete source entities after operation (default: true)" },
+          "name": { "type": "string", "description": "Name for result entity (auto-generated if omitted)" }
+        },
+        "required": ["entityIdA", "entityIdB"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "csg_intersect",
+      "description": "Compute the intersection of two mesh entities using CSG boolean intersection",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityIdA": { "type": "string", "description": "Entity ID of first mesh (A)" },
+          "entityIdB": { "type": "string", "description": "Entity ID of second mesh (B)" },
+          "deleteSources": { "type": "boolean", "description": "Delete source entities after operation (default: true)" },
+          "name": { "type": "string", "description": "Name for result entity (auto-generated if omitted)" }
+        },
+        "required": ["entityIdA", "entityIdB"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "extrude_shape",
+      "description": "Create a 3D mesh by extruding a 2D cross-section along a path",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "shape": { "type": "string", "enum": ["circle", "square", "hexagon", "star"], "description": "Cross-section shape: circle, square, hexagon, or star" },
+          "radius": { "type": "number", "description": "Radius of the cross-section (for circle, hexagon, star outer). Default: 0.5" },
+          "length": { "type": "number", "description": "Length of extrusion along Y-axis. Default: 2.0" },
+          "segments": { "type": "integer", "minimum": 3, "maximum": 64, "description": "Number of segments for circular shapes. Default: 16" },
+          "innerRadius": { "type": "number", "description": "Inner radius for star shape. Default: 0.25" },
+          "starPoints": { "type": "integer", "minimum": 3, "maximum": 20, "description": "Number of points for star shape. Default: 5" },
+          "size": { "type": "number", "description": "Side length for square shape. Default: 1.0" },
+          "name": { "type": "string", "description": "Name for the result entity" },
+          "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "World position [x, y, z]" }
+        },
+        "required": ["shape"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "lathe_shape",
+      "description": "Create a 3D mesh by revolving a 2D profile around the Y-axis",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "profile": { "type": "array", "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }, "minItems": 2, "description": "Array of [radius, height] points defining the 2D profile" },
+          "segments": { "type": "integer", "minimum": 8, "maximum": 64, "description": "Number of rotational segments (8-64). Default: 32" },
+          "name": { "type": "string", "description": "Name for the result entity" },
+          "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "World position [x, y, z]" }
+        },
+        "required": ["profile"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "array_entity",
+      "description": "Duplicate an entity in a grid (NxMxK) or circular pattern",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID to duplicate" },
+          "pattern": { "type": "string", "enum": ["grid", "circle"], "description": "Array pattern: grid or circle" },
+          "countX": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Grid count along X axis. Default: 3" },
+          "countY": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Grid count along Y axis. Default: 1" },
+          "countZ": { "type": "integer", "minimum": 1, "maximum": 20, "description": "Grid count along Z axis. Default: 3" },
+          "spacingX": { "type": "number", "description": "Grid spacing along X. Default: 2.0" },
+          "spacingY": { "type": "number", "description": "Grid spacing along Y. Default: 2.0" },
+          "spacingZ": { "type": "number", "description": "Grid spacing along Z. Default: 2.0" },
+          "circleCount": { "type": "integer", "minimum": 2, "maximum": 100, "description": "Number of copies in circle pattern. Default: 8" },
+          "circleRadius": { "type": "number", "description": "Radius of circle pattern. Default: 5.0" }
+        },
+        "required": ["entityId", "pattern"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "combine_meshes",
+      "description": "Merge multiple mesh entities into a single entity",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityIds": { "type": "array", "items": { "type": "string" }, "minItems": 2, "description": "Array of entity IDs to merge" },
+          "deleteSources": { "type": "boolean", "description": "Delete source entities after combining. Default: true" },
+          "name": { "type": "string", "description": "Name for the combined entity" }
+        },
+        "required": ["entityIds"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "spawn_terrain",
+      "description": "Spawn a procedural terrain entity with noise-based heightmap",
+      "category": "terrain",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Display name for the terrain entity" },
+          "position": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "World position [x, y, z]" },
+          "noiseType": { "type": "string", "enum": ["perlin", "simplex", "value"], "description": "Noise algorithm" },
+          "octaves": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Number of noise octaves" },
+          "frequency": { "type": "number", "description": "Base noise frequency" },
+          "amplitude": { "type": "number", "description": "Noise amplitude (persistence)" },
+          "heightScale": { "type": "number", "description": "Overall height multiplier" },
+          "seed": { "type": "integer", "description": "Random seed" },
+          "resolution": { "type": "integer", "enum": [32, 64, 128, 256], "description": "Grid vertices per side" },
+          "size": { "type": "number", "description": "World-space width/depth" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_terrain",
+      "description": "Update terrain noise parameters and regenerate the heightmap mesh",
+      "category": "terrain",
+      "parameters": {
+        "type": "object",
+        "required": ["entityId"],
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID of the terrain" },
+          "noiseType": { "type": "string", "enum": ["perlin", "simplex", "value"] },
+          "octaves": { "type": "integer", "minimum": 1, "maximum": 8 },
+          "frequency": { "type": "number" },
+          "amplitude": { "type": "number" },
+          "heightScale": { "type": "number" },
+          "seed": { "type": "integer" },
+          "resolution": { "type": "integer", "enum": [32, 64, 128, 256] },
+          "size": { "type": "number" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "sculpt_terrain",
+      "description": "Modify terrain heightmap at a specific position with a brush",
+      "category": "terrain",
+      "parameters": {
+        "type": "object",
+        "required": ["entityId", "position", "radius", "strength"],
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID of the terrain" },
+          "position": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "Sculpt center [x, z] in terrain local space" },
+          "radius": { "type": "number", "description": "Brush radius in world units" },
+          "strength": { "type": "number", "description": "Brush strength (positive=raise, negative=lower)" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_terrain",
+      "description": "Get terrain noise parameters for an entity",
+      "category": "terrain",
+      "parameters": {
+        "type": "object",
+        "required": ["entityId"],
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID of the terrain" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "search_docs",
+      "description": "Search Project Forge documentation by keyword. Returns ranked results with snippets.",
+      "category": "docs",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "Search query (keywords or natural language question)" },
+          "maxResults": { "type": "number", "description": "Maximum results to return (default: 10)" }
+        },
+        "required": ["query"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "docs:read"
+    },
+    {
+      "name": "get_doc",
+      "description": "Retrieve a full documentation page by its path (e.g., 'features/physics')",
+      "category": "docs",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "Document path relative to docs/ without .md extension (e.g., 'features/physics')" }
+        },
+        "required": ["path"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "docs:read"
+    },
+    {
+      "name": "list_doc_topics",
+      "description": "List all available documentation topics with descriptions and tags",
+      "category": "docs",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "docs:read"
+    },
+    {
+      "name": "list_material_presets",
+      "description": "List all available material presets with their IDs, names, categories, and descriptions. Use this to discover materials before applying them.",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Optional filter by category",
+            "enum": ["basic", "metal", "natural", "glass", "special", "fabric", "plastic", "stone", "wood"]
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "save_material_to_library",
+      "description": "Save the current material of the selected entity as a named custom preset in the material library.",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name for the custom material preset"
+          }
+        },
+        "required": ["name"]
+      },
+      "tokenCost": 1,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_library_material",
+      "description": "Delete a custom material from the material library by its ID.",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "materialId": {
+            "type": "string",
+            "description": "ID of the custom material to delete"
+          }
+        },
+        "required": ["materialId"]
+      },
+      "tokenCost": 1,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_quality_preset",
+      "description": "Set a rendering quality preset that adjusts MSAA, shadows, bloom, sharpening, and particle density all at once",
+      "category": "rendering",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "preset": {
+            "type": "string",
+            "enum": ["low", "medium", "high", "ultra"],
+            "description": "Quality preset level"
+          }
+        },
+        "required": ["preset"]
+      },
+      "tokenCost": 1,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_quality_settings",
+      "description": "Get the current quality preset and all rendering quality parameters",
+      "category": "rendering",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     }
   ],
   "resources": [
@@ -1379,6 +1962,18 @@
       "name": "Project Info",
       "description": "Project metadata and settings",
       "mimeType": "application/json"
+    },
+    {
+      "uri": "forge://docs/index",
+      "name": "Documentation Index",
+      "description": "Master index of all documentation topics with tags",
+      "mimeType": "application/json"
+    },
+    {
+      "uri": "forge://docs/{path}",
+      "name": "Documentation Page",
+      "description": "Individual documentation page by path (e.g., forge://docs/features/physics)",
+      "mimeType": "text/markdown"
     }
   ]
 }

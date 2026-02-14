@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { useEditorStore, type AmbientLightData, type EnvironmentData, type ColorGradingSectionData } from '@/stores/editorStore';
+import { useEditorStore, type AmbientLightData, type EnvironmentData, type ColorGradingSectionData, type QualityPreset } from '@/stores/editorStore';
 
 /** Convert linear RGB [0-1] to sRGB hex string. */
 function linearToHex(r: number, g: number, b: number): string {
@@ -38,6 +38,8 @@ export function SceneSettings() {
   const updateChromaticAberration = useEditorStore((s) => s.updateChromaticAberration);
   const updateColorGrading = useEditorStore((s) => s.updateColorGrading);
   const updateSharpening = useEditorStore((s) => s.updateSharpening);
+  const qualityPreset = useEditorStore((s) => s.qualityPreset);
+  const setQualityPreset = useEditorStore((s) => s.setQualityPreset);
 
   const handleAmbientUpdate = useCallback(
     (partial: Partial<AmbientLightData>) => {
@@ -73,6 +75,30 @@ export function SceneSettings() {
 
   return (
     <div className="space-y-4">
+      {/* Quality Preset */}
+      <div className="border-t border-zinc-800 pt-4">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Quality Preset
+        </h3>
+        <div className="flex items-center gap-2">
+          <label className="w-24 shrink-0 text-xs text-zinc-400">Preset</label>
+          <select
+            value={qualityPreset}
+            onChange={(e) => setQualityPreset(e.target.value as QualityPreset)}
+            className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300
+              focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="ultra">Ultra</option>
+          </select>
+        </div>
+        <p className="mt-1 text-[9px] text-zinc-600">
+          Adjusts MSAA, shadows, bloom, sharpening, and particle density
+        </p>
+      </div>
+
       {/* Ambient Light */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">

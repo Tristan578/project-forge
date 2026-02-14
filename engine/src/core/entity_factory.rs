@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use super::asset_manager::AssetRef;
 use super::audio::{AudioData, AudioEnabled};
+use super::csg;
 use super::entity_id::{EntityId, EntityName, EntityVisible};
+use super::terrain::{self, TerrainEnabled};
 use super::history::{EntitySnapshot, HistoryStack, TransformSnapshot, UndoableAction};
 use super::lighting::LightData;
 use super::material::MaterialData;
@@ -14,6 +16,7 @@ use super::pending_commands::{EntityType, PendingCommands};
 use super::physics::{PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::{Selection, SelectionChangedEvent};
+use super::shader_effects::ShaderEffectData;
 
 /// Marker component for entities that cannot be deleted by the user.
 #[derive(Component)]
@@ -69,6 +72,18 @@ pub fn apply_spawn_requests(
                 // Skip these if they somehow end up in the spawn queue.
                 continue;
             }
+            EntityType::CsgResult => {
+                // CsgResult entities are created by the CSG system, not through spawn requests.
+                continue;
+            }
+            EntityType::Terrain => {
+                // Terrain entities are created by the terrain system, not through spawn requests.
+                continue;
+            }
+            EntityType::ProceduralMesh => {
+                // ProceduralMesh entities are created by extrude/lathe/combine systems, not through spawn requests.
+                continue;
+            }
         };
 
         // Material data for mesh entities, light data for light entities
@@ -105,6 +120,11 @@ pub fn apply_spawn_requests(
                 audio_data: None,
                 particle_data: None,
                 particle_enabled: false,
+                shader_effect_data: None,
+                csg_mesh_data: None,
+                terrain_data: None,
+                terrain_mesh_data: None,
+                procedural_mesh_data: None,
             },
         });
 
@@ -120,6 +140,9 @@ pub fn apply_delete_requests(
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
+    procedural_mesh_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
     mut selection: ResMut<Selection>,
     mut selection_events: EventWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
@@ -149,6 +172,21 @@ pub fn apply_delete_requests(
                         .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
                         .unwrap_or((None, false));
 
+                    // Look up shader data separately
+                    let shader_effect_data = shader_query.iter()
+                        .find(|(seid, _)| seid.0 == eid.0)
+                        .and_then(|(_, sed)| sed.cloned());
+
+                    // Look up csg data separately
+                    let csg_mesh_data = csg_query.iter()
+                        .find(|(ceid, _)| ceid.0 == eid.0)
+                        .and_then(|(_, cmd)| cmd.cloned());
+
+                    // Look up procedural mesh data separately
+                    let procedural_mesh_data = procedural_mesh_query.iter()
+                        .find(|(pmeid, _)| pmeid.0 == eid.0)
+                        .and_then(|(_, pmd)| pmd.cloned());
+
                     // Record delete action in history before deleting
                     history.push(UndoableAction::Delete {
                         snapshot: EntitySnapshot {
@@ -167,6 +205,11 @@ pub fn apply_delete_requests(
                             audio_data,
                             particle_data,
                             particle_enabled,
+                            shader_effect_data,
+                            csg_mesh_data,
+                            terrain_data: None,
+                            terrain_mesh_data: None,
+                            procedural_mesh_data,
                         },
                     });
 
@@ -227,6 +270,9 @@ pub fn apply_duplicate_requests(
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
+    procedural_mesh_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
     mut history: ResMut<HistoryStack>,
 ) {
     for request in pending.duplicate_requests.drain(..) {
@@ -249,6 +295,22 @@ pub fn apply_duplicate_requests(
                 .find(|(peid, _, _)| peid.0 == source_eid.0)
                 .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
                 .unwrap_or((None, false));
+
+            // Look up shader data separately
+            let src_shader_data: Option<ShaderEffectData> = shader_query.iter()
+                .find(|(seid, _)| seid.0 == source_eid.0)
+                .and_then(|(_, sed)| sed.cloned());
+
+            // Look up csg data separately
+            let src_csg_data: Option<csg::CsgMeshData> = csg_query.iter()
+                .find(|(ceid, _)| ceid.0 == source_eid.0)
+                .and_then(|(_, cmd)| cmd.cloned());
+
+            // Look up procedural mesh data separately
+            let src_procedural_mesh_data = procedural_mesh_query.iter()
+                .find(|(pmeid, _)| pmeid.0 == source_eid.0)
+                .and_then(|(_, pmd)| pmd.cloned());
+
             // Clone with offset
             let new_pos = transform.translation + Vec3::new(1.0, 0.0, 0.0);
             let new_name = format!("{} (Copy)", name.0);
@@ -344,6 +406,21 @@ pub fn apply_duplicate_requests(
                 entity_commands.insert(ParticleEnabled);
             }
 
+            // Clone shader data if present
+            if let Some(ref sed) = src_shader_data {
+                entity_commands.insert(sed.clone());
+            }
+
+            // Clone csg data if present
+            if let Some(ref cmd) = src_csg_data {
+                entity_commands.insert(cmd.clone());
+            }
+
+            // Clone procedural mesh data if present
+            if let Some(ref pmd) = src_procedural_mesh_data {
+                entity_commands.insert(pmd.clone());
+            }
+
             // Record duplicate action in history
             history.push(UndoableAction::Duplicate {
                 source_entity_id: source_eid.0.clone(),
@@ -367,6 +444,11 @@ pub fn apply_duplicate_requests(
                     audio_data: src_audio_data,
                     particle_data: src_particle_data,
                     particle_enabled: src_particle_enabled,
+                    shader_effect_data: src_shader_data,
+                    csg_mesh_data: src_csg_data,
+                    terrain_data: None,
+                    terrain_mesh_data: None,
+                    procedural_mesh_data: src_procedural_mesh_data,
                 },
             });
         }
@@ -790,6 +872,121 @@ pub fn spawn_from_snapshot(
                 transform,
             )).id()
         }
+        EntityType::CsgResult => {
+            // CSG result mesh data is stored in the snapshot
+            // Rebuild the mesh from stored vertex/index data
+            if let Some(ref mesh_data) = snapshot.csg_mesh_data {
+                let mesh = csg::rebuild_mesh_from_data(mesh_data);
+                commands.spawn((
+                    snapshot.entity_type,
+                    entity_id,
+                    EntityName::new(&snapshot.name),
+                    EntityVisible(snapshot.visible),
+                    mat_data,
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.5, 0.5, 0.5),
+                        ..default()
+                    })),
+                    transform,
+                    mesh_data.clone(),  // CsgMeshData component
+                )).id()
+            } else {
+                // Fallback: spawn as a cube if mesh data is missing
+                commands.spawn((
+                    snapshot.entity_type,
+                    entity_id,
+                    EntityName::new(&snapshot.name),
+                    EntityVisible(snapshot.visible),
+                    mat_data,
+                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.5, 0.5, 0.5),
+                        ..default()
+                    })),
+                    transform,
+                )).id()
+            }
+        }
+        EntityType::Terrain => {
+            // Terrain mesh data is stored in the snapshot
+            // Rebuild the mesh from stored heightmap data
+            if let Some(ref mesh_data) = snapshot.terrain_mesh_data {
+                let terrain_data = snapshot.terrain_data.clone().unwrap_or_default();
+                let mesh = terrain::rebuild_terrain_mesh(mesh_data);
+                let mut entity_commands = commands.spawn((
+                    snapshot.entity_type,
+                    entity_id,
+                    EntityName::new(&snapshot.name),
+                    EntityVisible(snapshot.visible),
+                    terrain_data,
+                    mesh_data.clone(),  // TerrainMeshData component
+                    TerrainEnabled,
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.5, 0.5, 0.5),
+                        ..default()
+                    })),
+                    transform,
+                ));
+                // Apply material data if present
+                if let Some(mat) = &snapshot.material_data {
+                    entity_commands.insert(mat.clone());
+                }
+                entity_commands.id()
+            } else {
+                // Fallback: spawn as a plane if mesh data is missing
+                commands.spawn((
+                    snapshot.entity_type,
+                    entity_id,
+                    EntityName::new(&snapshot.name),
+                    EntityVisible(snapshot.visible),
+                    mat_data,
+                    Mesh3d(meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(1.0)))),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.5, 0.5, 0.5),
+                        ..default()
+                    })),
+                    transform,
+                )).id()
+            }
+        }
+        EntityType::ProceduralMesh => {
+            // Procedural mesh data is stored in the snapshot
+            // Rebuild the mesh from stored data
+            if let Some(ref mesh_data) = snapshot.procedural_mesh_data {
+                let mesh = super::procedural_mesh::rebuild_procedural_mesh(mesh_data);
+                commands.spawn((
+                    snapshot.entity_type,
+                    entity_id,
+                    EntityName::new(&snapshot.name),
+                    EntityVisible(snapshot.visible),
+                    mat_data,
+                    Mesh3d(meshes.add(mesh)),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.5, 0.5, 0.5),
+                        ..default()
+                    })),
+                    transform,
+                    mesh_data.clone(),  // ProceduralMeshData component
+                )).id()
+            } else {
+                // Fallback: spawn as a cube if mesh data is missing
+                commands.spawn((
+                    snapshot.entity_type,
+                    entity_id,
+                    EntityName::new(&snapshot.name),
+                    EntityVisible(snapshot.visible),
+                    mat_data,
+                    Mesh3d(meshes.add(Cuboid::new(1.0, 1.0, 1.0))),
+                    MeshMaterial3d(materials.add(StandardMaterial {
+                        base_color: Color::srgb(0.5, 0.5, 0.5),
+                        ..default()
+                    })),
+                    transform,
+                )).id()
+            }
+        }
         EntityType::PointLight => {
             let ld = snapshot.light_data.clone().unwrap_or_else(LightData::point);
             commands.spawn((
@@ -881,6 +1078,11 @@ pub fn spawn_from_snapshot(
     }
     if snapshot.particle_enabled {
         commands.entity(entity).insert(ParticleEnabled);
+    }
+
+    // Restore shader data if present
+    if let Some(sed) = &snapshot.shader_effect_data {
+        commands.entity(entity).insert(sed.clone());
     }
 
     entity
@@ -1143,6 +1345,98 @@ fn execute_undo(
                 }
             }
         }
+        UndoableAction::ShaderChange { entity_id, old_shader, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(shader) = old_shader {
+                        commands.entity(entity).insert(shader.clone());
+                    } else {
+                        commands.entity(entity).remove::<ShaderEffectData>();
+                    }
+                    break;
+                }
+            }
+        }
+        UndoableAction::CsgOperation {
+            source_a_snapshot,
+            source_b_snapshot,
+            result_snapshot,
+            sources_deleted,
+        } => {
+            // 1. Delete the result entity
+            for (entity, eid, _, _, _) in query.iter() {
+                if eid.0 == result_snapshot.entity_id {
+                    commands.entity(entity).despawn();
+                    break;
+                }
+            }
+
+            // 2. Restore source entities if they were deleted
+            if *sources_deleted {
+                if let Some(ref snap_a) = source_a_snapshot {
+                    spawn_from_snapshot(commands, meshes, materials, snap_a);
+                }
+                if let Some(ref snap_b) = source_b_snapshot {
+                    spawn_from_snapshot(commands, meshes, materials, snap_b);
+                }
+            }
+        }
+        UndoableAction::TerrainChange { entity_id, old_terrain, old_mesh_data, .. } => {
+            // Restore old terrain data and rebuild mesh
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    // Replace terrain data
+                    commands.entity(entity).insert(old_terrain.clone());
+                    commands.entity(entity).insert(old_mesh_data.clone());
+                    // Rebuild mesh from old heightmap
+                    let mesh = terrain::rebuild_terrain_mesh(old_mesh_data);
+                    commands.entity(entity).insert(Mesh3d(meshes.add(mesh)));
+                    break;
+                }
+            }
+        }
+        UndoableAction::ExtrudeShape { snapshot } => {
+            // Delete the extruded entity
+            for (entity, eid, _, _, _) in query.iter() {
+                if eid.0 == snapshot.entity_id {
+                    commands.entity(entity).despawn();
+                    break;
+                }
+            }
+        }
+        UndoableAction::LatheShape { snapshot } => {
+            // Delete the lathed entity
+            for (entity, eid, _, _, _) in query.iter() {
+                if eid.0 == snapshot.entity_id {
+                    commands.entity(entity).despawn();
+                    break;
+                }
+            }
+        }
+        UndoableAction::ArrayEntity { created_snapshots, .. } => {
+            // Delete all created array copies
+            for snap in created_snapshots {
+                for (entity, eid, _, _, _) in query.iter() {
+                    if eid.0 == snap.entity_id {
+                        commands.entity(entity).despawn();
+                        break;
+                    }
+                }
+            }
+        }
+        UndoableAction::CombineMeshes { source_snapshots, result_snapshot } => {
+            // Delete the combined result entity
+            for (entity, eid, _, _, _) in query.iter() {
+                if eid.0 == result_snapshot.entity_id {
+                    commands.entity(entity).despawn();
+                    break;
+                }
+            }
+            // Restore source entities
+            for snap in source_snapshots {
+                spawn_from_snapshot(commands, meshes, materials, snap);
+            }
+        }
     }
 }
 
@@ -1277,6 +1571,88 @@ fn execute_redo(
                     break;
                 }
             }
+        }
+        UndoableAction::ShaderChange { entity_id, new_shader, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(shader) = new_shader {
+                        commands.entity(entity).insert(shader.clone());
+                    } else {
+                        commands.entity(entity).remove::<ShaderEffectData>();
+                    }
+                    break;
+                }
+            }
+        }
+        UndoableAction::CsgOperation {
+            source_a_snapshot,
+            source_b_snapshot,
+            result_snapshot,
+            sources_deleted,
+        } => {
+            // 1. Delete source entities if they were originally deleted
+            if *sources_deleted {
+                if let Some(ref snap_a) = source_a_snapshot {
+                    for (entity, eid, _, _, _) in query.iter() {
+                        if eid.0 == snap_a.entity_id {
+                            commands.entity(entity).despawn();
+                            break;
+                        }
+                    }
+                }
+                if let Some(ref snap_b) = source_b_snapshot {
+                    for (entity, eid, _, _, _) in query.iter() {
+                        if eid.0 == snap_b.entity_id {
+                            commands.entity(entity).despawn();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // 2. Restore the result entity from snapshot
+            spawn_from_snapshot(commands, meshes, materials, result_snapshot);
+        }
+        UndoableAction::TerrainChange { entity_id, new_terrain, new_mesh_data, .. } => {
+            // Apply new terrain data and rebuild mesh
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    // Replace terrain data
+                    commands.entity(entity).insert(new_terrain.clone());
+                    commands.entity(entity).insert(new_mesh_data.clone());
+                    // Rebuild mesh from new heightmap
+                    let mesh = terrain::rebuild_terrain_mesh(new_mesh_data);
+                    commands.entity(entity).insert(Mesh3d(meshes.add(mesh)));
+                    break;
+                }
+            }
+        }
+        UndoableAction::ExtrudeShape { snapshot } => {
+            // Re-create the extruded entity
+            spawn_from_snapshot(commands, meshes, materials, snapshot);
+        }
+        UndoableAction::LatheShape { snapshot } => {
+            // Re-create the lathed entity
+            spawn_from_snapshot(commands, meshes, materials, snapshot);
+        }
+        UndoableAction::ArrayEntity { created_snapshots, .. } => {
+            // Re-create all array copies
+            for snap in created_snapshots {
+                spawn_from_snapshot(commands, meshes, materials, snap);
+            }
+        }
+        UndoableAction::CombineMeshes { source_snapshots, result_snapshot } => {
+            // Delete source entities
+            for snap in source_snapshots {
+                for (entity, eid, _, _, _) in query.iter() {
+                    if eid.0 == snap.entity_id {
+                        commands.entity(entity).despawn();
+                        break;
+                    }
+                }
+            }
+            // Re-create the combined result entity
+            spawn_from_snapshot(commands, meshes, materials, result_snapshot);
         }
     }
 }

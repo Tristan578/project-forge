@@ -21,6 +21,29 @@ declare namespace forge {
   /** Log an error */
   function error(message: string): void;
 
+  // --- Visual control ---
+  /** Set entity base color (RGBA, 0-1 range) */
+  function setColor(entityId: string, r: number, g: number, b: number, a?: number): void;
+  /** Show or hide an entity */
+  function setVisibility(entityId: string, visible: boolean): void;
+  /** Set entity emissive glow (RGB + intensity) */
+  function setEmissive(entityId: string, r: number, g: number, b: number, intensity?: number): void;
+
+  namespace scene {
+    /** Get all entities in the scene */
+    function getEntities(): Array<{ id: string; name: string; type: string; position: [number, number, number] }>;
+    /** Find entities whose name contains the search string (case-insensitive) */
+    function findByName(name: string): string[];
+    /** Get entity display name */
+    function getEntityName(entityId: string): string | null;
+    /** Get entity type (e.g. "cube", "sphere", "point_light") */
+    function getEntityType(entityId: string): string | null;
+    /** Find all entities within a radius of a world position */
+    function getEntitiesInRadius(position: [number, number, number], radius: number): string[];
+    /** Stop play mode (return to edit) */
+    function reset(): void;
+  }
+
   namespace input {
     /** Check if an action is currently pressed */
     function isPressed(action: string): boolean;
@@ -39,6 +62,10 @@ declare namespace forge {
     function applyImpulse(entityId: string, fx: number, fy: number, fz: number): void;
     /** Set linear velocity directly */
     function setVelocity(entityId: string, vx: number, vy: number, vz: number): void;
+    /** Get entity IDs currently in contact (proximity-based). Optional radius overrides collider size. */
+    function getContacts(entityId: string, radius?: number): string[];
+    /** Get distance between two entities */
+    function distanceTo(entityIdA: string, entityIdB: string): number;
   }
 
   namespace audio {
@@ -62,6 +89,25 @@ declare namespace forge {
     function getBusVolume(busName: string): number;
     /** Check if bus is muted */
     function isBusMuted(busName: string): boolean;
+
+    /** Add a layered audio source to an entity (runtime only) */
+    function addLayer(entityId: string, slotName: string, assetId: string, options?: {
+      volume?: number; pitch?: number; loop?: boolean; spatial?: boolean; bus?: string;
+    }): void;
+    /** Remove a layered audio source from an entity */
+    function removeLayer(entityId: string, slotName: string): void;
+    /** Remove all layers (not primary) from an entity */
+    function removeAllLayers(entityId: string): void;
+    /** Crossfade between two entity audio sources */
+    function crossfade(fromEntityId: string, toEntityId: string, durationMs: number): void;
+    /** Play a one-shot sound (fire-and-forget, no entity needed) */
+    function playOneShot(assetId: string, options?: {
+      position?: [number, number, number]; bus?: string; volume?: number; pitch?: number;
+    }): void;
+    /** Fade in audio on an entity */
+    function fadeIn(entityId: string, durationMs: number): void;
+    /** Fade out audio on an entity (stops after fade) */
+    function fadeOut(entityId: string, durationMs: number): void;
   }
 
   namespace particles {
@@ -88,8 +134,25 @@ declare namespace forge {
     function setSpeed(entityId: string, speed: number): void;
     /** Enable or disable looping */
     function setLoop(entityId: string, looping: boolean): void;
+    /** Set blend weight for a specific clip (0.0-1.0) */
+    function setBlendWeight(entityId: string, clipName: string, weight: number): void;
+    /** Set playback speed for a specific clip */
+    function setClipSpeed(entityId: string, clipName: string, speed: number): void;
     /** List available clip names */
     function listClips(entityId: string): string[];
+  }
+
+  namespace ui {
+    /** Show a text element on the game HUD */
+    function showText(id: string, text: string, x: number, y: number, options?: {
+      fontSize?: number; color?: string;
+    }): void;
+    /** Update the text content of an existing HUD element */
+    function updateText(id: string, text: string): void;
+    /** Remove a HUD text element */
+    function removeText(id: string): void;
+    /** Clear all HUD elements */
+    function clear(): void;
   }
 
   namespace time {

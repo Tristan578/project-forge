@@ -1,12 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, X, Loader2, ChevronDown, ChevronRight, Undo2 } from 'lucide-react';
+import { Check, X, Loader2, ChevronDown, ChevronRight, Undo2, RotateCcw, Eye, XCircle } from 'lucide-react';
 import type { ToolCallStatus } from '@/stores/chatStore';
 import { useEditorStore } from '@/stores/editorStore';
 
 interface ToolCallCardProps {
   toolCall: ToolCallStatus;
+  onApprove?: (id: string) => void;
+  onReject?: (id: string) => void;
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -20,6 +22,10 @@ const TOOL_LABELS: Record<string, string> = {
   set_visibility: 'Visibility',
   select_entity: 'Select',
   update_material: 'Material',
+  apply_material_preset: 'Material Preset',
+  set_custom_shader: 'Set Custom Shader',
+  remove_custom_shader: 'Remove Custom Shader',
+  list_shaders: 'List Shaders',
   update_light: 'Light',
   update_ambient_light: 'Ambient Light',
   update_environment: 'Environment',
@@ -71,6 +77,13 @@ const TOOL_LABELS: Record<string, string> = {
   delete_audio_bus: 'Delete Audio Bus',
   get_audio_buses: 'Get Audio Buses',
   set_bus_effects: 'Set Bus Effects',
+  audio_crossfade: 'Crossfade Audio',
+  audio_fade_in: 'Fade In Audio',
+  audio_fade_out: 'Fade Out Audio',
+  audio_play_one_shot: 'Play One-Shot',
+  audio_add_layer: 'Add Audio Layer',
+  audio_remove_layer: 'Remove Audio Layer',
+  set_ducking_rule: 'Set Ducking Rule',
   set_particle: 'Set Particles',
   remove_particle: 'Remove Particles',
   toggle_particle: 'Toggle Particles',
@@ -86,10 +99,33 @@ const TOOL_LABELS: Record<string, string> = {
   seek_animation: 'Seek Animation',
   set_animation_speed: 'Animation Speed',
   set_animation_loop: 'Animation Loop',
+  set_animation_blend_weight: 'Animation Blend Weight',
+  set_clip_speed: 'Clip Speed',
+  get_animation_graph: 'Get Animation Graph',
   get_animation_state: 'Get Animation State',
   list_animations: 'List Animations',
   export_game: 'Export Game',
   get_export_status: 'Export Status',
+  csg_union: 'CSG Union',
+  csg_subtract: 'CSG Subtract',
+  csg_intersect: 'CSG Intersect',
+  extrude_shape: 'Extrude Shape',
+  lathe_shape: 'Lathe Shape',
+  array_entity: 'Array Entity',
+  combine_meshes: 'Combine Meshes',
+  spawn_terrain: 'Spawn Terrain',
+  update_terrain: 'Update Terrain',
+  sculpt_terrain: 'Sculpt Terrain',
+  get_terrain: 'Get Terrain',
+  search_docs: 'Search Docs',
+  get_doc: 'Get Doc',
+  list_doc_topics: 'List Doc Topics',
+  list_material_presets: 'List Material Presets',
+  save_material_to_library: 'Save Material',
+  delete_library_material: 'Delete Custom Material',
+  list_custom_materials: 'List Custom Materials',
+  set_quality_preset: 'Set Quality Preset',
+  get_quality_settings: 'Get Quality Settings',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {
@@ -106,6 +142,8 @@ function summarizeInput(name: string, input: Record<string, unknown>): string {
     case 'update_material':
       if (input.baseColor) return `color=[${(input.baseColor as number[]).map((n) => n.toFixed(1)).join(',')}]`;
       return Object.keys(input).filter((k) => k !== 'entityId').join(', ');
+    case 'apply_material_preset':
+      return `${input.presetId ?? ''}`;
     case 'rename_entity':
       return `"${input.name}"`;
     case 'set_camera_preset':
@@ -117,29 +155,60 @@ function summarizeInput(name: string, input: Record<string, unknown>): string {
   }
 }
 
-export function ToolCallCard({ toolCall }: ToolCallCardProps) {
+export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const undo = useEditorStore((s) => s.undo);
 
   const label = TOOL_LABELS[toolCall.name] || toolCall.name;
   const summary = summarizeInput(toolCall.name, toolCall.input);
 
-  const statusIcon = {
-    pending: <Loader2 size={14} className="animate-spin text-blue-400" />,
-    success: <Check size={14} className="text-green-400" />,
-    error: <X size={14} className="text-red-400" />,
-  }[toolCall.status];
+  const statusIcon = (() => {
+    switch (toolCall.status) {
+      case 'pending':
+        return <Loader2 size={14} className="animate-spin text-blue-400" />;
+      case 'success':
+        return <Check size={14} className="text-green-400" />;
+      case 'error':
+        return <X size={14} className="text-red-400" />;
+      case 'preview':
+        return <Eye size={14} className="text-amber-400" />;
+      case 'rejected':
+        return <XCircle size={14} className="text-red-400/60" />;
+      case 'undone':
+        return <RotateCcw size={14} className="text-zinc-500" />;
+    }
+  })();
+
+  const isPreview = toolCall.status === 'preview';
+  const isRejected = toolCall.status === 'rejected';
+  const isUndone = toolCall.status === 'undone';
 
   return (
-    <div className="my-1 rounded border border-zinc-700 bg-zinc-800/50 text-xs">
+    <div className={`my-1 rounded border text-xs ${
+      isPreview
+        ? 'border-amber-700/50 bg-amber-950/20'
+        : isRejected
+          ? 'border-red-900/30 bg-red-950/10 opacity-60'
+          : isUndone
+            ? 'border-zinc-700/50 bg-zinc-800/30 opacity-50'
+            : 'border-zinc-700 bg-zinc-800/50'
+    }`}>
       <button
         className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
         onClick={() => setExpanded(!expanded)}
       >
         {statusIcon}
-        <span className="font-medium text-zinc-300">{label}</span>
+        <span className={`font-medium ${isRejected || isUndone ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>
+          {label}
+        </span>
         {summary && <span className="truncate text-zinc-500">{summary}</span>}
         <span className="ml-auto flex items-center gap-1">
+          {isRejected && (
+            <span className="text-[9px] text-red-400/60">Rejected</span>
+          )}
+          {isUndone && (
+            <span className="text-[9px] text-zinc-500">Undone</span>
+          )}
           {toolCall.status === 'success' && toolCall.undoable && (
             <button
               onClick={(e) => {
@@ -155,6 +224,26 @@ export function ToolCallCard({ toolCall }: ToolCallCardProps) {
           {expanded ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
         </span>
       </button>
+
+      {/* Preview approval buttons */}
+      {isPreview && (
+        <div className="flex gap-2 border-t border-amber-800/30 px-2 py-1.5">
+          <button
+            onClick={() => onApprove?.(toolCall.id)}
+            className="flex items-center gap-1 rounded bg-green-600/20 px-2 py-1 text-green-400 hover:bg-green-600/30"
+          >
+            <Check size={12} />
+            <span>Approve</span>
+          </button>
+          <button
+            onClick={() => onReject?.(toolCall.id)}
+            className="flex items-center gap-1 rounded bg-red-600/20 px-2 py-1 text-red-400 hover:bg-red-600/30"
+          >
+            <X size={12} />
+            <span>Reject</span>
+          </button>
+        </div>
+      )}
 
       {expanded && (
         <div className="border-t border-zinc-700 px-2 py-1.5">

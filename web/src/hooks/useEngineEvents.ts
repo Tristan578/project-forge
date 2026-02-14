@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, setCommandDispatcher } from '@/stores/editorStore';
+import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, setCommandDispatcher, firePlayTick } from '@/stores/editorStore';
 
 // Event types matching Rust's event emission
 interface SelectionChangedEvent {
@@ -223,7 +223,85 @@ interface AnimationListChangedEvent {
   payload: AnimationPlaybackState;
 }
 
-type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent;
+interface ShaderChangedEvent {
+  type: 'SHADER_CHANGED';
+  payload: {
+    entityId: string;
+    data: import('@/stores/editorStore').ShaderEffectData | null;
+  };
+}
+
+interface CsgCompletedEvent {
+  type: 'CSG_COMPLETED';
+  payload: {
+    entityId: string;
+    name: string;
+    operation: string;
+  };
+}
+
+interface CsgErrorEvent {
+  type: 'CSG_ERROR';
+  payload: {
+    message: string;
+  };
+}
+
+interface TerrainChangedEvent {
+  type: 'TERRAIN_CHANGED';
+  payload: {
+    entityId: string;
+    terrainData: import('@/stores/editorStore').TerrainDataState;
+  };
+}
+
+interface ProceduralMeshCreatedEvent {
+  type: 'PROCEDURAL_MESH_CREATED';
+  payload: {
+    entityId: string;
+    name: string;
+    operation: string;
+  };
+}
+
+interface ProceduralMeshErrorEvent {
+  type: 'PROCEDURAL_MESH_ERROR';
+  payload: {
+    message: string;
+  };
+}
+
+interface ArrayCompletedEvent {
+  type: 'ARRAY_COMPLETED';
+  payload: {
+    count: number;
+  };
+}
+
+interface QualityChangedEvent {
+  type: 'QUALITY_CHANGED';
+  payload: {
+    preset: string;
+    msaaSamples: number;
+    shadowsEnabled: boolean;
+    shadowsDirectionalOnly: boolean;
+    bloomEnabled: boolean;
+    chromaticAberrationEnabled: boolean;
+    sharpeningEnabled: boolean;
+    particleDensityScale: number;
+  };
+}
+
+interface PlayTickEvent {
+  type: 'PLAY_TICK';
+  payload: {
+    entities: Record<string, { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }>;
+    entityInfos: Record<string, { name: string; type: string; colliderRadius: number }>;
+    inputState: { pressed: Record<string, boolean>; justPressed: Record<string, boolean>; justReleased: Record<string, boolean>; axes: Record<string, number> };
+  };
+}
+
+type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent;
 
 // Debounced auto-save: triggers export_scene command after 2s of inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -547,6 +625,57 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           useEditorStore.getState().setEntityAnimation(animState.entityId, animState);
           break;
         }
+
+        case 'SHADER_CHANGED': {
+          const { data: _data } = event.payload;
+          useEditorStore.getState().setPrimaryShaderEffect(_data || null);
+          break;
+        }
+
+        case 'CSG_COMPLETED': {
+          const { entityId, name, operation } = event.payload;
+          console.log(`CSG ${operation} completed: ${name} (${entityId})`);
+          break;
+        }
+
+        case 'CSG_ERROR': {
+          const { message } = event.payload;
+          console.error(`CSG error: ${message}`);
+          break;
+        }
+
+        case 'PROCEDURAL_MESH_CREATED': {
+          const { entityId, name, operation } = event.payload;
+          console.log(`Procedural mesh ${operation} completed: ${name} (${entityId})`);
+          break;
+        }
+
+        case 'PROCEDURAL_MESH_ERROR': {
+          const { message } = event.payload;
+          console.error(`Procedural mesh error: ${message}`);
+          break;
+        }
+
+        case 'ARRAY_COMPLETED': {
+          const { count } = event.payload;
+          console.log(`Array completed: ${count} entities created`);
+          break;
+        }
+
+        case 'TERRAIN_CHANGED': {
+          const { entityId, terrainData } = event.payload;
+          useEditorStore.getState().setTerrainData(entityId, terrainData);
+          break;
+        }
+
+        case 'QUALITY_CHANGED': {
+          useEditorStore.getState().setQualityFromEngine(event.payload);
+          break;
+        }
+
+        case 'PLAY_TICK':
+          firePlayTick(event.payload);
+          break;
 
         default:
           console.warn('Unknown engine event:', event);

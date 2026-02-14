@@ -35,8 +35,11 @@ use crate::core::{
     scene_graph::{self, SceneGraphCache},
     scripting::ScriptData,
     selection::{Selection, SelectionChangedEvent},
+    shader_effects::{ShaderEffectsPlugin, ShaderEffectData, ForgeShaderExtension, ForgeMaterial},
+    terrain::TerrainData,
+    quality::QualitySettings,
 };
-use bevy::animation::{AnimationClip, AnimationPlayer, AnimationTransitions, RepeatAnimation, graph::{AnimationGraph, AnimationGraphHandle, AnimationNodeIndex}};
+use bevy::animation::{AnimationClip, AnimationPlayer, RepeatAnimation, graph::{AnimationGraph, AnimationGraphHandle}, transition::AnimationTransitions};
 use bevy::gltf::Gltf;
 
 // Editor-only imports
@@ -142,6 +145,7 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(PostProcessingPlugin)
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
+        .add_plugins(ShaderEffectsPlugin)
         .add_plugins(CameraControlPlugin);
 
     // Editor-only plugins
@@ -234,6 +238,9 @@ impl Plugin for SelectionPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(AnimationPlugin);
 
+        #[cfg(feature = "webgpu")]
+        app.add_plugins(bevy_hanabi::HanabiPlugin);
+
         app.init_resource::<Selection>()
             .init_resource::<SceneGraphCache>()
             .init_resource::<PendingCommands>()
@@ -242,7 +249,9 @@ impl Plugin for SelectionPlugin {
             .init_resource::<SceneSnapshot>()
             .init_resource::<SceneName>()
             .init_resource::<AssetRegistry>()
+            .init_resource::<crate::core::asset_manager::TextureHandleMap>()
             .init_resource::<AudioBusConfig>()
+            .init_resource::<QualitySettings>()
             .add_event::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
@@ -251,38 +260,56 @@ impl Plugin for SelectionPlugin {
         app
             .add_systems(Startup, (register_pending_commands_resource, register_history_stack_resource))
             // Always-active systems: run in both editor and runtime
+            .add_systems(Update, process_query_requests)
+            .add_systems(Update, process_terrain_queries)
+            .add_systems(Update, process_quality_queries)
+            .add_systems(Update, emit_play_tick_system)
             .add_systems(Update, (
-                process_query_requests,
                 apply_mode_change_requests,
                 apply_input_binding_updates,
                 apply_physics_updates,
                 apply_physics_toggles,
                 apply_force_applications,
                 apply_script_updates,
+            ))
+            // Script and audio systems (always-active, split to stay under tuple limit)
+            .add_systems(Update, (
                 apply_script_removals,
                 apply_audio_updates,
                 apply_audio_removals,
                 apply_audio_playback,
                 apply_audio_bus_updates,
+            ))
+            // Audio bus systems (always-active, split to stay under tuple limit)
+            .add_systems(Update, (
                 apply_audio_bus_creates,
                 apply_audio_bus_deletes,
                 apply_audio_bus_effects_updates,
+                apply_quality_presets,
+            ))
+            // Entity factory and particle systems (always-active, split to stay under tuple limit)
+            .add_systems(Update, (
                 entity_factory::apply_spawn_requests,
                 entity_factory::apply_delete_requests,
-            ))
-            // Particle systems (always-active, split to stay under tuple limit)
-            .add_systems(Update, (
                 apply_particle_updates,
                 apply_particle_toggles,
                 apply_particle_removals,
                 apply_particle_preset_requests,
                 apply_particle_playback,
-            ))
+            ));
+
+        // WebGPU-only: sync ParticleData to bevy_hanabi GPU effects
+        #[cfg(feature = "webgpu")]
+        app.add_systems(Update, sync_hanabi_effects);
+
+        app
             // Animation systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 register_gltf_animations,
                 apply_animation_requests,
             ))
+            // Shader sync system (always-active)
+            .add_systems(Update, sync_extended_material_data)
             .add_systems(PostUpdate, (
                 scene_graph::detect_entity_added,
                 scene_graph::detect_entity_removed,
@@ -308,6 +335,8 @@ impl Plugin for SelectionPlugin {
                     entity_factory::apply_ambient_light_updates,
                     apply_environment_updates,
                     apply_post_processing_updates,
+                    apply_shader_updates,
+                    apply_shader_removals,
                     entity_factory::apply_undo_requests,
                     entity_factory::apply_redo_requests,
                     core::reparent::apply_reparent_requests,
@@ -323,10 +352,18 @@ impl Plugin for SelectionPlugin {
                     emit_script_on_selection,
                     emit_audio_on_selection,
                     emit_particle_on_selection,
+                    emit_shader_on_selection,
                     emit_animation_on_selection,
                     visibility::sync_visibility,
                 ).chain().in_set(EditorSystemSet))
                 .add_systems(Update, poll_animation_state.in_set(EditorSystemSet))
+                .add_systems(Update, apply_csg_requests.in_set(EditorSystemSet))
+                .add_systems(Update, (
+                    apply_extrude_requests,
+                    apply_lathe_requests,
+                    apply_array_requests,
+                    apply_combine_requests,
+                ).in_set(EditorSystemSet))
                 .add_systems(Update, (
                     apply_debug_physics_toggle,
                     apply_scene_export,
@@ -335,6 +372,8 @@ impl Plugin for SelectionPlugin {
                     apply_gltf_import,
                     apply_texture_load,
                     apply_remove_texture,
+                ))
+                .add_systems(Update, (
                     apply_place_asset,
                     apply_delete_asset,
                 ))
@@ -386,6 +425,9 @@ fn apply_mode_change_requests(
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_snapshot_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_snapshot_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_snapshot_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
+    procedural_mesh_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>)>,
     runtime_query: Query<Entity, With<core::engine_mode::RuntimeEntity>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -401,7 +443,7 @@ fn apply_mode_change_requests(
                 // Snapshot the scene (uses read-only query p0)
                 {
                     let snapshot_query = queries.p0();
-                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &particle_snapshot_query, &selection);
+                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &particle_snapshot_query, &shader_snapshot_query, &csg_snapshot_query, &procedural_mesh_query, &selection);
                 }
                 // Clear selection for play mode
                 selection.clear();
@@ -900,6 +942,39 @@ fn apply_input_binding_updates(
     }
 }
 
+/// System that emits entity states every frame during Play mode for the script runtime.
+fn emit_play_tick_system(
+    mode: Res<EngineMode>,
+    query: Query<(&EntityId, &Transform, &EntityName, Option<&EntityType>)>,
+    input_state: Res<InputState>,
+) {
+    if !matches!(*mode, EngineMode::Play) {
+        return;
+    }
+
+    let entities: Vec<(String, [f32; 3], [f32; 3], [f32; 3], String, String, f32)> = query.iter()
+        .map(|(eid, transform, ename, etype)| {
+            let pos = transform.translation;
+            let rot = transform.rotation.to_euler(bevy::math::EulerRot::XYZ);
+            let scale = transform.scale;
+            let type_str = etype.map(|t| format!("{:?}", t).to_lowercase()).unwrap_or_else(|| "unknown".to_string());
+            // Estimate collider radius from max of scale dimensions * 0.5
+            let collider_r = scale.x.max(scale.y).max(scale.z) * 0.5;
+            (
+                eid.0.clone(),
+                [pos.x, pos.y, pos.z],
+                [rot.0, rot.1, rot.2],
+                [scale.x, scale.y, scale.z],
+                ename.0.clone(),
+                type_str,
+                collider_r,
+            )
+        })
+        .collect();
+
+    events::emit_play_tick(&entities, &input_state);
+}
+
 /// Process query requests from MCP and emit response events.
 fn process_query_requests(
     mut pending: ResMut<PendingCommands>,
@@ -923,6 +998,7 @@ fn process_query_requests(
     )>,
     audio_query: Query<(Entity, &EntityId, Option<&AudioData>)>,
     particle_q: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_data_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     animation_registry: Res<AnimationRegistry>,
     animation_player_query: Query<&AnimationPlayer>,
     camera_query: Query<&bevy_panorbit_camera::PanOrbitCamera>,
@@ -1081,6 +1157,87 @@ fn process_query_requests(
                     events::emit_animation_state_changed(&state);
                 }
             }
+            QueryRequest::AnimationGraph { entity_id } => {
+                if let Some(entry) = animation_registry.entries.get(&entity_id) {
+                    if let Ok(player) = animation_player_query.get(entry.player_entity) {
+                        let graph_state = build_animation_graph_state(&entity_id, entry, &player);
+                        events::emit_event("QUERY_ANIMATION_GRAPH", &graph_state);
+                    }
+                }
+            }
+            QueryRequest::ShaderData { entity_id } => {
+                for (eid, shader_data) in shader_data_query.iter() {
+                    if eid.0 == entity_id {
+                        events::emit_shader_changed(&entity_id, shader_data);
+                        break;
+                    }
+                }
+            }
+            QueryRequest::QualitySettings => {
+                // Handled by process_quality_queries system to avoid system parameter limit
+            }
+            QueryRequest::TerrainState { .. } => {
+                // Handled by process_terrain_queries system to avoid system parameter limit
+            }
+        }
+    }
+}
+
+/// Process terrain query requests separately to stay under 16 system parameter limit.
+fn process_terrain_queries(
+    mut pending: ResMut<PendingCommands>,
+    terrain_query: Query<(&EntityId, Option<&TerrainData>)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
+        if matches!(req, QueryRequest::TerrainState { .. }) {
+            Some(req.clone())
+        } else {
+            None
+        }
+    }).collect();
+
+    for request in requests {
+        if let QueryRequest::TerrainState { entity_id } = request {
+            for (eid, terrain_data) in terrain_query.iter() {
+                if eid.0 == entity_id {
+                    if let Some(terrain) = terrain_data {
+                        events::emit_terrain_changed(&entity_id, terrain);
+                    }
+                    break;
+                }
+            }
+            // Remove the processed request
+            pending.query_requests.retain(|r| !matches!(r, QueryRequest::TerrainState { entity_id: ref eid } if eid == &entity_id));
+        }
+    }
+}
+
+/// Process quality query requests separately to stay under 16 system parameter limit.
+fn process_quality_queries(
+    mut pending: ResMut<PendingCommands>,
+    quality_settings: Res<QualitySettings>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let has_quality = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::QualitySettings));
+    if has_quality {
+        events::emit_quality_changed(&quality_settings);
+        pending.query_requests.retain(|r| !matches!(r, QueryRequest::QualitySettings));
+    }
+}
+
+/// System that applies quality preset requests.
+fn apply_quality_presets(
+    mut pending: ResMut<PendingCommands>,
+    mut quality: ResMut<QualitySettings>,
+) {
+    for request in pending.quality_preset_requests.drain(..) {
+        if let Some(preset) = crate::core::quality::QualitySettings::parse_preset(&request.preset) {
+            *quality = crate::core::quality::QualitySettings::from_preset(preset);
+            events::emit_quality_changed(&quality);
+            tracing::info!("Applied quality preset: {}", request.preset);
         }
     }
 }
@@ -1237,6 +1394,8 @@ fn apply_scene_export(
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_export_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_procedural_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>, Option<&core::procedural_mesh::ProceduralMeshData>)>,
     child_of_query: Query<&ChildOf>,
     eid_query: Query<&EntityId>,
 ) {
@@ -1282,6 +1441,17 @@ fn apply_scene_export(
             .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
             .unwrap_or((None, false));
 
+        // Look up shader data separately
+        let shader_effect_data = shader_query.iter()
+            .find(|(seid, _)| seid.0 == eid.0)
+            .and_then(|(_, sed)| sed.cloned());
+
+        // Look up csg + procedural mesh data from combined query
+        let (csg_mesh_data, procedural_mesh_data) = csg_procedural_query.iter()
+            .find(|(ceid, _, _)| ceid.0 == eid.0)
+            .map(|(_, cmd, pmd)| (cmd.cloned(), pmd.cloned()))
+            .unwrap_or((None, None));
+
         snapshots.push(HistEntitySnapshot {
             entity_id: eid.0.clone(),
             entity_type,
@@ -1298,6 +1468,11 @@ fn apply_scene_export(
             audio_data,
             particle_data,
             particle_enabled,
+            shader_effect_data,
+            csg_mesh_data,
+            terrain_data: None,
+            terrain_mesh_data: None,
+            procedural_mesh_data,
         });
     }
 
@@ -1547,18 +1722,70 @@ fn apply_gltf_import(
 }
 
 /// System that processes texture load requests.
-/// Registers the texture as an asset and updates the entity's MaterialData.
+/// Decodes base64 image data, creates GPU texture assets, and updates MaterialData.
 #[cfg(not(feature = "runtime"))]
 fn apply_texture_load(
     mut pending: ResMut<PendingCommands>,
     mut asset_registry: ResMut<AssetRegistry>,
     mut mat_query: Query<(&EntityId, &mut MaterialData)>,
+    mut images: ResMut<Assets<Image>>,
+    mut texture_handles: ResMut<crate::core::asset_manager::TextureHandleMap>,
 ) {
     use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource};
+    use base64::Engine as _;
+    use bevy::image::{ImageType, CompressedImageFormats, ImageSampler};
+    use bevy::render::render_asset::RenderAssetUsages;
 
     for request in pending.texture_load_requests.drain(..) {
         let asset_id = uuid::Uuid::new_v4().to_string();
         let file_size = request.data_base64.len() as u64;
+
+        // Parse data URL: "data:image/png;base64,AAAA..."
+        let (mime_type, raw_base64) = if let Some(comma_pos) = request.data_base64.find(',') {
+            let header = &request.data_base64[..comma_pos];
+            let mime = header
+                .strip_prefix("data:")
+                .and_then(|s| s.strip_suffix(";base64"))
+                .unwrap_or("image/png");
+            (mime.to_string(), &request.data_base64[comma_pos + 1..])
+        } else {
+            // Raw base64 without data URL prefix
+            ("image/png".to_string(), request.data_base64.as_str())
+        };
+
+        // Decode base64 to raw bytes
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(raw_base64) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("Failed to decode base64 texture data: {}", e);
+                continue;
+            }
+        };
+
+        // Determine sRGB based on slot (normal maps, depth maps, and roughness maps are linear)
+        let is_srgb = !matches!(request.slot.as_str(), "normal_map" | "depth_map" | "clearcoat_normal" | "clearcoat_roughness" | "metallic_roughness");
+
+        // Create Bevy Image from raw bytes
+        let image_result = Image::from_buffer(
+            &bytes,
+            ImageType::MimeType(&mime_type),
+            CompressedImageFormats::NONE,
+            is_srgb,
+            ImageSampler::Default,
+            RenderAssetUsages::RENDER_WORLD,
+        );
+
+        let image = match image_result {
+            Ok(img) => img,
+            Err(e) => {
+                tracing::warn!("Failed to create image from texture data: {:?}", e);
+                continue;
+            }
+        };
+
+        // Add to Bevy's asset system and store the handle
+        let image_handle = images.add(image);
+        texture_handles.0.insert(asset_id.clone(), image_handle);
 
         // Register in asset registry
         asset_registry.assets.insert(asset_id.clone(), AssetMetadata {
@@ -1578,6 +1805,10 @@ fn apply_texture_load(
                     "metallic_roughness" => mat_data.metallic_roughness_texture = Some(asset_id.clone()),
                     "emissive" => mat_data.emissive_texture = Some(asset_id.clone()),
                     "occlusion" => mat_data.occlusion_texture = Some(asset_id.clone()),
+                    "depth_map" => mat_data.depth_map_texture = Some(asset_id.clone()),
+                    "clearcoat" => mat_data.clearcoat_texture = Some(asset_id.clone()),
+                    "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = Some(asset_id.clone()),
+                    "clearcoat_normal" => mat_data.clearcoat_normal_texture = Some(asset_id.clone()),
                     _ => {
                         tracing::warn!("Unknown texture slot: {}", request.slot);
                     }
@@ -1607,6 +1838,10 @@ fn apply_remove_texture(
                     "metallic_roughness" => mat_data.metallic_roughness_texture = None,
                     "emissive" => mat_data.emissive_texture = None,
                     "occlusion" => mat_data.occlusion_texture = None,
+                    "depth_map" => mat_data.depth_map_texture = None,
+                    "clearcoat" => mat_data.clearcoat_texture = None,
+                    "clearcoat_roughness" => mat_data.clearcoat_roughness_texture = None,
+                    "clearcoat_normal" => mat_data.clearcoat_normal_texture = None,
                     _ => {
                         tracing::warn!("Unknown texture slot: {}", request.slot);
                     }
@@ -2114,11 +2349,12 @@ fn apply_particle_preset_requests(
 }
 
 /// System that applies pending particle playback actions (always-active).
+/// Playback is controlled via ParticleEnabled toggle on both platforms.
 fn apply_particle_playback(
     mut pending: ResMut<PendingCommands>,
 ) {
-    // Particle playback (play/stop/burst) would control the actual bevy_hanabi
-    // EffectSpawner in a WebGPU build. For now, clear the queue.
+    // Playback (play/stop/burst) is handled by toggling ParticleEnabled.
+    // The sync_hanabi_effects system (WebGPU) watches for component changes.
     pending.particle_playback.clear();
 }
 
@@ -2143,6 +2379,398 @@ fn emit_particle_on_selection(
     if let Some(primary) = selection.primary {
         if let Ok((entity_id, particle_data, part_enabled)) = query.get(primary) {
             events::emit_particle_changed(&entity_id.0, Some(particle_data), part_enabled.is_some());
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shader Effect systems
+// ---------------------------------------------------------------------------
+
+/// System that applies pending shader update requests (editor-only).
+#[cfg(not(feature = "runtime"))]
+fn apply_shader_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    entity_query: Query<(Entity, &EntityId, Option<&ShaderEffectData>)>,
+    std_mat_query: Query<(Entity, &EntityId, &MeshMaterial3d<StandardMaterial>, &MaterialData)>,
+    ext_mat_query: Query<(Entity, &EntityId, &MeshMaterial3d<ForgeMaterial>)>,
+    std_materials: ResMut<Assets<StandardMaterial>>,
+    mut ext_materials: ResMut<Assets<ForgeMaterial>>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for update in pending.shader_updates.drain(..) {
+        // Find entity
+        let found = entity_query.iter().find(|(_, eid, _)| eid.0 == update.entity_id);
+        let Some((entity, _, old_shader)) = found else { continue; };
+
+        let old_shader_clone = old_shader.cloned();
+
+        // Check if entity already has ExtendedMaterial
+        if let Ok((_, _, ext_handle)) = ext_mat_query.get(entity) {
+            // Update existing extended material
+            if let Some(ext_mat) = ext_materials.get_mut(ext_handle) {
+                ext_mat.extension = ForgeShaderExtension::from(&update.shader_data);
+            }
+        } else if let Ok((_, _, std_handle, _mat_data)) = std_mat_query.get(entity) {
+            // Upgrade from StandardMaterial to ExtendedMaterial
+            if let Some(std_mat) = std_materials.get(std_handle.0.id()) {
+                let base = std_mat.clone();
+                let extension = ForgeShaderExtension::from(&update.shader_data);
+                let ext_mat = ForgeMaterial { base, extension };
+                let ext_handle = ext_materials.add(ext_mat);
+                commands.entity(entity)
+                    .remove::<MeshMaterial3d<StandardMaterial>>()
+                    .insert(MeshMaterial3d(ext_handle));
+            }
+        }
+
+        // Insert/update the ShaderEffectData component
+        commands.entity(entity).insert(update.shader_data.clone());
+
+        // Record undo
+        history.push(core::history::UndoableAction::ShaderChange {
+            entity_id: update.entity_id.clone(),
+            old_shader: old_shader_clone,
+            new_shader: Some(update.shader_data),
+        });
+    }
+}
+
+/// System that applies pending shader removal requests (editor-only).
+#[cfg(not(feature = "runtime"))]
+fn apply_shader_removals(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    entity_query: Query<(Entity, &EntityId, Option<&ShaderEffectData>)>,
+    ext_mat_query: Query<(Entity, &EntityId, &MeshMaterial3d<ForgeMaterial>)>,
+    mut ext_materials: ResMut<Assets<ForgeMaterial>>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for removal in pending.shader_removals.drain(..) {
+        let found = entity_query.iter().find(|(_, eid, _)| eid.0 == removal.entity_id);
+        let Some((entity, _, old_shader)) = found else { continue; };
+
+        let old_shader_clone = old_shader.cloned();
+
+        // Set shader to passthrough (don't swap back to StandardMaterial)
+        let none_data = ShaderEffectData { shader_type: "none".to_string(), ..Default::default() };
+
+        if let Ok((_, _, ext_handle)) = ext_mat_query.get(entity) {
+            if let Some(ext_mat) = ext_materials.get_mut(ext_handle) {
+                ext_mat.extension.shader_type = 0;
+            }
+        }
+
+        commands.entity(entity).insert(none_data.clone());
+
+        history.push(core::history::UndoableAction::ShaderChange {
+            entity_id: removal.entity_id.clone(),
+            old_shader: old_shader_clone,
+            new_shader: Some(none_data),
+        });
+    }
+}
+
+/// System that processes pending CSG boolean operation requests (editor-only).
+#[cfg(not(feature = "runtime"))]
+fn apply_csg_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mesh_query: Query<(
+        Entity,
+        &EntityId,
+        &EntityName,
+        &Transform,
+        &EntityVisible,
+        Option<&EntityType>,
+        Option<&MaterialData>,
+        Option<&Mesh3d>,
+        Option<&AssetRef>,
+    )>,
+    // Separate queries for components beyond the 15-tuple limit
+    light_query: Query<(&EntityId, Option<&LightData>)>,
+    physics_query: Query<(&EntityId, Option<&PhysicsData>, Option<&PhysicsEnabled>)>,
+    script_query: Query<(&EntityId, Option<&ScriptData>)>,
+    audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_data_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
+    mesh_assets: Res<Assets<Mesh>>,
+    mut history: ResMut<HistoryStack>,
+    mut selection: ResMut<Selection>,
+    mut selection_events: EventWriter<SelectionChangedEvent>,
+) {
+    for request in pending.csg_requests.drain(..) {
+        let operation_name = request.operation;
+
+        // 1. Find both entities
+        let entity_a = mesh_query.iter()
+            .find(|(_, eid, ..)| eid.0 == request.entity_id_a);
+        let entity_b = mesh_query.iter()
+            .find(|(_, eid, ..)| eid.0 == request.entity_id_b);
+
+        let (Some(a_data), Some(b_data)) = (entity_a, entity_b) else {
+            tracing::warn!("CSG: one or both entities not found");
+            events::emit_csg_error("One or both entities not found");
+            continue;
+        };
+
+        // 2. Get Mesh handles
+        let (entity_a_ent, a_eid, a_name, a_transform, a_visible, a_etype,
+             a_mat, a_mesh3d, a_asset_ref) = a_data;
+        let (entity_b_ent, _b_eid, _b_name, b_transform, _b_visible, _b_etype,
+             _b_mat, b_mesh3d, _b_asset_ref) = b_data;
+
+        let Some(a_mesh_handle) = a_mesh3d else {
+            tracing::warn!("CSG: entity A has no Mesh3d component");
+            events::emit_csg_error("Entity A has no mesh");
+            continue;
+        };
+        let Some(b_mesh_handle) = b_mesh3d else {
+            tracing::warn!("CSG: entity B has no Mesh3d component");
+            events::emit_csg_error("Entity B has no mesh");
+            continue;
+        };
+
+        // 3. Get actual Mesh assets
+        let Some(a_mesh) = mesh_assets.get(&a_mesh_handle.0) else {
+            tracing::warn!("CSG: could not load mesh asset for entity A");
+            events::emit_csg_error("Could not load mesh for entity A");
+            continue;
+        };
+        let Some(b_mesh) = mesh_assets.get(&b_mesh_handle.0) else {
+            tracing::warn!("CSG: could not load mesh asset for entity B");
+            events::emit_csg_error("Could not load mesh for entity B");
+            continue;
+        };
+
+        // 4. Convert to csgrs format (world space)
+        let csg_a = match core::csg::bevy_mesh_to_csg(a_mesh, a_transform) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("CSG: failed to convert entity A mesh: {}", e);
+                events::emit_csg_error(&format!("Failed to convert mesh A: {}", e));
+                continue;
+            }
+        };
+        let csg_b = match core::csg::bevy_mesh_to_csg(b_mesh, b_transform) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!("CSG: failed to convert entity B mesh: {}", e);
+                events::emit_csg_error(&format!("Failed to convert mesh B: {}", e));
+                continue;
+            }
+        };
+
+        // 5. Perform CSG operation
+        let result_csg = core::csg::perform_csg(&csg_a, &csg_b, operation_name);
+
+        // 6. Convert result back to Bevy Mesh
+        let (result_mesh, mesh_data) = match core::csg::csg_to_bevy_mesh(&result_csg) {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("CSG: operation produced invalid result: {}", e);
+                events::emit_csg_error(&format!("CSG operation failed: {}", e));
+                continue;
+            }
+        };
+
+        // 7. Create result entity
+        let result_material = a_mat.cloned().unwrap_or_default();
+        let result_entity_id = EntityId::default();
+        let result_entity_id_str = result_entity_id.0.clone();
+        let result_name = request.result_name.unwrap_or_else(|| {
+            let op_name = match operation_name {
+                core::csg::CsgOperation::Union => "Union",
+                core::csg::CsgOperation::Subtract => "Subtract",
+                core::csg::CsgOperation::Intersect => "Intersect",
+            };
+            format!("{} Result", op_name)
+        });
+
+        // Position at identity transform (mesh is already in world space)
+        let result_transform = Transform::IDENTITY;
+
+        commands.spawn((
+            EntityType::CsgResult,
+            result_entity_id.clone(),
+            EntityName::new(&result_name),
+            EntityVisible::default(),
+            result_material.clone(),
+            Mesh3d(meshes.add(result_mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial::default())),
+            result_transform,
+            mesh_data.clone(),  // CsgMeshData component
+        ));
+
+        // 8. Build helper function for snapshots
+        let build_snapshot = |eid: &EntityId, ename: &EntityName, etransform: &Transform,
+                              evisible: &EntityVisible, etype: Option<&EntityType>,
+                              emat: Option<&MaterialData>, easset: Option<&AssetRef>| -> core::history::EntitySnapshot {
+            let light_data = light_query.iter()
+                .find(|(lid, _)| lid.0 == eid.0)
+                .and_then(|(_, ld)| ld.cloned());
+
+            let (physics_data, physics_enabled) = physics_query.iter()
+                .find(|(pid, _, _)| pid.0 == eid.0)
+                .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
+                .unwrap_or((None, false));
+
+            let script_data = script_query.iter()
+                .find(|(sid, _)| sid.0 == eid.0)
+                .and_then(|(_, sd)| sd.cloned());
+
+            let audio_data = audio_query.iter()
+                .find(|(aid, _)| aid.0 == eid.0)
+                .and_then(|(_, ad)| ad.cloned());
+
+            let (particle_data, particle_enabled) = particle_query.iter()
+                .find(|(pid, _, _)| pid.0 == eid.0)
+                .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
+                .unwrap_or((None, false));
+
+            let shader_effect_data = shader_query.iter()
+                .find(|(sid, _)| sid.0 == eid.0)
+                .and_then(|(_, sed)| sed.cloned());
+
+            let csg_mesh_data = csg_data_query.iter()
+                .find(|(cid, _)| cid.0 == eid.0)
+                .and_then(|(_, cmd)| cmd.cloned());
+
+            let asset_ref = easset.cloned();
+
+            core::history::EntitySnapshot {
+                entity_id: eid.0.clone(),
+                entity_type: etype.copied().unwrap_or(EntityType::Cube),
+                name: ename.0.clone(),
+                transform: core::history::TransformSnapshot::from(etransform),
+                parent_id: None,
+                visible: evisible.0,
+                material_data: emat.cloned(),
+                light_data,
+                physics_data,
+                physics_enabled,
+                asset_ref,
+                script_data,
+                audio_data,
+                particle_data,
+                particle_enabled,
+                shader_effect_data,
+                csg_mesh_data,
+                terrain_data: None,
+                terrain_mesh_data: None,
+                procedural_mesh_data: None,
+            }
+        };
+
+        // Build source snapshots if we're deleting them
+        let source_a_snapshot = if request.delete_sources {
+            Some(build_snapshot(a_eid, a_name, a_transform, a_visible, a_etype, a_mat, a_asset_ref))
+        } else {
+            None
+        };
+        let source_b_snapshot = if request.delete_sources {
+            // Get b entity data again
+            let b_data = mesh_query.iter()
+                .find(|(_, eid, ..)| eid.0 == request.entity_id_b)
+                .unwrap();
+            let (_, b_eid, b_name, b_transform, b_visible, b_etype, b_mat, _, b_asset) = b_data;
+            Some(build_snapshot(b_eid, b_name, b_transform, b_visible, b_etype, b_mat, b_asset))
+        } else {
+            None
+        };
+
+        // Build result snapshot
+        let result_snapshot = core::history::EntitySnapshot {
+            entity_id: result_entity_id_str.clone(),
+            entity_type: EntityType::CsgResult,
+            name: result_name.clone(),
+            transform: core::history::TransformSnapshot::from(&result_transform),
+            parent_id: None,
+            visible: true,
+            material_data: Some(result_material),
+            light_data: None,
+            physics_data: None,
+            physics_enabled: false,
+            asset_ref: None,
+            script_data: None,
+            audio_data: None,
+            particle_data: None,
+            particle_enabled: false,
+            shader_effect_data: None,
+            csg_mesh_data: Some(mesh_data),
+            terrain_data: None,
+            terrain_mesh_data: None,
+            procedural_mesh_data: None,
+        };
+
+        // 9. Push history action
+        history.push(core::history::UndoableAction::CsgOperation {
+            source_a_snapshot,
+            source_b_snapshot,
+            result_snapshot,
+            sources_deleted: request.delete_sources,
+        });
+
+        // 10. Delete source entities if requested
+        if request.delete_sources {
+            commands.entity(entity_a_ent).despawn();
+            commands.entity(entity_b_ent).despawn();
+        }
+
+        // 11. Select the result entity (entity not yet spawned, clear and add ID only)
+        selection.clear();
+        selection.entity_ids.insert(result_entity_id_str.clone());
+        selection_events.write(SelectionChangedEvent {
+            selected_ids: vec![result_entity_id_str.clone()],
+            primary_id: Some(result_entity_id_str.clone()),
+            primary_name: Some(result_name.clone()),
+        });
+
+        // 12. Emit completion event
+        events::emit_csg_completed(&result_entity_id_str, &result_name, operation_name);
+
+        tracing::info!("CSG operation completed: {}", result_name);
+    }
+}
+
+/// System that syncs MaterialData changes to ExtendedMaterial entities (always-active).
+fn sync_extended_material_data(
+    query: Query<(&MaterialData, &MeshMaterial3d<ForgeMaterial>), Changed<MaterialData>>,
+    mut ext_materials: ResMut<Assets<ForgeMaterial>>,
+    texture_handles: Res<crate::core::asset_manager::TextureHandleMap>,
+) {
+    for (data, handle) in query.iter() {
+        if let Some(ext_mat) = ext_materials.get_mut(handle) {
+            crate::core::material::apply_material_data_to_standard(&mut ext_mat.base, data, &texture_handles);
+        }
+    }
+}
+
+/// System that emits shader data when the primary selection has a ShaderEffectData component (editor-only).
+#[cfg(not(feature = "runtime"))]
+fn emit_shader_on_selection(
+    selection: Res<Selection>,
+    query: Query<(&EntityId, &ShaderEffectData), Changed<ShaderEffectData>>,
+    selection_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    mut selection_events: EventReader<SelectionChangedEvent>,
+) {
+    // Emit on selection change
+    for _event in selection_events.read() {
+        if let Some(primary) = selection.primary {
+            if let Ok((entity_id, shader_data)) = selection_query.get(primary) {
+                events::emit_shader_changed(&entity_id.0, shader_data);
+            }
+        }
+    }
+
+    // Emit when shader data changes on selected entity
+    if let Some(primary) = selection.primary {
+        if let Ok((entity_id, shader_data)) = query.get(primary) {
+            events::emit_shader_changed(&entity_id.0, Some(shader_data));
         }
     }
 }
@@ -2210,6 +2838,51 @@ fn build_animation_state(
     })
 }
 
+/// Helper: Build animation graph state with node weights and speeds.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimationGraphState {
+    entity_id: String,
+    nodes: Vec<AnimationNodeState>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimationNodeState {
+    clip_name: String,
+    node_index: u32,
+    weight: f32,
+    speed: f32,
+    is_active: bool,
+}
+
+fn build_animation_graph_state(
+    entity_id: &str,
+    entry: &crate::core::animation::EntityAnimationData,
+    player: &AnimationPlayer,
+) -> AnimationGraphState {
+    let mut nodes = Vec::new();
+    for (name, (node_index, _duration)) in &entry.clips {
+        let animation = player.animation(*node_index);
+        let (weight, speed, is_active) = if let Some(anim) = animation {
+            (anim.weight(), anim.speed(), true)
+        } else {
+            (1.0, 1.0, false)
+        };
+        nodes.push(AnimationNodeState {
+            clip_name: name.clone(),
+            node_index: node_index.index() as u32,
+            weight,
+            speed,
+            is_active,
+        });
+    }
+    AnimationGraphState {
+        entity_id: entity_id.to_string(),
+        nodes,
+    }
+}
+
 /// System that detects newly-loaded glTF scenes with AnimationPlayer components
 /// and registers their animation clips in the AnimationRegistry.
 fn register_gltf_animations(
@@ -2218,7 +2891,7 @@ fn register_gltf_animations(
     child_of_query: Query<&ChildOf>,
     entity_id_query: Query<&EntityId>,
     gltf_assets: Res<Assets<Gltf>>,
-    gltf_handle_query: Query<&Handle<Gltf>>,
+    gltf_handle_query: Query<&crate::core::asset_manager::GltfSourceHandle>,
     clip_assets: Res<Assets<AnimationClip>>,
     mut commands: Commands,
     mut graphs: ResMut<Assets<AnimationGraph>>,
@@ -2251,12 +2924,12 @@ fn register_gltf_animations(
         }
 
         // Try to find the Gltf asset to discover named animations
-        // Walk up hierarchy again to find the entity with Handle<Gltf>
+        // Walk up hierarchy again to find the entity with GltfSourceHandle
         let mut gltf_ancestor = player_entity;
         let mut gltf_handle_opt: Option<&Handle<Gltf>> = None;
         for _depth in 0..20 {
-            if let Ok(handle) = gltf_handle_query.get(gltf_ancestor) {
-                gltf_handle_opt = Some(handle);
+            if let Ok(source_handle) = gltf_handle_query.get(gltf_ancestor) {
+                gltf_handle_opt = Some(&source_handle.0);
                 break;
             }
             if let Ok(child_of) = child_of_query.get(gltf_ancestor) {
@@ -2442,6 +3115,24 @@ fn apply_animation_requests(
                     }
                 }
             }
+            AnimationAction::SetBlendWeight { clip_name, weight } => {
+                if let Some((node_index, _)) = entry.clips.get(&clip_name) {
+                    if let Some(active) = player.animation_mut(*node_index) {
+                        active.set_weight(weight);
+                    }
+                } else {
+                    tracing::warn!("Unknown clip '{}' for entity: {}", clip_name, request.entity_id);
+                }
+            }
+            AnimationAction::SetClipSpeed { clip_name, speed } => {
+                if let Some((node_index, _)) = entry.clips.get(&clip_name) {
+                    if let Some(active) = player.animation_mut(*node_index) {
+                        active.set_speed(speed);
+                    }
+                } else {
+                    tracing::warn!("Unknown clip '{}' for entity: {}", clip_name, request.entity_id);
+                }
+            }
         }
     }
 }
@@ -2490,5 +3181,863 @@ fn poll_animation_state(
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// bevy_hanabi GPU particle rendering (WebGPU only)
+// ---------------------------------------------------------------------------
+
+/// Marker component on an entity that links to its child hanabi effect entity.
+#[cfg(feature = "webgpu")]
+#[derive(Component)]
+struct HanabiEffectLink(Entity);
+
+/// Marker component on the child hanabi effect entity pointing to its parent.
+#[cfg(feature = "webgpu")]
+#[derive(Component)]
+struct HanabiEffectParent(Entity);
+
+/// System that synchronises ParticleData/ParticleEnabled ECS components with
+/// actual bevy_hanabi GPU particle effect entities (WebGPU only).
+///
+/// For each entity that has `ParticleData` + `ParticleEnabled`:
+///   - If no `HanabiEffectLink` exists, create a child effect entity.
+///   - If data changed, recreate the effect asset.
+/// For entities that lost `ParticleEnabled` or `ParticleData`:
+///   - Despawn the child effect entity and remove the link.
+#[cfg(feature = "webgpu")]
+fn sync_hanabi_effects(
+    mut commands: Commands,
+    mut effects: ResMut<Assets<bevy_hanabi::EffectAsset>>,
+    // Entities with particle data — we need Added/Changed detection
+    added_q: Query<
+        (Entity, &ParticleData),
+        (With<ParticleEnabled>, Added<ParticleEnabled>),
+    >,
+    changed_q: Query<
+        (Entity, &ParticleData),
+        (With<ParticleEnabled>, Changed<ParticleData>),
+    >,
+    // Entities that have the link but no longer have ParticleEnabled
+    orphan_link_q: Query<
+        (Entity, &HanabiEffectLink),
+        Without<ParticleEnabled>,
+    >,
+    // All entities with link (for data-removed check)
+    all_link_q: Query<(Entity, &HanabiEffectLink, Option<&ParticleData>)>,
+    // Child effect entities
+    effect_parent_q: Query<(Entity, &HanabiEffectParent)>,
+) {
+    // --- Handle newly enabled particles: spawn child effect entity ---
+    for (entity, data) in added_q.iter() {
+        let handle = build_hanabi_effect(data, &mut effects);
+        let child = commands.spawn((
+            Name::new("particle_effect"),
+            bevy_hanabi::ParticleEffect::new(handle),
+            HanabiEffectParent(entity),
+            Transform::default(),
+            Visibility::default(),
+        )).id();
+        commands.entity(entity).insert(HanabiEffectLink(child));
+        commands.entity(entity).add_child(child);
+    }
+
+    // --- Handle data changes: recreate effect asset ---
+    for (entity, data) in changed_q.iter() {
+        // Skip if this entity was just added (handled above)
+        if added_q.get(entity).is_ok() {
+            continue;
+        }
+        // Find existing child effect entity
+        for (child_entity, parent_link) in effect_parent_q.iter() {
+            if parent_link.0 == entity {
+                let new_handle = build_hanabi_effect(data, &mut effects);
+                commands.entity(child_entity).insert(
+                    bevy_hanabi::ParticleEffect::new(new_handle),
+                );
+                break;
+            }
+        }
+    }
+
+    // --- Handle disabled particles: despawn child effect entity ---
+    for (entity, link) in orphan_link_q.iter() {
+        commands.entity(link.0).despawn();
+        commands.entity(entity).remove::<HanabiEffectLink>();
+    }
+
+    // --- Handle removed ParticleData: despawn child ---
+    for (entity, link, data) in all_link_q.iter() {
+        if data.is_none() {
+            commands.entity(link.0).despawn();
+            commands.entity(entity).remove::<HanabiEffectLink>();
+        }
+    }
+}
+
+/// Convert a `ParticleData` component into a bevy_hanabi `EffectAsset`.
+#[cfg(feature = "webgpu")]
+fn build_hanabi_effect(
+    data: &crate::core::particles::ParticleData,
+    effects: &mut Assets<bevy_hanabi::EffectAsset>,
+) -> Handle<bevy_hanabi::EffectAsset> {
+    use bevy_hanabi::prelude::*;
+    use crate::core::particles::*;
+
+    let writer = ExprWriter::new();
+
+    // --- Age: always starts at 0 ---
+    let init_age = SetAttributeModifier::new(Attribute::AGE, writer.lit(0.0f32).expr());
+
+    // --- Lifetime: uniform random between min and max ---
+    let lifetime_expr = if (data.lifetime_max - data.lifetime_min).abs() < 0.001 {
+        writer.lit(data.lifetime_min).expr()
+    } else {
+        writer.lit(data.lifetime_min).uniform(writer.lit(data.lifetime_max)).expr()
+    };
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, lifetime_expr);
+
+    // --- Velocity: per-component uniform random ---
+    let vel_min = Vec3::new(data.velocity_min[0], data.velocity_min[1], data.velocity_min[2]);
+    let vel_max = Vec3::new(data.velocity_max[0], data.velocity_max[1], data.velocity_max[2]);
+    let vel_expr = if (vel_max - vel_min).length() < 0.001 {
+        writer.lit(vel_min).expr()
+    } else {
+        writer.lit(vel_min).uniform(writer.lit(vel_max)).expr()
+    };
+    let init_vel = SetAttributeModifier::new(Attribute::VELOCITY, vel_expr);
+
+    // --- Position modifier based on emission shape ---
+    // We need to create expression handles before consuming the writer.
+    let position_modifier: Option<Box<dyn Modifier + Send + Sync>> = match &data.emission_shape {
+        EmissionShape::Point => None,
+        EmissionShape::Sphere { radius } => {
+            Some(Box::new(SetPositionSphereModifier {
+                center: writer.lit(Vec3::ZERO).expr(),
+                radius: writer.lit(*radius).expr(),
+                dimension: ShapeDimension::Volume,
+            }))
+        }
+        EmissionShape::Circle { radius } => {
+            Some(Box::new(SetPositionCircleModifier {
+                center: writer.lit(Vec3::ZERO).expr(),
+                axis: writer.lit(Vec3::Y).expr(),
+                radius: writer.lit(*radius).expr(),
+                dimension: ShapeDimension::Volume,
+            }))
+        }
+        EmissionShape::Cone { radius, height } => {
+            // Approximate cone as a sphere with small radius + upward velocity bias
+            // bevy_hanabi has SetPositionCone3dModifier but API may differ
+            Some(Box::new(SetPositionSphereModifier {
+                center: writer.lit(Vec3::new(0.0, *height * 0.5, 0.0)).expr(),
+                radius: writer.lit(*radius).expr(),
+                dimension: ShapeDimension::Volume,
+            }))
+        }
+        EmissionShape::Box { half_extents } => {
+            let he = Vec3::new(half_extents[0], half_extents[1], half_extents[2]);
+            let pos_expr = writer.lit(-he).uniform(writer.lit(he)).expr();
+            Some(Box::new(SetAttributeModifier::new(Attribute::POSITION, pos_expr)))
+        }
+    };
+
+    // --- Acceleration ---
+    let accel_vec = Vec3::new(data.acceleration[0], data.acceleration[1], data.acceleration[2]);
+    let accel_expr = writer.lit(accel_vec).expr();
+
+    // --- Linear drag ---
+    let drag_expr = writer.lit(data.linear_drag).expr();
+
+    // --- Finish the expression module ---
+    let module = writer.finish();
+
+    // --- Spawner settings ---
+    let spawner = match &data.spawner_mode {
+        SpawnerMode::Continuous { rate } => SpawnerSettings::rate((*rate).into()),
+        SpawnerMode::Burst { count } => SpawnerSettings::once((*count as f32).into()),
+        SpawnerMode::Once { count } => SpawnerSettings::once((*count as f32).into()),
+    };
+
+    // --- Simulation space ---
+    let sim_space = if data.world_space {
+        SimulationSpace::Global
+    } else {
+        SimulationSpace::Local
+    };
+
+    // --- Alpha mode ---
+    let alpha_mode = match data.blend_mode {
+        ParticleBlendMode::Additive => bevy_hanabi::AlphaMode::Add,
+        ParticleBlendMode::AlphaBlend => bevy_hanabi::AlphaMode::Blend,
+        ParticleBlendMode::Premultiply => bevy_hanabi::AlphaMode::Premultiply,
+    };
+
+    // --- Color gradient ---
+    let mut color_gradient = Gradient::new();
+    if data.color_gradient.is_empty() {
+        color_gradient.add_key(0.0, Vec4::ONE);
+        color_gradient.add_key(1.0, Vec4::new(1.0, 1.0, 1.0, 0.0));
+    } else {
+        for stop in &data.color_gradient {
+            color_gradient.add_key(
+                stop.position,
+                Vec4::new(stop.color[0], stop.color[1], stop.color[2], stop.color[3]),
+            );
+        }
+    }
+
+    // --- Size gradient ---
+    let mut size_gradient = Gradient::new();
+    if data.size_keyframes.is_empty() {
+        size_gradient.add_key(0.0, Vec3::splat(data.size_start));
+        size_gradient.add_key(1.0, Vec3::splat(data.size_end));
+    } else {
+        for kf in &data.size_keyframes {
+            size_gradient.add_key(kf.position, Vec3::splat(kf.size));
+        }
+    }
+
+    // --- Orient mode ---
+    let orient = match data.orientation {
+        ParticleOrientation::Billboard => OrientModifier::new(OrientMode::FaceCameraPosition),
+        ParticleOrientation::VelocityAligned => OrientModifier::new(OrientMode::AlongVelocity),
+        ParticleOrientation::Fixed => OrientModifier::new(OrientMode::ParallelCameraDepthPlane),
+    };
+
+    // --- Build the EffectAsset ---
+    let mut effect = EffectAsset::new(data.max_particles, spawner, module)
+        .with_simulation_space(sim_space)
+        .with_alpha_mode(alpha_mode)
+        .init(init_age)
+        .init(init_lifetime)
+        .init(init_vel)
+        .update(AccelModifier::new(accel_expr))
+        .update(LinearDragModifier::new(drag_expr))
+        .render(ColorOverLifetimeModifier::new(color_gradient))
+        .render(SizeOverLifetimeModifier {
+            gradient: size_gradient,
+            screen_space_size: false,
+        })
+        .render(orient);
+
+    // Add position modifier if not Point
+    if let Some(pos_mod) = position_modifier {
+        effect = effect.add_modifier(ModifierContext::Init, pos_mod);
+    }
+
+    effects.add(effect)
+}
+
+/// System that processes pending extrude requests.
+fn apply_extrude_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut selection: ResMut<Selection>,
+    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut history: ResMut<HistoryStack>,
+) {
+    use crate::core::history::UndoableAction;
+    use events::{emit_procedural_mesh_created, emit_procedural_mesh_error};
+
+    for request in pending.extrude_requests.drain(..) {
+        // Parse shape
+        let shape = match request.shape.as_str() {
+            "circle" => crate::core::procedural_mesh::ExtrudeShape::Circle {
+                radius: request.radius,
+                segments: request.segments,
+            },
+            "square" => crate::core::procedural_mesh::ExtrudeShape::Square {
+                size: request.size.unwrap_or(1.0),
+            },
+            "hexagon" => crate::core::procedural_mesh::ExtrudeShape::Hexagon {
+                radius: request.radius,
+            },
+            "star" => crate::core::procedural_mesh::ExtrudeShape::Star {
+                outer_radius: request.radius,
+                inner_radius: request.inner_radius.unwrap_or(request.radius * 0.5),
+                points: request.star_points.unwrap_or(5),
+            },
+            _ => {
+                emit_procedural_mesh_error(&format!("Unknown extrude shape: {}", request.shape));
+                continue;
+            }
+        };
+
+        // Generate mesh
+        let mesh = crate::core::procedural_mesh::generate_extrude_mesh(&shape, request.length, request.segments);
+
+        // Extract mesh data for snapshot
+        let (positions, normals, uvs, indices) = {
+            use bevy::render::mesh::VertexAttributeValues;
+            let pos_attr = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
+            let norm_attr = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap();
+            let uv_attr = mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap();
+            let indices = mesh.indices().unwrap();
+
+            let positions: Vec<[f32; 3]> = match pos_attr {
+                VertexAttributeValues::Float32x3(v) => v.clone(),
+                _ => vec![],
+            };
+            let normals: Vec<[f32; 3]> = match norm_attr {
+                VertexAttributeValues::Float32x3(v) => v.clone(),
+                _ => vec![],
+            };
+            let uvs: Vec<[f32; 2]> = match uv_attr {
+                VertexAttributeValues::Float32x2(v) => v.clone(),
+                _ => vec![],
+            };
+            let indices: Vec<u32> = match indices {
+                bevy::render::mesh::Indices::U32(v) => v.clone(),
+                bevy::render::mesh::Indices::U16(v) => v.iter().map(|i| *i as u32).collect(),
+            };
+            (positions, normals, uvs, indices)
+        };
+
+        let mesh_data = crate::core::procedural_mesh::ProceduralMeshData {
+            positions,
+            normals,
+            uvs,
+            indices,
+            operation: crate::core::procedural_mesh::ProceduralOp::Extrude {
+                shape: shape.clone(),
+                length: request.length,
+                segments: request.segments,
+            },
+        };
+
+        // Create entity
+        let name = request.name.unwrap_or_else(|| "Extruded Mesh".to_string());
+        let position = request.position.unwrap_or(Vec3::ZERO);
+        let entity_id = EntityId::default();
+        let entity_id_str = entity_id.0.clone();
+
+        let entity = commands.spawn((
+            EntityType::ProceduralMesh,
+            entity_id,
+            EntityName::new(&name),
+            EntityVisible::default(),
+            MaterialData::default(),
+            mesh_data.clone(),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.5, 0.5, 0.5),
+                ..default()
+            })),
+            Transform::from_translation(position),
+        )).id();
+
+        // Record in history
+        history.push(UndoableAction::ExtrudeShape {
+            snapshot: HistEntitySnapshot {
+                entity_id: entity_id_str.clone(),
+                entity_type: EntityType::ProceduralMesh,
+                name: name.clone(),
+                transform: TransformSnapshot {
+                    position: [position.x, position.y, position.z],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [1.0, 1.0, 1.0],
+                },
+                parent_id: None,
+                visible: true,
+                material_data: Some(MaterialData::default()),
+                light_data: None,
+                physics_data: None,
+                physics_enabled: false,
+                asset_ref: None,
+                script_data: None,
+                audio_data: None,
+                particle_data: None,
+                particle_enabled: false,
+                shader_effect_data: None,
+                csg_mesh_data: None,
+                terrain_data: None,
+                terrain_mesh_data: None,
+                procedural_mesh_data: Some(mesh_data),
+            },
+        });
+
+        // Select the new entity
+        selection.entities.clear();
+        selection.entity_ids.clear();
+        selection.entities.insert(entity);
+        selection.entity_ids.insert(entity_id_str.clone());
+        selection.primary = Some(entity);
+        selection.primary_id = Some(entity_id_str.clone());
+        selection_events.write(SelectionChangedEvent {
+            selected_ids: vec![entity_id_str.clone()],
+            primary_id: Some(entity_id_str.clone()),
+            primary_name: Some(name.clone()),
+        });
+
+        emit_procedural_mesh_created(&entity_id_str, &name, "extrude");
+    }
+}
+
+/// System that processes pending lathe requests.
+fn apply_lathe_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut selection: ResMut<Selection>,
+    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut history: ResMut<HistoryStack>,
+) {
+    use crate::core::history::UndoableAction;
+    use events::emit_procedural_mesh_created;
+
+    for request in pending.lathe_requests.drain(..) {
+        // Generate mesh
+        let mesh = crate::core::procedural_mesh::generate_lathe_mesh(&request.profile, request.segments);
+
+        // Extract mesh data for snapshot
+        let (positions, normals, uvs, indices) = {
+            use bevy::render::mesh::VertexAttributeValues;
+            let pos_attr = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
+            let norm_attr = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap();
+            let uv_attr = mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap();
+            let indices = mesh.indices().unwrap();
+
+            let positions: Vec<[f32; 3]> = match pos_attr {
+                VertexAttributeValues::Float32x3(v) => v.clone(),
+                _ => vec![],
+            };
+            let normals: Vec<[f32; 3]> = match norm_attr {
+                VertexAttributeValues::Float32x3(v) => v.clone(),
+                _ => vec![],
+            };
+            let uvs: Vec<[f32; 2]> = match uv_attr {
+                VertexAttributeValues::Float32x2(v) => v.clone(),
+                _ => vec![],
+            };
+            let indices: Vec<u32> = match indices {
+                bevy::render::mesh::Indices::U32(v) => v.clone(),
+                bevy::render::mesh::Indices::U16(v) => v.iter().map(|i| *i as u32).collect(),
+            };
+            (positions, normals, uvs, indices)
+        };
+
+        let mesh_data = crate::core::procedural_mesh::ProceduralMeshData {
+            positions,
+            normals,
+            uvs,
+            indices,
+            operation: crate::core::procedural_mesh::ProceduralOp::Lathe {
+                profile: request.profile,
+                segments: request.segments,
+            },
+        };
+
+        // Create entity
+        let name = request.name.unwrap_or_else(|| "Lathed Mesh".to_string());
+        let position = request.position.unwrap_or(Vec3::ZERO);
+        let entity_id = EntityId::default();
+        let entity_id_str = entity_id.0.clone();
+
+        let entity = commands.spawn((
+            EntityType::ProceduralMesh,
+            entity_id,
+            EntityName::new(&name),
+            EntityVisible::default(),
+            MaterialData::default(),
+            mesh_data.clone(),
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.5, 0.5, 0.5),
+                ..default()
+            })),
+            Transform::from_translation(position),
+        )).id();
+
+        // Record in history
+        history.push(UndoableAction::LatheShape {
+            snapshot: HistEntitySnapshot {
+                entity_id: entity_id_str.clone(),
+                entity_type: EntityType::ProceduralMesh,
+                name: name.clone(),
+                transform: TransformSnapshot {
+                    position: [position.x, position.y, position.z],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [1.0, 1.0, 1.0],
+                },
+                parent_id: None,
+                visible: true,
+                material_data: Some(MaterialData::default()),
+                light_data: None,
+                physics_data: None,
+                physics_enabled: false,
+                asset_ref: None,
+                script_data: None,
+                audio_data: None,
+                particle_data: None,
+                particle_enabled: false,
+                shader_effect_data: None,
+                csg_mesh_data: None,
+                terrain_data: None,
+                terrain_mesh_data: None,
+                procedural_mesh_data: Some(mesh_data),
+            },
+        });
+
+        // Select the new entity
+        selection.entities.clear();
+        selection.entity_ids.clear();
+        selection.entities.insert(entity);
+        selection.entity_ids.insert(entity_id_str.clone());
+        selection.primary = Some(entity);
+        selection.primary_id = Some(entity_id_str.clone());
+        selection_events.write(SelectionChangedEvent {
+            selected_ids: vec![entity_id_str.clone()],
+            primary_id: Some(entity_id_str.clone()),
+            primary_name: Some(name.clone()),
+        });
+
+        emit_procedural_mesh_created(&entity_id_str, &name, "lathe");
+    }
+}
+
+/// System that processes pending array requests (duplicate entity in pattern).
+fn apply_array_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(
+        Entity,
+        &EntityId,
+        &EntityName,
+        &Transform,
+        Option<&EntityType>,
+        Option<&Mesh3d>,
+        Option<&MeshMaterial3d<StandardMaterial>>,
+        Option<&PointLight>,
+        Option<&DirectionalLight>,
+        Option<&SpotLight>,
+        Option<&MaterialData>,
+        Option<&LightData>,
+        Option<&PhysicsData>,
+        Option<&PhysicsEnabled>,
+        Option<&AssetRef>,
+    )>,
+    script_query: Query<(&EntityId, Option<&ScriptData>)>,
+    audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
+    procedural_mesh_query: Query<(&EntityId, Option<&core::procedural_mesh::ProceduralMeshData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    use crate::core::history::UndoableAction;
+    use events::{emit_array_completed, emit_procedural_mesh_error};
+
+    for request in pending.array_requests.drain(..) {
+        let source_found = query.iter().find(|(_, eid, ..)| eid.0 == request.entity_id);
+        if source_found.is_none() {
+            emit_procedural_mesh_error(&format!("Source entity not found: {}", request.entity_id));
+            continue;
+        }
+
+        let (_src_entity, src_eid, src_name, src_transform, src_entity_type, mesh_h, mat_h, pl, dl, sl, mat_data, light_data, phys_data, phys_enabled, asset_ref) = source_found.unwrap();
+
+        let src_script_data = script_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, sd)| sd.cloned());
+        let src_audio_data = audio_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, ad)| ad.cloned());
+        let (src_particle_data, src_particle_enabled) = particle_query.iter().find(|(eid, _, _)| eid.0 == src_eid.0).map(|(_, pd, pe)| (pd.cloned(), pe.is_some())).unwrap_or((None, false));
+        let src_shader_data = shader_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, sed)| sed.cloned());
+        let src_csg_data = csg_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, cmd)| cmd.cloned());
+        let src_procedural_mesh_data = procedural_mesh_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, pmd)| pmd.cloned());
+
+        let entity_type = src_entity_type.copied().unwrap_or(EntityType::Cube);
+
+        let mut offsets: Vec<Vec3> = Vec::new();
+        match request.pattern.as_str() {
+            "grid" => {
+                let count_x = request.count_x.unwrap_or(2).max(1);
+                let count_y = request.count_y.unwrap_or(1).max(1);
+                let count_z = request.count_z.unwrap_or(2).max(1);
+                let spacing_x = request.spacing_x.unwrap_or(2.0);
+                let spacing_y = request.spacing_y.unwrap_or(2.0);
+                let spacing_z = request.spacing_z.unwrap_or(2.0);
+
+                for x in 0..count_x {
+                    for y in 0..count_y {
+                        for z in 0..count_z {
+                            if x == 0 && y == 0 && z == 0 {
+                                continue;
+                            }
+                            offsets.push(Vec3::new(
+                                x as f32 * spacing_x,
+                                y as f32 * spacing_y,
+                                z as f32 * spacing_z,
+                            ));
+                        }
+                    }
+                }
+            }
+            "circle" => {
+                let count = request.circle_count.unwrap_or(8).max(2);
+                let radius = request.circle_radius.unwrap_or(5.0);
+                for i in 0..count {
+                    if i == 0 {
+                        continue;
+                    }
+                    let angle = (i as f32) * std::f32::consts::TAU / (count as f32);
+                    offsets.push(Vec3::new(radius * angle.cos(), 0.0, radius * angle.sin()));
+                }
+            }
+            _ => {
+                emit_procedural_mesh_error(&format!("Unknown array pattern: {}", request.pattern));
+                continue;
+            }
+        }
+
+        let mut created_snapshots = Vec::new();
+        let mut created_ids = Vec::new();
+        for offset in offsets {
+            let new_pos = src_transform.translation + offset;
+            let new_name = format!("{} (Array)", src_name.0);
+            let new_entity_id = EntityId::default();
+            let new_entity_id_str = new_entity_id.0.clone();
+            created_ids.push(new_entity_id_str.clone());
+
+            let mut ec = commands.spawn((
+                entity_type,
+                new_entity_id,
+                EntityName::new(&new_name),
+                EntityVisible::default(),
+                Transform {
+                    translation: new_pos,
+                    rotation: src_transform.rotation,
+                    scale: src_transform.scale,
+                },
+            ));
+
+            if let Some(m) = mesh_h { ec.insert(m.clone()); }
+            if let Some(mat) = mat_h { ec.insert(mat.clone()); }
+            if let Some(p) = pl { ec.insert(p.clone()); }
+            if let Some(d) = dl { ec.insert(d.clone()); }
+            if let Some(s) = sl { ec.insert(s.clone()); }
+            if let Some(md) = mat_data { ec.insert(md.clone()); }
+            if let Some(ld) = light_data { ec.insert(ld.clone()); }
+            if let Some(pd) = phys_data { ec.insert(pd.clone()); }
+            if phys_enabled.is_some() { ec.insert(PhysicsEnabled); }
+            if let Some(ar) = asset_ref { ec.insert(ar.clone()); }
+            if let Some(ref sd) = src_script_data { ec.insert(sd.clone()); }
+            if let Some(ref ad) = src_audio_data { ec.insert(ad.clone()); ec.insert(AudioEnabled); }
+            if let Some(ref pd) = src_particle_data { ec.insert(pd.clone()); }
+            if src_particle_enabled { ec.insert(ParticleEnabled); }
+            if let Some(ref sed) = src_shader_data { ec.insert(sed.clone()); }
+            if let Some(ref cmd) = src_csg_data { ec.insert(cmd.clone()); }
+            if let Some(ref pmd) = src_procedural_mesh_data { ec.insert(pmd.clone()); }
+
+            created_snapshots.push(HistEntitySnapshot {
+                entity_id: new_entity_id_str,
+                entity_type,
+                name: new_name,
+                transform: TransformSnapshot {
+                    position: [new_pos.x, new_pos.y, new_pos.z],
+                    rotation: [src_transform.rotation.x, src_transform.rotation.y, src_transform.rotation.z, src_transform.rotation.w],
+                    scale: [src_transform.scale.x, src_transform.scale.y, src_transform.scale.z],
+                },
+                parent_id: None,
+                visible: true,
+                material_data: mat_data.cloned(),
+                light_data: light_data.cloned(),
+                physics_data: phys_data.cloned(),
+                physics_enabled: phys_enabled.is_some(),
+                asset_ref: asset_ref.cloned(),
+                script_data: src_script_data.clone(),
+                audio_data: src_audio_data.clone(),
+                particle_data: src_particle_data.clone(),
+                particle_enabled: src_particle_enabled,
+                shader_effect_data: src_shader_data.clone(),
+                csg_mesh_data: src_csg_data.clone(),
+                terrain_data: None,
+                terrain_mesh_data: None,
+                procedural_mesh_data: src_procedural_mesh_data.clone(),
+            });
+        }
+
+        history.push(UndoableAction::ArrayEntity {
+            source_id: request.entity_id.clone(),
+            created_snapshots,
+        });
+
+        emit_array_completed(&request.entity_id, &created_ids);
+    }
+}
+
+/// System that processes pending combine mesh requests.
+fn apply_combine_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    query: Query<(
+        Entity,
+        &EntityId,
+        &EntityName,
+        &Transform,
+        Option<&Mesh3d>,
+        Option<&MaterialData>,
+    )>,
+    mut selection: ResMut<Selection>,
+    mut selection_events: EventWriter<SelectionChangedEvent>,
+    script_query: Query<(&EntityId, Option<&ScriptData>)>,
+    audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
+    procedural_mesh_query: Query<(&EntityId, Option<&core::procedural_mesh::ProceduralMeshData>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    use crate::core::history::UndoableAction;
+    use events::{emit_procedural_mesh_created, emit_procedural_mesh_error};
+
+    for request in pending.combine_requests.drain(..) {
+        let mut mesh_list: Vec<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<u32>, Transform)> = Vec::new();
+        let mut source_snapshots: Vec<HistEntitySnapshot> = Vec::new();
+
+        for entity_id in &request.entity_ids {
+            if let Some((entity, eid, ename, transform, mesh_handle, mat_data)) = query.iter().find(|(_, eid, ..)| &eid.0 == entity_id) {
+                if let Some(mh) = mesh_handle {
+                    if let Some(mesh) = meshes.get(&mh.0) {
+                        use bevy::render::mesh::VertexAttributeValues;
+                        let positions: Vec<[f32; 3]> = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+                            Some(VertexAttributeValues::Float32x3(v)) => v.clone(),
+                            _ => vec![],
+                        };
+                        let normals: Vec<[f32; 3]> = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
+                            Some(VertexAttributeValues::Float32x3(v)) => v.clone(),
+                            _ => vec![],
+                        };
+                        let indices: Vec<u32> = match mesh.indices() {
+                            Some(bevy::render::mesh::Indices::U32(v)) => v.clone(),
+                            Some(bevy::render::mesh::Indices::U16(v)) => v.iter().map(|i| *i as u32).collect(),
+                            None => vec![],
+                        };
+                        mesh_list.push((positions, normals, indices, *transform));
+                    }
+                }
+
+                let src_script_data = script_query.iter().find(|(sid, _)| sid.0 == eid.0).and_then(|(_, sd)| sd.cloned());
+                let src_audio_data = audio_query.iter().find(|(aid, _)| aid.0 == eid.0).and_then(|(_, ad)| ad.cloned());
+                let (src_particle_data, src_particle_enabled) = particle_query.iter().find(|(pid, _, _)| pid.0 == eid.0).map(|(_, pd, pe)| (pd.cloned(), pe.is_some())).unwrap_or((None, false));
+                let src_shader_data = shader_query.iter().find(|(sid, _)| sid.0 == eid.0).and_then(|(_, sed)| sed.cloned());
+                let src_csg_data = csg_query.iter().find(|(cid, _)| cid.0 == eid.0).and_then(|(_, cmd)| cmd.cloned());
+                let src_procedural_mesh_data = procedural_mesh_query.iter().find(|(pid, _)| pid.0 == eid.0).and_then(|(_, pmd)| pmd.cloned());
+
+                source_snapshots.push(HistEntitySnapshot {
+                    entity_id: eid.0.clone(),
+                    entity_type: EntityType::Cube,
+                    name: ename.0.clone(),
+                    transform: TransformSnapshot::from(transform),
+                    parent_id: None,
+                    visible: true,
+                    material_data: mat_data.cloned(),
+                    light_data: None,
+                    physics_data: None,
+                    physics_enabled: false,
+                    asset_ref: None,
+                    script_data: src_script_data,
+                    audio_data: src_audio_data,
+                    particle_data: src_particle_data,
+                    particle_enabled: src_particle_enabled,
+                    shader_effect_data: src_shader_data,
+                    csg_mesh_data: src_csg_data,
+                    terrain_data: None,
+                    terrain_mesh_data: None,
+                    procedural_mesh_data: src_procedural_mesh_data,
+                });
+
+                if request.delete_sources {
+                    commands.entity(entity).despawn();
+                    selection.entities.remove(&entity);
+                    selection.entity_ids.remove(entity_id);
+                }
+            }
+        }
+
+        if mesh_list.is_empty() {
+            emit_procedural_mesh_error("No valid meshes to combine");
+            continue;
+        }
+
+        let (combined_positions, combined_normals, combined_indices) = crate::core::procedural_mesh::combine_meshes_data(mesh_list);
+        let uv_count = combined_normals.len();
+
+        let mesh_data = crate::core::procedural_mesh::ProceduralMeshData {
+            positions: combined_positions,
+            normals: combined_normals,
+            uvs: vec![[0.0, 0.0]; uv_count],
+            indices: combined_indices,
+            operation: crate::core::procedural_mesh::ProceduralOp::Combine,
+        };
+
+        let combined_mesh = crate::core::procedural_mesh::rebuild_procedural_mesh(&mesh_data);
+
+        let name = request.name.unwrap_or_else(|| "Combined Mesh".to_string());
+        let entity_id = EntityId::default();
+        let entity_id_str = entity_id.0.clone();
+
+        let entity = commands.spawn((
+            EntityType::ProceduralMesh,
+            entity_id,
+            EntityName::new(&name),
+            EntityVisible::default(),
+            MaterialData::default(),
+            mesh_data.clone(),
+            Mesh3d(meshes.add(combined_mesh)),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.5, 0.5, 0.5),
+                ..default()
+            })),
+            Transform::default(),
+        )).id();
+
+        history.push(UndoableAction::CombineMeshes {
+            source_snapshots,
+            result_snapshot: HistEntitySnapshot {
+                entity_id: entity_id_str.clone(),
+                entity_type: EntityType::ProceduralMesh,
+                name: name.clone(),
+                transform: TransformSnapshot {
+                    position: [0.0, 0.0, 0.0],
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    scale: [1.0, 1.0, 1.0],
+                },
+                parent_id: None,
+                visible: true,
+                material_data: Some(MaterialData::default()),
+                light_data: None,
+                physics_data: None,
+                physics_enabled: false,
+                asset_ref: None,
+                script_data: None,
+                audio_data: None,
+                particle_data: None,
+                particle_enabled: false,
+                shader_effect_data: None,
+                csg_mesh_data: None,
+                terrain_data: None,
+                terrain_mesh_data: None,
+                procedural_mesh_data: Some(mesh_data),
+            },
+        });
+
+        selection.entities.clear();
+        selection.entity_ids.clear();
+        selection.entities.insert(entity);
+        selection.entity_ids.insert(entity_id_str.clone());
+        selection.primary = Some(entity);
+        selection.primary_id = Some(entity_id_str.clone());
+        selection_events.write(SelectionChangedEvent {
+            selected_ids: vec![entity_id_str.clone()],
+            primary_id: Some(entity_id_str.clone()),
+            primary_name: Some(name.clone()),
+        });
+
+        emit_procedural_mesh_created(&entity_id_str, &name, "combine");
     }
 }

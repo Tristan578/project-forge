@@ -12,6 +12,9 @@ use super::physics::PhysicsData;
 use super::post_processing::{
     BloomSettings, ChromaticAberrationSettings, ColorGradingSettings, SharpeningSettings,
 };
+use super::shader_effects::ShaderEffectData;
+use super::csg::CsgOperation;
+use super::terrain::{TerrainData, NoiseType};
 use super::pending_commands::{
     queue_transform_update_from_bridge, queue_rename_from_bridge, queue_camera_focus_from_bridge,
     queue_spawn_from_bridge, queue_delete_from_bridge, queue_duplicate_from_bridge,
@@ -36,7 +39,14 @@ use super::pending_commands::{
     queue_particle_removal_from_bridge, queue_particle_preset_from_bridge,
     queue_particle_playback_from_bridge,
     queue_animation_request_from_bridge,
+    queue_shader_update_from_bridge, queue_shader_removal_from_bridge,
+    queue_csg_from_bridge,
+    queue_terrain_spawn_from_bridge, queue_terrain_update_from_bridge, queue_terrain_sculpt_from_bridge,
+    queue_extrude_from_bridge, queue_lathe_from_bridge, queue_array_from_bridge, queue_combine_from_bridge,
+    queue_quality_preset_from_bridge, QualityPresetRequest,
     AnimationRequest, AnimationAction,
+    ShaderUpdate, ShaderRemoval,
+    CsgRequest,
     TransformUpdate, RenameRequest, CameraFocusRequest, SpawnRequest, DeleteRequest, DuplicateRequest,
     ReparentRequest, SnapSettingsUpdate, CameraPresetRequest, MaterialUpdate, LightUpdate,
     AmbientLightUpdate, EnvironmentUpdate, PostProcessingUpdate, EntityType, SceneLoadRequest,
@@ -47,6 +57,8 @@ use super::pending_commands::{
     AudioUpdate, AudioRemoval, AudioPlayback,
     AudioBusUpdate, AudioBusCreate, AudioBusDelete, AudioBusEffectsUpdate,
     ParticleUpdate, ParticleToggle, ParticleRemoval, ParticlePresetRequest, ParticlePlayback,
+    TerrainSpawnRequest, TerrainUpdate, TerrainSculpt,
+    ExtrudeRequest, LatheRequest, ArrayRequest, CombineRequest,
 };
 use super::engine_mode::ModeChangeRequest;
 use super::history::{queue_undo_from_bridge, queue_redo_from_bridge};
@@ -100,6 +112,16 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         "toggle_grid" => handle_toggle_grid(payload),
         "set_camera_preset" => handle_set_camera_preset(payload),
         "update_material" => handle_update_material(payload),
+        "set_custom_shader" => handle_set_custom_shader(payload),
+        "remove_custom_shader" => handle_remove_custom_shader(payload),
+        "get_shader" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::ShaderData { entity_id })
+        },
+        "list_shaders" => handle_list_shaders(payload),
         "update_light" => handle_update_light(payload),
         "update_ambient_light" => handle_update_ambient_light(payload),
         "update_environment" => handle_update_environment(payload),
@@ -194,6 +216,8 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         "seek_animation" => handle_seek_animation(payload),
         "set_animation_speed" => handle_set_animation_speed(payload),
         "set_animation_loop" => handle_set_animation_loop(payload),
+        "set_animation_blend_weight" => handle_set_blend_weight(payload),
+        "set_clip_speed" => handle_set_clip_speed(payload),
         "get_animation_state" | "list_animations" => {
             let entity_id = payload.get("entityId")
                 .and_then(|v| v.as_str())
@@ -201,6 +225,36 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
                 .to_string();
             handle_query(QueryRequest::AnimationState { entity_id })
         },
+        "get_animation_graph" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::AnimationGraph { entity_id })
+        },
+        // CSG commands
+        "csg_union" => handle_csg(payload, CsgOperation::Union),
+        "csg_subtract" => handle_csg(payload, CsgOperation::Subtract),
+        "csg_intersect" => handle_csg(payload, CsgOperation::Intersect),
+        // Terrain commands
+        "spawn_terrain" => handle_spawn_terrain(payload),
+        "update_terrain" => handle_update_terrain(payload),
+        "sculpt_terrain" => handle_sculpt_terrain(payload),
+        "get_terrain" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::TerrainState { entity_id })
+        },
+        // Procedural mesh commands
+        "extrude_shape" => handle_extrude_shape(payload),
+        "lathe_shape" => handle_lathe_shape(payload),
+        "array_entity" => handle_array_entity(payload),
+        "combine_meshes" => handle_combine_meshes(payload),
+        // Quality preset commands
+        "set_quality_preset" => handle_set_quality_preset(payload),
+        "get_quality_settings" => handle_query(QueryRequest::QualitySettings),
         // Query commands (MCP resources)
         "get_scene_graph" => handle_query(QueryRequest::SceneGraph),
         "get_selection" => handle_query(QueryRequest::Selection),
@@ -664,6 +718,25 @@ struct UpdateMaterialPayload {
     alpha_cutoff: Option<f32>,
     double_sided: Option<bool>,
     unlit: Option<bool>,
+    // UV Transform (E-1a)
+    uv_offset: Option<[f32; 2]>,
+    uv_scale: Option<[f32; 2]>,
+    uv_rotation: Option<f32>,
+    // Parallax (E-1b)
+    parallax_depth_scale: Option<f32>,
+    parallax_mapping_method: Option<String>,
+    max_parallax_layer_count: Option<f32>,
+    parallax_relief_max_steps: Option<u32>,
+    // Clearcoat (E-1c)
+    clearcoat: Option<f32>,
+    clearcoat_perceptual_roughness: Option<f32>,
+    // Transmission (E-1d)
+    specular_transmission: Option<f32>,
+    diffuse_transmission: Option<f32>,
+    ior: Option<f32>,
+    thickness: Option<f32>,
+    attenuation_distance: Option<f32>,
+    attenuation_color: Option<[f32; 3]>,
 }
 
 /// Handle update_material command from React.
@@ -691,6 +764,30 @@ fn handle_update_material(payload: serde_json::Value) -> CommandResult {
     if let Some(v) = data.alpha_cutoff { mat.alpha_cutoff = v; }
     if let Some(v) = data.double_sided { mat.double_sided = v; }
     if let Some(v) = data.unlit { mat.unlit = v; }
+    // UV Transform (E-1a)
+    if let Some(v) = data.uv_offset { mat.uv_offset = v; }
+    if let Some(v) = data.uv_scale { mat.uv_scale = v; }
+    if let Some(v) = data.uv_rotation { mat.uv_rotation = v; }
+    // Parallax (E-1b)
+    if let Some(v) = data.parallax_depth_scale { mat.parallax_depth_scale = v; }
+    if let Some(ref v) = data.parallax_mapping_method {
+        mat.parallax_mapping_method = match v.as_str() {
+            "relief" => super::material::ParallaxMethod::Relief,
+            _ => super::material::ParallaxMethod::Occlusion,
+        };
+    }
+    if let Some(v) = data.max_parallax_layer_count { mat.max_parallax_layer_count = v; }
+    if let Some(v) = data.parallax_relief_max_steps { mat.parallax_relief_max_steps = v; }
+    // Clearcoat (E-1c)
+    if let Some(v) = data.clearcoat { mat.clearcoat = v; }
+    if let Some(v) = data.clearcoat_perceptual_roughness { mat.clearcoat_perceptual_roughness = v; }
+    // Transmission (E-1d)
+    if let Some(v) = data.specular_transmission { mat.specular_transmission = v; }
+    if let Some(v) = data.diffuse_transmission { mat.diffuse_transmission = v; }
+    if let Some(v) = data.ior { mat.ior = v; }
+    if let Some(v) = data.thickness { mat.thickness = v; }
+    if let Some(v) = data.attenuation_distance { mat.attenuation_distance = v; }
+    if let Some(v) = data.attenuation_color { mat.attenuation_color = v; }
 
     let update = MaterialUpdate {
         entity_id: data.entity_id.clone(),
@@ -1762,6 +1859,64 @@ fn handle_burst_particle(payload: serde_json::Value) -> CommandResult {
 }
 
 // ---------------------------------------------------------------------------
+// Shader effect handlers
+// ---------------------------------------------------------------------------
+
+/// Payload for set_custom_shader command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetCustomShaderPayload {
+    entity_id: String,
+    #[serde(flatten)]
+    shader_data: ShaderEffectData,
+}
+
+/// Handle set_custom_shader command.
+fn handle_set_custom_shader(payload: serde_json::Value) -> CommandResult {
+    let data: SetCustomShaderPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_custom_shader payload: {}", e))?;
+
+    let update = ShaderUpdate {
+        entity_id: data.entity_id.clone(),
+        shader_data: data.shader_data,
+    };
+
+    if queue_shader_update_from_bridge(update) {
+        tracing::info!("Queued shader update for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_custom_shader command.
+fn handle_remove_custom_shader(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload
+        .get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let removal = ShaderRemoval {
+        entity_id: entity_id.clone(),
+    };
+
+    if queue_shader_removal_from_bridge(removal) {
+        tracing::info!("Queued shader removal for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle list_shaders command — returns hardcoded shader list.
+fn handle_list_shaders(_payload: serde_json::Value) -> CommandResult {
+    // This is a simple query that doesn't need queuing — return immediately via emit_event
+    // For now, just return Ok(). The query system will handle emitting the result.
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Animation handlers
 // ---------------------------------------------------------------------------
 
@@ -1916,6 +2071,417 @@ fn handle_set_animation_loop(payload: serde_json::Value) -> CommandResult {
 
     if queue_animation_request_from_bridge(request) {
         tracing::info!("Queued set_animation_loop for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_animation_blend_weight command.
+fn handle_set_blend_weight(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+    let clip_name = payload.get("clipName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing clipName")?
+        .to_string();
+    let weight = payload.get("weight")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing weight")? as f32;
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::SetBlendWeight { clip_name, weight: weight.clamp(0.0, 1.0) },
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued set_animation_blend_weight for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_clip_speed command.
+fn handle_set_clip_speed(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+    let clip_name = payload.get("clipName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing clipName")?
+        .to_string();
+    let speed = payload.get("speed")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing speed")? as f32;
+
+    let request = AnimationRequest {
+        entity_id: entity_id.clone(),
+        action: AnimationAction::SetClipSpeed { clip_name, speed: speed.max(0.01) },
+    };
+
+    if queue_animation_request_from_bridge(request) {
+        tracing::info!("Queued set_clip_speed for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle CSG boolean operation commands.
+fn handle_csg(payload: serde_json::Value, operation: CsgOperation) -> CommandResult {
+    let entity_id_a = payload.get("entityIdA")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityIdA")?
+        .to_string();
+    let entity_id_b = payload.get("entityIdB")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityIdB")?
+        .to_string();
+    let delete_sources = payload.get("deleteSources")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let result_name = payload.get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let request = CsgRequest {
+        entity_id_a,
+        entity_id_b,
+        operation,
+        delete_sources,
+        result_name,
+    };
+
+    if queue_csg_from_bridge(request) {
+        tracing::info!("Queued CSG {:?} operation", operation);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for spawn_terrain command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SpawnTerrainPayload {
+    name: Option<String>,
+    position: Option<[f32; 3]>,
+    noise_type: Option<String>,
+    octaves: Option<u32>,
+    frequency: Option<f64>,
+    amplitude: Option<f64>,
+    height_scale: Option<f32>,
+    seed: Option<u32>,
+    resolution: Option<u32>,
+    size: Option<f32>,
+}
+
+fn handle_spawn_terrain(payload: serde_json::Value) -> CommandResult {
+    let data: SpawnTerrainPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid spawn_terrain payload: {}", e))?;
+
+    let mut td = TerrainData::default();
+    if let Some(ref nt) = data.noise_type {
+        td.noise_type = match nt.as_str() {
+            "simplex" => NoiseType::Simplex,
+            "value" => NoiseType::Value,
+            _ => NoiseType::Perlin,
+        };
+    }
+    if let Some(v) = data.octaves {
+        td.octaves = v.clamp(1, 8);
+    }
+    if let Some(v) = data.frequency {
+        td.frequency = v;
+    }
+    if let Some(v) = data.amplitude {
+        td.amplitude = v;
+    }
+    if let Some(v) = data.height_scale {
+        td.height_scale = v;
+    }
+    if let Some(v) = data.seed {
+        td.seed = v;
+    }
+    if let Some(v) = data.resolution {
+        td.resolution = match v {
+            0..=48 => 32,
+            49..=96 => 64,
+            97..=192 => 128,
+            _ => 256,
+        };
+    }
+    if let Some(v) = data.size {
+        td.size = v.max(1.0);
+    }
+
+    let request = TerrainSpawnRequest {
+        name: data.name,
+        position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
+        terrain_data: td,
+    };
+
+    if queue_terrain_spawn_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for update_terrain command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateTerrainPayload {
+    entity_id: String,
+    noise_type: Option<String>,
+    octaves: Option<u32>,
+    frequency: Option<f64>,
+    amplitude: Option<f64>,
+    height_scale: Option<f32>,
+    seed: Option<u32>,
+    resolution: Option<u32>,
+    size: Option<f32>,
+}
+
+fn handle_update_terrain(payload: serde_json::Value) -> CommandResult {
+    let data: UpdateTerrainPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid update_terrain payload: {}", e))?;
+
+    // Build a full TerrainData from partial payload with defaults.
+    // The apply system will merge with existing component data.
+    let mut td = TerrainData::default();
+    if let Some(ref nt) = data.noise_type {
+        td.noise_type = match nt.as_str() {
+            "simplex" => NoiseType::Simplex,
+            "value" => NoiseType::Value,
+            _ => NoiseType::Perlin,
+        };
+    }
+    if let Some(v) = data.octaves {
+        td.octaves = v.clamp(1, 8);
+    }
+    if let Some(v) = data.frequency {
+        td.frequency = v;
+    }
+    if let Some(v) = data.amplitude {
+        td.amplitude = v;
+    }
+    if let Some(v) = data.height_scale {
+        td.height_scale = v;
+    }
+    if let Some(v) = data.seed {
+        td.seed = v;
+    }
+    if let Some(v) = data.resolution {
+        td.resolution = match v {
+            0..=48 => 32,
+            49..=96 => 64,
+            97..=192 => 128,
+            _ => 256,
+        };
+    }
+    if let Some(v) = data.size {
+        td.size = v.max(1.0);
+    }
+
+    let update = TerrainUpdate {
+        entity_id: data.entity_id,
+        terrain_data: td,
+    };
+
+    if queue_terrain_update_from_bridge(update) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for sculpt_terrain command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SculptTerrainPayload {
+    entity_id: String,
+    position: [f32; 2], // x, z in world space
+    radius: f32,
+    strength: f32,
+}
+
+fn handle_sculpt_terrain(payload: serde_json::Value) -> CommandResult {
+    let data: SculptTerrainPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid sculpt_terrain payload: {}", e))?;
+
+    let sculpt = TerrainSculpt {
+        entity_id: data.entity_id,
+        position: data.position,
+        radius: data.radius.max(0.1),
+        strength: data.strength,
+    };
+
+    if queue_terrain_sculpt_from_bridge(sculpt) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for extrude_shape command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtrudeShapePayload {
+    shape: String,
+    radius: f32,
+    length: f32,
+    segments: u32,
+    inner_radius: Option<f32>,
+    star_points: Option<u32>,
+    size: Option<f32>,
+    name: Option<String>,
+    position: Option<[f32; 3]>,
+}
+
+fn handle_extrude_shape(payload: serde_json::Value) -> CommandResult {
+    let data: ExtrudeShapePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid extrude_shape payload: {}", e))?;
+
+    let request = ExtrudeRequest {
+        shape: data.shape,
+        radius: data.radius.max(0.01),
+        length: data.length.max(0.01),
+        segments: data.segments.clamp(3, 64),
+        inner_radius: data.inner_radius.map(|r| r.max(0.01)),
+        star_points: data.star_points.map(|p| p.clamp(3, 16)),
+        size: data.size.map(|s| s.max(0.01)),
+        name: data.name,
+        position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
+    };
+
+    if queue_extrude_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for lathe_shape command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LatheShapePayload {
+    profile: Vec<[f32; 2]>,
+    segments: u32,
+    name: Option<String>,
+    position: Option<[f32; 3]>,
+}
+
+fn handle_lathe_shape(payload: serde_json::Value) -> CommandResult {
+    let data: LatheShapePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid lathe_shape payload: {}", e))?;
+
+    if data.profile.len() < 2 {
+        return Err("Profile must have at least 2 points".to_string());
+    }
+
+    let request = LatheRequest {
+        profile: data.profile,
+        segments: data.segments.clamp(8, 64),
+        name: data.name,
+        position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
+    };
+
+    if queue_lathe_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for array_entity command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArrayEntityPayload {
+    entity_id: String,
+    pattern: String,
+    count_x: Option<u32>,
+    count_y: Option<u32>,
+    count_z: Option<u32>,
+    spacing_x: Option<f32>,
+    spacing_y: Option<f32>,
+    spacing_z: Option<f32>,
+    circle_count: Option<u32>,
+    circle_radius: Option<f32>,
+}
+
+fn handle_array_entity(payload: serde_json::Value) -> CommandResult {
+    let data: ArrayEntityPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid array_entity payload: {}", e))?;
+
+    let request = ArrayRequest {
+        entity_id: data.entity_id,
+        pattern: data.pattern,
+        count_x: data.count_x.map(|c| c.clamp(1, 20)),
+        count_y: data.count_y.map(|c| c.clamp(1, 20)),
+        count_z: data.count_z.map(|c| c.clamp(1, 20)),
+        spacing_x: data.spacing_x,
+        spacing_y: data.spacing_y,
+        spacing_z: data.spacing_z,
+        circle_count: data.circle_count.map(|c| c.clamp(2, 32)),
+        circle_radius: data.circle_radius,
+    };
+
+    if queue_array_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for combine_meshes command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CombineMeshesPayload {
+    entity_ids: Vec<String>,
+    delete_sources: bool,
+    name: Option<String>,
+}
+
+fn handle_combine_meshes(payload: serde_json::Value) -> CommandResult {
+    let data: CombineMeshesPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid combine_meshes payload: {}", e))?;
+
+    if data.entity_ids.len() < 2 {
+        return Err("Must provide at least 2 entities to combine".to_string());
+    }
+
+    let request = CombineRequest {
+        entity_ids: data.entity_ids,
+        delete_sources: data.delete_sources,
+        name: data.name,
+    };
+
+    if queue_combine_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_quality_preset command.
+/// Payload: { preset: "low" | "medium" | "high" | "ultra" }
+fn handle_set_quality_preset(payload: serde_json::Value) -> CommandResult {
+    let preset = payload.get("preset")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing preset")?
+        .to_string();
+
+    // Validate preset name
+    if !matches!(preset.as_str(), "low" | "medium" | "high" | "ultra") {
+        return Err(format!("Invalid quality preset: {}. Must be low, medium, high, or ultra", preset));
+    }
+
+    if queue_quality_preset_from_bridge(QualityPresetRequest { preset }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

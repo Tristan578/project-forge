@@ -1,6 +1,6 @@
 'use client';
 
-import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal } from 'lucide-react';
+import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -38,6 +38,7 @@ export function Sidebar() {
   const deleteSelectedEntities = useEditorStore((s) => s.deleteSelectedEntities);
   const duplicateSelectedEntity = useEditorStore((s) => s.duplicateSelectedEntity);
   const primaryId = useEditorStore((s) => s.primaryId);
+  const selectedIds = useEditorStore((s) => s.selectedIds);
   const undo = useEditorStore((s) => s.undo);
   const redo = useEditorStore((s) => s.redo);
   const toggleGrid = useEditorStore((s) => s.toggleGrid);
@@ -52,6 +53,10 @@ export function Sidebar() {
   const toggleMixerPanel = useEditorStore((s) => s.toggleMixerPanel);
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
+  const csgUnion = useEditorStore((s) => s.csgUnion);
+  const csgSubtract = useEditorStore((s) => s.csgSubtract);
+  const csgIntersect = useEditorStore((s) => s.csgIntersect);
+  const combineMeshes = useEditorStore((s) => s.combineMeshes);
 
   // Keyboard shortcuts for gizmo modes, delete, duplicate, undo, and redo
   useEffect(() => {
@@ -163,6 +168,12 @@ export function Sidebar() {
     spawnEntity(type);
   };
 
+  // Check if exactly 2 entities are selected for CSG operations
+  const selectedArray = Array.from(selectedIds);
+  const showCsgButtons = selectedArray.length === 2;
+  // Show Combine button when 2 or more entities are selected
+  const showCombineButton = selectedArray.length >= 2;
+
   return (
     <aside className="flex h-full w-14 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-3">
       {/* Add Entity Menu */}
@@ -217,6 +228,40 @@ export function Sidebar() {
         onClick={toggleGrid}
         title="Toggle Grid (G)"
       />
+
+      {/* CSG Boolean Operations (only visible when 2 entities selected) */}
+      {showCsgButtons && (
+        <>
+          <div className="my-2 h-px w-8 bg-zinc-800" />
+          <ToolButton
+            icon={<Plus size={20} />}
+            onClick={() => csgUnion(selectedArray[0], selectedArray[1])}
+            title="CSG Union"
+          />
+          <ToolButton
+            icon={<Minus size={20} />}
+            onClick={() => csgSubtract(selectedArray[0], selectedArray[1])}
+            title="CSG Subtract (A - B)"
+          />
+          <ToolButton
+            icon={<CircleDot size={20} />}
+            onClick={() => csgIntersect(selectedArray[0], selectedArray[1])}
+            title="CSG Intersect"
+          />
+        </>
+      )}
+
+      {/* Combine Meshes (only visible when 2+ entities selected) */}
+      {showCombineButton && (
+        <>
+          <div className="my-2 h-px w-8 bg-zinc-800" />
+          <ToolButton
+            icon={<Merge size={20} />}
+            onClick={() => combineMeshes(selectedArray)}
+            title="Combine Meshes"
+          />
+        </>
+      )}
 
       {/* Spacer to push bottom tools */}
       <div className="flex-1" />

@@ -1,4 +1,4 @@
-import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState } from '@/stores/editorStore';
+import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState, ShaderEffectData } from '@/stores/editorStore';
 
 
 interface EditorSnapshot {
@@ -7,6 +7,7 @@ interface EditorSnapshot {
   primaryId: string | null;
   primaryTransform: TransformData | null;
   primaryMaterial: MaterialData | null;
+  primaryShaderEffect?: ShaderEffectData | null;
   primaryLight: LightData | null;
   primaryPhysics?: PhysicsData | null;
   physicsEnabled?: boolean;
@@ -28,6 +29,7 @@ interface EditorSnapshot {
   primaryAnimation?: AnimationPlaybackState | null;
   postProcessing?: PostProcessingData;
   audioBuses?: AudioBusDef[];
+  terrainData?: Record<string, import('@/stores/editorStore').TerrainDataState>;
 }
 
 function formatVec3(v: [number, number, number]): string {
@@ -39,15 +41,17 @@ function formatColor(c: [number, number, number] | [number, number, number, numb
 }
 
 function describeEntity(node: SceneNode, graph: SceneGraph, indent: string = ''): string {
-  const entityType = node.components.includes('Mesh3d')
-    ? 'mesh'
-    : node.components.includes('PointLight')
-      ? 'point_light'
-      : node.components.includes('DirectionalLight')
-        ? 'directional_light'
-        : node.components.includes('SpotLight')
-          ? 'spot_light'
-          : 'entity';
+  const entityType = node.components.includes('TerrainEnabled')
+    ? 'terrain'
+    : node.components.includes('Mesh3d')
+      ? 'mesh'
+      : node.components.includes('PointLight')
+        ? 'point_light'
+        : node.components.includes('DirectionalLight')
+          ? 'directional_light'
+          : node.components.includes('SpotLight')
+            ? 'spot_light'
+            : 'entity';
 
   let line = `${indent}- "${node.name}" (${entityType}, id: ${node.entityId})`;
   if (!node.visible) line += ' [hidden]';
@@ -59,9 +63,11 @@ function describeEntityDetailed(
   graph: SceneGraph,
   transform: TransformData | null,
   material: MaterialData | null,
+  shader: ShaderEffectData | null | undefined,
   light: LightData | null,
   physics?: PhysicsData | null,
-  physicsEnabled?: boolean
+  physicsEnabled?: boolean,
+  terrain?: import('@/stores/editorStore').TerrainDataState | null
 ): string {
   const lines: string[] = [];
   lines.push(`  Entity: "${node.name}" (id: ${node.entityId})`);
@@ -78,6 +84,13 @@ function describeEntityDetailed(
   if (material) {
     lines.push(`  Material: color=${formatColor(material.baseColor)}, metallic=${material.metallic}, roughness=${material.perceptualRoughness}`);
     if (material.unlit) lines.push(`  Material mode: unlit`);
+    if (material.clearcoat && material.clearcoat > 0) lines.push(`  Clearcoat: ${material.clearcoat}`);
+    if (material.specularTransmission && material.specularTransmission > 0) lines.push(`  Transmission: specular=${material.specularTransmission}, ior=${material.ior ?? 1.5}`);
+    if (material.diffuseTransmission && material.diffuseTransmission > 0) lines.push(`  Diffuse transmission: ${material.diffuseTransmission}`);
+  }
+
+  if (shader && shader.shaderType !== 'none') {
+    lines.push(`  Custom shader: ${shader.shaderType}, emission=${shader.emissionStrength.toFixed(1)}`);
   }
 
   if (light) {
@@ -91,6 +104,11 @@ function describeEntityDetailed(
     if (physics.isSensor) lines.push(`  Sensor: true`);
   } else if (physicsEnabled) {
     lines.push(`  Physics: enabled (default settings)`);
+  }
+
+  if (terrain) {
+    lines.push(`  Terrain: ${terrain.noiseType} noise, resolution=${terrain.resolution}x${terrain.resolution}, size=${terrain.size}`);
+    lines.push(`  Noise params: octaves=${terrain.octaves}, frequency=${terrain.frequency}, amplitude=${terrain.amplitude}, height=${terrain.heightScale}, seed=${terrain.seed}`);
   }
 
   if (node.children.length > 0) {
@@ -155,8 +173,9 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Selected entity detail
   if (primaryId && sceneGraph.nodes[primaryId]) {
+    const terrainData = state.terrainData && primaryId ? state.terrainData[primaryId] : null;
     sections.push('\n## Selected Entity');
-    sections.push(describeEntityDetailed(sceneGraph.nodes[primaryId], sceneGraph, primaryTransform, primaryMaterial, primaryLight, state.primaryPhysics, state.physicsEnabled));
+    sections.push(describeEntityDetailed(sceneGraph.nodes[primaryId], sceneGraph, primaryTransform, primaryMaterial, state.primaryShaderEffect, primaryLight, state.primaryPhysics, state.physicsEnabled, terrainData));
   } else if (selectedIds.size > 0) {
     const names = [...selectedIds]
       .map((id) => sceneGraph.nodes[id]?.name)
@@ -258,6 +277,9 @@ export function buildSceneContext(state: EditorSnapshot): string {
     if (state.canRedo) historyParts.push(`can redo: "${state.redoDescription}"`);
     sections.push(`\n## History\n${historyParts.join(', ')}`);
   }
+
+  // Entity reference hint
+  sections.push('\n## Entity References\nUsers may reference entities with @EntityName format. When mentioned, entity IDs are provided in brackets at the end of the message. Use the provided entity IDs for commands.');
 
   return sections.join('\n');
 }

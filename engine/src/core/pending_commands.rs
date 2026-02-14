@@ -16,6 +16,8 @@ use super::material::MaterialData;
 use super::particles::ParticleData;
 use super::physics::PhysicsData;
 use super::post_processing::{BloomSettings, ChromaticAberrationSettings, ColorGradingSettings, SharpeningSettings};
+use super::shader_effects::ShaderEffectData;
+use super::terrain::TerrainData;
 
 /// A query request type for MCP resource reads.
 #[derive(Debug, Clone)]
@@ -36,6 +38,10 @@ pub enum QueryRequest {
     AudioBuses,
     ParticleState { entity_id: String },
     AnimationState { entity_id: String },
+    AnimationGraph { entity_id: String },
+    ShaderData { entity_id: String },
+    TerrainState { entity_id: String },
+    QualitySettings,
 }
 
 /// A pending glTF import request.
@@ -227,6 +233,99 @@ pub struct AnimationRequest {
     pub action: AnimationAction,
 }
 
+/// A pending shader update request.
+#[derive(Debug, Clone)]
+pub struct ShaderUpdate {
+    pub entity_id: String,
+    pub shader_data: ShaderEffectData,
+}
+
+/// A pending shader removal request (sets shader_type to "none").
+#[derive(Debug, Clone)]
+pub struct ShaderRemoval {
+    pub entity_id: String,
+}
+
+/// A pending CSG boolean operation request.
+#[derive(Debug, Clone)]
+pub struct CsgRequest {
+    pub entity_id_a: String,
+    pub entity_id_b: String,
+    pub operation: super::csg::CsgOperation,
+    pub delete_sources: bool,
+    pub result_name: Option<String>,
+}
+
+/// A pending terrain spawn request.
+#[derive(Debug, Clone)]
+pub struct TerrainSpawnRequest {
+    pub name: Option<String>,
+    pub position: Option<bevy::math::Vec3>,
+    pub terrain_data: TerrainData,
+}
+
+/// A pending terrain update request (modify noise params -> regenerate mesh).
+#[derive(Debug, Clone)]
+pub struct TerrainUpdate {
+    pub entity_id: String,
+    pub terrain_data: TerrainData,
+}
+
+/// A pending terrain sculpt request (modify heightmap at position+radius).
+#[derive(Debug, Clone)]
+pub struct TerrainSculpt {
+    pub entity_id: String,
+    pub position: [f32; 2], // x, z in terrain local space
+    pub radius: f32,
+    pub strength: f32,
+}
+
+/// A pending extrude request.
+#[derive(Debug, Clone)]
+pub struct ExtrudeRequest {
+    pub shape: String, // circle, square, hexagon, star
+    pub radius: f32,
+    pub length: f32,
+    pub segments: u32,
+    pub inner_radius: Option<f32>,
+    pub star_points: Option<u32>,
+    pub size: Option<f32>,
+    pub name: Option<String>,
+    pub position: Option<bevy::math::Vec3>,
+}
+
+/// A pending lathe request.
+#[derive(Debug, Clone)]
+pub struct LatheRequest {
+    pub profile: Vec<[f32; 2]>,
+    pub segments: u32,
+    pub name: Option<String>,
+    pub position: Option<bevy::math::Vec3>,
+}
+
+/// A pending array request.
+#[derive(Debug, Clone)]
+pub struct ArrayRequest {
+    pub entity_id: String,
+    pub pattern: String, // grid or circle
+    pub count_x: Option<u32>,
+    pub count_y: Option<u32>,
+    pub count_z: Option<u32>,
+    pub spacing_x: Option<f32>,
+    pub spacing_y: Option<f32>,
+    pub spacing_z: Option<f32>,
+    pub circle_count: Option<u32>,
+    pub circle_radius: Option<f32>,
+}
+
+/// A pending combine request.
+#[derive(Debug, Clone)]
+pub struct CombineRequest {
+    pub entity_ids: Vec<String>,
+    pub delete_sources: bool,
+    pub name: Option<String>,
+}
+
 /// The specific animation action to perform.
 #[derive(Debug, Clone)]
 pub enum AnimationAction {
@@ -247,6 +346,16 @@ pub enum AnimationAction {
     SetSpeed { speed: f32 },
     /// Set loop mode.
     SetLoop { looping: bool },
+    /// Set blend weight for a specific clip (0.0-1.0).
+    SetBlendWeight { clip_name: String, weight: f32 },
+    /// Set playback speed for a specific clip.
+    SetClipSpeed { clip_name: String, speed: f32 },
+}
+
+/// A quality preset change request.
+#[derive(Debug, Clone)]
+pub struct QualityPresetRequest {
+    pub preset: String,
 }
 
 /// A pending force/impulse application (Play mode only).
@@ -325,6 +434,17 @@ pub struct PendingCommands {
     pub particle_preset_requests: Vec<ParticlePresetRequest>,
     pub particle_playback: Vec<ParticlePlayback>,
     pub animation_requests: Vec<AnimationRequest>,
+    pub shader_updates: Vec<ShaderUpdate>,
+    pub shader_removals: Vec<ShaderRemoval>,
+    pub csg_requests: Vec<CsgRequest>,
+    pub terrain_spawn_requests: Vec<TerrainSpawnRequest>,
+    pub terrain_updates: Vec<TerrainUpdate>,
+    pub terrain_sculpts: Vec<TerrainSculpt>,
+    pub extrude_requests: Vec<ExtrudeRequest>,
+    pub lathe_requests: Vec<LatheRequest>,
+    pub array_requests: Vec<ArrayRequest>,
+    pub combine_requests: Vec<CombineRequest>,
+    pub quality_preset_requests: Vec<QualityPresetRequest>,
 }
 
 /// A pending selection request from the hierarchy panel.
@@ -418,6 +538,9 @@ pub enum EntityType {
     Cone,
     Torus,
     Capsule,
+    CsgResult,
+    Terrain,
+    ProceduralMesh,
     PointLight,
     DirectionalLight,
     SpotLight,
@@ -436,6 +559,9 @@ impl EntityType {
             "cone" => Some(EntityType::Cone),
             "torus" => Some(EntityType::Torus),
             "capsule" => Some(EntityType::Capsule),
+            "csg_result" => Some(EntityType::CsgResult),
+            "terrain" => Some(EntityType::Terrain),
+            "procedural_mesh" => Some(EntityType::ProceduralMesh),
             "point_light" => Some(EntityType::PointLight),
             "directional_light" => Some(EntityType::DirectionalLight),
             "spot_light" => Some(EntityType::SpotLight),
@@ -455,6 +581,9 @@ impl EntityType {
             EntityType::Cone => "Cone",
             EntityType::Torus => "Torus",
             EntityType::Capsule => "Capsule",
+            EntityType::CsgResult => "CSG Result",
+            EntityType::Terrain => "Terrain",
+            EntityType::ProceduralMesh => "Procedural Mesh",
             EntityType::PointLight => "Point Light",
             EntityType::DirectionalLight => "Directional Light",
             EntityType::SpotLight => "Spot Light",
@@ -753,6 +882,61 @@ impl PendingCommands {
     /// Queue an animation request.
     pub fn queue_animation_request(&mut self, request: AnimationRequest) {
         self.animation_requests.push(request);
+    }
+
+    /// Queue a shader update.
+    pub fn queue_shader_update(&mut self, update: ShaderUpdate) {
+        self.shader_updates.push(update);
+    }
+
+    /// Queue a shader removal.
+    pub fn queue_shader_removal(&mut self, removal: ShaderRemoval) {
+        self.shader_removals.push(removal);
+    }
+
+    /// Queue a CSG request.
+    pub fn queue_csg(&mut self, request: CsgRequest) {
+        self.csg_requests.push(request);
+    }
+
+    /// Queue a terrain spawn request.
+    pub fn queue_terrain_spawn(&mut self, request: TerrainSpawnRequest) {
+        self.terrain_spawn_requests.push(request);
+    }
+
+    /// Queue a terrain update.
+    pub fn queue_terrain_update(&mut self, update: TerrainUpdate) {
+        self.terrain_updates.push(update);
+    }
+
+    /// Queue a terrain sculpt.
+    pub fn queue_terrain_sculpt(&mut self, sculpt: TerrainSculpt) {
+        self.terrain_sculpts.push(sculpt);
+    }
+
+    /// Queue an extrude request.
+    pub fn queue_extrude(&mut self, request: ExtrudeRequest) {
+        self.extrude_requests.push(request);
+    }
+
+    /// Queue a lathe request.
+    pub fn queue_lathe(&mut self, request: LatheRequest) {
+        self.lathe_requests.push(request);
+    }
+
+    /// Queue an array request.
+    pub fn queue_array(&mut self, request: ArrayRequest) {
+        self.array_requests.push(request);
+    }
+
+    /// Queue a combine request.
+    pub fn queue_combine(&mut self, request: CombineRequest) {
+        self.combine_requests.push(request);
+    }
+
+    /// Queue a quality preset request.
+    pub fn queue_quality_preset(&mut self, request: QualityPresetRequest) {
+        self.quality_preset_requests.push(request);
     }
 }
 
@@ -1470,6 +1654,160 @@ pub fn queue_animation_request_from_bridge(request: AnimationRequest) -> bool {
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_animation_request(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a shader update from the bridge layer.
+pub fn queue_shader_update_from_bridge(update: ShaderUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_shader_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a shader removal from the bridge layer.
+pub fn queue_shader_removal_from_bridge(removal: ShaderRemoval) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_shader_removal(removal);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a CSG request from the bridge layer.
+pub fn queue_csg_from_bridge(request: CsgRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_csg(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a terrain spawn request from the bridge layer.
+pub fn queue_terrain_spawn_from_bridge(request: TerrainSpawnRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_terrain_spawn(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a terrain update from the bridge layer.
+pub fn queue_terrain_update_from_bridge(update: TerrainUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_terrain_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a terrain sculpt from the bridge layer.
+pub fn queue_terrain_sculpt_from_bridge(sculpt: TerrainSculpt) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_terrain_sculpt(sculpt);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an extrude request from the bridge layer.
+pub fn queue_extrude_from_bridge(request: ExtrudeRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_extrude(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a lathe request from the bridge layer.
+pub fn queue_lathe_from_bridge(request: LatheRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_lathe(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an array request from the bridge layer.
+pub fn queue_array_from_bridge(request: ArrayRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_array(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a combine request from the bridge layer.
+pub fn queue_combine_from_bridge(request: CombineRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_combine(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a quality preset request from the bridge layer.
+pub fn queue_quality_preset_from_bridge(request: QualityPresetRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_quality_preset(request);
             }
             true
         } else {

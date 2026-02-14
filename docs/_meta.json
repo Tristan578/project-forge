@@ -1,0 +1,157 @@
+{
+  "topics": {
+    "getting-started/installation": {
+      "title": "Installation & Setup",
+      "tags": ["install", "setup", "prerequisites", "build", "wasm", "node", "rust"],
+      "related": ["getting-started/first-scene", "getting-started/editor-overview"]
+    },
+    "getting-started/first-scene": {
+      "title": "Your First Scene",
+      "tags": ["tutorial", "beginner", "scene", "spawn", "select", "move", "material", "light", "save"],
+      "related": ["getting-started/editor-overview", "features/scene-management", "features/transforms"]
+    },
+    "getting-started/editor-overview": {
+      "title": "Editor Overview",
+      "tags": ["editor", "ui", "panel", "sidebar", "hierarchy", "inspector", "viewport", "toolbar", "shortcut", "keyboard"],
+      "related": ["getting-started/first-scene", "features/scene-management", "features/transforms"]
+    },
+    "features/scene-management": {
+      "title": "Scene Management",
+      "tags": ["entity", "spawn", "delete", "duplicate", "rename", "hierarchy", "reparent", "visibility", "select", "search"],
+      "related": ["features/transforms", "features/materials", "features/save-load"],
+      "commands": ["spawn_entity", "despawn_entity", "delete_entities", "duplicate_entity", "rename_entity", "reparent_entity", "set_visibility", "select_entity", "get_scene_graph", "get_entity_info", "get_selection"]
+    },
+    "features/transforms": {
+      "title": "Transforms",
+      "tags": ["transform", "position", "rotation", "scale", "move", "gizmo", "snap", "grid", "coordinate", "local", "world"],
+      "related": ["features/scene-management", "features/physics", "features/input-system"],
+      "commands": ["update_transform", "set_snap_settings", "set_gizmo_mode", "set_coordinate_mode"]
+    },
+    "features/materials": {
+      "title": "Materials",
+      "tags": ["material", "pbr", "color", "metallic", "roughness", "emissive", "texture", "alpha", "uv", "clearcoat", "transmission", "ior", "preset", "parallax"],
+      "related": ["features/custom-shaders", "features/post-processing", "features/asset-pipeline", "features/lighting"],
+      "commands": ["update_material", "set_material_preset", "update_material_extended", "set_material_texture"]
+    },
+    "features/lighting": {
+      "title": "Lighting",
+      "tags": ["light", "point light", "directional light", "spot light", "ambient", "shadow", "fog", "environment", "sun", "illumination"],
+      "related": ["features/materials", "features/post-processing", "features/scene-management"],
+      "commands": ["update_light", "set_ambient_light", "set_environment"]
+    },
+    "features/physics": {
+      "title": "Physics",
+      "tags": ["physics", "rigid body", "collider", "rapier", "gravity", "force", "impulse", "velocity", "friction", "restitution", "bounce", "dynamic", "static", "kinematic", "sensor", "collision"],
+      "related": ["features/scripting", "features/input-system", "guides/build-platformer"],
+      "commands": ["set_physics", "remove_physics", "set_physics_force", "get_physics", "set_gravity", "set_debug_physics"]
+    },
+    "features/audio": {
+      "title": "Audio",
+      "tags": ["audio", "sound", "music", "volume", "pitch", "loop", "spatial", "3d audio", "bus", "mixer", "reverb", "delay", "crossfade", "one-shot", "fade"],
+      "related": ["features/scripting", "features/asset-pipeline", "features/export"],
+      "commands": ["set_audio", "remove_audio", "play_audio", "stop_audio", "pause_audio", "set_audio_bus", "set_audio_bus_effects", "audio_add_layer", "audio_remove_layer", "audio_crossfade", "audio_play_one_shot", "audio_fade_in", "audio_fade_out"]
+    },
+    "features/scripting": {
+      "title": "Scripting",
+      "tags": ["script", "typescript", "code", "logic", "game logic", "forge api", "web worker", "template", "onUpdate", "onStart"],
+      "related": ["features/input-system", "features/physics", "features/audio", "features/particles", "reference/script-api"],
+      "commands": ["set_script", "remove_script", "get_script", "set_script_enabled", "set_script_template"]
+    },
+    "features/particles": {
+      "title": "Particles",
+      "tags": ["particle", "effect", "fire", "smoke", "sparks", "rain", "snow", "explosion", "magic", "dust", "trail", "gpu", "emission", "burst"],
+      "related": ["features/custom-shaders", "features/post-processing", "features/scripting"],
+      "commands": ["set_particle_preset", "set_particle_enabled", "update_particle", "particle_play", "particle_stop", "particle_burst", "get_particle", "remove_particle"]
+    },
+    "features/animation": {
+      "title": "Animation",
+      "tags": ["animation", "skeletal", "gltf", "clip", "crossfade", "blend", "weight", "speed", "loop", "play", "pause", "stop"],
+      "related": ["features/asset-pipeline", "features/scripting"],
+      "commands": ["play_animation", "pause_animation", "stop_animation", "set_animation_speed", "set_animation_loop", "set_animation_blend_weight", "set_clip_speed", "crossfade_animation"]
+    },
+    "features/terrain": {
+      "title": "Procedural Terrain",
+      "tags": ["terrain", "heightmap", "noise", "perlin", "simplex", "sculpt", "landscape", "procedural", "vertex color"],
+      "related": ["features/materials", "features/physics", "features/scene-management"],
+      "commands": ["spawn_terrain", "update_terrain", "sculpt_terrain", "get_terrain_data"]
+    },
+    "features/procedural-mesh": {
+      "title": "Procedural Mesh Generation",
+      "tags": ["procedural", "mesh", "extrude", "lathe", "array", "combine", "pattern", "grid", "circle"],
+      "related": ["features/csg-booleans", "features/materials", "features/scene-management"],
+      "commands": ["extrude_shape", "lathe_shape", "array_entity", "combine_meshes"]
+    },
+    "features/csg-booleans": {
+      "title": "CSG Boolean Operations",
+      "tags": ["csg", "boolean", "union", "subtract", "intersect", "constructive solid geometry", "mesh combine"],
+      "related": ["features/procedural-mesh", "features/scene-management", "features/materials"],
+      "commands": ["csg_union", "csg_subtract", "csg_intersect"]
+    },
+    "features/custom-shaders": {
+      "title": "Custom Shaders",
+      "tags": ["shader", "dissolve", "hologram", "force field", "lava", "toon", "fresnel", "glow", "effect", "visual"],
+      "related": ["features/materials", "features/post-processing", "features/particles"],
+      "commands": ["set_shader_effect", "remove_shader_effect", "get_shader_effect"]
+    },
+    "features/post-processing": {
+      "title": "Post-Processing",
+      "tags": ["post-processing", "bloom", "chromatic aberration", "color grading", "sharpening", "screen effect", "exposure", "saturation"],
+      "related": ["features/lighting", "features/materials", "features/custom-shaders"],
+      "commands": ["set_post_processing", "get_post_processing"]
+    },
+    "features/input-system": {
+      "title": "Input System",
+      "tags": ["input", "keyboard", "key binding", "action", "preset", "fps", "platformer", "top-down", "racing", "rebind"],
+      "related": ["features/scripting", "features/physics"],
+      "commands": ["set_input_preset", "set_input_binding", "add_input_action", "remove_input_action", "get_input_bindings"]
+    },
+    "features/asset-pipeline": {
+      "title": "Asset Pipeline",
+      "tags": ["asset", "import", "gltf", "glb", "texture", "image", "audio", "drag and drop", "model", "3d model"],
+      "related": ["features/materials", "features/animation", "features/audio", "features/export"],
+      "commands": ["import_gltf", "import_texture", "import_audio", "list_assets", "delete_asset"]
+    },
+    "features/save-load": {
+      "title": "Save & Load",
+      "tags": ["save", "load", "file", "forge format", "json", "auto-save", "cloud", "localstorage", "new scene"],
+      "related": ["features/export", "features/scene-management"],
+      "commands": ["save_scene", "load_scene", "new_scene", "export_scene_data"]
+    },
+    "features/export": {
+      "title": "Export",
+      "tags": ["export", "html", "standalone", "game", "runtime", "package", "publish", "build"],
+      "related": ["features/save-load", "features/scripting", "features/physics", "features/audio"],
+      "commands": ["export_game", "get_export_status"]
+    },
+    "guides/build-fps-game": {
+      "title": "Build an FPS Game",
+      "tags": ["tutorial", "fps", "first person", "shooter", "game", "walkthrough"],
+      "related": ["features/physics", "features/scripting", "features/input-system", "features/export"]
+    },
+    "guides/build-platformer": {
+      "title": "Build a Platformer",
+      "tags": ["tutorial", "platformer", "side-scroller", "jump", "game", "walkthrough"],
+      "related": ["features/physics", "features/scripting", "features/particles", "features/audio"]
+    },
+    "guides/ai-workflow": {
+      "title": "AI Workflow",
+      "tags": ["ai", "mcp", "claude", "natural language", "automation", "tool", "workflow"],
+      "related": ["features/scene-management", "features/scripting", "reference/commands"]
+    },
+    "reference/commands": {
+      "title": "Command Reference",
+      "tags": ["reference", "command", "mcp", "tool", "api", "parameter", "json"],
+      "related": ["guides/ai-workflow"]
+    },
+    "reference/script-api": {
+      "title": "Script API Reference",
+      "tags": ["reference", "api", "forge", "typescript", "function", "namespace"],
+      "related": ["features/scripting"]
+    },
+    "reference/entity-types": {
+      "title": "Entity Types",
+      "tags": ["reference", "entity", "type", "component", "mesh", "light", "primitive"],
+      "related": ["features/scene-management", "features/materials", "features/lighting"]
+    }
+  }
+}

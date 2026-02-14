@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, memo } from 'react';
 import { useEditorStore, type AudioBusDef, type AudioEffectDef } from '@/stores/editorStore';
 import { SlidersHorizontal, X, Plus } from 'lucide-react';
 
@@ -293,7 +293,7 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
   );
 }
 
-export function AudioMixerPanel() {
+export const AudioMixerPanel = memo(function AudioMixerPanel() {
   const audioBuses = useEditorStore((s) => s.audioBuses);
   const updateAudioBus = useEditorStore((s) => s.updateAudioBus);
   const setBusEffects = useEditorStore((s) => s.setBusEffects);
@@ -393,4 +393,4 @@ export function AudioMixerPanel() {
       </div>
     </div>
   );
-}
+});

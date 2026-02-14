@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
-import { Plus, Box, Circle, Square, Cylinder, Triangle, Donut, Pill, Lightbulb, Sun, Flashlight } from 'lucide-react';
+import { Plus, Box, Circle, Square, Cylinder, Triangle, Donut, Pill, Lightbulb, Sun, Flashlight, Mountain, RotateCcw } from 'lucide-react';
+import { useEditorStore } from '@/stores/editorStore';
 
-export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'point_light' | 'directional_light' | 'spot_light';
+export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'terrain' | 'point_light' | 'directional_light' | 'spot_light';
 
 interface AddEntityMenuProps {
   onSpawn: (type: EntityType) => void;
@@ -25,6 +26,10 @@ const meshItems: MenuItem[] = [
   { type: 'capsule', label: 'Capsule', icon: <Pill size={16} /> },
 ];
 
+const environmentItems: MenuItem[] = [
+  { type: 'terrain', label: 'Terrain', icon: <Mountain size={16} /> },
+];
+
 const lightItems: MenuItem[] = [
   { type: 'point_light', label: 'Point Light', icon: <Lightbulb size={16} /> },
   { type: 'directional_light', label: 'Directional Light', icon: <Sun size={16} /> },
@@ -34,6 +39,8 @@ const lightItems: MenuItem[] = [
 export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const extrudeShape = useEditorStore((s) => s.extrudeShape);
+  const latheShape = useEditorStore((s) => s.latheShape);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -51,6 +58,16 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
 
   const handleSpawn = (type: EntityType) => {
     onSpawn(type);
+    setOpen(false);
+  };
+
+  const handleExtrudeCircle = () => {
+    extrudeShape('circle', { radius: 0.5, length: 2.0, segments: 16 });
+    setOpen(false);
+  };
+
+  const handleLatheProfile = () => {
+    latheShape([[0.5, 0.0], [0.3, 0.5], [0.4, 1.0], [0.0, 1.2]], { segments: 32 });
     setOpen(false);
   };
 
@@ -75,6 +92,46 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
             Meshes
           </div>
           {meshItems.map((item) => (
+            <button
+              key={item.type}
+              onClick={() => handleSpawn(item.type)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+
+          {/* Divider */}
+          <div className="my-1 h-px bg-zinc-700" />
+
+          {/* Procedural */}
+          <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Procedural
+          </div>
+          <button
+            onClick={handleExtrudeCircle}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
+          >
+            <Circle size={16} />
+            Extrude Circle
+          </button>
+          <button
+            onClick={handleLatheProfile}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700"
+          >
+            <RotateCcw size={16} />
+            Lathe Profile
+          </button>
+
+          {/* Divider */}
+          <div className="my-1 h-px bg-zinc-700" />
+
+          {/* Environment */}
+          <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            Environment
+          </div>
+          {environmentItems.map((item) => (
             <button
               key={item.type}
               onClick={() => handleSpawn(item.type)}

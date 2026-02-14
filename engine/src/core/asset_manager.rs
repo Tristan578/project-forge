@@ -4,6 +4,7 @@
 //! imported glTF models and texture images. Pure Rust, no browser deps.
 
 use bevy::prelude::*;
+use bevy::gltf::Gltf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -50,3 +51,13 @@ pub enum AssetSource {
     Url { url: String },
     Generated { provider: String, prompt: String },
 }
+
+/// Wrapper component storing a Handle<Gltf> on an entity.
+/// In Bevy 0.16, Handle<T> no longer implements Component directly.
+#[derive(Component, Clone, Debug)]
+pub struct GltfSourceHandle(pub Handle<Gltf>);
+
+/// Resource mapping asset IDs to loaded GPU texture handles.
+/// Populated by apply_texture_load in bridge, consumed by sync_material_data in core.
+#[derive(Resource, Default)]
+pub struct TextureHandleMap(pub HashMap<String, Handle<Image>>);

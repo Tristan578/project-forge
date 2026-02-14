@@ -10,6 +10,7 @@ use serde::Serialize;
 
 use super::asset_manager::AssetRef;
 use super::audio::AudioData;
+use super::csg::CsgMeshData;
 use super::entity_factory::Undeletable;
 use super::entity_id::{EntityId, EntityName, EntityVisible};
 use super::history::{EntitySnapshot, TransformSnapshot};
@@ -20,6 +21,7 @@ use super::pending_commands::EntityType;
 use super::physics::{PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::Selection;
+use super::shader_effects::ShaderEffectData;
 
 /// The current engine mode.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
@@ -114,6 +116,9 @@ pub fn snapshot_scene(
     script_query: &Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: &Query<(&EntityId, Option<&AudioData>)>,
     particle_query: &Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_query: &Query<(&EntityId, Option<&ShaderEffectData>)>,
+    csg_query: &Query<(&EntityId, Option<&CsgMeshData>)>,
+    procedural_mesh_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
     selection: &Selection,
 ) -> SceneSnapshot {
     let mut entities = Vec::new();
@@ -150,6 +155,21 @@ pub fn snapshot_scene(
             .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
             .unwrap_or((None, false));
 
+        // Look up shader data separately
+        let shader_effect_data = shader_query.iter()
+            .find(|(seid, _)| seid.0 == eid.0)
+            .and_then(|(_, sed)| sed.cloned());
+
+        // Look up csg data separately
+        let csg_mesh_data = csg_query.iter()
+            .find(|(ceid, _)| ceid.0 == eid.0)
+            .and_then(|(_, cmd)| cmd.cloned());
+
+        // Look up procedural mesh data separately
+        let procedural_mesh_data = procedural_mesh_query.iter()
+            .find(|(pmeid, _)| pmeid.0 == eid.0)
+            .and_then(|(_, pmd)| pmd.cloned());
+
         entities.push(EntitySnapshot {
             entity_id: eid.0.clone(),
             entity_type,
@@ -166,6 +186,11 @@ pub fn snapshot_scene(
             audio_data,
             particle_data,
             particle_enabled,
+            shader_effect_data,
+            csg_mesh_data,
+            terrain_data: None,
+            terrain_mesh_data: None,
+            procedural_mesh_data,
         });
     }
 

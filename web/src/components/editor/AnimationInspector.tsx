@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { Play, Pause, Square, RotateCcw } from 'lucide-react';
 
@@ -14,14 +14,17 @@ export function AnimationInspector() {
   const seekAnimation = useEditorStore((s) => s.seekAnimation);
   const setAnimationSpeed = useEditorStore((s) => s.setAnimationSpeed);
   const setAnimationLoop = useEditorStore((s) => s.setAnimationLoop);
+  const setAnimationBlendWeight = useEditorStore((s) => s.setAnimationBlendWeight);
+
+  const [crossfadeDuration, setCrossfadeDuration] = useState(0.3);
 
   const handlePlayClip = useCallback(
     (clipName: string) => {
       if (primaryId) {
-        playAnimation(primaryId, clipName);
+        playAnimation(primaryId, clipName, crossfadeDuration);
       }
     },
-    [primaryId, playAnimation]
+    [primaryId, playAnimation, crossfadeDuration]
   );
 
   const handlePause = useCallback(() => {
@@ -92,6 +95,26 @@ export function AnimationInspector() {
             </option>
           ))}
         </select>
+      </div>
+
+      {/* Crossfade duration */}
+      <div className="mb-3 flex items-center gap-2">
+        <label className="w-20 shrink-0 text-xs text-zinc-400">Crossfade</label>
+        <input
+          type="range"
+          min={0}
+          max={2}
+          step={0.1}
+          value={crossfadeDuration}
+          onChange={(e) => setCrossfadeDuration(parseFloat(e.target.value))}
+          className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+            [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+            [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+            [&::-webkit-slider-thumb]:bg-zinc-300"
+        />
+        <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+          {crossfadeDuration.toFixed(1)}s
+        </span>
       </div>
 
       {/* Transport controls */}
@@ -192,7 +215,7 @@ export function AnimationInspector() {
       </div>
 
       {/* Loop toggle */}
-      <div className="flex items-center gap-2">
+      <div className="mb-3 flex items-center gap-2">
         <label className="w-12 shrink-0 text-xs text-zinc-400">Loop</label>
         <input
           type="checkbox"
@@ -202,6 +225,38 @@ export function AnimationInspector() {
             focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
         />
       </div>
+
+      {/* Per-clip blend weights (advanced) */}
+      {animation.availableClips.length > 1 && (
+        <div className="border-t border-zinc-800 pt-3">
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+            Blend Weights
+          </h4>
+          {animation.availableClips.map((clip) => (
+            <div key={clip.name} className="mb-2 flex items-center gap-2">
+              <label className="w-24 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-zinc-400">
+                {clip.name}
+              </label>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                defaultValue={1.0}
+                onChange={(e) => {
+                  if (primaryId) {
+                    setAnimationBlendWeight(primaryId, clip.name, parseFloat(e.target.value));
+                  }
+                }}
+                className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                  [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                  [&::-webkit-slider-thumb]:bg-zinc-300"
+              />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

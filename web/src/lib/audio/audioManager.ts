@@ -28,6 +28,7 @@ interface BusState {
   soloed: boolean;
   effectiveMuted: boolean;
   effects: EffectInstance[];
+  duckGainNode: GainNode;
 }
 
 interface EffectInstance {
@@ -38,12 +39,24 @@ interface EffectInstance {
   enabled: boolean;
 }
 
+interface DuckingRule {
+  triggerBus: string;
+  targetBus: string;
+  duckLevel: number;
+  attackMs: number;
+  releaseMs: number;
+}
+
 class AudioManager {
   private ctx: AudioContext | null = null;
   private instances: Map<string, AudioInstance> = new Map();
   private buffers: Map<string, AudioBuffer> = new Map();
   private buses: Map<string, BusState> = new Map();
   private irBuffers: Map<number, AudioBuffer> = new Map();
+  private oneShotInstances: Map<string, { source: AudioBufferSourceNode; gainNode: GainNode }> = new Map();
+  private oneShotCount = 0;
+  private duckingRules: DuckingRule[] = [];
+  private activeDuckTriggers: Map<string, number> = new Map();
 
   /**
    * Lazily initialize AudioContext (handles browser autoplay policy).
@@ -87,9 +100,13 @@ class AudioManager {
       const gainNode = this.ctx.createGain();
       gainNode.gain.value = busConfig.volume;
 
-      // Master bus connects to destination, others connect to master
+      const duckGainNode = this.ctx.createGain();
+      duckGainNode.gain.value = 1.0;
+
+      // Master bus: gainNode -> duckGainNode -> destination
+      // Other buses: gainNode -> duckGainNode -> (will connect to master later)
       if (busConfig.name === 'master') {
-        gainNode.connect(this.ctx.destination);
+        gainNode.connect(duckGainNode).connect(this.ctx.destination);
       }
 
       const bus: BusState = {
@@ -100,18 +117,28 @@ class AudioManager {
         soloed: busConfig.soloed,
         effectiveMuted: false,
         effects: [],
+        duckGainNode,
       };
 
       this.buses.set(busConfig.name, bus);
     }
 
-    // Connect non-master buses to master
+    // Connect non-master buses to master via duckGainNode
     const masterBus = this.buses.get('master')!;
     for (const bus of this.buses.values()) {
       if (bus.name !== 'master') {
-        bus.gainNode.connect(masterBus.gainNode);
+        bus.gainNode.connect(bus.duckGainNode).connect(masterBus.gainNode);
       }
     }
+
+    // Add default ducking rule: voice -> music
+    this.addDuckingRule({
+      triggerBus: 'voice',
+      targetBus: 'music',
+      duckLevel: 0.3,
+      attackMs: 200,
+      releaseMs: 500,
+    });
   }
 
   /**
@@ -143,7 +170,8 @@ class AudioManager {
       refDistance: number;
       rolloffFactor: number;
       bus?: string;
-    }
+    },
+    slot?: string
   ): void {
     const ctx = this.ensureContext();
     const buffer = this.buffers.get(assetId);
@@ -153,8 +181,10 @@ class AudioManager {
       return;
     }
 
+    const key = this.instanceKey(entityId, slot);
+
     // Destroy existing instance if any
-    this.destroyInstance(entityId);
+    this.destroyInstance(entityId, slot);
 
     // Create gain node for volume control
     const gainNode = ctx.createGain();
@@ -185,16 +215,21 @@ class AudioManager {
       bus: audioData.bus ?? 'sfx',
     };
 
-    this.instances.set(entityId, instance);
+    this.instances.set(key, instance);
+  }
+
+  private instanceKey(entityId: string, slot?: string): string {
+    return slot ? `${entityId}:${slot}` : entityId;
   }
 
   /**
    * Start playback for an entity.
    */
-  play(entityId: string): void {
-    const instance = this.instances.get(entityId);
+  play(entityId: string, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance) {
-      console.warn(`[AudioManager] Instance ${entityId} not found`);
+      console.warn(`[AudioManager] Instance ${key} not found`);
       return;
     }
 
@@ -232,13 +267,16 @@ class AudioManager {
     instance.isPlaying = true;
     instance.isPaused = false;
     instance.startTime = ctx.currentTime - offset;
+
+    this.checkDuckingOnPlay(busName);
   }
 
   /**
    * Stop playback and reset offset.
    */
-  stop(entityId: string): void {
-    const instance = this.instances.get(entityId);
+  stop(entityId: string, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance) return;
 
     if (instance.source) {
@@ -254,13 +292,16 @@ class AudioManager {
     instance.isPaused = false;
     instance.pauseOffset = 0;
     instance.startTime = 0;
+
+    this.checkDuckingOnStop(instance.bus);
   }
 
   /**
    * Pause playback (records offset for resume).
    */
-  pause(entityId: string): void {
-    const instance = this.instances.get(entityId);
+  pause(entityId: string, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance || !instance.isPlaying) return;
 
     const ctx = this.ensureContext();
@@ -283,18 +324,20 @@ class AudioManager {
   /**
    * Resume playback from paused offset.
    */
-  resume(entityId: string): void {
-    const instance = this.instances.get(entityId);
+  resume(entityId: string, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance || !instance.isPaused) return;
 
-    this.play(entityId);
+    this.play(entityId, slot);
   }
 
   /**
    * Set volume for an entity's audio.
    */
-  setVolume(entityId: string, volume: number): void {
-    const instance = this.instances.get(entityId);
+  setVolume(entityId: string, volume: number, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance) return;
     instance.gainNode.gain.value = Math.max(0, Math.min(1, volume));
   }
@@ -302,8 +345,9 @@ class AudioManager {
   /**
    * Set pitch (playback rate) for an entity's audio.
    */
-  setPitch(entityId: string, rate: number): void {
-    const instance = this.instances.get(entityId);
+  setPitch(entityId: string, rate: number, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance?.source) return;
     instance.source.playbackRate.value = Math.max(0.25, Math.min(4, rate));
   }
@@ -311,8 +355,9 @@ class AudioManager {
   /**
    * Update spatial position for an entity's audio.
    */
-  updatePosition(entityId: string, x: number, y: number, z: number): void {
-    const instance = this.instances.get(entityId);
+  updatePosition(entityId: string, x: number, y: number, z: number, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance?.pannerNode) return;
     instance.pannerNode.positionX.value = x;
     instance.pannerNode.positionY.value = y;
@@ -353,17 +398,23 @@ class AudioManager {
   /**
    * Destroy an audio instance for an entity.
    */
-  destroyInstance(entityId: string): void {
-    const instance = this.instances.get(entityId);
+  destroyInstance(entityId: string, slot?: string): void {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     if (!instance) return;
 
-    this.stop(entityId);
+    this.stop(entityId, slot);
 
     // Disconnect nodes
     instance.gainNode.disconnect();
     instance.pannerNode?.disconnect();
 
-    this.instances.delete(entityId);
+    this.instances.delete(key);
+
+    // If called without slot, also destroy all layers
+    if (!slot) {
+      this.removeAllLayers(entityId);
+    }
   }
 
   /**
@@ -373,14 +424,287 @@ class AudioManager {
     for (const entityId of Array.from(this.instances.keys())) {
       this.destroyInstance(entityId);
     }
+    this.cancelAllOneShots();
   }
 
   /**
    * Check if an entity's audio is currently playing.
    */
-  isPlaying(entityId: string): boolean {
-    const instance = this.instances.get(entityId);
+  isPlaying(entityId: string, slot?: string): boolean {
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
     return instance?.isPlaying ?? false;
+  }
+
+  // --- Audio Layers ---
+  addLayer(entityId: string, slotName: string, assetId: string, options?: {
+    volume?: number; pitch?: number; loop?: boolean; spatial?: boolean; bus?: string;
+  }): void {
+    const ctx = this.ensureContext();
+    const buffer = this.buffers.get(assetId);
+    if (!buffer) {
+      console.warn(`[AudioManager] Buffer ${assetId} not loaded for layer ${slotName}`);
+      return;
+    }
+    // Cap layers per entity at 8
+    const layerCount = Array.from(this.instances.keys()).filter(k => k.startsWith(`${entityId}:`)).length;
+    if (layerCount >= 8) {
+      console.warn(`[AudioManager] Max 8 layers per entity reached for ${entityId}`);
+      return;
+    }
+    const key = this.instanceKey(entityId, slotName);
+    // Destroy existing layer with same name
+    if (this.instances.has(key)) {
+      this.destroyInstance(entityId, slotName);
+    }
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = options?.volume ?? 1.0;
+    let pannerNode: PannerNode | null = null;
+    if (options?.spatial) {
+      pannerNode = ctx.createPanner();
+      pannerNode.distanceModel = 'inverse';
+      pannerNode.refDistance = 1;
+      pannerNode.maxDistance = 50;
+      pannerNode.rolloffFactor = 1;
+      // Copy spatial position from primary instance
+      const primary = this.instances.get(entityId);
+      if (primary?.pannerNode) {
+        pannerNode.positionX.value = primary.pannerNode.positionX.value;
+        pannerNode.positionY.value = primary.pannerNode.positionY.value;
+        pannerNode.positionZ.value = primary.pannerNode.positionZ.value;
+      }
+    }
+    const instance: AudioInstance = {
+      entityId,
+      assetId,
+      source: null,
+      gainNode,
+      pannerNode,
+      isPlaying: false,
+      isPaused: false,
+      startTime: 0,
+      pauseOffset: 0,
+      loop: options?.loop ?? false,
+      bus: options?.bus ?? 'sfx',
+    };
+    this.instances.set(key, instance);
+    // Auto-play the layer
+    this.play(entityId, slotName);
+  }
+
+  removeLayer(entityId: string, slotName: string): void {
+    this.destroyInstance(entityId, slotName);
+  }
+
+  removeAllLayers(entityId: string): void {
+    const layerKeys = Array.from(this.instances.keys()).filter(k => k.startsWith(`${entityId}:`));
+    for (const key of layerKeys) {
+      const parts = key.split(':');
+      this.destroyInstance(entityId, parts.slice(1).join(':'));
+    }
+  }
+
+  getEntitySlots(entityId: string): string[] {
+    const slots: string[] = [];
+    for (const key of this.instances.keys()) {
+      if (key === entityId) {
+        slots.push('');
+      } else if (key.startsWith(`${entityId}:`)) {
+        slots.push(key.substring(entityId.length + 1));
+      }
+    }
+    return slots;
+  }
+
+  crossfade(fromEntityId: string, toEntityId: string, durationMs: number, fromSlot?: string, toSlot?: string): void {
+    if (fromEntityId === toEntityId && fromSlot === toSlot) {
+      console.warn('[AudioManager] Cannot crossfade to same source');
+      return;
+    }
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+    const duration = durationMs / 1000;
+    const fromKey = this.instanceKey(fromEntityId, fromSlot);
+    const toKey = this.instanceKey(toEntityId, toSlot);
+    const fromInstance = this.instances.get(fromKey);
+    const toInstance = this.instances.get(toKey);
+    if (fromInstance) {
+      fromInstance.gainNode.gain.cancelScheduledValues(now);
+      fromInstance.gainNode.gain.setValueAtTime(fromInstance.gainNode.gain.value, now);
+      fromInstance.gainNode.gain.linearRampToValueAtTime(0, now + duration);
+      setTimeout(() => this.stop(fromEntityId, fromSlot), durationMs);
+    }
+    if (toInstance) {
+      const targetVolume = toInstance.gainNode.gain.value || 1.0;
+      toInstance.gainNode.gain.cancelScheduledValues(now);
+      toInstance.gainNode.gain.setValueAtTime(0, now);
+      toInstance.gainNode.gain.linearRampToValueAtTime(targetVolume, now + duration);
+      if (!toInstance.isPlaying) {
+        this.play(toEntityId, toSlot);
+      }
+    }
+  }
+
+  fadeIn(entityId: string, durationMs: number, slot?: string): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
+    if (!instance) return;
+    const targetVolume = instance.gainNode.gain.value || 1.0;
+    instance.gainNode.gain.cancelScheduledValues(now);
+    instance.gainNode.gain.setValueAtTime(0, now);
+    instance.gainNode.gain.linearRampToValueAtTime(targetVolume, now + durationMs / 1000);
+    if (!instance.isPlaying) {
+      this.play(entityId, slot);
+    }
+  }
+
+  fadeOut(entityId: string, durationMs: number, stopAfter: boolean = true, slot?: string): void {
+    const ctx = this.ensureContext();
+    const now = ctx.currentTime;
+    const key = this.instanceKey(entityId, slot);
+    const instance = this.instances.get(key);
+    if (!instance) return;
+    instance.gainNode.gain.cancelScheduledValues(now);
+    instance.gainNode.gain.setValueAtTime(instance.gainNode.gain.value, now);
+    instance.gainNode.gain.linearRampToValueAtTime(0, now + durationMs / 1000);
+    if (stopAfter) {
+      setTimeout(() => this.stop(entityId, slot), durationMs);
+    }
+  }
+
+  playOneShot(assetId: string, options?: {
+    position?: [number, number, number]; bus?: string; volume?: number; pitch?: number;
+  }): string {
+    const ctx = this.ensureContext();
+    const buffer = this.buffers.get(assetId);
+    if (!buffer) {
+      console.warn(`[AudioManager] Buffer ${assetId} not loaded for one-shot`);
+      return '';
+    }
+    // Cap one-shots at 32
+    if (this.oneShotInstances.size >= 32) {
+      const oldest = this.oneShotInstances.keys().next().value;
+      if (oldest) this.cancelOneShot(oldest);
+    }
+    const id = `__oneshot_${++this.oneShotCount}`;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = false;
+    if (options?.pitch) {
+      source.playbackRate.value = Math.max(0.25, Math.min(4, options.pitch));
+    }
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = Math.max(0, Math.min(1, options?.volume ?? 1.0));
+    let pannerNode: PannerNode | null = null;
+    if (options?.position) {
+      pannerNode = ctx.createPanner();
+      pannerNode.distanceModel = 'inverse';
+      pannerNode.refDistance = 1;
+      pannerNode.maxDistance = 50;
+      pannerNode.rolloffFactor = 1;
+      pannerNode.positionX.value = options.position[0];
+      pannerNode.positionY.value = options.position[1];
+      pannerNode.positionZ.value = options.position[2];
+    }
+    const busName = options?.bus ?? 'sfx';
+    const bus = this.buses.get(busName) ?? this.buses.get('sfx')!;
+    if (pannerNode) {
+      source.connect(gainNode).connect(pannerNode).connect(bus.gainNode);
+    } else {
+      source.connect(gainNode).connect(bus.gainNode);
+    }
+    source.onended = () => {
+      source.disconnect();
+      gainNode.disconnect();
+      pannerNode?.disconnect();
+      this.oneShotInstances.delete(id);
+    };
+    source.start();
+    this.oneShotInstances.set(id, { source, gainNode });
+    // Check ducking after one-shot plays
+    this.checkDuckingOnPlay(busName);
+    return id;
+  }
+
+  cancelOneShot(id: string): void {
+    const oneshot = this.oneShotInstances.get(id);
+    if (oneshot) {
+      try { oneshot.source.stop(); } catch { /* already stopped */ }
+      oneshot.source.disconnect();
+      oneshot.gainNode.disconnect();
+      this.oneShotInstances.delete(id);
+    }
+  }
+
+  cancelAllOneShots(): void {
+    for (const id of Array.from(this.oneShotInstances.keys())) {
+      this.cancelOneShot(id);
+    }
+  }
+
+  addDuckingRule(rule: DuckingRule): void {
+    this.duckingRules = this.duckingRules.filter(
+      r => !(r.triggerBus === rule.triggerBus && r.targetBus === rule.targetBus)
+    );
+    this.duckingRules.push(rule);
+  }
+
+  removeDuckingRule(triggerBus: string, targetBus: string): void {
+    this.duckingRules = this.duckingRules.filter(
+      r => !(r.triggerBus === triggerBus && r.targetBus === targetBus)
+    );
+  }
+
+  getDuckingRules(): DuckingRule[] {
+    return [...this.duckingRules];
+  }
+
+  private checkDuckingOnPlay(busName: string): void {
+    const count = (this.activeDuckTriggers.get(busName) ?? 0) + 1;
+    this.activeDuckTriggers.set(busName, count);
+    if (count === 1) {
+      for (const rule of this.duckingRules) {
+        if (rule.triggerBus === busName) {
+          this.applyDuck(rule);
+        }
+      }
+    }
+  }
+
+  private checkDuckingOnStop(busName: string): void {
+    const count = Math.max(0, (this.activeDuckTriggers.get(busName) ?? 0) - 1);
+    this.activeDuckTriggers.set(busName, count);
+    if (count === 0) {
+      for (const rule of this.duckingRules) {
+        if (rule.triggerBus === busName) {
+          this.releaseDuck(rule);
+        }
+      }
+    }
+  }
+
+  private applyDuck(rule: DuckingRule): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const targetBus = this.buses.get(rule.targetBus);
+    if (!targetBus) return;
+    const now = ctx.currentTime;
+    targetBus.duckGainNode.gain.cancelScheduledValues(now);
+    targetBus.duckGainNode.gain.setValueAtTime(targetBus.duckGainNode.gain.value, now);
+    targetBus.duckGainNode.gain.linearRampToValueAtTime(rule.duckLevel, now + rule.attackMs / 1000);
+  }
+
+  private releaseDuck(rule: DuckingRule): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const targetBus = this.buses.get(rule.targetBus);
+    if (!targetBus) return;
+    const now = ctx.currentTime;
+    targetBus.duckGainNode.gain.cancelScheduledValues(now);
+    targetBus.duckGainNode.gain.setValueAtTime(targetBus.duckGainNode.gain.value, now);
+    targetBus.duckGainNode.gain.linearRampToValueAtTime(1.0, now + rule.releaseMs / 1000);
   }
 
   /**
@@ -461,6 +785,9 @@ class AudioManager {
     const gainNode = this.ctx.createGain();
     gainNode.gain.value = volume;
 
+    const duckGainNode = this.ctx.createGain();
+    duckGainNode.gain.value = 1.0;
+
     const bus: BusState = {
       name,
       gainNode,
@@ -469,14 +796,15 @@ class AudioManager {
       soloed: false,
       effectiveMuted: false,
       effects: [],
+      duckGainNode,
     };
 
     this.buses.set(name, bus);
 
-    // Connect to master
+    // Connect to master: gainNode → duckGainNode → masterBus.gainNode
     const masterBus = this.buses.get('master');
     if (masterBus) {
-      gainNode.connect(masterBus.gainNode);
+      gainNode.connect(duckGainNode).connect(masterBus.gainNode);
     }
   }
 
@@ -504,6 +832,7 @@ class AudioManager {
 
     // Disconnect and remove bus
     bus.gainNode.disconnect();
+    bus.duckGainNode.disconnect();
     for (const fx of bus.effects) {
       fx.outputNode.disconnect();
     }
@@ -569,13 +898,14 @@ class AudioManager {
    */
   private disconnectBusChain(bus: BusState): void {
     bus.gainNode.disconnect();
+    bus.duckGainNode.disconnect();
     for (const fx of bus.effects) {
       fx.outputNode.disconnect();
     }
   }
 
   /**
-   * Connect bus -> effects -> master (or destination for master bus).
+   * Connect bus → effects → duckGainNode → master (or destination for master bus).
    */
   private connectBusChain(bus: BusState): void {
     if (!this.ctx) return;
@@ -586,16 +916,16 @@ class AudioManager {
         : this.buses.get('master')!.gainNode;
 
     if (bus.effects.length === 0) {
-      bus.gainNode.connect(target);
+      bus.gainNode.connect(bus.duckGainNode).connect(target);
       return;
     }
 
-    // Chain: busGain -> fx0.input -> fx0.output -> fx1.input -> ... -> target
+    // Chain: busGain → fx0.input → fx0.output → fx1.input → ... → duckGainNode → target
     bus.gainNode.connect(bus.effects[0].inputNode);
     for (let i = 0; i < bus.effects.length - 1; i++) {
       bus.effects[i].outputNode.connect(bus.effects[i + 1].inputNode);
     }
-    bus.effects[bus.effects.length - 1].outputNode.connect(target);
+    bus.effects[bus.effects.length - 1].outputNode.connect(bus.duckGainNode).connect(target);
   }
 
   /**

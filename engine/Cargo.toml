@@ -19,6 +19,7 @@ serde_json = "1.0"
 serde-wasm-bindgen = "0.6"
 console_error_panic_hook = "0.1"
 tracing = "0.1"
+base64 = "0.22"
 
 [dependencies.bevy]
 version = "0.16"
@@ -34,7 +35,7 @@ features = [
     "tonemapping_luts",
     "bevy_picking",
     "bevy_mesh_picking_backend",
-    "bevy_animation",
+    "animation",
     "bevy_gltf",
     "bevy_scene",
 ]
@@ -76,6 +77,15 @@ version = "0.16"
 optional = true
 default-features = false
 features = ["3d"]
+
+[dependencies.csgrs]
+version = "0.20"
+default-features = false
+features = ["f32", "earcut"]
+
+[dependencies.noise]
+version = "0.9"
+default-features = false
 
 [profile.release]
 opt-level = "z"

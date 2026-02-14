@@ -35,7 +35,7 @@ export interface TransformData {
 export type GizmoMode = 'translate' | 'rotate' | 'scale';
 
 // Entity types that can be spawned
-export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'point_light' | 'directional_light' | 'spot_light';
+export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'terrain' | 'point_light' | 'directional_light' | 'spot_light' | 'csg_result' | 'procedural_mesh';
 
 // Snap settings
 export interface SnapSettings {
@@ -56,6 +56,9 @@ export type CoordinateMode = 'world' | 'local';
 
 // Engine mode type
 export type EngineMode = 'edit' | 'play' | 'paused';
+
+// Quality preset type
+export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra' | 'custom';
 
 // Input binding data matching Rust's ActionDef
 export interface InputBinding {
@@ -136,6 +139,29 @@ export interface MaterialData {
   metallicRoughnessTexture?: string | null;
   emissiveTexture?: string | null;
   occlusionTexture?: string | null;
+  // UV Transform (E-1a)
+  uvOffset?: [number, number];
+  uvScale?: [number, number];
+  uvRotation?: number;
+  // Parallax Mapping (E-1b)
+  depthMapTexture?: string | null;
+  parallaxDepthScale?: number;
+  parallaxMappingMethod?: 'occlusion' | 'relief';
+  maxParallaxLayerCount?: number;
+  parallaxReliefMaxSteps?: number;
+  // Clearcoat (E-1c)
+  clearcoat?: number;
+  clearcoatPerceptualRoughness?: number;
+  clearcoatTexture?: string | null;
+  clearcoatRoughnessTexture?: string | null;
+  clearcoatNormalTexture?: string | null;
+  // Transmission (E-1d)
+  specularTransmission?: number;
+  diffuseTransmission?: number;
+  ior?: number;
+  thickness?: number;
+  attenuationDistance?: number | null;
+  attenuationColor?: [number, number, number];
 }
 
 // Asset metadata matching Rust's AssetMetadata struct
@@ -162,6 +188,17 @@ export interface ScriptLogEntry {
   timestamp: number;
 }
 
+// HUD element for in-game UI
+export interface HudElement {
+  id: string;
+  text: string;
+  x: number;
+  y: number;
+  fontSize?: number;
+  color?: string;
+  visible: boolean;
+}
+
 // Audio data matching Rust's AudioData struct
 export interface AudioData {
   assetId: string | null;
@@ -174,6 +211,22 @@ export interface AudioData {
   rolloffFactor: number;
   autoplay: boolean;
   bus: string;
+}
+
+// Shader effect data matching Rust's ShaderEffectData struct
+export interface ShaderEffectData {
+  shaderType: string; // "none" | "dissolve" | "hologram" | "force_field" | "lava_flow" | "toon" | "fresnel_glow"
+  customColor: [number, number, number, number];
+  noiseScale: number;
+  emissionStrength: number;
+  dissolveThreshold: number;
+  dissolveEdgeWidth: number;
+  scanLineFrequency: number;
+  scanLineSpeed: number;
+  scrollSpeed: [number, number];
+  distortionStrength: number;
+  toonBands: number;
+  fresnelPower: number;
 }
 
 // Audio bus definition
@@ -364,6 +417,18 @@ export const DEFAULT_POST_PROCESSING: PostProcessingData = {
   },
 };
 
+// Terrain data matching Rust's TerrainData struct
+export interface TerrainDataState {
+  noiseType: 'perlin' | 'simplex' | 'value';
+  octaves: number;
+  frequency: number;
+  amplitude: number;
+  heightScale: number;
+  seed: number;
+  resolution: number;
+  size: number;
+}
+
 export interface EditorState {
   // Hierarchy filter
   hierarchyFilter: string;
@@ -393,6 +458,7 @@ export interface EditorState {
 
   // Material state
   primaryMaterial: MaterialData | null;
+  primaryShaderEffect: ShaderEffectData | null;
 
   // Light state
   primaryLight: LightData | null;
@@ -438,6 +504,15 @@ export interface EditorState {
 
   // Post-processing state
   postProcessing: PostProcessingData;
+
+  // Quality preset state
+  qualityPreset: QualityPreset;
+
+  // Terrain state
+  terrainData: Record<string, TerrainDataState>;
+
+  // HUD state (for in-game UI during play mode)
+  hudElements: HudElement[];
 
   // Scene file state
   sceneName: string;
@@ -512,6 +587,11 @@ export interface EditorState {
   setPrimaryMaterial: (material: MaterialData) => void;
   updateMaterial: (entityId: string, material: MaterialData) => void;
 
+  // Shader effect actions
+  setPrimaryShaderEffect: (data: ShaderEffectData | null) => void;
+  updateShaderEffect: (entityId: string, data: Partial<ShaderEffectData> & { shaderType: string }) => void;
+  removeShaderEffect: (entityId: string) => void;
+
   // Light actions
   setPrimaryLight: (light: LightData) => void;
   updateLight: (entityId: string, light: LightData) => void;
@@ -571,6 +651,15 @@ export interface EditorState {
   setBusEffects: (busName: string, effects: AudioEffectDef[]) => void;
   toggleMixerPanel: () => void;
 
+  // Audio layering/transition actions (JS-only, no WASM dispatch)
+  crossfadeAudio: (fromEntityId: string, toEntityId: string, durationMs: number) => void;
+  fadeInAudio: (entityId: string, durationMs: number) => void;
+  fadeOutAudio: (entityId: string, durationMs: number) => void;
+  playOneShotAudio: (assetId: string, options?: { position?: [number, number, number]; bus?: string; volume?: number; pitch?: number }) => void;
+  addAudioLayer: (entityId: string, slotName: string, assetId: string, options?: { volume?: number; loop?: boolean; bus?: string }) => void;
+  removeAudioLayer: (entityId: string, slotName: string) => void;
+  setDuckingRule: (rule: { triggerBus: string; targetBus: string; duckLevel?: number; attackMs?: number; releaseMs?: number }) => void;
+
   // Particle actions
   setParticle: (entityId: string, data: Partial<ParticleData>) => void;
   removeParticle: (entityId: string) => void;
@@ -590,6 +679,8 @@ export interface EditorState {
   seekAnimation: (entityId: string, timeSecs: number) => void;
   setAnimationSpeed: (entityId: string, speed: number) => void;
   setAnimationLoop: (entityId: string, looping: boolean) => void;
+  setAnimationBlendWeight: (entityId: string, clipName: string, weight: number) => void;
+  setClipSpeed: (entityId: string, clipName: string, speed: number) => void;
   setEntityAnimation: (entityId: string, state: AnimationPlaybackState | null) => void;
   setPrimaryAnimation: (state: AnimationPlaybackState | null) => void;
 
@@ -623,6 +714,53 @@ export interface EditorState {
   setProjectId: (id: string | null) => void;
   saveToCloud: () => void;
   setCloudSaveStatus: (status: 'idle' | 'saving' | 'saved' | 'error') => void;
+
+  // CSG Boolean operations
+  csgUnion: (entityIdA: string, entityIdB: string, deleteSources?: boolean) => void;
+  csgSubtract: (entityIdA: string, entityIdB: string, deleteSources?: boolean) => void;
+  csgIntersect: (entityIdA: string, entityIdB: string, deleteSources?: boolean) => void;
+
+  // HUD actions
+  setHudElements: (elements: HudElement[]) => void;
+
+  // Procedural mesh operations
+  extrudeShape: (shape: string, params: {
+    radius?: number;
+    length?: number;
+    segments?: number;
+    innerRadius?: number;
+    starPoints?: number;
+    size?: number;
+    name?: string;
+    position?: [number, number, number];
+  }) => void;
+  latheShape: (profile: [number, number][], params: {
+    segments?: number;
+    name?: string;
+    position?: [number, number, number];
+  }) => void;
+  arrayEntity: (entityId: string, params: {
+    pattern: 'grid' | 'circle';
+    countX?: number;
+    countY?: number;
+    countZ?: number;
+    spacingX?: number;
+    spacingY?: number;
+    spacingZ?: number;
+    circleCount?: number;
+    circleRadius?: number;
+  }) => void;
+  combineMeshes: (entityIds: string[], deleteSources?: boolean, name?: string) => void;
+
+  // Terrain actions
+  spawnTerrain: (terrainData?: Partial<TerrainDataState>) => void;
+  updateTerrain: (entityId: string, terrainData: TerrainDataState) => void;
+  sculptTerrain: (entityId: string, position: [number, number], radius: number, strength: number) => void;
+  setTerrainData: (entityId: string, data: TerrainDataState) => void;
+
+  // Quality preset actions
+  setQualityPreset: (preset: QualityPreset) => void;
+  setQualityFromEngine: (data: { preset: string; msaaSamples: number; shadowsEnabled: boolean; shadowsDirectionalOnly: boolean; bloomEnabled: boolean; chromaticAberrationEnabled: boolean; sharpeningEnabled: boolean; particleDensityScale: number }) => void;
 
   // Post-processing actions
   updatePostProcessing: (partial: Partial<PostProcessingData>) => void;
@@ -663,6 +801,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     gridExtent: 20,
   },
   primaryMaterial: null,
+  primaryShaderEffect: null,
   primaryLight: null,
   ambientLight: { color: [1, 1, 1], brightness: 300 },
   environment: {
@@ -708,6 +847,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   cloudSaveStatus: 'idle',
   lastCloudSave: null,
   postProcessing: DEFAULT_POST_PROCESSING,
+  qualityPreset: 'high' as QualityPreset,
+  terrainData: {},
+  hudElements: [],
 
   // Select a single entity or modify selection
   selectEntity: (id, mode) => {
@@ -926,6 +1068,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // Spawn a new entity
   spawnEntity: (type, name) => {
+    if (type === 'terrain') {
+      get().spawnTerrain();
+      return;
+    }
     if (dispatchCommand) {
       dispatchCommand('spawn_entity', { entityType: type, name });
     }
@@ -1042,19 +1188,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ primaryMaterial: material });
 
     if (dispatchCommand) {
+      // Spread all material fields; Rust ignores unknown fields
+      const { baseColorTexture: _bct, normalMapTexture: _nmt, metallicRoughnessTexture: _mrt,
+              emissiveTexture: _et, occlusionTexture: _ot,
+              depthMapTexture: _dmt, clearcoatTexture: _ct, clearcoatRoughnessTexture: _crt,
+              clearcoatNormalTexture: _cnt, ...materialFields } = material;
       dispatchCommand('update_material', {
         entityId,
-        baseColor: material.baseColor,
-        metallic: material.metallic,
-        perceptualRoughness: material.perceptualRoughness,
-        reflectance: material.reflectance,
-        emissive: material.emissive,
-        emissiveExposureWeight: material.emissiveExposureWeight,
-        alphaMode: material.alphaMode,
-        alphaCutoff: material.alphaCutoff,
-        doubleSided: material.doubleSided,
-        unlit: material.unlit,
+        ...materialFields,
       });
+    }
+  },
+
+  // Shader effect actions
+  setPrimaryShaderEffect: (data) => set({ primaryShaderEffect: data }),
+  updateShaderEffect: (entityId, data) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_custom_shader', { entityId, ...data });
+    }
+  },
+  removeShaderEffect: (entityId) => {
+    if (dispatchCommand) {
+      dispatchCommand('remove_custom_shader', { entityId });
     }
   },
 
@@ -1521,6 +1676,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
+  // Quality preset actions
+  setQualityPreset: (preset) => {
+    set({ qualityPreset: preset });
+    if (dispatchCommand) {
+      dispatchCommand('set_quality_preset', { preset });
+    }
+  },
+
+  setQualityFromEngine: (data) => {
+    set({ qualityPreset: data.preset as QualityPreset });
+  },
+
   // Post-processing actions
   updatePostProcessing: (partial) => {
     const current = get().postProcessing;
@@ -1616,6 +1783,55 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   toggleMixerPanel: () => {
     set((state) => ({ mixerPanelOpen: !state.mixerPanelOpen }));
+  },
+
+  // Audio layering/transition actions (JS-only)
+  crossfadeAudio: (fromEntityId, toEntityId, durationMs) => {
+    import('@/lib/audio/audioManager').then(({ audioManager }) => {
+      audioManager.crossfade(fromEntityId, toEntityId, durationMs);
+    });
+  },
+
+  fadeInAudio: (entityId, durationMs) => {
+    import('@/lib/audio/audioManager').then(({ audioManager }) => {
+      audioManager.fadeIn(entityId, durationMs);
+    });
+  },
+
+  fadeOutAudio: (entityId, durationMs) => {
+    import('@/lib/audio/audioManager').then(({ audioManager }) => {
+      audioManager.fadeOut(entityId, durationMs);
+    });
+  },
+
+  playOneShotAudio: (assetId, options) => {
+    import('@/lib/audio/audioManager').then(({ audioManager }) => {
+      audioManager.playOneShot(assetId, options);
+    });
+  },
+
+  addAudioLayer: (entityId, slotName, assetId, options) => {
+    import('@/lib/audio/audioManager').then(({ audioManager }) => {
+      audioManager.addLayer(entityId, slotName, assetId, options);
+    });
+  },
+
+  removeAudioLayer: (entityId, slotName) => {
+    import('@/lib/audio/audioManager').then(({ audioManager }) => {
+      audioManager.removeLayer(entityId, slotName);
+    });
+  },
+
+  setDuckingRule: (rule) => {
+    import('@/lib/audio/audioManager').then(({ audioManager }) => {
+      audioManager.addDuckingRule({
+        triggerBus: rule.triggerBus,
+        targetBus: rule.targetBus,
+        duckLevel: rule.duckLevel ?? 0.3,
+        attackMs: rule.attackMs ?? 200,
+        releaseMs: rule.releaseMs ?? 500,
+      });
+    });
   },
 
   // Particle actions
@@ -1717,6 +1933,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
 
+  setAnimationBlendWeight: (entityId, clipName, weight) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_animation_blend_weight', { entityId, clipName, weight });
+    }
+  },
+
+  setClipSpeed: (entityId, clipName, speed) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_clip_speed', { entityId, clipName, speed });
+    }
+  },
+
   setEntityAnimation: (entityId, state) => {
     const current = get();
     if (current.primaryId === entityId) {
@@ -1727,4 +1955,105 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPrimaryAnimation: (state) => {
     set({ primaryAnimation: state });
   },
+
+  // Terrain actions
+  spawnTerrain: (terrainData) => {
+    if (dispatchCommand) {
+      dispatchCommand('spawn_terrain', {
+        noiseType: terrainData?.noiseType ?? 'perlin',
+        octaves: terrainData?.octaves ?? 4,
+        frequency: terrainData?.frequency ?? 0.03,
+        amplitude: terrainData?.amplitude ?? 0.5,
+        heightScale: terrainData?.heightScale ?? 10.0,
+        seed: terrainData?.seed ?? Math.floor(Math.random() * 100000),
+        resolution: terrainData?.resolution ?? 64,
+        size: terrainData?.size ?? 50.0,
+      });
+    }
+  },
+
+  updateTerrain: (entityId, terrainData) => {
+    if (dispatchCommand) {
+      dispatchCommand('update_terrain', {
+        entityId,
+        ...terrainData,
+      });
+    }
+  },
+
+  sculptTerrain: (entityId, position, radius, strength) => {
+    if (dispatchCommand) {
+      dispatchCommand('sculpt_terrain', {
+        entityId,
+        position,
+        radius,
+        strength,
+      });
+    }
+  },
+
+  setTerrainData: (entityId, data) => {
+    set((state) => ({
+      terrainData: { ...state.terrainData, [entityId]: data },
+    }));
+  },
+
+  // CSG Boolean operations
+  csgUnion: (entityIdA, entityIdB, deleteSources) => {
+    if (dispatchCommand) {
+      dispatchCommand('csg_union', { entityIdA, entityIdB, deleteSources: deleteSources ?? true });
+    }
+  },
+
+  csgSubtract: (entityIdA, entityIdB, deleteSources) => {
+    if (dispatchCommand) {
+      dispatchCommand('csg_subtract', { entityIdA, entityIdB, deleteSources: deleteSources ?? true });
+    }
+  },
+
+  csgIntersect: (entityIdA, entityIdB, deleteSources) => {
+    if (dispatchCommand) {
+      dispatchCommand('csg_intersect', { entityIdA, entityIdB, deleteSources: deleteSources ?? true });
+    }
+  },
+
+  // Procedural mesh operations
+  extrudeShape: (shape, params) => {
+    if (dispatchCommand) {
+      dispatchCommand('extrude_shape', { shape, ...params });
+    }
+  },
+
+  latheShape: (profile, params) => {
+    if (dispatchCommand) {
+      dispatchCommand('lathe_shape', { profile, ...params });
+    }
+  },
+
+  arrayEntity: (entityId, params) => {
+    if (dispatchCommand) {
+      dispatchCommand('array_entity', { entityId, ...params });
+    }
+  },
+
+  combineMeshes: (entityIds, deleteSources, name) => {
+    if (dispatchCommand) {
+      dispatchCommand('combine_meshes', { entityIds, deleteSources: deleteSources ?? true, name });
+    }
+  },
+
+  // Set HUD elements from script worker
+  setHudElements: (elements) => {
+    set({ hudElements: elements });
+  },
 }));
+
+// Play tick callback for script runner
+type PlayTickCallback = (data: unknown) => void;
+let _playTickCallback: PlayTickCallback | null = null;
+export function setPlayTickCallback(cb: PlayTickCallback | null) {
+  _playTickCallback = cb;
+}
+export function firePlayTick(data: unknown) {
+  _playTickCallback?.(data);
+}

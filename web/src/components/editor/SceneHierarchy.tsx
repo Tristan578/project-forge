@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useCallback, useRef, useMemo, type MouseEvent } from 'react';
+import { useState, useCallback, useRef, useMemo, memo, type MouseEvent } from 'react';
 import { Layers } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
@@ -17,7 +17,7 @@ import { HierarchySearch } from './HierarchySearch';
 import { computeInvalidTargets, type DropTarget, type DropZone } from '@/lib/dndUtils';
 import { filterHierarchy } from '@/lib/hierarchyFilter';
 
-export function SceneHierarchy() {
+export const SceneHierarchy = memo(function SceneHierarchy() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
@@ -311,4 +311,4 @@ export function SceneHierarchy() {
       )}
     </div>
   );
-}
+});

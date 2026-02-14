@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
-import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music } from 'lucide-react';
+import { useCallback, useRef, memo, useState } from 'react';
+import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
+import { MaterialLibraryPanel } from './MaterialLibraryPanel';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -56,7 +57,10 @@ function AssetCard({ asset }: { asset: AssetMetadata }) {
   );
 }
 
-export function AssetPanel() {
+type AssetPanelTab = 'assets' | 'materials';
+
+export const AssetPanel = memo(function AssetPanel() {
+  const [activeTab, setActiveTab] = useState<AssetPanelTab>('assets');
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const importGltf = useEditorStore((s) => s.importGltf);
   const loadTexture = useEditorStore((s) => s.loadTexture);
@@ -132,32 +136,57 @@ export function AssetPanel() {
       onDrop={handleDrop}
       onDragOver={handleDragOver}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
-        <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Assets</span>
-        <div className="flex gap-1">
+      {/* Tab bar + import buttons */}
+      <div className="flex items-center border-b border-zinc-800">
+        <div className="flex flex-1">
           <button
-            className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-            onClick={() => gltfInputRef.current?.click()}
-            title="Import 3D model (.glb/.gltf)"
+            onClick={() => setActiveTab('assets')}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              activeTab === 'assets'
+                ? 'border-b-2 border-blue-400 text-zinc-300'
+                : 'text-zinc-500 hover:text-zinc-400'
+            }`}
           >
-            <Upload size={14} />
+            <FolderOpen size={12} />
+            Assets
           </button>
           <button
-            className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-            onClick={() => textureInputRef.current?.click()}
-            title="Import texture (.png/.jpg)"
+            onClick={() => setActiveTab('materials')}
+            className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
+              activeTab === 'materials'
+                ? 'border-b-2 border-purple-400 text-zinc-300'
+                : 'text-zinc-500 hover:text-zinc-400'
+            }`}
           >
-            <ImageIcon size={14} />
-          </button>
-          <button
-            className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
-            onClick={() => audioInputRef.current?.click()}
-            title="Import audio (.mp3/.ogg/.wav)"
-          >
-            <Music size={14} />
+            <Palette size={12} />
+            Materials
           </button>
         </div>
+        {activeTab === 'assets' && (
+          <div className="flex gap-1 pr-2">
+            <button
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => gltfInputRef.current?.click()}
+              title="Import 3D model (.glb/.gltf)"
+            >
+              <Upload size={14} />
+            </button>
+            <button
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => textureInputRef.current?.click()}
+              title="Import texture (.png/.jpg)"
+            >
+              <ImageIcon size={14} />
+            </button>
+            <button
+              className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              onClick={() => audioInputRef.current?.click()}
+              title="Import audio (.mp3/.ogg/.wav)"
+            >
+              <Music size={14} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Hidden file inputs */}
@@ -186,21 +215,29 @@ export function AssetPanel() {
         onChange={(e) => handleAudioImport(e.target.files)}
       />
 
-      {/* Asset grid or empty state */}
-      {assets.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center p-4">
-          <div className="flex flex-col items-center gap-2 text-zinc-600">
-            <FolderOpen size={20} />
-            <span className="text-xs">Drop .glb, .png, or audio files here</span>
-          </div>
+      {/* Tab content */}
+      {activeTab === 'materials' ? (
+        <div className="flex-1 overflow-y-auto">
+          <MaterialLibraryPanel />
         </div>
       ) : (
-        <div className="grid grid-cols-4 gap-1.5 overflow-y-auto p-2">
-          {assets.map((asset) => (
-            <AssetCard key={asset.id} asset={asset} />
-          ))}
-        </div>
+        <>
+          {assets.length === 0 ? (
+            <div className="flex flex-1 items-center justify-center p-4">
+              <div className="flex flex-col items-center gap-2 text-zinc-600">
+                <FolderOpen size={20} />
+                <span className="text-xs">Drop .glb, .png, or audio files here</span>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-1.5 overflow-y-auto p-2">
+              {assets.map((asset) => (
+                <AssetCard key={asset.id} asset={asset} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
-}
+});
