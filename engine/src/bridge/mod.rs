@@ -263,7 +263,12 @@ impl Plugin for SelectionPlugin {
             // Always-active systems: run in both editor and runtime
             .add_systems(Update, process_query_requests)
             .add_systems(Update, process_terrain_queries)
-            .add_systems(Update, process_quality_queries)
+            .add_systems(Update, process_quality_queries);
+
+        #[cfg(not(feature = "runtime"))]
+        app.add_systems(Update, process_joint_queries);
+
+        app
             .add_systems(Update, emit_play_tick_system)
             .add_systems(Update, (
                 apply_mode_change_requests,
@@ -358,6 +363,7 @@ impl Plugin for SelectionPlugin {
                     emit_material_on_selection,
                     emit_light_on_selection,
                     emit_physics_on_selection,
+                    emit_joint_on_selection,
                     emit_script_on_selection,
                     emit_audio_on_selection,
                     emit_particle_on_selection,
@@ -375,6 +381,9 @@ impl Plugin for SelectionPlugin {
                 ).in_set(EditorSystemSet))
                 .add_systems(Update, (
                     apply_debug_physics_toggle,
+                    apply_create_joint_requests,
+                    apply_update_joint_requests,
+                    apply_remove_joint_requests,
                     apply_scene_export,
                     apply_scene_load,
                     apply_new_scene,
@@ -437,7 +446,7 @@ fn apply_mode_change_requests(
     particle_snapshot_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_snapshot_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_snapshot_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
-    procedural_mesh_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>)>,
+    procedural_joint_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>, Option<&core::physics::JointData>)>,
     runtime_query: Query<Entity, With<core::engine_mode::RuntimeEntity>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -453,7 +462,7 @@ fn apply_mode_change_requests(
                 // Snapshot the scene (uses read-only query p0)
                 {
                     let snapshot_query = queries.p0();
-                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &particle_snapshot_query, &shader_snapshot_query, &csg_snapshot_query, &procedural_mesh_query, &selection);
+                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &particle_snapshot_query, &shader_snapshot_query, &csg_snapshot_query, &procedural_joint_query, &selection);
                 }
                 // Clear selection for play mode
                 selection.clear();
@@ -999,6 +1008,15 @@ fn apply_post_processing_updates(
         if let Some(sharp) = update.sharpening {
             settings.sharpening = sharp;
         }
+        if let Some(ssao) = update.ssao {
+            settings.ssao = ssao;
+        }
+        if let Some(dof) = update.depth_of_field {
+            settings.depth_of_field = dof;
+        }
+        if let Some(mb) = update.motion_blur {
+            settings.motion_blur = mb;
+        }
 
         // Emit event back to React with full state
         events::emit_post_processing_changed(&settings);
@@ -1303,6 +1321,9 @@ fn process_query_requests(
             QueryRequest::TerrainState { .. } => {
                 // Handled by process_terrain_queries system to avoid system parameter limit
             }
+            QueryRequest::ListJoints => {
+                // Handled by process_joint_queries system to avoid system parameter limit
+            }
         }
     }
 }
@@ -1363,6 +1384,36 @@ fn apply_quality_presets(
             events::emit_quality_changed(&quality);
             tracing::info!("Applied quality preset: {}", request.preset);
         }
+    }
+}
+
+/// Process joint list query requests.
+#[cfg(not(feature = "runtime"))]
+fn process_joint_queries(
+    mut pending: ResMut<PendingCommands>,
+    joint_query: Query<(&EntityId, &core::physics::JointData)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let has_list_joints = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::ListJoints));
+    if has_list_joints {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct JointInfo {
+            entity_id: String,
+            #[serde(flatten)]
+            joint_data: core::physics::JointData,
+        }
+
+        let joints: Vec<JointInfo> = joint_query.iter()
+            .map(|(eid, jd)| JointInfo {
+                entity_id: eid.0.clone(),
+                joint_data: jd.clone(),
+            })
+            .collect();
+
+        events::emit_event("QUERY_JOINTS_LIST", &joints);
+        pending.query_requests.retain(|r| !matches!(r, QueryRequest::ListJoints));
     }
 }
 
@@ -1491,6 +1542,113 @@ fn apply_force_applications(
     }
 }
 
+/// System that applies pending create joint requests.
+#[cfg(not(feature = "runtime"))]
+fn apply_create_joint_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for request in pending.create_joint_requests.drain(..) {
+        // Find the entity to add the joint to
+        for (entity, entity_id) in query.iter() {
+            if entity_id.0 == request.entity_id {
+                commands.entity(entity).insert(request.joint_data.clone());
+
+                // Record for undo
+                history.push(core::history::UndoableAction::JointChange {
+                    entity_id: request.entity_id.clone(),
+                    old_joint: None,
+                    new_joint: Some(request.joint_data.clone()),
+                });
+
+                // Emit change event
+                events::emit_joint_changed(&request.joint_data);
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies pending update joint requests.
+#[cfg(not(feature = "runtime"))]
+fn apply_update_joint_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut core::physics::JointData)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for update in pending.update_joint_requests.drain(..) {
+        for (entity_id, mut current_joint) in query.iter_mut() {
+            if entity_id.0 == update.entity_id {
+                let old_joint = current_joint.clone();
+
+                // Apply updates
+                if let Some(joint_type) = update.joint_type {
+                    current_joint.joint_type = joint_type;
+                }
+                if let Some(connected_entity_id) = update.connected_entity_id {
+                    current_joint.connected_entity_id = connected_entity_id;
+                }
+                if let Some(anchor_self) = update.anchor_self {
+                    current_joint.anchor_self = anchor_self;
+                }
+                if let Some(anchor_other) = update.anchor_other {
+                    current_joint.anchor_other = anchor_other;
+                }
+                if let Some(axis) = update.axis {
+                    current_joint.axis = axis;
+                }
+                if let Some(limits) = update.limits {
+                    current_joint.limits = limits;
+                }
+                if let Some(motor) = update.motor {
+                    current_joint.motor = motor;
+                }
+
+                // Record for undo
+                history.push(core::history::UndoableAction::JointChange {
+                    entity_id: update.entity_id.clone(),
+                    old_joint: Some(old_joint),
+                    new_joint: Some(current_joint.clone()),
+                });
+
+                // Emit change event
+                events::emit_joint_changed(&current_joint);
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies pending remove joint requests.
+#[cfg(not(feature = "runtime"))]
+fn apply_remove_joint_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId, &core::physics::JointData)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for request in pending.remove_joint_requests.drain(..) {
+        for (entity, entity_id, joint_data) in query.iter() {
+            if entity_id.0 == request.entity_id {
+                let old_joint = joint_data.clone();
+                commands.entity(entity).remove::<core::physics::JointData>();
+
+                // Record for undo
+                history.push(core::history::UndoableAction::JointChange {
+                    entity_id: request.entity_id.clone(),
+                    old_joint: Some(old_joint),
+                    new_joint: None,
+                });
+
+                // No event needed — removal is implicit
+                break;
+            }
+        }
+    }
+}
+
 /// System that reads collision events from Rapier and emits them to JS.
 /// Runs always (mode-gated internally by checking if physics is active).
 fn read_collision_events(
@@ -1583,7 +1741,7 @@ fn apply_scene_export(
     audio_export_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
-    csg_procedural_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>, Option<&core::procedural_mesh::ProceduralMeshData>)>,
+    csg_procedural_joint_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>, Option<&core::procedural_mesh::ProceduralMeshData>, Option<&core::physics::JointData>)>,
     child_of_query: Query<&ChildOf>,
     eid_query: Query<&EntityId>,
 ) {
@@ -1634,11 +1792,11 @@ fn apply_scene_export(
             .find(|(seid, _)| seid.0 == eid.0)
             .and_then(|(_, sed)| sed.cloned());
 
-        // Look up csg + procedural mesh data from combined query
-        let (csg_mesh_data, procedural_mesh_data) = csg_procedural_query.iter()
-            .find(|(ceid, _, _)| ceid.0 == eid.0)
-            .map(|(_, cmd, pmd)| (cmd.cloned(), pmd.cloned()))
-            .unwrap_or((None, None));
+        // Look up csg + procedural mesh + joint data from combined query
+        let (csg_mesh_data, procedural_mesh_data, joint_data) = csg_procedural_joint_query.iter()
+            .find(|(ceid, _, _, _)| ceid.0 == eid.0)
+            .map(|(_, cmd, pmd, jd)| (cmd.cloned(), pmd.cloned(), jd.cloned()))
+            .unwrap_or((None, None, None));
 
         snapshots.push(HistEntitySnapshot {
             entity_id: eid.0.clone(),
@@ -1661,6 +1819,7 @@ fn apply_scene_export(
             terrain_data: None,
             terrain_mesh_data: None,
             procedural_mesh_data,
+            joint_data,
         });
     }
 
@@ -2120,6 +2279,33 @@ fn emit_physics_on_selection(
     if let Some(primary) = selection.primary {
         if let Ok((entity_id, physics_data, phys_enabled)) = query.get(primary) {
             events::emit_physics_changed(&entity_id.0, physics_data, phys_enabled.is_some());
+        }
+    }
+}
+
+/// System that emits joint data when selection changes or joint changes.
+#[cfg(not(feature = "runtime"))]
+fn emit_joint_on_selection(
+    selection: Res<Selection>,
+    query: Query<(&EntityId, &core::physics::JointData), Changed<core::physics::JointData>>,
+    selection_query: Query<(&EntityId, Option<&core::physics::JointData>)>,
+    mut selection_events: EventReader<SelectionChangedEvent>,
+) {
+    // Emit on selection change
+    for _event in selection_events.read() {
+        if let Some(primary) = selection.primary {
+            if let Ok((_, joint_data)) = selection_query.get(primary) {
+                if let Some(jd) = joint_data {
+                    events::emit_joint_changed(jd);
+                }
+            }
+        }
+    }
+
+    // Emit when joint data changes on selected entity
+    if let Some(primary) = selection.primary {
+        if let Ok((_, joint_data)) = query.get(primary) {
+            events::emit_joint_changed(joint_data);
         }
     }
 }
@@ -2851,6 +3037,7 @@ fn apply_csg_requests(
                 terrain_data: None,
                 terrain_mesh_data: None,
                 procedural_mesh_data: None,
+                joint_data: None,
             }
         };
 
@@ -2893,6 +3080,7 @@ fn apply_csg_requests(
             terrain_data: None,
             terrain_mesh_data: None,
             procedural_mesh_data: None,
+            joint_data: None,
         };
 
         // 9. Push history action
@@ -3745,6 +3933,7 @@ fn apply_extrude_requests(
                 terrain_data: None,
                 terrain_mesh_data: None,
                 procedural_mesh_data: Some(mesh_data),
+                joint_data: None,
             },
         });
 
@@ -3868,6 +4057,7 @@ fn apply_lathe_requests(
                 terrain_data: None,
                 terrain_mesh_data: None,
                 procedural_mesh_data: Some(mesh_data),
+                joint_data: None,
             },
         });
 
@@ -4044,6 +4234,7 @@ fn apply_array_requests(
                 terrain_data: None,
                 terrain_mesh_data: None,
                 procedural_mesh_data: src_procedural_mesh_data.clone(),
+                joint_data: None,
             });
         }
 
@@ -4137,6 +4328,7 @@ fn apply_combine_requests(
                     terrain_data: None,
                     terrain_mesh_data: None,
                     procedural_mesh_data: src_procedural_mesh_data,
+                    joint_data: None,
                 });
 
                 if request.delete_sources {
@@ -4211,6 +4403,7 @@ fn apply_combine_requests(
                 terrain_data: None,
                 terrain_mesh_data: None,
                 procedural_mesh_data: Some(mesh_data),
+                joint_data: None,
             },
         });
 

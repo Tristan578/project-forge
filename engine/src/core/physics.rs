@@ -102,6 +102,48 @@ impl Default for DebugPhysicsEnabled {
     }
 }
 
+/// Joint type for connecting physics bodies.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JointType {
+    Fixed,
+    Revolute,
+    Spherical,
+    Prismatic,
+    Rope,
+    Spring,
+}
+
+/// Joint limits for constrained motion.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JointLimits {
+    pub min: f32,
+    pub max: f32,
+}
+
+/// Joint motor configuration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JointMotor {
+    pub target_velocity: f32,
+    pub max_force: f32,
+}
+
+/// Physics joint component (stored persistently on entities).
+/// Connects this entity to another entity with physics constraints.
+#[derive(Component, Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JointData {
+    pub joint_type: JointType,
+    pub connected_entity_id: String,
+    pub anchor_self: [f32; 3],
+    pub anchor_other: [f32; 3],
+    pub axis: [f32; 3],  // For revolute/prismatic
+    pub limits: Option<JointLimits>,
+    pub motor: Option<JointMotor>,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -236,6 +278,123 @@ fn sync_debug_physics(
     }
 }
 
+/// Unified system managing the joint lifecycle.
+/// Handles Edit→Play (attach), Play→Edit (detach).
+fn manage_joint_lifecycle(
+    engine_mode: Res<EngineMode>,
+    mut commands: Commands,
+    to_attach: Query<(Entity, &JointData), (Without<ImpulseJoint>,)>,
+    to_detach: Query<Entity, With<ImpulseJoint>>,
+    entity_id_query: Query<(Entity, &super::entity_id::EntityId)>,
+    mut prev_mode: Local<Option<EngineMode>>,
+) {
+    let current = *engine_mode;
+    let prev = *prev_mode;
+    *prev_mode = Some(current);
+
+    // Transition: Edit → Play — attach Rapier joints
+    let entering_play = current == EngineMode::Play
+        && prev.map_or(true, |p| p == EngineMode::Edit);
+    if entering_play {
+        for (entity, joint_data) in to_attach.iter() {
+            // Resolve connected entity ID to Bevy Entity
+            let connected_entity = entity_id_query
+                .iter()
+                .find(|(_, eid)| eid.0 == joint_data.connected_entity_id)
+                .map(|(e, _)| e);
+
+            let Some(connected_entity) = connected_entity else {
+                tracing::warn!(
+                    "Joint connected entity not found: {}",
+                    joint_data.connected_entity_id
+                );
+                continue;
+            };
+
+            // Build the appropriate Rapier joint
+            let anchor1 = Vec3::from(joint_data.anchor_self);
+            let anchor2 = Vec3::from(joint_data.anchor_other);
+            let axis = Vec3::from(joint_data.axis);
+
+            let joint: TypedJoint = match &joint_data.joint_type {
+                JointType::Fixed => {
+                    FixedJointBuilder::new()
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2)
+                        .build()
+                        .into()
+                }
+                JointType::Revolute => {
+                    let mut builder = RevoluteJointBuilder::new(axis)
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2);
+                    if let Some(limits) = &joint_data.limits {
+                        builder = builder.limits([limits.min, limits.max]);
+                    }
+                    if let Some(motor) = &joint_data.motor {
+                        builder = builder
+                            .motor_velocity(motor.target_velocity, 0.5)
+                            .motor_max_force(motor.max_force);
+                    }
+                    builder.build().into()
+                }
+                JointType::Spherical => {
+                    SphericalJointBuilder::new()
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2)
+                        .build()
+                        .into()
+                }
+                JointType::Prismatic => {
+                    let mut builder = PrismaticJointBuilder::new(axis)
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2);
+                    if let Some(limits) = &joint_data.limits {
+                        builder = builder.limits([limits.min, limits.max]);
+                    }
+                    if let Some(motor) = &joint_data.motor {
+                        builder = builder
+                            .motor_velocity(motor.target_velocity, 0.5)
+                            .motor_max_force(motor.max_force);
+                    }
+                    builder.build().into()
+                }
+                JointType::Rope => {
+                    let max_distance = joint_data.limits.as_ref().map(|l| l.max).unwrap_or(1.0);
+                    RopeJointBuilder::new(max_distance)
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2)
+                        .build()
+                        .into()
+                }
+                JointType::Spring => {
+                    let rest_length = joint_data.limits.as_ref().map(|l| l.min).unwrap_or(1.0);
+                    let stiffness = joint_data.motor.as_ref().map(|m| m.target_velocity).unwrap_or(1.0);
+                    let damping = joint_data.motor.as_ref().map(|m| m.max_force).unwrap_or(0.1);
+                    SpringJointBuilder::new(rest_length, stiffness, damping)
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2)
+                        .build()
+                        .into()
+                }
+            };
+
+            commands.entity(entity).insert(ImpulseJoint::new(connected_entity, joint));
+        }
+        tracing::info!("Joints attached: {} joints", to_attach.iter().count());
+    }
+
+    // Transition: Play/Paused → Edit (Stop) — remove all ImpulseJoint components
+    let entering_edit = current == EngineMode::Edit
+        && prev.map_or(false, |p| p != EngineMode::Edit);
+    if entering_edit {
+        for entity in to_detach.iter() {
+            commands.entity(entity).remove::<ImpulseJoint>();
+        }
+        tracing::info!("Joints detached");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
@@ -245,12 +404,15 @@ pub struct PhysicsPlugin;
 
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
+        use super::engine_mode::PlaySystemSet;
+
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
             .add_plugins(RapierDebugRenderPlugin::default())
             .init_resource::<DebugPhysicsEnabled>()
             .add_systems(Update, (
                 manage_physics_lifecycle,
                 sync_debug_physics,
-            ));
+            ))
+            .add_systems(Update, manage_joint_lifecycle.in_set(PlaySystemSet));
     }
 }

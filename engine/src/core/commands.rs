@@ -8,9 +8,10 @@ use super::lighting::LightData;
 use super::material::MaterialData;
 use super::input::{ActionDef, ActionType, InputPreset, InputSource};
 use super::particles::ParticleData as CoreParticleData;
-use super::physics::PhysicsData;
+use super::physics::{JointData, JointLimits, JointMotor, JointType, PhysicsData};
 use super::post_processing::{
     BloomSettings, ChromaticAberrationSettings, ColorGradingSettings, SharpeningSettings,
+    SsaoSettings, DepthOfFieldSettings, MotionBlurSettings,
 };
 use super::shader_effects::ShaderEffectData;
 use super::csg::CsgOperation;
@@ -26,6 +27,7 @@ use super::pending_commands::{
     queue_input_binding_removal_from_bridge,
     queue_physics_update_from_bridge, queue_physics_toggle_from_bridge,
     queue_debug_physics_toggle_from_bridge, queue_force_application_from_bridge,
+    queue_create_joint_from_bridge, queue_update_joint_from_bridge, queue_remove_joint_from_bridge,
     queue_scene_export_from_bridge, queue_scene_load_from_bridge, queue_new_scene_from_bridge,
     queue_gltf_import_from_bridge, queue_texture_load_from_bridge,
     queue_place_asset_from_bridge, queue_delete_asset_from_bridge,
@@ -55,6 +57,7 @@ use super::pending_commands::{
     AmbientLightUpdate, EnvironmentUpdate, PostProcessingUpdate, EntityType, SceneLoadRequest,
     InputBindingUpdate, InputPresetRequest, InputBindingRemoval,
     PhysicsUpdate, PhysicsToggle, ForceApplication,
+    CreateJointRequest, UpdateJointRequest, RemoveJointRequest,
     GltfImportRequest, TextureLoadRequest, PlaceAssetRequest, DeleteAssetRequest, RemoveTextureRequest,
     ScriptUpdate, ScriptRemoval,
     AudioUpdate, AudioRemoval, AudioPlayback,
@@ -155,6 +158,11 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         },
         "apply_force" => handle_apply_force(payload),
         "raycast_query" => handle_raycast_query(payload),
+        // Joint commands
+        "create_joint" => handle_create_joint(payload),
+        "update_joint" => handle_update_joint(payload),
+        "remove_joint" => handle_remove_joint(payload),
+        "list_joints" => handle_query(QueryRequest::ListJoints),
         // Scene save/load commands
         "export_scene" => handle_export_scene(payload),
         "load_scene" => handle_load_scene(payload),
@@ -931,6 +939,9 @@ struct UpdatePostProcessingPayload {
     chromatic_aberration: Option<ChromaticAberrationSettings>,
     color_grading: Option<ColorGradingSettings>,
     sharpening: Option<SharpeningSettings>,
+    ssao: Option<Option<SsaoSettings>>,
+    depth_of_field: Option<Option<DepthOfFieldSettings>>,
+    motion_blur: Option<Option<MotionBlurSettings>>,
 }
 
 fn handle_update_post_processing(payload: serde_json::Value) -> CommandResult {
@@ -942,6 +953,9 @@ fn handle_update_post_processing(payload: serde_json::Value) -> CommandResult {
         chromatic_aberration: data.chromatic_aberration,
         color_grading: data.color_grading,
         sharpening: data.sharpening,
+        ssao: data.ssao,
+        depth_of_field: data.depth_of_field,
+        motion_blur: data.motion_blur,
     };
 
     if queue_post_processing_update_from_bridge(update) {
@@ -2635,6 +2649,231 @@ fn handle_set_quality_preset(payload: serde_json::Value) -> CommandResult {
     }
 
     if queue_quality_preset_from_bridge(QualityPresetRequest { preset }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle create_joint command.
+/// Payload: { entityId, jointType, connectedEntityId, anchorSelf?, anchorOther?, axis?, limits?, motor? }
+fn handle_create_joint(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let joint_type_str = payload.get("jointType")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing jointType")?;
+
+    let joint_type = match joint_type_str {
+        "fixed" => JointType::Fixed,
+        "revolute" => JointType::Revolute,
+        "spherical" => JointType::Spherical,
+        "prismatic" => JointType::Prismatic,
+        "rope" => JointType::Rope,
+        "spring" => JointType::Spring,
+        _ => return Err(format!("Invalid joint type: {}", joint_type_str)),
+    };
+
+    let connected_entity_id = payload.get("connectedEntityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing connectedEntityId")?
+        .to_string();
+
+    let anchor_self = payload.get("anchorSelf")
+        .and_then(|v| {
+            let arr = v.as_array()?;
+            if arr.len() == 3 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                ])
+            } else { None }
+        })
+        .unwrap_or([0.0, 0.0, 0.0]);
+
+    let anchor_other = payload.get("anchorOther")
+        .and_then(|v| {
+            let arr = v.as_array()?;
+            if arr.len() == 3 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                ])
+            } else { None }
+        })
+        .unwrap_or([0.0, 0.0, 0.0]);
+
+    let axis = payload.get("axis")
+        .and_then(|v| {
+            let arr = v.as_array()?;
+            if arr.len() == 3 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                ])
+            } else { None }
+        })
+        .unwrap_or([0.0, 1.0, 0.0]);
+
+    let limits = payload.get("limits").and_then(|v| {
+        let obj = v.as_object()?;
+        Some(JointLimits {
+            min: obj.get("min")?.as_f64()? as f32,
+            max: obj.get("max")?.as_f64()? as f32,
+        })
+    });
+
+    let motor = payload.get("motor").and_then(|v| {
+        let obj = v.as_object()?;
+        Some(JointMotor {
+            target_velocity: obj.get("targetVelocity")?.as_f64()? as f32,
+            max_force: obj.get("maxForce")?.as_f64()? as f32,
+        })
+    });
+
+    let joint_data = JointData {
+        joint_type,
+        connected_entity_id,
+        anchor_self,
+        anchor_other,
+        axis,
+        limits,
+        motor,
+    };
+
+    let request = CreateJointRequest {
+        entity_id,
+        joint_data,
+    };
+
+    if queue_create_joint_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle update_joint command.
+/// Payload: { entityId, jointType?, connectedEntityId?, anchorSelf?, anchorOther?, axis?, limits?, motor? }
+fn handle_update_joint(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let joint_type = payload.get("jointType").and_then(|v| {
+        let type_str = v.as_str()?;
+        match type_str {
+            "fixed" => Some(JointType::Fixed),
+            "revolute" => Some(JointType::Revolute),
+            "spherical" => Some(JointType::Spherical),
+            "prismatic" => Some(JointType::Prismatic),
+            "rope" => Some(JointType::Rope),
+            "spring" => Some(JointType::Spring),
+            _ => None,
+        }
+    });
+
+    let connected_entity_id = payload.get("connectedEntityId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let anchor_self = payload.get("anchorSelf").and_then(|v| {
+        let arr = v.as_array()?;
+        if arr.len() == 3 {
+            Some([
+                arr[0].as_f64()? as f32,
+                arr[1].as_f64()? as f32,
+                arr[2].as_f64()? as f32,
+            ])
+        } else { None }
+    });
+
+    let anchor_other = payload.get("anchorOther").and_then(|v| {
+        let arr = v.as_array()?;
+        if arr.len() == 3 {
+            Some([
+                arr[0].as_f64()? as f32,
+                arr[1].as_f64()? as f32,
+                arr[2].as_f64()? as f32,
+            ])
+        } else { None }
+    });
+
+    let axis = payload.get("axis").and_then(|v| {
+        let arr = v.as_array()?;
+        if arr.len() == 3 {
+            Some([
+                arr[0].as_f64()? as f32,
+                arr[1].as_f64()? as f32,
+                arr[2].as_f64()? as f32,
+            ])
+        } else { None }
+    });
+
+    // Limits: None means "no update", Some(None) means "clear limits", Some(Some(limits)) means "set limits"
+    let limits = if payload.get("limits").is_some() {
+        Some(payload.get("limits").and_then(|v| {
+            let obj = v.as_object()?;
+            Some(JointLimits {
+                min: obj.get("min")?.as_f64()? as f32,
+                max: obj.get("max")?.as_f64()? as f32,
+            })
+        }))
+    } else {
+        None
+    };
+
+    // Motor: None means "no update", Some(None) means "clear motor", Some(Some(motor)) means "set motor"
+    let motor = if payload.get("motor").is_some() {
+        Some(payload.get("motor").and_then(|v| {
+            let obj = v.as_object()?;
+            Some(JointMotor {
+                target_velocity: obj.get("targetVelocity")?.as_f64()? as f32,
+                max_force: obj.get("maxForce")?.as_f64()? as f32,
+            })
+        }))
+    } else {
+        None
+    };
+
+    let request = UpdateJointRequest {
+        entity_id,
+        joint_type,
+        connected_entity_id,
+        anchor_self,
+        anchor_other,
+        axis,
+        limits,
+        motor,
+    };
+
+    if queue_update_joint_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_joint command.
+/// Payload: { entityId }
+fn handle_remove_joint(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let request = RemoveJointRequest {
+        entity_id,
+    };
+
+    if queue_remove_joint_from_bridge(request) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

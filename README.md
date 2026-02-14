@@ -9,7 +9,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ### AI & Automation
 - **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want ("build a platformer level") and the AI spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
-- **MCP Server** — 139 commands across 20 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 143 commands across 20 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28 structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features and procedures on demand
@@ -21,7 +21,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **PBR Materials** — Physically-based rendering with metallic/roughness workflow, UV transforms, clearcoat, transmission/IOR, parallax mapping, texture support, alpha modes, and 56 material presets across 9 categories
 - **Quality Presets** — Low/Medium/High/Ultra rendering presets that batch-configure MSAA, shadows, bloom, sharpening, and particle density
 - **Dynamic Lighting** — Point, directional, and spot lights with real-time shadows and ambient light controls
-- **Physics** — Rigid body dynamics, colliders, forces, and constraints powered by Rapier
+- **Physics** — Rigid body dynamics, colliders, forces, joints (fixed, revolute, spherical, prismatic, rope, spring), and constraints powered by Rapier
 - **Audio** — Spatial 3D audio, bus mixer with effect chains (reverb, delay, EQ, compressor), crossfade transitions, ducking, one-shot sounds, audio layers, and per-entity controls
 - **GPU Particles** — 9 built-in presets (fire, smoke, sparks, rain, snow, explosions, and more) with full customization via WebGPU compute shaders
 - **Skeletal Animation** — glTF animation playback with transport controls, crossfade transitions, blend weights, per-clip speed, and script API
@@ -29,7 +29,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Procedural Terrain** — Heightmap terrain generation with Perlin/Simplex/Value noise, sculpting tools, and height-based vertex coloring
 - **Procedural Mesh Generation** — Extrude 2D shapes, lathe profiles, array entities in grid/circle patterns, and combine meshes
 - **Custom Shader Effects** — 6 built-in visual effects (Dissolve, Hologram, Force Field, Lava/Flow, Toon, Fresnel Glow) extending the PBR pipeline via MaterialExtension
-- **Post-Processing** — Bloom, chromatic aberration, color grading, and contrast-adaptive sharpening
+- **Post-Processing** — Bloom, chromatic aberration, color grading, contrast-adaptive sharpening, SSAO (WebGPU), depth of field, and motion blur
 
 ### Editor
 - **3D Scene Editor** — Transform gizmos, multi-select, snapping, scene hierarchy, and inspector panels
@@ -48,7 +48,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Architecture
 
 ```
-MCP Server (139 commands)                      AI agents + LLM tool use
+MCP Server (143 commands)                      AI agents + LLM tool use
     ↕  JSON commands
 React Shell (Next.js, Zustand, Tailwind)      Visual editor UI
     ↕  JSON events via wasm-bindgen

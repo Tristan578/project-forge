@@ -13,7 +13,7 @@ use super::lighting::LightData;
 use super::material::MaterialData;
 use super::particles::ParticleData;
 use super::pending_commands::EntityType;
-use super::physics::PhysicsData;
+use super::physics::{JointData, PhysicsData};
 use super::scripting::ScriptData;
 use super::shader_effects::ShaderEffectData;
 use super::terrain::{TerrainData, TerrainMeshData};
@@ -107,6 +107,9 @@ pub struct EntitySnapshot {
     /// Procedural mesh data (for extrude/lathe/combine results)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub procedural_mesh_data: Option<super::procedural_mesh::ProceduralMeshData>,
+    /// Joint data (if entity has a physics joint)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joint_data: Option<JointData>,
 }
 
 /// An action that can be undone/redone.
@@ -246,6 +249,13 @@ pub enum UndoableAction {
         source_snapshots: Vec<EntitySnapshot>,
         result_snapshot: EntitySnapshot,
     },
+
+    /// Joint configuration changed
+    JointChange {
+        entity_id: String,
+        old_joint: Option<JointData>,
+        new_joint: Option<JointData>,
+    },
 }
 
 impl UndoableAction {
@@ -290,6 +300,7 @@ impl UndoableAction {
             UndoableAction::CombineMeshes { result_snapshot, .. } => {
                 format!("Combine '{}'", result_snapshot.name)
             }
+            UndoableAction::JointChange { .. } => "Joint Change".to_string(),
         }
     }
 }

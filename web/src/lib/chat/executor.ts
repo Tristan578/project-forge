@@ -899,6 +899,49 @@ export async function executeToolCall(
         };
       }
 
+      // --- Joint commands ---
+      case 'create_joint': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        const jointData = {
+          jointType: (input.jointType as string) ?? 'revolute',
+          connectedEntityId: input.connectedEntityId as string ?? '',
+          anchorSelf: (input.anchorSelf as [number, number, number]) ?? [0, 0, 0],
+          anchorOther: (input.anchorOther as [number, number, number]) ?? [0, 0, 0],
+          axis: (input.axis as [number, number, number]) ?? [0, 1, 0],
+          limits: input.limits as { min: number; max: number } | null ?? null,
+          motor: input.motor as { targetVelocity: number; maxForce: number } | null ?? null,
+        };
+        store.createJoint(entityId, jointData as import('@/stores/editorStore').JointData);
+        return { success: true, result: { message: `Created ${jointData.jointType} joint on ${entityId}` } };
+      }
+
+      case 'update_joint': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        const updates: Record<string, unknown> = {};
+        if (input.jointType !== undefined) updates.jointType = input.jointType;
+        if (input.connectedEntityId !== undefined) updates.connectedEntityId = input.connectedEntityId;
+        if (input.anchorSelf !== undefined) updates.anchorSelf = input.anchorSelf;
+        if (input.anchorOther !== undefined) updates.anchorOther = input.anchorOther;
+        if (input.axis !== undefined) updates.axis = input.axis;
+        if (input.limits !== undefined) updates.limits = input.limits;
+        if (input.motor !== undefined) updates.motor = input.motor;
+        store.updateJoint(entityId, updates as Partial<import('@/stores/editorStore').JointData>);
+        return { success: true, result: { message: `Updated joint on ${entityId}` } };
+      }
+
+      case 'remove_joint': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        store.removeJoint(entityId);
+        return { success: true, result: { message: `Removed joint from ${entityId}` } };
+      }
+
+      case 'get_joint': {
+        return { success: true, result: { joint: store.primaryJoint } };
+      }
+
       // --- CSG commands ---
       case 'csg_union':
       case 'csg_subtract':

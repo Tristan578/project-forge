@@ -41,6 +41,9 @@ export function SceneSettings() {
   const updateChromaticAberration = useEditorStore((s) => s.updateChromaticAberration);
   const updateColorGrading = useEditorStore((s) => s.updateColorGrading);
   const updateSharpening = useEditorStore((s) => s.updateSharpening);
+  const updateSsao = useEditorStore((s) => s.updateSsao);
+  const updateDepthOfField = useEditorStore((s) => s.updateDepthOfField);
+  const updateMotionBlur = useEditorStore((s) => s.updateMotionBlur);
   const qualityPreset = useEditorStore((s) => s.qualityPreset);
   const setQualityPreset = useEditorStore((s) => s.setQualityPreset);
 
@@ -803,6 +806,223 @@ export function SceneSettings() {
                   className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
                     focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
                 />
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* SSAO (WebGPU only) */}
+      {typeof navigator !== 'undefined' && !!(navigator as Navigator & { gpu?: unknown }).gpu && (
+        <div className="border-t border-zinc-800 pt-4">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            SSAO (WebGPU)
+          </h3>
+
+          <div className="space-y-3">
+            {/* Enabled toggle */}
+            <div className="flex items-center gap-2">
+              <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+              <input
+                type="checkbox"
+                checked={postProcessing.ssao !== null}
+                onChange={(e) => {
+                  if (e.target.checked) {
+                    updateSsao({ quality: 'medium' });
+                  } else {
+                    updateSsao(null);
+                  }
+                }}
+                className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
+                  focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
+              />
+            </div>
+
+            {/* SSAO controls (only when enabled) */}
+            {postProcessing.ssao && (
+              <div className="flex items-center gap-2">
+                <label className="w-24 shrink-0 text-xs text-zinc-400">Quality</label>
+                <select
+                  value={postProcessing.ssao.quality}
+                  onChange={(e) => updateSsao({ quality: e.target.value as 'low' | 'medium' | 'high' | 'ultra' })}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300
+                    focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="ultra">Ultra</option>
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Depth of Field */}
+      <div className="border-t border-zinc-800 pt-4">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Depth of Field
+        </h3>
+
+        <div className="space-y-3">
+          {/* Enabled toggle */}
+          <div className="flex items-center gap-2">
+            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <input
+              type="checkbox"
+              checked={postProcessing.depthOfField !== null}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  updateDepthOfField({
+                    mode: 'gaussian',
+                    focalDistance: 10.0,
+                    apertureFStops: 5.6,
+                    sensorHeight: 0.024,
+                    maxCircleOfConfusionDiameter: 0.1,
+                    maxDepth: 100.0,
+                  });
+                } else {
+                  updateDepthOfField(null);
+                }
+              }}
+              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
+                focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
+            />
+          </div>
+
+          {/* DOF controls (only when enabled) */}
+          {postProcessing.depthOfField && (
+            <>
+              {/* Mode */}
+              <div className="flex items-center gap-2">
+                <label className="w-24 shrink-0 text-xs text-zinc-400">Mode</label>
+                <select
+                  value={postProcessing.depthOfField.mode}
+                  onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, mode: e.target.value as 'gaussian' | 'bokeh' })}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300
+                    focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="gaussian">Gaussian</option>
+                  <option value="bokeh">Bokeh</option>
+                </select>
+              </div>
+
+              {/* Focal Distance */}
+              <div className="flex items-center gap-2">
+                <label className="w-24 shrink-0 text-xs text-zinc-400">Focal Dist</label>
+                <input
+                  type="range"
+                  min={0.1}
+                  max={100}
+                  step={0.1}
+                  value={postProcessing.depthOfField.focalDistance}
+                  onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, focalDistance: parseFloat(e.target.value) })}
+                  className={sliderClass}
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                  {postProcessing.depthOfField.focalDistance.toFixed(1)}
+                </span>
+              </div>
+
+              {/* Aperture f-stops */}
+              <div className="flex items-center gap-2">
+                <label className="w-24 shrink-0 text-xs text-zinc-400">Aperture f</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={32}
+                  step={0.1}
+                  value={postProcessing.depthOfField.apertureFStops}
+                  onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, apertureFStops: parseFloat(e.target.value) })}
+                  className={sliderClass}
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                  {postProcessing.depthOfField.apertureFStops.toFixed(1)}
+                </span>
+              </div>
+
+              {/* Max blur diameter */}
+              <div className="flex items-center gap-2">
+                <label className="w-24 shrink-0 text-xs text-zinc-400">Max Blur</label>
+                <input
+                  type="range"
+                  min={0.01}
+                  max={1.0}
+                  step={0.01}
+                  value={postProcessing.depthOfField.maxCircleOfConfusionDiameter}
+                  onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, maxCircleOfConfusionDiameter: parseFloat(e.target.value) })}
+                  className={sliderClass}
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                  {postProcessing.depthOfField.maxCircleOfConfusionDiameter.toFixed(2)}
+                </span>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Motion Blur */}
+      <div className="border-t border-zinc-800 pt-4">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Motion Blur
+        </h3>
+
+        <div className="space-y-3">
+          {/* Enabled toggle */}
+          <div className="flex items-center gap-2">
+            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <input
+              type="checkbox"
+              checked={postProcessing.motionBlur !== null}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  updateMotionBlur({ shutterAngle: 0.5, samples: 4 });
+                } else {
+                  updateMotionBlur(null);
+                }
+              }}
+              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
+                focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
+            />
+          </div>
+
+          {/* Motion blur controls (only when enabled) */}
+          {postProcessing.motionBlur && (
+            <>
+              {/* Shutter Angle */}
+              <div className="flex items-center gap-2">
+                <label className="w-24 shrink-0 text-xs text-zinc-400">Shutter</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={1.0}
+                  step={0.01}
+                  value={postProcessing.motionBlur.shutterAngle}
+                  onChange={(e) => updateMotionBlur({ ...postProcessing.motionBlur!, shutterAngle: parseFloat(e.target.value) })}
+                  className={sliderClass}
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                  {postProcessing.motionBlur.shutterAngle.toFixed(2)}
+                </span>
+              </div>
+
+              {/* Samples */}
+              <div className="flex items-center gap-2">
+                <label className="w-24 shrink-0 text-xs text-zinc-400">Samples</label>
+                <input
+                  type="range"
+                  min={1}
+                  max={8}
+                  step={1}
+                  value={postProcessing.motionBlur.samples}
+                  onChange={(e) => updateMotionBlur({ ...postProcessing.motionBlur!, samples: parseInt(e.target.value) })}
+                  className={sliderClass}
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                  {postProcessing.motionBlur.samples}
+                </span>
               </div>
             </>
           )}

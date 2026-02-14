@@ -13,7 +13,7 @@ use super::lighting::LightData;
 use super::material::MaterialData;
 use super::particles::{ParticleData, ParticleEnabled};
 use super::pending_commands::{EntityType, PendingCommands};
-use super::physics::{PhysicsData, PhysicsEnabled};
+use super::physics::{JointData, PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::{Selection, SelectionChangedEvent};
 use super::shader_effects::ShaderEffectData;
@@ -125,6 +125,7 @@ pub fn apply_spawn_requests(
                 terrain_data: None,
                 terrain_mesh_data: None,
                 procedural_mesh_data: None,
+                joint_data: None,
             },
         });
 
@@ -143,6 +144,7 @@ pub fn apply_delete_requests(
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
     procedural_mesh_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
+    joint_query: Query<(&EntityId, Option<&JointData>)>,
     mut selection: ResMut<Selection>,
     mut selection_events: EventWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
@@ -187,6 +189,11 @@ pub fn apply_delete_requests(
                         .find(|(pmeid, _)| pmeid.0 == eid.0)
                         .and_then(|(_, pmd)| pmd.cloned());
 
+                    // Look up joint data separately
+                    let joint_data = joint_query.iter()
+                        .find(|(jeid, _)| jeid.0 == eid.0)
+                        .and_then(|(_, jd)| jd.cloned());
+
                     // Record delete action in history before deleting
                     history.push(UndoableAction::Delete {
                         snapshot: EntitySnapshot {
@@ -210,6 +217,7 @@ pub fn apply_delete_requests(
                             terrain_data: None,
                             terrain_mesh_data: None,
                             procedural_mesh_data,
+                            joint_data,
                         },
                     });
 
@@ -273,6 +281,7 @@ pub fn apply_duplicate_requests(
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
     procedural_mesh_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
+    joint_query: Query<(&EntityId, Option<&JointData>)>,
     mut history: ResMut<HistoryStack>,
 ) {
     for request in pending.duplicate_requests.drain(..) {
@@ -310,6 +319,11 @@ pub fn apply_duplicate_requests(
             let src_procedural_mesh_data = procedural_mesh_query.iter()
                 .find(|(pmeid, _)| pmeid.0 == source_eid.0)
                 .and_then(|(_, pmd)| pmd.cloned());
+
+            // Look up joint data separately
+            let src_joint_data = joint_query.iter()
+                .find(|(jeid, _)| jeid.0 == source_eid.0)
+                .and_then(|(_, jd)| jd.cloned());
 
             // Clone with offset
             let new_pos = transform.translation + Vec3::new(1.0, 0.0, 0.0);
@@ -421,6 +435,11 @@ pub fn apply_duplicate_requests(
                 entity_commands.insert(pmd.clone());
             }
 
+            // Clone joint data if present
+            if let Some(ref jd) = src_joint_data {
+                entity_commands.insert(jd.clone());
+            }
+
             // Record duplicate action in history
             history.push(UndoableAction::Duplicate {
                 source_entity_id: source_eid.0.clone(),
@@ -449,6 +468,7 @@ pub fn apply_duplicate_requests(
                     terrain_data: None,
                     terrain_mesh_data: None,
                     procedural_mesh_data: src_procedural_mesh_data,
+                    joint_data: src_joint_data,
                 },
             });
         }
@@ -1085,6 +1105,11 @@ pub fn spawn_from_snapshot(
         commands.entity(entity).insert(sed.clone());
     }
 
+    // Restore joint data if present
+    if let Some(jd) = &snapshot.joint_data {
+        commands.entity(entity).insert(jd.clone());
+    }
+
     entity
 }
 
@@ -1437,6 +1462,18 @@ fn execute_undo(
                 spawn_from_snapshot(commands, meshes, materials, snap);
             }
         }
+        UndoableAction::JointChange { entity_id, old_joint, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref jd) = old_joint {
+                        commands.entity(entity).insert(jd.clone());
+                    } else {
+                        commands.entity(entity).remove::<JointData>();
+                    }
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -1653,6 +1690,18 @@ fn execute_redo(
             }
             // Re-create the combined result entity
             spawn_from_snapshot(commands, meshes, materials, result_snapshot);
+        }
+        UndoableAction::JointChange { entity_id, new_joint, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref jd) = new_joint {
+                        commands.entity(entity).insert(jd.clone());
+                    } else {
+                        commands.entity(entity).remove::<JointData>();
+                    }
+                    break;
+                }
+            }
         }
     }
 }

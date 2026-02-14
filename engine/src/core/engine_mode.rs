@@ -18,7 +18,7 @@ use super::lighting::LightData;
 use super::material::MaterialData;
 use super::particles::{ParticleData, ParticleEnabled};
 use super::pending_commands::EntityType;
-use super::physics::{PhysicsData, PhysicsEnabled};
+use super::physics::{JointData, PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::Selection;
 use super::shader_effects::ShaderEffectData;
@@ -118,7 +118,7 @@ pub fn snapshot_scene(
     particle_query: &Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: &Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: &Query<(&EntityId, Option<&CsgMeshData>)>,
-    procedural_mesh_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
+    procedural_joint_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>)>,
     selection: &Selection,
 ) -> SceneSnapshot {
     let mut entities = Vec::new();
@@ -165,10 +165,11 @@ pub fn snapshot_scene(
             .find(|(ceid, _)| ceid.0 == eid.0)
             .and_then(|(_, cmd)| cmd.cloned());
 
-        // Look up procedural mesh data separately
-        let procedural_mesh_data = procedural_mesh_query.iter()
-            .find(|(pmeid, _)| pmeid.0 == eid.0)
-            .and_then(|(_, pmd)| pmd.cloned());
+        // Look up procedural mesh and joint data (combined query)
+        let (procedural_mesh_data, joint_data) = procedural_joint_query.iter()
+            .find(|(pmeid, _, _)| pmeid.0 == eid.0)
+            .map(|(_, pmd, jd)| (pmd.cloned(), jd.cloned()))
+            .unwrap_or((None, None));
 
         entities.push(EntitySnapshot {
             entity_id: eid.0.clone(),
@@ -191,6 +192,7 @@ pub fn snapshot_scene(
             terrain_data: None,
             terrain_mesh_data: None,
             procedural_mesh_data,
+            joint_data,
         });
     }
 

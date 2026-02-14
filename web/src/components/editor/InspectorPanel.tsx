@@ -14,6 +14,7 @@ import { AudioInspector } from './AudioInspector';
 import { ParticleInspector } from './ParticleInspector';
 import { AnimationInspector } from './AnimationInspector';
 import { TerrainInspector } from './TerrainInspector';
+import { JointInspector } from './JointInspector';
 import {
   copyTransformProperty,
   copyFullTransform,
@@ -298,6 +299,9 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Physics section (for all entities) */}
       <PhysicsInspector />
+
+      {/* Joint section (for entities with physics) */}
+      <JointInspector />
 
       {/* Terrain section (for terrain entities) */}
       <TerrainInspector />

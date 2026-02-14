@@ -14,6 +14,7 @@
     "@anthropic-ai/sdk": "^0.74.0",
     "@clerk/nextjs": "^6.37.3",
     "@clerk/themes": "^2.4.51",
+    "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
     "bcryptjs": "^3.0.3",
     "dotenv": "^17.2.4",

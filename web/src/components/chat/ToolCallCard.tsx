@@ -141,6 +141,10 @@ const TOOL_LABELS: Record<string, string> = {
   rename_scene: 'Rename Scene',
   set_start_scene: 'Set Start Scene',
   list_scenes: 'List Scenes',
+  create_joint: 'Create Joint',
+  update_joint: 'Update Joint',
+  remove_joint: 'Remove Joint',
+  get_joint: 'Get Joint',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {

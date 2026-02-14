@@ -124,6 +124,17 @@ export interface PhysicsData {
   isSensor: boolean;
 }
 
+// Joint data matching Rust's JointData struct
+export interface JointData {
+  jointType: 'fixed' | 'revolute' | 'spherical' | 'prismatic' | 'rope' | 'spring';
+  connectedEntityId: string;
+  anchorSelf: [number, number, number];
+  anchorOther: [number, number, number];
+  axis: [number, number, number];
+  limits: { min: number; max: number } | null;
+  motor: { targetVelocity: number; maxForce: number } | null;
+}
+
 // Material data matching Rust's MaterialData struct
 export interface MaterialData {
   baseColor: [number, number, number, number];
@@ -380,12 +391,36 @@ export interface SharpeningData {
   denoise: boolean;
 }
 
+// SSAO settings matching Rust's SsaoSettings
+export interface SsaoData {
+  quality: 'low' | 'medium' | 'high' | 'ultra';
+}
+
+// Depth of field settings matching Rust's DepthOfFieldSettings
+export interface DepthOfFieldData {
+  mode: 'gaussian' | 'bokeh';
+  focalDistance: number;
+  apertureFStops: number;
+  sensorHeight: number;
+  maxCircleOfConfusionDiameter: number;
+  maxDepth: number;
+}
+
+// Motion blur settings matching Rust's MotionBlurSettings
+export interface MotionBlurData {
+  shutterAngle: number;
+  samples: number;
+}
+
 // Top-level post-processing data
 export interface PostProcessingData {
   bloom: BloomData;
   chromaticAberration: ChromaticAberrationData;
   colorGrading: ColorGradingData;
   sharpening: SharpeningData;
+  ssao: SsaoData | null;
+  depthOfField: DepthOfFieldData | null;
+  motionBlur: MotionBlurData | null;
 }
 
 export const DEFAULT_POST_PROCESSING: PostProcessingData = {
@@ -417,6 +452,9 @@ export const DEFAULT_POST_PROCESSING: PostProcessingData = {
     sharpeningStrength: 0.6,
     denoise: false,
   },
+  ssao: null,
+  depthOfField: null,
+  motionBlur: null,
 };
 
 // Terrain data matching Rust's TerrainData struct
@@ -479,6 +517,7 @@ export interface EditorState {
   primaryPhysics: PhysicsData | null;
   physicsEnabled: boolean;
   debugPhysics: boolean;
+  primaryJoint: JointData | null;
 
   // Input bindings state
   inputBindings: InputBinding[];
@@ -629,6 +668,12 @@ export interface EditorState {
   togglePhysics: (entityId: string, enabled: boolean) => void;
   toggleDebugPhysics: () => void;
   setDebugPhysics: (enabled: boolean) => void;
+
+  // Joint actions
+  setPrimaryJoint: (data: JointData | null) => void;
+  createJoint: (entityId: string, data: JointData) => void;
+  updateJoint: (entityId: string, updates: Partial<JointData>) => void;
+  removeJoint: (entityId: string) => void;
 
   // Input binding actions
   setInputBinding: (binding: InputBinding) => void;
@@ -782,6 +827,9 @@ export interface EditorState {
   updateChromaticAberration: (partial: Partial<ChromaticAberrationData>) => void;
   updateColorGrading: (partial: Partial<ColorGradingData>) => void;
   updateSharpening: (partial: Partial<SharpeningData>) => void;
+  updateSsao: (data: SsaoData | null) => void;
+  updateDepthOfField: (data: DepthOfFieldData | null) => void;
+  updateMotionBlur: (data: MotionBlurData | null) => void;
   setPostProcessing: (data: PostProcessingData) => void;
 }
 
@@ -836,6 +884,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   primaryPhysics: null,
   physicsEnabled: false,
   debugPhysics: false,
+  primaryJoint: null,
   inputBindings: [],
   inputPreset: null,
   assetRegistry: {},
@@ -1409,6 +1458,33 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ debugPhysics: enabled });
   },
 
+  // Joint actions
+  setPrimaryJoint: (data) => {
+    set({ primaryJoint: data });
+  },
+  createJoint: (entityId, data) => {
+    set({ primaryJoint: data });
+    if (dispatchCommand) {
+      dispatchCommand('create_joint', { entityId, ...data });
+    }
+  },
+  updateJoint: (entityId, updates) => {
+    const current = get().primaryJoint;
+    if (current) {
+      const updated = { ...current, ...updates };
+      set({ primaryJoint: updated });
+    }
+    if (dispatchCommand) {
+      dispatchCommand('update_joint', { entityId, ...updates });
+    }
+  },
+  removeJoint: (entityId) => {
+    set({ primaryJoint: null });
+    if (dispatchCommand) {
+      dispatchCommand('remove_joint', { entityId });
+    }
+  },
+
   // Set input binding and send to Rust
   setInputBinding: (binding) => {
     if (dispatchCommand) {
@@ -1728,11 +1804,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Post-processing actions
   updatePostProcessing: (partial) => {
     const current = get().postProcessing;
-    const merged = {
+    const merged: PostProcessingData = {
       bloom: partial.bloom ?? current.bloom,
       chromaticAberration: partial.chromaticAberration ?? current.chromaticAberration,
       colorGrading: partial.colorGrading ?? current.colorGrading,
       sharpening: partial.sharpening ?? current.sharpening,
+      ssao: partial.ssao !== undefined ? partial.ssao : current.ssao,
+      depthOfField: partial.depthOfField !== undefined ? partial.depthOfField : current.depthOfField,
+      motionBlur: partial.motionBlur !== undefined ? partial.motionBlur : current.motionBlur,
     };
     set({ postProcessing: merged });
 
@@ -1743,6 +1822,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         chromaticAberration: partial.chromaticAberration,
         colorGrading: partial.colorGrading,
         sharpening: partial.sharpening,
+        ssao: partial.ssao,
+        depthOfField: partial.depthOfField,
+        motionBlur: partial.motionBlur,
       });
     }
   },
@@ -1769,6 +1851,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const current = get().postProcessing.sharpening;
     const merged = { ...current, ...partial };
     get().updatePostProcessing({ sharpening: merged });
+  },
+
+  updateSsao: (data) => {
+    get().updatePostProcessing({ ssao: data });
+  },
+
+  updateDepthOfField: (data) => {
+    get().updatePostProcessing({ depthOfField: data });
+  },
+
+  updateMotionBlur: (data) => {
+    get().updatePostProcessing({ motionBlur: data });
   },
 
   setPostProcessing: (data) => {

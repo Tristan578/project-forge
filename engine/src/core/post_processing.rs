@@ -13,6 +13,10 @@ use serde::{Serialize, Deserialize};
 
 use super::camera::EditorCamera;
 
+// SSAO import - WebGPU only
+#[cfg(feature = "webgpu")]
+use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
+
 /// Serializable bloom configuration.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -159,6 +163,63 @@ impl Default for SharpeningSettings {
     }
 }
 
+/// Serializable SSAO configuration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsaoSettings {
+    pub quality: String,  // "low", "medium", "high", "ultra"
+}
+
+impl Default for SsaoSettings {
+    fn default() -> Self {
+        Self {
+            quality: "medium".to_string(),
+        }
+    }
+}
+
+/// Serializable depth of field configuration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DepthOfFieldSettings {
+    pub mode: String,         // "gaussian" or "bokeh"
+    pub focal_distance: f32,
+    pub aperture_f_stops: f32,
+    pub sensor_height: f32,
+    pub max_circle_of_confusion_diameter: f32,
+    pub max_depth: f32,
+}
+
+impl Default for DepthOfFieldSettings {
+    fn default() -> Self {
+        Self {
+            mode: "gaussian".to_string(),
+            focal_distance: 10.0,
+            aperture_f_stops: 5.6,
+            sensor_height: 0.024,
+            max_circle_of_confusion_diameter: 0.1,
+            max_depth: 100.0,
+        }
+    }
+}
+
+/// Serializable motion blur configuration.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MotionBlurSettings {
+    pub shutter_angle: f32,
+    pub samples: u32,
+}
+
+impl Default for MotionBlurSettings {
+    fn default() -> Self {
+        Self {
+            shutter_angle: 0.5,
+            samples: 4,
+        }
+    }
+}
+
 /// Top-level post-processing resource that aggregates all effect settings.
 #[derive(Resource, Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,6 +228,12 @@ pub struct PostProcessingSettings {
     pub chromatic_aberration: ChromaticAberrationSettings,
     pub color_grading: ColorGradingSettings,
     pub sharpening: SharpeningSettings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssao: Option<SsaoSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth_of_field: Option<DepthOfFieldSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub motion_blur: Option<MotionBlurSettings>,
 }
 
 impl Default for PostProcessingSettings {
@@ -176,6 +243,9 @@ impl Default for PostProcessingSettings {
             chromatic_aberration: ChromaticAberrationSettings::default(),
             color_grading: ColorGradingSettings::default(),
             sharpening: SharpeningSettings::default(),
+            ssao: None,
+            depth_of_field: None,
+            motion_blur: None,
         }
     }
 }
@@ -199,6 +269,8 @@ fn sync_post_processing_settings(
     bloom_query: Query<Entity, (With<EditorCamera>, With<Bloom>)>,
     ca_query: Query<Entity, (With<EditorCamera>, With<ChromaticAberration>)>,
     cas_query: Query<Entity, (With<EditorCamera>, With<ContrastAdaptiveSharpening>)>,
+    #[cfg(feature = "webgpu")]
+    ssao_query: Query<Entity, (With<EditorCamera>, With<ScreenSpaceAmbientOcclusion>)>,
     mut color_grading_query: Query<&mut ColorGrading, With<EditorCamera>>,
     mut commands: Commands,
 ) {
@@ -305,4 +377,31 @@ fn sync_post_processing_settings(
             *color_grading = ColorGrading::default();
         }
     }
+
+    // Handle SSAO (WebGPU only)
+    #[cfg(feature = "webgpu")]
+    {
+        if let Some(ssao_settings) = &settings.ssao {
+            let quality_level = match ssao_settings.quality.as_str() {
+                "low" => ScreenSpaceAmbientOcclusionQualityLevel::Low,
+                "medium" => ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+                "high" => ScreenSpaceAmbientOcclusionQualityLevel::High,
+                "ultra" => ScreenSpaceAmbientOcclusionQualityLevel::Ultra,
+                _ => ScreenSpaceAmbientOcclusionQualityLevel::Medium,
+            };
+            let ssao_component = ScreenSpaceAmbientOcclusion {
+                quality_level,
+                ..Default::default()
+            };
+            commands.entity(camera_entity).insert(ssao_component);
+        } else if ssao_query.single().is_ok() {
+            commands.entity(camera_entity).remove::<ScreenSpaceAmbientOcclusion>();
+        }
+    }
+
+    // NOTE: Depth of Field and Motion Blur are not available in Bevy 0.16
+    // The settings are stored but not applied to the camera.
+    // Future Bevy versions may add these features.
+    let _ = settings.depth_of_field;
+    let _ = settings.motion_blur;
 }

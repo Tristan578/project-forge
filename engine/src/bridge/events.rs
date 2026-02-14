@@ -190,6 +190,20 @@ pub fn emit_debug_physics_changed(enabled: bool) {
     emit_event("DEBUG_PHYSICS_CHANGED", &DebugPhysicsPayload { enabled });
 }
 
+/// Emit a joint changed event.
+pub fn emit_joint_changed(joint_data: &crate::core::physics::JointData) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct JointPayload<'a> {
+        #[serde(flatten)]
+        data: &'a crate::core::physics::JointData,
+    }
+
+    emit_event("JOINT_CHANGED", &JointPayload {
+        data: joint_data,
+    });
+}
+
 /// Emit a scene exported event with the full JSON.
 pub fn emit_scene_exported(json: &str, name: &str) {
     #[derive(Serialize)]

@@ -1,9 +1,14 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { Trash2, Save, FileCode } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { SCRIPT_TEMPLATES } from '@/lib/scripting/scriptTemplates';
+import { FORGE_TYPE_DEFINITIONS } from '@/lib/scripting/forgeTypes';
+
+// Dynamic import Monaco with SSR disabled (it accesses browser APIs)
+const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
 
 const DEFAULT_SCRIPT = `function onStart() {
   forge.log("Script started!");
@@ -29,9 +34,8 @@ export function ScriptEditorPanel() {
   const [localEnabled, setLocalEnabled] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
   const [showConsole, setShowConsole] = useState(true);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const gutterRef = useRef<HTMLDivElement>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
+  const monacoSetup = useRef(false);
 
   // Derive local state from selection/script changes
   const currentScript = primaryId ? allScripts[primaryId] ?? primaryScript : null;
@@ -60,33 +64,6 @@ export function ScriptEditorPanel() {
     setIsDirty(false);
   }, [primaryId, localSource, localEnabled, setScript]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 's' && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        handleSave();
-      }
-      // Handle tab key in textarea
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const textarea = textareaRef.current;
-        if (textarea) {
-          const start = textarea.selectionStart;
-          const end = textarea.selectionEnd;
-          const value = textarea.value;
-          const newValue = value.substring(0, start) + '  ' + value.substring(end);
-          setLocalSource(newValue);
-          setIsDirty(true);
-          // Set cursor position after React re-render
-          requestAnimationFrame(() => {
-            textarea.selectionStart = textarea.selectionEnd = start + 2;
-          });
-        }
-      }
-    },
-    [handleSave]
-  );
-
   const handleAddScript = useCallback(() => {
     if (!primaryId) return;
     setScript(primaryId, DEFAULT_SCRIPT, true);
@@ -114,6 +91,69 @@ export function ScriptEditorPanel() {
     },
     [primaryId, applyScriptTemplate]
   );
+
+  // Monaco editor mount handler — register forge.* type definitions
+  const handleEditorDidMount = useCallback((_editor: unknown, monaco: unknown) => {
+    if (monacoSetup.current) return;
+    monacoSetup.current = true;
+
+    const m = monaco as {
+      languages: {
+        typescript: {
+          typescriptDefaults: {
+            addExtraLib: (content: string, filePath: string) => void;
+            setCompilerOptions: (options: Record<string, unknown>) => void;
+            setDiagnosticsOptions: (options: Record<string, unknown>) => void;
+          };
+          ScriptTarget: { ES2020: number };
+          ModuleResolutionKind: { NodeJs: number };
+          ModuleKind: { CommonJS: number };
+        };
+      };
+    };
+
+    // Register forge.* type definitions for autocomplete
+    m.languages.typescript.typescriptDefaults.addExtraLib(
+      FORGE_TYPE_DEFINITIONS,
+      'ts:filename/forge.d.ts'
+    );
+
+    // Configure TypeScript compiler for script editing
+    m.languages.typescript.typescriptDefaults.setCompilerOptions({
+      target: m.languages.typescript.ScriptTarget.ES2020,
+      allowNonTsExtensions: true,
+      moduleResolution: m.languages.typescript.ModuleResolutionKind.NodeJs,
+      module: m.languages.typescript.ModuleKind.CommonJS,
+      noEmit: true,
+      allowJs: true,
+    });
+
+    // Enable full diagnostics
+    m.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+    });
+  }, []);
+
+  // Monaco editor options
+  const editorOptions = useMemo(() => ({
+    minimap: { enabled: false },
+    fontSize: 12,
+    lineNumbers: 'on' as const,
+    scrollBeyondLastLine: false,
+    automaticLayout: true,
+    tabSize: 2,
+    wordWrap: 'on' as const,
+    renderLineHighlight: 'all' as const,
+    quickSuggestions: true,
+    suggestOnTriggerCharacters: true,
+    folding: true,
+    bracketPairColorization: { enabled: true },
+    padding: { top: 8 },
+    overviewRulerLanes: 0,
+    hideCursorInOverviewRuler: true,
+    scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+  }), []);
 
   const hasScript = primaryId ? !!allScripts[primaryId] || !!primaryScript : false;
 
@@ -166,11 +206,11 @@ export function ScriptEditorPanel() {
     );
   }
 
-  // Entity has script — show editor
+  // Entity has script — show Monaco editor
   const filteredLogs = scriptLogs.filter((l) => l.entityId === primaryId || l.entityId === '*');
 
   return (
-    <div className="flex h-full flex-col bg-zinc-900" onKeyDown={handleKeyDown}>
+    <div className="flex h-full flex-col bg-zinc-900">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
         <div className="flex items-center gap-2">
@@ -231,34 +271,19 @@ export function ScriptEditorPanel() {
         </div>
       </div>
 
-      {/* Code editor (textarea with line numbers) */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Line numbers gutter */}
-        <div
-          ref={gutterRef}
-          className="flex-shrink-0 select-none overflow-hidden bg-zinc-950 py-3 pl-2 pr-1 text-right font-mono text-[11px] leading-[18px] text-zinc-700"
-          aria-hidden="true"
-        >
-          {localSource.split('\n').map((_line, i) => (
-            <div key={i}>{i + 1}</div>
-          ))}
-        </div>
-        <textarea
-          ref={textareaRef}
+      {/* Monaco Code Editor */}
+      <div className="flex-1 overflow-hidden">
+        <MonacoEditor
+          height="100%"
+          defaultLanguage="typescript"
           value={localSource}
-          onChange={(e) => {
-            setLocalSource(e.target.value);
+          onChange={(value) => {
+            setLocalSource(value ?? '');
             setIsDirty(true);
           }}
-          onScroll={() => {
-            if (textareaRef.current && gutterRef.current) {
-              gutterRef.current.scrollTop = textareaRef.current.scrollTop;
-            }
-          }}
-          onBlur={handleSave}
-          spellCheck={false}
-          className="h-full w-full resize-none bg-zinc-950 py-3 pl-2 pr-3 font-mono text-[11px] leading-[18px] text-zinc-300 outline-none"
-          placeholder="// Write your script here..."
+          onMount={handleEditorDidMount}
+          theme="vs-dark"
+          options={editorOptions}
         />
       </div>
 

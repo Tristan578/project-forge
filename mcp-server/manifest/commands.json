@@ -392,7 +392,7 @@
     },
     {
       "name": "update_post_processing",
-      "description": "Update post-processing visual effects (bloom, chromatic aberration, color grading, sharpening). Send only the effects you want to change.",
+      "description": "Update post-processing visual effects (bloom, chromatic aberration, color grading, sharpening, SSAO, depth of field, motion blur). Send only the effects you want to change.",
       "category": "rendering",
       "parameters": {
         "type": "object",
@@ -475,6 +475,33 @@
               "enabled": { "type": "boolean", "description": "Enable/disable sharpening" },
               "sharpeningStrength": { "type": "number", "description": "Sharpening strength (0.0-1.0)" },
               "denoise": { "type": "boolean", "description": "Avoid sharpening noisy areas" }
+            }
+          },
+          "ssao": {
+            "type": ["object", "null"],
+            "description": "Screen-space ambient occlusion (WebGPU only). Send null to disable.",
+            "properties": {
+              "quality": { "type": "string", "enum": ["low", "medium", "high", "ultra"], "description": "SSAO quality level" }
+            }
+          },
+          "depthOfField": {
+            "type": ["object", "null"],
+            "description": "Depth of field (camera focus blur). Send null to disable.",
+            "properties": {
+              "mode": { "type": "string", "enum": ["gaussian", "bokeh"], "description": "DOF blur algorithm" },
+              "focalDistance": { "type": "number", "description": "Distance to focal plane (0.1-100)" },
+              "apertureFStops": { "type": "number", "description": "Aperture f-stop (1-32, lower = more blur)" },
+              "sensorHeight": { "type": "number", "description": "Camera sensor height in meters (default 0.024)" },
+              "maxCircleOfConfusionDiameter": { "type": "number", "description": "Max blur diameter (0.01-1.0)" },
+              "maxDepth": { "type": "number", "description": "Max depth for DOF calculation" }
+            }
+          },
+          "motionBlur": {
+            "type": ["object", "null"],
+            "description": "Motion blur (velocity-based blur). Send null to disable.",
+            "properties": {
+              "shutterAngle": { "type": "number", "description": "Shutter angle as fraction of frame (0.0-1.0)" },
+              "samples": { "type": "integer", "description": "Number of blur samples (1-8)" }
             }
           }
         }
@@ -2162,6 +2189,75 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_joint",
+      "description": "Create a physics joint between two entities. Requires physics enabled on both. Joint types: fixed, revolute, spherical, prismatic, rope, spring",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID to attach the joint to" },
+          "jointType": { "type": "string", "enum": ["fixed", "revolute", "spherical", "prismatic", "rope", "spring"], "description": "Type of joint constraint" },
+          "connectedEntityId": { "type": "string", "description": "Entity ID of the other body to connect to" },
+          "anchorSelf": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Local anchor point on this entity [x, y, z]" },
+          "anchorOther": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Local anchor point on the connected entity [x, y, z]" },
+          "axis": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Joint axis for revolute/prismatic [x, y, z]" },
+          "limits": { "type": "object", "properties": { "min": { "type": "number" }, "max": { "type": "number" } }, "description": "Optional joint limits" },
+          "motor": { "type": "object", "properties": { "targetVelocity": { "type": "number" }, "maxForce": { "type": "number" } }, "description": "Optional motor settings" }
+        },
+        "required": ["entityId", "connectedEntityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_joint",
+      "description": "Update joint properties on an entity",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID with the joint" },
+          "jointType": { "type": "string", "enum": ["fixed", "revolute", "spherical", "prismatic", "rope", "spring"], "description": "Change joint type" },
+          "connectedEntityId": { "type": "string", "description": "Change connected entity" },
+          "anchorSelf": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Update self anchor [x, y, z]" },
+          "anchorOther": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Update other anchor [x, y, z]" },
+          "axis": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Update joint axis [x, y, z]" },
+          "limits": { "type": ["object", "null"], "properties": { "min": { "type": "number" }, "max": { "type": "number" } }, "description": "Set or remove limits (null to remove)" },
+          "motor": { "type": ["object", "null"], "properties": { "targetVelocity": { "type": "number" }, "maxForce": { "type": "number" } }, "description": "Set or remove motor (null to remove)" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_joint",
+      "description": "Remove a physics joint from an entity",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID to remove joint from" }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_joint",
+      "description": "Get the joint configuration for the selected entity",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity ID (defaults to primary selection)" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     },
     {
       "name": "list_scenes",

@@ -14,8 +14,11 @@ use super::input::{ActionDef, InputPreset};
 use super::lighting::LightData;
 use super::material::MaterialData;
 use super::particles::ParticleData;
-use super::physics::PhysicsData;
-use super::post_processing::{BloomSettings, ChromaticAberrationSettings, ColorGradingSettings, SharpeningSettings};
+use super::physics::{JointData, JointLimits, JointMotor, JointType, PhysicsData};
+use super::post_processing::{
+    BloomSettings, ChromaticAberrationSettings, ColorGradingSettings, SharpeningSettings,
+    SsaoSettings, DepthOfFieldSettings, MotionBlurSettings,
+};
 use super::shader_effects::ShaderEffectData;
 use super::terrain::TerrainData;
 
@@ -42,6 +45,7 @@ pub enum QueryRequest {
     ShaderData { entity_id: String },
     TerrainState { entity_id: String },
     QualitySettings,
+    ListJoints,
 }
 
 /// A pending glTF import request.
@@ -116,6 +120,32 @@ pub struct PhysicsToggle {
 /// A pending debug physics toggle request.
 #[derive(Debug, Clone)]
 pub struct DebugPhysicsToggle;
+
+/// A pending joint creation request.
+#[derive(Debug, Clone)]
+pub struct CreateJointRequest {
+    pub entity_id: String,
+    pub joint_data: JointData,
+}
+
+/// A pending joint update request.
+#[derive(Debug, Clone)]
+pub struct UpdateJointRequest {
+    pub entity_id: String,
+    pub joint_type: Option<JointType>,
+    pub connected_entity_id: Option<String>,
+    pub anchor_self: Option<[f32; 3]>,
+    pub anchor_other: Option<[f32; 3]>,
+    pub axis: Option<[f32; 3]>,
+    pub limits: Option<Option<JointLimits>>,
+    pub motor: Option<Option<JointMotor>>,
+}
+
+/// A pending joint removal request.
+#[derive(Debug, Clone)]
+pub struct RemoveJointRequest {
+    pub entity_id: String,
+}
 
 /// A pending script update request.
 #[derive(Debug, Clone)]
@@ -449,6 +479,9 @@ pub struct PendingCommands {
     pub physics_updates: Vec<PhysicsUpdate>,
     pub physics_toggles: Vec<PhysicsToggle>,
     pub debug_physics_toggles: Vec<DebugPhysicsToggle>,
+    pub create_joint_requests: Vec<CreateJointRequest>,
+    pub update_joint_requests: Vec<UpdateJointRequest>,
+    pub remove_joint_requests: Vec<RemoveJointRequest>,
     pub force_applications: Vec<ForceApplication>,
     pub scene_export_requests: Vec<SceneExportRequest>,
     pub scene_load_requests: Vec<SceneLoadRequest>,
@@ -547,6 +580,9 @@ pub struct PostProcessingUpdate {
     pub chromatic_aberration: Option<ChromaticAberrationSettings>,
     pub color_grading: Option<ColorGradingSettings>,
     pub sharpening: Option<SharpeningSettings>,
+    pub ssao: Option<Option<SsaoSettings>>,
+    pub depth_of_field: Option<Option<DepthOfFieldSettings>>,
+    pub motion_blur: Option<Option<MotionBlurSettings>>,
 }
 
 /// A pending transform update request.
@@ -806,6 +842,21 @@ impl PendingCommands {
     /// Queue a debug physics toggle.
     pub fn queue_debug_physics_toggle(&mut self) {
         self.debug_physics_toggles.push(DebugPhysicsToggle);
+    }
+
+    /// Queue a joint creation request.
+    pub fn queue_create_joint(&mut self, request: CreateJointRequest) {
+        self.create_joint_requests.push(request);
+    }
+
+    /// Queue a joint update request.
+    pub fn queue_update_joint(&mut self, request: UpdateJointRequest) {
+        self.update_joint_requests.push(request);
+    }
+
+    /// Queue a joint removal request.
+    pub fn queue_remove_joint(&mut self, request: RemoveJointRequest) {
+        self.remove_joint_requests.push(request);
     }
 
     /// Queue a force application.
@@ -1947,6 +1998,48 @@ pub fn queue_update_skybox_from_bridge(request: UpdateSkyboxRequest) -> bool {
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_update_skybox(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a create joint request from the bridge layer.
+pub fn queue_create_joint_from_bridge(request: CreateJointRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_create_joint(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an update joint request from the bridge layer.
+pub fn queue_update_joint_from_bridge(request: UpdateJointRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_update_joint(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a remove joint request from the bridge layer.
+pub fn queue_remove_joint_from_bridge(request: RemoveJointRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_remove_joint(request);
             }
             true
         } else {

@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, setCommandDispatcher, firePlayTick } from '@/stores/editorStore';
+import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, type JointData, setCommandDispatcher, firePlayTick } from '@/stores/editorStore';
 
 // Event types matching Rust's event emission
 interface SelectionChangedEvent {
@@ -103,6 +103,19 @@ interface PhysicsChangedEvent {
 interface DebugPhysicsChangedEvent {
   type: 'DEBUG_PHYSICS_CHANGED';
   payload: { enabled: boolean };
+}
+
+interface JointChangedEvent {
+  type: 'JOINT_CHANGED';
+  payload: {
+    jointType: string;
+    connectedEntityId: string;
+    anchorSelf: [number, number, number];
+    anchorOther: [number, number, number];
+    axis: [number, number, number];
+    limits: { min: number; max: number } | null;
+    motor: { targetVelocity: number; maxForce: number } | null;
+  } | null;
 }
 
 interface InputBindingsChangedEvent {
@@ -311,7 +324,7 @@ interface RaycastResultEvent {
   payload: { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number };
 }
 
-type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent | CollisionEventEvent | RaycastResultEvent;
+type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent | CollisionEventEvent | RaycastResultEvent | JointChangedEvent;
 
 // Debounced auto-save: triggers export_scene command after 2s of inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -483,6 +496,10 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           useEditorStore.getState().setPrimaryPhysics(physData as PhysicsData, enabled);
           break;
         }
+
+        case 'JOINT_CHANGED':
+          useEditorStore.getState().setPrimaryJoint(event.payload as JointData | null);
+          break;
 
         case 'DEBUG_PHYSICS_CHANGED':
           useEditorStore.getState().setDebugPhysics(event.payload.enabled);

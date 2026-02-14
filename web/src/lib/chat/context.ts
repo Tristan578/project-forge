@@ -1,4 +1,4 @@
-import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState, ShaderEffectData } from '@/stores/editorStore';
+import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState, ShaderEffectData, JointData } from '@/stores/editorStore';
 
 
 interface EditorSnapshot {
@@ -30,6 +30,7 @@ interface EditorSnapshot {
   postProcessing?: PostProcessingData;
   audioBuses?: AudioBusDef[];
   terrainData?: Record<string, import('@/stores/editorStore').TerrainDataState>;
+  primaryJoint?: JointData | null;
   scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
   activeSceneId?: string | null;
 }
@@ -178,6 +179,11 @@ export function buildSceneContext(state: EditorSnapshot): string {
     const terrainData = state.terrainData && primaryId ? state.terrainData[primaryId] : null;
     sections.push('\n## Selected Entity');
     sections.push(describeEntityDetailed(sceneGraph.nodes[primaryId], sceneGraph, primaryTransform, primaryMaterial, state.primaryShaderEffect, primaryLight, state.primaryPhysics, state.physicsEnabled, terrainData));
+    if (state.primaryJoint) {
+      const j = state.primaryJoint;
+      const connectedName = sceneGraph.nodes[j.connectedEntityId]?.name ?? j.connectedEntityId;
+      sections.push(`  Joint: ${j.jointType} → "${connectedName}", anchors=self${formatVec3(j.anchorSelf)} other${formatVec3(j.anchorOther)}${j.limits ? `, limits=[${j.limits.min}, ${j.limits.max}]` : ''}${j.motor ? `, motor(vel=${j.motor.targetVelocity}, force=${j.motor.maxForce})` : ''}`);
+    }
   } else if (selectedIds.size > 0) {
     const names = [...selectedIds]
       .map((id) => sceneGraph.nodes[id]?.name)
