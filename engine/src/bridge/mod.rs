@@ -376,6 +376,7 @@ impl Plugin for SelectionPlugin {
                 .add_systems(Update, (
                     apply_place_asset,
                     apply_delete_asset,
+                    apply_instantiate_prefab,
                 ))
                 .add_systems(PostUpdate, (
                     emit_scene_graph_updates,
@@ -4039,5 +4040,49 @@ fn apply_combine_requests(
         });
 
         emit_procedural_mesh_created(&entity_id_str, &name, "combine");
+    }
+}
+
+/// System that processes pending instantiate prefab requests.
+fn apply_instantiate_prefab(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut cache: ResMut<SceneGraphCache>,
+) {
+    for request in pending.instantiate_prefab_requests.drain(..) {
+        // Deserialize the snapshot JSON
+        let snapshot: HistEntitySnapshot = match serde_json::from_str(&request.snapshot_json) {
+            Ok(s) => s,
+            Err(e) => {
+                log(&format!("Failed to deserialize prefab snapshot: {}", e));
+                continue;
+            }
+        };
+
+        // Create a mutable copy to apply overrides
+        let mut modified_snapshot = snapshot;
+
+        // Override position if provided
+        if let Some(pos) = request.position {
+            modified_snapshot.transform.position = pos;
+        }
+
+        // Override name if provided
+        if let Some(name) = request.name {
+            modified_snapshot.name = name;
+        }
+
+        // Spawn the entity from the snapshot
+        let _entity = entity_factory::spawn_from_snapshot(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &modified_snapshot,
+        );
+
+        // Mark scene graph as dirty to trigger update event
+        cache.dirty = true;
     }
 }

@@ -30,6 +30,8 @@ interface EditorSnapshot {
   postProcessing?: PostProcessingData;
   audioBuses?: AudioBusDef[];
   terrainData?: Record<string, import('@/stores/editorStore').TerrainDataState>;
+  scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
+  activeSceneId?: string | null;
 }
 
 function formatVec3(v: [number, number, number]): string {
@@ -276,6 +278,20 @@ export function buildSceneContext(state: EditorSnapshot): string {
     if (state.canUndo) historyParts.push(`can undo: "${state.undoDescription}"`);
     if (state.canRedo) historyParts.push(`can redo: "${state.redoDescription}"`);
     sections.push(`\n## History\n${historyParts.join(', ')}`);
+  }
+
+  // Prefabs
+  sections.push('\nPrefabs: Use list_prefabs to see available reusable templates.');
+
+  // Scenes
+  if (state.scenes && state.scenes.length > 1) {
+    const sceneList = state.scenes.map(s => {
+      let label = s.name;
+      if (s.isStartScene) label += ' (start)';
+      if (s.id === state.activeSceneId) label += ' (active)';
+      return label;
+    }).join(', ');
+    sections.push(`\nScenes: ${sceneList}`);
   }
 
   // Entity reference hint

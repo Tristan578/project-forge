@@ -43,7 +43,8 @@ use super::pending_commands::{
     queue_csg_from_bridge,
     queue_terrain_spawn_from_bridge, queue_terrain_update_from_bridge, queue_terrain_sculpt_from_bridge,
     queue_extrude_from_bridge, queue_lathe_from_bridge, queue_array_from_bridge, queue_combine_from_bridge,
-    queue_quality_preset_from_bridge, QualityPresetRequest,
+    queue_quality_preset_from_bridge, queue_instantiate_prefab_from_bridge,
+    QualityPresetRequest, InstantiatePrefabRequest,
     AnimationRequest, AnimationAction,
     ShaderUpdate, ShaderRemoval,
     CsgRequest,
@@ -252,6 +253,8 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         "lathe_shape" => handle_lathe_shape(payload),
         "array_entity" => handle_array_entity(payload),
         "combine_meshes" => handle_combine_meshes(payload),
+        // Prefab commands
+        "instantiate_prefab" => handle_instantiate_prefab(payload),
         // Quality preset commands
         "set_quality_preset" => handle_set_quality_preset(payload),
         "get_quality_settings" => handle_query(QueryRequest::QualitySettings),
@@ -2462,6 +2465,40 @@ fn handle_combine_meshes(payload: serde_json::Value) -> CommandResult {
     };
 
     if queue_combine_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle instantiate_prefab command.
+/// Payload: { snapshot_json: string, position?: [x, y, z], name?: string }
+fn handle_instantiate_prefab(payload: serde_json::Value) -> CommandResult {
+    let snapshot_json = payload.get("snapshot_json")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing snapshot_json")?
+        .to_string();
+
+    let position = payload.get("position").and_then(|v| {
+        let arr = v.as_array()?;
+        if arr.len() == 3 {
+            Some([
+                arr[0].as_f64()? as f32,
+                arr[1].as_f64()? as f32,
+                arr[2].as_f64()? as f32,
+            ])
+        } else { None }
+    });
+
+    let name = payload.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+    let request = InstantiatePrefabRequest {
+        snapshot_json,
+        position,
+        name,
+    };
+
+    if queue_instantiate_prefab_from_bridge(request) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

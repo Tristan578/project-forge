@@ -1118,6 +1118,217 @@ export async function executeToolCall(
       case 'list_doc_topics':
         return { success: true, result: { message: `Documentation tool "${toolName}" is handled by the MCP server` } };
 
+      // --- Prefab commands ---
+      case 'save_as_prefab': {
+        const { savePrefab } = await import('@/lib/prefabs/prefabStore');
+        const entityId = input.entityId as string;
+        const name = input.name as string;
+        const category = (input.category as string) || 'uncategorized';
+        const description = (input.description as string) || '';
+
+        // Build snapshot from current editor state
+        const transforms = store.primaryTransform;
+        const snapshot = {
+          entityType: 'cube', // Will be overridden by actual entity type from scene graph
+          name: name,
+          transform: transforms ? {
+            position: transforms.position,
+            rotation: transforms.rotation,
+            scale: transforms.scale,
+          } : { position: [0, 0, 0] as [number, number, number], rotation: [0, 0, 0] as [number, number, number], scale: [1, 1, 1] as [number, number, number] },
+          material: store.primaryMaterial || undefined,
+          light: store.primaryLight || undefined,
+          physics: store.primaryPhysics || undefined,
+          script: store.primaryScript || undefined,
+          audio: store.primaryAudio || undefined,
+          particle: store.primaryParticle || undefined,
+        };
+
+        // Get entity type from scene graph
+        const node = store.sceneGraph.nodes[entityId];
+        if (node) {
+          // Try to infer entity type from components
+          const components = node.components || [];
+          if (components.includes('PointLight') || components.includes('DirectionalLight') || components.includes('SpotLight')) {
+            snapshot.entityType = store.primaryLight?.lightType === 'point' ? 'point_light' : store.primaryLight?.lightType === 'directional' ? 'directional_light' : 'spot_light';
+          }
+        }
+
+        const prefab = savePrefab(name, category, description, snapshot);
+        return { success: true, result: { prefabId: prefab.id, message: `Saved "${name}" as prefab` } };
+      }
+
+      case 'instantiate_prefab': {
+        const { getPrefab } = await import('@/lib/prefabs/prefabStore');
+        const prefabId = input.prefabId as string;
+        const prefab = getPrefab(prefabId);
+        if (!prefab) return { success: false, error: `Prefab not found: ${prefabId}` };
+
+        const position = input.position as [number, number, number] | undefined;
+        const name = input.name as string | undefined;
+
+        store.spawnEntity(prefab.snapshot.entityType as EntityType, name || prefab.snapshot.name);
+
+        // Apply material if present
+        if (prefab.snapshot.material && store.primaryId) {
+          store.updateMaterial(store.primaryId, prefab.snapshot.material);
+        }
+
+        // Apply position if specified
+        if (position && store.primaryId) {
+          store.updateTransform(store.primaryId, 'position', position);
+        }
+
+        return { success: true, result: { message: `Instantiated prefab "${prefab.name}"` } };
+      }
+
+      case 'list_prefabs': {
+        const { listAllPrefabs, getPrefabsByCategory } = await import('@/lib/prefabs/prefabStore');
+        const category = input.category as string | undefined;
+        const prefabs = category ? getPrefabsByCategory(category) : listAllPrefabs();
+        return { success: true, result: { prefabs: prefabs.map(p => ({ id: p.id, name: p.name, category: p.category, description: p.description })) } };
+      }
+
+      case 'delete_prefab': {
+        const { deletePrefab } = await import('@/lib/prefabs/prefabStore');
+        const deleted = deletePrefab(input.prefabId as string);
+        return deleted ? { success: true, result: { message: 'Prefab deleted' } } : { success: false, error: 'Prefab not found' };
+      }
+
+      case 'get_prefab': {
+        const { getPrefab } = await import('@/lib/prefabs/prefabStore');
+        const prefab = getPrefab(input.prefabId as string);
+        return prefab ? { success: true, result: prefab } : { success: false, error: 'Prefab not found' };
+      }
+
+      // --- Multi-scene commands ---
+      case 'create_scene': {
+        const { createScene, loadProjectScenes, saveProjectScenes } = await import('@/lib/scenes/sceneManager');
+        const project = loadProjectScenes();
+        const result = createScene(project, input.name as string);
+        saveProjectScenes(result.project);
+        store.setScenes(
+          result.project.scenes.map(s => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+          result.project.activeSceneId
+        );
+        return { success: true, result: { sceneId: result.sceneId, message: `Created scene "${input.name}"` } };
+      }
+
+      case 'switch_scene': {
+        const { switchScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
+        const project = loadProjectScenes();
+        const sceneIdInput = input.sceneId as string;
+        // Try by ID first, then by name
+        let targetId = sceneIdInput;
+        const byName = getSceneByName(project, sceneIdInput);
+        if (byName) targetId = byName.id;
+
+        const result = switchScene(project, targetId);
+        if ('error' in result) return { success: false, error: result.error };
+
+        saveProjectScenes(result.project);
+        store.setScenes(
+          result.project.scenes.map(s => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+          result.project.activeSceneId
+        );
+        // Load the scene data into the engine
+        if (result.sceneToLoad) {
+          store.loadScene(JSON.stringify(result.sceneToLoad));
+        } else {
+          store.newScene();
+        }
+        return { success: true, result: { message: `Switched to scene` } };
+      }
+
+      case 'duplicate_scene': {
+        const { duplicateScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
+        const project = loadProjectScenes();
+        const sceneIdInput = input.sceneId as string;
+        let targetId = sceneIdInput;
+        const byName = getSceneByName(project, sceneIdInput);
+        if (byName) targetId = byName.id;
+
+        const result = duplicateScene(project, targetId, input.name as string | undefined);
+        if ('error' in result) return { success: false, error: result.error };
+
+        saveProjectScenes(result.project);
+        store.setScenes(
+          result.project.scenes.map(s => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+          result.project.activeSceneId
+        );
+        return { success: true, result: { sceneId: result.newSceneId, message: `Duplicated scene` } };
+      }
+
+      case 'delete_scene': {
+        const { deleteScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
+        const project = loadProjectScenes();
+        const sceneIdInput = input.sceneId as string;
+        let targetId = sceneIdInput;
+        const byName = getSceneByName(project, sceneIdInput);
+        if (byName) targetId = byName.id;
+
+        const result = deleteScene(project, targetId);
+        if (result.error) return { success: false, error: result.error };
+
+        saveProjectScenes(result.project);
+        store.setScenes(
+          result.project.scenes.map(s => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+          result.project.activeSceneId
+        );
+        return { success: true, result: { message: 'Scene deleted' } };
+      }
+
+      case 'rename_scene': {
+        const { renameScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
+        const project = loadProjectScenes();
+        const sceneIdInput = input.sceneId as string;
+        let targetId = sceneIdInput;
+        const byName = getSceneByName(project, sceneIdInput);
+        if (byName) targetId = byName.id;
+
+        const updated = renameScene(project, targetId, input.name as string);
+        saveProjectScenes(updated);
+        store.setScenes(
+          updated.scenes.map(s => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+          updated.activeSceneId
+        );
+        return { success: true, result: { message: `Renamed scene to "${input.name}"` } };
+      }
+
+      case 'set_start_scene': {
+        const { setStartScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
+        const project = loadProjectScenes();
+        const sceneIdInput = input.sceneId as string;
+        let targetId = sceneIdInput;
+        const byName = getSceneByName(project, sceneIdInput);
+        if (byName) targetId = byName.id;
+
+        const updated = setStartScene(project, targetId);
+        saveProjectScenes(updated);
+        store.setScenes(
+          updated.scenes.map(s => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+          updated.activeSceneId
+        );
+        return { success: true, result: { message: 'Start scene updated' } };
+      }
+
+      case 'list_scenes': {
+        const { loadProjectScenes } = await import('@/lib/scenes/sceneManager');
+        const project = loadProjectScenes();
+        return {
+          success: true,
+          result: {
+            scenes: project.scenes.map(s => ({
+              id: s.id,
+              name: s.name,
+              isStartScene: s.isStartScene,
+              isActive: s.id === project.activeSceneId,
+            })),
+            activeSceneId: project.activeSceneId,
+          }
+        };
+      }
+
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
     }

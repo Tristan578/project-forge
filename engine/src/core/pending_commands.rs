@@ -326,6 +326,14 @@ pub struct CombineRequest {
     pub name: Option<String>,
 }
 
+/// A pending instantiate prefab request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstantiatePrefabRequest {
+    pub snapshot_json: String,
+    pub position: Option<[f32; 3]>,
+    pub name: Option<String>,
+}
+
 /// The specific animation action to perform.
 #[derive(Debug, Clone)]
 pub enum AnimationAction {
@@ -445,6 +453,7 @@ pub struct PendingCommands {
     pub array_requests: Vec<ArrayRequest>,
     pub combine_requests: Vec<CombineRequest>,
     pub quality_preset_requests: Vec<QualityPresetRequest>,
+    pub instantiate_prefab_requests: Vec<InstantiatePrefabRequest>,
 }
 
 /// A pending selection request from the hierarchy panel.
@@ -937,6 +946,11 @@ impl PendingCommands {
     /// Queue a quality preset request.
     pub fn queue_quality_preset(&mut self, request: QualityPresetRequest) {
         self.quality_preset_requests.push(request);
+    }
+
+    /// Queue an instantiate prefab request.
+    pub fn queue_instantiate_prefab(&mut self, request: InstantiatePrefabRequest) {
+        self.instantiate_prefab_requests.push(request);
     }
 }
 
@@ -1808,6 +1822,20 @@ pub fn queue_quality_preset_from_bridge(request: QualityPresetRequest) -> bool {
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_quality_preset(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an instantiate prefab request from the bridge layer.
+pub fn queue_instantiate_prefab_from_bridge(request: InstantiatePrefabRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_instantiate_prefab(request);
             }
             true
         } else {

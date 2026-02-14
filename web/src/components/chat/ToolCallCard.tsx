@@ -126,6 +126,18 @@ const TOOL_LABELS: Record<string, string> = {
   list_custom_materials: 'List Custom Materials',
   set_quality_preset: 'Set Quality Preset',
   get_quality_settings: 'Get Quality Settings',
+  save_as_prefab: 'Save as Prefab',
+  instantiate_prefab: 'Instantiate Prefab',
+  list_prefabs: 'List Prefabs',
+  delete_prefab: 'Delete Prefab',
+  get_prefab: 'Get Prefab',
+  create_scene: 'Create Scene',
+  switch_scene: 'Switch Scene',
+  duplicate_scene: 'Duplicate Scene',
+  delete_scene: 'Delete Scene',
+  rename_scene: 'Rename Scene',
+  set_start_scene: 'Set Start Scene',
+  list_scenes: 'List Scenes',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {

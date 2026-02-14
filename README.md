@@ -9,7 +9,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ### AI & Automation
 - **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want ("build a platformer level") and the AI spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
-- **MCP Server** — 123 commands across 19 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 135 commands across 20 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28 structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features and procedures on demand
@@ -39,12 +39,14 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Play Mode** — Test your game instantly with play/pause/stop and scene snapshot restore
 - **Input System** — Configurable key bindings with 4 presets (FPS, Platformer, Top-Down, Racing)
 - **Save/Load** — JSON scene format, local storage auto-save, and cloud project storage
+- **Prefab System** — Save entity configurations as reusable templates with 8 built-in prefabs, import/export, and search
+- **Multi-Scene Management** — Multiple named scenes per project with scene switching, duplication, and import/export
 - **Game Export** — Export standalone HTML games that run anywhere
 
 ## Architecture
 
 ```
-MCP Server (123 commands)                      AI agents + LLM tool use
+MCP Server (135 commands)                      AI agents + LLM tool use
     ↕  JSON commands
 React Shell (Next.js, Zustand, Tailwind)      Visual editor UI
     ↕  JSON events via wasm-bindgen

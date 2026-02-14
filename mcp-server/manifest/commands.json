@@ -1942,6 +1942,177 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "save_as_prefab",
+      "description": "Save the current entity as a reusable prefab template",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": { "type": "string", "description": "Entity to save as prefab" },
+          "name": { "type": "string", "description": "Name for the prefab" },
+          "category": { "type": "string", "description": "Category (e.g. Characters, Props, Effects)" },
+          "description": { "type": "string", "description": "Optional description" }
+        },
+        "required": ["entityId", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "instantiate_prefab",
+      "description": "Spawn a copy of a saved prefab at a position",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": { "type": "string", "description": "Prefab ID or name" },
+          "position": { "type": "array", "items": { "type": "number" }, "description": "[x, y, z] spawn position" },
+          "name": { "type": "string", "description": "Optional name override for the spawned entity" }
+        },
+        "required": ["prefabId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_prefabs",
+      "description": "List all available prefabs (built-in and user-created)",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": { "type": "string", "description": "Optional category filter" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "delete_prefab",
+      "description": "Delete a user-created prefab",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": { "type": "string", "description": "Prefab ID to delete" }
+        },
+        "required": ["prefabId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "get_prefab",
+      "description": "Get full prefab data by ID or name",
+      "category": "prefab",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prefabId": { "type": "string", "description": "Prefab ID or name" }
+        },
+        "required": ["prefabId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "create_scene",
+      "description": "Create a new empty scene in the project",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Name for the new scene" }
+        },
+        "required": ["name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "switch_scene",
+      "description": "Switch to a different scene by name or ID",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sceneId": { "type": "string", "description": "Scene ID or name to switch to" }
+        },
+        "required": ["sceneId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "duplicate_scene",
+      "description": "Create a copy of an existing scene",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sceneId": { "type": "string", "description": "Scene ID or name to duplicate" },
+          "name": { "type": "string", "description": "Name for the duplicate" }
+        },
+        "required": ["sceneId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "delete_scene",
+      "description": "Delete a scene from the project",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sceneId": { "type": "string", "description": "Scene ID or name to delete" }
+        },
+        "required": ["sceneId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "rename_scene",
+      "description": "Rename a scene",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sceneId": { "type": "string", "description": "Scene ID or name" },
+          "name": { "type": "string", "description": "New name for the scene" }
+        },
+        "required": ["sceneId", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_start_scene",
+      "description": "Set which scene loads first when the game starts",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sceneId": { "type": "string", "description": "Scene ID or name to set as start" }
+        },
+        "required": ["sceneId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_scenes",
+      "description": "List all scenes in the project with metadata",
+      "category": "scene",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     }
   ],
   "resources": [

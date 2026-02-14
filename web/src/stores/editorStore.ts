@@ -511,6 +511,11 @@ export interface EditorState {
   // Terrain state
   terrainData: Record<string, TerrainDataState>;
 
+  // Multi-scene
+  scenes: Array<{ id: string; name: string; isStartScene: boolean }>;
+  activeSceneId: string | null;
+  sceneSwitching: boolean;
+
   // HUD state (for in-game UI during play mode)
   hudElements: HudElement[];
 
@@ -723,6 +728,10 @@ export interface EditorState {
   // HUD actions
   setHudElements: (elements: HudElement[]) => void;
 
+  // Multi-scene actions
+  setScenes: (scenes: Array<{ id: string; name: string; isStartScene: boolean }>, activeId: string | null) => void;
+  setSceneSwitching: (switching: boolean) => void;
+
   // Procedural mesh operations
   extrudeShape: (shape: string, params: {
     radius?: number;
@@ -850,6 +859,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   qualityPreset: 'high' as QualityPreset,
   terrainData: {},
   hudElements: [],
+  scenes: [],
+  activeSceneId: null,
+  sceneSwitching: false,
 
   // Select a single entity or modify selection
   selectEntity: (id, mode) => {
@@ -2045,6 +2057,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // Set HUD elements from script worker
   setHudElements: (elements) => {
     set({ hudElements: elements });
+  },
+
+  // Multi-scene actions
+  setScenes: (scenes: Array<{ id: string; name: string; isStartScene: boolean }>, activeId: string | null) => {
+    set({ scenes, activeSceneId: activeId });
+  },
+  setSceneSwitching: (switching: boolean) => {
+    set({ sceneSwitching: switching });
   },
 }));
 
