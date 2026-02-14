@@ -66,6 +66,12 @@ declare namespace forge {
     function getContacts(entityId: string, radius?: number): string[];
     /** Get distance between two entities */
     function distanceTo(entityIdA: string, entityIdB: string): number;
+    /** Register a callback for when this entity collides with another (collision start) */
+    function onCollisionEnter(entityId: string, callback: (otherEntityId: string) => void): void;
+    /** Register a callback for when this entity stops colliding with another (collision end) */
+    function onCollisionExit(entityId: string, callback: (otherEntityId: string) => void): void;
+    /** Remove all collision callbacks for this entity */
+    function offCollision(entityId: string): void;
   }
 
   namespace audio {

@@ -19,6 +19,8 @@ function makeState(overrides?: Record<string, unknown>) {
       fogColor: [0.5, 0.5, 0.5] as [number, number, number],
       fogStart: 10,
       fogEnd: 100,
+      skyboxPreset: null,
+      skyboxAssetId: null,
     },
     canUndo: false,
     canRedo: false,
@@ -94,6 +96,8 @@ describe('buildSceneContext', () => {
         fogColor: [0.5, 0.5, 0.5] as [number, number, number],
         fogStart: 10,
         fogEnd: 100,
+        skyboxPreset: null,
+        skyboxAssetId: null,
       },
     });
     const ctx = buildSceneContext(state);

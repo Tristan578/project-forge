@@ -38,6 +38,8 @@ features = [
     "animation",
     "bevy_gltf",
     "bevy_scene",
+    "ktx2",
+    "zstd",
 ]
 
 [dependencies.web-sys]

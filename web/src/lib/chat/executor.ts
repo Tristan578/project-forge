@@ -215,6 +215,23 @@ export async function executeToolCall(
         return { success: true };
       }
 
+      case 'set_skybox': {
+        if (input.preset) {
+          store.setSkybox(input.preset as string);
+        }
+        return { success: true };
+      }
+
+      case 'remove_skybox': {
+        store.removeSkybox();
+        return { success: true };
+      }
+
+      case 'update_skybox': {
+        store.updateSkybox(input as { brightness?: number; iblIntensity?: number; rotation?: number });
+        return { success: true };
+      }
+
       case 'update_post_processing': {
         store.updatePostProcessing(input as Record<string, unknown>);
         return { success: true };

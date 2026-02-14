@@ -55,6 +55,8 @@ describe('editorStore', () => {
         fogColor: [0.5, 0.5, 0.55],
         fogStart: 30,
         fogEnd: 100,
+        skyboxPreset: null,
+        skyboxAssetId: null,
       },
       currentCameraPreset: 'perspective',
       coordinateMode: 'world',

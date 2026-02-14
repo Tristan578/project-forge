@@ -191,7 +191,8 @@ fn manage_physics_lifecycle(
               .insert(Friction::coefficient(physics_data.friction))
               .insert(ColliderMassProperties::Density(physics_data.density))
               .insert(GravityScale(physics_data.gravity_scale))
-              .insert(locked_axes);
+              .insert(locked_axes)
+              .insert(ActiveEvents::COLLISION_EVENTS);
 
             if physics_data.is_sensor {
                 ec.insert(Sensor);
@@ -216,7 +217,8 @@ fn manage_physics_lifecycle(
                 .remove::<LockedAxes>()
                 .remove::<Sensor>()
                 .remove::<ExternalForce>()
-                .remove::<ExternalImpulse>();
+                .remove::<ExternalImpulse>()
+                .remove::<ActiveEvents>();
         }
         tracing::info!("Physics detached");
     }

@@ -33,6 +33,9 @@ export function SceneSettings() {
   const updateAmbientLight = useEditorStore((s) => s.updateAmbientLight);
   const environment = useEditorStore((s) => s.environment);
   const updateEnvironment = useEditorStore((s) => s.updateEnvironment);
+  const setSkybox = useEditorStore((s) => s.setSkybox);
+  const removeSkybox = useEditorStore((s) => s.removeSkybox);
+  const updateSkybox = useEditorStore((s) => s.updateSkybox);
   const postProcessing = useEditorStore((s) => s.postProcessing);
   const updateBloom = useEditorStore((s) => s.updateBloom);
   const updateChromaticAberration = useEditorStore((s) => s.updateChromaticAberration);
@@ -162,17 +165,87 @@ export function SceneSettings() {
             <span className="text-xs text-zinc-500">{clearColorHex}</span>
           </div>
 
-          {/* Skybox Brightness (disabled - no skybox loaded) */}
-          <div className="flex items-center gap-2 opacity-40">
+          {/* Skybox Preset */}
+          <div className="flex items-center gap-2">
             <label className="w-24 shrink-0 text-xs text-zinc-400">Skybox</label>
-            <span className="text-xs text-zinc-500 italic">No skybox loaded</span>
+            <select
+              value={environment.skyboxPreset || 'none'}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === 'none') {
+                  removeSkybox();
+                } else {
+                  setSkybox(value);
+                }
+              }}
+              className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300
+                focus:border-blue-500 focus:outline-none"
+            >
+              <option value="none">None</option>
+              <option value="studio">Studio</option>
+              <option value="sunset">Sunset</option>
+              <option value="overcast">Overcast</option>
+              <option value="night">Night</option>
+              <option value="bright_day">Bright Day</option>
+            </select>
           </div>
 
-          {/* IBL Intensity (disabled - no IBL loaded) */}
-          <div className="flex items-center gap-2 opacity-40">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">IBL</label>
-            <span className="text-xs text-zinc-500 italic">No IBL loaded</span>
-          </div>
+          {/* Skybox Brightness (shown when skybox active) */}
+          {environment.skyboxPreset && (
+            <div className="flex items-center gap-2">
+              <label className="w-24 shrink-0 text-xs text-zinc-400">Brightness</label>
+              <input
+                type="range"
+                min={100}
+                max={5000}
+                step={50}
+                value={environment.skyboxBrightness}
+                onChange={(e) => updateSkybox({ brightness: parseFloat(e.target.value) })}
+                className={sliderClass}
+              />
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                {environment.skyboxBrightness.toFixed(0)}
+              </span>
+            </div>
+          )}
+
+          {/* IBL Intensity (shown when skybox active) */}
+          {environment.skyboxPreset && (
+            <div className="flex items-center gap-2">
+              <label className="w-24 shrink-0 text-xs text-zinc-400">IBL</label>
+              <input
+                type="range"
+                min={100}
+                max={5000}
+                step={50}
+                value={environment.iblIntensity}
+                onChange={(e) => updateSkybox({ iblIntensity: parseFloat(e.target.value) })}
+                className={sliderClass}
+              />
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                {environment.iblIntensity.toFixed(0)}
+              </span>
+            </div>
+          )}
+
+          {/* IBL Rotation (shown when skybox active) */}
+          {environment.skyboxPreset && (
+            <div className="flex items-center gap-2">
+              <label className="w-24 shrink-0 text-xs text-zinc-400">Rotation</label>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                step={1}
+                value={environment.iblRotationDegrees}
+                onChange={(e) => updateSkybox({ rotation: parseFloat(e.target.value) })}
+                className={sliderClass}
+              />
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                {environment.iblRotationDegrees.toFixed(0)}°
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

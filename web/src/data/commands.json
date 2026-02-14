@@ -348,6 +348,49 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "set_skybox",
+      "description": "Set the scene skybox to a built-in preset or custom cubemap asset",
+      "category": "environment",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "preset": { "type": "string", "enum": ["studio", "sunset", "overcast", "night", "bright_day"], "description": "Built-in skybox preset" },
+          "assetId": { "type": "string", "description": "Asset ID of an imported KTX2 cubemap (not yet supported)" },
+          "brightness": { "type": "number", "description": "Skybox brightness (100-5000, default 1000)" },
+          "iblIntensity": { "type": "number", "description": "Image-based lighting intensity (100-5000, default 900)" },
+          "rotation": { "type": "number", "description": "Skybox rotation in degrees (0-360)" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_skybox",
+      "description": "Remove the scene skybox, reverting to clear color background",
+      "category": "environment",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "update_skybox",
+      "description": "Update skybox brightness, IBL intensity, or rotation without changing the cubemap",
+      "category": "environment",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "brightness": { "type": "number", "description": "Skybox brightness (100-5000)" },
+          "iblIntensity": { "type": "number", "description": "Image-based lighting intensity (100-5000)" },
+          "rotation": { "type": "number", "description": "Skybox rotation in degrees (0-360)" }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "update_post_processing",
       "description": "Update post-processing visual effects (bloom, chromatic aberration, color grading, sharpening). Send only the effects you want to change.",
       "category": "rendering",
@@ -767,6 +810,23 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "raycast_query",
+      "description": "Cast a ray from origin in direction and return the first entity hit. Results arrive asynchronously via RAYCAST_RESULT event.",
+      "category": "runtime",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "origin": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Ray origin [x, y, z]" },
+          "direction": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3, "description": "Ray direction [x, y, z] (normalized)" },
+          "maxDistance": { "type": "number", "description": "Maximum ray distance (default 100)" },
+          "requestId": { "type": "string", "description": "Optional request ID for tracking (auto-generated if omitted)" }
+        },
+        "required": ["origin", "direction"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     },
     {
       "name": "export_scene",

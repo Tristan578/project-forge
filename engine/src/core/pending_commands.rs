@@ -334,6 +334,15 @@ pub struct InstantiatePrefabRequest {
     pub name: Option<String>,
 }
 
+/// A pending raycast query request.
+#[derive(Debug, Clone)]
+pub struct RaycastRequest {
+    pub request_id: String,
+    pub origin: [f32; 3],
+    pub direction: [f32; 3],
+    pub max_distance: f32,
+}
+
 /// The specific animation action to perform.
 #[derive(Debug, Clone)]
 pub enum AnimationAction {
@@ -388,6 +397,28 @@ pub struct SceneLoadRequest {
 /// A pending new scene request.
 #[derive(Debug, Clone)]
 pub struct NewSceneRequest;
+
+/// A pending set skybox request.
+#[derive(Debug, Clone)]
+pub struct SetSkyboxRequest {
+    pub preset: Option<String>,
+    pub asset_id: Option<String>,
+    pub brightness: Option<f32>,
+    pub ibl_intensity: Option<f32>,
+    pub rotation: Option<f32>,
+}
+
+/// A pending remove skybox request.
+#[derive(Debug, Clone)]
+pub struct RemoveSkyboxRequest;
+
+/// A pending update skybox request (brightness/intensity/rotation only).
+#[derive(Debug, Clone)]
+pub struct UpdateSkyboxRequest {
+    pub brightness: Option<f32>,
+    pub ibl_intensity: Option<f32>,
+    pub rotation: Option<f32>,
+}
 
 /// Resource that holds pending commands from the bridge layer.
 /// Systems process these each frame and clear them.
@@ -454,6 +485,10 @@ pub struct PendingCommands {
     pub combine_requests: Vec<CombineRequest>,
     pub quality_preset_requests: Vec<QualityPresetRequest>,
     pub instantiate_prefab_requests: Vec<InstantiatePrefabRequest>,
+    pub raycast_requests: Vec<RaycastRequest>,
+    pub set_skybox_requests: Vec<SetSkyboxRequest>,
+    pub remove_skybox_requests: Vec<RemoveSkyboxRequest>,
+    pub update_skybox_requests: Vec<UpdateSkyboxRequest>,
 }
 
 /// A pending selection request from the hierarchy panel.
@@ -951,6 +986,26 @@ impl PendingCommands {
     /// Queue an instantiate prefab request.
     pub fn queue_instantiate_prefab(&mut self, request: InstantiatePrefabRequest) {
         self.instantiate_prefab_requests.push(request);
+    }
+
+    /// Queue a set skybox request.
+    pub fn queue_set_skybox(&mut self, request: SetSkyboxRequest) {
+        self.set_skybox_requests.push(request);
+    }
+
+    /// Queue a remove skybox request.
+    pub fn queue_remove_skybox(&mut self, request: RemoveSkyboxRequest) {
+        self.remove_skybox_requests.push(request);
+    }
+
+    /// Queue an update skybox request.
+    pub fn queue_update_skybox(&mut self, request: UpdateSkyboxRequest) {
+        self.update_skybox_requests.push(request);
+    }
+
+    /// Queue a raycast request.
+    pub fn queue_raycast(&mut self, request: RaycastRequest) {
+        self.raycast_requests.push(request);
     }
 }
 
@@ -1836,6 +1891,62 @@ pub fn queue_instantiate_prefab_from_bridge(request: InstantiatePrefabRequest) -
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_instantiate_prefab(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a raycast request from the bridge layer.
+pub fn queue_raycast_from_bridge(request: RaycastRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_raycast(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a set skybox request from the bridge layer.
+pub fn queue_set_skybox_from_bridge(request: SetSkyboxRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_set_skybox(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a remove skybox request from the bridge layer.
+pub fn queue_remove_skybox_from_bridge(request: RemoveSkyboxRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_remove_skybox(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an update skybox request from the bridge layer.
+pub fn queue_update_skybox_from_bridge(request: UpdateSkyboxRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_update_skybox(request);
             }
             true
         } else {

@@ -484,3 +484,28 @@ pub fn emit_play_tick(entities: &[(String, [f32; 3], [f32; 3], [f32; 3], String,
 pub fn emit_quality_changed(settings: &crate::core::quality::QualitySettings) {
     emit_event("QUALITY_CHANGED", settings);
 }
+
+/// Emit a collision event (started or stopped).
+pub fn emit_collision_event(entity_a: &str, entity_b: &str, started: bool) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct CollisionPayload<'a> {
+        entity_a: &'a str,
+        entity_b: &'a str,
+        started: bool,
+    }
+    emit_event("COLLISION_EVENT", &CollisionPayload { entity_a, entity_b, started });
+}
+
+/// Emit a raycast result event.
+pub fn emit_raycast_result(request_id: &str, hit_entity: Option<&str>, point: [f32; 3], distance: f32) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RaycastPayload<'a> {
+        request_id: &'a str,
+        hit_entity: Option<&'a str>,
+        point: [f32; 3],
+        distance: f32,
+    }
+    emit_event("RAYCAST_RESULT", &RaycastPayload { request_id, hit_entity, point, distance });
+}

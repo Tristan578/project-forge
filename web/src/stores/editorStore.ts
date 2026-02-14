@@ -103,6 +103,8 @@ export interface EnvironmentData {
   fogColor: [number, number, number];
   fogStart: number;
   fogEnd: number;
+  skyboxPreset: string | null;
+  skyboxAssetId: string | null;
 }
 
 // Physics data matching Rust's PhysicsData struct
@@ -606,6 +608,9 @@ export interface EditorState {
   // Environment actions
   setEnvironment: (data: EnvironmentData) => void;
   updateEnvironment: (data: Partial<EnvironmentData>) => void;
+  setSkybox: (preset: string) => void;
+  removeSkybox: () => void;
+  updateSkybox: (changes: { brightness?: number; iblIntensity?: number; rotation?: number }) => void;
 
   // Coordinate mode actions
   setCoordinateMode: (mode: CoordinateMode) => void;
@@ -822,6 +827,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     fogColor: [0.5, 0.5, 0.55],
     fogStart: 30,
     fogEnd: 100,
+    skyboxPreset: null,
+    skyboxAssetId: null,
   },
   currentCameraPreset: 'perspective',
   coordinateMode: 'world',
@@ -1279,6 +1286,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
     if (dispatchCommand) {
       dispatchCommand('update_environment', data);
+    }
+  },
+
+  setSkybox: (preset) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_skybox', { preset });
+    }
+  },
+
+  removeSkybox: () => {
+    if (dispatchCommand) {
+      dispatchCommand('remove_skybox', {});
+    }
+  },
+
+  updateSkybox: (changes) => {
+    if (dispatchCommand) {
+      dispatchCommand('update_skybox', changes);
     }
   },
 

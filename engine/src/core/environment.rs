@@ -1,12 +1,14 @@
 //! Environment settings - skybox, clear color, fog.
 //!
-//! For Option B (no external cubemap assets), this provides:
+//! Provides:
 //! - Configurable ClearColor background
 //! - Distance fog (linear falloff)
-//! - Skybox/IBL fields exist for future use when KTX2 assets are added
+//! - Skybox cubemap rendering with 5 built-in presets
+//! - Image-based lighting (IBL)
 
 use bevy::prelude::*;
 use bevy::pbr::{DistanceFog, FogFalloff};
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use serde::{Serialize, Deserialize};
 
 use super::camera::EditorCamera;
@@ -23,6 +25,8 @@ pub struct EnvironmentSettings {
     pub fog_color: [f32; 3],
     pub fog_start: f32,
     pub fog_end: f32,
+    pub skybox_preset: Option<String>,
+    pub skybox_asset_id: Option<String>,
 }
 
 impl Default for EnvironmentSettings {
@@ -36,8 +40,89 @@ impl Default for EnvironmentSettings {
             fog_color: [0.5, 0.5, 0.55],
             fog_start: 30.0,
             fog_end: 100.0,
+            skybox_preset: None,
+            skybox_asset_id: None,
         }
     }
+}
+
+/// Resource for caching generated preset cubemap handles.
+#[derive(Resource, Default)]
+pub struct SkyboxHandles {
+    pub handles: std::collections::HashMap<String, Handle<Image>>,
+}
+
+/// Generate a procedural cubemap for a built-in preset.
+/// Returns a cubemap Image with 6 faces (64x64 each).
+pub fn generate_preset_cubemap(preset: &str) -> Image {
+    let size = 64;
+    let face_size = size * size * 4; // RGBA
+
+    // Define color schemes for each preset
+    let colors = match preset {
+        "studio" => {
+            // Neutral gray studio
+            let gray = [0x88, 0x88, 0x88, 0xFF];
+            [gray; 6]
+        }
+        "sunset" => {
+            // Warm orange/purple gradient
+            let orange = [0xFF, 0x66, 0x33, 0xFF];
+            let purple = [0x66, 0x33, 0xAA, 0xFF];
+            [orange, orange, purple, orange, orange, orange] // Bottom faces orange, top purple
+        }
+        "overcast" => {
+            // Cool gray-blue
+            let cool = [0x77, 0x88, 0xAA, 0xFF];
+            [cool; 6]
+        }
+        "night" => {
+            // Dark navy
+            let navy = [0x11, 0x11, 0x33, 0xFF];
+            [navy; 6]
+        }
+        "bright_day" => {
+            // Blue top, white bottom
+            let blue = [0x88, 0xBB, 0xFF, 0xFF];
+            let white = [0xEE, 0xEE, 0xEE, 0xFF];
+            [white, white, blue, white, white, white] // Bottom white, top blue
+        }
+        _ => {
+            // Default fallback
+            let gray = [0x88, 0x88, 0x88, 0xFF];
+            [gray; 6]
+        }
+    };
+
+    // Create pixel data for all 6 faces
+    let mut data = Vec::with_capacity(face_size * 6);
+    for face_color in &colors {
+        for _ in 0..(size * size) {
+            data.extend_from_slice(face_color);
+        }
+    }
+
+    // Create the cubemap image
+    let mut image = Image::new(
+        Extent3d {
+            width: size as u32,
+            height: size as u32,
+            depth_or_array_layers: 6,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD,
+    );
+
+    // Mark as cubemap
+    image.reinterpret_stacked_2d_as_array(6);
+    image.texture_view_descriptor = Some(bevy::render::render_resource::TextureViewDescriptor {
+        dimension: Some(bevy::render::render_resource::TextureViewDimension::Cube),
+        ..default()
+    });
+
+    image
 }
 
 pub struct EnvironmentPlugin;

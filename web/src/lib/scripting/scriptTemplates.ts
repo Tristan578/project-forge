@@ -146,6 +146,16 @@ let invulnTimer = 0;
 
 function onStart() {
   forge.ui.showText("hp", "HP: 100 / 100", 5, 5, { fontSize: 20, color: "#00ff00" });
+  // Register collision callback for damage
+  forge.physics.onCollisionEnter(entityId, (otherId) => {
+    if (invulnerable) return;
+    const name = forge.scene.getEntityName(otherId) || "";
+    if (name.toLowerCase().includes("enemy") || name.toLowerCase().includes("hazard")) {
+      currentHP = Math.max(0, currentHP - 10);
+      invulnerable = true;
+      invulnTimer = 1.0; // 1 second invulnerability
+    }
+  });
 }
 
 function onUpdate(dt) {
@@ -153,20 +163,6 @@ function onUpdate(dt) {
   if (invulnerable) {
     invulnTimer -= dt;
     if (invulnTimer <= 0) invulnerable = false;
-  }
-
-  // Check for enemy contacts
-  if (!invulnerable) {
-    const contacts = forge.physics.getContacts(entityId, 1.5);
-    for (const cid of contacts) {
-      const name = forge.scene.getEntityName(cid) || "";
-      if (name.toLowerCase().includes("enemy") || name.toLowerCase().includes("hazard")) {
-        currentHP = Math.max(0, currentHP - 10);
-        invulnerable = true;
-        invulnTimer = 1.0; // 1 second invulnerability
-        break;
-      }
-    }
   }
 
   // Update UI
@@ -192,21 +188,21 @@ let collected = new Set();
 function onStart() {
   forge.ui.showText("score", "Score: 0", 85, 5, { fontSize: 22, color: "#ffdd00" });
   forge.ui.showText("info", "Collect the items!", 30, 90, { fontSize: 16, color: "#ffffff" });
-}
-
-function onUpdate(dt) {
-  // Check for collectible contacts
-  const nearby = forge.physics.getContacts(entityId, 2.0);
-  for (const cid of nearby) {
-    if (collected.has(cid)) continue;
-    const name = forge.scene.getEntityName(cid) || "";
+  // Register collision callback for pickups
+  forge.physics.onCollisionEnter(entityId, (otherId) => {
+    if (collected.has(otherId)) return;
+    const name = forge.scene.getEntityName(otherId) || "";
     if (name.toLowerCase().includes("coin") || name.toLowerCase().includes("collect") || name.toLowerCase().includes("pickup")) {
       score += 10;
-      collected.add(cid);
-      forge.setVisibility(cid, false);
+      collected.add(otherId);
+      forge.setVisibility(otherId, false);
       forge.ui.updateText("score", "Score: " + score);
     }
-  }
+  });
+}
+
+function onUpdate(_dt) {
+  // Collision callbacks handle pickup detection now
 }`,
   },
   {

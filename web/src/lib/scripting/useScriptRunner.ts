@@ -66,6 +66,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const addScriptLog = useEditorStore((s) => s.addScriptLog);
   const elapsedRef = useRef(0);
   const lastTickRef = useRef(0);
+  const collisionEventCallbackRef = useRef<((event: { entityA: string; entityB: string; started: boolean }) => void) | null>(null);
 
   const dispatchCommand = useCallback(
     (command: string, payload: unknown) => {
@@ -186,18 +187,38 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         });
       });
 
+      // Set up collision event callback
+      collisionEventCallbackRef.current = (event: { entityA: string; entityB: string; started: boolean }) => {
+        worker.postMessage({
+          type: 'COLLISION_EVENT',
+          entityA: event.entityA,
+          entityB: event.entityB,
+          started: event.started,
+        });
+      };
+
       workerRef.current = worker;
     }
 
     // Stop worker when leaving Play mode
     if (engineMode === 'edit' && workerRef.current) {
       setPlayTickCallback(null);
+      collisionEventCallbackRef.current = null;
       workerRef.current.postMessage({ type: 'stop' });
       workerRef.current.terminate();
       workerRef.current = null;
       useEditorStore.getState().setHudElements([]);
     }
   }, [engineMode, wasmModule, dispatchCommand, addScriptLog]);
+
+  // Export collision callback ref for useEngineEvents
+  useEffect(() => {
+    if (engineMode === 'play' && collisionEventCallbackRef.current) {
+      (window as unknown as { __scriptCollisionCallback?: typeof collisionEventCallbackRef.current }).__scriptCollisionCallback = collisionEventCallbackRef.current;
+    } else {
+      (window as unknown as { __scriptCollisionCallback?: typeof collisionEventCallbackRef.current }).__scriptCollisionCallback = undefined;
+    }
+  }, [engineMode]);
 
   // Cleanup on unmount
   useEffect(() => {

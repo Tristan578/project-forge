@@ -44,7 +44,9 @@ use super::pending_commands::{
     queue_terrain_spawn_from_bridge, queue_terrain_update_from_bridge, queue_terrain_sculpt_from_bridge,
     queue_extrude_from_bridge, queue_lathe_from_bridge, queue_array_from_bridge, queue_combine_from_bridge,
     queue_quality_preset_from_bridge, queue_instantiate_prefab_from_bridge,
+    queue_set_skybox_from_bridge, queue_remove_skybox_from_bridge, queue_update_skybox_from_bridge,
     QualityPresetRequest, InstantiatePrefabRequest,
+    SetSkyboxRequest, RemoveSkyboxRequest, UpdateSkyboxRequest,
     AnimationRequest, AnimationAction,
     ShaderUpdate, ShaderRemoval,
     CsgRequest,
@@ -152,6 +154,7 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
             handle_query(QueryRequest::PhysicsState { entity_id })
         },
         "apply_force" => handle_apply_force(payload),
+        "raycast_query" => handle_raycast_query(payload),
         // Scene save/load commands
         "export_scene" => handle_export_scene(payload),
         "load_scene" => handle_load_scene(payload),
@@ -258,6 +261,10 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         // Quality preset commands
         "set_quality_preset" => handle_set_quality_preset(payload),
         "get_quality_settings" => handle_query(QueryRequest::QualitySettings),
+        // Skybox commands
+        "set_skybox" => handle_set_skybox(payload),
+        "remove_skybox" => handle_remove_skybox(payload),
+        "update_skybox" => handle_update_skybox(payload),
         // Query commands (MCP resources)
         "get_scene_graph" => handle_query(QueryRequest::SceneGraph),
         "get_selection" => handle_query(QueryRequest::Selection),
@@ -945,6 +952,78 @@ fn handle_update_post_processing(payload: serde_json::Value) -> CommandResult {
     }
 }
 
+/// Payload for set_skybox command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetSkyboxPayload {
+    preset: Option<String>,
+    asset_id: Option<String>,
+    brightness: Option<f32>,
+    ibl_intensity: Option<f32>,
+    rotation: Option<f32>,
+}
+
+/// Handle set_skybox command.
+fn handle_set_skybox(payload: serde_json::Value) -> CommandResult {
+    let data: SetSkyboxPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_skybox payload: {}", e))?;
+
+    let request = SetSkyboxRequest {
+        preset: data.preset,
+        asset_id: data.asset_id,
+        brightness: data.brightness,
+        ibl_intensity: data.ibl_intensity,
+        rotation: data.rotation,
+    };
+
+    if queue_set_skybox_from_bridge(request) {
+        tracing::info!("Queued set skybox request");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_skybox command.
+fn handle_remove_skybox(_payload: serde_json::Value) -> CommandResult {
+    let request = RemoveSkyboxRequest;
+
+    if queue_remove_skybox_from_bridge(request) {
+        tracing::info!("Queued remove skybox request");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for update_skybox command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateSkyboxPayload {
+    brightness: Option<f32>,
+    ibl_intensity: Option<f32>,
+    rotation: Option<f32>,
+}
+
+/// Handle update_skybox command.
+fn handle_update_skybox(payload: serde_json::Value) -> CommandResult {
+    let data: UpdateSkyboxPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid update_skybox payload: {}", e))?;
+
+    let request = UpdateSkyboxRequest {
+        brightness: data.brightness,
+        ibl_intensity: data.ibl_intensity,
+        rotation: data.rotation,
+    };
+
+    if queue_update_skybox_from_bridge(request) {
+        tracing::info!("Queued update skybox request");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 /// Handle a query command by queuing it for the next frame's Bevy system to process.
 fn handle_query(request: QueryRequest) -> CommandResult {
     if queue_query_from_bridge(request) {
@@ -1157,6 +1236,43 @@ fn handle_apply_force(payload: serde_json::Value) -> CommandResult {
 
     if queue_force_application_from_bridge(application) {
         tracing::info!("Queued force application for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RaycastPayload {
+    request_id: Option<String>,
+    origin: [f32; 3],
+    direction: [f32; 3],
+    max_distance: Option<f32>,
+}
+
+/// Handle raycast_query command.
+fn handle_raycast_query(payload: serde_json::Value) -> CommandResult {
+    use super::pending_commands::{RaycastRequest, queue_raycast_from_bridge};
+
+    let data: RaycastPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid raycast_query payload: {}", e))?;
+
+    let request_id = data.request_id.unwrap_or_else(|| format!("ray_{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis()));
+    let max_distance = data.max_distance.unwrap_or(100.0);
+
+    let request = RaycastRequest {
+        request_id: request_id.clone(),
+        origin: data.origin,
+        direction: data.direction,
+        max_distance,
+    };
+
+    if queue_raycast_from_bridge(request) {
+        tracing::info!("Queued raycast query: {}", request_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

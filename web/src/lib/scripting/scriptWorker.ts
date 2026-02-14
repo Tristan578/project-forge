@@ -55,6 +55,10 @@ let spawnCounter = 0;
 const uiElements: Map<string, UIElement> = new Map();
 let uiDirty = false;
 
+// Collision callback registries
+const collisionEnterCallbacks: Map<string, (otherId: string) => void> = new Map();
+const collisionExitCallbacks: Map<string, (otherId: string) => void> = new Map();
+
 function distanceBetween(a: [number, number, number], b: [number, number, number]): number {
   const dx = a[0] - b[0];
   const dy = a[1] - b[1];
@@ -200,6 +204,16 @@ function buildForgeApi(scriptEntityId: string) {
         const b = entityStates[eidB];
         if (!a || !b) return Infinity;
         return distanceBetween(a.position, b.position);
+      },
+      onCollisionEnter: (eid: string, callback: (otherId: string) => void) => {
+        collisionEnterCallbacks.set(eid, callback);
+      },
+      onCollisionExit: (eid: string, callback: (otherId: string) => void) => {
+        collisionExitCallbacks.set(eid, callback);
+      },
+      offCollision: (eid: string) => {
+        collisionEnterCallbacks.delete(eid);
+        collisionExitCallbacks.delete(eid);
       },
     },
     particles: {
@@ -483,8 +497,36 @@ self.onmessage = (e: MessageEvent) => {
       }
       scripts = [];
       sharedState = {};
+      collisionEnterCallbacks.clear();
+      collisionExitCallbacks.clear();
       // Send final UI clear
       (self as unknown as Worker).postMessage({ type: 'ui', elements: [] });
+      break;
+    }
+
+    case 'COLLISION_EVENT': {
+      const { entityA, entityB, started } = msg;
+      const callbacks = started ? collisionEnterCallbacks : collisionExitCallbacks;
+      // Fire callback for entityA if registered
+      const cbA = callbacks.get(entityA);
+      if (cbA) {
+        try {
+          cbA(entityB);
+        } catch (err) {
+          const msg_ = err instanceof Error ? err.message : String(err);
+          (self as unknown as Worker).postMessage({ type: 'error', entityId: entityA, line: 0, message: `Collision callback error: ${msg_}` });
+        }
+      }
+      // Fire callback for entityB if registered
+      const cbB = callbacks.get(entityB);
+      if (cbB) {
+        try {
+          cbB(entityA);
+        } catch (err) {
+          const msg_ = err instanceof Error ? err.message : String(err);
+          (self as unknown as Worker).postMessage({ type: 'error', entityId: entityB, line: 0, message: `Collision callback error: ${msg_}` });
+        }
+      }
       break;
     }
   }

@@ -189,6 +189,9 @@ export function buildSceneContext(state: EditorSnapshot): string {
 
   // Environment
   sections.push(`\n## Environment\nAmbient light: color=${formatColor(ambientLight.color)}, brightness=${ambientLight.brightness}`);
+  if (environment.skyboxPreset) {
+    sections.push(`Skybox: preset=${environment.skyboxPreset}, brightness=${environment.skyboxBrightness}, IBL intensity=${environment.iblIntensity}, rotation=${environment.iblRotationDegrees}°`);
+  }
   if (environment.fogEnabled) {
     sections.push(`Fog: enabled, color=${formatColor(environment.fogColor)}, range=${environment.fogStart}-${environment.fogEnd}`);
   }

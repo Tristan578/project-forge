@@ -301,7 +301,17 @@ interface PlayTickEvent {
   };
 }
 
-type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent;
+interface CollisionEventEvent {
+  type: 'COLLISION_EVENT';
+  payload: { entityA: string; entityB: string; started: boolean };
+}
+
+interface RaycastResultEvent {
+  type: 'RAYCAST_RESULT';
+  payload: { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number };
+}
+
+type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent | CollisionEventEvent | RaycastResultEvent;
 
 // Debounced auto-save: triggers export_scene command after 2s of inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -676,6 +686,22 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
         case 'PLAY_TICK':
           firePlayTick(event.payload);
           break;
+
+        case 'COLLISION_EVENT': {
+          const collisionCb = (window as unknown as { __scriptCollisionCallback?: (event: { entityA: string; entityB: string; started: boolean }) => void }).__scriptCollisionCallback;
+          if (collisionCb && event.type === 'COLLISION_EVENT') {
+            collisionCb(event.payload);
+          }
+          break;
+        }
+
+        case 'RAYCAST_RESULT': {
+          const raycastCb = (window as unknown as { __scriptRaycastCallback?: (event: { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number }) => void }).__scriptRaycastCallback;
+          if (raycastCb && event.type === 'RAYCAST_RESULT') {
+            raycastCb(event.payload);
+          }
+          break;
+        }
 
         default:
           console.warn('Unknown engine event:', event);

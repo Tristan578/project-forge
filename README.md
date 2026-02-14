@@ -9,12 +9,14 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ### AI & Automation
 - **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want ("build a platformer level") and the AI spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
-- **MCP Server** — 135 commands across 20 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 139 commands across 20 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28 structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features and procedures on demand
 
 ### Engine
+- **Skybox & Environment Maps** — 5 built-in procedural cubemap presets (Studio, Sunset, Overcast, Night, Bright Day) with adjustable brightness, IBL intensity, and rotation
+- **Collision Events & Raycasting** — Real-time physics collision callbacks for scripts and raycasting API for spatial queries
 - **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 24) with automatic WebGL2 fallback for older browsers
 - **PBR Materials** — Physically-based rendering with metallic/roughness workflow, UV transforms, clearcoat, transmission/IOR, parallax mapping, texture support, alpha modes, and 56 material presets across 9 categories
 - **Quality Presets** — Low/Medium/High/Ultra rendering presets that batch-configure MSAA, shadows, bloom, sharpening, and particle density
@@ -46,7 +48,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Architecture
 
 ```
-MCP Server (135 commands)                      AI agents + LLM tool use
+MCP Server (139 commands)                      AI agents + LLM tool use
     ↕  JSON commands
 React Shell (Next.js, Zustand, Tailwind)      Visual editor UI
     ↕  JSON events via wasm-bindgen

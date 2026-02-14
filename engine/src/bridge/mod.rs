@@ -252,6 +252,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<crate::core::asset_manager::TextureHandleMap>()
             .init_resource::<AudioBusConfig>()
             .init_resource::<QualitySettings>()
+            .init_resource::<core::environment::SkyboxHandles>()
             .add_event::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
@@ -271,6 +272,11 @@ impl Plugin for SelectionPlugin {
                 apply_physics_toggles,
                 apply_force_applications,
                 apply_script_updates,
+            ))
+            // Collision/raycast systems (always-active, split to stay under tuple limit)
+            .add_systems(Update, (
+                read_collision_events,
+                apply_raycast_queries,
             ))
             // Script and audio systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
@@ -334,6 +340,9 @@ impl Plugin for SelectionPlugin {
                     entity_factory::apply_light_updates,
                     entity_factory::apply_ambient_light_updates,
                     apply_environment_updates,
+                    apply_set_skybox_requests,
+                    apply_remove_skybox_requests,
+                    apply_update_skybox_requests,
                     apply_post_processing_updates,
                     apply_shader_updates,
                     apply_shader_removals,
@@ -857,6 +866,120 @@ fn apply_environment_updates(
     }
 }
 
+/// System that applies pending set skybox requests.
+#[cfg(not(feature = "runtime"))]
+fn apply_set_skybox_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut settings: ResMut<EnvironmentSettings>,
+    mut skybox_handles: ResMut<core::environment::SkyboxHandles>,
+    mut images: ResMut<Assets<Image>>,
+    camera_query: Query<Entity, With<core::camera::EditorCamera>>,
+    mut commands: Commands,
+) {
+    for request in pending.set_skybox_requests.drain(..) {
+        // Update settings fields
+        if let Some(brightness) = request.brightness {
+            settings.skybox_brightness = brightness;
+        }
+        if let Some(intensity) = request.ibl_intensity {
+            settings.ibl_intensity = intensity;
+        }
+        if let Some(rotation) = request.rotation {
+            settings.ibl_rotation_degrees = rotation;
+        }
+
+        // Handle preset or asset ID
+        if let Some(preset) = request.preset {
+            settings.skybox_preset = Some(preset.clone());
+            settings.skybox_asset_id = None;
+
+            // Generate or retrieve cached preset cubemap
+            let handle = if let Some(h) = skybox_handles.handles.get(&preset) {
+                h.clone()
+            } else {
+                let image = core::environment::generate_preset_cubemap(&preset);
+                let handle = images.add(image);
+                skybox_handles.handles.insert(preset.clone(), handle.clone());
+                handle
+            };
+
+            // Apply to camera
+            if let Ok(camera_entity) = camera_query.single() {
+                commands.entity(camera_entity).insert(bevy::core_pipeline::Skybox {
+                    image: handle,
+                    brightness: settings.skybox_brightness,
+                    ..Default::default()
+                });
+            }
+
+            tracing::info!("Applied skybox preset: {}", preset);
+        } else if let Some(asset_id) = request.asset_id {
+            settings.skybox_asset_id = Some(asset_id.clone());
+            settings.skybox_preset = None;
+            // TODO: Handle custom cubemap assets when asset pipeline is ready
+            tracing::warn!("Custom skybox assets not yet supported: {}", asset_id);
+        }
+
+        // Emit event
+        events::emit_environment_changed(&settings);
+    }
+}
+
+/// System that applies pending remove skybox requests.
+#[cfg(not(feature = "runtime"))]
+fn apply_remove_skybox_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut settings: ResMut<EnvironmentSettings>,
+    camera_query: Query<Entity, With<core::camera::EditorCamera>>,
+    mut commands: Commands,
+) {
+    if !pending.remove_skybox_requests.is_empty() {
+        pending.remove_skybox_requests.clear();
+
+        settings.skybox_preset = None;
+        settings.skybox_asset_id = None;
+
+        // Remove Skybox component from camera
+        if let Ok(camera_entity) = camera_query.single() {
+            commands.entity(camera_entity).remove::<bevy::core_pipeline::Skybox>();
+        }
+
+        tracing::info!("Removed skybox");
+        events::emit_environment_changed(&settings);
+    }
+}
+
+/// System that applies pending update skybox requests.
+#[cfg(not(feature = "runtime"))]
+fn apply_update_skybox_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut settings: ResMut<EnvironmentSettings>,
+    camera_query: Query<Entity, With<core::camera::EditorCamera>>,
+    mut skybox_query: Query<&mut bevy::core_pipeline::Skybox>,
+    _commands: Commands,
+) {
+    for request in pending.update_skybox_requests.drain(..) {
+        if let Some(brightness) = request.brightness {
+            settings.skybox_brightness = brightness;
+        }
+        if let Some(intensity) = request.ibl_intensity {
+            settings.ibl_intensity = intensity;
+        }
+        if let Some(rotation) = request.rotation {
+            settings.ibl_rotation_degrees = rotation;
+        }
+
+        // Update Skybox component brightness
+        if let Ok(camera_entity) = camera_query.single() {
+            if let Ok(mut skybox) = skybox_query.get_mut(camera_entity) {
+                skybox.brightness = settings.skybox_brightness;
+            }
+        }
+
+        events::emit_environment_changed(&settings);
+    }
+}
+
 /// System that applies pending post-processing updates from the bridge.
 #[cfg(not(feature = "runtime"))]
 fn apply_post_processing_updates(
@@ -1364,6 +1487,70 @@ fn apply_force_applications(
                 }
                 break;
             }
+        }
+    }
+}
+
+/// System that reads collision events from Rapier and emits them to JS.
+/// Runs always (mode-gated internally by checking if physics is active).
+fn read_collision_events(
+    mut collision_events: EventReader<bevy_rapier3d::prelude::CollisionEvent>,
+    entity_id_query: Query<&EntityId>,
+    engine_mode: Res<EngineMode>,
+) {
+    if !engine_mode.is_playing() {
+        collision_events.clear();
+        return;
+    }
+
+    for event in collision_events.read() {
+        let (entity_a, entity_b, started) = match event {
+            bevy_rapier3d::prelude::CollisionEvent::Started(a, b, _) => (*a, *b, true),
+            bevy_rapier3d::prelude::CollisionEvent::Stopped(a, b, _) => (*a, *b, false),
+        };
+
+        if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(entity_a), entity_id_query.get(entity_b)) {
+            events::emit_collision_event(&id_a.0, &id_b.0, started);
+        }
+    }
+}
+
+/// System that processes raycast requests.
+/// Runs always-active (AI/MCP might raycast from edit mode too).
+fn apply_raycast_queries(
+    mut pending: ResMut<PendingCommands>,
+    rapier_context: bevy_rapier3d::prelude::ReadRapierContext,
+    entity_id_query: Query<&EntityId>,
+) {
+    for request in pending.raycast_requests.drain(..) {
+        let Ok(rapier_context) = rapier_context.single() else {
+            events::emit_raycast_result(&request.request_id, None, [0.0; 3], 0.0);
+            continue;
+        };
+
+        let origin = bevy::math::Vec3::new(request.origin[0], request.origin[1], request.origin[2]);
+        let direction = bevy::math::Vec3::new(request.direction[0], request.direction[1], request.direction[2]);
+
+        if let Some((entity, toi)) = rapier_context.cast_ray(
+            origin,
+            direction,
+            request.max_distance,
+            true,
+            bevy_rapier3d::prelude::QueryFilter::default(),
+        ) {
+            let hit_point = origin + direction * toi;
+            if let Ok(eid) = entity_id_query.get(entity) {
+                events::emit_raycast_result(
+                    &request.request_id,
+                    Some(&eid.0),
+                    [hit_point.x, hit_point.y, hit_point.z],
+                    toi,
+                );
+            } else {
+                events::emit_raycast_result(&request.request_id, None, [0.0; 3], 0.0);
+            }
+        } else {
+            events::emit_raycast_result(&request.request_id, None, [0.0; 3], 0.0);
         }
     }
 }
