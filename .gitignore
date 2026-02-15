@@ -64,6 +64,17 @@ nul
 .settings/
 .classpath
 
+# ----- Session artifacts -----
+PHASE-*.md
+REFACTOR*.md
+*-SUMMARY.md
+*-PROGRESS.md
+rust_errors.txt
+*.backup
+do_split.py
+extract_handlers.py
+split_commands*.py
+
 # ----- Misc -----
 *.log
 *.pid
