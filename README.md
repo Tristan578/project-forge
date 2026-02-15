@@ -1,6 +1,6 @@
 # Project Forge
 
-An open-source, AI-native 3D game engine for the browser. Every capability — scene creation, materials, physics, scripting, audio, particles, export — is exposed as a JSON command, making the entire editor fully controllable by LLMs and autonomous agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Build games by conversation, by code, or by hand.
+An open-source, AI-native 2D/3D game engine for the browser. Every capability — scene creation, materials, physics, scripting, audio, particles, tilemaps, animation, export — is exposed as a JSON command, making the entire editor fully controllable by LLMs and autonomous agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Build games by conversation, by code, or by hand.
 
 Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a React-based visual editor.
 
@@ -8,53 +8,79 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 
 ### AI & Automation
 - **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want ("build a platformer level") and the AI spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
+- **Compound AI Actions** — 8 high-level tools (`create_scene_from_description`, `setup_character`, `arrange_entities`, etc.) that batch dozens of operations into single AI calls
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
-- **MCP Server** — 143 commands across 20 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
+- **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
+- **MCP Server** — 329 commands across 41 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
-- **Documentation System** — 28 structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features and procedures on demand
+- **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
 
-### Engine
-- **Skybox & Environment Maps** — 5 built-in procedural cubemap presets (Studio, Sunset, Overcast, Night, Bright Day) with adjustable brightness, IBL intensity, and rotation
-- **Collision Events & Raycasting** — Real-time physics collision callbacks for scripts and raycasting API for spatial queries
+### 3D Engine
 - **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 24) with automatic WebGL2 fallback for older browsers
 - **PBR Materials** — Physically-based rendering with metallic/roughness workflow, UV transforms, clearcoat, transmission/IOR, parallax mapping, texture support, alpha modes, and 56 material presets across 9 categories
+- **Shader Node Editor** — Visual WGSL shader creation with 30+ node types, live material preview, and save/load
 - **Quality Presets** — Low/Medium/High/Ultra rendering presets that batch-configure MSAA, shadows, bloom, sharpening, and particle density
 - **Dynamic Lighting** — Point, directional, and spot lights with real-time shadows and ambient light controls
-- **Physics** — Rigid body dynamics, colliders, forces, joints (fixed, revolute, spherical, prismatic, rope, spring), and constraints powered by Rapier
-- **Audio** — Spatial 3D audio, bus mixer with effect chains (reverb, delay, EQ, compressor), crossfade transitions, ducking, one-shot sounds, audio layers, and per-entity controls
-- **GPU Particles** — 9 built-in presets (fire, smoke, sparks, rain, snow, explosions, and more) with full customization via WebGPU compute shaders
-- **Skeletal Animation** — glTF animation playback with transport controls, crossfade transitions, blend weights, per-clip speed, and script API
+- **Skybox & Environment Maps** — 5 built-in procedural cubemap presets (Studio, Sunset, Overcast, Night, Bright Day) with adjustable brightness, IBL, and rotation
+- **Physics** — Rigid body dynamics, colliders, forces, joints (fixed, revolute, spherical, prismatic, rope, spring), collision events, and raycasting powered by Rapier 3D
+- **Audio** — Spatial 3D audio, bus mixer with effect chains (reverb, delay, EQ, compressor), adaptive music (vertical layering, horizontal re-sequencing), reverb zones, crossfade, ducking
+- **GPU Particles** — 9 built-in presets (fire, smoke, sparks, rain, snow, explosions, etc.) with full customization via WebGPU compute shaders
+- **Skeletal Animation** — glTF animation playback with transport controls, crossfade, blend weights, per-clip speed, and script API
+- **Keyframe Animation** — Custom animation clips with position/rotation/scale/color keyframes, easing modes, and timeline editor
 - **CSG Boolean Operations** — Union, subtract, and intersect on mesh entities using BSP-based constructive solid geometry
-- **Procedural Terrain** — Heightmap terrain generation with Perlin/Simplex/Value noise, sculpting tools, and height-based vertex coloring
-- **Procedural Mesh Generation** — Extrude 2D shapes, lathe profiles, array entities in grid/circle patterns, and combine meshes
-- **Custom Shader Effects** — 6 built-in visual effects (Dissolve, Hologram, Force Field, Lava/Flow, Toon, Fresnel Glow) extending the PBR pipeline via MaterialExtension
-- **Post-Processing** — Bloom, chromatic aberration, color grading, contrast-adaptive sharpening, SSAO (WebGPU), depth of field, and motion blur
+- **Procedural Terrain** — Heightmap generation with Perlin/Simplex/Value noise, sculpting tools, and vertex coloring
+- **Procedural Mesh Generation** — Extrude 2D shapes, lathe profiles, array entities, and combine meshes
+- **Polygon Modeling** — Edit mode with vertex/edge/face selection, extrude, subdivide, and normal recalculation
+- **Custom Shader Effects** — 6 built-in visual effects (Dissolve, Hologram, Force Field, Lava/Flow, Toon, Fresnel Glow)
+- **Post-Processing** — Bloom, chromatic aberration, color grading, CAS sharpening, SSAO (WebGPU), depth of field, and motion blur
+- **LOD System** — Level-of-detail component with distance thresholds, performance budget tracking
+
+### 2D Engine
+- **2D Project Type** — Dedicated 2D mode with orthographic camera, sorting layers, and sprite-specific tools
+- **Sprite System** — Import PNG/WebP sprites, SpriteInspector, sorting layers (Background/Default/Foreground/UI)
+- **Sprite Animation** — Sprite sheet slicing, animation clips, state machines with parameter-driven transitions
+- **Tilemap System** — Multi-layer tilemaps, paint/erase/fill/rectangle tools, auto-tiling (4-bit/8-bit bitmask), tile palette
+- **2D Physics** — Rapier 2D with 6 collider shapes, 4 joint types, one-way platforms, surface velocity, raycasting
+- **Skeletal 2D Animation** — Bone hierarchy, skins, IK constraints, blend trees, keyframe animation, weight painting
+- **AI Sprite Generation** — Generate pixel art characters, tilesets, and sprite sheets via AI providers
 
 ### Editor
-- **3D Scene Editor** — Transform gizmos, multi-select, snapping, scene hierarchy, and inspector panels
-- **Responsive Layout** — Adaptive UI with compact mode (mobile/tablet), condensed mode (laptop), and full desktop layout with slide-over drawer panels
-- **Onboarding** — Welcome modal for first-time users and keyboard shortcuts reference panel (press ?)
-- **TypeScript Scripting** — Sandboxed scripting API (`forge.*`), starter templates, and a built-in editor with console output
-- **Material Library** — Browse 56 built-in material presets with CSS sphere previews, category filters, search, and custom material saving
-- **Asset Pipeline** — Import glTF models (with animations), textures, and audio files via drag-and-drop
-- **Play Mode** — Test your game instantly with play/pause/stop and scene snapshot restore
-- **Input System** — Configurable key bindings with 4 presets (FPS, Platformer, Top-Down, Racing)
-- **Save/Load** — JSON scene format, local storage auto-save, and cloud project storage
-- **Prefab System** — Save entity configurations as reusable templates with 8 built-in prefabs, import/export, and search
+- **Dockable Workspace** — Movable, resizable panels with preset layouts and persistent user customization
+- **3D/2D Scene Editor** — Transform gizmos, multi-select, snapping, scene hierarchy, and domain-specific inspector panels
+- **Game Templates** — 11 starter templates (5 3D + 6 2D): platformer, runner, shooter, puzzle, explorer, top-down RPG, shoot-em-up, fighting, metroidvania
+- **Game Cameras** — 6 camera modes (ThirdPerson, FirstPerson, SideScroller, TopDown, Fixed, Orbital) with auto-activation in Play mode
+- **Dialogue System** — Visual node editor with 5 node types (text, choice, condition, action, end), typewriter display, branching, and `forge.dialogue` script API
+- **Scene Transitions** — Fade, wipe, and instant transitions between scenes with `forge.scene.load` API
+- **In-Game UI Builder** — 10 widget types, WYSIWYG editor, 7 screen presets, data binding, play-mode renderer, and `forge.ui` script API
+- **TypeScript Scripting** — Sandboxed scripting with `forge.*` API (14+ namespaces), starter templates, built-in editor with console
+- **Script Library** — Save and share standalone scripts, import/export, enhanced script explorer
+- **Material Library** — Browse 56 built-in presets with CSS sphere previews, category filters, search, and custom saving
+- **Asset Pipeline** — Import glTF models, textures, audio, and sprites via drag-and-drop
+- **Play Mode** — Test games instantly with play/pause/stop and scene snapshot restore
+- **Input System** — Configurable key bindings with presets (FPS, Platformer, Top-Down, Racing)
+- **Mobile Controls** — Virtual joystick and action buttons overlay, 5 touch presets, auto quality reduction
+- **Prefab System** — Reusable entity templates with 8+ built-in prefabs, import/export, and search
 - **Multi-Scene Management** — Multiple named scenes per project with scene switching, duplication, and import/export
-- **Game Export** — Export standalone HTML games that run anywhere
+- **Cloud Publishing** — Publish to shareable URLs with version management, tier-based limits, and analytics
+- **Game Export** — ZIP export with texture compression, custom loading screens, PWA generation
+- **Guided Onboarding** — Welcome wizard, interactive tutorials, context-sensitive tips
+- **In-Editor Documentation** — Browsable docs panel with BM25 search, help buttons on inspectors, F1 shortcut
+- **Pre-Built Game Components** — 13 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
+- **Editor Collaboration** — Real-time multi-user editing with WebSocket sync and CRDT conflict resolution
+- **Responsive Layout** — Adaptive UI with compact (mobile), condensed (laptop), and full desktop modes
 
 ## Architecture
 
 ```
-MCP Server (143 commands)                      AI agents + LLM tool use
-    ↕  JSON commands
-React Shell (Next.js, Zustand, Tailwind)      Visual editor UI
-    ↕  JSON events via wasm-bindgen
-Bevy Engine (Rust → WebAssembly)              Scene editing + WebGPU rendering
-    ↕
-Game Runtime + TypeScript Scripting           In-browser game execution
+MCP Server (329 commands, 41 categories)       AI agents + LLM tool use
+    |  JSON commands
+React Shell (Next.js 16, Zustand, Tailwind)    Visual editor UI
+    |  JSON events via wasm-bindgen
+Bevy Engine (Rust -> WebAssembly)              Scene editing + WebGPU rendering
+    |
+Game Runtime + TypeScript Scripting            In-browser game execution
 ```
 
 The MCP server and the visual editor share the same command interface — there is no separate "AI mode." An agent calling `set_material` goes through the exact same code path as a user dragging a color picker.
@@ -127,29 +153,29 @@ npm install
 
 ```
 project-forge/
-├── engine/                  # Bevy ECS engine (Rust → WASM)
+├── engine/                  # Bevy ECS engine (Rust -> WASM)
 │   ├── src/
-│   │   ├── bridge/          # JS interop (wasm-bindgen, events)
-│   │   └── core/            # Pure Rust: commands, ECS components, systems
+│   │   ├── bridge/          # JS interop — domain modules (wasm-bindgen, events)
+│   │   └── core/            # Pure Rust: commands, ECS components, pending queues
 │   ├── Cargo.toml
 │   └── Cargo.lock
 ├── web/                     # Next.js frontend
 │   ├── src/
-│   │   ├── components/      # React UI (editor panels, dashboard, settings)
+│   │   ├── components/      # React UI (editor panels, inspectors, dialogs)
 │   │   ├── hooks/           # WASM loader, engine events, script runner
-│   │   ├── stores/          # Zustand state (editor, chat, user)
-│   │   └── lib/             # Audio, scripting, export, auth, billing
+│   │   ├── stores/          # Zustand state (editor slices, chat, user, workspace)
+│   │   └── lib/             # Audio, scripting, export, auth, billing, shaders
 │   ├── public/              # Static assets + WASM binaries (generated)
 │   └── package.json
 ├── mcp-server/              # MCP command manifest + tools
-│   ├── manifest/commands.json
+│   ├── manifest/commands.json  # 329 commands across 41 categories
 │   └── src/
 ├── docs/                    # User-facing documentation (human + AI readable)
 │   ├── getting-started/     # Installation, first scene, editor overview
-│   ├── features/            # Per-feature guides (18 topics)
-│   ├── guides/              # End-to-end tutorials (FPS, platformer, AI workflow)
-│   ├── reference/           # Command reference, script API, entity types
-│   └── scripts/             # Doc generation scripts
+│   ├── features/            # Per-feature guides
+│   ├── guides/              # End-to-end tutorials
+│   └── reference/           # Command reference, script API, entity types
+├── specs/                   # Feature specifications and sprint plans
 ├── build_wasm.ps1           # Dual WASM build script (WebGL2 + WebGPU)
 └── README.md
 ```
@@ -165,14 +191,14 @@ project-forge/
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
-| `cd web && npx vitest run` | Run web tests |
+| `cd web && npx vitest run` | Run web tests (~900 tests) |
 | `cd mcp-server && npx vitest run` | Run MCP server tests |
 
 ### Key conventions
 
 - **Bridge isolation:** Only `engine/src/bridge/` may import `web_sys`/`js_sys`/`wasm_bindgen`. The `core/` module is pure Rust with no browser dependencies.
 - **Command-driven:** All engine operations are expressed as JSON commands through `handle_command()`. This enables both the UI and programmatic integrations to drive the editor.
-- **Event-driven updates:** Bevy systems emit events via the bridge → JS callback → Zustand store → React re-render. No direct DOM manipulation from Rust.
+- **Event-driven updates:** Bevy systems emit events via the bridge -> JS callback -> Zustand store -> React re-render. No direct DOM manipulation from Rust.
 
 ## Contributing
 
@@ -243,7 +269,7 @@ Contributions are welcome! Here's how to get involved.
 | Layer | Technology |
 |-------|-----------|
 | Engine | Bevy 0.16, wgpu 24, bevy_rapier3d, bevy_hanabi, bevy_panorbit_camera, csgrs, noise |
-| Frontend | Next.js 16, React, Zustand, Tailwind CSS |
+| Frontend | Next.js 16, React 19, Zustand 5, Tailwind CSS, React Flow |
 | Auth | Clerk |
 | Payments | Stripe |
 | Database | Neon (PostgreSQL) + Drizzle ORM |
