@@ -17,6 +17,7 @@ mod mesh_ops;
 mod scripts;
 mod game;
 mod skeleton2d;
+mod edit_mode;
 
 use bevy::prelude::*;
 use bevy::window::{PresentMode, Window, WindowPlugin};
@@ -427,6 +428,10 @@ impl Plugin for SelectionPlugin {
                     game::apply_set_active_game_camera_requests,
                     game::apply_camera_shake_requests,
                     game::process_game_camera_queries,
+                ))
+                .add_systems(Update, (
+                    edit_mode::apply_edit_mode_requests,
+                    edit_mode::emit_edit_mode_selection,
                 ))
                 .add_systems(Update, (
                     skeleton2d::apply_skeleton2d_creates,

@@ -130,7 +130,8 @@ export function OnboardingChecklist() {
   const [collapsed, setCollapsed] = useState(false);
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());
 
-  const hasCompletedOnboarding = useOnboardingStore((s) => s.hasCompletedOnboarding);
+  const tutorialCompleted = useOnboardingStore((s) => s.tutorialCompleted);
+  const hasCompletedOnboarding = Object.keys(tutorialCompleted).length > 0;
 
   // Auto-dismiss if user completed onboarding via tutorial
   const [prevOnboarded, setPrevOnboarded] = useState(hasCompletedOnboarding);

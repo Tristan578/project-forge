@@ -10,7 +10,7 @@ export interface GameTemplate {
   id: string;
   name: string;
   description: string;
-  category: 'platformer' | 'runner' | 'shooter' | 'puzzle' | 'explorer';
+  category: 'platformer' | 'runner' | 'shooter' | 'puzzle' | 'explorer' | '2d_platformer' | '2d_topdown' | '2d_shmup' | '2d_puzzle' | '2d_fighter' | '2d_metroidvania';
   difficulty: 'beginner' | 'intermediate';
   thumbnail: TemplateThumbnail;
   tags: string[];
@@ -133,6 +133,72 @@ export const TEMPLATE_REGISTRY: TemplateRegistryEntry[] = [
     tags: ['3d', 'exploration', 'narrative', 'ambient'],
     entityCount: 20, // Will be computed at runtime from sceneData
     load: async () => (await import('./explorer')).EXPLORER_TEMPLATE,
+  },
+  {
+    id: '2d-platformer',
+    name: '2D Platformer',
+    description: 'Side-scrolling platformer with jumps, enemies, and collectibles.',
+    category: '2d_platformer',
+    difficulty: 'beginner',
+    thumbnail: { gradient: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', icon: 'Gamepad2', accentColor: '#3b82f6' },
+    tags: ['2d', 'platformer', 'side-scroller', 'retro'],
+    entityCount: 28,
+    load: async () => (await import('./2d-platformer')).PLATFORMER_2D_TEMPLATE,
+  },
+  {
+    id: '2d-topdown',
+    name: '2D Top-Down RPG',
+    description: 'Zelda-style adventure. Explore, talk to NPCs, collect items.',
+    category: '2d_topdown',
+    difficulty: 'beginner',
+    thumbnail: { gradient: 'linear-gradient(135deg, #10b981, #059669)', icon: 'Map', accentColor: '#10b981' },
+    tags: ['2d', 'rpg', 'exploration', 'dialogue'],
+    entityCount: 22,
+    load: async () => (await import('./2d-topdown')).TOPDOWN_2D_TEMPLATE,
+  },
+  {
+    id: '2d-shmup',
+    name: '2D Shoot-em-up',
+    description: 'Vertical scrolling shooter. Dodge bullets, defeat waves of enemies.',
+    category: '2d_shmup',
+    difficulty: 'intermediate',
+    thumbnail: { gradient: 'linear-gradient(135deg, #ef4444, #b91c1c)', icon: 'Target', accentColor: '#ef4444' },
+    tags: ['2d', 'shooter', 'shmup', 'arcade'],
+    entityCount: 19,
+    load: async () => (await import('./2d-shmup')).SHMUP_2D_TEMPLATE,
+  },
+  {
+    id: '2d-puzzle',
+    name: '2D Puzzle Game',
+    description: 'Match-3 puzzle game. Swap tiles to create matches.',
+    category: '2d_puzzle',
+    difficulty: 'intermediate',
+    thumbnail: { gradient: 'linear-gradient(135deg, #8b5cf6, #6d28d9)', icon: 'Grid3x3', accentColor: '#8b5cf6' },
+    tags: ['2d', 'puzzle', 'match-3', 'logic'],
+    entityCount: 28,
+    load: async () => (await import('./2d-puzzle')).PUZZLE_2D_TEMPLATE,
+  },
+  {
+    id: '2d-fighter',
+    name: '2D Fighter',
+    description: 'Two-player fighting game. Attack, defend, knockout opponent.',
+    category: '2d_fighter',
+    difficulty: 'intermediate',
+    thumbnail: { gradient: 'linear-gradient(135deg, #f59e0b, #d97706)', icon: 'Swords', accentColor: '#f59e0b' },
+    tags: ['2d', 'fighting', 'pvp', 'action'],
+    entityCount: 9,
+    load: async () => (await import('./2d-fighter')).FIGHTER_2D_TEMPLATE,
+  },
+  {
+    id: '2d-metroidvania',
+    name: '2D Metroidvania',
+    description: 'Exploration platformer. Unlock abilities, save progress, discover secrets.',
+    category: '2d_metroidvania',
+    difficulty: 'intermediate',
+    thumbnail: { gradient: 'linear-gradient(135deg, #06b6d4, #0891b2)', icon: 'Layers', accentColor: '#06b6d4' },
+    tags: ['2d', 'metroidvania', 'exploration', 'abilities'],
+    entityCount: 31,
+    load: async () => (await import('./2d-metroidvania')).METROIDVANIA_2D_TEMPLATE,
   },
 ];
 

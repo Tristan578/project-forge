@@ -36,7 +36,7 @@ describe('command manifest', () => {
   });
 
   it('categories are from expected set', () => {
-    const validCategories = ['scene', 'materials', 'lighting', 'environment', 'editor', 'camera', 'history', 'query', 'runtime', 'asset', 'scripting', 'audio', 'particles', 'animation', 'export', 'rendering', 'mesh', 'terrain', 'docs', 'prefab', 'game_components', 'game_cameras', 'generation', 'ui', 'compound', 'templates', 'dialogue', 'publishing', 'sprite', 'sprite_animation', 'physics2d', 'tilemap', 'skeleton2d'];
+    const validCategories = ['scene', 'materials', 'lighting', 'environment', 'editor', 'camera', 'history', 'query', 'runtime', 'asset', 'scripting', 'audio', 'particles', 'animation', 'export', 'rendering', 'mesh', 'terrain', 'docs', 'prefab', 'game_components', 'game_cameras', 'generation', 'ui', 'compound', 'templates', 'dialogue', 'publishing', 'sprite', 'sprite_animation', 'physics2d', 'tilemap', 'skeleton2d', 'community', 'marketplace', 'modeling'];
     for (const cmd of manifest.commands) {
       expect(validCategories, `${cmd.name}: unexpected category '${cmd.category}'`).toContain(cmd.category);
     }

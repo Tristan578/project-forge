@@ -11,6 +11,7 @@ mod procedural;
 mod scene;
 mod game;
 mod sprites;
+mod edit_mode;
 
 use serde::Serialize;
 use super::pending_commands::{QueryRequest, queue_query_from_bridge, queue_mode_change_from_bridge};
@@ -51,6 +52,7 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
     if let Some(result) = scene::dispatch(command, &payload) { return result; }
     if let Some(result) = game::dispatch(command, &payload) { return result; }
     if let Some(result) = sprites::dispatch(command, &payload) { return result; }
+    if let Some(result) = edit_mode::dispatch(command, &payload) { return result; }
 
     // Mode commands (play/stop/pause/resume)
     match command {

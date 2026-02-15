@@ -231,6 +231,214 @@ export const publishedGames = pgTable(
   ]
 );
 
+// --- Community Gallery Tables ---
+
+export const gameRatings = pgTable(
+  'game_ratings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    rating: integer('rating').notNull(), // 1-5 stars
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_game_ratings_user_game').on(table.gameId, table.userId),
+    index('idx_game_ratings_game').on(table.gameId),
+  ]
+);
+
+export const gameComments = pgTable(
+  'game_comments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    content: text('content').notNull(),
+    parentId: uuid('parent_id'), // For replies
+    flagged: integer('flagged').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_game_comments_game').on(table.gameId),
+    index('idx_game_comments_user').on(table.userId),
+  ]
+);
+
+export const gameLikes = pgTable(
+  'game_likes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_game_likes_user_game').on(table.gameId, table.userId),
+    index('idx_game_likes_game').on(table.gameId),
+  ]
+);
+
+export const userFollows = pgTable(
+  'user_follows',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    followerId: uuid('follower_id').notNull().references(() => users.id),
+    followingId: uuid('following_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_user_follows').on(table.followerId, table.followingId),
+    index('idx_user_follows_following').on(table.followingId),
+  ]
+);
+
+export const gameTags = pgTable(
+  'game_tags',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    tag: text('tag').notNull(),
+  },
+  (table) => [
+    index('idx_game_tags_game').on(table.gameId),
+    index('idx_game_tags_tag').on(table.tag),
+  ]
+);
+
+export const gameForks = pgTable(
+  'game_forks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    originalGameId: uuid('original_game_id').notNull().references(() => publishedGames.id),
+    forkedProjectId: uuid('forked_project_id').notNull().references(() => projects.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_game_forks_original').on(table.originalGameId),
+  ]
+);
+
+export const featuredGames = pgTable(
+  'featured_games',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id),
+    position: integer('position').notNull().default(0),
+    featuredAt: timestamp('featured_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_featured_games_position').on(table.position),
+  ]
+);
+
+// --- Asset Marketplace Tables ---
+
+export const assetCategoryEnum = pgEnum('asset_category', [
+  'model_3d', 'sprite', 'texture', 'audio', 'script', 'prefab', 'template', 'shader', 'animation',
+]);
+
+export const assetStatusEnum = pgEnum('asset_status', [
+  'draft', 'pending_review', 'published', 'rejected', 'removed',
+]);
+
+export const assetLicenseEnum = pgEnum('asset_license', ['standard', 'extended']);
+
+export const marketplaceAssets = pgTable(
+  'marketplace_assets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sellerId: uuid('seller_id').notNull().references(() => users.id),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    category: assetCategoryEnum('category').notNull(),
+    status: assetStatusEnum('status').notNull().default('draft'),
+    license: assetLicenseEnum('license').notNull().default('standard'),
+
+    // Pricing (in platform tokens, 0 = free)
+    priceTokens: integer('price_tokens').notNull().default(0),
+
+    // Files
+    previewUrl: text('preview_url'),
+    assetFileUrl: text('asset_file_url'),
+    assetFileSize: integer('asset_file_size'),
+
+    // Metadata
+    tags: text('tags').array().notNull().default([]),
+    metadataJson: jsonb('metadata_json'),
+    aiGenerated: integer('ai_generated').notNull().default(0),
+    aiProvider: text('ai_provider'),
+
+    // Stats
+    downloadCount: integer('download_count').notNull().default(0),
+    avgRating: integer('avg_rating'),
+    ratingCount: integer('rating_count').notNull().default(0),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_marketplace_assets_seller').on(table.sellerId),
+    index('idx_marketplace_assets_category').on(table.category),
+    index('idx_marketplace_assets_status').on(table.status),
+  ]
+);
+
+export const assetPurchases = pgTable(
+  'asset_purchases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    buyerId: uuid('buyer_id').notNull().references(() => users.id),
+    assetId: uuid('asset_id').notNull().references(() => marketplaceAssets.id),
+    priceTokens: integer('price_tokens').notNull(),
+    license: assetLicenseEnum('license').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_asset_purchases_buyer_asset').on(table.buyerId, table.assetId),
+    index('idx_asset_purchases_buyer').on(table.buyerId),
+    index('idx_asset_purchases_asset').on(table.assetId),
+  ]
+);
+
+export const assetReviews = pgTable(
+  'asset_reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    assetId: uuid('asset_id').notNull().references(() => marketplaceAssets.id),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    rating: integer('rating').notNull(),
+    content: text('content'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_asset_reviews_user_asset').on(table.assetId, table.userId),
+    index('idx_asset_reviews_asset').on(table.assetId),
+  ]
+);
+
+export const sellerProfiles = pgTable(
+  'seller_profiles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id).unique(),
+    displayName: text('display_name').notNull(),
+    bio: text('bio'),
+    portfolioUrl: text('portfolio_url'),
+    totalEarnings: integer('total_earnings').notNull().default(0),
+    totalSales: integer('total_sales').notNull().default(0),
+    approved: integer('approved').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_seller_profiles_user').on(table.userId),
+  ]
+);
+
 // --- Types ---
 
 export type User = typeof users.$inferSelect;
@@ -250,6 +458,23 @@ export type PublishedGame = typeof publishedGames.$inferSelect;
 export type NewPublishedGame = typeof publishedGames.$inferInsert;
 export type TransactionType = 'monthly_grant' | 'purchase' | 'deduction' | 'refund' | 'rollover' | 'earned' | 'adjustment';
 
+export type GameRating = typeof gameRatings.$inferSelect;
+export type GameComment = typeof gameComments.$inferSelect;
+export type GameLike = typeof gameLikes.$inferSelect;
+export type UserFollow = typeof userFollows.$inferSelect;
+export type GameTag = typeof gameTags.$inferSelect;
+export type GameFork = typeof gameForks.$inferSelect;
+export type FeaturedGame = typeof featuredGames.$inferSelect;
+
+export type MarketplaceAsset = typeof marketplaceAssets.$inferSelect;
+export type NewMarketplaceAsset = typeof marketplaceAssets.$inferInsert;
+export type AssetPurchase = typeof assetPurchases.$inferSelect;
+export type AssetReview = typeof assetReviews.$inferSelect;
+export type SellerProfile = typeof sellerProfiles.$inferSelect;
+
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';
 export type ApiKeyScope = 'scene:read' | 'scene:write' | 'ai:generate' | 'project:manage';
+export type AssetCategory = 'model_3d' | 'sprite' | 'texture' | 'audio' | 'script' | 'prefab' | 'template' | 'shader' | 'animation';
+export type AssetStatus = 'draft' | 'pending_review' | 'published' | 'rejected' | 'removed';
+export type AssetLicense = 'standard' | 'extended';

@@ -13,6 +13,7 @@ pub mod camera_2d;
 pub mod camera_presets;
 pub mod commands;
 pub mod csg;
+pub mod edit_mode;
 pub mod engine_mode;
 pub mod entity_factory;
 pub mod entity_id;

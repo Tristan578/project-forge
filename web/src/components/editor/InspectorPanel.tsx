@@ -25,6 +25,7 @@ import { SkeletonInspector } from './SkeletonInspector';
 import { Camera2dInspector } from './Camera2dInspector';
 import { TilemapInspector } from './TilemapInspector';
 import { ReverbZoneInspector } from './ReverbZoneInspector';
+import { EditModeInspector } from './EditModeInspector';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   copyTransformProperty,
@@ -362,6 +363,9 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Game Camera section */}
       <GameCameraInspector />
+
+      {/* Edit Mode section */}
+      <EditModeInspector />
 
       {/* Script section */}
       <div className="border-t border-zinc-800 pt-4 mt-4">

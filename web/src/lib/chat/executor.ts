@@ -10,6 +10,7 @@ import type { ToolCallContext, ExecutionResult } from './handlers/types';
 import { transformHandlers } from './handlers/transformHandlers';
 import { materialHandlers } from './handlers/materialHandlers';
 import { queryHandlers } from './handlers/queryHandlers';
+import { editModeHandlers } from './handlers/editModeHandlers';
 
 // Import the legacy executor temporarily
 import { executeToolCall as legacyExecuteToolCall } from './executor.legacy';
@@ -22,6 +23,7 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...transformHandlers,
   ...materialHandlers,
   ...queryHandlers,
+  ...editModeHandlers,
 };
 
 /**

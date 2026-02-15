@@ -6,15 +6,15 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { X, ChevronLeft, ChevronRight, Trophy } from 'lucide-react';
+import { X, ChevronRight, Trophy } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { TUTORIALS, type TutorialStep } from '@/data/tutorials';
 
 export function TutorialOverlay() {
-  const activeTutorial = useOnboardingStore((s) => s.activeTutorial);
-  const nextStep = useOnboardingStore((s) => s.nextStep);
-  const prevStep = useOnboardingStore((s) => s.prevStep);
+  const activeTutorialId = useOnboardingStore((s) => s.activeTutorial);
+  const tutorialStep = useOnboardingStore((s) => s.tutorialStep);
+  const advanceTutorial = useOnboardingStore((s) => s.advanceTutorial);
   const skipTutorial = useOnboardingStore((s) => s.skipTutorial);
   const completeTutorial = useOnboardingStore((s) => s.completeTutorial);
 
@@ -23,24 +23,24 @@ export function TutorialOverlay() {
 
   // Compute tutorial and step data
   const tutorial = useMemo(
-    () => (activeTutorial ? TUTORIALS.find((t) => t.id === activeTutorial.id) : null),
-    [activeTutorial]
+    () => (activeTutorialId ? TUTORIALS.find((t) => t.id === activeTutorialId) : null),
+    [activeTutorialId]
   );
 
   const currentStep = useMemo(
-    () => (tutorial && activeTutorial ? tutorial.steps[activeTutorial.step] : null),
-    [tutorial, activeTutorial]
+    () => (tutorial ? tutorial.steps[tutorialStep] : null),
+    [tutorial, tutorialStep]
   );
 
   const isLastStep = useMemo(
-    () => (tutorial && activeTutorial ? activeTutorial.step === tutorial.steps.length - 1 : false),
-    [tutorial, activeTutorial]
+    () => (tutorial ? tutorialStep === tutorial.steps.length - 1 : false),
+    [tutorial, tutorialStep]
   );
 
   // Prev-value pattern: Reset actionCompleted when step changes
-  const [prevStep_, setPrevStep_] = useState(activeTutorial?.step ?? -1);
-  if (prevStep_ !== (activeTutorial?.step ?? -1)) {
-    setPrevStep_(activeTutorial?.step ?? -1);
+  const [prevStep_, setPrevStep_] = useState(tutorialStep);
+  if (prevStep_ !== tutorialStep) {
+    setPrevStep_(tutorialStep);
     setActionCompleted(currentStep?.actionRequired ? false : true);
   }
 
@@ -57,13 +57,9 @@ export function TutorialOverlay() {
     if (isLastStep) {
       completeTutorial();
     } else {
-      nextStep();
+      advanceTutorial();
     }
-  }, [isLastStep, completeTutorial, nextStep]);
-
-  const handlePrev = useCallback(() => {
-    prevStep();
-  }, [prevStep]);
+  }, [isLastStep, completeTutorial, advanceTutorial]);
 
   const handleSkip = useCallback(() => {
     skipTutorial();
@@ -100,7 +96,7 @@ export function TutorialOverlay() {
           if (state.primaryId && !prevState.primaryId) {
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => nextStep(), 500);
+              setTimeout(() => advanceTutorial(), 500);
             }
           }
           break;
@@ -112,7 +108,7 @@ export function TutorialOverlay() {
           ) {
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => nextStep(), 500);
+              setTimeout(() => advanceTutorial(), 500);
             }
           }
           break;
@@ -124,7 +120,7 @@ export function TutorialOverlay() {
           ) {
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => nextStep(), 500);
+              setTimeout(() => advanceTutorial(), 500);
             }
           }
           break;
@@ -134,7 +130,7 @@ export function TutorialOverlay() {
             // Check if correct entity type (simplified - just check count increase for now)
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => nextStep(), 500);
+              setTimeout(() => advanceTutorial(), 500);
             }
           }
           break;
@@ -143,7 +139,7 @@ export function TutorialOverlay() {
           if (state.engineMode === 'play' && prevState.engineMode === 'edit') {
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => nextStep(), currentStep.delay || 500);
+              setTimeout(() => advanceTutorial(), currentStep.delay || 500);
             }
           }
           break;
@@ -152,7 +148,7 @@ export function TutorialOverlay() {
           if (state.engineMode === 'edit' && prevState.engineMode === 'play') {
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => nextStep(), 500);
+              setTimeout(() => advanceTutorial(), 500);
             }
           }
           break;
@@ -164,7 +160,7 @@ export function TutorialOverlay() {
           ) {
             setActionCompleted(true);
             if (currentStep.autoAdvance) {
-              setTimeout(() => nextStep(), 500);
+              setTimeout(() => advanceTutorial(), 500);
             }
           }
           break;
@@ -172,10 +168,10 @@ export function TutorialOverlay() {
     });
 
     return unsubscribe;
-  }, [currentStep, nextStep]);
+  }, [currentStep, advanceTutorial]);
 
   // Early return after all hooks
-  if (!activeTutorial || !tutorial || !currentStep) return null;
+  if (!activeTutorialId || !tutorial || !currentStep) return null;
 
   return (
     <>
@@ -199,13 +195,12 @@ export function TutorialOverlay() {
       {/* Instruction bubble */}
       <TutorialBubble
         step={currentStep}
-        stepNumber={activeTutorial.step + 1}
+        stepNumber={tutorialStep + 1}
         totalSteps={tutorial.steps.length}
         actionCompleted={actionCompleted}
         isLastStep={isLastStep}
         highlightRect={highlightRect}
         onNext={handleNext}
-        onPrev={handlePrev}
         onSkip={handleSkip}
       />
     </>
@@ -220,7 +215,6 @@ interface TutorialBubbleProps {
   isLastStep: boolean;
   highlightRect: DOMRect | null;
   onNext: () => void;
-  onPrev: () => void;
   onSkip: () => void;
 }
 
@@ -232,7 +226,6 @@ function TutorialBubble({
   isLastStep,
   highlightRect,
   onNext,
-  onPrev,
   onSkip,
 }: TutorialBubbleProps) {
   // Use useMemo to compute position (render-time calculation)
@@ -308,16 +301,7 @@ function TutorialBubble({
       <p className="mb-4 text-sm text-zinc-300">{step.description}</p>
 
       {/* Actions */}
-      <div className="flex items-center justify-between gap-2">
-        <button
-          onClick={onPrev}
-          disabled={stepNumber === 1}
-          className="flex items-center gap-1 rounded bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-        >
-          <ChevronLeft size={16} />
-          Previous
-        </button>
-
+      <div className="flex items-center justify-end gap-2">
         <div className="flex gap-2">
           <button
             onClick={onSkip}

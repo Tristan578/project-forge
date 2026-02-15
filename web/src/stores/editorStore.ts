@@ -54,6 +54,9 @@ import {
   AssetSlice,
   createAssetSlice,
   setAssetDispatcher,
+  EditModeSlice,
+  createEditModeSlice,
+  setEditModeDispatcher,
 } from './slices';
 
 // Re-export all types for backward compatibility
@@ -75,7 +78,8 @@ export type EditorState =
   & SpriteSlice
   & HistorySlice
   & SceneSlice
-  & AssetSlice;
+  & AssetSlice
+  & EditModeSlice;
 
 // Create the store by composing all slices
 export const useEditorStore = create<EditorState>()((...args) => ({
@@ -94,6 +98,7 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createHistorySlice(...args),
   ...createSceneSlice(...args),
   ...createAssetSlice(...args),
+  ...createEditModeSlice(...args),
 }));
 
 // Command dispatcher type - will be set by useEngine hook
@@ -119,6 +124,7 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
   setHistoryDispatcher(dispatcher);
   setSceneDispatcher(dispatcher);
   setAssetDispatcher(dispatcher);
+  setEditModeDispatcher(dispatcher);
 }
 
 // Play tick callback for script runner

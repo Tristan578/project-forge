@@ -22,6 +22,7 @@ use std::cell::RefCell;
 
 pub mod animation;
 pub mod audio;
+pub mod edit_mode;
 pub mod game;
 pub mod material;
 pub mod particles;
@@ -35,6 +36,7 @@ pub mod transform;
 // Re-export all request types and bridge functions from domain modules
 pub use animation::*;
 pub use audio::*;
+pub use edit_mode::*;
 pub use game::*;
 pub use material::*;
 pub use particles::*;
@@ -239,6 +241,13 @@ pub struct PendingCommands {
     pub instantiate_prefab_requests: Vec<InstantiatePrefabRequest>,
     // query domain
     pub query_requests: Vec<QueryRequest>,
+    // edit_mode domain
+    pub enter_edit_mode_requests: Vec<EnterEditModeRequest>,
+    pub exit_edit_mode_requests: Vec<ExitEditModeRequest>,
+    pub set_selection_mode_requests: Vec<SetSelectionModeRequest>,
+    pub select_elements_requests: Vec<SelectElementsRequest>,
+    pub mesh_operation_requests: Vec<MeshOperationRequest>,
+    pub recalc_normals_requests: Vec<RecalcNormalsRequest>,
 }
 
 // === Thread-Local Bridge Access ===

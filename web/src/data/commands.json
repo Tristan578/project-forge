@@ -9010,6 +9010,373 @@
       },
       "tokenCost": 20,
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_community_games",
+      "description": "Browse published games in the community gallery",
+      "category": "community",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sort": {
+            "type": "string",
+            "enum": ["trending", "newest", "top_rated", "most_played"],
+            "description": "Sort order for games"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Filter by tag"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of games to return"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_community_game",
+      "description": "Get details of a published game",
+      "category": "community",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "description": "ID of the game to retrieve"
+          }
+        },
+        "required": ["gameId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "fork_community_game",
+      "description": "Fork a community game into your projects",
+      "category": "community",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "description": "ID of the game to fork"
+          }
+        },
+        "required": ["gameId"]
+      },
+      "tokenCost": 5,
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "rate_community_game",
+      "description": "Rate a community game (1-5 stars)",
+      "category": "community",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "description": "ID of the game to rate"
+          },
+          "rating": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "Rating from 1 to 5 stars"
+          }
+        },
+        "required": ["gameId", "rating"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "search_community_games",
+      "description": "Search community games by keyword",
+      "category": "community",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search keyword"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of results"
+          }
+        },
+        "required": ["query"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "browse_marketplace",
+      "description": "Browse the asset marketplace with filters",
+      "category": "marketplace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "description": "Filter by asset category"
+          },
+          "sort": {
+            "type": "string",
+            "enum": ["newest", "popular", "top_rated", "free"],
+            "description": "Sort order"
+          },
+          "query": {
+            "type": "string",
+            "description": "Search keyword"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results to return"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_marketplace_asset",
+      "description": "Get detailed information about a specific marketplace asset",
+      "category": "marketplace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "description": "Asset ID to retrieve"
+          }
+        },
+        "required": ["assetId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "purchase_marketplace_asset",
+      "description": "Purchase an asset from the marketplace using tokens",
+      "category": "marketplace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "description": "Asset ID to purchase"
+          }
+        },
+        "required": ["assetId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "list_purchased_assets",
+      "description": "List all assets purchased by the current user",
+      "category": "marketplace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "description": "Filter by category"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "create_marketplace_listing",
+      "description": "Create a new asset listing on the marketplace",
+      "category": "marketplace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Asset name"
+          },
+          "description": {
+            "type": "string",
+            "description": "Asset description"
+          },
+          "category": {
+            "type": "string",
+            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "description": "Asset category"
+          },
+          "priceTokens": {
+            "type": "number",
+            "description": "Price in tokens (0 for free)"
+          },
+          "license": {
+            "type": "string",
+            "enum": ["standard", "extended"],
+            "description": "License type"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Asset tags"
+          }
+        },
+        "required": ["name", "description", "category"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "search_marketplace",
+      "description": "Search the asset marketplace by keyword with filters",
+      "category": "marketplace",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search keyword"
+          },
+          "category": {
+            "type": "string",
+            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "description": "Filter by category"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum results"
+          }
+        },
+        "required": ["query"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "enter_edit_mode",
+      "description": "Enter polygon edit mode for an entity",
+      "category": "modeling",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to edit"
+          }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "exit_edit_mode",
+      "description": "Exit polygon edit mode",
+      "category": "modeling",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_selection_mode",
+      "description": "Set vertex/edge/face selection mode",
+      "category": "modeling",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": ["vertex", "edge", "face"],
+            "description": "Selection mode"
+          }
+        },
+        "required": ["mode"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_extrude",
+      "description": "Extrude selected faces along normal",
+      "category": "modeling",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "indices": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Indices to extrude"
+          },
+          "distance": {
+            "type": "number",
+            "description": "Extrude distance (default: 1.0)"
+          },
+          "direction": {
+            "type": "array",
+            "items": { "type": "number" },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Extrude direction [x, y, z] (default: [0, 1, 0])"
+          }
+        },
+        "required": ["indices"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_subdivide",
+      "description": "Subdivide selected faces",
+      "category": "modeling",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "indices": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Face indices to subdivide (empty = whole mesh)"
+          },
+          "level": {
+            "type": "number",
+            "description": "Subdivision level (default: 1)"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "recalc_normals",
+      "description": "Recalculate mesh normals",
+      "category": "modeling",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "smooth": {
+            "type": "boolean",
+            "description": "Smooth normals (default: true)"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
     }
   ],
   "resources": [

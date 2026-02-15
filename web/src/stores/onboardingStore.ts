@@ -1,211 +1,183 @@
-/**
- * Zustand store for onboarding and tutorial state.
- * Tracks tutorial progress, completed tasks, and user preferences.
- */
-
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
-const STORAGE_KEY = 'forge-onboarding-v1';
+interface OnboardingState {
+  // Tutorial state
+  activeTutorial: string | null;
+  tutorialStep: number;
+  tutorialCompleted: Record<string, boolean>;
 
-interface PersistedState {
-  completedSteps: string[];
-  completedTutorials: string[];
-  activeTutorial: { id: string; step: number } | null;
-  showTips: boolean;
-  hasCompletedOnboarding: boolean;
-}
+  // Feature checklist
+  basicTasks: Record<string, boolean>;
+  advancedTasks: Record<string, boolean>;
 
-function loadPersistedState(): PersistedState {
-  if (typeof localStorage === 'undefined') {
-    return {
-      completedSteps: [],
-      completedTutorials: [],
-      activeTutorial: null,
-      showTips: true,
-      hasCompletedOnboarding: false,
-    };
-  }
+  // Tips
+  dismissedTips: string[];
+  tipCooldownUntil: number;
 
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      return JSON.parse(raw) as PersistedState;
-    }
-  } catch {
-    /* ignore */
-  }
+  // Achievements
+  unlockedAchievements: string[];
+  lastAchievementShown: string | null;
 
-  return {
-    completedSteps: [],
-    completedTutorials: [],
-    activeTutorial: null,
-    showTips: true,
-    hasCompletedOnboarding: false,
-  };
-}
+  // Returning user
+  lastVisitTimestamp: number;
+  isNewUser: boolean;
+  showWhatsNew: boolean;
 
-function savePersistedState(state: PersistedState): void {
-  if (typeof localStorage === 'undefined') return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    /* ignore */
-  }
-}
-
-export interface OnboardingState {
-  // Persisted state
-  completedSteps: string[];
-  completedTutorials: string[];
-  activeTutorial: { id: string; step: number } | null;
-  showTips: boolean;
-  hasCompletedOnboarding: boolean;
+  // UI
+  showOnboardingPanel: boolean;
+  showAchievementToast: boolean;
 
   // Actions
   startTutorial: (id: string) => void;
-  nextStep: () => void;
-  prevStep: () => void;
-  skipTutorial: () => void;
+  advanceTutorial: () => void;
   completeTutorial: () => void;
-  toggleTips: () => void;
-  markStepComplete: (stepId: string) => void;
-  resetOnboarding: () => void;
+  skipTutorial: () => void;
+  completeTask: (taskId: string) => void;
+  dismissTip: (tipId: string) => void;
+  unlockAchievement: (id: string) => void;
+  dismissAchievementToast: () => void;
+  setShowOnboardingPanel: (show: boolean) => void;
+  dismissWhatsNew: () => void;
+  recordVisit: () => void;
 }
 
-export const useOnboardingStore = create<OnboardingState>((set, get) => {
-  const persisted = loadPersistedState();
+export const useOnboardingStore = create<OnboardingState>()(
+  persist(
+    (set, get) => ({
+      // Initial state
+      activeTutorial: null,
+      tutorialStep: 0,
+      tutorialCompleted: {},
 
-  return {
-    ...persisted,
+      basicTasks: {},
+      advancedTasks: {},
 
-    startTutorial: (id) => {
-      const newState = { id, step: 0 };
-      set({ activeTutorial: newState });
+      dismissedTips: [],
+      tipCooldownUntil: 0,
 
-      const persistedUpdate: PersistedState = {
-        completedSteps: get().completedSteps,
-        completedTutorials: get().completedTutorials,
-        activeTutorial: newState,
-        showTips: get().showTips,
-        hasCompletedOnboarding: get().hasCompletedOnboarding,
-      };
-      savePersistedState(persistedUpdate);
-    },
+      unlockedAchievements: [],
+      lastAchievementShown: null,
 
-    nextStep: () => {
-      const { activeTutorial } = get();
-      if (!activeTutorial) return;
+      lastVisitTimestamp: Date.now(),
+      isNewUser: true,
+      showWhatsNew: false,
 
-      const newState = {
-        id: activeTutorial.id,
-        step: activeTutorial.step + 1,
-      };
-      set({ activeTutorial: newState });
+      showOnboardingPanel: false,
+      showAchievementToast: false,
 
-      const persistedUpdate: PersistedState = {
-        completedSteps: get().completedSteps,
-        completedTutorials: get().completedTutorials,
-        activeTutorial: newState,
-        showTips: get().showTips,
-        hasCompletedOnboarding: get().hasCompletedOnboarding,
-      };
-      savePersistedState(persistedUpdate);
-    },
+      // Actions
+      startTutorial: (id: string) => {
+        set({
+          activeTutorial: id,
+          tutorialStep: 0,
+        });
+      },
 
-    prevStep: () => {
-      const { activeTutorial } = get();
-      if (!activeTutorial || activeTutorial.step === 0) return;
+      advanceTutorial: () => {
+        set((state) => ({
+          tutorialStep: state.tutorialStep + 1,
+        }));
+      },
 
-      const newState = {
-        id: activeTutorial.id,
-        step: activeTutorial.step - 1,
-      };
-      set({ activeTutorial: newState });
+      completeTutorial: () => {
+        const state = get();
+        if (!state.activeTutorial) return;
 
-      const persistedUpdate: PersistedState = {
-        completedSteps: get().completedSteps,
-        completedTutorials: get().completedTutorials,
-        activeTutorial: newState,
-        showTips: get().showTips,
-        hasCompletedOnboarding: get().hasCompletedOnboarding,
-      };
-      savePersistedState(persistedUpdate);
-    },
+        set({
+          tutorialCompleted: {
+            ...state.tutorialCompleted,
+            [state.activeTutorial]: true,
+          },
+          activeTutorial: null,
+          tutorialStep: 0,
+        });
+      },
 
-    skipTutorial: () => {
-      set({ activeTutorial: null });
+      skipTutorial: () => {
+        set({
+          activeTutorial: null,
+          tutorialStep: 0,
+        });
+      },
 
-      const persistedUpdate: PersistedState = {
-        completedSteps: get().completedSteps,
-        completedTutorials: get().completedTutorials,
-        activeTutorial: null,
-        showTips: get().showTips,
-        hasCompletedOnboarding: get().hasCompletedOnboarding,
-      };
-      savePersistedState(persistedUpdate);
-    },
+      completeTask: (taskId: string) => {
+        const state = get();
+        const isBasic = taskId.startsWith('create-') || 
+          taskId === 'customize-material' ||
+          taskId === 'add-physics' ||
+          taskId === 'write-script' ||
+          taskId === 'use-ai-chat' ||
+          taskId === 'export-game';
 
-    completeTutorial: () => {
-      const { activeTutorial, completedTutorials } = get();
-      if (!activeTutorial) return;
+        if (isBasic) {
+          set({
+            basicTasks: {
+              ...state.basicTasks,
+              [taskId]: true,
+            },
+          });
+        } else {
+          set({
+            advancedTasks: {
+              ...state.advancedTasks,
+              [taskId]: true,
+            },
+          });
+        }
+      },
 
-      const newCompleted = [...completedTutorials, activeTutorial.id];
-      set({
-        activeTutorial: null,
-        completedTutorials: newCompleted,
-        hasCompletedOnboarding: newCompleted.length > 0,
-      });
+      dismissTip: (tipId: string) => {
+        const state = get();
+        set({
+          dismissedTips: [...state.dismissedTips, tipId],
+          tipCooldownUntil: Date.now() + 30000, // 30 seconds
+        });
+      },
 
-      const persistedUpdate: PersistedState = {
-        completedSteps: get().completedSteps,
-        completedTutorials: newCompleted,
-        activeTutorial: null,
-        showTips: get().showTips,
-        hasCompletedOnboarding: true,
-      };
-      savePersistedState(persistedUpdate);
-    },
+      unlockAchievement: (id: string) => {
+        const state = get();
+        if (state.unlockedAchievements.includes(id)) return;
 
-    toggleTips: () => {
-      set((s) => ({ showTips: !s.showTips }));
+        set({
+          unlockedAchievements: [...state.unlockedAchievements, id],
+          lastAchievementShown: id,
+          showAchievementToast: true,
+        });
+      },
 
-      const persistedUpdate: PersistedState = {
-        completedSteps: get().completedSteps,
-        completedTutorials: get().completedTutorials,
-        activeTutorial: get().activeTutorial,
-        showTips: !get().showTips,
-        hasCompletedOnboarding: get().hasCompletedOnboarding,
-      };
-      savePersistedState(persistedUpdate);
-    },
+      dismissAchievementToast: () => {
+        set({
+          showAchievementToast: false,
+        });
+      },
 
-    markStepComplete: (stepId) => {
-      const { completedSteps } = get();
-      if (completedSteps.includes(stepId)) return;
+      setShowOnboardingPanel: (show: boolean) => {
+        set({
+          showOnboardingPanel: show,
+        });
+      },
 
-      const newSteps = [...completedSteps, stepId];
-      set({ completedSteps: newSteps });
+      dismissWhatsNew: () => {
+        set({
+          showWhatsNew: false,
+        });
+      },
 
-      const persistedUpdate: PersistedState = {
-        completedSteps: newSteps,
-        completedTutorials: get().completedTutorials,
-        activeTutorial: get().activeTutorial,
-        showTips: get().showTips,
-        hasCompletedOnboarding: get().hasCompletedOnboarding,
-      };
-      savePersistedState(persistedUpdate);
-    },
+      recordVisit: () => {
+        const state = get();
+        const now = Date.now();
+        const daysSinceLastVisit = (now - state.lastVisitTimestamp) / (1000 * 60 * 60 * 24);
 
-    resetOnboarding: () => {
-      const resetState: PersistedState = {
-        completedSteps: [],
-        completedTutorials: [],
-        activeTutorial: null,
-        showTips: true,
-        hasCompletedOnboarding: false,
-      };
-      set(resetState);
-      savePersistedState(resetState);
-    },
-  };
-});
+        set({
+          lastVisitTimestamp: now,
+          isNewUser: false,
+          showWhatsNew: daysSinceLastVisit > 7,
+        });
+      },
+    }),
+    {
+      name: 'forge-onboarding',
+    }
+  )
+);

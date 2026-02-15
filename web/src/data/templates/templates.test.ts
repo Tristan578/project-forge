@@ -3,8 +3,8 @@ import { TEMPLATE_REGISTRY, loadTemplate, getTemplateInfo } from './index';
 import type { GameTemplate } from './index';
 
 describe('game templates', () => {
-  it('registry has 5 templates', () => {
-    expect(TEMPLATE_REGISTRY).toHaveLength(5);
+  it('registry has 11 templates', () => {
+    expect(TEMPLATE_REGISTRY).toHaveLength(11);
   });
 
   it('all registry entries have required fields', () => {
@@ -50,13 +50,14 @@ describe('game templates', () => {
 
       it('has valid sceneData with entities', () => {
         expect(template.sceneData.formatVersion).toBe(3);
-        expect(template.sceneData.entities.length).toBeGreaterThan(10);
+        expect(template.sceneData.entities.length).toBeGreaterThan(5);
         expect(template.sceneData.entities.length).toBeLessThanOrEqual(50);
       });
 
       it('has reasonable entity count', () => {
         // Entity count in range (actual count depends on Array.from spreads)
-        expect(template.sceneData.entities.length).toBeGreaterThan(10);
+        // 2D templates may have fewer entities (min 5 is fine for focused templates like fighter)
+        expect(template.sceneData.entities.length).toBeGreaterThan(5);
         expect(template.sceneData.entities.length).toBeLessThan(50);
       });
 
