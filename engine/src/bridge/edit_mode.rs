@@ -36,14 +36,14 @@ pub fn apply_edit_mode_requests(
             }
 
             // Emit event
-            emit_event("edit_mode_entered", serde_json::json!({ "entityId": request.entity_id }));
+            emit_event("edit_mode_entered", &serde_json::json!({ "entityId": request.entity_id }));
 
             // Get mesh stats and emit
             if let Some(entity_id_comp) = edit_mode_query.iter().find(|(id, _)| id.0 == request.entity_id).map(|(id, _)| id) {
                 if let Ok(mesh_handle) = mesh_query.get(entity_id_comp.entity()) {
                     if let Some(mesh) = meshes.get(&mesh_handle.0) {
                         let (vertex_count, edge_count, face_count) = get_mesh_stats(mesh);
-                        emit_event("edit_mode_mesh_stats", serde_json::json!({
+                        emit_event("edit_mode_mesh_stats", &serde_json::json!({
                             "entityId": request.entity_id,
                             "vertexCount": vertex_count,
                             "edgeCount": edge_count,
@@ -60,7 +60,7 @@ pub fn apply_edit_mode_requests(
         if let Some((_, Some(mut edit_mode))) = edit_mode_query.iter_mut().find(|(id, _)| id.0 == request.entity_id) {
             edit_mode.active = false;
             edit_mode.selected_indices.clear();
-            emit_event("edit_mode_exited", serde_json::json!({ "entityId": request.entity_id }));
+            emit_event("edit_mode_exited", &serde_json::json!({ "entityId": request.entity_id }));
         }
     }
 
@@ -158,7 +158,7 @@ pub fn emit_edit_mode_selection(
 ) {
     for (entity_id, edit_mode) in query.iter() {
         if edit_mode.active {
-            emit_event("edit_mode_selection_changed", serde_json::json!({
+            emit_event("edit_mode_selection_changed", &serde_json::json!({
                 "entityId": entity_id.0,
                 "indices": edit_mode.selected_indices,
                 "mode": match edit_mode.selection_mode {
