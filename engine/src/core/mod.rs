@@ -26,6 +26,7 @@ pub mod gizmo;
 pub mod history;
 pub mod input;
 pub mod lighting;
+pub mod lod;
 pub mod material;
 pub mod observability;
 pub mod particles;

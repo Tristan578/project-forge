@@ -1,13 +1,18 @@
 import { bundleScripts } from './scriptBundler';
 import { generateGameHTML, type GameTemplateOptions } from './gameTemplate';
 import { useEditorStore } from '@/stores/editorStore';
+import { exportAsZip, type ZipExportOptions } from './zipExporter';
+import type { LoadingScreenConfig } from './loadingScreen';
+import type { ExportPreset } from './presets';
 
 export interface ExportOptions {
   title: string;
-  mode: 'single-html' | 'zip';
+  mode: 'single-html' | 'zip' | 'pwa';
   resolution: GameTemplateOptions['resolution'];
   bgColor: string;
   includeDebug: boolean;
+  preset?: ExportPreset;
+  customLoadingScreen?: LoadingScreenConfig;
 }
 
 export async function exportGame(options: ExportOptions): Promise<Blob> {
@@ -36,7 +41,25 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   const mobileTouchConfig = store.mobileTouchConfig;
   const mobileTouchConfigJson = mobileTouchConfig?.enabled ? JSON.stringify(mobileTouchConfig) : undefined;
 
-  // 5. Generate HTML
+  // 5. Branch based on export mode
+  if (options.mode === 'zip' || options.mode === 'pwa') {
+    // ZIP or PWA export with separated assets
+    const zipOptions: ZipExportOptions = {
+      format: options.mode,
+      includeSourceMaps: options.preset?.includeSourceMaps ?? false,
+      compressTextures: options.preset?.compressTextures ?? false,
+      customLoadingScreen: options.customLoadingScreen,
+      title: options.title,
+      resolution: options.resolution,
+      bgColor: options.bgColor,
+      includeDebug: options.includeDebug,
+    };
+
+    return await exportAsZip(sceneData, store.allScripts, zipOptions);
+  }
+
+  // Default: Single HTML export
+  // 6. Generate HTML
   const html = generateGameHTML({
     title: options.title,
     bgColor: options.bgColor,
@@ -48,9 +71,6 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     mobileTouchConfig: mobileTouchConfigJson,
   });
 
-  // For now, always produce single HTML
-  // ZIP mode with embedded WASM would require fetching the binary, which is complex
-  // We'll generate HTML that loads WASM from a CDN or relative path
   return new Blob([html], { type: 'text/html' });
 }
 

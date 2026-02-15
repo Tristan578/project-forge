@@ -12,6 +12,8 @@ export interface AudioSlice {
   mixerPanelOpen: boolean;
   reverbZones: Record<string, ReverbZoneData>;
   reverbZonesEnabled: Record<string, boolean>;
+  adaptiveMusicIntensity: number;
+  currentMusicSegment: string;
 
   setAudio: (entityId: string, data: Partial<AudioData>) => void;
   removeAudio: (entityId: string) => void;
@@ -35,6 +37,8 @@ export interface AudioSlice {
   addAudioLayer: (entityId: string, slotName: string, assetId: string, options?: { volume?: number; loop?: boolean; bus?: string }) => void;
   removeAudioLayer: (entityId: string, slotName: string) => void;
   setDuckingRule: (rule: { triggerBus: string; targetBus: string; duckLevel?: number; attackMs?: number; releaseMs?: number }) => void;
+  setAdaptiveMusicIntensity: (intensity: number) => void;
+  setCurrentMusicSegment: (segment: string) => void;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -55,6 +59,8 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   mixerPanelOpen: false,
   reverbZones: {},
   reverbZonesEnabled: {},
+  adaptiveMusicIntensity: 0,
+  currentMusicSegment: 'intro',
 
   setAudio: (entityId, data) => {
     if (dispatchCommand) dispatchCommand('set_audio', { entityId, ...data });
@@ -127,4 +133,6 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   addAudioLayer: (_entityId, _slotName, _assetId, _options) => {},
   removeAudioLayer: (_entityId, _slotName) => {},
   setDuckingRule: (_rule) => {},
+  setAdaptiveMusicIntensity: (intensity) => set({ adaptiveMusicIntensity: intensity }),
+  setCurrentMusicSegment: (segment) => set({ currentMusicSegment: segment }),
 });

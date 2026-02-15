@@ -57,6 +57,8 @@ class AudioManager {
   private oneShotCount = 0;
   private duckingRules: DuckingRule[] = [];
   private activeDuckTriggers: Map<string, number> = new Map();
+  private occlusionEnabled: Set<string> = new Set();
+  private occlusionFilters: Map<string, BiquadFilterNode> = new Map();
 
   /**
    * Lazily initialize AudioContext (handles browser autoplay policy).
@@ -1104,6 +1106,54 @@ class AudioManager {
 
     this.irBuffers.set(presetIndex, buffer);
     return buffer;
+  }
+
+  /**
+   * Enable or disable audio occlusion for an entity.
+   * When enabled, low-pass filtering is applied when geometry blocks listener-source line.
+   */
+  setOcclusion(entityId: string, enabled: boolean): void {
+    if (enabled) {
+      this.occlusionEnabled.add(entityId);
+      // Create low-pass filter if needed
+      if (!this.occlusionFilters.has(entityId)) {
+        const ctx = this.ensureContext();
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 5000; // Default occluded frequency
+        filter.Q.value = 1.0;
+        this.occlusionFilters.set(entityId, filter);
+      }
+    } else {
+      this.occlusionEnabled.delete(entityId);
+      const filter = this.occlusionFilters.get(entityId);
+      if (filter) {
+        filter.disconnect();
+        this.occlusionFilters.delete(entityId);
+      }
+    }
+  }
+
+  /**
+   * Update occlusion state based on raycasting result.
+   * In production, this would be called from the physics raycasting system.
+   */
+  updateOcclusionState(entityId: string, occluded: boolean): void {
+    if (!this.occlusionEnabled.has(entityId)) return;
+
+    const filter = this.occlusionFilters.get(entityId);
+    if (!filter || !this.ctx) return;
+
+    const now = this.ctx.currentTime;
+    const targetFreq = occluded ? 500 : 5000; // Muffled vs clear
+    filter.frequency.linearRampToValueAtTime(targetFreq, now + 0.1);
+  }
+
+  /**
+   * Check if occlusion is enabled for an entity.
+   */
+  isOcclusionEnabled(entityId: string): boolean {
+    return this.occlusionEnabled.has(entityId);
   }
 }
 

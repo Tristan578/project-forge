@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import { Sparkles, HelpCircle, Smartphone } from 'lucide-react';
+import { Sparkles, HelpCircle, Smartphone, Wifi } from 'lucide-react';
 import { useEditorStore, type AmbientLightData, type EnvironmentData, type ColorGradingSectionData, type QualityPreset } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useMultiplayerStore } from '@/stores/multiplayerStore';
 import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
@@ -1056,6 +1057,15 @@ export function SceneSettings() {
         </div>
       </div>
 
+      {/* Multiplayer */}
+      <div className="border-t border-zinc-800 pt-4">
+        <h3 className="mb-3 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <Wifi size={12} />
+          Multiplayer
+        </h3>
+        <MultiplayerSection />
+      </div>
+
       {/* Mobile Controls */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
@@ -1181,6 +1191,76 @@ export function SceneSettings() {
         isOpen={generateSkyboxOpen}
         onClose={() => setGenerateSkyboxOpen(false)}
       />
+    </div>
+  );
+}
+
+/** Multiplayer configuration section */
+function MultiplayerSection() {
+  const { networkConfig, setNetworkConfig } = useMultiplayerStore();
+
+  return (
+    <div className="space-y-3">
+      {/* Enable toggle */}
+      <div className="flex items-center gap-2">
+        <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
+        <input
+          type="checkbox"
+          checked={networkConfig.enabled}
+          onChange={(e) => setNetworkConfig({ enabled: e.target.checked })}
+          className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
+        />
+      </div>
+
+      {networkConfig.enabled && (
+        <>
+          {/* Server URL */}
+          <div className="flex items-center gap-2">
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Server</label>
+            <input
+              type="text"
+              value={networkConfig.serverUrl}
+              onChange={(e) => setNetworkConfig({ serverUrl: e.target.value })}
+              placeholder="ws://localhost:2567"
+              className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+
+          {/* Max Players */}
+          <div className="flex items-center gap-2">
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Max Players</label>
+            <input
+              type="range"
+              min="2"
+              max="16"
+              value={networkConfig.maxPlayers}
+              onChange={(e) => setNetworkConfig({ maxPlayers: parseInt(e.target.value) })}
+              className={sliderClass}
+            />
+            <span className="w-12 text-right text-xs tabular-nums text-zinc-500">{networkConfig.maxPlayers}</span>
+          </div>
+
+          {/* Room Type */}
+          <div className="flex items-center gap-2">
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Room Type</label>
+            <select
+              value={networkConfig.roomType}
+              onChange={(e) => setNetworkConfig({ roomType: e.target.value })}
+              className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="custom">Custom</option>
+              <option value="platformer">Platformer</option>
+              <option value="arena">Arena</option>
+              <option value="lobby">Lobby</option>
+            </select>
+          </div>
+
+          {/* Info note */}
+          <p className="text-[10px] text-zinc-500 italic">
+            See Inspector panel for spawn points and synced properties.
+          </p>
+        </>
+      )}
     </div>
   );
 }

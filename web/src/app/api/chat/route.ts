@@ -5,6 +5,11 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
 import { getChatTools } from '@/lib/chat/tools';
+import {
+  sanitizeChatInput,
+  validateBodySize,
+  detectPromptInjection,
+} from '@/lib/chat/sanitizer';
 
 const SYSTEM_PROMPT = `You are an expert game creation assistant for Project Forge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
@@ -135,7 +140,16 @@ export async function POST(request: NextRequest) {
   const auth = await authenticateRequest();
   if (!auth.ok) return auth.response;
 
-  // 2. Parse request
+  // 2. Validate request size (max 10KB)
+  const bodyText = await request.text();
+  if (!validateBodySize(bodyText, 10 * 1024)) {
+    return Response.json(
+      { error: 'Request too large. Maximum 10KB allowed.' },
+      { status: 413 }
+    );
+  }
+
+  // 3. Parse request
   let body: {
     messages: { role: string; content: unknown }[];
     model: string;
@@ -144,7 +158,7 @@ export async function POST(request: NextRequest) {
   };
 
   try {
-    body = await request.json();
+    body = JSON.parse(bodyText);
   } catch {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 });
   }
@@ -154,7 +168,34 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
   }
 
-  // 3. Resolve Anthropic API key
+  // 4. Validate message length and content
+  for (const msg of messages) {
+    if (typeof msg.content !== 'string') {
+      continue; // Skip non-text messages (tool results)
+    }
+
+    if (msg.content.length > 4000) {
+      return Response.json(
+        { error: 'Message too long. Maximum 4000 characters per message.' },
+        { status: 400 }
+      );
+    }
+
+    // Detect prompt injection attempts
+    if (msg.role === 'user' && detectPromptInjection(msg.content)) {
+      return Response.json(
+        { error: 'Message contains suspicious patterns.' },
+        { status: 400 }
+      );
+    }
+
+    // Sanitize user messages
+    if (msg.role === 'user') {
+      msg.content = sanitizeChatInput(msg.content);
+    }
+  }
+
+  // 5. Resolve Anthropic API key
   const estimatedCost = getTokenCost(
     'chat_message',
     messages.length > 3 ? 'long' : 'short'
@@ -180,7 +221,7 @@ export async function POST(request: NextRequest) {
     throw err;
   }
 
-  // 4. Build Claude request
+  // 6. Build Claude request
   const client = new Anthropic({ apiKey });
 
   const systemPrompt = sceneContext
@@ -195,7 +236,7 @@ export async function POST(request: NextRequest) {
     content: m.content as string | Anthropic.ContentBlockParam[],
   }));
 
-  // 5. Stream response
+  // 7. Stream response
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

@@ -422,8 +422,8 @@
           },
           "ior": {
             "type": "number",
-            "minimum": 1.0,
-            "maximum": 3.0,
+            "minimum": 1,
+            "maximum": 3,
             "description": "Index of refraction (1.0=air, 1.33=water, 1.5=glass, 2.42=diamond)"
           },
           "thickness": {
@@ -2589,7 +2589,10 @@
           },
           "shape": {
             "type": "string",
-            "enum": ["box", "sphere"],
+            "enum": [
+              "box",
+              "sphere"
+            ],
             "description": "Box or Sphere"
           },
           "sizeX": {
@@ -2610,7 +2613,13 @@
           },
           "reverbType": {
             "type": "string",
-            "enum": ["hall", "room", "cave", "outdoor", "custom"],
+            "enum": [
+              "hall",
+              "room",
+              "cave",
+              "outdoor",
+              "custom"
+            ],
             "description": "Reverb preset type"
           },
           "wetMix": {
@@ -2636,7 +2645,9 @@
             "description": "Priority for overlapping zones"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -2653,7 +2664,9 @@
             "description": "Entity to remove reverb zone from"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -2672,7 +2685,9 @@
             "description": "Intensity level (0.0-1.0)"
           }
         },
-        "required": ["intensity"]
+        "required": [
+          "intensity"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -2706,6 +2721,128 @@
           }
         },
         "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_adaptive_music",
+      "description": "Configure adaptive music track with stems (pad, bass, melody, drums) for dynamic layering",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "pad": {
+            "type": "string",
+            "description": "Asset ID for pad/ambient stem"
+          },
+          "bass": {
+            "type": "string",
+            "description": "Asset ID for bass stem"
+          },
+          "melody": {
+            "type": "string",
+            "description": "Asset ID for melody stem"
+          },
+          "drums": {
+            "type": "string",
+            "description": "Asset ID for drums stem"
+          },
+          "bpm": {
+            "type": "number",
+            "description": "Beats per minute for beat-quantized transitions"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "transition_music_segment",
+      "description": "Transition to a named music segment with beat-quantized timing (horizontal re-sequencing)",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "segment": {
+            "type": "string",
+            "description": "Name of the music segment to transition to"
+          },
+          "quantized": {
+            "type": "boolean",
+            "description": "Quantize transition to next beat (default: true)"
+          }
+        },
+        "required": [
+          "segment"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "create_audio_snapshot",
+      "description": "Save a named snapshot of current audio state (bus volumes, stems, effects, ducking)",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name for the audio snapshot"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "apply_audio_snapshot",
+      "description": "Crossfade to a previously saved audio snapshot",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the snapshot to apply"
+          },
+          "crossfadeDurationMs": {
+            "type": "number",
+            "description": "Duration of crossfade in milliseconds (default: 1000)"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_audio_occlusion",
+      "description": "Enable or disable raycasting-based audio occlusion (low-pass filtering when geometry blocks listener)",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to enable/disable occlusion for"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable audio occlusion"
+          }
+        },
+        "required": [
+          "entityId",
+          "enabled"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -3183,8 +3320,8 @@
           "weight": {
             "type": "number",
             "description": "Blend weight (0.0 = no influence, 1.0 = full influence)",
-            "minimum": 0.0,
-            "maximum": 1.0
+            "minimum": 0,
+            "maximum": 1
           }
         },
         "required": [
@@ -3283,6 +3420,130 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "export_project_zip",
+      "description": "Export game as ZIP bundle with separated assets (textures, audio, models)",
+      "category": "export",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Game title (defaults to scene name)"
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "web-optimized",
+              "self-contained",
+              "itch-io",
+              "newgrounds",
+              "pwa-mobile",
+              "debug"
+            ],
+            "description": "Export preset with optimized settings for target platform"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "export_project_pwa",
+      "description": "Export game as Progressive Web App (installable on mobile/desktop)",
+      "category": "export",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Game title (defaults to scene name)"
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "web-optimized",
+              "self-contained",
+              "itch-io",
+              "newgrounds",
+              "pwa-mobile",
+              "debug"
+            ],
+            "description": "Export preset (defaults to pwa-mobile)"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "set_loading_screen",
+      "description": "Customize the loading screen appearance for exported games",
+      "category": "export",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "backgroundColor": {
+            "type": "string",
+            "description": "Background color (hex format, e.g. '#1a1a1a')"
+          },
+          "progressBarColor": {
+            "type": "string",
+            "description": "Progress indicator color (hex format, e.g. '#6366f1')"
+          },
+          "progressStyle": {
+            "type": "string",
+            "enum": [
+              "bar",
+              "spinner",
+              "dots",
+              "none"
+            ],
+            "description": "Loading animation style"
+          },
+          "title": {
+            "type": "string",
+            "description": "Loading screen title text (optional)"
+          },
+          "subtitle": {
+            "type": "string",
+            "description": "Loading screen subtitle text (optional)"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_export_preset",
+      "description": "Select an export preset for future exports",
+      "category": "export",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "preset": {
+            "type": "string",
+            "enum": [
+              "web-optimized",
+              "self-contained",
+              "itch-io",
+              "newgrounds",
+              "pwa-mobile",
+              "debug"
+            ],
+            "description": "Export preset name"
+          }
+        },
+        "required": [
+          "preset"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
     },
     {
       "name": "csg_union",
@@ -7880,7 +8141,10 @@
             "properties": {
               "type": {
                 "type": "string",
-                "enum": ["grid", "manual"]
+                "enum": [
+                  "grid",
+                  "manual"
+                ]
               },
               "columns": {
                 "type": "number",
@@ -7920,18 +8184,31 @@
                 "items": {
                   "type": "object",
                   "properties": {
-                    "x": { "type": "number" },
-                    "y": { "type": "number" },
-                    "width": { "type": "number" },
-                    "height": { "type": "number" }
+                    "x": {
+                      "type": "number"
+                    },
+                    "y": {
+                      "type": "number"
+                    },
+                    "width": {
+                      "type": "number"
+                    },
+                    "height": {
+                      "type": "number"
+                    }
                   }
                 }
               }
             },
-            "required": ["type"]
+            "required": [
+              "type"
+            ]
           }
         },
-        "required": ["asset_id", "mode"]
+        "required": [
+          "asset_id",
+          "mode"
+        ]
       },
       "tokenCost": 1,
       "requiredScope": "scene:write"
@@ -7953,7 +8230,9 @@
           },
           "frames": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Frame indices to include"
           },
           "frame_duration": {
@@ -7969,7 +8248,11 @@
             "description": "Whether to play forward then backward (default false)"
           }
         },
-        "required": ["sprite_sheet_id", "clip_name", "frames"]
+        "required": [
+          "sprite_sheet_id",
+          "clip_name",
+          "frames"
+        ]
       },
       "tokenCost": 1,
       "requiredScope": "scene:write"
@@ -7998,7 +8281,10 @@
             "description": "Playback speed multiplier (default 1.0)"
           }
         },
-        "required": ["entity_id", "sprite_sheet_id"]
+        "required": [
+          "entity_id",
+          "sprite_sheet_id"
+        ]
       },
       "tokenCost": 1,
       "requiredScope": "scene:write"
@@ -8023,7 +8309,10 @@
             "description": "Playback speed (default 1.0)"
           }
         },
-        "required": ["entity_id", "clip_name"]
+        "required": [
+          "entity_id",
+          "clip_name"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8042,7 +8331,9 @@
           "states": {
             "type": "object",
             "description": "Map of state name to clip name",
-            "additionalProperties": { "type": "string" }
+            "additionalProperties": {
+              "type": "string"
+            }
           },
           "transitions": {
             "type": "array",
@@ -8050,22 +8341,41 @@
             "items": {
               "type": "object",
               "properties": {
-                "from": { "type": "string" },
-                "to": { "type": "string" },
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
                 "condition": {
                   "type": "object",
                   "properties": {
                     "type": {
                       "type": "string",
-                      "enum": ["always", "bool", "float", "trigger"]
+                      "enum": [
+                        "always",
+                        "bool",
+                        "float",
+                        "trigger"
+                      ]
                     },
-                    "param": { "type": "string" },
-                    "value": { "type": "boolean" },
+                    "param": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "boolean"
+                    },
                     "op": {
                       "type": "string",
-                      "enum": ["greater", "less", "equal"]
+                      "enum": [
+                        "greater",
+                        "less",
+                        "equal"
+                      ]
                     },
-                    "threshold": { "type": "number" }
+                    "threshold": {
+                      "type": "number"
+                    }
                   }
                 }
               }
@@ -8076,7 +8386,11 @@
             "description": "Starting state name"
           }
         },
-        "required": ["entity_id", "states", "initial_state"]
+        "required": [
+          "entity_id",
+          "states",
+          "initial_state"
+        ]
       },
       "tokenCost": 2,
       "requiredScope": "scene:write"
@@ -8099,12 +8413,20 @@
           "value": {
             "description": "Parameter value (boolean or number)",
             "oneOf": [
-              { "type": "boolean" },
-              { "type": "number" }
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "number"
+              }
             ]
           }
         },
-        "required": ["entity_id", "param_name", "value"]
+        "required": [
+          "entity_id",
+          "param_name",
+          "value"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8122,12 +8444,23 @@
           },
           "bodyType": {
             "type": "string",
-            "enum": ["dynamic", "static", "kinematic"],
+            "enum": [
+              "dynamic",
+              "static",
+              "kinematic"
+            ],
             "description": "Physics body type"
           },
           "colliderShape": {
             "type": "string",
-            "enum": ["box", "circle", "capsule", "convex_polygon", "edge", "auto"],
+            "enum": [
+              "box",
+              "circle",
+              "capsule",
+              "convex_polygon",
+              "edge",
+              "auto"
+            ],
             "description": "Collider shape"
           },
           "size": {
@@ -8176,7 +8509,9 @@
             "description": "Only collide from above (static only)"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8193,7 +8528,9 @@
             "description": "Target entity ID"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8210,7 +8547,9 @@
             "description": "Target entity ID"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -8231,7 +8570,10 @@
             "description": "Vertical gravity (negative = downward)"
           }
         },
-        "required": ["gravityX", "gravityY"]
+        "required": [
+          "gravityX",
+          "gravityY"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8248,7 +8590,9 @@
             "description": "Show collider wireframes"
           }
         },
-        "required": ["enabled"]
+        "required": [
+          "enabled"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8273,7 +8617,11 @@
             "description": "Vertical force"
           }
         },
-        "required": ["entityId", "forceX", "forceY"]
+        "required": [
+          "entityId",
+          "forceX",
+          "forceY"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8298,7 +8646,11 @@
             "description": "Vertical impulse"
           }
         },
-        "required": ["entityId", "impulseX", "impulseY"]
+        "required": [
+          "entityId",
+          "impulseX",
+          "impulseY"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8331,7 +8683,12 @@
             "description": "Max ray distance"
           }
         },
-        "required": ["originX", "originY", "directionX", "directionY"]
+        "required": [
+          "originX",
+          "originY",
+          "directionX",
+          "directionY"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -8379,7 +8736,11 @@
             "description": "Display name for the tilemap"
           }
         },
-        "required": ["tilesetId", "mapSize", "tileSize"]
+        "required": [
+          "tilesetId",
+          "mapSize",
+          "tileSize"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8413,7 +8774,10 @@
             "description": "Margin around the tileset in pixels"
           }
         },
-        "required": ["assetId", "tileSize"]
+        "required": [
+          "assetId",
+          "tileSize"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "asset:write"
@@ -8446,7 +8810,11 @@
             "description": "Layer index (default: 0)"
           }
         },
-        "required": ["entityId", "x", "y"]
+        "required": [
+          "entityId",
+          "x",
+          "y"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8487,7 +8855,13 @@
             "description": "Layer index (default: 0)"
           }
         },
-        "required": ["entityId", "x", "y", "width", "height"]
+        "required": [
+          "entityId",
+          "x",
+          "y",
+          "width",
+          "height"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8524,7 +8898,13 @@
             "description": "Layer index (default: 0)"
           }
         },
-        "required": ["entityId", "x", "y", "width", "height"]
+        "required": [
+          "entityId",
+          "x",
+          "y",
+          "width",
+          "height"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8545,7 +8925,9 @@
             "description": "Layer name"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8566,7 +8948,10 @@
             "description": "Layer index to remove"
           }
         },
-        "required": ["entityId", "layer"]
+        "required": [
+          "entityId",
+          "layer"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8599,7 +8984,10 @@
             "description": "Whether this layer is a collision layer"
           }
         },
-        "required": ["entityId", "layer"]
+        "required": [
+          "entityId",
+          "layer"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8625,11 +9013,18 @@
           },
           "anchor": {
             "type": "string",
-            "enum": ["top-left", "center"],
+            "enum": [
+              "top-left",
+              "center"
+            ],
             "description": "Anchor point for resize (default: top-left)"
           }
         },
-        "required": ["entityId", "width", "height"]
+        "required": [
+          "entityId",
+          "width",
+          "height"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -8646,7 +9041,9 @@
             "description": "Tilemap entity ID"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -8663,7 +9060,9 @@
             "description": "Entity ID to add skeleton to"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 15,
       "requiredScope": "scene:write"
@@ -8689,7 +9088,9 @@
           },
           "position": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "minItems": 2,
             "maxItems": 2,
             "description": "Local position [x, y]"
@@ -8703,7 +9104,10 @@
             "description": "Bone length"
           }
         },
-        "required": ["entityId", "name"]
+        "required": [
+          "entityId",
+          "name"
+        ]
       },
       "tokenCost": 10,
       "requiredScope": "scene:write"
@@ -8724,7 +9128,10 @@
             "description": "Bone to remove"
           }
         },
-        "required": ["entityId", "boneName"]
+        "required": [
+          "entityId",
+          "boneName"
+        ]
       },
       "tokenCost": 10,
       "requiredScope": "scene:write"
@@ -8746,7 +9153,9 @@
           },
           "position": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "minItems": 2,
             "maxItems": 2,
             "description": "New local position"
@@ -8757,7 +9166,9 @@
           },
           "scale": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "minItems": 2,
             "maxItems": 2,
             "description": "New local scale"
@@ -8767,7 +9178,10 @@
             "description": "New bone length"
           }
         },
-        "required": ["entityId", "boneName"]
+        "required": [
+          "entityId",
+          "boneName"
+        ]
       },
       "tokenCost": 10,
       "requiredScope": "scene:write"
@@ -8800,7 +9214,11 @@
             "description": "Bone name -> keyframes mapping"
           }
         },
-        "required": ["entityId", "name", "duration"]
+        "required": [
+          "entityId",
+          "name",
+          "duration"
+        ]
       },
       "tokenCost": 20,
       "requiredScope": "scene:write"
@@ -8830,7 +9248,9 @@
           },
           "position": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "minItems": 2,
             "maxItems": 2,
             "description": "Position value"
@@ -8841,11 +9261,22 @@
           },
           "easing": {
             "type": "string",
-            "enum": ["linear", "ease_in", "ease_out", "ease_in_out", "step"],
+            "enum": [
+              "linear",
+              "ease_in",
+              "ease_out",
+              "ease_in_out",
+              "step"
+            ],
             "description": "Easing function"
           }
         },
-        "required": ["entityId", "animName", "boneName", "time"]
+        "required": [
+          "entityId",
+          "animName",
+          "boneName",
+          "time"
+        ]
       },
       "tokenCost": 10,
       "requiredScope": "scene:write"
@@ -8878,7 +9309,10 @@
             "description": "Crossfade duration in seconds"
           }
         },
-        "required": ["entityId", "animName"]
+        "required": [
+          "entityId",
+          "animName"
+        ]
       },
       "tokenCost": 5,
       "requiredScope": "scene:write"
@@ -8899,7 +9333,10 @@
             "description": "Skin to activate"
           }
         },
-        "required": ["entityId", "skinName"]
+        "required": [
+          "entityId",
+          "skinName"
+        ]
       },
       "tokenCost": 5,
       "requiredScope": "scene:write"
@@ -8921,7 +9358,9 @@
           },
           "bones": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Bone chain (2 bones)"
           },
           "targetEntityId": {
@@ -8937,7 +9376,12 @@
             "description": "IK/FK blend (0-1)"
           }
         },
-        "required": ["entityId", "name", "bones", "targetEntityId"]
+        "required": [
+          "entityId",
+          "name",
+          "bones",
+          "targetEntityId"
+        ]
       },
       "tokenCost": 15,
       "requiredScope": "scene:write"
@@ -8954,7 +9398,9 @@
             "description": "Skeleton entity ID"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -8976,11 +9422,19 @@
           },
           "format": {
             "type": "string",
-            "enum": ["custom", "dragonbones", "spine"],
+            "enum": [
+              "custom",
+              "dragonbones",
+              "spine"
+            ],
             "description": "Source format"
           }
         },
-        "required": ["entityId", "jsonData", "format"]
+        "required": [
+          "entityId",
+          "jsonData",
+          "format"
+        ]
       },
       "tokenCost": 25,
       "requiredScope": "scene:write"
@@ -8998,7 +9452,10 @@
           },
           "method": {
             "type": "string",
-            "enum": ["heat", "envelope"],
+            "enum": [
+              "heat",
+              "envelope"
+            ],
             "description": "Auto-weighting algorithm"
           },
           "iterations": {
@@ -9006,7 +9463,10 @@
             "description": "Iteration count for heat method"
           }
         },
-        "required": ["entityId", "method"]
+        "required": [
+          "entityId",
+          "method"
+        ]
       },
       "tokenCost": 20,
       "requiredScope": "scene:write"
@@ -9020,7 +9480,12 @@
         "properties": {
           "sort": {
             "type": "string",
-            "enum": ["trending", "newest", "top_rated", "most_played"],
+            "enum": [
+              "trending",
+              "newest",
+              "top_rated",
+              "most_played"
+            ],
             "description": "Sort order for games"
           },
           "tag": {
@@ -9049,7 +9514,9 @@
             "description": "ID of the game to retrieve"
           }
         },
-        "required": ["gameId"]
+        "required": [
+          "gameId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -9066,7 +9533,9 @@
             "description": "ID of the game to fork"
           }
         },
-        "required": ["gameId"]
+        "required": [
+          "gameId"
+        ]
       },
       "tokenCost": 5,
       "requiredScope": "project:manage"
@@ -9089,7 +9558,10 @@
             "description": "Rating from 1 to 5 stars"
           }
         },
-        "required": ["gameId", "rating"]
+        "required": [
+          "gameId",
+          "rating"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -9110,7 +9582,9 @@
             "description": "Maximum number of results"
           }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -9124,12 +9598,27 @@
         "properties": {
           "category": {
             "type": "string",
-            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "enum": [
+              "model_3d",
+              "sprite",
+              "texture",
+              "audio",
+              "script",
+              "prefab",
+              "template",
+              "shader",
+              "animation"
+            ],
             "description": "Filter by asset category"
           },
           "sort": {
             "type": "string",
-            "enum": ["newest", "popular", "top_rated", "free"],
+            "enum": [
+              "newest",
+              "popular",
+              "top_rated",
+              "free"
+            ],
             "description": "Sort order"
           },
           "query": {
@@ -9158,7 +9647,9 @@
             "description": "Asset ID to retrieve"
           }
         },
-        "required": ["assetId"]
+        "required": [
+          "assetId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -9175,7 +9666,9 @@
             "description": "Asset ID to purchase"
           }
         },
-        "required": ["assetId"]
+        "required": [
+          "assetId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "project:manage"
@@ -9189,7 +9682,17 @@
         "properties": {
           "category": {
             "type": "string",
-            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "enum": [
+              "model_3d",
+              "sprite",
+              "texture",
+              "audio",
+              "script",
+              "prefab",
+              "template",
+              "shader",
+              "animation"
+            ],
             "description": "Filter by category"
           }
         },
@@ -9215,7 +9718,17 @@
           },
           "category": {
             "type": "string",
-            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "enum": [
+              "model_3d",
+              "sprite",
+              "texture",
+              "audio",
+              "script",
+              "prefab",
+              "template",
+              "shader",
+              "animation"
+            ],
             "description": "Asset category"
           },
           "priceTokens": {
@@ -9224,7 +9737,10 @@
           },
           "license": {
             "type": "string",
-            "enum": ["standard", "extended"],
+            "enum": [
+              "standard",
+              "extended"
+            ],
             "description": "License type"
           },
           "tags": {
@@ -9235,7 +9751,11 @@
             "description": "Asset tags"
           }
         },
-        "required": ["name", "description", "category"]
+        "required": [
+          "name",
+          "description",
+          "category"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "project:manage"
@@ -9253,7 +9773,17 @@
           },
           "category": {
             "type": "string",
-            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"],
+            "enum": [
+              "model_3d",
+              "sprite",
+              "texture",
+              "audio",
+              "script",
+              "prefab",
+              "template",
+              "shader",
+              "animation"
+            ],
             "description": "Filter by category"
           },
           "limit": {
@@ -9261,7 +9791,9 @@
             "description": "Maximum results"
           }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -9278,7 +9810,9 @@
             "description": "Entity ID to edit"
           }
         },
-        "required": ["entityId"]
+        "required": [
+          "entityId"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -9303,11 +9837,17 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["vertex", "edge", "face"],
+            "enum": [
+              "vertex",
+              "edge",
+              "face"
+            ],
             "description": "Selection mode"
           }
         },
-        "required": ["mode"]
+        "required": [
+          "mode"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -9321,7 +9861,9 @@
         "properties": {
           "indices": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Indices to extrude"
           },
           "distance": {
@@ -9330,13 +9872,17 @@
           },
           "direction": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "minItems": 3,
             "maxItems": 3,
             "description": "Extrude direction [x, y, z] (default: [0, 1, 0])"
           }
         },
-        "required": ["indices"]
+        "required": [
+          "indices"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -9350,7 +9896,9 @@
         "properties": {
           "indices": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Face indices to subdivide (empty = whole mesh)"
           },
           "level": {
@@ -9377,6 +9925,647 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "configure_multiplayer",
+      "description": "Configure multiplayer networking settings",
+      "category": "multiplayer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable multiplayer"
+          },
+          "serverUrl": {
+            "type": "string",
+            "description": "Server WebSocket URL (e.g. ws://localhost:2567)"
+          },
+          "maxPlayers": {
+            "type": "number",
+            "description": "Maximum number of players (2-16)"
+          },
+          "tickRate": {
+            "type": "number",
+            "description": "Network tick rate in Hz (10-60)"
+          },
+          "syncMode": {
+            "type": "string",
+            "enum": [
+              "authoritative",
+              "relay"
+            ],
+            "description": "Synchronization mode"
+          },
+          "roomType": {
+            "type": "string",
+            "description": "Room type preset (platformer, arena, lobby, custom)"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_spawn_point",
+      "description": "Add a player spawn point for multiplayer",
+      "category": "multiplayer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Spawn point ID (auto-generated if omitted)"
+          },
+          "position": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "World position [x, y, z]"
+          },
+          "rotation": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Rotation [x, y, z]"
+          },
+          "team": {
+            "type": "string",
+            "description": "Team name (optional)"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_spawn_point",
+      "description": "Remove a player spawn point",
+      "category": "multiplayer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Spawn point ID"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "add_synced_property",
+      "description": "Mark an entity property for network synchronization",
+      "category": "multiplayer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID"
+          },
+          "property": {
+            "type": "string",
+            "description": "Property to sync (transform, health, score, animation)"
+          },
+          "syncRate": {
+            "type": "string",
+            "enum": [
+              "every-tick",
+              "on-change",
+              "manual"
+            ],
+            "description": "Synchronization rate"
+          },
+          "ownerOnly": {
+            "type": "boolean",
+            "description": "Only sync to owner (default: false)"
+          }
+        },
+        "required": [
+          "entityId",
+          "property"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_room_type",
+      "description": "Set the multiplayer room type",
+      "category": "multiplayer",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "roomType": {
+            "type": "string",
+            "description": "Room type (platformer, arena, lobby, custom)"
+          }
+        },
+        "required": [
+          "roomType"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_network_config",
+      "description": "Show current multiplayer configuration",
+      "category": "multiplayer",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "start_collaboration",
+      "description": "Start a collaboration session for the current project",
+      "category": "collaboration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project ID to collaborate on"
+          },
+          "userId": {
+            "type": "string",
+            "description": "Current user ID"
+          }
+        },
+        "required": [
+          "projectId",
+          "userId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "collaboration:write"
+    },
+    {
+      "name": "invite_collaborator",
+      "description": "Generate an invite link with specified permission level",
+      "category": "collaboration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "projectId": {
+            "type": "string",
+            "description": "Project ID to invite to"
+          },
+          "permissionLevel": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "viewer"
+            ],
+            "description": "Permission level (editor or viewer)"
+          }
+        },
+        "required": [
+          "projectId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "collaboration:write"
+    },
+    {
+      "name": "list_collaborators",
+      "description": "List currently connected collaborators",
+      "category": "collaboration",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "collaboration:read"
+    },
+    {
+      "name": "lock_entity",
+      "description": "Lock an entity for exclusive editing",
+      "category": "collaboration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to lock"
+          },
+          "userId": {
+            "type": "string",
+            "description": "User ID acquiring the lock"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "collaboration:write"
+    },
+    {
+      "name": "unlock_entity",
+      "description": "Release an entity lock",
+      "category": "collaboration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to unlock"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "collaboration:write"
+    },
+    {
+      "name": "send_activity_message",
+      "description": "Post a message to the activity feed",
+      "category": "collaboration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action description (e.g., 'moved Player')"
+          },
+          "userId": {
+            "type": "string",
+            "description": "User ID performing the action"
+          },
+          "userName": {
+            "type": "string",
+            "description": "User name"
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID involved (optional)"
+          }
+        },
+        "required": [
+          "action",
+          "userId",
+          "userName"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "collaboration:write"
+    },
+    {
+      "name": "get_security_status",
+      "description": "Get current security configuration status",
+      "category": "security",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "security:read"
+    },
+    {
+      "name": "validate_project_security",
+      "description": "Check project for common security issues (suspicious entity names, oversized scripts, injection patterns)",
+      "category": "security",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "security:read"
+    },
+    {
+      "name": "create_shader_graph",
+      "description": "Create a new shader graph for visual shader authoring",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Name of the shader graph"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "add_shader_node",
+      "description": "Add a node to a shader graph",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "Shader graph ID (uses active graph if omitted)"
+          },
+          "nodeType": {
+            "type": "string",
+            "enum": [
+              "vertex_position",
+              "vertex_normal",
+              "vertex_uv",
+              "time",
+              "camera_position",
+              "add",
+              "subtract",
+              "multiply",
+              "divide",
+              "power",
+              "sqrt",
+              "abs",
+              "clamp",
+              "lerp",
+              "step",
+              "smoothstep",
+              "sin",
+              "cos",
+              "fract",
+              "floor",
+              "texture_sample",
+              "noise_texture",
+              "voronoi_texture",
+              "color_constant",
+              "hsv_to_rgb",
+              "rgb_to_hsv",
+              "color_ramp",
+              "split_vec3",
+              "combine_vec3",
+              "normalize",
+              "dot_product",
+              "cross_product",
+              "fresnel",
+              "normal_map",
+              "pbr_output"
+            ],
+            "description": "Type of shader node to add"
+          },
+          "position": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "description": "Position in the graph canvas"
+          },
+          "data": {
+            "type": "object",
+            "description": "Node-specific data (e.g., color value for color_constant)"
+          }
+        },
+        "required": [
+          "nodeType"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "connect_shader_nodes",
+      "description": "Connect two shader nodes together",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sourceNodeId": {
+            "type": "string",
+            "description": "Source node ID"
+          },
+          "sourceHandle": {
+            "type": "string",
+            "description": "Source output handle name"
+          },
+          "targetNodeId": {
+            "type": "string",
+            "description": "Target node ID"
+          },
+          "targetHandle": {
+            "type": "string",
+            "description": "Target input handle name"
+          }
+        },
+        "required": [
+          "sourceNodeId",
+          "sourceHandle",
+          "targetNodeId",
+          "targetHandle"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "compile_shader",
+      "description": "Compile a shader graph to WGSL code",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "graphId": {
+            "type": "string",
+            "description": "Shader graph ID (uses active graph if omitted)"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:read"
+    },
+    {
+      "name": "apply_shader_to_entity",
+      "description": "Apply a compiled shader graph to an entity's material",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to apply shader to"
+          },
+          "graphId": {
+            "type": "string",
+            "description": "Shader graph ID (uses active graph if omitted)"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "list_shader_presets",
+      "description": "List all saved shader graphs",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:read"
+    },
+    {
+      "name": "set_entity_lod",
+      "description": "Configure LOD (Level of Detail) settings for an entity",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to configure LOD for"
+          },
+          "lodDistances": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Distance thresholds for LOD1, LOD2, LOD3 [20, 50, 100]"
+          },
+          "autoGenerate": {
+            "type": "boolean",
+            "description": "Auto-generate LOD meshes"
+          },
+          "lodRatios": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Triangle reduction ratios [0.5, 0.25, 0.1]"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "generate_lods",
+      "description": "Auto-generate LOD meshes for an entity",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to generate LODs for"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "set_performance_budget",
+      "description": "Set scene performance budget limits",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "maxTriangles": {
+            "type": "number",
+            "description": "Maximum triangle count (default 500,000)"
+          },
+          "maxDrawCalls": {
+            "type": "number",
+            "description": "Maximum draw calls (default 200)"
+          },
+          "targetFps": {
+            "type": "number",
+            "description": "Target frame rate (default 60)"
+          },
+          "warningThreshold": {
+            "type": "number",
+            "description": "Warning threshold 0.0-1.0 (default 0.8)"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "get_performance_stats",
+      "description": "Get current performance metrics",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:read"
+    },
+    {
+      "name": "optimize_scene",
+      "description": "Run automatic optimization pass on the scene",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write"
+    },
+    {
+      "name": "set_lod_distances",
+      "description": "Set global LOD distance thresholds",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "distances": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3,
+            "description": "Global LOD distances [20, 50, 100]"
+          }
+        },
+        "required": [
+          "distances"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write"
     }
   ],
   "resources": [

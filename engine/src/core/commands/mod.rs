@@ -7,6 +7,7 @@ mod physics;
 mod audio;
 mod animation;
 mod particles;
+mod performance;
 mod procedural;
 mod scene;
 mod game;
@@ -48,6 +49,7 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
     if let Some(result) = audio::dispatch(command, &payload) { return result; }
     if let Some(result) = animation::dispatch(command, &payload) { return result; }
     if let Some(result) = particles::dispatch(command, &payload) { return result; }
+    if let Some(result) = performance::dispatch(command, &payload) { return result; }
     if let Some(result) = procedural::dispatch(command, &payload) { return result; }
     if let Some(result) = scene::dispatch(command, &payload) { return result; }
     if let Some(result) = game::dispatch(command, &payload) { return result; }

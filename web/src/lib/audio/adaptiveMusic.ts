@@ -1,12 +1,19 @@
 /**
  * Adaptive Music Manager — Multi-stem music system with intensity-based transitions.
  * Supports pad, bass, melody, and drums layers with smooth crossfading and beat quantization.
+ * Includes horizontal re-sequencing for seamless music segment transitions.
  */
 
 interface StemData {
   buffer: AudioBuffer;
   source: AudioBufferSourceNode | null;
   gain: GainNode;
+}
+
+interface MusicSegment {
+  name: string;
+  startTime: number;
+  duration: number;
 }
 
 export class AdaptiveMusicManager {
@@ -16,6 +23,8 @@ export class AdaptiveMusicManager {
   private _bpm = 120;
   private startTime = 0;
   private isPlaying = false;
+  private segments: MusicSegment[] = [];
+  private currentSegment = 'intro';
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
@@ -144,5 +153,87 @@ export class AdaptiveMusicManager {
 
   get bpm(): number {
     return this._bpm;
+  }
+
+  /**
+   * Define music segments for horizontal re-sequencing.
+   * Each segment represents a section of the music (intro, main, combat, etc.).
+   */
+  setSegments(segments: MusicSegment[]): void {
+    this.segments = segments;
+  }
+
+  /**
+   * Transition to a named music segment with beat quantization.
+   * Implements horizontal re-sequencing for seamless transitions.
+   */
+  transitionToSegment(segmentName: string, quantized = true): void {
+    const segment = this.segments.find(s => s.name === segmentName);
+    if (!segment) {
+      console.warn(`[AdaptiveMusic] Segment "${segmentName}" not found`);
+      return;
+    }
+
+    this.currentSegment = segmentName;
+
+    if (!quantized || !this.isPlaying) {
+      // Immediate transition
+      this.seekToTime(segment.startTime);
+      return;
+    }
+
+    // Beat-quantized transition
+    const beatsPerSecond = this._bpm / 60;
+    const beatDuration = 1 / beatsPerSecond;
+
+    // Calculate elapsed beats
+    const elapsed = this.ctx.currentTime - this.startTime;
+    const currentBeat = Math.floor(elapsed / beatDuration);
+    const nextBeatTime = this.startTime + (currentBeat + 1) * beatDuration;
+
+    // Schedule the transition to start on the next beat
+    const delay = nextBeatTime - this.ctx.currentTime;
+    setTimeout(() => {
+      this.seekToTime(segment.startTime);
+    }, delay * 1000);
+  }
+
+  /**
+   * Seek all stems to a specific time offset.
+   */
+  private seekToTime(time: number): void {
+    if (!this.isPlaying) return;
+
+    // Stop current sources
+    for (const data of this.stems.values()) {
+      if (data.source) {
+        try {
+          data.source.stop();
+        } catch {
+          // Already stopped
+        }
+        data.source = null;
+      }
+    }
+
+    // Create new sources starting at the desired offset
+    for (const [_name, data] of this.stems) {
+      const source = this.ctx.createBufferSource();
+      source.buffer = data.buffer;
+      source.loop = true;
+      source.connect(data.gain);
+      source.start(0, time);
+      data.source = source;
+    }
+
+    // Update start time to account for offset
+    this.startTime = this.ctx.currentTime - time;
+  }
+
+  /**
+   * Get the current segment name.
+   */
+  getCurrentSegment(): string {
+    return this.currentSegment;
   }
 }

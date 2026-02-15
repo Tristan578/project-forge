@@ -1,9 +1,10 @@
 'use client';
 
 import { useCallback, useRef, useState, useMemo, memo } from 'react';
-import { Image as ImageIcon, X, ChevronDown, ChevronRight, BookmarkPlus, Sparkles, HelpCircle } from 'lucide-react';
+import { Image as ImageIcon, X, ChevronDown, ChevronRight, BookmarkPlus, Sparkles, HelpCircle, Layers } from 'lucide-react';
 import { useEditorStore, type MaterialData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useShaderEditorStore } from '@/stores/shaderEditorStore';
 import { MATERIAL_PRESETS, ALL_CATEGORIES, getPresetById, saveCustomMaterial, type MaterialPreset } from '@/lib/materialPresets';
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
@@ -263,6 +264,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
   const updateShaderEffect = useEditorStore((s) => s.updateShaderEffect);
   const removeShaderEffect = useEditorStore((s) => s.removeShaderEffect);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
+  const openShaderEditor = useShaderEditorStore((s) => s.openShaderEditor);
 
   const handleUpdate = useCallback(
     (partial: Partial<MaterialData>) => {
@@ -347,6 +349,14 @@ export const MaterialInspector = memo(function MaterialInspector() {
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
           Material
         </h3>
+        <button
+          onClick={() => openShaderEditor()}
+          className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+          title="Open Shader Editor"
+        >
+          <Layers className="h-3 w-3" />
+          Shader Editor
+        </button>
         <button onClick={() => navigateDocs('features/materials')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
           <HelpCircle size={12} />
         </button>

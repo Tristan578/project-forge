@@ -11,6 +11,13 @@ import { transformHandlers } from './handlers/transformHandlers';
 import { materialHandlers } from './handlers/materialHandlers';
 import { queryHandlers } from './handlers/queryHandlers';
 import { editModeHandlers } from './handlers/editModeHandlers';
+import { audioHandlers } from './handlers/audioHandlers';
+import { multiplayerHandlers } from './handlers/multiplayerHandlers';
+import { collaborationHandlers } from './handlers/collaborationHandlers';
+import { securityHandlers } from './handlers/securityHandlers';
+import { exportHandlers } from './handlers/exportHandlers';
+import { shaderHandlers } from './handlers/shaderHandlers';
+import { performanceHandlers } from './handlers/performanceHandlers';
 
 // Import the legacy executor temporarily
 import { executeToolCall as legacyExecuteToolCall } from './executor.legacy';
@@ -24,6 +31,13 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...materialHandlers,
   ...queryHandlers,
   ...editModeHandlers,
+  ...audioHandlers,
+  ...multiplayerHandlers,
+  ...collaborationHandlers,
+  ...securityHandlers,
+  ...exportHandlers,
+  ...shaderHandlers,
+  ...performanceHandlers,
 };
 
 /**

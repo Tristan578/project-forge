@@ -6,6 +6,7 @@
 pub mod events;
 mod core_systems;
 mod material;
+mod performance;
 mod physics;
 mod audio;
 mod query;
@@ -445,6 +446,10 @@ impl Plugin for SelectionPlugin {
                     skeleton2d::apply_ik_chain2d_creates,
                     skeleton2d::handle_skeleton2d_query,
                     skeleton2d::apply_auto_weight_skeleton2d,
+                ))
+                .add_systems(Update, (
+                    performance::apply_lod_commands,
+                    performance::apply_performance_budget_commands,
                 ))
                 .add_systems(PostUpdate, (
                     core_systems::emit_scene_graph_updates,

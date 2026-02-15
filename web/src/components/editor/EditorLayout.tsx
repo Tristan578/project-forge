@@ -8,6 +8,7 @@ import { SceneHierarchy } from './SceneHierarchy';
 import { InspectorPanel } from './InspectorPanel';
 import { ScriptEditorPanel } from './ScriptEditorPanel';
 import { UIBuilderPanel } from './UIBuilderPanel';
+import { ShaderEditorPanel } from './ShaderEditorPanel';
 import { PlayControls } from './PlayControls';
 import { SceneToolbar } from './SceneToolbar';
 import { LayoutMenu } from './LayoutMenu';
@@ -23,6 +24,7 @@ import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
 import { TutorialOverlay } from './TutorialOverlay';
 import { OnboardingChecklist } from './OnboardingChecklist';
+import { PerformanceProfiler } from './PerformanceProfiler';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
@@ -255,6 +257,7 @@ export function EditorLayout() {
         <TutorialOverlay />
         <OnboardingChecklist />
         <WelcomeModal />
+        <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       </div>
     );
@@ -302,6 +305,8 @@ export function EditorLayout() {
       <TutorialOverlay />
       <OnboardingChecklist />
       <WelcomeModal />
+      <ShaderEditorPanel />
+      <PerformanceProfiler />
       <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
   );

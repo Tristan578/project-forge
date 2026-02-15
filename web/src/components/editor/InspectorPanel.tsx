@@ -26,6 +26,9 @@ import { Camera2dInspector } from './Camera2dInspector';
 import { TilemapInspector } from './TilemapInspector';
 import { ReverbZoneInspector } from './ReverbZoneInspector';
 import { EditModeInspector } from './EditModeInspector';
+import AdaptiveMusicInspector from './AdaptiveMusicInspector';
+import { NetworkSettingsInspector } from './NetworkSettingsInspector';
+import { LodInspector } from './LodInspector';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   copyTransformProperty,
@@ -334,6 +337,9 @@ export const InspectorPanel = memo(function InspectorPanel() {
       {/* Material section (only for mesh entities in 3D projects — mutually exclusive with light) */}
       {!is2D && !primaryLight && <MaterialInspector />}
 
+      {/* LOD section (only for mesh entities in 3D projects) */}
+      {!is2D && !primaryLight && <LodInspector />}
+
       {/* Physics section (conditional based on project type) */}
       {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
 
@@ -348,6 +354,9 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Reverb Zone section (for all entities in 3D) */}
       {!is2D && primaryId && <ReverbZoneInspector entityId={primaryId} />}
+
+      {/* Adaptive Music section (global) */}
+      <AdaptiveMusicInspector />
 
       {/* Particle section (for all entities) */}
       <ParticleInspector />
@@ -396,6 +405,11 @@ export const InspectorPanel = memo(function InspectorPanel() {
           <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
         </div>
       )}
+
+      {/* Network settings section */}
+      <div className="border-t border-zinc-800 pt-4 mt-4">
+        <NetworkSettingsInspector />
+      </div>
 
       {/* Input bindings section */}
       <InputBindingsPanel />

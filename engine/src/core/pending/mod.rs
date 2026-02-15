@@ -26,6 +26,7 @@ pub mod edit_mode;
 pub mod game;
 pub mod material;
 pub mod particles;
+pub mod performance;
 pub mod physics;
 pub mod procedural;
 pub mod query;
@@ -40,6 +41,7 @@ pub use edit_mode::*;
 pub use game::*;
 pub use material::*;
 pub use particles::*;
+pub use performance::*;
 pub use physics::*;
 pub use procedural::*;
 pub use query::*;
@@ -248,6 +250,13 @@ pub struct PendingCommands {
     pub select_elements_requests: Vec<SelectElementsRequest>,
     pub mesh_operation_requests: Vec<MeshOperationRequest>,
     pub recalc_normals_requests: Vec<RecalcNormalsRequest>,
+    // performance domain
+    pub set_lod_requests: RefCell<Vec<SetLodRequest>>,
+    pub generate_lods_requests: RefCell<Vec<GenerateLodsRequest>>,
+    pub set_performance_budget_requests: RefCell<Vec<SetPerformanceBudgetRequest>>,
+    pub get_performance_stats_requests: RefCell<Vec<GetPerformanceStatsRequest>>,
+    pub optimize_scene_requests: RefCell<Vec<OptimizeSceneRequest>>,
+    pub set_lod_distances_requests: RefCell<Vec<SetLodDistancesRequest>>,
 }
 
 // === Thread-Local Bridge Access ===

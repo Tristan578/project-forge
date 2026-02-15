@@ -113,6 +113,10 @@ const TOOL_LABELS: Record<string, string> = {
   list_animations: 'List Animations',
   export_game: 'Export Game',
   get_export_status: 'Export Status',
+  export_project_zip: 'Export ZIP',
+  export_project_pwa: 'Export PWA',
+  set_loading_screen: 'Set Loading Screen',
+  set_export_preset: 'Set Export Preset',
   csg_union: 'CSG Union',
   csg_subtract: 'CSG Subtract',
   csg_intersect: 'CSG Intersect',
@@ -280,6 +284,9 @@ const TOOL_LABELS: Record<string, string> = {
   get_skeleton2d: 'Get Skeleton',
   import_skeleton_json: 'Import Skeleton JSON',
   auto_weight_skeleton2d: 'Auto-Weight Skeleton',
+  // Security
+  get_security_status: 'Get Security Status',
+  validate_project_security: 'Validate Project Security',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {
