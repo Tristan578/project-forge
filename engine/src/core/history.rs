@@ -165,6 +165,55 @@ pub struct EntitySnapshot {
     pub skeletal_animations: Option<Vec<SkeletalAnimation2d>>,
 }
 
+impl EntitySnapshot {
+    /// Create a new snapshot with required fields; all optional fields default to None/false.
+    pub fn new(
+        entity_id: String,
+        entity_type: EntityType,
+        name: String,
+        transform: TransformSnapshot,
+    ) -> Self {
+        Self {
+            entity_id,
+            entity_type,
+            name,
+            transform,
+            parent_id: None,
+            visible: true,
+            material_data: None,
+            light_data: None,
+            physics_data: None,
+            physics_enabled: false,
+            asset_ref: None,
+            script_data: None,
+            audio_data: None,
+            reverb_zone_data: None,
+            reverb_zone_enabled: false,
+            particle_data: None,
+            particle_enabled: false,
+            shader_effect_data: None,
+            csg_mesh_data: None,
+            terrain_data: None,
+            terrain_mesh_data: None,
+            procedural_mesh_data: None,
+            joint_data: None,
+            game_components: None,
+            animation_clip_data: None,
+            game_camera_data: None,
+            active_game_camera: false,
+            sprite_data: None,
+            physics2d_data: None,
+            physics2d_enabled: false,
+            joint2d_data: None,
+            tilemap_data: None,
+            tilemap_enabled: false,
+            skeleton2d_data: None,
+            skeleton2d_enabled: false,
+            skeletal_animations: None,
+        }
+    }
+}
+
 /// An action that can be undone/redone.
 #[derive(Debug, Clone)]
 pub enum UndoableAction {
@@ -412,6 +461,7 @@ impl UndoableAction {
             UndoableAction::JointChange { .. } => "Joint Change".to_string(),
             UndoableAction::GameComponentChange { .. } => "Game Component Change".to_string(),
             UndoableAction::AnimationClipChange { .. } => "Animation Clip Change".to_string(),
+            UndoableAction::ReverbZoneChange { .. } => "Reverb Zone Change".to_string(),
             UndoableAction::SpriteChange { .. } => "Sprite Change".to_string(),
             UndoableAction::Physics2dChange { .. } => "2D Physics Change".to_string(),
             UndoableAction::Joint2dChange { .. } => "2D Joint Change".to_string(),

@@ -28,7 +28,11 @@ pub mod lighting;
 pub mod material;
 pub mod observability;
 pub mod particles;
-pub mod pending_commands;
+pub mod pending;
+/// Backward-compatible alias for the split pending_commands module.
+pub mod pending_commands {
+    pub use super::pending::*;
+}
 pub mod physics;
 pub mod physics_2d;
 pub mod post_processing;

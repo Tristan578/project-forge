@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 /// Sprite data component for 2D entities.
-#[derive(Component, Clone, Serialize, Deserialize)]
+#[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct SpriteData {
     /// Asset ID of the texture to render
     pub texture_asset_id: Option<String>,
@@ -25,7 +25,7 @@ pub struct SpriteData {
 }
 
 /// Anchor point for sprite rendering.
-#[derive(Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SpriteAnchor {
     Center,
     TopLeft,

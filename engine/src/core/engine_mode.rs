@@ -115,16 +115,11 @@ pub fn snapshot_scene(
         Option<&SpotLight>,
         Option<&AssetRef>,
     )>,
-    script_query: &Query<(&EntityId, Option<&ScriptData>)>,
-    audio_query: &Query<(&EntityId, Option<&AudioData>)>,
-    reverb_zone_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>)>,
-    particle_query: &Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_query: &Query<(&EntityId, Option<&ShaderEffectData>)>,
-    csg_query: &Query<(&EntityId, Option<&CsgMeshData>)>,
+    script_audio_query: &Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
+    reverb_particle_shader_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
+    csg_sprite_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>)>,
     procedural_joint_gc_camera_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>, Option<&super::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    sprite_query: &Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
-    tilemap_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>)>,
-    skeleton2d_query: &Query<(&EntityId, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>)>,
+    tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>)>,
     selection: &Selection,
 ) -> SceneSnapshot {
     let mut entities = Vec::new();
@@ -145,99 +140,68 @@ pub fn snapshot_scene(
             continue; // Skip non-forge entities (camera, lights from scene setup, etc.)
         };
 
-        // Look up script data separately
-        let script_data = script_query.iter()
-            .find(|(script_eid, _)| script_eid.0 == eid.0)
-            .and_then(|(_, sd)| sd.cloned());
+        // Look up script & audio data
+        let (script_data, audio_data) = script_audio_query.iter()
+            .find(|(saeid, _, _)| saeid.0 == eid.0)
+            .map(|(_, sd, ad)| (sd.cloned(), ad.cloned()))
+            .unwrap_or((None, None));
 
-        // Look up audio data separately
-        let audio_data = audio_query.iter()
-            .find(|(audio_eid, _)| audio_eid.0 == eid.0)
-            .and_then(|(_, ad)| ad.cloned());
+        // Look up reverb, particle, & shader data
+        let (reverb_zone_data, reverb_zone_enabled, particle_data, particle_enabled, shader_effect_data) = reverb_particle_shader_query.iter()
+            .find(|(rpseid, _, _, _, _, _)| rpseid.0 == eid.0)
+            .map(|(_, rzd, rze, pd, pe, sed)| (rzd.cloned(), rze.is_some(), pd.cloned(), pe.is_some(), sed.cloned()))
+            .unwrap_or((None, false, None, false, None));
 
-        // Look up reverb zone data separately
-        let (reverb_zone_data, reverb_zone_enabled) = reverb_zone_query.iter()
-            .find(|(rz_eid, _, _)| rz_eid.0 == eid.0)
-            .map(|(_, rzd, rze)| (rzd.cloned(), rze.is_some()))
-            .unwrap_or((None, false));
+        // Look up csg & sprite data
+        let (csg_mesh_data, sprite_data) = csg_sprite_query.iter()
+            .find(|(cseid, _, _)| cseid.0 == eid.0)
+            .map(|(_, cmd, sd)| (cmd.cloned(), sd.cloned()))
+            .unwrap_or((None, None));
 
-        // Look up particle data separately
-        let (particle_data, particle_enabled) = particle_query.iter()
-            .find(|(peid, _, _)| peid.0 == eid.0)
-            .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
-            .unwrap_or((None, false));
-
-        // Look up shader data separately
-        let shader_effect_data = shader_query.iter()
-            .find(|(seid, _)| seid.0 == eid.0)
-            .and_then(|(_, sed)| sed.cloned());
-
-        // Look up csg data separately
-        let csg_mesh_data = csg_query.iter()
-            .find(|(ceid, _)| ceid.0 == eid.0)
-            .and_then(|(_, cmd)| cmd.cloned());
-
-        // Look up procedural mesh, joint, game component, and game camera data (combined query)
+        // Look up procedural mesh, joint, game component, and game camera data
         let (procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = procedural_joint_gc_camera_query.iter()
             .find(|(pmeid, _, _, _, _, _)| pmeid.0 == eid.0)
             .map(|(_, pmd, jd, gc, gcd, agc)| (pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some()))
             .unwrap_or((None, None, None, None, false));
 
-        // Look up sprite data separately
-        let sprite_data = sprite_query.iter()
-            .find(|(speid, _)| speid.0 == eid.0)
-            .and_then(|(_, sd)| sd.cloned());
+        // Look up tilemap & skeleton2d data
+        let (tilemap_data, tilemap_enabled, skeleton2d_data, skeleton2d_enabled, skeletal_animations) = tilemap_skeleton2d_query.iter()
+            .find(|(tseid, _, _, _, _, _)| tseid.0 == eid.0)
+            .map(|(_, tmd, tme, sd, se, sa)| (tmd.cloned(), tme.is_some(), sd.cloned(), se.is_some(), sa.cloned().map(|a| vec![a])))
+            .unwrap_or((None, false, None, false, None));
 
-        // Look up tilemap data separately
-        let (tilemap_data, tilemap_enabled) = tilemap_query.iter()
-            .find(|(tmeid, _, _)| tmeid.0 == eid.0)
-            .map(|(_, tmd, tme)| (tmd.cloned(), tme.is_some()))
-            .unwrap_or((None, false));
-
-        // Look up skeleton2d data separately
-        let (skeleton2d_data, skeleton2d_enabled, skeletal_animations) = skeleton2d_query.iter()
-            .find(|(skeid, _, _, _)| skeid.0 == eid.0)
-            .map(|(_, sd, se, sa)| (sd.cloned(), se.is_some(), sa.cloned()))
-            .unwrap_or((None, false, None));
-
-        entities.push(EntitySnapshot {
-            entity_id: eid.0.clone(),
+        let mut snap = EntitySnapshot::new(
+            eid.0.clone(),
             entity_type,
-            name: ename.0.clone(),
-            transform: TransformSnapshot::from(transform),
-            parent_id: None, // TODO: parent hierarchy snapshot
-            visible: visible.0,
-            material_data: mat_data.cloned(),
-            light_data: light_data.cloned(),
-            physics_data: phys_data.cloned(),
-            physics_enabled: phys_enabled.is_some(),
-            asset_ref: asset_ref.cloned(),
-            script_data,
-            audio_data,
-            reverb_zone_data,
-            reverb_zone_enabled,
-            particle_data,
-            particle_enabled,
-            shader_effect_data,
-            csg_mesh_data,
-            terrain_data: None,
-            terrain_mesh_data: None,
-            procedural_mesh_data,
-            joint_data,
-            game_components,
-            animation_clip_data: None,
-            game_camera_data,
-            active_game_camera,
-            sprite_data,
-            physics2d_data: None,
-            physics2d_enabled: false,
-            joint2d_data: None,
-            tilemap_data,
-            tilemap_enabled,
-            skeleton2d_data,
-            skeleton2d_enabled,
-            skeletal_animations,
-        });
+            ename.0.clone(),
+            TransformSnapshot::from(transform),
+        );
+        snap.visible = visible.0;
+        snap.material_data = mat_data.cloned();
+        snap.light_data = light_data.cloned();
+        snap.physics_data = phys_data.cloned();
+        snap.physics_enabled = phys_enabled.is_some();
+        snap.asset_ref = asset_ref.cloned();
+        snap.script_data = script_data;
+        snap.audio_data = audio_data;
+        snap.reverb_zone_data = reverb_zone_data;
+        snap.reverb_zone_enabled = reverb_zone_enabled;
+        snap.particle_data = particle_data;
+        snap.particle_enabled = particle_enabled;
+        snap.shader_effect_data = shader_effect_data;
+        snap.csg_mesh_data = csg_mesh_data;
+        snap.procedural_mesh_data = procedural_mesh_data;
+        snap.joint_data = joint_data;
+        snap.game_components = game_components;
+        snap.game_camera_data = game_camera_data;
+        snap.active_game_camera = active_game_camera;
+        snap.sprite_data = sprite_data;
+        snap.tilemap_data = tilemap_data;
+        snap.tilemap_enabled = tilemap_enabled;
+        snap.skeleton2d_data = skeleton2d_data;
+        snap.skeleton2d_enabled = skeleton2d_enabled;
+        snap.skeletal_animations = skeletal_animations;
+        entities.push(snap);
     }
 
     SceneSnapshot {

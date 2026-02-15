@@ -77,7 +77,7 @@ if ($wasmOpt) {
         }
     }
 } else {
-    Write-Host "wasm-opt not found — skipping optimization. Install via: cargo install wasm-opt" -ForegroundColor Yellow
+    Write-Host "wasm-opt not found - skipping optimization. Install via: cargo install wasm-opt" -ForegroundColor Yellow
 }
 
 Write-Host "=== Copying to web/public ===" -ForegroundColor Cyan
