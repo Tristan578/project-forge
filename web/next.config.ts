@@ -27,11 +27,20 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: "/(.*)",
+        source: "/:path*",
         headers: securityHeaders,
       },
       {
-        source: "/engine-pkg-:path*",
+        source: "/engine-pkg-webgl2/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/engine-pkg-webgpu/:path*",
         headers: [
           {
             key: "Cache-Control",
