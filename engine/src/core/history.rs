@@ -6,17 +6,25 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::animation_clip::AnimationClipData;
 use super::asset_manager::AssetRef;
 use super::audio::AudioData;
 use super::csg::CsgMeshData;
+use super::game_camera::GameCameraData;
+use super::game_components::GameComponents;
 use super::lighting::LightData;
 use super::material::MaterialData;
 use super::particles::ParticleData;
 use super::pending_commands::EntityType;
 use super::physics::{JointData, PhysicsData};
+use super::physics_2d::{PhysicsJoint2d, Physics2dData};
 use super::scripting::ScriptData;
 use super::shader_effects::ShaderEffectData;
+use super::skeletal_animation2d::SkeletalAnimation2d;
+use super::skeleton2d::SkeletonData2d;
+use super::sprite::SpriteData;
 use super::terrain::{TerrainData, TerrainMeshData};
+use super::tilemap::TilemapData;
 
 /// Snapshot of transform data for undo/redo.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,6 +118,45 @@ pub struct EntitySnapshot {
     /// Joint data (if entity has a physics joint)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joint_data: Option<JointData>,
+    /// Game components (pre-built behaviors)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_components: Option<GameComponents>,
+    /// Animation clip data (keyframe property animation)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub animation_clip_data: Option<AnimationClipData>,
+    /// Game camera configuration (if entity has a game camera)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_camera_data: Option<GameCameraData>,
+    /// Whether this entity is the active game camera
+    #[serde(default)]
+    pub active_game_camera: bool,
+    /// Sprite data (if entity is a 2D sprite)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprite_data: Option<SpriteData>,
+    /// 2D physics data (if entity has 2D physics configured)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physics2d_data: Option<Physics2dData>,
+    /// Whether 2D physics is enabled on this entity
+    #[serde(default)]
+    pub physics2d_enabled: bool,
+    /// 2D joint data (if entity has a 2D physics joint)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joint2d_data: Option<PhysicsJoint2d>,
+    /// Tilemap data (if entity is a tilemap)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tilemap_data: Option<TilemapData>,
+    /// Whether tilemap rendering is enabled
+    #[serde(default)]
+    pub tilemap_enabled: bool,
+    /// Skeleton 2D data (if entity has a skeleton)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skeleton2d_data: Option<SkeletonData2d>,
+    /// Whether skeleton 2D is enabled
+    #[serde(default)]
+    pub skeleton2d_enabled: bool,
+    /// Skeletal animations (if entity has skeletal animations)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skeletal_animations: Option<Vec<SkeletalAnimation2d>>,
 }
 
 /// An action that can be undone/redone.
@@ -256,6 +303,55 @@ pub enum UndoableAction {
         old_joint: Option<JointData>,
         new_joint: Option<JointData>,
     },
+
+    /// Game component added, updated, or removed
+    GameComponentChange {
+        entity_id: String,
+        old_components: Option<GameComponents>,  // None = no GameComponents existed
+        new_components: Option<GameComponents>,  // None = GameComponents removed
+    },
+
+    /// Animation clip configuration changed (keyframe animation)
+    AnimationClipChange {
+        entity_id: String,
+        old_clip: Option<AnimationClipData>,
+        new_clip: Option<AnimationClipData>,
+    },
+
+    /// Sprite configuration changed
+    SpriteChange {
+        entity_id: String,
+        old_sprite: Option<SpriteData>,
+        new_sprite: Option<SpriteData>,
+    },
+
+    /// 2D Physics properties were changed
+    Physics2dChange {
+        entity_id: String,
+        old_physics: Option<Physics2dData>,
+        new_physics: Option<Physics2dData>,
+    },
+
+    /// 2D Joint configuration changed
+    Joint2dChange {
+        entity_id: String,
+        old_joint: Option<PhysicsJoint2d>,
+        new_joint: Option<PhysicsJoint2d>,
+    },
+
+    /// Tilemap configuration changed
+    TilemapChange {
+        entity_id: String,
+        old_tilemap: Option<TilemapData>,
+        new_tilemap: Option<TilemapData>,
+    },
+
+    /// Skeleton 2D configuration changed
+    SkeletonChange {
+        entity_id: String,
+        old_skeleton: Option<SkeletonData2d>,
+        new_skeleton: Option<SkeletonData2d>,
+    },
 }
 
 impl UndoableAction {
@@ -301,6 +397,13 @@ impl UndoableAction {
                 format!("Combine '{}'", result_snapshot.name)
             }
             UndoableAction::JointChange { .. } => "Joint Change".to_string(),
+            UndoableAction::GameComponentChange { .. } => "Game Component Change".to_string(),
+            UndoableAction::AnimationClipChange { .. } => "Animation Clip Change".to_string(),
+            UndoableAction::SpriteChange { .. } => "Sprite Change".to_string(),
+            UndoableAction::Physics2dChange { .. } => "2D Physics Change".to_string(),
+            UndoableAction::Joint2dChange { .. } => "2D Joint Change".to_string(),
+            UndoableAction::TilemapChange { .. } => "Tilemap Change".to_string(),
+            UndoableAction::SkeletonChange { .. } => "Skeleton 2D Change".to_string(),
         }
     }
 }

@@ -6,7 +6,8 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, type JointData, setCommandDispatcher, firePlayTick } from '@/stores/editorStore';
+import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, type AnimationClipData, type JointData, type GameCameraData, setCommandDispatcher, firePlayTick } from '@/stores/editorStore';
+import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 
 // Event types matching Rust's event emission
 interface SelectionChangedEvent {
@@ -324,7 +325,134 @@ interface RaycastResultEvent {
   payload: { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number };
 }
 
-type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent | CollisionEventEvent | RaycastResultEvent | JointChangedEvent;
+interface GameComponentChangedEvent {
+  type: 'GAME_COMPONENT_CHANGED';
+  payload: {
+    entityId: string;
+    components: import('@/stores/editorStore').GameComponentData[];
+  };
+}
+
+interface AnimationClipChangedEvent {
+  type: 'ANIMATION_CLIP_CHANGED';
+  payload: AnimationClipData & { entityId: string };
+}
+
+interface GameCameraChangedEvent {
+  type: 'GAME_CAMERA_CHANGED';
+  payload: {
+    entityId: string;
+    mode: string;
+    targetEntity: string | null;
+  };
+}
+
+interface ActiveGameCameraChangedEvent {
+  type: 'ACTIVE_GAME_CAMERA_CHANGED';
+  payload: {
+    entityId: string | null;
+  };
+}
+
+interface SpriteUpdatedEvent {
+  type: 'SPRITE_UPDATED';
+  payload: {
+    entityId: string;
+    sprite: import('@/stores/editorStore').SpriteData;
+  };
+}
+
+interface SpriteSheetUpdatedEvent {
+  type: 'SPRITE_SHEET_UPDATED';
+  payload: {
+    entityId: string;
+    spriteSheet: import('@/stores/editorStore').SpriteSheetData;
+  };
+}
+
+interface SpriteAnimatorUpdatedEvent {
+  type: 'SPRITE_ANIMATOR_UPDATED';
+  payload: {
+    entityId: string;
+    animator: import('@/stores/editorStore').SpriteAnimatorData;
+  };
+}
+
+interface AnimationStateMachineUpdatedEvent {
+  type: 'ANIMATION_STATE_MACHINE_UPDATED';
+  payload: {
+    entityId: string;
+    stateMachine: import('@/stores/editorStore').AnimationStateMachineData;
+  };
+}
+
+interface Skeleton2dUpdatedEvent {
+  type: 'SKELETON2D_UPDATED';
+  payload: {
+    entityId: string;
+    skeleton: import('@/stores/editorStore').SkeletonData2d;
+  };
+}
+
+interface SkeletalAnimation2dPlayingEvent {
+  type: 'SKELETAL_ANIMATION2D_PLAYING';
+  payload: {
+    entityId: string;
+    animName: string;
+  };
+}
+
+interface Skeleton2dSkinChangedEvent {
+  type: 'SKELETON2D_SKIN_CHANGED';
+  payload: {
+    entityId: string;
+    skinName: string;
+  };
+}
+
+interface ProjectTypeChangedEvent {
+  type: 'PROJECT_TYPE_CHANGED';
+  payload: {
+    projectType: '2d' | '3d';
+  };
+}
+
+interface Camera2dUpdatedEvent {
+  type: 'CAMERA2D_UPDATED';
+  payload: import('@/stores/editorStore').Camera2dData;
+}
+
+interface Physics2dUpdatedEvent {
+  type: 'PHYSICS2D_UPDATED';
+  payload: import('@/stores/editorStore').Physics2dData & { entityId: string; enabled: boolean };
+}
+
+interface Joint2dUpdatedEvent {
+  type: 'JOINT2D_UPDATED';
+  payload: import('@/stores/editorStore').Joint2dData & { entityId: string };
+}
+
+interface Physics2dRemovedEvent {
+  type: 'PHYSICS2D_REMOVED';
+  payload: { entityId: string };
+}
+
+interface TilemapUpdatedEvent {
+  type: 'TILEMAP_UPDATED';
+  payload: import('@/stores/editorStore').TilemapData & { entityId: string };
+}
+
+interface TilemapRemovedEvent {
+  type: 'TILEMAP_REMOVED';
+  payload: { entityId: string };
+}
+
+interface TilesetLoadedEvent {
+  type: 'TILESET_LOADED';
+  payload: import('@/stores/editorStore').TilesetData & { assetId: string };
+}
+
+type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent | CollisionEventEvent | RaycastResultEvent | JointChangedEvent | GameComponentChangedEvent | AnimationClipChangedEvent | GameCameraChangedEvent | ActiveGameCameraChangedEvent | SpriteUpdatedEvent | SpriteSheetUpdatedEvent | SpriteAnimatorUpdatedEvent | AnimationStateMachineUpdatedEvent | Skeleton2dUpdatedEvent | SkeletalAnimation2dPlayingEvent | Skeleton2dSkinChangedEvent | ProjectTypeChangedEvent | Camera2dUpdatedEvent | Physics2dUpdatedEvent | Joint2dUpdatedEvent | Physics2dRemovedEvent | TilemapUpdatedEvent | TilemapRemovedEvent | TilesetLoadedEvent;
 
 // Debounced auto-save: triggers export_scene command after 2s of inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -705,8 +833,8 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           break;
 
         case 'COLLISION_EVENT': {
-          const collisionCb = (window as unknown as { __scriptCollisionCallback?: (event: { entityA: string; entityB: string; started: boolean }) => void }).__scriptCollisionCallback;
-          if (collisionCb && event.type === 'COLLISION_EVENT') {
+          const collisionCb = getScriptCollisionCallback();
+          if (collisionCb) {
             collisionCb(event.payload);
           }
           break;
@@ -717,6 +845,135 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           if (raycastCb && event.type === 'RAYCAST_RESULT') {
             raycastCb(event.payload);
           }
+          break;
+        }
+
+        case 'GAME_COMPONENT_CHANGED': {
+          const { entityId, components } = event.payload;
+          const state = useEditorStore.getState();
+          // Update allGameComponents
+          const newAll = { ...state.allGameComponents, [entityId]: components };
+          // Update primaryGameComponents if this entity is selected
+          const primary = state.primaryId === entityId ? components : state.primaryGameComponents;
+          useEditorStore.setState({ allGameComponents: newAll, primaryGameComponents: primary });
+          break;
+        }
+
+        case 'ANIMATION_CLIP_CHANGED': {
+          const clipPayload = event.payload as AnimationClipData & { entityId: string };
+          const state = useEditorStore.getState();
+          if (state.primaryId === clipPayload.entityId) {
+            const { entityId: _entityId, ...clipData } = clipPayload;
+            useEditorStore.setState({ primaryAnimationClip: clipData });
+          }
+          break;
+        }
+
+        case 'GAME_CAMERA_CHANGED': {
+          const { entityId, mode, targetEntity } = event.payload;
+          const gameCameraData: GameCameraData = {
+            mode: mode as GameCameraData['mode'],
+            targetEntity: targetEntity || null,
+          };
+          useEditorStore.getState().setEntityGameCamera(entityId, gameCameraData);
+          break;
+        }
+
+        case 'ACTIVE_GAME_CAMERA_CHANGED': {
+          const { entityId } = event.payload;
+          useEditorStore.getState().setActiveGameCameraId(entityId);
+          break;
+        }
+
+        case 'SPRITE_UPDATED': {
+          const { entityId, sprite } = event.payload;
+          useEditorStore.getState().setSpriteData(entityId, sprite);
+          break;
+        }
+
+        case 'SPRITE_SHEET_UPDATED': {
+          const { entityId, spriteSheet } = event.payload;
+          useEditorStore.getState().setSpriteSheet(entityId, spriteSheet);
+          break;
+        }
+
+        case 'SPRITE_ANIMATOR_UPDATED': {
+          const { entityId, animator } = event.payload;
+          useEditorStore.getState().setSpriteAnimator(entityId, animator);
+          break;
+        }
+
+        case 'ANIMATION_STATE_MACHINE_UPDATED': {
+          const { entityId, stateMachine } = event.payload;
+          useEditorStore.getState().setAnimationStateMachine(entityId, stateMachine);
+          break;
+        }
+
+        case 'SKELETON2D_UPDATED': {
+          const { entityId, skeleton } = event.payload;
+          useEditorStore.getState().setSkeleton2d(entityId, skeleton);
+          break;
+        }
+
+        case 'SKELETAL_ANIMATION2D_PLAYING': {
+          // Animation playback state could be tracked here if needed
+          break;
+        }
+
+        case 'SKELETON2D_SKIN_CHANGED': {
+          const { entityId, skinName } = event.payload;
+          const skeleton = useEditorStore.getState().skeletons2d[entityId];
+          if (skeleton) {
+            useEditorStore.getState().setSkeleton2d(entityId, {
+              ...skeleton,
+              activeSkin: skinName
+            });
+          }
+          break;
+        }
+
+        case 'PROJECT_TYPE_CHANGED': {
+          const { projectType } = event.payload;
+          useEditorStore.getState().setProjectType(projectType);
+          break;
+        }
+
+        case 'CAMERA2D_UPDATED': {
+          useEditorStore.getState().setCamera2dData(event.payload);
+          break;
+        }
+
+        case 'PHYSICS2D_UPDATED': {
+          const { entityId, enabled, ...physData } = event.payload;
+          useEditorStore.getState().setPhysics2d(entityId, physData, enabled);
+          break;
+        }
+
+        case 'JOINT2D_UPDATED': {
+          const { entityId, ...jointData } = event.payload;
+          useEditorStore.getState().setJoint2d(entityId, jointData);
+          break;
+        }
+
+        case 'PHYSICS2D_REMOVED': {
+          useEditorStore.getState().removePhysics2d(event.payload.entityId);
+          break;
+        }
+
+        case 'TILEMAP_UPDATED': {
+          const { entityId, ...data } = event.payload;
+          useEditorStore.getState().setTilemapData(entityId, data);
+          break;
+        }
+
+        case 'TILEMAP_REMOVED': {
+          useEditorStore.getState().removeTilemapData(event.payload.entityId);
+          break;
+        }
+
+        case 'TILESET_LOADED': {
+          const { assetId, ...rest } = event.payload;
+          useEditorStore.getState().setTileset(assetId, { assetId, ...rest });
           break;
         }
 

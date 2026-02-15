@@ -48,9 +48,10 @@ describe('scriptBundler', () => {
       };
       const result = bundleScripts(scripts);
       expect(result.count).toBe(2);
-      expect(result.code).toContain('console.log("enabled")');
-      expect(result.code).not.toContain('console.log("disabled")');
-      expect(result.code).toContain('console.log("also enabled")');
+      // Scripts are JSON-encoded for security
+      expect(result.code).toContain(JSON.stringify('console.log("enabled")'));
+      expect(result.code).not.toContain(JSON.stringify('console.log("disabled")'));
+      expect(result.code).toContain(JSON.stringify('console.log("also enabled")'));
     });
 
     it('returns correct count of enabled scripts', () => {
@@ -74,7 +75,9 @@ describe('scriptBundler', () => {
       const result = bundleScripts(scripts);
       expect(result.code).toContain("scripts['entity1']");
       expect(result.code).toContain('(function(forge)');
-      expect(result.code).toContain('console.log("test")');
+      // Script source is JSON-encoded for security
+      expect(result.code).toContain(JSON.stringify('console.log("test")'));
+      expect(result.code).toContain('new Function');
       expect(result.code).toContain('onStart');
       expect(result.code).toContain('onUpdate');
       expect(result.code).toContain('onDestroy');
@@ -134,8 +137,9 @@ describe('scriptBundler', () => {
       expect(result.count).toBe(2);
       expect(result.code).toContain("scripts['entity1']");
       expect(result.code).toContain("scripts['entity2']");
-      expect(result.code).toContain('console.log("1")');
-      expect(result.code).toContain('console.log("2")');
+      // Scripts are JSON-encoded for security
+      expect(result.code).toContain(JSON.stringify('function onStart() { console.log("1"); }'));
+      expect(result.code).toContain(JSON.stringify('function onUpdate(dt) { console.log("2"); }'));
     });
 
     it('includes lifecycle dispatch code', () => {
@@ -246,6 +250,27 @@ describe('scriptBundler', () => {
       expect(result.code).toContain('_data: {}');
       expect(result.code).toContain('get: function(key)');
       expect(result.code).toContain('set: function(key, value)');
+    });
+
+    it('prevents closure breakout via JSON encoding', () => {
+      const maliciousScripts: Record<string, ScriptData> = {
+        entity1: {
+          source: '};alert("XSS");//',
+          enabled: true,
+          template: null,
+        },
+      };
+      const result = bundleScripts(maliciousScripts);
+
+      // Source should be JSON-encoded, not directly embedded
+      expect(result.code).toContain(JSON.stringify('};alert("XSS");//'));
+
+      // The malicious payload should be neutralized (wrapped in string, not executable)
+      expect(result.code).not.toMatch(/\}\s*;\s*alert\s*\(\s*["']XSS["']\s*\)\s*;\s*\/\//);
+
+      // Should use new Function() pattern
+      expect(result.code).toContain('new Function(');
+      expect(result.code).toContain('const src =');
     });
   });
 });

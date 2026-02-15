@@ -1,8 +1,12 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useEditorStore, type AudioData } from '@/stores/editorStore';
-import { Play, StopCircle } from 'lucide-react';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { Play, StopCircle, Sparkles, HelpCircle } from 'lucide-react';
+import { GenerateSoundDialog } from './GenerateSoundDialog';
+import { GenerateMusicDialog } from './GenerateMusicDialog';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 interface SliderRowProps {
   label: string;
@@ -14,10 +18,13 @@ interface SliderRowProps {
   onChange: (v: number) => void;
 }
 
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange }: SliderRowProps) {
+function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, term }: SliderRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
+      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+        {label}
+        {term && <InfoTooltip term={term} />}
+      </label>
       <input
         type="range"
         min={min}
@@ -43,10 +50,13 @@ interface CheckboxRowProps {
   onChange: (v: boolean) => void;
 }
 
-function CheckboxRow({ label, checked, onChange }: CheckboxRowProps) {
+function CheckboxRow({ label, checked, onChange, term }: CheckboxRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
+      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+        {label}
+        {term && <InfoTooltip term={term} />}
+      </label>
       <input
         type="checkbox"
         checked={checked}
@@ -67,10 +77,13 @@ interface NumberInputRowProps {
   onChange: (v: number) => void;
 }
 
-function NumberInputRow({ label, value, min, max, step = 0.1, onChange }: NumberInputRowProps) {
+function NumberInputRow({ label, value, min, max, step = 0.1, onChange, term }: NumberInputRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
+      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+        {label}
+        {term && <InfoTooltip term={term} />}
+      </label>
       <input
         type="number"
         value={value}
@@ -86,6 +99,9 @@ function NumberInputRow({ label, value, min, max, step = 0.1, onChange }: Number
 }
 
 export function AudioInspector() {
+  const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
+  const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
+
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryAudio = useEditorStore((s) => s.primaryAudio);
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
@@ -94,6 +110,7 @@ export function AudioInspector() {
   const removeAudio = useEditorStore((s) => s.removeAudio);
   const playAudio = useEditorStore((s) => s.playAudio);
   const stopAudio = useEditorStore((s) => s.stopAudio);
+  const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
 
   const audioAssets = Object.values(assetRegistry).filter((a) => a.kind === 'audio');
 
@@ -142,9 +159,35 @@ export function AudioInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4 mt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-        Audio
-      </h3>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Audio
+          </h3>
+          <InfoTooltip text="Sound attached to this object" />
+          <button onClick={() => navigateDocs('features/audio')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+            <HelpCircle size={12} />
+          </button>
+        </div>
+        <div className="flex gap-1">
+          <button
+            onClick={() => setGenerateSoundOpen(true)}
+            className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
+            title="Generate sound with AI"
+          >
+            <Sparkles size={10} />
+            Sound
+          </button>
+          <button
+            onClick={() => setGenerateMusicOpen(true)}
+            className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
+            title="Generate music with AI"
+          >
+            <Sparkles size={10} />
+            Music
+          </button>
+        </div>
+      </div>
 
       {!primaryAudio ? (
         <button
@@ -157,7 +200,10 @@ export function AudioInspector() {
         <div className="space-y-3">
           {/* Asset Dropdown */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Asset</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              Asset
+              <InfoTooltip term="audioAsset" />
+            </label>
             <select
               value={primaryAudio.assetId ?? ''}
               onChange={(e) => handleUpdate({ assetId: e.target.value || null })}
@@ -175,7 +221,10 @@ export function AudioInspector() {
 
           {/* Bus Assignment */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Bus</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              Bus
+              <InfoTooltip term="audioBus" />
+            </label>
             <select
               value={primaryAudio.bus ?? 'sfx'}
               onChange={(e) => handleUpdate({ bus: e.target.value })}
@@ -198,6 +247,7 @@ export function AudioInspector() {
             max={1}
             step={0.01}
             onChange={(v) => handleUpdate({ volume: v })}
+            term="audioVolume"
           />
 
           {/* Pitch */}
@@ -208,6 +258,7 @@ export function AudioInspector() {
             max={4}
             step={0.05}
             onChange={(v) => handleUpdate({ pitch: v })}
+            term="audioPitch"
           />
 
           {/* Loop */}
@@ -215,6 +266,7 @@ export function AudioInspector() {
             label="Loop"
             checked={primaryAudio.loopAudio}
             onChange={(v) => handleUpdate({ loopAudio: v })}
+            term="audioLoop"
           />
 
           {/* Spatial */}
@@ -222,6 +274,7 @@ export function AudioInspector() {
             label="Spatial"
             checked={primaryAudio.spatial}
             onChange={(v) => handleUpdate({ spatial: v })}
+            term="audioSpatial"
           />
 
           {/* Spatial Settings (conditional) */}
@@ -232,12 +285,14 @@ export function AudioInspector() {
                 value={primaryAudio.maxDistance}
                 min={1}
                 onChange={(v) => handleUpdate({ maxDistance: v })}
+                term="audioMaxDistance"
               />
               <NumberInputRow
                 label="Ref Distance"
                 value={primaryAudio.refDistance}
                 min={0.1}
                 onChange={(v) => handleUpdate({ refDistance: v })}
+                term="audioRefDistance"
               />
               <NumberInputRow
                 label="Rolloff"
@@ -246,6 +301,7 @@ export function AudioInspector() {
                 max={10}
                 step={0.1}
                 onChange={(v) => handleUpdate({ rolloffFactor: v })}
+                term="audioRolloff"
               />
             </>
           )}
@@ -255,6 +311,7 @@ export function AudioInspector() {
             label="Autoplay"
             checked={primaryAudio.autoplay}
             onChange={(v) => handleUpdate({ autoplay: v })}
+            term="audioAutoplay"
           />
 
           {/* Preview Buttons */}
@@ -283,6 +340,22 @@ export function AudioInspector() {
             Remove Audio
           </button>
         </div>
+      )}
+
+      {/* Generation dialogs */}
+      {primaryId && (
+        <>
+          <GenerateSoundDialog
+            isOpen={generateSoundOpen}
+            onClose={() => setGenerateSoundOpen(false)}
+            entityId={primaryId}
+          />
+          <GenerateMusicDialog
+            isOpen={generateMusicOpen}
+            onClose={() => setGenerateMusicOpen(false)}
+            entityId={primaryId}
+          />
+        </>
       )}
     </div>
   );

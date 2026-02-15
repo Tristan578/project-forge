@@ -38,9 +38,9 @@ export async function authenticateRequest(): Promise<
 /** Check if user tier allows a specific action */
 export function assertTier(
   user: User,
-  requiredTiers: Array<'free' | 'starter' | 'creator' | 'studio'>
+  requiredTiers: Array<'starter' | 'hobbyist' | 'creator' | 'pro'>
 ): NextResponse | null {
-  if (!requiredTiers.includes(user.tier as 'free' | 'starter' | 'creator' | 'studio')) {
+  if (!requiredTiers.includes(user.tier as 'starter' | 'hobbyist' | 'creator' | 'pro')) {
     return NextResponse.json(
       {
         error: 'TIER_REQUIRED',

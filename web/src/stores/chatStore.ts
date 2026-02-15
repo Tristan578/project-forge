@@ -25,7 +25,7 @@ export interface ChatMessage {
 
 export type ChatModel = 'claude-sonnet-4-5-20250929' | 'claude-haiku-4-5-20251001';
 
-export type RightPanelTab = 'inspector' | 'chat' | 'script';
+export type RightPanelTab = 'inspector' | 'chat' | 'script' | 'ui';
 
 const MAX_LOOP_ITERATIONS = 10;
 const PERSISTENCE_KEY = 'forge-chat-';

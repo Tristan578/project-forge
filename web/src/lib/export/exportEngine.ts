@@ -19,7 +19,24 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   // 2. Bundle scripts
   const scripts = bundleScripts(store.allScripts);
 
-  // 3. Generate HTML
+  // 3. Get UI data
+  let uiDataJson: string | undefined;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useUIBuilderStore } = require('@/stores/uiBuilderStore');
+    const uiData = useUIBuilderStore.getState().serialize();
+    if (uiData && uiData.screens && uiData.screens.length > 0) {
+      uiDataJson = JSON.stringify(uiData);
+    }
+  } catch {
+    // uiBuilderStore not available yet
+  }
+
+  // 4. Get mobile touch config
+  const mobileTouchConfig = store.mobileTouchConfig;
+  const mobileTouchConfigJson = mobileTouchConfig?.enabled ? JSON.stringify(mobileTouchConfig) : undefined;
+
+  // 5. Generate HTML
   const html = generateGameHTML({
     title: options.title,
     bgColor: options.bgColor,
@@ -27,6 +44,8 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     sceneData: JSON.stringify(sceneData),
     scriptBundle: scripts.code,
     includeDebug: options.includeDebug,
+    uiData: uiDataJson,
+    mobileTouchConfig: mobileTouchConfigJson,
   });
 
   // For now, always produce single HTML
@@ -44,7 +63,9 @@ async function getSceneData(): Promise<unknown> {
       // The event contains { json, name }, parse the json
       try {
         const sceneData = JSON.parse(customEvent.detail.json);
-        resolve(sceneData);
+        // Inject UI data from uiBuilderStore
+        const uiData = injectUIData(sceneData);
+        resolve(uiData);
       } catch (err) {
         console.error('[Export] Failed to parse scene data:', err);
         resolve(buildSceneFromStore());
@@ -63,6 +84,21 @@ async function getSceneData(): Promise<unknown> {
       resolve(buildSceneFromStore());
     }, 2000);
   });
+}
+
+function injectUIData(sceneData: unknown): unknown {
+  // Dynamically import uiBuilderStore to avoid circular dependency
+  const sceneObj = sceneData as Record<string, unknown>;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useUIBuilderStore } = require('@/stores/uiBuilderStore');
+    const uiData = useUIBuilderStore.getState().serialize();
+    sceneObj.gameUi = JSON.stringify(uiData);
+  } catch {
+    // uiBuilderStore not available (no UI builder phase implemented yet)
+    sceneObj.gameUi = null;
+  }
+  return sceneObj;
 }
 
 function buildSceneFromStore(): unknown {

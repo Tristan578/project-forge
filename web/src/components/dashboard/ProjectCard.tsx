@@ -53,7 +53,7 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
   };
 
   return (
-    <div className="group relative overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-secondary)] transition-all hover:border-[var(--color-accent)]">
+    <div className="group relative overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 transition-all hover:border-blue-500">
       {/* Thumbnail */}
       <div
         className="h-[180px] cursor-pointer"
@@ -82,16 +82,16 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
               }
             }}
             autoFocus
-            className="w-full rounded border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2 py-1 text-sm text-[var(--color-text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+            className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         ) : (
-          <h3 className="truncate text-sm font-semibold text-[var(--color-text-primary)]">
+          <h3 className="truncate text-sm font-semibold text-zinc-200">
             {project.name}
           </h3>
         )}
 
         {/* Metadata */}
-        <div className="mt-2 flex items-center justify-between text-xs text-[var(--color-text-secondary)]">
+        <div className="mt-2 flex items-center justify-between text-xs text-zinc-400">
           <span>{project.entityCount} entities</span>
           <span>{relativeTime}</span>
         </div>
@@ -113,13 +113,13 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
               className="fixed inset-0 z-10"
               onClick={() => setShowMenu(false)}
             />
-            <div className="absolute right-0 top-8 z-20 w-40 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] shadow-xl">
+            <div className="absolute right-0 top-8 z-20 w-40 overflow-hidden rounded-lg border border-zinc-700 bg-zinc-800 shadow-xl">
               <button
                 onClick={() => {
                   setShowMenu(false);
                   onOpen(project.id);
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-primary)]"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-950"
               >
                 <FolderOpen size={14} />
                 Open
@@ -129,7 +129,7 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
                   setShowMenu(false);
                   setEditing(true);
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-primary)]"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-950"
               >
                 <Edit size={14} />
                 Rename
@@ -139,7 +139,7 @@ export function ProjectCard({ project, onOpen, onDelete, onRename }: ProjectCard
                   setShowMenu(false);
                   handleDelete();
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-[var(--color-bg-primary)]"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 hover:bg-zinc-950"
               >
                 <Trash2 size={14} />
                 {showConfirm ? 'Confirm Delete?' : 'Delete'}

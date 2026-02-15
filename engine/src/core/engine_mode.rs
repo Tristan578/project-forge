@@ -13,6 +13,7 @@ use super::audio::AudioData;
 use super::csg::CsgMeshData;
 use super::entity_factory::Undeletable;
 use super::entity_id::{EntityId, EntityName, EntityVisible};
+use super::game_camera::{GameCameraData, ActiveGameCamera};
 use super::history::{EntitySnapshot, TransformSnapshot};
 use super::lighting::LightData;
 use super::material::MaterialData;
@@ -22,6 +23,7 @@ use super::physics::{JointData, PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::Selection;
 use super::shader_effects::ShaderEffectData;
+use super::tilemap::{TilemapData, TilemapEnabled};
 
 /// The current engine mode.
 #[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
@@ -118,7 +120,10 @@ pub fn snapshot_scene(
     particle_query: &Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: &Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: &Query<(&EntityId, Option<&CsgMeshData>)>,
-    procedural_joint_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>)>,
+    procedural_joint_gc_camera_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>, Option<&super::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+    sprite_query: &Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
+    tilemap_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>)>,
+    skeleton2d_query: &Query<(&EntityId, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>)>,
     selection: &Selection,
 ) -> SceneSnapshot {
     let mut entities = Vec::new();
@@ -165,11 +170,28 @@ pub fn snapshot_scene(
             .find(|(ceid, _)| ceid.0 == eid.0)
             .and_then(|(_, cmd)| cmd.cloned());
 
-        // Look up procedural mesh and joint data (combined query)
-        let (procedural_mesh_data, joint_data) = procedural_joint_query.iter()
-            .find(|(pmeid, _, _)| pmeid.0 == eid.0)
-            .map(|(_, pmd, jd)| (pmd.cloned(), jd.cloned()))
-            .unwrap_or((None, None));
+        // Look up procedural mesh, joint, game component, and game camera data (combined query)
+        let (procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = procedural_joint_gc_camera_query.iter()
+            .find(|(pmeid, _, _, _, _, _)| pmeid.0 == eid.0)
+            .map(|(_, pmd, jd, gc, gcd, agc)| (pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some()))
+            .unwrap_or((None, None, None, None, false));
+
+        // Look up sprite data separately
+        let sprite_data = sprite_query.iter()
+            .find(|(speid, _)| speid.0 == eid.0)
+            .and_then(|(_, sd)| sd.cloned());
+
+        // Look up tilemap data separately
+        let (tilemap_data, tilemap_enabled) = tilemap_query.iter()
+            .find(|(tmeid, _, _)| tmeid.0 == eid.0)
+            .map(|(_, tmd, tme)| (tmd.cloned(), tme.is_some()))
+            .unwrap_or((None, false));
+
+        // Look up skeleton2d data separately
+        let (skeleton2d_data, skeleton2d_enabled, skeletal_animations) = skeleton2d_query.iter()
+            .find(|(skeid, _, _, _)| skeid.0 == eid.0)
+            .map(|(_, sd, se, sa)| (sd.cloned(), se.is_some(), sa.cloned()))
+            .unwrap_or((None, false, None));
 
         entities.push(EntitySnapshot {
             entity_id: eid.0.clone(),
@@ -193,6 +215,19 @@ pub fn snapshot_scene(
             terrain_mesh_data: None,
             procedural_mesh_data,
             joint_data,
+            game_components,
+            animation_clip_data: None,
+            game_camera_data,
+            active_game_camera,
+            sprite_data,
+            physics2d_data: None,
+            physics2d_enabled: false,
+            joint2d_data: None,
+            tilemap_data,
+            tilemap_enabled,
+            skeleton2d_data,
+            skeleton2d_enabled,
+            skeletal_animations,
         });
     }
 

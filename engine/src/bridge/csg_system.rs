@@ -218,6 +218,18 @@ pub fn apply_csg_requests(
                 particle_enabled,
                 shader_effect_data,
                 csg_mesh_data,
+                terrain_data: None,
+                terrain_mesh_data: None,
+                procedural_mesh_data: None,
+                joint_data: None,
+                game_components: None,
+                animation_clip_data: None,
+                game_camera_data: None,
+                active_game_camera: false,
+                sprite_data: None,
+                physics2d_data: None,
+                physics2d_enabled: false,
+                joint2d_data: None,
             }
         };
 
@@ -257,6 +269,18 @@ pub fn apply_csg_requests(
             particle_enabled: false,
             shader_effect_data: None,
             csg_mesh_data: Some(mesh_data),
+            terrain_data: None,
+            terrain_mesh_data: None,
+            procedural_mesh_data: None,
+            joint_data: None,
+            game_components: None,
+            animation_clip_data: None,
+            game_camera_data: None,
+            active_game_camera: false,
+            sprite_data: None,
+            physics2d_data: None,
+            physics2d_enabled: false,
+            joint2d_data: None,
         };
 
         // 9. Push history action

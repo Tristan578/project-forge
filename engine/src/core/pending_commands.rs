@@ -6,15 +6,18 @@
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use super::animation_clip::{AnimationClipData, Interpolation, PlayMode, PropertyTarget};
 use super::audio::AudioEffectDef;
 use super::camera_presets::CameraPreset;
 use super::engine_mode::ModeChangeRequest;
+use super::game_camera::GameCameraMode;
 use super::gizmo::CoordinateMode;
 use super::input::{ActionDef, InputPreset};
 use super::lighting::LightData;
 use super::material::MaterialData;
 use super::particles::ParticleData;
 use super::physics::{JointData, JointLimits, JointMotor, JointType, PhysicsData};
+use super::physics_2d::{Physics2dData, PhysicsJoint2d};
 use super::post_processing::{
     BloomSettings, ChromaticAberrationSettings, ColorGradingSettings, SharpeningSettings,
     SsaoSettings, DepthOfFieldSettings, MotionBlurSettings,
@@ -33,6 +36,7 @@ pub enum QueryRequest {
     InputBindings,
     InputState,
     PhysicsState { entity_id: String },
+    Physics2dState { entity_id: String },
     AssetList,
     ScriptData { entity_id: String },
     ScriptTemplates,
@@ -46,6 +50,13 @@ pub enum QueryRequest {
     TerrainState { entity_id: String },
     QualitySettings,
     ListJoints,
+    GameComponentState { entity_id: String },
+    GameCameraState { entity_id: String },
+    AnimationClipState { entity_id: String },
+    SpriteState { entity_id: String },
+    Camera2dState,
+    ProjectType,
+    Skeleton2dState { entity_id: String },
 }
 
 /// A pending glTF import request.
@@ -145,6 +156,72 @@ pub struct UpdateJointRequest {
 #[derive(Debug, Clone)]
 pub struct RemoveJointRequest {
     pub entity_id: String,
+}
+
+/// A pending 2D physics update request.
+#[derive(Debug, Clone)]
+pub struct Physics2dUpdate {
+    pub entity_id: String,
+    pub physics_data: Physics2dData,
+}
+
+/// A pending 2D physics toggle request.
+#[derive(Debug, Clone)]
+pub struct Physics2dToggle {
+    pub entity_id: String,
+    pub enabled: bool,
+}
+
+/// A pending 2D joint creation request.
+#[derive(Debug, Clone)]
+pub struct CreateJoint2dRequest {
+    pub entity_id: String,
+    pub joint_data: PhysicsJoint2d,
+}
+
+/// A pending 2D joint removal request.
+#[derive(Debug, Clone)]
+pub struct RemoveJoint2dRequest {
+    pub entity_id: String,
+}
+
+/// A pending 2D force application request.
+#[derive(Debug, Clone)]
+pub struct ForceApplication2d {
+    pub entity_id: String,
+    pub force_x: f32,
+    pub force_y: f32,
+}
+
+/// A pending 2D impulse application request.
+#[derive(Debug, Clone)]
+pub struct ImpulseApplication2d {
+    pub entity_id: String,
+    pub impulse_x: f32,
+    pub impulse_y: f32,
+}
+
+/// A pending 2D raycast request.
+#[derive(Debug, Clone)]
+pub struct Raycast2dRequest {
+    pub origin_x: f32,
+    pub origin_y: f32,
+    pub dir_x: f32,
+    pub dir_y: f32,
+    pub max_distance: f32,
+}
+
+/// A pending 2D gravity update request.
+#[derive(Debug, Clone)]
+pub struct Gravity2dUpdate {
+    pub gravity_x: f32,
+    pub gravity_y: f32,
+}
+
+/// A pending 2D debug physics toggle request.
+#[derive(Debug, Clone)]
+pub struct DebugPhysics2dToggle {
+    pub enabled: bool,
 }
 
 /// A pending script update request.
@@ -405,6 +482,49 @@ pub struct QualityPresetRequest {
     pub preset: String,
 }
 
+/// A project type change request.
+#[derive(Debug, Clone)]
+pub struct SetProjectTypeRequest {
+    pub project_type: String, // "2d" or "3d"
+}
+
+/// A pending sprite data update request.
+#[derive(Debug, Clone)]
+pub struct SpriteDataUpdate {
+    pub entity_id: String,
+    pub texture_asset_id: Option<Option<String>>,
+    pub color_tint: Option<[f32; 4]>,
+    pub flip_x: Option<bool>,
+    pub flip_y: Option<bool>,
+    pub custom_size: Option<Option<[f32; 2]>>,
+    pub sorting_layer: Option<String>,
+    pub sorting_order: Option<i32>,
+    pub anchor: Option<String>, // "center", "top_left", etc.
+}
+
+/// A pending sprite removal request.
+#[derive(Debug, Clone)]
+pub struct SpriteRemoval {
+    pub entity_id: String,
+}
+
+/// A pending 2D camera data update request.
+#[derive(Debug, Clone)]
+pub struct Camera2dDataUpdate {
+    pub zoom: Option<f32>,
+    pub pixel_perfect: Option<bool>,
+    pub bounds: Option<Option<Camera2dBounds>>,
+}
+
+/// Camera bounds for 2D camera.
+#[derive(Debug, Clone)]
+pub struct Camera2dBounds {
+    pub min_x: f32,
+    pub max_x: f32,
+    pub min_y: f32,
+    pub max_y: f32,
+}
+
 /// A pending force/impulse application (Play mode only).
 #[derive(Debug, Clone)]
 pub struct ForceApplication {
@@ -450,6 +570,211 @@ pub struct UpdateSkyboxRequest {
     pub rotation: Option<f32>,
 }
 
+/// A pending custom skybox request.
+#[derive(Debug, Clone)]
+pub struct SetCustomSkyboxRequest {
+    pub asset_id: String,
+    pub data_base64: String,
+}
+
+/// A pending set game camera request.
+#[derive(Debug, Clone)]
+pub struct SetGameCameraRequest {
+    pub entity_id: String,
+    pub mode: GameCameraMode,
+    pub target_entity: Option<String>,
+}
+
+/// A pending set active game camera request.
+#[derive(Debug, Clone)]
+pub struct SetActiveGameCameraRequest {
+    pub entity_id: String,
+}
+
+/// A pending camera shake request.
+#[derive(Debug, Clone)]
+pub struct CameraShakeRequest {
+    pub intensity: f32,
+    pub duration: f32,
+}
+
+/// A pending game component add request.
+#[derive(Debug, Clone)]
+pub struct GameComponentAddRequest {
+    pub entity_id: String,
+    pub component_type: String,
+    pub properties_json: String,
+}
+
+/// A pending game component update request.
+#[derive(Debug, Clone)]
+pub struct GameComponentUpdateRequest {
+    pub entity_id: String,
+    pub component_type: String,
+    pub properties_json: String,
+}
+
+/// A pending game component removal request.
+#[derive(Debug, Clone)]
+pub struct GameComponentRemovalRequest {
+    pub entity_id: String,
+    pub component_name: String,
+}
+
+/// Create or replace the full animation clip on an entity.
+#[derive(Debug, Clone)]
+pub struct AnimationClipUpdate {
+    pub entity_id: String,
+    pub clip_data: AnimationClipData,
+}
+
+/// Add a keyframe to a specific track (creates track if needed).
+#[derive(Debug, Clone)]
+pub struct AnimationClipAddKeyframe {
+    pub entity_id: String,
+    pub target: PropertyTarget,
+    pub time: f32,
+    pub value: f32,
+    pub interpolation: Interpolation,
+}
+
+/// Remove a keyframe by track target and time.
+#[derive(Debug, Clone)]
+pub struct AnimationClipRemoveKeyframe {
+    pub entity_id: String,
+    pub target: PropertyTarget,
+    pub time: f32,
+}
+
+/// Update a specific keyframe's value or interpolation.
+#[derive(Debug, Clone)]
+pub struct AnimationClipUpdateKeyframe {
+    pub entity_id: String,
+    pub target: PropertyTarget,
+    pub time: f32,
+    pub new_value: Option<f32>,
+    pub new_interpolation: Option<Interpolation>,
+    pub new_time: Option<f32>,
+}
+
+/// Update clip-level properties (duration, play_mode, speed, autoplay).
+#[derive(Debug, Clone)]
+pub struct AnimationClipPropertyUpdate {
+    pub entity_id: String,
+    pub duration: Option<f32>,
+    pub play_mode: Option<PlayMode>,
+    pub speed: Option<f32>,
+    pub autoplay: Option<bool>,
+}
+
+/// Start or stop animation preview in Edit mode.
+#[derive(Debug, Clone)]
+pub struct AnimationClipPreview {
+    pub entity_id: String,
+    pub action: String, // "play", "stop", "seek"
+    pub seek_time: Option<f32>,
+}
+
+/// Remove the entire animation clip from an entity.
+#[derive(Debug, Clone)]
+pub struct AnimationClipRemoval {
+    pub entity_id: String,
+}
+
+/// A pending skeleton creation request.
+#[derive(Debug, Clone)]
+pub struct CreateSkeleton2dRequest {
+    pub entity_id: String,
+    pub skeleton_data: super::skeleton2d::SkeletonData2d,
+}
+
+/// A pending bone addition request.
+#[derive(Debug, Clone)]
+pub struct AddBone2dRequest {
+    pub entity_id: String,
+    pub bone: super::skeleton2d::Bone2dDef,
+}
+
+/// A pending bone removal request.
+#[derive(Debug, Clone)]
+pub struct RemoveBone2dRequest {
+    pub entity_id: String,
+    pub bone_name: String,
+}
+
+/// A pending bone update request.
+#[derive(Debug, Clone)]
+pub struct UpdateBone2dRequest {
+    pub entity_id: String,
+    pub bone_name: String,
+    pub local_position: Option<[f32; 2]>,
+    pub local_rotation: Option<f32>,
+    pub local_scale: Option<[f32; 2]>,
+    pub length: Option<f32>,
+    pub color: Option<[f32; 4]>,
+}
+
+/// A pending skeletal animation creation request.
+#[derive(Debug, Clone)]
+pub struct CreateSkeletalAnimation2dRequest {
+    pub entity_id: String,
+    pub animation: super::skeletal_animation2d::SkeletalAnimation2d,
+}
+
+/// A pending keyframe addition request.
+#[derive(Debug, Clone)]
+pub struct AddKeyframe2dRequest {
+    pub entity_id: String,
+    pub animation_name: String,
+    pub bone_name: String,
+    pub keyframe: super::skeletal_animation2d::BoneKeyframe,
+}
+
+/// A pending skeletal animation playback request.
+#[derive(Debug, Clone)]
+pub struct PlaySkeletalAnimation2dRequest {
+    pub entity_id: String,
+    pub animation_name: String,
+    pub loop_animation: bool,
+    pub speed: f32,
+}
+
+/// A pending skin change request.
+#[derive(Debug, Clone)]
+pub struct SetSkeleton2dSkinRequest {
+    pub entity_id: String,
+    pub skin_name: String,
+}
+
+/// A pending IK chain creation request.
+#[derive(Debug, Clone)]
+pub struct CreateIkChain2dRequest {
+    pub entity_id: String,
+    pub constraint: super::skeleton2d::IkConstraint2d,
+}
+
+/// A pending skeleton query request.
+#[derive(Debug, Clone)]
+pub struct GetSkeleton2dRequest {
+    pub entity_id: String,
+}
+
+/// A pending skeleton import request.
+#[derive(Debug, Clone)]
+pub struct ImportSkeletonJsonRequest {
+    pub entity_id: String,
+    pub json_data: String,
+    pub format: String, // "custom", "dragonbones", "spine"
+}
+
+/// A pending auto-weight generation request.
+#[derive(Debug, Clone)]
+pub struct AutoWeightSkeleton2dRequest {
+    pub entity_id: String,
+    pub method: String, // "heat", "envelope"
+    pub iterations: u32,
+}
+
 /// Resource that holds pending commands from the bridge layer.
 /// Systems process these each frame and clear them.
 #[derive(Resource, Default)]
@@ -483,6 +808,15 @@ pub struct PendingCommands {
     pub update_joint_requests: Vec<UpdateJointRequest>,
     pub remove_joint_requests: Vec<RemoveJointRequest>,
     pub force_applications: Vec<ForceApplication>,
+    pub physics2d_updates: Vec<Physics2dUpdate>,
+    pub physics2d_toggles: Vec<Physics2dToggle>,
+    pub create_joint2d_requests: Vec<CreateJoint2dRequest>,
+    pub remove_joint2d_requests: Vec<RemoveJoint2dRequest>,
+    pub force_applications2d: Vec<ForceApplication2d>,
+    pub impulse_applications2d: Vec<ImpulseApplication2d>,
+    pub raycast2d_requests: Vec<Raycast2dRequest>,
+    pub gravity2d_updates: Vec<Gravity2dUpdate>,
+    pub debug_physics2d_toggles: Vec<DebugPhysics2dToggle>,
     pub scene_export_requests: Vec<SceneExportRequest>,
     pub scene_load_requests: Vec<SceneLoadRequest>,
     pub new_scene_requests: Vec<NewSceneRequest>,
@@ -522,6 +856,36 @@ pub struct PendingCommands {
     pub set_skybox_requests: Vec<SetSkyboxRequest>,
     pub remove_skybox_requests: Vec<RemoveSkyboxRequest>,
     pub update_skybox_requests: Vec<UpdateSkyboxRequest>,
+    pub custom_skybox_requests: Vec<SetCustomSkyboxRequest>,
+    pub set_game_camera_requests: Vec<SetGameCameraRequest>,
+    pub set_active_game_camera_requests: Vec<SetActiveGameCameraRequest>,
+    pub camera_shake_requests: Vec<CameraShakeRequest>,
+    pub game_component_adds: Vec<GameComponentAddRequest>,
+    pub game_component_updates: Vec<GameComponentUpdateRequest>,
+    pub game_component_removals: Vec<GameComponentRemovalRequest>,
+    pub animation_clip_updates: Vec<AnimationClipUpdate>,
+    pub animation_clip_add_keyframes: Vec<AnimationClipAddKeyframe>,
+    pub animation_clip_remove_keyframes: Vec<AnimationClipRemoveKeyframe>,
+    pub animation_clip_update_keyframes: Vec<AnimationClipUpdateKeyframe>,
+    pub animation_clip_property_updates: Vec<AnimationClipPropertyUpdate>,
+    pub animation_clip_previews: Vec<AnimationClipPreview>,
+    pub animation_clip_removals: Vec<AnimationClipRemoval>,
+    pub set_project_type_requests: Vec<SetProjectTypeRequest>,
+    pub sprite_data_updates: Vec<SpriteDataUpdate>,
+    pub sprite_removals: Vec<SpriteRemoval>,
+    pub camera_2d_data_updates: Vec<Camera2dDataUpdate>,
+    pub create_skeleton2d_requests: Vec<CreateSkeleton2dRequest>,
+    pub add_bone2d_requests: Vec<AddBone2dRequest>,
+    pub remove_bone2d_requests: Vec<RemoveBone2dRequest>,
+    pub update_bone2d_requests: Vec<UpdateBone2dRequest>,
+    pub create_skeletal_animation2d_requests: Vec<CreateSkeletalAnimation2dRequest>,
+    pub add_keyframe2d_requests: Vec<AddKeyframe2dRequest>,
+    pub play_skeletal_animation2d_requests: Vec<PlaySkeletalAnimation2dRequest>,
+    pub set_skeleton2d_skin_requests: Vec<SetSkeleton2dSkinRequest>,
+    pub create_ik_chain2d_requests: Vec<CreateIkChain2dRequest>,
+    pub get_skeleton2d_requests: Vec<GetSkeleton2dRequest>,
+    pub import_skeleton_json_requests: Vec<ImportSkeletonJsonRequest>,
+    pub auto_weight_skeleton2d_requests: Vec<AutoWeightSkeleton2dRequest>,
 }
 
 /// A pending selection request from the hierarchy panel.
@@ -626,6 +990,7 @@ pub enum EntityType {
     SpotLight,
     GltfModel,
     GltfMesh,
+    Sprite,
 }
 
 impl EntityType {
@@ -647,6 +1012,7 @@ impl EntityType {
             "spot_light" => Some(EntityType::SpotLight),
             "gltf_model" => Some(EntityType::GltfModel),
             "gltf_mesh" => Some(EntityType::GltfMesh),
+            "sprite" => Some(EntityType::Sprite),
             _ => None,
         }
     }
@@ -669,6 +1035,7 @@ impl EntityType {
             EntityType::SpotLight => "Spot Light",
             EntityType::GltfModel => "Model",
             EntityType::GltfMesh => "Mesh",
+            EntityType::Sprite => "Sprite",
         }
     }
 }
@@ -864,6 +1231,51 @@ impl PendingCommands {
         self.force_applications.push(application);
     }
 
+    /// Queue a 2D physics update.
+    pub fn queue_physics2d_update(&mut self, update: Physics2dUpdate) {
+        self.physics2d_updates.push(update);
+    }
+
+    /// Queue a 2D physics toggle.
+    pub fn queue_physics2d_toggle(&mut self, toggle: Physics2dToggle) {
+        self.physics2d_toggles.push(toggle);
+    }
+
+    /// Queue a 2D joint creation request.
+    pub fn queue_create_joint2d(&mut self, request: CreateJoint2dRequest) {
+        self.create_joint2d_requests.push(request);
+    }
+
+    /// Queue a 2D joint removal request.
+    pub fn queue_remove_joint2d(&mut self, request: RemoveJoint2dRequest) {
+        self.remove_joint2d_requests.push(request);
+    }
+
+    /// Queue a 2D force application.
+    pub fn queue_force_application2d(&mut self, application: ForceApplication2d) {
+        self.force_applications2d.push(application);
+    }
+
+    /// Queue a 2D impulse application.
+    pub fn queue_impulse_application2d(&mut self, application: ImpulseApplication2d) {
+        self.impulse_applications2d.push(application);
+    }
+
+    /// Queue a 2D raycast request.
+    pub fn queue_raycast2d(&mut self, request: Raycast2dRequest) {
+        self.raycast2d_requests.push(request);
+    }
+
+    /// Queue a 2D gravity update.
+    pub fn queue_gravity2d_update(&mut self, update: Gravity2dUpdate) {
+        self.gravity2d_updates.push(update);
+    }
+
+    /// Queue a 2D debug physics toggle.
+    pub fn queue_debug_physics2d_toggle(&mut self, toggle: DebugPhysics2dToggle) {
+        self.debug_physics2d_toggles.push(toggle);
+    }
+
     /// Queue a scene export request.
     pub fn queue_scene_export(&mut self) {
         self.scene_export_requests.push(SceneExportRequest);
@@ -1054,9 +1466,147 @@ impl PendingCommands {
         self.update_skybox_requests.push(request);
     }
 
+    /// Queue a custom skybox request.
+    pub fn queue_custom_skybox(&mut self, request: SetCustomSkyboxRequest) {
+        self.custom_skybox_requests.push(request);
+    }
+
     /// Queue a raycast request.
     pub fn queue_raycast(&mut self, request: RaycastRequest) {
         self.raycast_requests.push(request);
+    }
+
+    /// Queue a set game camera request.
+    pub fn queue_set_game_camera(&mut self, request: SetGameCameraRequest) {
+        self.set_game_camera_requests.push(request);
+    }
+
+    /// Queue a set active game camera request.
+    pub fn queue_set_active_game_camera(&mut self, request: SetActiveGameCameraRequest) {
+        self.set_active_game_camera_requests.push(request);
+    }
+
+    /// Queue a camera shake request.
+    pub fn queue_camera_shake(&mut self, request: CameraShakeRequest) {
+        self.camera_shake_requests.push(request);
+    }
+
+    /// Queue a game component add.
+    pub fn queue_game_component_add(&mut self, request: GameComponentAddRequest) {
+        self.game_component_adds.push(request);
+    }
+
+    /// Queue a game component update.
+    pub fn queue_game_component_update(&mut self, request: GameComponentUpdateRequest) {
+        self.game_component_updates.push(request);
+    }
+
+    /// Queue a game component removal.
+    pub fn queue_game_component_removal(&mut self, request: GameComponentRemovalRequest) {
+        self.game_component_removals.push(request);
+    }
+
+    /// Queue an animation clip update.
+    pub fn queue_animation_clip_update(&mut self, update: AnimationClipUpdate) {
+        self.animation_clip_updates.push(update);
+    }
+
+    /// Queue an animation clip add keyframe.
+    pub fn queue_animation_clip_add_keyframe(&mut self, request: AnimationClipAddKeyframe) {
+        self.animation_clip_add_keyframes.push(request);
+    }
+
+    /// Queue an animation clip remove keyframe.
+    pub fn queue_animation_clip_remove_keyframe(&mut self, request: AnimationClipRemoveKeyframe) {
+        self.animation_clip_remove_keyframes.push(request);
+    }
+
+    /// Queue an animation clip update keyframe.
+    pub fn queue_animation_clip_update_keyframe(&mut self, request: AnimationClipUpdateKeyframe) {
+        self.animation_clip_update_keyframes.push(request);
+    }
+
+    /// Queue an animation clip property update.
+    pub fn queue_animation_clip_property_update(&mut self, update: AnimationClipPropertyUpdate) {
+        self.animation_clip_property_updates.push(update);
+    }
+
+    /// Queue an animation clip preview.
+    pub fn queue_animation_clip_preview(&mut self, preview: AnimationClipPreview) {
+        self.animation_clip_previews.push(preview);
+    }
+
+    /// Queue an animation clip removal.
+    pub fn queue_animation_clip_removal(&mut self, removal: AnimationClipRemoval) {
+        self.animation_clip_removals.push(removal);
+    }
+
+    /// Queue a project type change request.
+    pub fn queue_set_project_type(&mut self, request: SetProjectTypeRequest) {
+        self.set_project_type_requests.push(request);
+    }
+
+    /// Queue a sprite data update.
+    pub fn queue_sprite_data_update(&mut self, update: SpriteDataUpdate) {
+        self.sprite_data_updates.push(update);
+    }
+
+    /// Queue a sprite removal.
+    pub fn queue_sprite_removal(&mut self, removal: SpriteRemoval) {
+        self.sprite_removals.push(removal);
+    }
+
+    /// Queue a 2D camera data update.
+    pub fn queue_camera_2d_data_update(&mut self, update: Camera2dDataUpdate) {
+        self.camera_2d_data_updates.push(update);
+    }
+
+    pub fn queue_create_skeleton2d(&mut self, request: CreateSkeleton2dRequest) {
+        self.create_skeleton2d_requests.push(request);
+    }
+
+    pub fn queue_add_bone2d(&mut self, request: AddBone2dRequest) {
+        self.add_bone2d_requests.push(request);
+    }
+
+    pub fn queue_remove_bone2d(&mut self, request: RemoveBone2dRequest) {
+        self.remove_bone2d_requests.push(request);
+    }
+
+    pub fn queue_update_bone2d(&mut self, request: UpdateBone2dRequest) {
+        self.update_bone2d_requests.push(request);
+    }
+
+    pub fn queue_create_skeletal_animation2d(&mut self, request: CreateSkeletalAnimation2dRequest) {
+        self.create_skeletal_animation2d_requests.push(request);
+    }
+
+    pub fn queue_add_keyframe2d(&mut self, request: AddKeyframe2dRequest) {
+        self.add_keyframe2d_requests.push(request);
+    }
+
+    pub fn queue_play_skeletal_animation2d(&mut self, request: PlaySkeletalAnimation2dRequest) {
+        self.play_skeletal_animation2d_requests.push(request);
+    }
+
+    pub fn queue_set_skeleton2d_skin(&mut self, request: SetSkeleton2dSkinRequest) {
+        self.set_skeleton2d_skin_requests.push(request);
+    }
+
+    pub fn queue_create_ik_chain2d(&mut self, request: CreateIkChain2dRequest) {
+        self.create_ik_chain2d_requests.push(request);
+    }
+
+    pub fn queue_get_skeleton2d(&mut self, request: GetSkeleton2dRequest) {
+        self.get_skeleton2d_requests.push(request);
+    }
+
+    pub fn queue_import_skeleton_json(&mut self, request: ImportSkeletonJsonRequest) {
+        self.import_skeleton_json_requests.push(request);
+    }
+
+    pub fn queue_auto_weight_skeleton2d(&mut self, request: AutoWeightSkeleton2dRequest) {
+        self.auto_weight_skeleton2d_requests.push(request);
     }
 }
 
@@ -1438,6 +1988,132 @@ pub fn queue_force_application_from_bridge(application: ForceApplication) -> boo
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_force_application(application);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D physics update from the bridge layer.
+pub fn queue_physics2d_update_from_bridge(update: Physics2dUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_physics2d_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D physics toggle from the bridge layer.
+pub fn queue_physics2d_toggle_from_bridge(toggle: Physics2dToggle) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_physics2d_toggle(toggle);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D joint creation from the bridge layer.
+pub fn queue_create_joint2d_from_bridge(request: CreateJoint2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_create_joint2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D joint removal from the bridge layer.
+pub fn queue_remove_joint2d_from_bridge(request: RemoveJoint2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_remove_joint2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D force application from the bridge layer.
+pub fn queue_force_application2d_from_bridge(application: ForceApplication2d) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_force_application2d(application);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D impulse application from the bridge layer.
+pub fn queue_impulse_application2d_from_bridge(application: ImpulseApplication2d) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_impulse_application2d(application);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D raycast from the bridge layer.
+pub fn queue_raycast2d_from_bridge(request: Raycast2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_raycast2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D gravity update from the bridge layer.
+pub fn queue_gravity2d_update_from_bridge(update: Gravity2dUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_gravity2d_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D debug physics toggle from the bridge layer.
+pub fn queue_debug_physics2d_toggle_from_bridge(toggle: DebugPhysics2dToggle) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_debug_physics2d_toggle(toggle);
             }
             true
         } else {
@@ -2006,6 +2682,20 @@ pub fn queue_update_skybox_from_bridge(request: UpdateSkyboxRequest) -> bool {
     })
 }
 
+/// Queue a custom skybox request from the bridge layer.
+pub fn queue_custom_skybox_from_bridge(request: SetCustomSkyboxRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_custom_skybox(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
 /// Queue a create joint request from the bridge layer.
 pub fn queue_create_joint_from_bridge(request: CreateJointRequest) -> bool {
     PENDING_COMMANDS.with(|pc| {
@@ -2040,6 +2730,423 @@ pub fn queue_remove_joint_from_bridge(request: RemoveJointRequest) -> bool {
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_remove_joint(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a game component add from the bridge layer.
+pub fn queue_game_component_add_from_bridge(entity_id: String, component_type: String, properties_json: String) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_game_component_add(GameComponentAddRequest {
+                    entity_id,
+                    component_type,
+                    properties_json,
+                });
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a game component update from the bridge layer.
+pub fn queue_game_component_update_from_bridge(entity_id: String, component_type: String, properties_json: String) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_game_component_update(GameComponentUpdateRequest {
+                    entity_id,
+                    component_type,
+                    properties_json,
+                });
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a set game camera request from the bridge layer.
+pub fn queue_set_game_camera_from_bridge(request: SetGameCameraRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_set_game_camera(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a set active game camera request from the bridge layer.
+pub fn queue_set_active_game_camera_from_bridge(request: SetActiveGameCameraRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_set_active_game_camera(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a camera shake request from the bridge layer.
+pub fn queue_camera_shake_from_bridge(request: CameraShakeRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_camera_shake(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a game component removal from the bridge layer.
+pub fn queue_game_component_removal_from_bridge(entity_id: String, component_name: String) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_game_component_removal(GameComponentRemovalRequest {
+                    entity_id,
+                    component_name,
+                });
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation clip update from the bridge layer.
+pub fn queue_animation_clip_update_from_bridge(update: AnimationClipUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_clip_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation clip add keyframe from the bridge layer.
+pub fn queue_animation_clip_add_keyframe_from_bridge(request: AnimationClipAddKeyframe) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_clip_add_keyframe(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation clip remove keyframe from the bridge layer.
+pub fn queue_animation_clip_remove_keyframe_from_bridge(request: AnimationClipRemoveKeyframe) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_clip_remove_keyframe(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation clip update keyframe from the bridge layer.
+pub fn queue_animation_clip_update_keyframe_from_bridge(request: AnimationClipUpdateKeyframe) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_clip_update_keyframe(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation clip property update from the bridge layer.
+pub fn queue_animation_clip_property_update_from_bridge(update: AnimationClipPropertyUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_clip_property_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation clip preview from the bridge layer.
+pub fn queue_animation_clip_preview_from_bridge(preview: AnimationClipPreview) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_clip_preview(preview);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an animation clip removal from the bridge layer.
+pub fn queue_animation_clip_removal_from_bridge(removal: AnimationClipRemoval) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_animation_clip_removal(removal);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a project type change request from the bridge layer.
+pub fn queue_set_project_type_from_bridge(request: SetProjectTypeRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_set_project_type(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a sprite data update from the bridge layer.
+pub fn queue_sprite_data_update_from_bridge(update: SpriteDataUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_sprite_data_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a sprite removal from the bridge layer.
+pub fn queue_sprite_removal_from_bridge(removal: SpriteRemoval) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_sprite_removal(removal);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a 2D camera data update from the bridge layer.
+pub fn queue_camera_2d_data_update_from_bridge(update: Camera2dDataUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_camera_2d_data_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a create skeleton 2D request from the bridge layer.
+pub fn queue_create_skeleton2d_from_bridge(request: CreateSkeleton2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_create_skeleton2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an add bone 2D request from the bridge layer.
+pub fn queue_add_bone2d_from_bridge(request: AddBone2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_add_bone2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a remove bone 2D request from the bridge layer.
+pub fn queue_remove_bone2d_from_bridge(request: RemoveBone2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_remove_bone2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an update bone 2D request from the bridge layer.
+pub fn queue_update_bone2d_from_bridge(request: UpdateBone2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_update_bone2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a create skeletal animation 2D request from the bridge layer.
+pub fn queue_create_skeletal_animation2d_from_bridge(request: CreateSkeletalAnimation2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_create_skeletal_animation2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an add keyframe 2D request from the bridge layer.
+pub fn queue_add_keyframe2d_from_bridge(request: AddKeyframe2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_add_keyframe2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a play skeletal animation 2D request from the bridge layer.
+pub fn queue_play_skeletal_animation2d_from_bridge(request: PlaySkeletalAnimation2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_play_skeletal_animation2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a set skeleton 2D skin request from the bridge layer.
+pub fn queue_set_skeleton2d_skin_from_bridge(request: SetSkeleton2dSkinRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_set_skeleton2d_skin(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a create IK chain 2D request from the bridge layer.
+pub fn queue_create_ik_chain2d_from_bridge(request: CreateIkChain2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_create_ik_chain2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a get skeleton 2D request from the bridge layer.
+pub fn queue_get_skeleton2d_from_bridge(request: GetSkeleton2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_get_skeleton2d(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an import skeleton JSON request from the bridge layer.
+pub fn queue_import_skeleton_json_from_bridge(request: ImportSkeletonJsonRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_import_skeleton_json(request);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue an auto weight skeleton 2D request from the bridge layer.
+pub fn queue_auto_weight_skeleton2d_from_bridge(request: AutoWeightSkeleton2dRequest) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_auto_weight_skeleton2d(request);
             }
             true
         } else {

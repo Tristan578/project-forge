@@ -4,6 +4,7 @@ import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, 
 import { useEffect, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { AddEntityMenu, EntityType } from './AddEntityMenu';
 import { SettingsPanel } from '../settings/SettingsPanel';
 
@@ -49,10 +50,11 @@ export function Sidebar() {
   const engineMode = useEditorStore((s) => s.engineMode);
   const play = useEditorStore((s) => s.play);
   const stop = useEditorStore((s) => s.stop);
-  const mixerPanelOpen = useEditorStore((s) => s.mixerPanelOpen);
-  const toggleMixerPanel = useEditorStore((s) => s.toggleMixerPanel);
+  const openPanel = useWorkspaceStore((s) => s.openPanel);
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
+  const chatOverlayOpen = useWorkspaceStore((s) => s.chatOverlayOpen);
+  const toggleChatOverlay = useWorkspaceStore((s) => s.toggleChatOverlay);
   const csgUnion = useEditorStore((s) => s.csgUnion);
   const csgSubtract = useEditorStore((s) => s.csgSubtract);
   const csgIntersect = useEditorStore((s) => s.csgIntersect);
@@ -269,17 +271,16 @@ export function Sidebar() {
       {/* Audio Mixer toggle */}
       <ToolButton
         icon={<SlidersHorizontal size={20} />}
-        active={mixerPanelOpen}
-        onClick={toggleMixerPanel}
+        onClick={() => openPanel('audio-mixer')}
         title="Audio Mixer"
       />
 
       {/* AI Chat toggle */}
       <ToolButton
         icon={<MessageSquare size={20} />}
-        active={rightPanelTab === 'chat'}
-        onClick={() => setRightPanelTab(rightPanelTab === 'chat' ? 'inspector' : 'chat')}
-        title="AI Chat (Ctrl+Shift+I)"
+        active={chatOverlayOpen}
+        onClick={toggleChatOverlay}
+        title="AI Chat (Ctrl+K)"
       />
 
       {/* Settings */}

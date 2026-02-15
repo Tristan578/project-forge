@@ -8,7 +8,12 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:headed": "playwright test --headed",
+    "e2e:debug": "playwright test --debug",
+    "e2e:install": "playwright install --with-deps chromium webkit"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
@@ -16,13 +21,17 @@
     "@clerk/themes": "^2.4.51",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
+    "@xyflow/react": "^12.10.0",
     "bcryptjs": "^3.0.3",
+    "dockview-react": "^4.13.1",
     "dotenv": "^17.2.4",
     "drizzle-orm": "^0.45.1",
     "lucide-react": "^0.563.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "stripe": "^20.3.1",
     "svix": "^1.84.1",
     "zustand": "^5.0.11"

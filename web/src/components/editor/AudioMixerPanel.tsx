@@ -2,7 +2,7 @@
 
 import { useState, memo } from 'react';
 import { useEditorStore, type AudioBusDef, type AudioEffectDef } from '@/stores/editorStore';
-import { SlidersHorizontal, X, Plus } from 'lucide-react';
+import { SlidersHorizontal, Plus } from 'lucide-react';
 
 interface MixerStripProps {
   bus: AudioBusDef;
@@ -297,7 +297,6 @@ export const AudioMixerPanel = memo(function AudioMixerPanel() {
   const audioBuses = useEditorStore((s) => s.audioBuses);
   const updateAudioBus = useEditorStore((s) => s.updateAudioBus);
   const setBusEffects = useEditorStore((s) => s.setBusEffects);
-  const toggleMixerPanel = useEditorStore((s) => s.toggleMixerPanel);
   const createAudioBus = useEditorStore((s) => s.createAudioBus);
 
   const [newBusName, setNewBusName] = useState('');
@@ -333,12 +332,6 @@ export const AudioMixerPanel = memo(function AudioMixerPanel() {
           >
             <Plus size={12} />
             Add Bus
-          </button>
-          <button
-            onClick={toggleMixerPanel}
-            className="text-zinc-500 hover:text-zinc-300"
-          >
-            <X size={14} />
           </button>
         </div>
       </div>

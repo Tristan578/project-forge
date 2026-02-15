@@ -136,6 +136,10 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           // Note: For Bevy on WASM, init_engine may not return immediately
           // The 'ready' event will be emitted from Rust when first frame renders
           setIsReady(true);
+          // Expose readiness flag for E2E tests (Playwright)
+          if (typeof window !== 'undefined') {
+            (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
+          }
           onReadyRef.current?.();
         } catch (err) {
           const engineError = err instanceof Error ? err : new Error(String(err));

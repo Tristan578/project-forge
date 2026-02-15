@@ -13,9 +13,9 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-01
 // Map Stripe price IDs to tiers
 function tierFromPriceId(priceId: string): Tier | null {
   const map: Record<string, Tier> = {
-    [process.env.STRIPE_PRICE_STARTER ?? '']: 'starter',
+    [process.env.STRIPE_PRICE_STARTER ?? '']: 'hobbyist',
     [process.env.STRIPE_PRICE_CREATOR ?? '']: 'creator',
-    [process.env.STRIPE_PRICE_STUDIO ?? '']: 'studio',
+    [process.env.STRIPE_PRICE_STUDIO ?? '']: 'pro',
   };
   return map[priceId] ?? null;
 }
@@ -88,7 +88,7 @@ export async function POST(req: Request) {
         .limit(1);
 
       if (user) {
-        await updateUserTier(user.id, 'free');
+        await updateUserTier(user.id, 'starter');
         await db
           .update(users)
           .set({
@@ -118,7 +118,7 @@ export async function POST(req: Request) {
       if (user) {
         await resetMonthlyTokens(
           user.id,
-          user.tier as 'free' | 'starter' | 'creator' | 'studio'
+          user.tier as 'starter' | 'hobbyist' | 'creator' | 'pro'
         );
       }
       break;

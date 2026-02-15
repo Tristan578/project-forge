@@ -1,7 +1,11 @@
 'use client';
 
 import { useCallback, useState } from 'react';
+import { Sparkles, HelpCircle, Smartphone } from 'lucide-react';
 import { useEditorStore, type AmbientLightData, type EnvironmentData, type ColorGradingSectionData, type QualityPreset } from '@/stores/editorStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 /** Convert linear RGB [0-1] to sRGB hex string. */
 function linearToHex(r: number, g: number, b: number): string {
@@ -28,6 +32,7 @@ const sliderClass = `h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-7
 
 export function SceneSettings() {
   const [colorGradingSection, setColorGradingSection] = useState<'shadows' | 'midtones' | 'highlights'>('midtones');
+  const [generateSkyboxOpen, setGenerateSkyboxOpen] = useState(false);
 
   const ambientLight = useEditorStore((s) => s.ambientLight);
   const updateAmbientLight = useEditorStore((s) => s.updateAmbientLight);
@@ -46,6 +51,10 @@ export function SceneSettings() {
   const updateMotionBlur = useEditorStore((s) => s.updateMotionBlur);
   const qualityPreset = useEditorStore((s) => s.qualityPreset);
   const setQualityPreset = useEditorStore((s) => s.setQualityPreset);
+  const mobileTouchConfig = useEditorStore((s) => s.mobileTouchConfig);
+  const setMobileTouchConfig = useEditorStore((s) => s.setMobileTouchConfig);
+  const updateMobileTouchConfig = useEditorStore((s) => s.updateMobileTouchConfig);
+  const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
 
   const handleAmbientUpdate = useCallback(
     (partial: Partial<AmbientLightData>) => {
@@ -87,7 +96,7 @@ export function SceneSettings() {
           Quality Preset
         </h3>
         <div className="flex items-center gap-2">
-          <label className="w-24 shrink-0 text-xs text-zinc-400">Preset</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Preset<InfoTooltip term="qualityPreset" /></label>
           <select
             value={qualityPreset}
             onChange={(e) => setQualityPreset(e.target.value as QualityPreset)}
@@ -108,13 +117,13 @@ export function SceneSettings() {
       {/* Ambient Light */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Ambient Light
+          Ambient Light<InfoTooltip term="ambientLight" />
         </h3>
 
         <div className="space-y-3">
           {/* Color */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Color</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip text="The color of ambient light filling the scene" /></label>
             <input
               type="color"
               value={ambientColorHex}
@@ -129,7 +138,7 @@ export function SceneSettings() {
 
           {/* Brightness */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Brightness</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Brightness<InfoTooltip text="How bright the ambient light is" /></label>
             <input
               type="range"
               min={0}
@@ -148,14 +157,29 @@ export function SceneSettings() {
 
       {/* Environment */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Environment
-        </h3>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              Environment
+            </h3>
+            <button onClick={() => navigateDocs('features/scene-management')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+              <HelpCircle size={12} />
+            </button>
+          </div>
+          <button
+            onClick={() => setGenerateSkyboxOpen(true)}
+            className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
+            title="Generate skybox with AI"
+          >
+            <Sparkles size={10} />
+            Generate Skybox
+          </button>
+        </div>
 
         <div className="space-y-3">
           {/* Clear Color */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Clear Color</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Clear Color<InfoTooltip term="clearColor" /></label>
             <input
               type="color"
               value={clearColorHex}
@@ -170,7 +194,7 @@ export function SceneSettings() {
 
           {/* Skybox Preset */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Skybox</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Skybox<InfoTooltip term="skybox" /></label>
             <select
               value={environment.skyboxPreset || 'none'}
               onChange={(e) => {
@@ -196,7 +220,7 @@ export function SceneSettings() {
           {/* Skybox Brightness (shown when skybox active) */}
           {environment.skyboxPreset && (
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">Brightness</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Brightness<InfoTooltip term="skyboxBrightness" /></label>
               <input
                 type="range"
                 min={100}
@@ -215,7 +239,7 @@ export function SceneSettings() {
           {/* IBL Intensity (shown when skybox active) */}
           {environment.skyboxPreset && (
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">IBL</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">IBL<InfoTooltip term="ibl" /></label>
               <input
                 type="range"
                 min={100}
@@ -234,7 +258,7 @@ export function SceneSettings() {
           {/* IBL Rotation (shown when skybox active) */}
           {environment.skyboxPreset && (
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">Rotation</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Rotation<InfoTooltip term="skyboxRotation" /></label>
               <input
                 type="range"
                 min={0}
@@ -255,13 +279,13 @@ export function SceneSettings() {
       {/* Fog */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Fog
+          Fog<InfoTooltip term="fog" />
         </h3>
 
         <div className="space-y-3">
           {/* Enabled toggle */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled<InfoTooltip text="Turn fog on or off" /></label>
             <input
               type="checkbox"
               checked={environment.fogEnabled}
@@ -276,7 +300,7 @@ export function SceneSettings() {
             <>
               {/* Fog Color */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Color</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip text="The color objects fade into with distance" /></label>
                 <input
                   type="color"
                   value={fogColorHex}
@@ -291,7 +315,7 @@ export function SceneSettings() {
 
               {/* Fog Start */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Start</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Start<InfoTooltip text="The distance where fog starts to appear" /></label>
                 <input
                   type="range"
                   min={0}
@@ -308,7 +332,7 @@ export function SceneSettings() {
 
               {/* Fog End */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">End</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">End<InfoTooltip text="The distance where objects are fully hidden by fog" /></label>
                 <input
                   type="range"
                   min={environment.fogStart}
@@ -330,13 +354,13 @@ export function SceneSettings() {
       {/* Bloom */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Bloom
+          Bloom<InfoTooltip term="bloom" />
         </h3>
 
         <div className="space-y-3">
           {/* Enabled toggle */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled<InfoTooltip text="Turn the glow effect on or off" /></label>
             <input
               type="checkbox"
               checked={postProcessing.bloom.enabled}
@@ -351,7 +375,7 @@ export function SceneSettings() {
             <>
               {/* Intensity */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Intensity</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Intensity<InfoTooltip term="bloomIntensity" /></label>
                 <input
                   type="range"
                   min={0}
@@ -368,7 +392,7 @@ export function SceneSettings() {
 
               {/* Low Freq Boost */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Low Freq Boost</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Low Freq Boost<InfoTooltip term="bloomLowFreqBoost" /></label>
                 <input
                   type="range"
                   min={0}
@@ -385,7 +409,7 @@ export function SceneSettings() {
 
               {/* High Pass */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">High Pass</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">High Pass<InfoTooltip term="bloomHighPass" /></label>
                 <input
                   type="range"
                   min={0}
@@ -402,7 +426,7 @@ export function SceneSettings() {
 
               {/* Threshold */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Threshold</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Threshold<InfoTooltip term="bloomThreshold" /></label>
                 <input
                   type="range"
                   min={0}
@@ -419,7 +443,7 @@ export function SceneSettings() {
 
               {/* Softness */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Softness</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Softness<InfoTooltip term="bloomSoftness" /></label>
                 <input
                   type="range"
                   min={0}
@@ -436,7 +460,7 @@ export function SceneSettings() {
 
               {/* Composite Mode */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Mode</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Mode<InfoTooltip term="bloomMode" /></label>
                 <select
                   value={postProcessing.bloom.compositeMode}
                   onChange={(e) => updateBloom({ compositeMode: e.target.value as 'energy_conserving' | 'additive' })}
@@ -455,13 +479,13 @@ export function SceneSettings() {
       {/* Chromatic Aberration */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Chromatic Aberration
+          Chromatic Aberration<InfoTooltip term="chromaticAberration" />
         </h3>
 
         <div className="space-y-3">
           {/* Enabled toggle */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
             <input
               type="checkbox"
               checked={postProcessing.chromaticAberration.enabled}
@@ -476,7 +500,7 @@ export function SceneSettings() {
             <>
               {/* Intensity */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Intensity</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Intensity<InfoTooltip term="caIntensity" /></label>
                 <input
                   type="range"
                   min={0}
@@ -493,7 +517,7 @@ export function SceneSettings() {
 
               {/* Max Samples */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Max Samples</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Max Samples<InfoTooltip term="caMaxSamples" /></label>
                 <input
                   type="range"
                   min={2}
@@ -515,13 +539,13 @@ export function SceneSettings() {
       {/* Color Grading */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Color Grading
+          Color Grading<InfoTooltip term="colorGrading" />
         </h3>
 
         <div className="space-y-3">
           {/* Enabled toggle */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
             <input
               type="checkbox"
               checked={postProcessing.colorGrading.enabled}
@@ -535,11 +559,11 @@ export function SceneSettings() {
           {postProcessing.colorGrading.enabled && (
             <>
               {/* Global section header */}
-              <div className="mt-2 text-xs font-semibold text-zinc-400">Global</div>
+              <div className="mt-2 text-xs font-semibold text-zinc-400">Global<InfoTooltip text="Color adjustments that affect the entire image" /></div>
 
               {/* Exposure */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Exposure</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Exposure<InfoTooltip term="exposure" /></label>
                 <input
                   type="range"
                   min={-3}
@@ -556,7 +580,7 @@ export function SceneSettings() {
 
               {/* Temperature */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Temperature</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Temperature<InfoTooltip term="temperature" /></label>
                 <input
                   type="range"
                   min={-1}
@@ -573,7 +597,7 @@ export function SceneSettings() {
 
               {/* Tint */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Tint</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Tint<InfoTooltip term="tint" /></label>
                 <input
                   type="range"
                   min={-1}
@@ -590,7 +614,7 @@ export function SceneSettings() {
 
               {/* Hue (show as degrees) */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Hue</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Hue<InfoTooltip term="hue" /></label>
                 <input
                   type="range"
                   min={-3.14159}
@@ -607,7 +631,7 @@ export function SceneSettings() {
 
               {/* Post Saturation */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Saturation</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Saturation<InfoTooltip term="saturation" /></label>
                 <input
                   type="range"
                   min={0}
@@ -631,6 +655,7 @@ export function SceneSettings() {
                       ? 'bg-zinc-700 text-zinc-200'
                       : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-750'
                   }`}
+                  title="Adjust the darkest parts of the image"
                 >
                   Shadows
                 </button>
@@ -641,6 +666,7 @@ export function SceneSettings() {
                       ? 'bg-zinc-700 text-zinc-200'
                       : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-750'
                   }`}
+                  title="Adjust the middle brightness values"
                 >
                   Midtones
                 </button>
@@ -651,6 +677,7 @@ export function SceneSettings() {
                       ? 'bg-zinc-700 text-zinc-200'
                       : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-750'
                   }`}
+                  title="Adjust the brightest parts of the image"
                 >
                   Highlights
                 </button>
@@ -667,7 +694,7 @@ export function SceneSettings() {
                   <div className="space-y-2 pt-2">
                     {/* Saturation */}
                     <div className="flex items-center gap-2">
-                      <label className="w-24 shrink-0 text-xs text-zinc-400">Saturation</label>
+                      <label className="w-20 shrink-0 text-xs text-zinc-400">Saturation<InfoTooltip term="saturation" /></label>
                       <input
                         type="range"
                         min={0}
@@ -684,7 +711,7 @@ export function SceneSettings() {
 
                     {/* Contrast */}
                     <div className="flex items-center gap-2">
-                      <label className="w-24 shrink-0 text-xs text-zinc-400">Contrast</label>
+                      <label className="w-20 shrink-0 text-xs text-zinc-400">Contrast<InfoTooltip term="contrast" /></label>
                       <input
                         type="range"
                         min={0}
@@ -701,7 +728,7 @@ export function SceneSettings() {
 
                     {/* Gamma */}
                     <div className="flex items-center gap-2">
-                      <label className="w-24 shrink-0 text-xs text-zinc-400">Gamma</label>
+                      <label className="w-20 shrink-0 text-xs text-zinc-400">Gamma<InfoTooltip term="gamma" /></label>
                       <input
                         type="range"
                         min={0.1}
@@ -718,7 +745,7 @@ export function SceneSettings() {
 
                     {/* Gain */}
                     <div className="flex items-center gap-2">
-                      <label className="w-24 shrink-0 text-xs text-zinc-400">Gain</label>
+                      <label className="w-20 shrink-0 text-xs text-zinc-400">Gain<InfoTooltip term="gain" /></label>
                       <input
                         type="range"
                         min={0}
@@ -735,7 +762,7 @@ export function SceneSettings() {
 
                     {/* Lift */}
                     <div className="flex items-center gap-2">
-                      <label className="w-24 shrink-0 text-xs text-zinc-400">Lift</label>
+                      <label className="w-20 shrink-0 text-xs text-zinc-400">Lift<InfoTooltip term="lift" /></label>
                       <input
                         type="range"
                         min={-0.5}
@@ -760,13 +787,13 @@ export function SceneSettings() {
       {/* Sharpening (CAS) */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Sharpening (CAS)
+          Sharpening<InfoTooltip term="sharpening" />
         </h3>
 
         <div className="space-y-3">
           {/* Enabled toggle */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
             <input
               type="checkbox"
               checked={postProcessing.sharpening.enabled}
@@ -781,7 +808,7 @@ export function SceneSettings() {
             <>
               {/* Strength */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Strength</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Strength<InfoTooltip term="sharpenStrength" /></label>
                 <input
                   type="range"
                   min={0}
@@ -798,7 +825,7 @@ export function SceneSettings() {
 
               {/* Denoise */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Denoise</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Denoise<InfoTooltip term="sharpenDenoise" /></label>
                 <input
                   type="checkbox"
                   checked={postProcessing.sharpening.denoise}
@@ -816,13 +843,13 @@ export function SceneSettings() {
       {typeof navigator !== 'undefined' && !!(navigator as Navigator & { gpu?: unknown }).gpu && (
         <div className="border-t border-zinc-800 pt-4">
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            SSAO (WebGPU)
+            SSAO<InfoTooltip term="ssao" />
           </h3>
 
           <div className="space-y-3">
             {/* Enabled toggle */}
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
               <input
                 type="checkbox"
                 checked={postProcessing.ssao !== null}
@@ -841,7 +868,7 @@ export function SceneSettings() {
             {/* SSAO controls (only when enabled) */}
             {postProcessing.ssao && (
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Quality</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Quality<InfoTooltip term="ssaoQuality" /></label>
                 <select
                   value={postProcessing.ssao.quality}
                   onChange={(e) => updateSsao({ quality: e.target.value as 'low' | 'medium' | 'high' | 'ultra' })}
@@ -862,13 +889,13 @@ export function SceneSettings() {
       {/* Depth of Field */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Depth of Field
+          Depth of Field<InfoTooltip term="depthOfField" />
         </h3>
 
         <div className="space-y-3">
           {/* Enabled toggle */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
             <input
               type="checkbox"
               checked={postProcessing.depthOfField !== null}
@@ -896,7 +923,7 @@ export function SceneSettings() {
             <>
               {/* Mode */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Mode</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Mode<InfoTooltip term="dofMode" /></label>
                 <select
                   value={postProcessing.depthOfField.mode}
                   onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, mode: e.target.value as 'gaussian' | 'bokeh' })}
@@ -910,7 +937,7 @@ export function SceneSettings() {
 
               {/* Focal Distance */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Focal Dist</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Focal Dist<InfoTooltip term="dofFocalDist" /></label>
                 <input
                   type="range"
                   min={0.1}
@@ -927,7 +954,7 @@ export function SceneSettings() {
 
               {/* Aperture f-stops */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Aperture f</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Aperture f<InfoTooltip term="dofAperture" /></label>
                 <input
                   type="range"
                   min={1}
@@ -944,7 +971,7 @@ export function SceneSettings() {
 
               {/* Max blur diameter */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Max Blur</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Max Blur<InfoTooltip term="dofMaxBlur" /></label>
                 <input
                   type="range"
                   min={0.01}
@@ -966,13 +993,13 @@ export function SceneSettings() {
       {/* Motion Blur */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-          Motion Blur
+          Motion Blur<InfoTooltip term="motionBlur" />
         </h3>
 
         <div className="space-y-3">
           {/* Enabled toggle */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
             <input
               type="checkbox"
               checked={postProcessing.motionBlur !== null}
@@ -993,7 +1020,7 @@ export function SceneSettings() {
             <>
               {/* Shutter Angle */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Shutter</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Shutter<InfoTooltip term="motionBlurShutter" /></label>
                 <input
                   type="range"
                   min={0}
@@ -1010,7 +1037,7 @@ export function SceneSettings() {
 
               {/* Samples */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Samples</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Samples<InfoTooltip term="motionBlurSamples" /></label>
                 <input
                   type="range"
                   min={1}
@@ -1028,6 +1055,132 @@ export function SceneSettings() {
           )}
         </div>
       </div>
+
+      {/* Mobile Controls */}
+      <div className="border-t border-zinc-800 pt-4">
+        <h3 className="mb-3 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <Smartphone size={12} />
+          Mobile Controls
+        </h3>
+
+        <div className="space-y-3">
+          {/* Enable toggle */}
+          <div className="flex items-center gap-2">
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Enabled</label>
+            <input type="checkbox" checked={mobileTouchConfig.enabled}
+              onChange={(e) => updateMobileTouchConfig({ enabled: e.target.checked })}
+              className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0" />
+          </div>
+
+          {mobileTouchConfig.enabled && (
+            <>
+              {/* Preset dropdown */}
+              <div className="flex items-center gap-2">
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Preset</label>
+                <select value={mobileTouchConfig.preset}
+                  onChange={(e) => {
+                    const preset = e.target.value;
+                    // Import getDefaultTouchPreset dynamically to avoid circular deps
+                    import('@/lib/export/touchControls').then(({ getDefaultTouchPreset }) => {
+                      const config = getDefaultTouchPreset(preset);
+                      setMobileTouchConfig(config);
+                    }).catch(() => {
+                      // If module doesn't exist yet, just update preset
+                      updateMobileTouchConfig({ preset });
+                    });
+                  }}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                  <option value="platformer">Platformer</option>
+                  <option value="fps">FPS</option>
+                  <option value="topdown">Top Down</option>
+                  <option value="racing">Racing</option>
+                  <option value="puzzle">Puzzle</option>
+                  <option value="custom">Custom</option>
+                </select>
+              </div>
+
+              {/* Joystick section */}
+              {mobileTouchConfig.joystick && (
+                <>
+                  <div className="mt-2 text-xs font-semibold text-zinc-400">Joystick</div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-20 shrink-0 text-xs text-zinc-400">Position</label>
+                    <select value={mobileTouchConfig.joystick.position}
+                      onChange={(e) => updateMobileTouchConfig({
+                        joystick: { ...mobileTouchConfig.joystick!, position: e.target.value as 'bottom-left' | 'bottom-right' },
+                      })}
+                      className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 focus:border-blue-500 focus:outline-none">
+                      <option value="bottom-left">Bottom Left</option>
+                      <option value="bottom-right">Bottom Right</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-20 shrink-0 text-xs text-zinc-400">Size</label>
+                    <input type="range" min={60} max={200} step={10}
+                      value={mobileTouchConfig.joystick.size}
+                      onChange={(e) => updateMobileTouchConfig({
+                        joystick: { ...mobileTouchConfig.joystick!, size: parseInt(e.target.value) },
+                      })}
+                      className={sliderClass} />
+                    <span className="w-12 text-right text-xs tabular-nums text-zinc-500">{mobileTouchConfig.joystick.size}px</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="w-20 shrink-0 text-xs text-zinc-400">Opacity</label>
+                    <input type="range" min={0.1} max={1} step={0.05}
+                      value={mobileTouchConfig.joystick.opacity}
+                      onChange={(e) => updateMobileTouchConfig({
+                        joystick: { ...mobileTouchConfig.joystick!, opacity: parseFloat(e.target.value) },
+                      })}
+                      className={sliderClass} />
+                    <span className="w-12 text-right text-xs tabular-nums text-zinc-500">{(mobileTouchConfig.joystick.opacity * 100).toFixed(0)}%</span>
+                  </div>
+                </>
+              )}
+
+              {/* Buttons list */}
+              <div className="mt-2 text-xs font-semibold text-zinc-400">
+                Buttons ({mobileTouchConfig.buttons.length})
+              </div>
+              {mobileTouchConfig.buttons.map((btn) => (
+                <div key={btn.id} className="flex items-center gap-2 rounded bg-zinc-800/50 px-2 py-1">
+                  <span className="w-6 text-center text-sm">{btn.icon}</span>
+                  <span className="flex-1 text-xs text-zinc-300">{btn.action}</span>
+                  <span className="text-[10px] text-zinc-500">{btn.size}px</span>
+                </div>
+              ))}
+
+              {/* Auto quality reduction */}
+              <div className="flex items-center gap-2">
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Auto Low</label>
+                <input type="checkbox" checked={mobileTouchConfig.autoReduceQuality}
+                  onChange={(e) => updateMobileTouchConfig({ autoReduceQuality: e.target.checked })}
+                  className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0" />
+                <span className="text-[10px] text-zinc-500">Reduce quality on mobile</span>
+              </div>
+
+              {/* Orientation */}
+              <div className="flex items-center gap-2">
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Orientation</label>
+                <select value={mobileTouchConfig.preferredOrientation}
+                  onChange={(e) => updateMobileTouchConfig({
+                    preferredOrientation: e.target.value as 'any' | 'landscape' | 'portrait',
+                  })}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 focus:border-blue-500 focus:outline-none">
+                  <option value="any">Any</option>
+                  <option value="landscape">Landscape</option>
+                  <option value="portrait">Portrait</option>
+                </select>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Generation dialog */}
+      <GenerateSkyboxDialog
+        isOpen={generateSkyboxOpen}
+        onClose={() => setGenerateSkyboxOpen(false)}
+      />
     </div>
   );
 }

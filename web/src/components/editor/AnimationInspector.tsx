@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { Play, Pause, Square, RotateCcw } from 'lucide-react';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 export function AnimationInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
@@ -73,13 +74,19 @@ export function AnimationInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4 mt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-        Animation
-      </h3>
+      <div className="mb-3 flex items-center gap-1.5">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Animation
+        </h3>
+        <InfoTooltip text="Controls animation playback on this object" />
+      </div>
 
       {/* Clip selector */}
       <div className="mb-3">
-        <label className="mb-1 block text-xs text-zinc-400">Clip</label>
+        <div className="mb-1 flex items-center gap-1.5">
+          <label className="text-xs text-zinc-400">Clip</label>
+          <InfoTooltip term="animationClip" />
+        </div>
         <select
           value={animation.activeClipName ?? ''}
           onChange={(e) => {
@@ -99,7 +106,10 @@ export function AnimationInspector() {
 
       {/* Crossfade duration */}
       <div className="mb-3 flex items-center gap-2">
-        <label className="w-20 shrink-0 text-xs text-zinc-400">Crossfade</label>
+        <div className="flex w-20 shrink-0 items-center gap-1">
+          <label className="text-xs text-zinc-400">Crossfade</label>
+          <InfoTooltip term="animationCrossfade" />
+        </div>
         <input
           type="range"
           min={0}
@@ -196,7 +206,10 @@ export function AnimationInspector() {
 
       {/* Speed control */}
       <div className="mb-3 flex items-center gap-2">
-        <label className="w-12 shrink-0 text-xs text-zinc-400">Speed</label>
+        <div className="flex w-12 shrink-0 items-center gap-1">
+          <label className="text-xs text-zinc-400">Speed</label>
+          <InfoTooltip term="animationSpeed" />
+        </div>
         <input
           type="range"
           min={0.1}
@@ -216,7 +229,10 @@ export function AnimationInspector() {
 
       {/* Loop toggle */}
       <div className="mb-3 flex items-center gap-2">
-        <label className="w-12 shrink-0 text-xs text-zinc-400">Loop</label>
+        <div className="flex w-12 shrink-0 items-center gap-1">
+          <label className="text-xs text-zinc-400">Loop</label>
+          <InfoTooltip term="animationLoop" />
+        </div>
         <input
           type="checkbox"
           checked={animation.isLooping}
@@ -229,12 +245,15 @@ export function AnimationInspector() {
       {/* Per-clip blend weights (advanced) */}
       {animation.availableClips.length > 1 && (
         <div className="border-t border-zinc-800 pt-3">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
-            Blend Weights
-          </h4>
+          <div className="mb-2 flex items-center gap-1.5">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+              Blend Weights
+            </h4>
+            <InfoTooltip term="blendWeights" />
+          </div>
           {animation.availableClips.map((clip) => (
             <div key={clip.name} className="mb-2 flex items-center gap-2">
-              <label className="w-24 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-zinc-400">
+              <label className="w-20 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs text-zinc-400">
                 {clip.name}
               </label>
               <input

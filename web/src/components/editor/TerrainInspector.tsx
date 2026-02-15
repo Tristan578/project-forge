@@ -1,14 +1,17 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Shuffle } from 'lucide-react';
+import { Shuffle, HelpCircle } from 'lucide-react';
 import { useEditorStore, type TerrainDataState } from '@/stores/editorStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 export function TerrainInspector() {
   const primaryId = useEditorStore((s) => s.primaryId);
   const terrainDataStore = useEditorStore((s) => s.terrainData);
   const updateTerrain = useEditorStore((s) => s.updateTerrain);
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
+  const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
 
   const terrainData = primaryId ? terrainDataStore[primaryId] : null;
 
@@ -55,12 +58,23 @@ export function TerrainInspector() {
   return (
     <div className="space-y-4 border-b border-zinc-800 pb-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-zinc-300">Terrain</h3>
+        <div className="flex items-center gap-1">
+          <h3 className="text-sm font-medium text-zinc-300">
+            Terrain
+          </h3>
+          <InfoTooltip text="Procedurally generated landscape" />
+          <button onClick={() => navigateDocs('features/terrain')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+            <HelpCircle size={12} />
+          </button>
+        </div>
       </div>
 
       {/* Resolution and Size */}
       <div className="space-y-2">
-        <label className="text-xs text-zinc-400">Resolution</label>
+        <label className="text-xs text-zinc-400 flex items-center gap-1">
+          Resolution
+          <InfoTooltip term="terrainResolution" />
+        </label>
         <select
           value={localData.resolution}
           onChange={(e) => handleChange('resolution', parseInt(e.target.value))}
@@ -74,7 +88,10 @@ export function TerrainInspector() {
       </div>
 
       <div className="space-y-2">
-        <label className="text-xs text-zinc-400">Size (world units)</label>
+        <label className="text-xs text-zinc-400 flex items-center gap-1">
+          Size
+          <InfoTooltip term="terrainSize" />
+        </label>
         <input
           type="number"
           value={localData.size}
@@ -90,7 +107,10 @@ export function TerrainInspector() {
         <h4 className="text-xs font-medium text-zinc-500 uppercase">Noise</h4>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Type</label>
+          <label className="text-xs text-zinc-400 flex items-center gap-1">
+            Type
+            <InfoTooltip term="terrainNoiseType" />
+          </label>
           <select
             value={localData.noiseType}
             onChange={(e) => handleChange('noiseType', e.target.value)}
@@ -103,7 +123,10 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Octaves: {localData.octaves}</label>
+          <label className="text-xs text-zinc-400 flex items-center gap-1">
+            Octaves: {localData.octaves}
+            <InfoTooltip term="terrainOctaves" />
+          </label>
           <input
             type="range"
             min={1}
@@ -116,7 +139,10 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Frequency: {localData.frequency.toFixed(3)}</label>
+          <label className="text-xs text-zinc-400 flex items-center gap-1">
+            Frequency: {localData.frequency.toFixed(3)}
+            <InfoTooltip term="terrainFrequency" />
+          </label>
           <input
             type="range"
             min={0.001}
@@ -129,7 +155,10 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Amplitude: {localData.amplitude.toFixed(2)}</label>
+          <label className="text-xs text-zinc-400 flex items-center gap-1">
+            Amplitude: {localData.amplitude.toFixed(2)}
+            <InfoTooltip term="terrainAmplitude" />
+          </label>
           <input
             type="range"
             min={0.0}
@@ -142,7 +171,10 @@ export function TerrainInspector() {
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs text-zinc-400">Height Scale: {localData.heightScale.toFixed(1)}</label>
+          <label className="text-xs text-zinc-400 flex items-center gap-1">
+            Height Scale: {localData.heightScale.toFixed(1)}
+            <InfoTooltip term="terrainHeightScale" />
+          </label>
           <input
             type="range"
             min={0.1}
@@ -156,7 +188,10 @@ export function TerrainInspector() {
 
         <div className="flex items-end gap-2">
           <div className="flex-1 space-y-2">
-            <label className="text-xs text-zinc-400">Seed</label>
+            <label className="text-xs text-zinc-400 flex items-center gap-1">
+              Seed
+              <InfoTooltip term="terrainSeed" />
+            </label>
             <input
               type="number"
               value={localData.seed}

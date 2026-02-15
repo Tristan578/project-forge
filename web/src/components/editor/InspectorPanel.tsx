@@ -10,11 +10,21 @@ import { MaterialInspector } from './MaterialInspector';
 import { SceneSettings } from './SceneSettings';
 import { InputBindingsPanel } from './InputBindingsPanel';
 import { PhysicsInspector } from './PhysicsInspector';
+import { Physics2dInspector } from './Physics2dInspector';
 import { AudioInspector } from './AudioInspector';
 import { ParticleInspector } from './ParticleInspector';
 import { AnimationInspector } from './AnimationInspector';
+import { AnimationClipInspector } from './AnimationClipInspector';
 import { TerrainInspector } from './TerrainInspector';
 import { JointInspector } from './JointInspector';
+import { GameComponentInspector } from './GameComponentInspector';
+import { GameCameraInspector } from './GameCameraInspector';
+import { SpriteInspector } from './SpriteInspector';
+import { SpriteAnimationInspector } from './SpriteAnimationInspector';
+import { SkeletonInspector } from './SkeletonInspector';
+import { Camera2dInspector } from './Camera2dInspector';
+import { TilemapInspector } from './TilemapInspector';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   copyTransformProperty,
   copyFullTransform,
@@ -42,6 +52,14 @@ export const InspectorPanel = memo(function InspectorPanel() {
   const allScripts = useEditorStore((s) => s.allScripts);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
   const hasScript = primaryId ? !!allScripts[primaryId] : false;
+  const projectType = useEditorStore((s) => s.projectType);
+  const sceneGraph = useEditorStore((s) => s.sceneGraph);
+  const is2D = projectType === '2d';
+  const skeletons2d = useEditorStore((s) => s.skeletons2d);
+
+  // Determine entity type from scene graph components
+  const entityType = primaryId ? sceneGraph.nodes[primaryId]?.components : [];
+  const hasSkeleton = primaryId ? !!skeletons2d[primaryId] : false;
 
   const [localName, setLocalName] = useState(primaryName ?? '');
   const [trackedPrimaryId, setTrackedPrimaryId] = useState(primaryId);
@@ -176,7 +194,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
   // No selection — show Scene Settings
   if (!primaryId) {
     return (
-      <div className="flex h-full flex-col bg-zinc-900 p-4 overflow-y-auto">
+      <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
         <h2 className="mb-4 text-sm font-semibold text-zinc-300">Scene Settings</h2>
         <SceneSettings />
         <InputBindingsPanel />
@@ -200,13 +218,13 @@ export const InspectorPanel = memo(function InspectorPanel() {
   `;
 
   return (
-    <div className="flex h-full flex-col bg-zinc-900 p-4 overflow-y-auto">
+    <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
       <h2 className="mb-4 text-sm font-semibold text-zinc-300">Inspector</h2>
 
       {/* Name field */}
       <div className="mb-4">
         <label className="mb-1 block text-xs font-medium text-zinc-400">
-          Name
+          <span>Name <InfoTooltip term="name" /></span>
         </label>
         <input
           ref={nameInputRef}
@@ -227,7 +245,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
             {/* Transform header with Copy All / Paste All */}
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                Transform
+                <span>Transform <InfoTooltip text="The position, rotation, and size of this object in the 3D world" /></span>
               </h3>
               <div className="flex items-center gap-1">
                 <button
@@ -291,14 +309,31 @@ export const InspectorPanel = memo(function InspectorPanel() {
         </div>
       )}
 
-      {/* Light section (only for light entities) */}
-      {primaryLight && <LightInspector />}
+      {/* 2D Sprite section (only for sprite entities in 2D projects) */}
+      {is2D && entityType.includes('Sprite') && <SpriteInspector />}
 
-      {/* Material section (only for mesh entities — mutually exclusive with light) */}
-      {!primaryLight && <MaterialInspector />}
+      {/* Sprite Animation section (for sprites with animation data) */}
+      {is2D && entityType.includes('Sprite') && <SpriteAnimationInspector />}
 
-      {/* Physics section (for all entities) */}
-      <PhysicsInspector />
+      {/* Skeletal 2D Animation section (for entities with skeleton data in 2D projects) */}
+      {is2D && primaryId && (hasSkeleton || entityType.includes('Sprite')) && (
+        <SkeletonInspector entityId={primaryId} />
+      )}
+
+      {/* 2D Camera section (only for camera2d entities in 2D projects) */}
+      {is2D && entityType.includes('Camera2d') && <Camera2dInspector />}
+
+      {/* Tilemap section (only in 2D projects) */}
+      {is2D && <TilemapInspector />}
+
+      {/* Light section (only for light entities in 3D projects) */}
+      {!is2D && primaryLight && <LightInspector />}
+
+      {/* Material section (only for mesh entities in 3D projects — mutually exclusive with light) */}
+      {!is2D && !primaryLight && <MaterialInspector />}
+
+      {/* Physics section (conditional based on project type) */}
+      {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
 
       {/* Joint section (for entities with physics) */}
       <JointInspector />
@@ -315,10 +350,21 @@ export const InspectorPanel = memo(function InspectorPanel() {
       {/* Animation section (for glTF entities with animations) */}
       <AnimationInspector />
 
+      {/* Keyframe property animation (D-2) */}
+      <AnimationClipInspector />
+
+      {/* Game Components section */}
+      <GameComponentInspector />
+
+      {/* Game Camera section */}
+      <GameCameraInspector />
+
       {/* Script section */}
       <div className="border-t border-zinc-800 pt-4 mt-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Script</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <span>Script <InfoTooltip term="script" /></span>
+          </h3>
           {hasScript && (
             <span className="rounded bg-green-900/30 px-1.5 py-0.5 text-[10px] text-green-400">
               Active

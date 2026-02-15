@@ -19,6 +19,7 @@ interface EntityInfo {
   name: string;
   type: string;
   colliderRadius: number;
+  currentFrame?: number;
 }
 
 interface InputState {
@@ -54,6 +55,16 @@ let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;
 const uiElements: Map<string, UIElement> = new Map();
 let uiDirty = false;
+
+// UI Builder screen visibility (synced from main thread)
+const screenVisibility: Record<string, boolean> = {};
+const widgetValues: Record<string, unknown> = {};
+
+// Shared state (synced from main thread)
+const _sharedState: Record<string, unknown> & { cameraMode: string; dialogueActive: boolean } = {
+  cameraMode: 'thirdPersonFollow',
+  dialogueActive: false,
+};
 
 // Collision callback registries
 const collisionEnterCallbacks: Map<string, (otherId: string) => void> = new Map();
@@ -163,6 +174,19 @@ function buildForgeApi(scriptEntityId: string) {
       reset: () => {
         pendingCommands.push({ cmd: 'stop' });
       },
+      load: (sceneName: string, transition?: Record<string, unknown>) => {
+        (self as unknown as Worker).postMessage({ type: 'scene_load', sceneName, transition });
+      },
+      restart: () => {
+        (self as unknown as Worker).postMessage({ type: 'scene_restart' });
+      },
+      getCurrent: () => {
+        // Will be set from main thread on init/tick
+        return (self as unknown as Record<string, unknown>).__currentScene as string || 'Main';
+      },
+      getAll: () => {
+        return ((self as unknown as Record<string, unknown>).__allSceneNames as string[]) || [];
+      },
     },
 
     input: {
@@ -170,6 +194,13 @@ function buildForgeApi(scriptEntityId: string) {
       justPressed: (action: string) => !!currentInput.justPressed[action],
       justReleased: (action: string) => !!currentInput.justReleased[action],
       getAxis: (action: string) => currentInput.axes[action] ?? 0,
+      isTouchDevice: () => {
+        // In web worker context, check for touch support
+        return typeof self !== 'undefined' && ('ontouchstart' in self || (navigator && navigator.maxTouchPoints > 0));
+      },
+      vibrate: (pattern: number[]) => {
+        pendingCommands.push({ cmd: 'vibrate', pattern });
+      },
     },
     physics: {
       applyForce: (eid: string, fx: number, fy: number, fz: number) => {
@@ -216,6 +247,59 @@ function buildForgeApi(scriptEntityId: string) {
         collisionExitCallbacks.delete(eid);
       },
     },
+    physics2d: {
+      applyForce: (eid: string, forceX: number, forceY: number) => {
+        pendingCommands.push({ cmd: 'apply_force2d', entityId: eid, forceX, forceY });
+      },
+      applyImpulse: (eid: string, impulseX: number, impulseY: number) => {
+        pendingCommands.push({ cmd: 'apply_impulse2d', entityId: eid, impulseX, impulseY });
+      },
+      setVelocity: (eid: string, vx: number, vy: number) => {
+        pendingCommands.push({ cmd: 'set_velocity2d', entityId: eid, velocityX: vx, velocityY: vy });
+      },
+      getVelocity: (_eid: string) => {
+        // Would need state tracking from engine
+        return null;
+      },
+      setAngularVelocity: (eid: string, omega: number) => {
+        pendingCommands.push({ cmd: 'set_angular_velocity2d', entityId: eid, omega });
+      },
+      getAngularVelocity: (_eid: string) => {
+        // Would need state tracking from engine
+        return null;
+      },
+      raycast: async (_originX: number, _originY: number, _dirX: number, _dirY: number, _maxDistance?: number) => {
+        // TODO: Implement raycast2d with request/response pattern when engine supports it
+        return Promise.resolve(null);
+      },
+      isGrounded: async (_eid: string, _distance?: number) => {
+        // TODO: Implement isGrounded when raycast2d is available
+        return Promise.resolve(false);
+      },
+      setGravity: (x: number, y: number) => {
+        pendingCommands.push({ cmd: 'set_gravity2d', gravityX: x, gravityY: y });
+      },
+      onCollisionEnter: (callback: (event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void) => {
+        // Store callback in global array
+        const callbacks = ((self as unknown as Record<string, unknown>).__collision2dEnterCallbacks as Array<typeof callback>) || [];
+        callbacks.push(callback);
+        (self as unknown as Record<string, unknown>).__collision2dEnterCallbacks = callbacks;
+        // Return unsubscribe function
+        return () => {
+          const idx = callbacks.indexOf(callback);
+          if (idx >= 0) callbacks.splice(idx, 1);
+        };
+      },
+      onCollisionExit: (callback: (event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void) => {
+        const callbacks = ((self as unknown as Record<string, unknown>).__collision2dExitCallbacks as Array<typeof callback>) || [];
+        callbacks.push(callback);
+        (self as unknown as Record<string, unknown>).__collision2dExitCallbacks = callbacks;
+        return () => {
+          const idx = callbacks.indexOf(callback);
+          if (idx >= 0) callbacks.splice(idx, 1);
+        };
+      },
+    },
     particles: {
       setPreset: (eid: string, preset: string) => {
         pendingCommands.push({ cmd: 'set_particle_preset', entityId: eid, preset });
@@ -258,6 +342,46 @@ function buildForgeApi(scriptEntityId: string) {
       listClips: (_eid: string) => {
         // In worker, we don't have access to animation registry — return empty
         return [] as string[];
+      },
+    },
+    tilemap: {
+      getTile: (_tilemapId: string, _x: number, _y: number, _layer = 0) => {
+        // Read from entity cache/store (would need tilemap state synced)
+        // For now, return null until tilemap state is synced to worker
+        // TODO: Sync tilemap data to worker and use parameters
+        return null;
+      },
+      setTile: (tilemapId: string, x: number, y: number, tileId: number | null, layer = 0) => {
+        pendingCommands.push({ cmd: 'set_tile', tilemapId, x, y, tileId, layer });
+      },
+      fillRect: (tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer = 0) => {
+        pendingCommands.push({ cmd: 'fill_tiles', tilemapId, x, y, width: w, height: h, tileId, layer });
+      },
+      clearTile: (tilemapId: string, x: number, y: number, layer = 0) => {
+        pendingCommands.push({ cmd: 'clear_tiles', tilemapId, x, y, width: 1, height: 1, layer });
+      },
+      worldToTile: (_tilemapId: string, worldX: number, worldY: number): [number, number] => {
+        // Pure math conversion (would need tilemap data for tile size and origin)
+        // For now, assume 32x32 tiles and top-left origin
+        // TODO: Use actual tilemap tile size from synced data
+        const tileX = Math.floor(worldX / 32);
+        const tileY = Math.floor(-worldY / 32);
+        return [tileX, tileY];
+      },
+      tileToWorld: (_tilemapId: string, tileX: number, tileY: number): [number, number] => {
+        // Pure math conversion
+        // TODO: Use actual tilemap tile size from synced data
+        const worldX = tileX * 32;
+        const worldY = -tileY * 32;
+        return [worldX, worldY];
+      },
+      getMapSize: (_tilemapId: string): [number, number] => {
+        // Would need tilemap data synced to worker
+        // TODO: Sync tilemap data to worker
+        return [0, 0];
+      },
+      resize: (tilemapId: string, width: number, height: number, anchor = 'top-left') => {
+        pendingCommands.push({ cmd: 'resize_tilemap', tilemapId, width, height, anchor });
       },
     },
     audio: {
@@ -354,6 +478,37 @@ function buildForgeApi(scriptEntityId: string) {
         uiElements.clear();
         uiDirty = true;
       },
+
+      // --- UI Builder screen management ---
+      showScreen: (nameOrId: string) => {
+        (self as unknown as Worker).postMessage({ type: 'ui_screen', action: 'show', target: nameOrId });
+      },
+      hideScreen: (nameOrId: string) => {
+        (self as unknown as Worker).postMessage({ type: 'ui_screen', action: 'hide', target: nameOrId });
+      },
+      toggleScreen: (nameOrId: string) => {
+        (self as unknown as Worker).postMessage({ type: 'ui_screen', action: 'toggle', target: nameOrId });
+      },
+      isScreenVisible: (nameOrId: string) => {
+        return screenVisibility[nameOrId] ?? false;
+      },
+      hideAllScreens: () => {
+        (self as unknown as Worker).postMessage({ type: 'ui_screen', action: 'hide_all' });
+      },
+
+      // --- UI Builder widget manipulation ---
+      setWidgetText: (screen: string, widget: string, text: string) => {
+        (self as unknown as Worker).postMessage({ type: 'ui_widget', action: 'set_text', screen, widget, text });
+      },
+      setWidgetVisible: (screen: string, widget: string, visible: boolean) => {
+        (self as unknown as Worker).postMessage({ type: 'ui_widget', action: 'set_visible', screen, widget, visible });
+      },
+      setWidgetStyle: (screen: string, widget: string, style: Record<string, unknown>) => {
+        (self as unknown as Worker).postMessage({ type: 'ui_widget', action: 'set_style', screen, widget, style });
+      },
+      getWidgetValue: (screen: string, widget: string) => {
+        return widgetValues[`${screen}:${widget}`] ?? null;
+      },
     },
 
     // --- Camera control ---
@@ -374,6 +529,160 @@ function buildForgeApi(scriptEntityId: string) {
       lookAt: (x: number, y: number, z: number) => {
         pendingCommands.push({ cmd: 'camera_look_at', target: [x, y, z] });
       },
+      setMode: (mode: string) => {
+        (self as unknown as Worker).postMessage({ type: 'camera_set_mode', mode });
+      },
+      setTarget: (eid: string) => {
+        (self as unknown as Worker).postMessage({ type: 'camera_set_target', entityId: eid });
+      },
+      shake: (intensity: number, duration: number) => {
+        (self as unknown as Worker).postMessage({ type: 'camera_shake', intensity, duration });
+      },
+      getMode: () => {
+        // Sync access from shared state
+        return _sharedState.cameraMode || 'thirdPersonFollow';
+      },
+      setProperty: (property: string, value: number) => {
+        (self as unknown as Worker).postMessage({ type: 'camera_set_property', property, value });
+      },
+    },
+
+    // --- Dialogue control ---
+    dialogue: {
+      start: (treeId: string) => {
+        (self as unknown as Worker).postMessage({ type: 'dialogue_start', treeId });
+      },
+      isActive: () => {
+        return !!_sharedState.dialogueActive;
+      },
+      end: () => {
+        (self as unknown as Worker).postMessage({ type: 'dialogue_end' });
+      },
+      advance: () => {
+        (self as unknown as Worker).postMessage({ type: 'dialogue_advance' });
+      },
+      skip: () => {
+        (self as unknown as Worker).postMessage({ type: 'dialogue_skip' });
+      },
+      setVariable: (treeId: string, key: string, value: unknown) => {
+        (self as unknown as Worker).postMessage({ type: 'dialogue_set_variable', treeId, key, value });
+      },
+      getVariable: (treeId: string, key: string) => {
+        return _sharedState[`dialogue_var_${treeId}_${key}`];
+      },
+      onStart: (callback: (treeId: string) => void) => {
+        _sharedState._dialogueOnStart = callback;
+      },
+      onEnd: (callback: () => void) => {
+        _sharedState._dialogueOnEnd = callback;
+      },
+      onChoice: (callback: (choiceId: string, choiceText: string) => void) => {
+        _sharedState._dialogueOnChoice = callback;
+      },
+    },
+
+    // --- Sprite animation control ---
+    sprite: {
+      playAnimation: (eid: string, clipName: string) => {
+        pendingCommands.push({ cmd: 'play_sprite_animation', entityId: eid, clipName });
+      },
+      stopAnimation: (eid: string) => {
+        pendingCommands.push({ cmd: 'stop_sprite_animation', entityId: eid });
+      },
+      setAnimSpeed: (eid: string, speed: number) => {
+        pendingCommands.push({ cmd: 'set_sprite_anim_speed', entityId: eid, speed });
+      },
+      setAnimParam: (eid: string, paramName: string, value: number | boolean) => {
+        pendingCommands.push({ cmd: 'set_sprite_anim_param', entityId: eid, paramName, value });
+      },
+      getCurrentFrame: (eid: string) => {
+        return entityInfos[eid]?.currentFrame ?? 0;
+      },
+    },
+
+    // --- Skeletal 2D animation control (old namespace - for compatibility) ---
+    skeleton: {
+      addBone: (eid: string, bone: Partial<{ name: string; parentBone: string | null; position: [number, number]; rotation: number; length: number }>) => {
+        pendingCommands.push({
+          cmd: 'add_bone2d',
+          entityId: eid,
+          name: bone.name ?? 'bone',
+          parent_bone: bone.parentBone ?? null,
+          position: bone.position ?? [0, 0],
+          rotation: bone.rotation ?? 0,
+          length: bone.length ?? 50,
+        });
+      },
+      removeBone: (eid: string, boneName: string) => {
+        pendingCommands.push({ cmd: 'remove_bone2d', entityId: eid, bone_name: boneName });
+      },
+      updateBone: (eid: string, boneName: string, updates: Partial<{ position: [number, number]; rotation: number; scale: [number, number]; length: number }>) => {
+        pendingCommands.push({
+          cmd: 'update_bone2d',
+          entityId: eid,
+          bone_name: boneName,
+          ...updates,
+        });
+      },
+      getBones: (_eid: string) => {
+        // Would need to be populated from engine state
+        return null;
+      },
+      playAnimation: (eid: string, animName: string, options?: { loop?: boolean; speed?: number; crossfade?: number }) => {
+        pendingCommands.push({
+          cmd: 'play_skeletal_animation2d',
+          entityId: eid,
+          anim_name: animName,
+          loop: options?.loop ?? true,
+          speed: options?.speed ?? 1.0,
+          crossfade: options?.crossfade ?? 0.0,
+        });
+      },
+      stopAnimation: (eid: string) => {
+        pendingCommands.push({ cmd: 'stop_skeletal_animation2d', entityId: eid });
+      },
+      setSkin: (eid: string, skinName: string) => {
+        pendingCommands.push({ cmd: 'set_skeleton2d_skin', entityId: eid, skin_name: skinName });
+      },
+      getSkin: (_eid: string) => {
+        // Would need to be populated from engine state
+        return null;
+      },
+      setIkTarget: (eid: string, constraintName: string, targetX: number, targetY: number) => {
+        pendingCommands.push({
+          cmd: 'set_ik_target2d',
+          entityId: eid,
+          constraint_name: constraintName,
+          target_x: targetX,
+          target_y: targetY,
+        });
+      },
+    },
+
+    // --- Skeletal 2D animation control (new namespace) ---
+    skeleton2d: {
+      createSkeleton: (eid: string) => {
+        pendingCommands.push({ cmd: 'create_skeleton2d', entityId: eid });
+      },
+      addBone: (eid: string, boneName: string, parentBone: string | null, x: number, y: number, rotation: number, length: number) => {
+        pendingCommands.push({ cmd: 'add_bone2d', entityId: eid, boneName, parentBone, positionX: x, positionY: y, rotation, length });
+      },
+      removeBone: (eid: string, boneName: string) => {
+        pendingCommands.push({ cmd: 'remove_bone2d', entityId: eid, boneName });
+      },
+      updateBone: (eid: string, boneName: string, x: number, y: number, rotation: number, length: number) => {
+        pendingCommands.push({ cmd: 'update_bone2d', entityId: eid, boneName, positionX: x, positionY: y, rotation, length });
+      },
+      setSkin: (eid: string, skinName: string) => {
+        pendingCommands.push({ cmd: 'set_skeleton2d_skin', entityId: eid, skinName });
+      },
+      playAnimation: (eid: string, animationName: string) => {
+        pendingCommands.push({ cmd: 'play_skeletal_animation2d', entityId: eid, animationName });
+      },
+      getBones: (_eid: string) => {
+        // TODO: sync skeleton state to worker
+        return null;
+      },
     },
 
     time: {
@@ -384,20 +693,37 @@ function buildForgeApi(scriptEntityId: string) {
       get: (key: string) => sharedState[key],
       set: (key: string, value: unknown) => { sharedState[key] = value; },
     },
+    screen: {
+      get orientation() {
+        return 'landscape-primary'; // Workers can't access screen orientation
+      },
+    },
   };
 }
+
+// Globals to shadow in user scripts for sandbox isolation
+const SHADOWED_GLOBALS = [
+  'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
+  'indexedDB', 'caches', 'navigator', 'location',
+  'EventSource', 'BroadcastChannel',
+] as const;
 
 function compileScript(entityId_: string, source: string): ScriptInstance {
   const forge = buildForgeApi(entityId_);
   const instance: ScriptInstance = { entityId: entityId_ };
 
   try {
-    // Create a function that has access to forge and entityId
-    const fn = new Function('forge', 'entityId', `
+    // Shadow dangerous globals to prevent network access from user scripts
+    const fn = new Function(
+      'forge', 'entityId',
+      ...SHADOWED_GLOBALS,
+      `
       ${source}
       return { onStart: typeof onStart === 'function' ? onStart : undefined, onUpdate: typeof onUpdate === 'function' ? onUpdate : undefined, onDestroy: typeof onDestroy === 'function' ? onDestroy : undefined };
-    `);
-    const result = fn(forge, entityId_);
+      `
+    );
+    // Pass undefined for all shadowed globals
+    const result = fn(forge, entityId_, ...SHADOWED_GLOBALS.map(() => undefined));
     instance.onStart = result.onStart;
     instance.onUpdate = result.onUpdate;
     instance.onDestroy = result.onDestroy;
@@ -409,7 +735,16 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
   return instance;
 }
 
+const MAX_COMMANDS_PER_FRAME = 100;
+
 function flushCommands() {
+  if (pendingCommands.length > MAX_COMMANDS_PER_FRAME) {
+    (self as unknown as Worker).postMessage({
+      type: 'error', entityId: '', line: 0,
+      message: `Command limit exceeded (${pendingCommands.length}/${MAX_COMMANDS_PER_FRAME} per frame). Extra commands dropped.`,
+    });
+    pendingCommands = pendingCommands.slice(0, MAX_COMMANDS_PER_FRAME);
+  }
   if (pendingCommands.length > 0) {
     (self as unknown as Worker).postMessage({ type: 'commands', commands: pendingCommands });
     pendingCommands = [];
@@ -527,6 +862,12 @@ self.onmessage = (e: MessageEvent) => {
           (self as unknown as Worker).postMessage({ type: 'error', entityId: entityB, line: 0, message: `Collision callback error: ${msg_}` });
         }
       }
+      break;
+    }
+
+    case 'scene_info': {
+      (self as unknown as Record<string, unknown>).__currentScene = msg.currentScene;
+      (self as unknown as Record<string, unknown>).__allSceneNames = msg.allSceneNames;
       break;
     }
   }

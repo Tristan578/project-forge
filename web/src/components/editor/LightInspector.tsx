@@ -2,6 +2,7 @@
 
 import { useCallback } from 'react';
 import { useEditorStore, type LightData } from '@/stores/editorStore';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 /** Convert linear RGB [0-1] to sRGB hex string. */
 function linearToHex(r: number, g: number, b: number): string {
@@ -27,39 +28,6 @@ function radToDeg(rad: number): number {
 
 function degToRad(deg: number): number {
   return (deg * Math.PI) / 180;
-}
-
-interface SliderRowProps {
-  label: string;
-  value: number;
-  min?: number;
-  max?: number;
-  step?: number;
-  precision?: number;
-  onChange: (v: number) => void;
-}
-
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange }: SliderRowProps) {
-  return (
-    <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
-          [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
-          [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-          [&::-webkit-slider-thumb]:bg-zinc-300"
-      />
-      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
-        {value.toFixed(precision)}
-      </span>
-    </div>
-  );
 }
 
 export function LightInspector() {
@@ -106,7 +74,7 @@ export function LightInspector() {
       <div className="space-y-3">
         {/* Color */}
         <div className="flex items-center gap-2">
-          <label className="w-24 shrink-0 text-xs text-zinc-400">Color</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Color</label>
           <input
             type="color"
             value={colorHex}
@@ -120,68 +88,114 @@ export function LightInspector() {
         </div>
 
         {/* Intensity */}
-        <SliderRow
-          label={intensityLabel}
-          value={primaryLight.intensity}
-          min={0}
-          max={intensityMax}
-          step={isDirectional ? 100 : 1000}
-          precision={0}
-          onChange={(v) => handleUpdate({ intensity: v })}
-        />
+        <div className="flex items-center gap-2">
+          <label className="w-20 shrink-0 text-xs text-zinc-400">{intensityLabel}<InfoTooltip term="intensity" /></label>
+          <input
+            type="range"
+            min={0}
+            max={intensityMax}
+            step={isDirectional ? 100 : 1000}
+            value={primaryLight.intensity}
+            onChange={(e) => handleUpdate({ intensity: parseFloat(e.target.value) })}
+            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+              [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+              [&::-webkit-slider-thumb]:bg-zinc-300"
+          />
+          <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+            {primaryLight.intensity.toFixed(0)}
+          </span>
+        </div>
 
         {/* Range (Point/Spot only) */}
         {!isDirectional && (
-          <SliderRow
-            label="Range"
-            value={primaryLight.range}
-            min={1}
-            max={100}
-            step={0.5}
-            precision={1}
-            onChange={(v) => handleUpdate({ range: v })}
-          />
+          <div className="flex items-center gap-2">
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Range<InfoTooltip term="range" /></label>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              step={0.5}
+              value={primaryLight.range}
+              onChange={(e) => handleUpdate({ range: parseFloat(e.target.value) })}
+              className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-zinc-300"
+            />
+            <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              {primaryLight.range.toFixed(1)}
+            </span>
+          </div>
         )}
 
         {/* Radius (Point/Spot only) */}
         {!isDirectional && (
-          <SliderRow
-            label="Radius"
-            value={primaryLight.radius}
-            min={0}
-            max={5}
-            step={0.05}
-            onChange={(v) => handleUpdate({ radius: v })}
-          />
+          <div className="flex items-center gap-2">
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Radius</label>
+            <input
+              type="range"
+              min={0}
+              max={5}
+              step={0.05}
+              value={primaryLight.radius}
+              onChange={(e) => handleUpdate({ radius: parseFloat(e.target.value) })}
+              className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                [&::-webkit-slider-thumb]:bg-zinc-300"
+            />
+            <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              {primaryLight.radius.toFixed(2)}
+            </span>
+          </div>
         )}
 
         {/* Spot angles */}
         {isSpot && (
           <>
-            <SliderRow
-              label="Inner Angle"
-              value={radToDeg(primaryLight.innerAngle)}
-              min={0}
-              max={radToDeg(primaryLight.outerAngle)}
-              step={1}
-              precision={0}
-              onChange={(v) => handleUpdate({ innerAngle: degToRad(v) })}
-            />
-            <SliderRow
-              label="Outer Angle"
-              value={radToDeg(primaryLight.outerAngle)}
-              min={radToDeg(primaryLight.innerAngle)}
-              max={89}
-              step={1}
-              precision={0}
-              onChange={(v) => handleUpdate({ outerAngle: degToRad(v) })}
-            />
+            <div className="flex items-center gap-2">
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Inner Angle<InfoTooltip term="innerAngle" /></label>
+              <input
+                type="range"
+                min={0}
+                max={radToDeg(primaryLight.outerAngle)}
+                step={1}
+                value={radToDeg(primaryLight.innerAngle)}
+                onChange={(e) => handleUpdate({ innerAngle: degToRad(parseFloat(e.target.value)) })}
+                className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                  [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                  [&::-webkit-slider-thumb]:bg-zinc-300"
+              />
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                {radToDeg(primaryLight.innerAngle).toFixed(0)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Outer Angle<InfoTooltip term="outerAngle" /></label>
+              <input
+                type="range"
+                min={radToDeg(primaryLight.innerAngle)}
+                max={89}
+                step={1}
+                value={radToDeg(primaryLight.outerAngle)}
+                onChange={(e) => handleUpdate({ outerAngle: degToRad(parseFloat(e.target.value)) })}
+                className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                  [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                  [&::-webkit-slider-thumb]:bg-zinc-300"
+              />
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                {radToDeg(primaryLight.outerAngle).toFixed(0)}
+              </span>
+            </div>
           </>
         )}
 
         {/* Shadows */}
         <div className="flex items-center gap-2">
-          <label className="w-24 shrink-0 text-xs text-zinc-400">Shadows</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Shadows</label>
           <input
             type="checkbox"
             checked={primaryLight.shadowsEnabled}
@@ -194,23 +208,42 @@ export function LightInspector() {
         {/* Shadow bias (only when shadows enabled) */}
         {primaryLight.shadowsEnabled && (
           <>
-            <SliderRow
-              label="Depth Bias"
-              value={primaryLight.shadowDepthBias}
-              min={0}
-              max={1}
-              step={0.01}
-              onChange={(v) => handleUpdate({ shadowDepthBias: v })}
-            />
-            <SliderRow
-              label="Normal Bias"
-              value={primaryLight.shadowNormalBias}
-              min={0}
-              max={10}
-              step={0.1}
-              precision={1}
-              onChange={(v) => handleUpdate({ shadowNormalBias: v })}
-            />
+            <div className="flex items-center gap-2">
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Depth Bias<InfoTooltip term="shadowDepthBias" /></label>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={primaryLight.shadowDepthBias}
+                onChange={(e) => handleUpdate({ shadowDepthBias: parseFloat(e.target.value) })}
+                className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                  [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                  [&::-webkit-slider-thumb]:bg-zinc-300"
+              />
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                {primaryLight.shadowDepthBias.toFixed(2)}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="w-20 shrink-0 text-xs text-zinc-400">Normal Bias<InfoTooltip term="shadowNormalBias" /></label>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                step={0.1}
+                value={primaryLight.shadowNormalBias}
+                onChange={(e) => handleUpdate({ shadowNormalBias: parseFloat(e.target.value) })}
+                className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                  [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+                  [&::-webkit-slider-thumb]:bg-zinc-300"
+              />
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                {primaryLight.shadowNormalBias.toFixed(1)}
+              </span>
+            </div>
           </>
         )}
       </div>

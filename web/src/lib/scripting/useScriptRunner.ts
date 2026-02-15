@@ -1,6 +1,26 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useEditorStore, setPlayTickCallback } from '@/stores/editorStore';
+import { useDialogueStore } from '@/stores/dialogueStore';
 import { audioManager } from '@/lib/audio/audioManager';
+
+// Commands allowed from user scripts (maps to forge.* API surface)
+const SCRIPT_ALLOWED_COMMANDS = new Set([
+  'set_transform', 'spawn_entity', 'despawn_entity',
+  'set_visibility', 'update_material',
+  'apply_force', 'set_velocity', 'apply_impulse',
+  'play_audio', 'stop_audio', 'set_audio_volume',
+  'play_animation', 'set_animation_speed', 'stop_animation',
+  'camera_follow', 'camera_stop_follow', 'camera_set_position', 'camera_look_at',
+]);
+
+const WATCHDOG_TIMEOUT_MS = 5000;
+
+// Module-level collision callback (replaces window.__scriptCollisionCallback)
+let _scriptCollisionCallback: ((event: { entityA: string; entityB: string; started: boolean }) => void) | null = null;
+
+export function getScriptCollisionCallback() {
+  return _scriptCollisionCallback;
+}
 
 interface ScriptRunnerOptions {
   wasmModule: {
@@ -63,6 +83,7 @@ function handleAudioCommand(cmdName: string, payload: Record<string, unknown>): 
 export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const engineMode = useEditorStore((s) => s.engineMode);
   const workerRef = useRef<Worker | null>(null);
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const addScriptLog = useEditorStore((s) => s.addScriptLog);
   const elapsedRef = useRef(0);
   const lastTickRef = useRef(0);
@@ -91,13 +112,22 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
 
       const setHudElements = useEditorStore.getState().setHudElements;
 
-      worker.onmessage = (e) => {
+      worker.onmessage = async (e) => {
+        // Clear watchdog on any response — worker is alive
+        if (watchdogRef.current) {
+          clearTimeout(watchdogRef.current);
+          watchdogRef.current = null;
+        }
         const msg = e.data;
         switch (msg.type) {
           case 'commands':
             for (const cmd of msg.commands) {
               const { cmd: cmdName, ...payload } = cmd;
               if (handleAudioCommand(cmdName, payload)) {
+                continue;
+              }
+              if (!SCRIPT_ALLOWED_COMMANDS.has(cmdName)) {
+                console.warn(`[ScriptRunner] Blocked unauthorized command: ${cmdName}`);
                 continue;
               }
               dispatchCommand(cmdName, payload);
@@ -122,6 +152,100 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           case 'ui':
             setHudElements(msg.elements || []);
             break;
+          case 'ui_screen': {
+            try {
+              const uiStore = (await import('@/stores/uiBuilderStore')).useUIBuilderStore;
+              uiStore.getState().handleRuntimeScreenAction(msg.action, msg.target);
+            } catch {
+              // uiBuilderStore not available yet
+            }
+            break;
+          }
+          case 'ui_widget': {
+            try {
+              const uiStore = (await import('@/stores/uiBuilderStore')).useUIBuilderStore;
+              uiStore.getState().handleRuntimeWidgetAction(msg);
+            } catch {
+              // uiBuilderStore not available yet
+            }
+            break;
+          }
+          case 'camera_set_mode': {
+            const { mode } = msg;
+            const store = useEditorStore.getState();
+            const primaryId = store.activeGameCameraId || store.primaryId;
+            if (primaryId) {
+              const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
+              store.setGameCamera(primaryId, { ...existing, mode });
+            }
+            break;
+          }
+          case 'camera_set_target': {
+            const { entityId: targetEntityId } = msg;
+            const store = useEditorStore.getState();
+            const primaryId = store.activeGameCameraId || store.primaryId;
+            if (primaryId) {
+              const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
+              store.setGameCamera(primaryId, { ...existing, targetEntity: targetEntityId });
+            }
+            break;
+          }
+          case 'camera_shake': {
+            const { intensity, duration } = msg;
+            const store = useEditorStore.getState();
+            const cameraId = store.activeGameCameraId;
+            if (cameraId) {
+              store.cameraShake(cameraId, intensity, duration);
+            }
+            break;
+          }
+          case 'camera_set_property': {
+            const { property, value } = msg;
+            const store = useEditorStore.getState();
+            const primaryId = store.activeGameCameraId || store.primaryId;
+            if (primaryId) {
+              const existing = store.allGameCameras[primaryId] || { mode: 'thirdPersonFollow', targetEntity: null };
+              store.setGameCamera(primaryId, { ...existing, [property]: value });
+            }
+            break;
+          }
+          case 'scene_load': {
+            const { sceneName, transition } = msg;
+            useEditorStore.getState().startSceneTransition(sceneName, transition);
+            break;
+          }
+          case 'scene_restart': {
+            const store = useEditorStore.getState();
+            const currentSceneName = store.scenes.find(s => s.id === store.activeSceneId)?.name;
+            if (currentSceneName) {
+              store.startSceneTransition(currentSceneName, { type: 'instant' });
+            }
+            break;
+          }
+          case 'dialogue_start': {
+            useDialogueStore.getState().startDialogue(msg.treeId);
+            break;
+          }
+          case 'dialogue_end': {
+            useDialogueStore.getState().endDialogue();
+            break;
+          }
+          case 'dialogue_advance': {
+            useDialogueStore.getState().advanceDialogue();
+            break;
+          }
+          case 'dialogue_skip': {
+            useDialogueStore.getState().skipTypewriter();
+            break;
+          }
+          case 'dialogue_set_variable': {
+            const dStore = useDialogueStore.getState();
+            const tree = dStore.dialogueTrees[msg.treeId];
+            if (tree) {
+              dStore.updateTree(msg.treeId, { variables: { ...tree.variables, [msg.key]: msg.value } });
+            }
+            break;
+          }
         }
       };
 
@@ -161,6 +285,15 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
       });
 
+      // Send scene info to worker
+      const sceneNames = store.scenes.map(s => s.name);
+      const activeScene = store.scenes.find(s => s.id === store.activeSceneId)?.name || 'Main';
+      worker.postMessage({
+        type: 'scene_info',
+        currentScene: activeScene,
+        allSceneNames: sceneNames,
+      });
+
       // Set up play tick callback for forwarding engine ticks to worker
       elapsedRef.current = 0;
       lastTickRef.current = performance.now();
@@ -176,6 +309,25 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           entityInfos: Record<string, unknown>;
           inputState: unknown;
         };
+
+        // Start watchdog — if Worker doesn't respond in 5s, terminate it
+        if (!watchdogRef.current) {
+          watchdogRef.current = setTimeout(() => {
+            console.error('[ScriptRunner] Worker timeout — possible infinite loop. Terminating.');
+            addScriptLog({
+              entityId: '',
+              level: 'error',
+              message: 'Script execution timed out (possible infinite loop). Play mode stopped.',
+              timestamp: Date.now(),
+            });
+            workerRef.current?.terminate();
+            workerRef.current = null;
+            watchdogRef.current = null;
+            setPlayTickCallback(null);
+            // Stop play mode via store action
+            useEditorStore.getState().setEngineMode('edit');
+          }, WATCHDOG_TIMEOUT_MS);
+        }
 
         worker.postMessage({
           type: 'tick',
@@ -204,6 +356,10 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     if (engineMode === 'edit' && workerRef.current) {
       setPlayTickCallback(null);
       collisionEventCallbackRef.current = null;
+      if (watchdogRef.current) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
       workerRef.current.postMessage({ type: 'stop' });
       workerRef.current.terminate();
       workerRef.current = null;
@@ -211,12 +367,12 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
     }
   }, [engineMode, wasmModule, dispatchCommand, addScriptLog]);
 
-  // Export collision callback ref for useEngineEvents
+  // Export collision callback via module-level variable (not window global)
   useEffect(() => {
     if (engineMode === 'play' && collisionEventCallbackRef.current) {
-      (window as unknown as { __scriptCollisionCallback?: typeof collisionEventCallbackRef.current }).__scriptCollisionCallback = collisionEventCallbackRef.current;
+      _scriptCollisionCallback = collisionEventCallbackRef.current;
     } else {
-      (window as unknown as { __scriptCollisionCallback?: typeof collisionEventCallbackRef.current }).__scriptCollisionCallback = undefined;
+      _scriptCollisionCallback = null;
     }
   }, [engineMode]);
 

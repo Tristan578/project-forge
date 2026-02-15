@@ -35,15 +35,16 @@ export function ApiKeyManager() {
   const [showInputs, setShowInputs] = useState<Record<string, boolean>>({});
   const [newMcpKey, setNewMcpKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/keys')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load keys'))))
       .then((data) => setProviderKeys(data.providers ?? []))
       .catch(() => {});
 
     fetch('/api/keys/api-key')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed to load API keys'))))
       .then((data) => setMcpKeys(data.keys ?? []))
       .catch(() => {});
   }, []);
@@ -55,39 +56,62 @@ export function ApiKeyManager() {
     const key = keyInputs[provider];
     if (!key) return;
 
-    await fetch(`/api/keys/${provider}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key }),
-    });
+    try {
+      const res = await fetch(`/api/keys/${provider}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key }),
+      });
+      if (!res.ok) throw new Error('Failed to save key');
 
-    setProviderKeys((prev) => [
-      ...prev.filter((p) => p.provider !== provider),
-      { provider, configured: true, createdAt: new Date().toISOString() },
-    ]);
-    setKeyInputs((prev) => ({ ...prev, [provider]: '' }));
-    setShowInputs((prev) => ({ ...prev, [provider]: false }));
+      setProviderKeys((prev) => [
+        ...prev.filter((p) => p.provider !== provider),
+        { provider, configured: true, createdAt: new Date().toISOString() },
+      ]);
+      setKeyInputs((prev) => ({ ...prev, [provider]: '' }));
+      setShowInputs((prev) => ({ ...prev, [provider]: false }));
+      setError(null);
+    } catch {
+      setError(`Failed to save ${provider} key. Please try again.`);
+    }
   };
 
   const removeKey = async (provider: Provider) => {
-    await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
-    setProviderKeys((prev) => prev.filter((p) => p.provider !== provider));
+    try {
+      await fetch(`/api/keys/${provider}`, { method: 'DELETE' });
+      setProviderKeys((prev) => prev.filter((p) => p.provider !== provider));
+    } catch {
+      setError(`Failed to remove ${provider} key.`);
+    }
   };
 
   const generateMcpKey = async () => {
-    const res = await fetch('/api/keys/api-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: `Key ${mcpKeys.length + 1}` }),
-    });
-    const data = await res.json();
-    setNewMcpKey(data.key);
-    setMcpKeys((prev) => [...prev, data]);
+    setError(null);
+    try {
+      const res = await fetch('/api/keys/api-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: `Key ${mcpKeys.length + 1}` }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `Server error (${res.status})`);
+      }
+      const data = await res.json();
+      setNewMcpKey(data.key);
+      setMcpKeys((prev) => [...prev, data]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate API key');
+    }
   };
 
   const revokeMcpKey = async (id: string) => {
-    await fetch(`/api/keys/api-key/${id}`, { method: 'DELETE' });
-    setMcpKeys((prev) => prev.filter((k) => k.id !== id));
+    try {
+      await fetch(`/api/keys/api-key/${id}`, { method: 'DELETE' });
+      setMcpKeys((prev) => prev.filter((k) => k.id !== id));
+    } catch {
+      setError('Failed to revoke key.');
+    }
   };
 
   const copyKey = () => {
@@ -100,22 +124,29 @@ export function ApiKeyManager() {
 
   return (
     <div className="space-y-6 p-4">
+      {/* Error banner */}
+      {error && (
+        <div className="rounded border border-red-800 bg-red-900/30 px-3 py-2 text-xs text-red-300">
+          {error}
+        </div>
+      )}
+
       {/* BYOK Provider Keys */}
       <div>
-        <h3 className="mb-3 flex items-center gap-2 font-semibold text-[var(--color-text-primary)]">
+        <h3 className="mb-3 flex items-center gap-2 font-semibold text-zinc-200">
           <Key size={18} />
           Provider API Keys (BYOK)
         </h3>
-        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
+        <p className="mb-3 text-xs text-zinc-400">
           Add your own API keys to use AI features without spending tokens.
         </p>
         <div className="space-y-2">
           {PROVIDERS.map(({ id, label, placeholder }) => (
             <div
               key={id}
-              className="flex items-center gap-2 rounded-md bg-[var(--color-bg-tertiary)] p-2"
+              className="flex items-center gap-2 rounded-md bg-zinc-800 p-2"
             >
-              <span className="min-w-[140px] text-sm text-[var(--color-text-primary)]">
+              <span className="min-w-[140px] text-sm text-zinc-200">
                 {label}
               </span>
               {isConfigured(id) ? (
@@ -138,11 +169,11 @@ export function ApiKeyManager() {
                       setKeyInputs((prev) => ({ ...prev, [id]: e.target.value }))
                     }
                     placeholder={placeholder}
-                    className="flex-1 rounded border border-[var(--color-border)] bg-[var(--color-bg-primary)] px-2 py-1 text-xs text-[var(--color-text-primary)]"
+                    className="flex-1 rounded border border-zinc-600 bg-zinc-950 px-2 py-1 text-xs text-zinc-200"
                   />
                   <button
                     onClick={() => saveKey(id)}
-                    className="rounded bg-[var(--color-accent)] px-2 py-1 text-xs text-white"
+                    className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-500"
                   >
                     Save
                   </button>
@@ -150,7 +181,7 @@ export function ApiKeyManager() {
               ) : (
                 <button
                   onClick={() => setShowInputs((prev) => ({ ...prev, [id]: true }))}
-                  className="text-xs text-[var(--color-accent)] hover:underline"
+                  className="text-xs text-blue-400 hover:underline"
                 >
                   Add Key
                 </button>
@@ -162,11 +193,11 @@ export function ApiKeyManager() {
 
       {/* MCP API Keys */}
       <div>
-        <h3 className="mb-3 flex items-center gap-2 font-semibold text-[var(--color-text-primary)]">
+        <h3 className="mb-3 flex items-center gap-2 font-semibold text-zinc-200">
           <Key size={18} />
           MCP API Keys
         </h3>
-        <p className="mb-3 text-xs text-[var(--color-text-secondary)]">
+        <p className="mb-3 text-xs text-zinc-400">
           API keys for connecting Claude Desktop or other MCP clients to your editor.
         </p>
 
@@ -176,7 +207,7 @@ export function ApiKeyManager() {
               Save this key now — it won&apos;t be shown again!
             </p>
             <div className="flex items-center gap-2">
-              <code className="flex-1 rounded bg-[var(--color-bg-primary)] px-2 py-1 text-xs text-[var(--color-text-primary)]">
+              <code className="flex-1 rounded bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
                 {newMcpKey}
               </code>
               <button onClick={copyKey} className="text-yellow-400 hover:text-yellow-300">
@@ -190,13 +221,13 @@ export function ApiKeyManager() {
           {mcpKeys.map((key) => (
             <div
               key={key.id}
-              className="flex items-center gap-2 rounded-md bg-[var(--color-bg-tertiary)] p-2"
+              className="flex items-center gap-2 rounded-md bg-zinc-800 p-2"
             >
-              <span className="text-sm text-[var(--color-text-primary)]">{key.name}</span>
-              <code className="text-xs text-[var(--color-text-secondary)]">{key.prefix}...</code>
+              <span className="text-sm text-zinc-200">{key.name}</span>
+              <code className="text-xs text-zinc-400">{key.prefix}...</code>
               <span className="flex-1" />
               {key.lastUsed && (
-                <span className="text-xs text-[var(--color-text-secondary)]">
+                <span className="text-xs text-zinc-400">
                   Last used: {new Date(key.lastUsed).toLocaleDateString()}
                 </span>
               )}
@@ -213,7 +244,7 @@ export function ApiKeyManager() {
 
         <button
           onClick={generateMcpKey}
-          className="mt-2 flex items-center gap-1 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+          className="mt-2 flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
         >
           <Plus size={14} />
           Generate API Key

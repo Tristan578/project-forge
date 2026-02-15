@@ -20,9 +20,9 @@ export function TokenDashboard() {
   useEffect(() => {
     fetchBalance();
     fetch('/api/tokens/usage?days=30')
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('Failed'))))
       .then((data) => setUsage(data.usage ?? []))
-      .catch(console.error);
+      .catch(() => {});
   }, [fetchBalance]);
 
   const handlePurchase = async (pkg: string) => {
@@ -55,37 +55,37 @@ export function TokenDashboard() {
   return (
     <div className="space-y-6 p-4">
       {/* Balance Card */}
-      <div className="rounded-lg bg-[var(--color-bg-tertiary)] p-4">
+      <div className="rounded-lg bg-zinc-800 p-4">
         <div className="mb-2 flex items-center gap-2">
           <Coins size={18} className="text-yellow-400" />
-          <h3 className="font-semibold text-[var(--color-text-primary)]">Token Balance</h3>
+          <h3 className="font-semibold text-zinc-200">Token Balance</h3>
         </div>
         {tokenBalance ? (
           <div className="grid grid-cols-3 gap-4 text-center">
             <div>
-              <div className="text-2xl font-bold text-[var(--color-text-primary)]">
+              <div className="text-2xl font-bold text-zinc-200">
                 {tokenBalance.total.toLocaleString()}
               </div>
-              <div className="text-xs text-[var(--color-text-secondary)]">Total Available</div>
+              <div className="text-xs text-zinc-400">Total Available</div>
             </div>
             <div>
-              <div className="text-lg font-medium text-[var(--color-text-primary)]">
+              <div className="text-lg font-medium text-zinc-200">
                 {tokenBalance.monthlyRemaining.toLocaleString()}
               </div>
-              <div className="text-xs text-[var(--color-text-secondary)]">Monthly Remaining</div>
+              <div className="text-xs text-zinc-400">Monthly Remaining</div>
             </div>
             <div>
-              <div className="text-lg font-medium text-[var(--color-text-primary)]">
+              <div className="text-lg font-medium text-zinc-200">
                 {tokenBalance.addon.toLocaleString()}
               </div>
-              <div className="text-xs text-[var(--color-text-secondary)]">Add-On</div>
+              <div className="text-xs text-zinc-400">Add-On</div>
             </div>
           </div>
         ) : (
-          <div className="text-sm text-[var(--color-text-secondary)]">Loading...</div>
+          <div className="text-sm text-zinc-400">Loading...</div>
         )}
         {tokenBalance?.nextRefillDate && (
-          <div className="mt-2 text-xs text-[var(--color-text-secondary)]">
+          <div className="mt-2 text-xs text-zinc-400">
             Next refill: {new Date(tokenBalance.nextRefillDate).toLocaleDateString()}
           </div>
         )}
@@ -93,10 +93,10 @@ export function TokenDashboard() {
 
       {/* Usage Breakdown */}
       {Object.keys(usageByOp).length > 0 && (
-        <div className="rounded-lg bg-[var(--color-bg-tertiary)] p-4">
+        <div className="rounded-lg bg-zinc-800 p-4">
           <div className="mb-2 flex items-center gap-2">
             <TrendingUp size={18} className="text-blue-400" />
-            <h3 className="font-semibold text-[var(--color-text-primary)]">
+            <h3 className="font-semibold text-zinc-200">
               Usage (Last 30 Days)
             </h3>
           </div>
@@ -106,7 +106,7 @@ export function TokenDashboard() {
               .map(([op, tokens]) => (
                 <div
                   key={op}
-                  className="flex items-center justify-between text-sm text-[var(--color-text-secondary)]"
+                  className="flex items-center justify-between text-sm text-zinc-400"
                 >
                   <span>{op.replace(/_/g, ' ')}</span>
                   <span className="font-mono">{tokens.toLocaleString()}</span>
@@ -117,11 +117,11 @@ export function TokenDashboard() {
       )}
 
       {/* Buy Tokens */}
-      {tier !== 'free' && (
-        <div className="rounded-lg bg-[var(--color-bg-tertiary)] p-4">
+      {tier !== 'starter' && (
+        <div className="rounded-lg bg-zinc-800 p-4">
           <div className="mb-3 flex items-center gap-2">
             <ShoppingCart size={18} className="text-green-400" />
-            <h3 className="font-semibold text-[var(--color-text-primary)]">Buy More Tokens</h3>
+            <h3 className="font-semibold text-zinc-200">Buy More Tokens</h3>
           </div>
           <div className="grid grid-cols-3 gap-3">
             {(Object.entries(TOKEN_PACKAGES) as [string, { tokens: number; priceCents: number; label: string }][]).map(
@@ -130,13 +130,13 @@ export function TokenDashboard() {
                   key={key}
                   onClick={() => handlePurchase(key)}
                   disabled={purchasing}
-                  className="rounded-md border border-[var(--color-border)] p-3 text-center transition-colors hover:border-[var(--color-accent)] hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                  className="rounded-md border border-zinc-600 p-3 text-center transition-colors hover:border-blue-500 hover:bg-zinc-900 disabled:opacity-50"
                 >
-                  <div className="font-semibold text-[var(--color-text-primary)]">{pkg.label}</div>
+                  <div className="font-semibold text-zinc-200">{pkg.label}</div>
                   <div className="text-lg font-bold text-yellow-400">
                     {pkg.tokens.toLocaleString()}
                   </div>
-                  <div className="text-xs text-[var(--color-text-secondary)]">
+                  <div className="text-xs text-zinc-400">
                     ${(pkg.priceCents / 100).toFixed(0)}
                   </div>
                 </button>

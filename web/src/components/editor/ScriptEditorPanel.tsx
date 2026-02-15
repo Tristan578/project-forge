@@ -6,9 +6,17 @@ import { Trash2, Save, FileCode } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { SCRIPT_TEMPLATES } from '@/lib/scripting/scriptTemplates';
 import { FORGE_TYPE_DEFINITIONS } from '@/lib/scripting/forgeTypes';
+import type { VisualScriptGraph } from '@/lib/scripting/visualScriptTypes';
+import { compileGraph } from '@/lib/scripting/graphCompiler';
 
 // Dynamic import Monaco with SSR disabled (it accesses browser APIs)
 const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false });
+
+// Dynamic import VisualScriptEditor with SSR disabled (React Flow doesn't support SSR)
+const VisualScriptEditor = dynamic(
+  () => import('./VisualScriptEditor').then(mod => ({ default: mod.VisualScriptEditor })),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-zinc-600 text-xs">Loading graph editor...</div> }
+);
 
 const DEFAULT_SCRIPT = `function onStart() {
   forge.log("Script started!");
@@ -30,6 +38,8 @@ export function ScriptEditorPanel() {
   const applyScriptTemplate = useEditorStore((s) => s.applyScriptTemplate);
   const clearScriptLogs = useEditorStore((s) => s.clearScriptLogs);
 
+  const [viewMode, setViewMode] = useState<'code' | 'graph'>('code');
+  const [graphData, setGraphData] = useState<VisualScriptGraph>({ nodes: [], edges: [] });
   const [localSource, setLocalSource] = useState('');
   const [localEnabled, setLocalEnabled] = useState(true);
   const [isDirty, setIsDirty] = useState(false);
@@ -163,6 +173,23 @@ export function ScriptEditorPanel() {
       <div className="flex h-full flex-col items-center justify-center bg-zinc-900 p-4">
         <FileCode size={32} className="mb-2 text-zinc-600" />
         <p className="text-xs text-zinc-500">Select an entity to edit its script</p>
+        <p className="mt-2 text-[10px] text-zinc-600">
+          Or open the Script Explorer to manage standalone scripts
+        </p>
+        <div className="mt-4 w-full max-w-xs rounded border border-zinc-800 bg-zinc-800/50 px-3 py-2">
+          <p className="mb-1.5 text-[10px] font-medium text-zinc-400">
+            <span className="rounded bg-blue-900/40 px-1 py-0.5 text-blue-400">TypeScript</span>
+            {' '}forge.* API
+          </p>
+          <div className="space-y-0.5 text-[10px] text-zinc-600">
+            <p><span className="text-zinc-400">forge.transform</span> — position, rotation, scale</p>
+            <p><span className="text-zinc-400">forge.input</span> — keyboard, mouse, gamepad</p>
+            <p><span className="text-zinc-400">forge.physics</span> — forces, collisions, raycast</p>
+            <p><span className="text-zinc-400">forge.audio</span> — play, stop, spatial audio</p>
+            <p><span className="text-zinc-400">forge.scene</span> — spawn, destroy, find</p>
+            <p><span className="text-zinc-400">forge.ui</span> — HUD text, bars, widgets</p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -188,15 +215,15 @@ export function ScriptEditorPanel() {
             <p className="mb-1.5 text-center text-[10px] uppercase tracking-wider text-zinc-600">
               Or start from a template
             </p>
-            <div className="space-y-1">
+            <div className="grid grid-cols-2 gap-1">
               {SCRIPT_TEMPLATES.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => handleApplyTemplate(t.id)}
-                  className="flex w-full items-center justify-between rounded bg-zinc-800 px-2 py-1.5 text-left text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+                  className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-left hover:border-zinc-600 hover:bg-zinc-700"
                 >
-                  <span>{t.name}</span>
-                  <span className="text-[10px] text-zinc-600">{t.description}</span>
+                  <div className="text-xs text-zinc-300">{t.name}</div>
+                  <div className="mt-0.5 text-[10px] text-zinc-600 line-clamp-2">{t.description}</div>
                 </button>
               ))}
             </div>
@@ -271,9 +298,42 @@ export function ScriptEditorPanel() {
         </div>
       </div>
 
-      {/* Monaco Code Editor */}
+      {/* View mode tabs */}
+      <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1">
+        <button
+          onClick={() => setViewMode('code')}
+          className={`rounded px-2 py-0.5 text-xs ${viewMode === 'code' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          Code
+        </button>
+        <button
+          onClick={() => setViewMode('graph')}
+          className={`rounded px-2 py-0.5 text-xs ${viewMode === 'graph' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+        >
+          Graph
+        </button>
+      </div>
+
+      {/* Editor area */}
       <div className="flex-1 overflow-hidden">
-        <MonacoEditor
+        {viewMode === 'graph' ? (
+          <VisualScriptEditor
+            graph={graphData}
+            onGraphChange={setGraphData}
+            onCompile={() => {
+              const result = compileGraph(graphData);
+              if (result.success && primaryId) {
+                setScript(primaryId, result.code, localEnabled);
+                setLocalSource(result.code);
+                setIsDirty(false);
+              }
+              if (result.errors.length > 0) {
+                result.errors.forEach((e) => console.warn('[VisualScript]', e.message));
+              }
+            }}
+          />
+        ) : (
+          <MonacoEditor
           height="100%"
           defaultLanguage="typescript"
           value={localSource}
@@ -285,6 +345,7 @@ export function ScriptEditorPanel() {
           theme="vs-dark"
           options={editorOptions}
         />
+        )}
       </div>
 
       {/* Console */}

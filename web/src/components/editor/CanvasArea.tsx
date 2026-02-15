@@ -4,8 +4,11 @@ import { useViewport } from '@/hooks/useViewport';
 import { useEngineEvents } from '@/hooks/useEngineEvents';
 import { getWasmModule } from '@/hooks/useEngine';
 import { useEditorStore } from '@/stores/editorStore';
+import { useChatStore } from '@/stores/chatStore';
 import { InitOverlay } from './InitOverlay';
 import { ViewPresetButtons } from './ViewPresetButtons';
+import { UICanvasOverlay } from './ui-builder/UICanvasOverlay';
+import { UIRuntimeRenderer } from './ui-builder/UIRuntimeRenderer';
 
 const CANVAS_ID = 'game-canvas';
 
@@ -13,6 +16,7 @@ export function CanvasArea() {
   const { dimensions, isReady } = useViewport(CANVAS_ID);
   const hudElements = useEditorStore((s) => s.hudElements);
   const engineMode = useEditorStore((s) => s.engineMode);
+  const rightPanelTab = useChatStore((s) => s.rightPanelTab);
 
   // Connect engine events to Zustand store
   useEngineEvents({ wasmModule: getWasmModule() });
@@ -48,6 +52,12 @@ export function CanvasArea() {
           ))}
         </div>
       )}
+
+      {/* UI Builder Canvas Overlay - visible in edit mode when UI tab active */}
+      {engineMode === 'edit' && rightPanelTab === 'ui' && <UICanvasOverlay />}
+
+      {/* UI Runtime Renderer - visible in play/paused mode */}
+      {engineMode !== 'edit' && <UIRuntimeRenderer />}
 
       {/* Initialization overlay with progress and error handling */}
       <InitOverlay />

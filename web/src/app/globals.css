@@ -30,3 +30,122 @@ body {
   display: block;
   outline: none;
 }
+
+/* Dockview workspace theme — matches our zinc dark palette */
+.dockview-theme-forge {
+  --dv-group-view-background-color: #09090b;
+  --dv-tabs-and-actions-container-background-color: #18181b;
+  --dv-activegroup-visiblepanel-tab-background-color: #09090b;
+  --dv-activegroup-hiddenpanel-tab-background-color: #18181b;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #18181b;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #18181b;
+  --dv-tab-divider-color: #27272a;
+  --dv-activegroup-visiblepanel-tab-color: #e4e4e7;
+  --dv-activegroup-hiddenpanel-tab-color: #71717a;
+  --dv-inactivegroup-visiblepanel-tab-color: #a1a1aa;
+  --dv-inactivegroup-hiddenpanel-tab-color: #52525b;
+  --dv-separator-border: #27272a;
+  --dv-paneview-header-border-color: #27272a;
+  --dv-tabs-and-actions-container-font-size: 11px;
+  --dv-tabs-and-actions-container-height: 30px;
+  --dv-drag-over-background-color: rgba(59, 130, 246, 0.15);
+  --dv-drag-over-border-color: rgba(59, 130, 246, 0.4);
+  --dv-floating-box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: #3b82f6;
+  --dv-icon-hover-background-color: rgba(113, 113, 122, 0.3);
+  --dv-border-radius: 0px;
+  --dv-tab-margin: 0;
+}
+
+/* Compact tab styling — prevent text truncation */
+.dockview-theme-forge .dv-default-tab {
+  padding: 0 8px;
+  min-width: 0;
+  max-width: 140px;
+}
+
+.dockview-theme-forge .dv-default-tab-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Resize handle visibility on hover */
+.dockview-theme-forge .dv-resize-container:hover > .dv-resize-handle-top,
+.dockview-theme-forge .dv-resize-container:hover > .dv-resize-handle-bottom,
+.dockview-theme-forge .dv-resize-container:hover > .dv-resize-handle-left,
+.dockview-theme-forge .dv-resize-container:hover > .dv-resize-handle-right {
+  background-color: rgba(59, 130, 246, 0.2);
+}
+
+/* Active tab bottom accent */
+.dockview-theme-forge .dv-default-tab.dv-activegroup-visiblepanel-tab {
+  border-bottom: 2px solid #3b82f6;
+}
+
+/* Scene transition overlays */
+.scene-transition-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9999;
+}
+
+.scene-transition-fade {
+  background-color: var(--st-color);
+  animation: scene-fade-in-out var(--st-duration) var(--st-easing);
+}
+
+@keyframes scene-fade-in-out {
+  0% { opacity: 0; }
+  50% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.scene-transition-wipe {
+  background-color: var(--st-color);
+}
+
+.scene-transition-wipe-left {
+  animation: scene-wipe-left var(--st-duration) var(--st-easing);
+}
+
+.scene-transition-wipe-right {
+  animation: scene-wipe-right var(--st-duration) var(--st-easing);
+}
+
+.scene-transition-wipe-up {
+  animation: scene-wipe-up var(--st-duration) var(--st-easing);
+}
+
+.scene-transition-wipe-down {
+  animation: scene-wipe-down var(--st-duration) var(--st-easing);
+}
+
+@keyframes scene-wipe-left {
+  0% { clip-path: inset(0 100% 0 0); }
+  50% { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(0 0 0 100%); }
+}
+
+@keyframes scene-wipe-right {
+  0% { clip-path: inset(0 0 0 100%); }
+  50% { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(0 100% 0 0); }
+}
+
+@keyframes scene-wipe-up {
+  0% { clip-path: inset(100% 0 0 0); }
+  50% { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(0 0 100% 0); }
+}
+
+@keyframes scene-wipe-down {
+  0% { clip-path: inset(0 0 100% 0); }
+  50% { clip-path: inset(0 0 0 0); }
+  100% { clip-path: inset(100% 0 0 0); }
+}

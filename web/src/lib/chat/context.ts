@@ -1,4 +1,6 @@
-import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState, ShaderEffectData, JointData } from '@/stores/editorStore';
+import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState, AnimationClipData, ShaderEffectData, JointData } from '@/stores/editorStore';
+import type { GenerationJob } from '@/stores/generationStore';
+import { loadScripts as loadLibraryScripts } from '@/stores/scriptLibraryStore';
 
 
 interface EditorSnapshot {
@@ -27,12 +29,17 @@ interface EditorSnapshot {
   primaryParticle?: ParticleData | null;
   particleEnabled?: boolean;
   primaryAnimation?: AnimationPlaybackState | null;
+  primaryAnimationClip?: AnimationClipData | null;
   postProcessing?: PostProcessingData;
   audioBuses?: AudioBusDef[];
   terrainData?: Record<string, import('@/stores/editorStore').TerrainDataState>;
   primaryJoint?: JointData | null;
   scenes?: Array<{ id: string; name: string; isStartScene: boolean }>;
   activeSceneId?: string | null;
+  allGameComponents?: Record<string, import('@/stores/editorStore').GameComponentData[]>;
+  allGameCameras?: Record<string, import('@/stores/editorStore').GameCameraData>;
+  activeGameCameraId?: string | null;
+  activeGenerations?: GenerationJob[];
 }
 
 function formatVec3(v: [number, number, number]): string {
@@ -70,7 +77,11 @@ function describeEntityDetailed(
   light: LightData | null,
   physics?: PhysicsData | null,
   physicsEnabled?: boolean,
-  terrain?: import('@/stores/editorStore').TerrainDataState | null
+  terrain?: import('@/stores/editorStore').TerrainDataState | null,
+  gameComponents?: import('@/stores/editorStore').GameComponentData[],
+  gameCamera?: import('@/stores/editorStore').GameCameraData | null,
+  isActiveGameCamera?: boolean,
+  sprite?: import('@/stores/editorStore').SpriteData | null,
 ): string {
   const lines: string[] = [];
   lines.push(`  Entity: "${node.name}" (id: ${node.entityId})`);
@@ -114,6 +125,42 @@ function describeEntityDetailed(
     lines.push(`  Noise params: octaves=${terrain.octaves}, frequency=${terrain.frequency}, amplitude=${terrain.amplitude}, height=${terrain.heightScale}, seed=${terrain.seed}`);
   }
 
+  if (gameComponents && gameComponents.length > 0) {
+    const componentNames = gameComponents.map((c: import('@/stores/editorStore').GameComponentData) => {
+      if (c.type === 'characterController') return 'character_controller';
+      if (c.type === 'health') return 'health';
+      if (c.type === 'collectible') return 'collectible';
+      if (c.type === 'damageZone') return 'damage_zone';
+      if (c.type === 'checkpoint') return 'checkpoint';
+      if (c.type === 'teleporter') return 'teleporter';
+      if (c.type === 'movingPlatform') return 'moving_platform';
+      if (c.type === 'triggerZone') return 'trigger_zone';
+      if (c.type === 'spawner') return 'spawner';
+      if (c.type === 'follower') return 'follower';
+      if (c.type === 'projectile') return 'projectile';
+      if (c.type === 'winCondition') return 'win_condition';
+      return 'unknown';
+    });
+    lines.push(`  Game components: ${componentNames.join(', ')}`);
+  }
+
+  if (gameCamera) {
+    let cameraLine = `  Game camera: ${gameCamera.mode}`;
+    if (gameCamera.targetEntity) cameraLine += ` (target: ${gameCamera.targetEntity})`;
+    if (isActiveGameCamera) cameraLine += ' [ACTIVE]';
+    lines.push(cameraLine);
+  }
+
+  if (sprite) {
+    const spriteParts: string[] = [];
+    if (sprite.textureAssetId) spriteParts.push(`texture=${sprite.textureAssetId}`);
+    if (sprite.colorTint) spriteParts.push(`tint=[${sprite.colorTint.map((n: number) => n.toFixed(2)).join(',')}]`);
+    if (sprite.flipX || sprite.flipY) spriteParts.push(`flip(x=${sprite.flipX}, y=${sprite.flipY})`);
+    spriteParts.push(`layer=${sprite.sortingLayer}, order=${sprite.sortingOrder}`);
+    if (sprite.anchor !== 'center') spriteParts.push(`anchor=${sprite.anchor}`);
+    lines.push(`  Sprite: ${spriteParts.join(', ')}`);
+  }
+
   if (node.children.length > 0) {
     const childNames = node.children
       .map((cid) => graph.nodes[cid]?.name)
@@ -128,6 +175,10 @@ export function buildSceneContext(state: EditorSnapshot): string {
   const { sceneGraph, selectedIds, primaryId, primaryTransform, primaryMaterial, primaryLight, ambientLight, environment } = state;
   const nodeCount = Object.keys(sceneGraph.nodes).length;
   const sections: string[] = [];
+
+  // Project type
+  const projectType = (state as { projectType?: '2d' | '3d' }).projectType ?? '3d';
+  sections.push(`## Project Type: ${projectType.toUpperCase()}`);
 
   // Engine mode
   if (state.engineMode && state.engineMode !== 'edit') {
@@ -177,8 +228,12 @@ export function buildSceneContext(state: EditorSnapshot): string {
   // Selected entity detail
   if (primaryId && sceneGraph.nodes[primaryId]) {
     const terrainData = state.terrainData && primaryId ? state.terrainData[primaryId] : null;
+    const gameComponents = state.allGameComponents?.[primaryId];
+    const gameCamera = state.allGameCameras?.[primaryId] ?? null;
+    const isActiveGameCamera = state.activeGameCameraId === primaryId;
+    const spriteData = (state as { sprites?: Record<string, import('@/stores/editorStore').SpriteData> }).sprites?.[primaryId] ?? null;
     sections.push('\n## Selected Entity');
-    sections.push(describeEntityDetailed(sceneGraph.nodes[primaryId], sceneGraph, primaryTransform, primaryMaterial, state.primaryShaderEffect, primaryLight, state.primaryPhysics, state.physicsEnabled, terrainData));
+    sections.push(describeEntityDetailed(sceneGraph.nodes[primaryId], sceneGraph, primaryTransform, primaryMaterial, state.primaryShaderEffect, primaryLight, state.primaryPhysics, state.physicsEnabled, terrainData, gameComponents, gameCamera, isActiveGameCamera, spriteData));
     if (state.primaryJoint) {
       const j = state.primaryJoint;
       const connectedName = sceneGraph.nodes[j.connectedEntityId]?.name ?? j.connectedEntityId;
@@ -215,6 +270,84 @@ export function buildSceneContext(state: EditorSnapshot): string {
     }
   }
 
+  // 2D Physics
+  if (projectType === '2d') {
+    const physics2dState = (state as { physics2d?: Record<string, import('@/stores/editorStore').Physics2dData>; physics2dEnabled?: Record<string, boolean> });
+    const physics2dEntries = Object.entries(physics2dState.physics2d ?? {});
+    if (physics2dEntries.length > 0) {
+      const lines: string[] = [];
+      for (const [id, data] of physics2dEntries) {
+        const node = sceneGraph.nodes[id];
+        const name = node?.name ?? id;
+        const enabled = physics2dState.physics2dEnabled?.[id] ?? false;
+        const enabledStr = enabled ? '' : ' [disabled]';
+        lines.push(`- "${name}" (${id}): ${data.bodyType} ${data.colliderShape}, mass=${data.mass}${enabledStr}`);
+      }
+      sections.push(`\n## 2D Physics Entities\n${lines.join('\n')}`);
+    }
+  }
+
+  // Tilemaps
+  if (projectType === '2d') {
+    const tilemapState = (state as { tilemaps?: Record<string, import('@/stores/editorStore').TilemapData> });
+    const tilemapEntries = Object.entries(tilemapState.tilemaps ?? {});
+    if (tilemapEntries.length > 0) {
+      const lines: string[] = [];
+      for (const [id, data] of tilemapEntries) {
+        const node = sceneGraph.nodes[id];
+        const name = node?.name ?? id;
+        lines.push(`- "${name}" (${id}): ${data.mapSize[0]}x${data.mapSize[1]} tiles, ${data.layers.length} layer${data.layers.length === 1 ? '' : 's'}`);
+      }
+      sections.push(`\n## Tilemaps\n${lines.join('\n')}`);
+    }
+  }
+
+  // Sprite Entities
+  if (projectType === '2d') {
+    const spriteState = (state as { sprites?: Record<string, import('@/stores/editorStore').SpriteData> });
+    const spriteEntries = Object.entries(spriteState.sprites ?? {});
+    if (spriteEntries.length > 0) {
+      sections.push('## Sprite Entities');
+      for (const [entityId, sprite] of spriteEntries) {
+        const name = sceneGraph.nodes[entityId]?.name || 'Unknown';
+        const texInfo = sprite.textureAssetId ? ` texture=${sprite.textureAssetId}` : '';
+        sections.push(`- "${name}" (${entityId}):${texInfo}`);
+      }
+    }
+  }
+
+  // Skeleton 2D Entities
+  if (projectType === '2d') {
+    const skeletons2d = (state as { skeletons2d?: Record<string, import('@/stores/editorStore').SkeletonData2d> }).skeletons2d || {};
+    const skeletonEntries = Object.entries(skeletons2d);
+    if (skeletonEntries.length > 0) {
+      sections.push('## Skeleton 2D Entities');
+      for (const [entityId, skeleton] of skeletonEntries) {
+        const name = sceneGraph.nodes[entityId]?.name || 'Unknown';
+        const boneCount = skeleton.bones?.length || 0;
+        const skinCount = Object.keys(skeleton.skins || {}).length;
+        sections.push(`- "${name}" (${entityId}): ${boneCount} bones, ${skinCount} skins`);
+      }
+    }
+  }
+
+  // Skeletal 2D Animations
+  if (projectType === '2d') {
+    const skeletonState = (state as { skeletons2d?: Record<string, import('@/stores/editorStore').SkeletonData2d>; skeletalAnimations2d?: Record<string, import('@/stores/editorStore').SkeletalAnimation2d[]> });
+    const skeletonEntries = Object.entries(skeletonState.skeletons2d ?? {});
+    if (skeletonEntries.length > 0) {
+      const lines: string[] = [];
+      for (const [id, data] of skeletonEntries) {
+        const node = sceneGraph.nodes[id];
+        const name = node?.name ?? id;
+        const animations = skeletonState.skeletalAnimations2d?.[id] ?? [];
+        const skinCount = Object.keys(data.skins).length;
+        lines.push(`- "${name}" (${id}): ${data.bones.length} bone${data.bones.length === 1 ? '' : 's'}, ${skinCount} skin${skinCount === 1 ? '' : 's'}, ${animations.length} animation${animations.length === 1 ? '' : 's'}`);
+      }
+      sections.push(`\n## Skeletal Animations\n${lines.join('\n')}`);
+    }
+  }
+
   // Assets
   if (state.assetRegistry) {
     const assets = Object.values(state.assetRegistry);
@@ -239,6 +372,17 @@ export function buildSceneContext(state: EditorSnapshot): string {
       if (withTemplates > 0) parts.push(`${withTemplates} from templates`);
       sections.push(`\n## Scripts\n${parts.join(', ')}`);
     }
+  }
+
+  // Script Library
+  try {
+    const libraryScripts = loadLibraryScripts();
+    if (libraryScripts.length > 0) {
+      const names = libraryScripts.map((s) => s.name).join(', ');
+      sections.push(`\n## Script Library\n${libraryScripts.length} standalone script${libraryScripts.length === 1 ? '' : 's'}: ${names}`);
+    }
+  } catch {
+    // Script library not available (SSR or test)
   }
 
   // Audio
@@ -274,6 +418,12 @@ export function buildSceneContext(state: EditorSnapshot): string {
     sections.push(`\n## Animation\n${statusParts.join('\n')}`);
   }
 
+  // Keyframe animation clip (D-2)
+  if (state.primaryAnimationClip) {
+    const clip = state.primaryAnimationClip;
+    sections.push(`\n## Keyframe Animation Clip\n${clip.tracks.length} tracks, duration=${clip.duration}s, mode=${clip.playMode}, speed=${clip.speed}x, autoplay=${clip.autoplay}`);
+  }
+
   // Input bindings
   if (state.inputBindings && state.inputBindings.length > 0) {
     const presetLabel = state.inputPreset ? ` (preset: ${state.inputPreset})` : ' (custom)';
@@ -301,6 +451,48 @@ export function buildSceneContext(state: EditorSnapshot): string {
       return label;
     }).join(', ');
     sections.push(`\nScenes: ${sceneList}`);
+  }
+
+  // Active AI Generations
+  if (state.activeGenerations && state.activeGenerations.length > 0) {
+    const genLines = state.activeGenerations.map(job => {
+      const typeLabel = job.type === 'model' ? '3D Model' : job.type === 'texture' ? 'Texture' : job.type === 'sfx' ? 'Sound Effect' : job.type === 'voice' ? 'Voice' : job.type === 'skybox' ? 'Skybox' : 'Music';
+      return `- ${typeLabel}: "${job.prompt.slice(0, 40)}..." (${job.status}, ${job.progress}%)`;
+    });
+    sections.push(`\n## Active AI Generations\n${genLines.join('\n')}`);
+  }
+
+  // Dialogue Trees
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useDialogueStore } = require('@/stores/dialogueStore');
+    const dialogueStore = useDialogueStore.getState();
+    const trees = Object.values(dialogueStore.dialogueTrees) as Array<{ id: string; name: string; nodes: unknown[] }>;
+    if (trees.length > 0) {
+      sections.push('');
+      sections.push(`## Dialogue Trees (${trees.length})`);
+      for (const tree of trees) {
+        sections.push(`- "${tree.name}" (id: ${tree.id}, ${tree.nodes.length} nodes)`);
+      }
+    }
+  } catch {
+    // dialogueStore not available
+  }
+
+  // UI Screens
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { useUIBuilderStore } = require('@/stores/uiBuilderStore');
+    const uiStore = useUIBuilderStore.getState();
+    if (uiStore.screens && uiStore.screens.length > 0) {
+      sections.push('');
+      sections.push(`## Game UI (${uiStore.screens.length} screens)`);
+      for (const screen of uiStore.screens) {
+        sections.push(`- "${screen.name}" (${screen.widgets.length} widgets${screen.showOnStart ? ', auto-show' : ''}${screen.showOnKey ? `, key: ${screen.showOnKey}` : ''})`);
+      }
+    }
+  } catch {
+    // uiBuilderStore not available or screens not initialized
   }
 
   // Entity reference hint

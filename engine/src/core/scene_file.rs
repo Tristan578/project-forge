@@ -34,6 +34,8 @@ pub struct SceneFile {
     #[serde(default)]
     pub audio_buses: AudioBusConfig,
     pub entities: Vec<EntitySnapshot>,
+    #[serde(default)]
+    pub game_ui: Option<String>,
 }
 
 /// Scene metadata (name, timestamps).
@@ -92,9 +94,10 @@ pub fn build_scene_file(
     post_processing: &PostProcessingSettings,
     audio_buses: &AudioBusConfig,
     entities: Vec<EntitySnapshot>,
+    game_ui: Option<String>,
 ) -> SceneFile {
     SceneFile {
-        format_version: 2,
+        format_version: 3,
         metadata: SceneMetadata {
             name: scene_name.to_string(),
             created_at: String::new(),
@@ -114,5 +117,6 @@ pub fn build_scene_file(
         post_processing: post_processing.clone(),
         audio_buses: audio_buses.clone(),
         entities,
+        game_ui,
     }
 }

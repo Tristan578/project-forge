@@ -1,9 +1,14 @@
 'use client';
 
-import { useCallback, useRef, memo, useState } from 'react';
-import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette } from 'lucide-react';
+import { useCallback, useRef, memo, useState, useEffect } from 'react';
+import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
+import { GenerateModelDialog } from './GenerateModelDialog';
+import { GenerateTextureDialog } from './GenerateTextureDialog';
+import { GenerateSoundDialog } from './GenerateSoundDialog';
+import { GenerateMusicDialog } from './GenerateMusicDialog';
+import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -61,6 +66,13 @@ type AssetPanelTab = 'assets' | 'materials';
 
 export const AssetPanel = memo(function AssetPanel() {
   const [activeTab, setActiveTab] = useState<AssetPanelTab>('assets');
+  const [showAiDropdown, setShowAiDropdown] = useState(false);
+  const [generateModelOpen, setGenerateModelOpen] = useState(false);
+  const [generateTextureOpen, setGenerateTextureOpen] = useState(false);
+  const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
+  const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
+  const [generateSkyboxOpen, setGenerateSkyboxOpen] = useState(false);
+
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const importGltf = useEditorStore((s) => s.importGltf);
   const loadTexture = useEditorStore((s) => s.loadTexture);
@@ -69,6 +81,7 @@ export const AssetPanel = memo(function AssetPanel() {
   const gltfInputRef = useRef<HTMLInputElement>(null);
   const textureInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
+  const aiDropdownRef = useRef<HTMLDivElement>(null);
 
   const assets = Object.values(assetRegistry);
 
@@ -130,6 +143,17 @@ export const AssetPanel = memo(function AssetPanel() {
     e.stopPropagation();
   }, []);
 
+  // Close AI dropdown on outside click
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (aiDropdownRef.current && !aiDropdownRef.current.contains(e.target as Node)) {
+        setShowAiDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
   return (
     <div
       className="flex min-h-[140px] w-full flex-col border-t border-zinc-800 bg-zinc-900"
@@ -164,6 +188,52 @@ export const AssetPanel = memo(function AssetPanel() {
         </div>
         {activeTab === 'assets' && (
           <div className="flex gap-1 pr-2">
+            {/* AI Generate dropdown */}
+            <div className="relative" ref={aiDropdownRef}>
+              <button
+                className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-xs text-purple-400 hover:bg-purple-900/50"
+                onClick={() => setShowAiDropdown(!showAiDropdown)}
+                title="AI Generate"
+              >
+                <Sparkles size={14} />
+                <ChevronDown size={10} />
+              </button>
+              {showAiDropdown && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 shadow-xl">
+                  <button
+                    onClick={() => { setGenerateModelOpen(true); setShowAiDropdown(false); }}
+                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Generate 3D Model
+                  </button>
+                  <button
+                    onClick={() => { setGenerateTextureOpen(true); setShowAiDropdown(false); }}
+                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Generate Texture
+                  </button>
+                  <button
+                    onClick={() => { setGenerateSoundOpen(true); setShowAiDropdown(false); }}
+                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Generate Sound
+                  </button>
+                  <button
+                    onClick={() => { setGenerateMusicOpen(true); setShowAiDropdown(false); }}
+                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Generate Music
+                  </button>
+                  <button
+                    onClick={() => { setGenerateSkyboxOpen(true); setShowAiDropdown(false); }}
+                    className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
+                  >
+                    Generate Skybox
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               onClick={() => gltfInputRef.current?.click()}
@@ -238,6 +308,17 @@ export const AssetPanel = memo(function AssetPanel() {
           )}
         </>
       )}
+
+      {/* Generation dialogs */}
+      <GenerateModelDialog isOpen={generateModelOpen} onClose={() => setGenerateModelOpen(false)} />
+      {primaryId && (
+        <>
+          <GenerateTextureDialog isOpen={generateTextureOpen} onClose={() => setGenerateTextureOpen(false)} entityId={primaryId} />
+          <GenerateSoundDialog isOpen={generateSoundOpen} onClose={() => setGenerateSoundOpen(false)} entityId={primaryId} />
+          <GenerateMusicDialog isOpen={generateMusicOpen} onClose={() => setGenerateMusicOpen(false)} entityId={primaryId} />
+        </>
+      )}
+      <GenerateSkyboxDialog isOpen={generateSkyboxOpen} onClose={() => setGenerateSkyboxOpen(false)} />
     </div>
   );
 });

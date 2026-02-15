@@ -50,20 +50,20 @@ export default function EditorPage() {
 
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--color-bg-primary)]">
-        <div className="text-[var(--color-text-secondary)]">Loading project...</div>
+      <div className="flex h-screen items-center justify-center bg-zinc-950">
+        <div className="text-zinc-400">Loading project...</div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--color-bg-primary)]">
+      <div className="flex h-screen items-center justify-center bg-zinc-950">
         <div className="text-center">
           <div className="mb-2 text-red-400">{error}</div>
           <button
             onClick={() => router.push('/dashboard')}
-            className="rounded bg-[var(--color-accent)] px-4 py-2 text-sm text-white hover:opacity-90"
+            className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:opacity-90"
           >
             Back to Dashboard
           </button>

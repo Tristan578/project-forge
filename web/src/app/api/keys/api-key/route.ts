@@ -15,7 +15,7 @@ export async function POST(req: Request) {
   if (!authResult.ok) return authResult.response;
 
   // MCP keys require Creator+ tier
-  const tierCheck = assertTier(authResult.ctx.user, ['creator', 'studio']);
+  const tierCheck = assertTier(authResult.ctx.user, ['creator', 'pro']);
   if (tierCheck) return tierCheck;
 
   const body = await req.json();

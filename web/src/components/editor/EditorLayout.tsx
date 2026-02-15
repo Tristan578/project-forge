@@ -4,25 +4,31 @@ import { useState, useEffect, useCallback } from 'react';
 import { HelpCircle, X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CanvasArea } from './CanvasArea';
-import { AssetPanel } from './AssetPanel';
-import { AudioMixerPanel } from './AudioMixerPanel';
 import { SceneHierarchy } from './SceneHierarchy';
 import { InspectorPanel } from './InspectorPanel';
 import { ScriptEditorPanel } from './ScriptEditorPanel';
+import { UIBuilderPanel } from './UIBuilderPanel';
 import { PlayControls } from './PlayControls';
 import { SceneToolbar } from './SceneToolbar';
+import { LayoutMenu } from './LayoutMenu';
+import { PanelsMenu } from './PanelsMenu';
 import { TokenBalance } from '../settings/TokenBalance';
 import { ChatPanel } from '../chat/ChatPanel';
 import { DrawerPanel } from './DrawerPanel';
 import { MobileToolbar } from './MobileToolbar';
 import { WelcomeModal } from './WelcomeModal';
 import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel';
+import { WorkspaceProvider } from './WorkspaceProvider';
+import { SceneTransitionOverlay } from './SceneTransitionOverlay';
+import { DialogueOverlay } from '../game/DialogueOverlay';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
-import { useEditorStore } from '@/stores/editorStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { UserButton } from '@clerk/nextjs';
 
 const MOBILE_DISMISSED_KEY = 'forge-mobile-dismissed';
+
+// ---- Mobile-only components (unchanged) ----
 
 function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; onTabChange: (tab: RightPanelTab) => void }) {
   const hasUnread = useChatStore((s) => s.hasUnreadMessages);
@@ -62,6 +68,16 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
       >
         Script
       </button>
+      <button
+        onClick={() => onTabChange('ui')}
+        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+          activeTab === 'ui'
+            ? 'border-b border-orange-500 text-zinc-200'
+            : 'text-zinc-600 hover:text-zinc-400'
+        }`}
+      >
+        UI
+      </button>
     </div>
   );
 }
@@ -69,6 +85,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
 function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
   if (activeTab === 'inspector') return <InspectorPanel />;
   if (activeTab === 'script') return <ScriptEditorPanel />;
+  if (activeTab === 'ui') return <UIBuilderPanel />;
   return <ChatPanel />;
 }
 
@@ -97,10 +114,46 @@ function MobileBanner() {
   );
 }
 
+// ---- Floating Chat Overlay ----
+
+function ChatOverlay() {
+  const chatOverlayOpen = useWorkspaceStore((s) => s.chatOverlayOpen);
+  const setChatOverlayOpen = useWorkspaceStore((s) => s.setChatOverlayOpen);
+
+  if (!chatOverlayOpen) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/30 backdrop-blur-sm"
+        onClick={() => setChatOverlayOpen(false)}
+      />
+      {/* Chat panel */}
+      <div className="fixed left-1/2 top-[10vh] z-50 flex h-[70vh] w-[600px] max-w-[90vw] -translate-x-1/2 flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl">
+        <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5">
+          <span className="text-xs font-medium text-zinc-400">AI Chat (Ctrl+K to toggle)</span>
+          <button
+            onClick={() => setChatOverlayOpen(false)}
+            className="rounded p-0.5 text-zinc-500 hover:text-zinc-300"
+          >
+            <X size={14} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <ChatPanel />
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---- Main EditorLayout ----
+
 export function EditorLayout() {
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
-  const mixerPanelOpen = useEditorStore((s) => s.mixerPanelOpen);
+  const toggleChatOverlay = useWorkspaceStore((s) => s.toggleChatOverlay);
   const layout = useResponsiveLayout();
 
   // Drawer state for compact mode
@@ -118,18 +171,35 @@ export function EditorLayout() {
     }
   }
 
-  // ? key opens shortcuts panel
+  // Global keyboard shortcuts
   const handleGlobalKeyDown = useCallback(
     (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+
+      // Ctrl+K / Cmd+K: Toggle AI chat overlay (works even in inputs)
+      if (e.key === 'k' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        toggleChatOverlay();
+        return;
+      }
+
+      // F1: Open docs panel
+      if (e.key === 'F1') {
+        e.preventDefault();
+        useWorkspaceStore.getState().openPanel('docs');
+        return;
+      }
+
       if (isInput) return;
+
+      // ? key opens shortcuts panel
       if (e.key === '?') {
         e.preventDefault();
         setShortcutsOpen((prev) => !prev);
       }
     },
-    []
+    [toggleChatOverlay]
   );
 
   useEffect(() => {
@@ -137,9 +207,7 @@ export function EditorLayout() {
     return () => document.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleGlobalKeyDown]);
 
-  const rightPanelWidth = rightPanelTab === 'script' ? '480px' : '280px';
-
-  // --- Compact layout (mobile/tablet) ---
+  // --- Compact layout (mobile/tablet) --- unchanged
   if (layout.mode === 'compact') {
     return (
       <div className="relative h-screen w-screen bg-zinc-950">
@@ -179,32 +247,28 @@ export function EditorLayout() {
           </div>
         </DrawerPanel>
 
+        <ChatOverlay />
+        <SceneTransitionOverlay />
+        <DialogueOverlay />
         <WelcomeModal />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       </div>
     );
   }
 
-  // --- Condensed / Full layout (laptop / desktop+) ---
-  const hierarchyWidth = layout.hierarchyWidth;
-  const bottomHeight = layout.bottomPanelHeight;
-
+  // --- Desktop layout: Sidebar + Dockview Workspace ---
   return (
-    <div
-      className="grid h-screen w-screen bg-zinc-950 transition-[grid-template-columns] duration-200"
-      style={{
-        gridTemplateColumns: `56px ${hierarchyWidth}px 1fr ${rightPanelWidth}`,
-        gridTemplateRows: `32px 1fr ${bottomHeight}px`,
-      }}
-    >
+    <div className="flex h-screen w-screen flex-col bg-zinc-950">
       {/* Top bar */}
-      <div className="col-span-4 flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3">
+      <div className="flex h-8 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3">
         <div className="flex items-center gap-3">
           <span className="text-xs font-semibold text-zinc-400">Project Forge</span>
           <SceneToolbar />
         </div>
         <PlayControls />
         <div className="flex items-center gap-3">
+          <PanelsMenu />
+          <LayoutMenu />
           <button
             onClick={() => setShortcutsOpen(true)}
             className="rounded p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
@@ -217,30 +281,20 @@ export function EditorLayout() {
         </div>
       </div>
 
-      {/* Tool sidebar */}
-      <Sidebar />
+      {/* Main area: Sidebar + Dockview */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Tool sidebar */}
+        <Sidebar />
 
-      {/* Scene hierarchy panel */}
-      <div className="border-r border-zinc-800 bg-zinc-900 overflow-hidden">
-        <SceneHierarchy />
-      </div>
-
-      {/* Main canvas */}
-      <CanvasArea />
-
-      {/* Right panel: Inspector / Chat tabs */}
-      <div className="flex flex-col border-l border-zinc-800 bg-zinc-900 overflow-hidden">
-        <RightPanelTabs activeTab={rightPanelTab} onTabChange={setRightPanelTab} />
+        {/* Dockview workspace fills remaining space */}
         <div className="flex-1 overflow-hidden">
-          <RightPanelContent activeTab={rightPanelTab} />
+          <WorkspaceProvider />
         </div>
       </div>
 
-      {/* Bottom panel: Asset panel or Audio mixer */}
-      <div className="col-span-4">
-        {mixerPanelOpen ? <AudioMixerPanel /> : <AssetPanel />}
-      </div>
-
+      <ChatOverlay />
+      <SceneTransitionOverlay />
+      <DialogueOverlay />
       <WelcomeModal />
       <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>

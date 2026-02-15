@@ -1,9 +1,12 @@
 'use client';
 
-import { useCallback, useRef, useState, memo } from 'react';
-import { Image as ImageIcon, X, ChevronDown, ChevronRight, BookmarkPlus } from 'lucide-react';
+import { useCallback, useRef, useState, useMemo, memo } from 'react';
+import { Image as ImageIcon, X, ChevronDown, ChevronRight, BookmarkPlus, Sparkles, HelpCircle } from 'lucide-react';
 import { useEditorStore, type MaterialData } from '@/stores/editorStore';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { MATERIAL_PRESETS, ALL_CATEGORIES, getPresetById, saveCustomMaterial, type MaterialPreset } from '@/lib/materialPresets';
+import { GenerateTextureDialog } from './GenerateTextureDialog';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 /** Convert linear RGB [0-1] to sRGB hex string. */
 function linearToHex(r: number, g: number, b: number): string {
@@ -30,12 +33,18 @@ interface SliderRowProps {
   max?: number;
   step?: number;
   onChange: (v: number) => void;
+  tooltipTerm?: string;
+  tooltipText?: string;
 }
 
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange }: SliderRowProps) {
+function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange, tooltipTerm, tooltipText }: SliderRowProps) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
+      <label className="w-20 shrink-0 text-xs text-zinc-400">
+        {label}
+        {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
+        {tooltipText && <InfoTooltip text={tooltipText} />}
+      </label>
       <input
         type="range"
         min={min}
@@ -60,15 +69,22 @@ interface TextureSlotProps {
   slot: string;
   textureRef: string | null | undefined;
   entityId: string;
+  tooltipTerm?: string;
 }
 
-function TextureSlot({ label, slot, textureRef, entityId }: TextureSlotProps) {
+function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: TextureSlotProps) {
   const loadTexture = useEditorStore((s) => s.loadTexture);
   const removeTexture = useEditorStore((s) => s.removeTexture);
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const assetName = textureRef ? assetRegistry[textureRef]?.name : null;
+
+  // Get available texture assets from registry
+  const textureAssets = useMemo(
+    () => Object.values(assetRegistry).filter((a) => a.kind === 'texture'),
+    [assetRegistry]
+  );
 
   const handleFileSelect = useCallback(async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -82,29 +98,73 @@ function TextureSlot({ label, slot, textureRef, entityId }: TextureSlotProps) {
     reader.readAsDataURL(file);
   }, [loadTexture, entityId, slot]);
 
+  const handleSelectChange = useCallback((value: string) => {
+    if (value === '__upload__') {
+      fileRef.current?.click();
+    } else if (value === '__none__') {
+      removeTexture(entityId, slot);
+    } else {
+      // value is an asset ID — load it into this slot
+      // For existing assets, we fire loadTexture with the asset's data
+      // But the asset is already loaded; we need to assign it to this slot
+      // The texture is referenced by asset ID
+      loadTexture('', value, entityId, slot);
+    }
+  }, [loadTexture, removeTexture, entityId, slot]);
+
   return (
     <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
-      <button
-        className="flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
-        onClick={() => fileRef.current?.click()}
-        title={`Select ${label.toLowerCase()} texture`}
-      >
-        <ImageIcon size={12} />
-        <span>Select</span>
-      </button>
-      {textureRef && (
-        <button
-          className="rounded p-0.5 text-zinc-500 hover:text-red-400"
-          onClick={() => removeTexture(entityId, slot)}
-          title="Remove texture"
-        >
-          <X size={12} />
-        </button>
+      <label className="w-20 shrink-0 text-xs text-zinc-400">
+        {label}
+        {tooltipTerm && <InfoTooltip term={tooltipTerm} />}
+      </label>
+      {textureAssets.length > 0 ? (
+        <>
+          <select
+            value={textureRef ?? '__none__'}
+            onChange={(e) => handleSelectChange(e.target.value)}
+            className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
+          >
+            <option value="__none__">None</option>
+            {textureAssets.map((asset) => (
+              <option key={asset.id} value={asset.id}>{asset.name}</option>
+            ))}
+            <option value="__upload__">Upload new...</option>
+          </select>
+          {textureRef && (
+            <button
+              className="shrink-0 rounded p-0.5 text-zinc-500 hover:text-red-400"
+              onClick={() => removeTexture(entityId, slot)}
+              title="Remove texture"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </>
+      ) : (
+        <>
+          <button
+            className="flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+            onClick={() => fileRef.current?.click()}
+            title={`Upload ${label.toLowerCase()} texture`}
+          >
+            <ImageIcon size={12} />
+            <span>Upload</span>
+          </button>
+          {textureRef && (
+            <button
+              className="rounded p-0.5 text-zinc-500 hover:text-red-400"
+              onClick={() => removeTexture(entityId, slot)}
+              title="Remove texture"
+            >
+              <X size={12} />
+            </button>
+          )}
+          <span className="truncate text-[10px] text-zinc-600">
+            {assetName ?? (textureRef ? textureRef.slice(0, 8) + '...' : 'none')}
+          </span>
+        </>
       )}
-      <span className="truncate text-[10px] text-zinc-600">
-        {assetName ?? (textureRef ? textureRef.slice(0, 8) + '...' : 'none')}
-      </span>
       <input
         ref={fileRef}
         type="file"
@@ -140,46 +200,50 @@ function PresetSelector({ onApply, onSaveToLibrary }: { onApply: (preset: Materi
   const [selectedId, setSelectedId] = useState<string>('');
 
   return (
-    <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">Preset</label>
-      <select
-        value={selectedId}
-        onChange={(e) => setSelectedId(e.target.value)}
-        className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
-      >
-        <option value="">(Custom)</option>
-        {ALL_CATEGORIES.map((cat) => {
-          const presets = MATERIAL_PRESETS.filter((p) => p.category === cat);
-          if (presets.length === 0) return null;
-          return (
-            <optgroup key={cat} label={cat.charAt(0).toUpperCase() + cat.slice(1)}>
-              {presets.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </optgroup>
-          );
-        })}
-      </select>
-      <button
-        className="rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 disabled:opacity-40"
-        disabled={!selectedId}
-        onClick={() => {
-          const preset = getPresetById(selectedId);
-          if (preset) {
-            onApply(preset);
-            setSelectedId('');
-          }
-        }}
-      >
-        Apply
-      </button>
-      <button
-        className="rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:border-zinc-500 hover:text-purple-400"
-        onClick={onSaveToLibrary}
-        title="Save current material to library"
-      >
-        <BookmarkPlus size={12} />
-      </button>
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <label className="w-20 shrink-0 text-xs text-zinc-400">Preset<InfoTooltip term="materialPreset" /></label>
+        <select
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+          className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
+        >
+          <option value="">(Custom)</option>
+          {ALL_CATEGORIES.map((cat) => {
+            const presets = MATERIAL_PRESETS.filter((p) => p.category === cat);
+            if (presets.length === 0) return null;
+            return (
+              <optgroup key={cat} label={cat.charAt(0).toUpperCase() + cat.slice(1)}>
+                {presets.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </optgroup>
+            );
+          })}
+        </select>
+      </div>
+      <div className="flex items-center gap-2 pl-20">
+        <button
+          className="shrink-0 rounded border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:border-blue-500 hover:text-blue-400 disabled:opacity-40 transition-colors"
+          disabled={!selectedId}
+          onClick={() => {
+            const preset = getPresetById(selectedId);
+            if (preset) {
+              onApply(preset);
+              setSelectedId('');
+            }
+          }}
+        >
+          Apply Preset
+        </button>
+        <button
+          className="shrink-0 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:border-zinc-500 hover:text-purple-400"
+          onClick={onSaveToLibrary}
+          title="Save current material to library"
+        >
+          <BookmarkPlus size={12} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -190,12 +254,15 @@ const IOR_HINTS: Record<string, number> = {
 };
 
 export const MaterialInspector = memo(function MaterialInspector() {
+  const [generateTextureOpen, setGenerateTextureOpen] = useState(false);
+
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryMaterial = useEditorStore((s) => s.primaryMaterial);
   const updateMaterial = useEditorStore((s) => s.updateMaterial);
   const primaryShaderEffect = useEditorStore((s) => s.primaryShaderEffect);
   const updateShaderEffect = useEditorStore((s) => s.updateShaderEffect);
   const removeShaderEffect = useEditorStore((s) => s.removeShaderEffect);
+  const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
 
   const handleUpdate = useCallback(
     (partial: Partial<MaterialData>) => {
@@ -276,15 +343,20 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-        Material
-      </h3>
+      <div className="mb-3 flex items-center justify-between">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          Material
+        </h3>
+        <button onClick={() => navigateDocs('features/materials')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+          <HelpCircle size={12} />
+        </button>
+      </div>
 
       <div className="space-y-3">
         {/* Shader Effect */}
         <CollapsibleSection title="Shader Effect" defaultOpen={shaderType !== 'none'}>
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Type</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Type<InfoTooltip term="shaderType" /></label>
             <select
               value={shaderType}
               onChange={(e) => handleShaderTypeChange(e.target.value)}
@@ -304,7 +376,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
             <>
               {/* Common params */}
               <div className="flex items-center gap-2">
-                <label className="w-24 shrink-0 text-xs text-zinc-400">Color</label>
+                <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip text="The color applied to this shader effect" /></label>
                 <input
                   type="color"
                   value={linearToHex(primaryShaderEffect.customColor[0], primaryShaderEffect.customColor[1], primaryShaderEffect.customColor[2])}
@@ -322,51 +394,52 @@ export const MaterialInspector = memo(function MaterialInspector() {
                 max={10}
                 step={0.1}
                 onChange={(v) => handleShaderParamChange('emissionStrength', v)}
+                tooltipTerm="shaderEmission"
               />
 
               {/* Dissolve-specific */}
               {shaderType === 'dissolve' && (
                 <>
-                  <SliderRow label="Threshold" value={primaryShaderEffect.dissolveThreshold} min={0} max={1} step={0.01} onChange={(v) => handleShaderParamChange('dissolveThreshold', v)} />
-                  <SliderRow label="Edge Width" value={primaryShaderEffect.dissolveEdgeWidth} min={0} max={0.2} step={0.005} onChange={(v) => handleShaderParamChange('dissolveEdgeWidth', v)} />
-                  <SliderRow label="Noise Scale" value={primaryShaderEffect.noiseScale} min={0.5} max={20} step={0.5} onChange={(v) => handleShaderParamChange('noiseScale', v)} />
+                  <SliderRow label="Threshold" value={primaryShaderEffect.dissolveThreshold} min={0} max={1} step={0.01} onChange={(v) => handleShaderParamChange('dissolveThreshold', v)} tooltipTerm="dissolveThreshold" />
+                  <SliderRow label="Edge Width" value={primaryShaderEffect.dissolveEdgeWidth} min={0} max={0.2} step={0.005} onChange={(v) => handleShaderParamChange('dissolveEdgeWidth', v)} tooltipTerm="dissolveEdgeWidth" />
+                  <SliderRow label="Noise Scale" value={primaryShaderEffect.noiseScale} min={0.5} max={20} step={0.5} onChange={(v) => handleShaderParamChange('noiseScale', v)} tooltipTerm="noiseScale" />
                 </>
               )}
 
               {/* Hologram-specific */}
               {shaderType === 'hologram' && (
                 <>
-                  <SliderRow label="Scan Freq" value={primaryShaderEffect.scanLineFrequency} min={10} max={200} step={1} onChange={(v) => handleShaderParamChange('scanLineFrequency', v)} />
-                  <SliderRow label="Scan Speed" value={primaryShaderEffect.scanLineSpeed} min={0.5} max={10} step={0.1} onChange={(v) => handleShaderParamChange('scanLineSpeed', v)} />
+                  <SliderRow label="Scan Freq" value={primaryShaderEffect.scanLineFrequency} min={10} max={200} step={1} onChange={(v) => handleShaderParamChange('scanLineFrequency', v)} tooltipTerm="scanFreq" />
+                  <SliderRow label="Scan Speed" value={primaryShaderEffect.scanLineSpeed} min={0.5} max={10} step={0.1} onChange={(v) => handleShaderParamChange('scanLineSpeed', v)} tooltipTerm="scanSpeed" />
                 </>
               )}
 
               {/* Force Field-specific */}
               {shaderType === 'force_field' && (
                 <>
-                  <SliderRow label="Fresnel" value={primaryShaderEffect.fresnelPower} min={1} max={10} step={0.1} onChange={(v) => handleShaderParamChange('fresnelPower', v)} />
-                  <SliderRow label="Noise Scale" value={primaryShaderEffect.noiseScale} min={0.5} max={20} step={0.5} onChange={(v) => handleShaderParamChange('noiseScale', v)} />
+                  <SliderRow label="Fresnel" value={primaryShaderEffect.fresnelPower} min={1} max={10} step={0.1} onChange={(v) => handleShaderParamChange('fresnelPower', v)} tooltipTerm="fresnelPower" />
+                  <SliderRow label="Noise Scale" value={primaryShaderEffect.noiseScale} min={0.5} max={20} step={0.5} onChange={(v) => handleShaderParamChange('noiseScale', v)} tooltipTerm="noiseScale" />
                 </>
               )}
 
               {/* Lava/Flow-specific */}
               {shaderType === 'lava_flow' && (
                 <>
-                  <SliderRow label="Scroll X" value={primaryShaderEffect.scrollSpeed[0]} min={-2} max={2} step={0.1} onChange={(v) => handleShaderParamChange('scrollSpeed', [v, primaryShaderEffect.scrollSpeed[1]])} />
-                  <SliderRow label="Scroll Y" value={primaryShaderEffect.scrollSpeed[1]} min={-2} max={2} step={0.1} onChange={(v) => handleShaderParamChange('scrollSpeed', [primaryShaderEffect.scrollSpeed[0], v])} />
-                  <SliderRow label="Distortion" value={primaryShaderEffect.distortionStrength} min={0} max={1} step={0.01} onChange={(v) => handleShaderParamChange('distortionStrength', v)} />
-                  <SliderRow label="Noise Scale" value={primaryShaderEffect.noiseScale} min={0.5} max={20} step={0.5} onChange={(v) => handleShaderParamChange('noiseScale', v)} />
+                  <SliderRow label="Scroll X" value={primaryShaderEffect.scrollSpeed[0]} min={-2} max={2} step={0.1} onChange={(v) => handleShaderParamChange('scrollSpeed', [v, primaryShaderEffect.scrollSpeed[1]])} tooltipTerm="scrollX" />
+                  <SliderRow label="Scroll Y" value={primaryShaderEffect.scrollSpeed[1]} min={-2} max={2} step={0.1} onChange={(v) => handleShaderParamChange('scrollSpeed', [primaryShaderEffect.scrollSpeed[0], v])} tooltipTerm="scrollY" />
+                  <SliderRow label="Distortion" value={primaryShaderEffect.distortionStrength} min={0} max={1} step={0.01} onChange={(v) => handleShaderParamChange('distortionStrength', v)} tooltipTerm="distortion" />
+                  <SliderRow label="Noise Scale" value={primaryShaderEffect.noiseScale} min={0.5} max={20} step={0.5} onChange={(v) => handleShaderParamChange('noiseScale', v)} tooltipTerm="noiseScale" />
                 </>
               )}
 
               {/* Toon-specific */}
               {shaderType === 'toon' && (
-                <SliderRow label="Bands" value={primaryShaderEffect.toonBands} min={2} max={8} step={1} onChange={(v) => handleShaderParamChange('toonBands', v)} />
+                <SliderRow label="Bands" value={primaryShaderEffect.toonBands} min={2} max={8} step={1} onChange={(v) => handleShaderParamChange('toonBands', v)} tooltipTerm="toonBands" />
               )}
 
               {/* Fresnel Glow-specific */}
               {shaderType === 'fresnel_glow' && (
-                <SliderRow label="Fresnel" value={primaryShaderEffect.fresnelPower} min={1} max={10} step={0.1} onChange={(v) => handleShaderParamChange('fresnelPower', v)} />
+                <SliderRow label="Fresnel" value={primaryShaderEffect.fresnelPower} min={1} max={10} step={0.1} onChange={(v) => handleShaderParamChange('fresnelPower', v)} tooltipTerm="fresnelPower" />
               )}
             </>
           )}
@@ -375,9 +448,10 @@ export const MaterialInspector = memo(function MaterialInspector() {
         {/* Preset Selector */}
         <PresetSelector onApply={handleApplyPreset} onSaveToLibrary={handleSaveToLibrary} />
 
+
         {/* Base Color */}
         <div className="flex items-center gap-2">
-          <label className="w-24 shrink-0 text-xs text-zinc-400">Color</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Color<InfoTooltip term="baseColor" /></label>
           <input
             type="color"
             value={baseColorHex}
@@ -405,32 +479,72 @@ export const MaterialInspector = memo(function MaterialInspector() {
               alphaMode: v < 1 ? 'blend' : 'opaque',
             })
           }
+          tooltipTerm="opacity"
         />
 
         {/* Metallic */}
-        <SliderRow
-          label="Metallic"
-          value={primaryMaterial.metallic}
-          onChange={(v) => handleUpdate({ metallic: v })}
-        />
+        <div className="flex items-center gap-2">
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Metallic<InfoTooltip term="metallic" /></label>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={primaryMaterial.metallic}
+            onChange={(e) => handleUpdate({ metallic: parseFloat(e.target.value) })}
+            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+              [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+              [&::-webkit-slider-thumb]:bg-zinc-300"
+          />
+          <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+            {primaryMaterial.metallic.toFixed(2)}
+          </span>
+        </div>
 
         {/* Roughness */}
-        <SliderRow
-          label="Roughness"
-          value={primaryMaterial.perceptualRoughness}
-          onChange={(v) => handleUpdate({ perceptualRoughness: v })}
-        />
+        <div className="flex items-center gap-2">
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Roughness<InfoTooltip term="roughness" /></label>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={primaryMaterial.perceptualRoughness}
+            onChange={(e) => handleUpdate({ perceptualRoughness: parseFloat(e.target.value) })}
+            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+              [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+              [&::-webkit-slider-thumb]:bg-zinc-300"
+          />
+          <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+            {primaryMaterial.perceptualRoughness.toFixed(2)}
+          </span>
+        </div>
 
         {/* Reflectance */}
-        <SliderRow
-          label="Reflectance"
-          value={primaryMaterial.reflectance}
-          onChange={(v) => handleUpdate({ reflectance: v })}
-        />
+        <div className="flex items-center gap-2">
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Reflectance<InfoTooltip term="reflectance" /></label>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.01}
+            value={primaryMaterial.reflectance}
+            onChange={(e) => handleUpdate({ reflectance: parseFloat(e.target.value) })}
+            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+              [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
+              [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
+              [&::-webkit-slider-thumb]:bg-zinc-300"
+          />
+          <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+            {primaryMaterial.reflectance.toFixed(2)}
+          </span>
+        </div>
 
         {/* Emissive */}
         <div className="flex items-center gap-2">
-          <label className="w-24 shrink-0 text-xs text-zinc-400">Emissive</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Emissive<InfoTooltip term="emissive" /></label>
           <input
             type="color"
             value={emissiveHex}
@@ -460,11 +574,12 @@ export const MaterialInspector = memo(function MaterialInspector() {
               ],
             })
           }
+          tooltipTerm="emissiveStrength"
         />
 
         {/* Double Sided */}
         <div className="flex items-center gap-2">
-          <label className="w-24 shrink-0 text-xs text-zinc-400">Double Sided</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Double Sided<InfoTooltip term="doubleSided" /></label>
           <input
             type="checkbox"
             checked={primaryMaterial.doubleSided}
@@ -476,7 +591,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Unlit */}
         <div className="flex items-center gap-2">
-          <label className="w-24 shrink-0 text-xs text-zinc-400">Unlit</label>
+          <label className="w-20 shrink-0 text-xs text-zinc-400">Unlit<InfoTooltip term="unlit" /></label>
           <input
             type="checkbox"
             checked={primaryMaterial.unlit}
@@ -488,38 +603,49 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
         {/* Texture Slots */}
         <div className="mt-2 border-t border-zinc-800 pt-2">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
-            Textures
-          </h4>
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
+              Textures<InfoTooltip term="textures" />
+            </h4>
+            <button
+              onClick={() => setGenerateTextureOpen(true)}
+              className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
+              title="Generate texture with AI"
+            >
+              <Sparkles size={10} />
+              Generate
+            </button>
+          </div>
           <div className="space-y-2">
-            <TextureSlot label="Base Color" slot="base_color" textureRef={primaryMaterial.baseColorTexture} entityId={primaryId} />
-            <TextureSlot label="Normal Map" slot="normal_map" textureRef={primaryMaterial.normalMapTexture} entityId={primaryId} />
-            <TextureSlot label="Metal/Rough" slot="metallic_roughness" textureRef={primaryMaterial.metallicRoughnessTexture} entityId={primaryId} />
-            <TextureSlot label="Emissive" slot="emissive" textureRef={primaryMaterial.emissiveTexture} entityId={primaryId} />
-            <TextureSlot label="Occlusion" slot="occlusion" textureRef={primaryMaterial.occlusionTexture} entityId={primaryId} />
+            <TextureSlot label="Base Color" slot="base_color" textureRef={primaryMaterial.baseColorTexture} entityId={primaryId} tooltipTerm="baseColorTexture" />
+            <TextureSlot label="Normal Map" slot="normal_map" textureRef={primaryMaterial.normalMapTexture} entityId={primaryId} tooltipTerm="normalMap" />
+            <TextureSlot label="Metal/Rough" slot="metallic_roughness" textureRef={primaryMaterial.metallicRoughnessTexture} entityId={primaryId} tooltipTerm="metalRoughTexture" />
+            <TextureSlot label="Emissive" slot="emissive" textureRef={primaryMaterial.emissiveTexture} entityId={primaryId} tooltipTerm="emissiveTexture" />
+            <TextureSlot label="Occlusion" slot="occlusion" textureRef={primaryMaterial.occlusionTexture} entityId={primaryId} tooltipTerm="occlusionTexture" />
           </div>
         </div>
 
         {/* UV Transform (E-1a) */}
         <CollapsibleSection title="UV Transform">
-          <SliderRow label="Offset X" value={primaryMaterial.uvOffset?.[0] ?? 0} min={-10} max={10} step={0.01} onChange={(v) => handleUpdate({ uvOffset: [v, primaryMaterial.uvOffset?.[1] ?? 0] })} />
-          <SliderRow label="Offset Y" value={primaryMaterial.uvOffset?.[1] ?? 0} min={-10} max={10} step={0.01} onChange={(v) => handleUpdate({ uvOffset: [primaryMaterial.uvOffset?.[0] ?? 0, v] })} />
-          <SliderRow label="Scale X" value={primaryMaterial.uvScale?.[0] ?? 1} min={0.01} max={20} step={0.01} onChange={(v) => handleUpdate({ uvScale: [v, primaryMaterial.uvScale?.[1] ?? 1] })} />
-          <SliderRow label="Scale Y" value={primaryMaterial.uvScale?.[1] ?? 1} min={0.01} max={20} step={0.01} onChange={(v) => handleUpdate({ uvScale: [primaryMaterial.uvScale?.[0] ?? 1, v] })} />
+          <SliderRow label="Offset X" value={primaryMaterial.uvOffset?.[0] ?? 0} min={-10} max={10} step={0.01} onChange={(v) => handleUpdate({ uvOffset: [v, primaryMaterial.uvOffset?.[1] ?? 0] })} tooltipTerm="uvOffsetX" />
+          <SliderRow label="Offset Y" value={primaryMaterial.uvOffset?.[1] ?? 0} min={-10} max={10} step={0.01} onChange={(v) => handleUpdate({ uvOffset: [primaryMaterial.uvOffset?.[0] ?? 0, v] })} tooltipTerm="uvOffsetY" />
+          <SliderRow label="Scale X" value={primaryMaterial.uvScale?.[0] ?? 1} min={0.01} max={20} step={0.01} onChange={(v) => handleUpdate({ uvScale: [v, primaryMaterial.uvScale?.[1] ?? 1] })} tooltipTerm="uvScaleX" />
+          <SliderRow label="Scale Y" value={primaryMaterial.uvScale?.[1] ?? 1} min={0.01} max={20} step={0.01} onChange={(v) => handleUpdate({ uvScale: [primaryMaterial.uvScale?.[0] ?? 1, v] })} tooltipTerm="uvScaleY" />
           <SliderRow
             label="Rotation"
             value={Math.round((primaryMaterial.uvRotation ?? 0) * 180 / Math.PI)}
             min={0} max={360} step={1}
             onChange={(v) => handleUpdate({ uvRotation: v * Math.PI / 180 })}
+            tooltipTerm="uvRotation"
           />
         </CollapsibleSection>
 
         {/* Parallax Mapping (E-1b) */}
         <CollapsibleSection title="Parallax Mapping">
-          <TextureSlot label="Depth Map" slot="depth_map" textureRef={primaryMaterial.depthMapTexture} entityId={primaryId} />
-          <SliderRow label="Depth Scale" value={primaryMaterial.parallaxDepthScale ?? 0.1} min={0} max={0.5} step={0.005} onChange={(v) => handleUpdate({ parallaxDepthScale: v })} />
+          <TextureSlot label="Depth Map" slot="depth_map" textureRef={primaryMaterial.depthMapTexture} entityId={primaryId} tooltipTerm="depthMap" />
+          <SliderRow label="Depth Scale" value={primaryMaterial.parallaxDepthScale ?? 0.1} min={0} max={0.5} step={0.005} onChange={(v) => handleUpdate({ parallaxDepthScale: v })} tooltipTerm="depthScale" />
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Method</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Method<InfoTooltip term="parallaxMethod" /></label>
             <select
               value={primaryMaterial.parallaxMappingMethod ?? 'occlusion'}
               onChange={(e) => handleUpdate({ parallaxMappingMethod: e.target.value as 'occlusion' | 'relief' })}
@@ -529,36 +655,36 @@ export const MaterialInspector = memo(function MaterialInspector() {
               <option value="relief">Relief</option>
             </select>
           </div>
-          <SliderRow label="Max Layers" value={primaryMaterial.maxParallaxLayerCount ?? 16} min={1} max={128} step={1} onChange={(v) => handleUpdate({ maxParallaxLayerCount: v })} />
+          <SliderRow label="Max Layers" value={primaryMaterial.maxParallaxLayerCount ?? 16} min={1} max={128} step={1} onChange={(v) => handleUpdate({ maxParallaxLayerCount: v })} tooltipTerm="parallaxMaxLayers" />
           {(primaryMaterial.parallaxMappingMethod === 'relief') && (
-            <SliderRow label="Relief Steps" value={primaryMaterial.parallaxReliefMaxSteps ?? 5} min={1} max={32} step={1} onChange={(v) => handleUpdate({ parallaxReliefMaxSteps: v })} />
+            <SliderRow label="Relief Steps" value={primaryMaterial.parallaxReliefMaxSteps ?? 5} min={1} max={32} step={1} onChange={(v) => handleUpdate({ parallaxReliefMaxSteps: v })} tooltipTerm="parallaxReliefSteps" />
           )}
         </CollapsibleSection>
 
         {/* Clearcoat (E-1c) */}
         <CollapsibleSection title="Clearcoat">
-          <SliderRow label="Intensity" value={primaryMaterial.clearcoat ?? 0} onChange={(v) => handleUpdate({ clearcoat: v })} />
-          <SliderRow label="Roughness" value={primaryMaterial.clearcoatPerceptualRoughness ?? 0.5} onChange={(v) => handleUpdate({ clearcoatPerceptualRoughness: v })} />
-          <TextureSlot label="Coat Map" slot="clearcoat" textureRef={primaryMaterial.clearcoatTexture} entityId={primaryId} />
-          <TextureSlot label="Rough Map" slot="clearcoat_roughness" textureRef={primaryMaterial.clearcoatRoughnessTexture} entityId={primaryId} />
-          <TextureSlot label="Normal Map" slot="clearcoat_normal" textureRef={primaryMaterial.clearcoatNormalTexture} entityId={primaryId} />
+          <SliderRow label="Intensity" value={primaryMaterial.clearcoat ?? 0} onChange={(v) => handleUpdate({ clearcoat: v })} tooltipTerm="clearcoatIntensity" />
+          <SliderRow label="Roughness" value={primaryMaterial.clearcoatPerceptualRoughness ?? 0.5} onChange={(v) => handleUpdate({ clearcoatPerceptualRoughness: v })} tooltipTerm="clearcoatRoughness" />
+          <TextureSlot label="Coat Map" slot="clearcoat" textureRef={primaryMaterial.clearcoatTexture} entityId={primaryId} tooltipTerm="clearcoatMap" />
+          <TextureSlot label="Rough Map" slot="clearcoat_roughness" textureRef={primaryMaterial.clearcoatRoughnessTexture} entityId={primaryId} tooltipTerm="clearcoatRoughMap" />
+          <TextureSlot label="Normal Map" slot="clearcoat_normal" textureRef={primaryMaterial.clearcoatNormalTexture} entityId={primaryId} tooltipTerm="clearcoatNormal" />
         </CollapsibleSection>
 
         {/* Transmission (E-1d) */}
         <CollapsibleSection title="Transmission">
-          <SliderRow label="Specular" value={primaryMaterial.specularTransmission ?? 0} onChange={(v) => handleUpdate({ specularTransmission: v })} />
-          <SliderRow label="Diffuse" value={primaryMaterial.diffuseTransmission ?? 0} onChange={(v) => handleUpdate({ diffuseTransmission: v })} />
+          <SliderRow label="Specular" value={primaryMaterial.specularTransmission ?? 0} onChange={(v) => handleUpdate({ specularTransmission: v })} tooltipTerm="specularTransmission" />
+          <SliderRow label="Diffuse" value={primaryMaterial.diffuseTransmission ?? 0} onChange={(v) => handleUpdate({ diffuseTransmission: v })} tooltipTerm="diffuseTransmission" />
           <div>
-            <SliderRow label="IOR" value={primaryMaterial.ior ?? 1.5} min={1.0} max={3.0} step={0.01} onChange={(v) => handleUpdate({ ior: v })} />
+            <SliderRow label="IOR" value={primaryMaterial.ior ?? 1.5} min={1.0} max={3.0} step={0.01} onChange={(v) => handleUpdate({ ior: v })} tooltipTerm="ior" />
             <div className="ml-24 mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-zinc-600">
               {Object.entries(IOR_HINTS).map(([name, val]) => (
                 <span key={name}>{name} {val}</span>
               ))}
             </div>
           </div>
-          <SliderRow label="Thickness" value={primaryMaterial.thickness ?? 0} min={0} max={10} step={0.01} onChange={(v) => handleUpdate({ thickness: v })} />
+          <SliderRow label="Thickness" value={primaryMaterial.thickness ?? 0} min={0} max={10} step={0.01} onChange={(v) => handleUpdate({ thickness: v })} tooltipTerm="transmissionThickness" />
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Atten. Dist.</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Atten. Dist.<InfoTooltip term="attenuationDist" /></label>
             <input
               type="checkbox"
               checked={primaryMaterial.attenuationDistance == null}
@@ -583,7 +709,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
             )}
           </div>
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Atten. Color</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400">Atten. Color<InfoTooltip term="attenuationColor" /></label>
             <input
               type="color"
               value={attColorHex}
@@ -603,6 +729,15 @@ export const MaterialInspector = memo(function MaterialInspector() {
           )}
         </CollapsibleSection>
       </div>
+
+      {/* Generation dialog */}
+      {primaryId && (
+        <GenerateTextureDialog
+          isOpen={generateTextureOpen}
+          onClose={() => setGenerateTextureOpen(false)}
+          entityId={primaryId}
+        />
+      )}
     </div>
   );
 });

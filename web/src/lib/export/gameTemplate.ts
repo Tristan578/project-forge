@@ -1,3 +1,7 @@
+import { generateUIRuntimeCode } from './uiRuntime';
+import { generateTouchCSS, generateTouchJS } from './touchControls';
+import type { MobileTouchConfig } from './touchControls';
+
 export interface GameTemplateOptions {
   title: string;
   bgColor: string;
@@ -5,10 +9,12 @@ export interface GameTemplateOptions {
   sceneData: string;       // JSON scene data
   scriptBundle: string;    // JS script bundle
   includeDebug: boolean;
+  uiData?: string;         // JSON-encoded GameUIData
+  mobileTouchConfig?: string;  // JSON-encoded MobileTouchConfig
 }
 
 export function generateGameHTML(options: GameTemplateOptions): string {
-  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug } = options;
+  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig } = options;
 
   const canvasStyle = resolution === 'responsive'
     ? 'width: 100vw; height: 100vh;'
@@ -16,21 +22,29 @@ export function generateGameHTML(options: GameTemplateOptions): string {
       ? `width: ${resolution.split('x')[0]}px; height: ${resolution.split('x')[1]}px; margin: auto;`
       : `width: ${resolution.width}px; height: ${resolution.height}px; margin: auto;`;
 
+  const touchConfig: MobileTouchConfig | null = mobileTouchConfig
+    ? JSON.parse(mobileTouchConfig)
+    : null;
+
+  const touchCSS = touchConfig?.enabled ? generateTouchCSS() : '';
+  const touchJS = touchConfig?.enabled ? generateTouchJS(touchConfig) : '';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>${escapeHtml(title)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: ${bgColor}; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    body { overflow: hidden; background: ${bgColor}; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
     canvas { ${canvasStyle} display: block; }
     #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: ${bgColor}; z-index: 1000; transition: opacity 0.5s; }
     #loading.hidden { opacity: 0; pointer-events: none; }
     .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
     #loading p { color: rgba(255,255,255,0.6); font-family: system-ui; font-size: 14px; margin-top: 16px; }
+    ${touchCSS}
   </style>
 </head>
 <body>
@@ -39,11 +53,16 @@ export function generateGameHTML(options: GameTemplateOptions): string {
     <p>Loading ${escapeHtml(title)}...</p>
   </div>
   <canvas id="game-canvas"></canvas>
+  <div id="forge-ui-root"></div>
+  <div id="forge-touch-overlay"></div>
 
   <script>
     // Scene data
     window.__forgeSceneData = ${sceneData};
+    ${uiData ? `window.__forgeUIData = ${uiData};` : ''}
   </script>
+
+  ${touchJS ? `<script>${touchJS}</script>` : ''}
 
   ${scriptBundle ? `<script>\n${scriptBundle}\n</script>` : ''}
 
@@ -79,6 +98,12 @@ export function generateGameHTML(options: GameTemplateOptions): string {
         // Initialize engine
         init_engine('game-canvas');
 
+        // Auto-reduce quality on mobile
+        var _isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        if (_isMobile && ${touchConfig?.autoReduceQuality ? 'true' : 'false'}) {
+          handle_command('set_quality', JSON.stringify({ preset: 'low' }));
+        }
+
         // Load scene
         handle_command('load_scene', JSON.stringify(window.__forgeSceneData));
 
@@ -95,6 +120,17 @@ export function generateGameHTML(options: GameTemplateOptions): string {
             lastTime = now;
 
             if (window.__forgeScriptUpdate) window.__forgeScriptUpdate(dt);
+
+            // Merge touch input
+            if (window.__forgeTouchInput) {
+              if (!window.__forgeInputState) window.__forgeInputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+              var ti = window.__forgeTouchInput;
+              for (var k in ti.pressed) { if (ti.pressed[k]) window.__forgeInputState.pressed[k] = true; }
+              for (var k2 in ti.justPressed) { if (ti.justPressed[k2]) window.__forgeInputState.justPressed[k2] = true; }
+              for (var k3 in ti.justReleased) { if (ti.justReleased[k3]) window.__forgeInputState.justReleased[k3] = true; }
+              for (var k4 in ti.axes) { window.__forgeInputState.axes[k4] = ti.axes[k4]; }
+              if (window.__forgeTouchFlush) window.__forgeTouchFlush();
+            }
 
             // Flush script commands to engine
             if (window.__forgeFlushCommands) {
@@ -126,10 +162,20 @@ export function generateGameHTML(options: GameTemplateOptions): string {
 
     document.querySelector('#loading p').textContent = 'Click to start ${escapeHtml(title)}';
   </script>
+
+  ${uiData ? generateUIRuntimeScript(uiData) : ''}
 </body>
 </html>`;
 }
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function generateUIRuntimeScript(uiData: string): string {
+  const runtimeCode = generateUIRuntimeCode(uiData);
+  return `
+  <script>
+    ${runtimeCode}
+  </script>`;
 }

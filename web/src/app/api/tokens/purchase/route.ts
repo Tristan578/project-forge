@@ -17,7 +17,7 @@ export async function POST(req: Request) {
   if (!authResult.ok) return authResult.response;
 
   // Only paid tiers can buy tokens
-  const tierCheck = assertTier(authResult.ctx.user, ['starter', 'creator', 'studio']);
+  const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
 
   const body = await req.json();

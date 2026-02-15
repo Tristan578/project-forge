@@ -9,6 +9,7 @@ use super::material::MaterialData;
 use super::input::{ActionDef, ActionType, InputPreset, InputSource};
 use super::particles::ParticleData as CoreParticleData;
 use super::physics::{JointData, JointLimits, JointMotor, JointType, PhysicsData};
+use super::physics_2d::{Physics2dData, PhysicsJoint2d, BodyType2d, ColliderShape2d};
 use super::post_processing::{
     BloomSettings, ChromaticAberrationSettings, ColorGradingSettings, SharpeningSettings,
     SsaoSettings, DepthOfFieldSettings, MotionBlurSettings,
@@ -28,6 +29,10 @@ use super::pending_commands::{
     queue_physics_update_from_bridge, queue_physics_toggle_from_bridge,
     queue_debug_physics_toggle_from_bridge, queue_force_application_from_bridge,
     queue_create_joint_from_bridge, queue_update_joint_from_bridge, queue_remove_joint_from_bridge,
+    queue_physics2d_update_from_bridge, queue_physics2d_toggle_from_bridge,
+    queue_create_joint2d_from_bridge, queue_remove_joint2d_from_bridge,
+    queue_force_application2d_from_bridge, queue_impulse_application2d_from_bridge,
+    queue_raycast2d_from_bridge, queue_gravity2d_update_from_bridge, queue_debug_physics2d_toggle_from_bridge,
     queue_scene_export_from_bridge, queue_scene_load_from_bridge, queue_new_scene_from_bridge,
     queue_gltf_import_from_bridge, queue_texture_load_from_bridge,
     queue_place_asset_from_bridge, queue_delete_asset_from_bridge,
@@ -47,8 +52,22 @@ use super::pending_commands::{
     queue_extrude_from_bridge, queue_lathe_from_bridge, queue_array_from_bridge, queue_combine_from_bridge,
     queue_quality_preset_from_bridge, queue_instantiate_prefab_from_bridge,
     queue_set_skybox_from_bridge, queue_remove_skybox_from_bridge, queue_update_skybox_from_bridge,
+    queue_custom_skybox_from_bridge,
+    queue_game_component_add_from_bridge, queue_game_component_update_from_bridge, queue_game_component_removal_from_bridge,
+    queue_set_game_camera_from_bridge, queue_set_active_game_camera_from_bridge, queue_camera_shake_from_bridge,
+    queue_set_project_type_from_bridge, queue_sprite_data_update_from_bridge, queue_sprite_removal_from_bridge,
+    queue_camera_2d_data_update_from_bridge,
+    queue_create_skeleton2d_from_bridge, queue_add_bone2d_from_bridge, queue_remove_bone2d_from_bridge,
+    queue_update_bone2d_from_bridge, queue_create_skeletal_animation2d_from_bridge, queue_add_keyframe2d_from_bridge,
+    queue_play_skeletal_animation2d_from_bridge, queue_set_skeleton2d_skin_from_bridge, queue_create_ik_chain2d_from_bridge,
+    queue_auto_weight_skeleton2d_from_bridge,
+    SetProjectTypeRequest, SpriteDataUpdate, SpriteRemoval, Camera2dDataUpdate, Camera2dBounds,
+    CreateSkeleton2dRequest, AddBone2dRequest, RemoveBone2dRequest, UpdateBone2dRequest,
+    CreateSkeletalAnimation2dRequest, AddKeyframe2dRequest, PlaySkeletalAnimation2dRequest,
+    SetSkeleton2dSkinRequest, CreateIkChain2dRequest, AutoWeightSkeleton2dRequest,
+    SetGameCameraRequest, SetActiveGameCameraRequest, CameraShakeRequest,
     QualityPresetRequest, InstantiatePrefabRequest,
-    SetSkyboxRequest, RemoveSkyboxRequest, UpdateSkyboxRequest,
+    SetSkyboxRequest, RemoveSkyboxRequest, UpdateSkyboxRequest, SetCustomSkyboxRequest,
     AnimationRequest, AnimationAction,
     ShaderUpdate, ShaderRemoval,
     CsgRequest,
@@ -58,6 +77,8 @@ use super::pending_commands::{
     InputBindingUpdate, InputPresetRequest, InputBindingRemoval,
     PhysicsUpdate, PhysicsToggle, ForceApplication,
     CreateJointRequest, UpdateJointRequest, RemoveJointRequest,
+    Physics2dUpdate, Physics2dToggle, CreateJoint2dRequest, RemoveJoint2dRequest,
+    ForceApplication2d, ImpulseApplication2d, Raycast2dRequest, Gravity2dUpdate, DebugPhysics2dToggle,
     GltfImportRequest, TextureLoadRequest, PlaceAssetRequest, DeleteAssetRequest, RemoveTextureRequest,
     ScriptUpdate, ScriptRemoval,
     AudioUpdate, AudioRemoval, AudioPlayback,
@@ -163,6 +184,25 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         "update_joint" => handle_update_joint(payload),
         "remove_joint" => handle_remove_joint(payload),
         "list_joints" => handle_query(QueryRequest::ListJoints),
+        // 2D Physics commands
+        "set_physics2d" => handle_set_physics2d(payload),
+        "remove_physics2d" => handle_remove_physics2d(payload),
+        "set_2d_collider_shape" => handle_set_2d_collider_shape(payload),
+        "set_2d_body_type" => handle_set_2d_body_type(payload),
+        "create_2d_joint" => handle_create_2d_joint(payload),
+        "remove_2d_joint" => handle_remove_2d_joint(payload),
+        "apply_force2d" => handle_apply_force2d(payload),
+        "apply_impulse2d" => handle_apply_impulse2d(payload),
+        "raycast2d" => handle_raycast2d(payload),
+        "set_gravity2d" => handle_set_gravity2d(payload),
+        "set_debug_physics2d" => handle_set_debug_physics2d(payload),
+        "get_physics2d" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::Physics2dState { entity_id })
+        },
         // Scene save/load commands
         "export_scene" => handle_export_scene(payload),
         "load_scene" => handle_load_scene(payload),
@@ -273,6 +313,63 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         "set_skybox" => handle_set_skybox(payload),
         "remove_skybox" => handle_remove_skybox(payload),
         "update_skybox" => handle_update_skybox(payload),
+        "set_custom_skybox" => handle_set_custom_skybox(payload),
+        // Game component commands
+        "add_game_component" => handle_add_game_component(payload),
+        "update_game_component" => handle_update_game_component(payload),
+        "remove_game_component" => handle_remove_game_component(payload),
+        "get_game_components" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::GameComponentState { entity_id })
+        },
+        "list_game_component_types" => handle_list_game_component_types(payload),
+        // Game camera commands
+        "set_game_camera" => handle_set_game_camera(payload),
+        "set_active_game_camera" => handle_set_active_game_camera(payload),
+        "camera_shake" => handle_camera_shake(payload),
+        "get_game_camera" => {
+            let entity_id = payload.get("entityId")
+                .or_else(|| payload.get("entity_id"))
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::GameCameraState { entity_id })
+        },
+        // 2D/Sprite commands
+        "set_project_type" => handle_set_project_type(payload),
+        "get_project_type" => handle_query(QueryRequest::ProjectType),
+        "set_sprite_data" => handle_set_sprite_data(payload),
+        "remove_sprite" => handle_remove_sprite(payload),
+        "get_sprite" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::SpriteState { entity_id })
+        },
+        "update_camera_2d" => handle_update_camera_2d(payload),
+        "get_camera_2d" => handle_query(QueryRequest::Camera2dState),
+        // Skeleton 2D commands
+        "create_skeleton2d" => handle_create_skeleton2d(payload),
+        "add_bone2d" => handle_add_bone2d(payload),
+        "remove_bone2d" => handle_remove_bone2d(payload),
+        "update_bone2d" => handle_update_bone2d(payload),
+        "create_skeletal_animation2d" => handle_create_skeletal_animation2d(payload),
+        "add_keyframe2d" => handle_add_keyframe2d(payload),
+        "play_skeletal_animation2d" => handle_play_skeletal_animation2d(payload),
+        "set_skeleton2d_skin" => handle_set_skeleton2d_skin(payload),
+        "create_ik_chain2d" => handle_create_ik_chain2d(payload),
+        "get_skeleton2d" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::Skeleton2dState { entity_id })
+        },
+        "auto_weight_skeleton2d" => handle_auto_weight_skeleton2d(payload),
         // Query commands (MCP resources)
         "get_scene_graph" => handle_query(QueryRequest::SceneGraph),
         "get_selection" => handle_query(QueryRequest::Selection),
@@ -1032,6 +1129,32 @@ fn handle_update_skybox(payload: serde_json::Value) -> CommandResult {
 
     if queue_update_skybox_from_bridge(request) {
         tracing::info!("Queued update skybox request");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for set_custom_skybox command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetCustomSkyboxPayload {
+    asset_id: String,
+    data_base64: String,
+}
+
+/// Handle set_custom_skybox command.
+fn handle_set_custom_skybox(payload: serde_json::Value) -> CommandResult {
+    let data: SetCustomSkyboxPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_custom_skybox payload: {}", e))?;
+
+    let request = SetCustomSkyboxRequest {
+        asset_id: data.asset_id,
+        data_base64: data.data_base64,
+    };
+
+    if queue_custom_skybox_from_bridge(request) {
+        tracing::info!("Queued custom skybox request");
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -2874,6 +2997,1010 @@ fn handle_remove_joint(payload: serde_json::Value) -> CommandResult {
     };
 
     if queue_remove_joint_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+// ============================================================================
+// 2D Physics Handlers
+// ============================================================================
+
+/// Payload for set_physics2d command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetPhysics2dPayload {
+    entity_id: String,
+    physics_data: Physics2dData,
+}
+
+/// Handle set_physics2d command.
+fn handle_set_physics2d(payload: serde_json::Value) -> CommandResult {
+    let data: SetPhysics2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_physics2d payload: {}", e))?;
+
+    let update = Physics2dUpdate {
+        entity_id: data.entity_id.clone(),
+        physics_data: data.physics_data,
+    };
+
+    if queue_physics2d_update_from_bridge(update) {
+        tracing::info!("Queued 2D physics update for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_physics2d command.
+fn handle_remove_physics2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let toggle = Physics2dToggle {
+        entity_id: entity_id.clone(),
+        enabled: false,
+    };
+
+    if queue_physics2d_toggle_from_bridge(toggle) {
+        tracing::info!("Queued 2D physics removal for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for set_2d_collider_shape command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Set2dColliderShapePayload {
+    entity_id: String,
+    collider_shape: ColliderShape2d,
+    size: Option<[f32; 2]>,
+    radius: Option<f32>,
+    vertices: Option<Vec<[f32; 2]>>,
+}
+
+/// Handle set_2d_collider_shape command.
+fn handle_set_2d_collider_shape(payload: serde_json::Value) -> CommandResult {
+    let data: Set2dColliderShapePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_2d_collider_shape payload: {}", e))?;
+
+    // Build minimal physics data with just the shape change
+    let mut physics_data = Physics2dData::default();
+    physics_data.collider_shape = data.collider_shape;
+    if let Some(size) = data.size {
+        physics_data.size = size;
+    }
+    if let Some(radius) = data.radius {
+        physics_data.radius = radius;
+    }
+    if let Some(vertices) = data.vertices {
+        physics_data.vertices = vertices;
+    }
+
+    let update = Physics2dUpdate {
+        entity_id: data.entity_id.clone(),
+        physics_data,
+    };
+
+    if queue_physics2d_update_from_bridge(update) {
+        tracing::info!("Queued 2D collider shape update for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for set_2d_body_type command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Set2dBodyTypePayload {
+    entity_id: String,
+    body_type: BodyType2d,
+}
+
+/// Handle set_2d_body_type command.
+fn handle_set_2d_body_type(payload: serde_json::Value) -> CommandResult {
+    let data: Set2dBodyTypePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_2d_body_type payload: {}", e))?;
+
+    let mut physics_data = Physics2dData::default();
+    physics_data.body_type = data.body_type;
+
+    let update = Physics2dUpdate {
+        entity_id: data.entity_id.clone(),
+        physics_data,
+    };
+
+    if queue_physics2d_update_from_bridge(update) {
+        tracing::info!("Queued 2D body type update for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for create_2d_joint command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Create2dJointPayload {
+    entity_id: String,
+    joint_data: PhysicsJoint2d,
+}
+
+/// Handle create_2d_joint command.
+fn handle_create_2d_joint(payload: serde_json::Value) -> CommandResult {
+    let data: Create2dJointPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid create_2d_joint payload: {}", e))?;
+
+    let request = CreateJoint2dRequest {
+        entity_id: data.entity_id.clone(),
+        joint_data: data.joint_data,
+    };
+
+    if queue_create_joint2d_from_bridge(request) {
+        tracing::info!("Queued 2D joint creation for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_2d_joint command.
+fn handle_remove_2d_joint(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let request = RemoveJoint2dRequest {
+        entity_id: entity_id.clone(),
+    };
+
+    if queue_remove_joint2d_from_bridge(request) {
+        tracing::info!("Queued 2D joint removal for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for apply_force2d command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyForce2dPayload {
+    entity_id: String,
+    force_x: f32,
+    force_y: f32,
+}
+
+/// Handle apply_force2d command.
+fn handle_apply_force2d(payload: serde_json::Value) -> CommandResult {
+    let data: ApplyForce2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid apply_force2d payload: {}", e))?;
+
+    let application = ForceApplication2d {
+        entity_id: data.entity_id.clone(),
+        force_x: data.force_x,
+        force_y: data.force_y,
+    };
+
+    if queue_force_application2d_from_bridge(application) {
+        tracing::info!("Queued 2D force application for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for apply_impulse2d command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyImpulse2dPayload {
+    entity_id: String,
+    impulse_x: f32,
+    impulse_y: f32,
+}
+
+/// Handle apply_impulse2d command.
+fn handle_apply_impulse2d(payload: serde_json::Value) -> CommandResult {
+    let data: ApplyImpulse2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid apply_impulse2d payload: {}", e))?;
+
+    let application = ImpulseApplication2d {
+        entity_id: data.entity_id.clone(),
+        impulse_x: data.impulse_x,
+        impulse_y: data.impulse_y,
+    };
+
+    if queue_impulse_application2d_from_bridge(application) {
+        tracing::info!("Queued 2D impulse application for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for raycast2d command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Raycast2dPayload {
+    origin_x: f32,
+    origin_y: f32,
+    dir_x: f32,
+    dir_y: f32,
+    max_distance: f32,
+}
+
+/// Handle raycast2d command.
+fn handle_raycast2d(payload: serde_json::Value) -> CommandResult {
+    let data: Raycast2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid raycast2d payload: {}", e))?;
+
+    let request = Raycast2dRequest {
+        origin_x: data.origin_x,
+        origin_y: data.origin_y,
+        dir_x: data.dir_x,
+        dir_y: data.dir_y,
+        max_distance: data.max_distance,
+    };
+
+    if queue_raycast2d_from_bridge(request) {
+        tracing::info!("Queued 2D raycast");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for set_gravity2d command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetGravity2dPayload {
+    gravity_x: f32,
+    gravity_y: f32,
+}
+
+/// Handle set_gravity2d command.
+fn handle_set_gravity2d(payload: serde_json::Value) -> CommandResult {
+    let data: SetGravity2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_gravity2d payload: {}", e))?;
+
+    let update = Gravity2dUpdate {
+        gravity_x: data.gravity_x,
+        gravity_y: data.gravity_y,
+    };
+
+    if queue_gravity2d_update_from_bridge(update) {
+        tracing::info!("Queued 2D gravity update: ({}, {})", data.gravity_x, data.gravity_y);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for set_debug_physics2d command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetDebugPhysics2dPayload {
+    enabled: bool,
+}
+
+/// Handle set_debug_physics2d command.
+fn handle_set_debug_physics2d(payload: serde_json::Value) -> CommandResult {
+    let data: SetDebugPhysics2dPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_debug_physics2d payload: {}", e))?;
+
+    let toggle = DebugPhysics2dToggle {
+        enabled: data.enabled,
+    };
+
+    if queue_debug_physics2d_toggle_from_bridge(toggle) {
+        tracing::info!("Queued 2D debug physics toggle: {}", data.enabled);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle add_game_component command.
+/// Payload: { entityId, componentType, properties? }
+fn handle_add_game_component(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let component_type = payload.get("componentType")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing componentType")?
+        .to_string();
+
+    let properties = payload.get("properties")
+        .cloned()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+    let properties_json = properties.to_string();
+
+    if queue_game_component_add_from_bridge(entity_id, component_type, properties_json) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle update_game_component command.
+/// Payload: { entityId, componentType, properties }
+fn handle_update_game_component(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let component_type = payload.get("componentType")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing componentType")?
+        .to_string();
+
+    let properties = payload.get("properties")
+        .cloned()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+    let properties_json = properties.to_string();
+
+    if queue_game_component_update_from_bridge(entity_id, component_type, properties_json) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_game_component command.
+/// Payload: { entityId, componentName }
+fn handle_remove_game_component(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let component_name = payload.get("componentName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing componentName")?
+        .to_string();
+
+    if queue_game_component_removal_from_bridge(entity_id, component_name) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle list_game_component_types command.
+/// Returns static list of available types with default data.
+fn handle_list_game_component_types(_payload: serde_json::Value) -> CommandResult {
+    // This is a synchronous query, handled directly via handle_query in dispatch
+    // But we need to return data immediately here
+    Ok(())
+}
+
+// --- Game Camera Commands ---
+
+/// Handle set_game_camera command.
+/// Payload: { entity_id, mode, target_entity? }
+fn handle_set_game_camera(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entity_id")
+        .or_else(|| payload.get("entityId"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entity_id")?
+        .to_string();
+
+    let mode: super::game_camera::GameCameraMode = serde_json::from_value(
+        payload.get("mode").cloned().ok_or("Missing mode")?
+    ).map_err(|e| format!("Invalid mode: {}", e))?;
+
+    let target_entity = payload.get("target_entity")
+        .or_else(|| payload.get("targetEntity"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    if queue_set_game_camera_from_bridge(SetGameCameraRequest {
+        entity_id,
+        mode,
+        target_entity,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_active_game_camera command.
+/// Payload: { entity_id }
+fn handle_set_active_game_camera(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entity_id")
+        .or_else(|| payload.get("entityId"))
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entity_id")?
+        .to_string();
+
+    if queue_set_active_game_camera_from_bridge(SetActiveGameCameraRequest {
+        entity_id,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle camera_shake command.
+/// Payload: { intensity, duration }
+fn handle_camera_shake(payload: serde_json::Value) -> CommandResult {
+    let intensity = payload.get("intensity")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing intensity")? as f32;
+
+    let duration = payload.get("duration")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing duration")? as f32;
+
+    if queue_camera_shake_from_bridge(CameraShakeRequest {
+        intensity,
+        duration,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_project_type command.
+/// Payload: { projectType: "2d" | "3d" }
+fn handle_set_project_type(payload: serde_json::Value) -> CommandResult {
+    let project_type = payload.get("projectType")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing projectType")?
+        .to_string();
+
+    if queue_set_project_type_from_bridge(SetProjectTypeRequest { project_type }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_sprite_data command.
+/// Payload: { entityId, textureAssetId?, colorTint?, flipX?, flipY?, customSize?, sortingLayer?, sortingOrder?, anchor? }
+fn handle_set_sprite_data(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let texture_asset_id = payload.get("textureAssetId")
+        .map(|v| v.as_str().map(|s| s.to_string()));
+
+    let color_tint = payload.get("colorTint")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            if arr.len() == 4 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                    arr[3].as_f64()? as f32,
+                ])
+            } else {
+                None
+            }
+        });
+
+    let flip_x = payload.get("flipX").and_then(|v| v.as_bool());
+    let flip_y = payload.get("flipY").and_then(|v| v.as_bool());
+
+    let custom_size = payload.get("customSize")
+        .map(|v| {
+            v.as_array().and_then(|arr| {
+                if arr.len() == 2 {
+                    Some([
+                        arr[0].as_f64()? as f32,
+                        arr[1].as_f64()? as f32,
+                    ])
+                } else {
+                    None
+                }
+            })
+        });
+
+    let sorting_layer = payload.get("sortingLayer")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let sorting_order = payload.get("sortingOrder")
+        .and_then(|v| v.as_i64())
+        .map(|i| i as i32);
+
+    let anchor = payload.get("anchor")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    if queue_sprite_data_update_from_bridge(SpriteDataUpdate {
+        entity_id,
+        texture_asset_id,
+        color_tint,
+        flip_x,
+        flip_y,
+        custom_size,
+        sorting_layer,
+        sorting_order,
+        anchor,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_sprite command.
+/// Payload: { entityId }
+fn handle_remove_sprite(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_sprite_removal_from_bridge(SpriteRemoval { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle update_camera_2d command.
+/// Payload: { zoom?, pixelPerfect?, bounds? }
+fn handle_update_camera_2d(payload: serde_json::Value) -> CommandResult {
+    let zoom = payload.get("zoom").and_then(|v| v.as_f64()).map(|f| f as f32);
+    let pixel_perfect = payload.get("pixelPerfect").and_then(|v| v.as_bool());
+
+    let bounds = payload.get("bounds")
+        .map(|v| {
+            if v.is_null() {
+                None
+            } else {
+                v.as_object().and_then(|obj| {
+                    Some(Camera2dBounds {
+                        min_x: obj.get("minX")?.as_f64()? as f32,
+                        max_x: obj.get("maxX")?.as_f64()? as f32,
+                        min_y: obj.get("minY")?.as_f64()? as f32,
+                        max_y: obj.get("maxY")?.as_f64()? as f32,
+                    })
+                })
+            }
+        });
+
+    if queue_camera_2d_data_update_from_bridge(Camera2dDataUpdate {
+        zoom,
+        pixel_perfect,
+        bounds,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle create_skeleton2d command.
+/// Payload: { entityId, skeletonData? }
+fn handle_create_skeleton2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let skeleton_data = payload.get("skeletonData")
+        .map(|v| serde_json::from_value(v.clone()))
+        .transpose()
+        .map_err(|e| format!("Invalid skeletonData: {}", e))?
+        .unwrap_or_default();
+
+    if queue_create_skeleton2d_from_bridge(CreateSkeleton2dRequest {
+        entity_id,
+        skeleton_data,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle add_bone2d command.
+/// Payload: { entityId, boneName, parentBone?, positionX, positionY, rotation, length, order? }
+fn handle_add_bone2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let bone_name = payload.get("boneName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing boneName")?
+        .to_string();
+
+    let parent_bone = payload.get("parentBone")
+        .and_then(|v| if v.is_null() { None } else { v.as_str() })
+        .map(|s| s.to_string());
+
+    let position_x = payload.get("positionX")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing positionX")? as f32;
+
+    let position_y = payload.get("positionY")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing positionY")? as f32;
+
+    let rotation = payload.get("rotation")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing rotation")? as f32;
+
+    let length = payload.get("length")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing length")? as f32;
+
+    let color = payload.get("color")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            if arr.len() == 4 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                    arr[3].as_f64()? as f32,
+                ])
+            } else {
+                None
+            }
+        })
+        .unwrap_or([1.0, 1.0, 1.0, 1.0]);
+
+    let bone = super::skeleton2d::Bone2dDef {
+        name: bone_name,
+        parent_bone,
+        local_position: [position_x, position_y],
+        local_rotation: rotation,
+        local_scale: [1.0, 1.0],
+        length,
+        color,
+    };
+
+    if queue_add_bone2d_from_bridge(AddBone2dRequest { entity_id, bone }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_bone2d command.
+/// Payload: { entityId, boneName }
+fn handle_remove_bone2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let bone_name = payload.get("boneName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing boneName")?
+        .to_string();
+
+    if queue_remove_bone2d_from_bridge(RemoveBone2dRequest {
+        entity_id,
+        bone_name,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle update_bone2d command.
+/// Payload: { entityId, boneName, positionX?, positionY?, rotation?, length? }
+fn handle_update_bone2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let bone_name = payload.get("boneName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing boneName")?
+        .to_string();
+
+    let local_position = match (
+        payload.get("positionX").and_then(|v| v.as_f64()),
+        payload.get("positionY").and_then(|v| v.as_f64()),
+    ) {
+        (Some(x), Some(y)) => Some([x as f32, y as f32]),
+        _ => None,
+    };
+
+    let local_rotation = payload.get("rotation")
+        .and_then(|v| v.as_f64())
+        .map(|r| r as f32);
+
+    let length = payload.get("length")
+        .and_then(|v| v.as_f64())
+        .map(|l| l as f32);
+
+    let color = payload.get("color")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            if arr.len() == 4 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                    arr[3].as_f64()? as f32,
+                ])
+            } else {
+                None
+            }
+        });
+
+    if queue_update_bone2d_from_bridge(UpdateBone2dRequest {
+        entity_id,
+        bone_name,
+        local_position,
+        local_rotation,
+        local_scale: None,
+        length,
+        color,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle create_skeletal_animation2d command.
+/// Payload: { entityId, animationName, duration, looping }
+fn handle_create_skeletal_animation2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let animation_name = payload.get("animationName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing animationName")?
+        .to_string();
+
+    let duration = payload.get("duration")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing duration")? as f32;
+
+    let looping = payload.get("looping")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let animation = super::skeletal_animation2d::SkeletalAnimation2d {
+        name: animation_name,
+        duration,
+        looping,
+        tracks: Default::default(),
+    };
+
+    if queue_create_skeletal_animation2d_from_bridge(CreateSkeletalAnimation2dRequest {
+        entity_id,
+        animation,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle add_keyframe2d command.
+/// Payload: { entityId, animationName, boneName, time, positionX?, positionY?, rotation?, scaleX?, scaleY?, easing? }
+fn handle_add_keyframe2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let animation_name = payload.get("animationName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing animationName")?
+        .to_string();
+
+    let bone_name = payload.get("boneName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing boneName")?
+        .to_string();
+
+    let time = payload.get("time")
+        .and_then(|v| v.as_f64())
+        .ok_or("Missing time")? as f32;
+
+    let position = match (
+        payload.get("positionX").and_then(|v| v.as_f64()),
+        payload.get("positionY").and_then(|v| v.as_f64()),
+    ) {
+        (Some(x), Some(y)) => Some([x as f32, y as f32]),
+        _ => None,
+    };
+
+    let rotation = payload.get("rotation")
+        .and_then(|v| v.as_f64())
+        .map(|r| r as f32);
+
+    let scale = match (
+        payload.get("scaleX").and_then(|v| v.as_f64()),
+        payload.get("scaleY").and_then(|v| v.as_f64()),
+    ) {
+        (Some(x), Some(y)) => Some([x as f32, y as f32]),
+        _ => None,
+    };
+
+    let easing_str = payload.get("easing")
+        .and_then(|v| v.as_str())
+        .unwrap_or("linear");
+
+    let easing = match easing_str {
+        "easeIn" => super::skeletal_animation2d::EasingType2d::EaseIn,
+        "easeOut" => super::skeletal_animation2d::EasingType2d::EaseOut,
+        "easeInOut" => super::skeletal_animation2d::EasingType2d::EaseInOut,
+        "step" => super::skeletal_animation2d::EasingType2d::Step,
+        _ => super::skeletal_animation2d::EasingType2d::Linear,
+    };
+
+    let keyframe = super::skeletal_animation2d::BoneKeyframe {
+        time,
+        position,
+        rotation,
+        scale,
+        easing,
+    };
+
+    if queue_add_keyframe2d_from_bridge(AddKeyframe2dRequest {
+        entity_id,
+        animation_name,
+        bone_name,
+        keyframe,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle play_skeletal_animation2d command.
+/// Payload: { entityId, animationName, loop?, speed? }
+fn handle_play_skeletal_animation2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let animation_name = payload.get("animationName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing animationName")?
+        .to_string();
+
+    let loop_animation = payload.get("loop")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let speed = payload.get("speed")
+        .and_then(|v| v.as_f64())
+        .map(|s| s as f32)
+        .unwrap_or(1.0);
+
+    if queue_play_skeletal_animation2d_from_bridge(PlaySkeletalAnimation2dRequest {
+        entity_id,
+        animation_name,
+        loop_animation,
+        speed,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_skeleton2d_skin command.
+/// Payload: { entityId, skinName }
+fn handle_set_skeleton2d_skin(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let skin_name = payload.get("skinName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing skinName")?
+        .to_string();
+
+    if queue_set_skeleton2d_skin_from_bridge(SetSkeleton2dSkinRequest {
+        entity_id,
+        skin_name,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle create_ik_chain2d command.
+/// Payload: { entityId, chainName, targetBone, chainLength, bendPositive }
+fn handle_create_ik_chain2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let chain_name = payload.get("chainName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing chainName")?
+        .to_string();
+
+    let target_bone = payload.get("targetBone")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing targetBone")?
+        .to_string();
+
+    let chain_length = payload.get("chainLength")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing chainLength")? as usize;
+
+    let bend_positive = payload.get("bendPositive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    // For now, create a placeholder constraint
+    let constraint = super::skeleton2d::IkConstraint2d {
+        name: chain_name,
+        bone_chain: vec![target_bone],
+        target_entity_id: 0, // Placeholder
+        bend_direction: if bend_positive { 1.0 } else { -1.0 },
+        mix: 1.0,
+    };
+
+    if queue_create_ik_chain2d_from_bridge(CreateIkChain2dRequest {
+        entity_id,
+        constraint,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle auto_weight_skeleton2d command.
+/// Payload: { entityId, method?, iterations? }
+fn handle_auto_weight_skeleton2d(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let method = payload.get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("heat")
+        .to_string();
+
+    let iterations = payload.get("iterations")
+        .and_then(|v| v.as_u64())
+        .map(|i| i as u32)
+        .unwrap_or(10);
+
+    if queue_auto_weight_skeleton2d_from_bridge(AutoWeightSkeleton2dRequest {
+        entity_id,
+        method,
+        iterations,
+    }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

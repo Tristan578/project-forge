@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 
-export type Tier = 'free' | 'starter' | 'creator' | 'studio';
+export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 
 export interface TokenBalance {
   monthlyRemaining: number;
@@ -37,7 +37,7 @@ interface UserState {
 }
 
 export const useUserStore = create<UserState>((set, get) => ({
-  tier: 'free',
+  tier: 'starter',
   tokenBalance: null,
   isLoading: false,
   error: null,
@@ -65,22 +65,22 @@ export const useUserStore = create<UserState>((set, get) => ({
 
   canUseAI: () => {
     const { tier } = get();
-    return tier !== 'free';
+    return tier !== 'starter';
   },
 
   canUseMCP: () => {
     const { tier } = get();
-    return tier === 'creator' || tier === 'studio';
+    return tier === 'creator' || tier === 'pro';
   },
 
   canPublish: () => {
     const { tier } = get();
-    return tier !== 'free';
+    return tier !== 'starter';
   },
 
   canBuyTokens: () => {
     const { tier } = get();
-    return tier !== 'free';
+    return tier !== 'starter';
   },
 
   fetchBillingStatus: async () => {

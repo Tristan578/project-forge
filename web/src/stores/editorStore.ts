@@ -35,7 +35,7 @@ export interface TransformData {
 export type GizmoMode = 'translate' | 'rotate' | 'scale';
 
 // Entity types that can be spawned
-export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'terrain' | 'point_light' | 'directional_light' | 'spot_light' | 'csg_result' | 'procedural_mesh';
+export type EntityType = 'cube' | 'sphere' | 'plane' | 'cylinder' | 'cone' | 'torus' | 'capsule' | 'terrain' | 'point_light' | 'directional_light' | 'spot_light' | 'csg_result' | 'procedural_mesh' | 'sprite';
 
 // Snap settings
 export interface SnapSettings {
@@ -57,8 +57,226 @@ export type CoordinateMode = 'world' | 'local';
 // Engine mode type
 export type EngineMode = 'edit' | 'play' | 'paused';
 
+// Scene transition config
+export interface SceneTransitionConfig {
+  type: 'fade' | 'wipe' | 'instant';
+  duration: number;
+  color: string;
+  direction?: 'left' | 'right' | 'up' | 'down';
+  easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+}
+
+export const DEFAULT_TRANSITION: SceneTransitionConfig = {
+  type: 'fade',
+  duration: 500,
+  color: '#000000',
+  easing: 'ease-in-out',
+};
+
 // Quality preset type
 export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra' | 'custom';
+
+// 2D Project types
+export type ProjectType = '2d' | '3d';
+
+export interface SpriteData {
+  textureAssetId: string | null;
+  colorTint: [number, number, number, number]; // RGBA 0-1
+  flipX: boolean;
+  flipY: boolean;
+  customSize: [number, number] | null;
+  sortingLayer: string;
+  sortingOrder: number;
+  anchor: SpriteAnchor;
+}
+
+export type SpriteAnchor = 'center' | 'top_left' | 'top_center' | 'top_right' | 'middle_left' | 'middle_right' | 'bottom_left' | 'bottom_center' | 'bottom_right';
+
+export interface Camera2dData {
+  zoom: number;
+  pixelPerfect: boolean;
+  bounds: { minX: number; maxX: number; minY: number; maxY: number } | null;
+}
+
+export interface SortingLayerData {
+  name: string;
+  order: number;
+  visible: boolean;
+}
+
+export interface Grid2dSettings {
+  enabled: boolean;
+  size: number;
+  color: string;
+  opacity: number;
+  snapToGrid: boolean;
+}
+
+// Sprite Animation types (Phase 2D-2)
+export interface SpriteSheetData {
+  assetId: string;
+  sliceMode: SliceMode;
+  frames: FrameRect[];
+  clips: Record<string, SpriteAnimClip>;
+}
+
+export type SliceMode =
+  | { type: 'grid'; columns: number; rows: number; tileSize: [number, number]; padding: [number, number]; offset: [number, number] }
+  | { type: 'manual'; regions: FrameRect[] };
+
+export interface FrameRect {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface SpriteAnimClip {
+  name: string;
+  frames: number[];
+  frameDurations: { type: 'uniform'; duration: number } | { type: 'perFrame'; durations: number[] };
+  looping: boolean;
+  pingPong: boolean;
+}
+
+export interface SpriteAnimatorData {
+  spriteSheetId: string;
+  currentClip: string | null;
+  frameIndex: number;
+  playing: boolean;
+  speed: number;
+}
+
+export interface AnimationStateMachineData {
+  states: Record<string, string>; // stateName -> clipName
+  transitions: StateTransitionData[];
+  currentState: string;
+  parameters: Record<string, AnimParamData>;
+}
+
+export interface StateTransitionData {
+  fromState: string;
+  toState: string;
+  condition: TransitionCondition;
+  duration: number;
+}
+
+export type TransitionCondition =
+  | { type: 'always' }
+  | { type: 'paramBool'; name: string; value: boolean }
+  | { type: 'paramFloat'; name: string; op: 'greater' | 'less' | 'equal'; threshold: number }
+  | { type: 'paramTrigger'; name: string };
+
+export type AnimParamData =
+  | { type: 'bool'; value: boolean }
+  | { type: 'float'; value: number }
+  | { type: 'trigger'; value: boolean };
+
+// Skeletal 2D Animation types (Phase 2D-5)
+export interface SkeletonData2d {
+  bones: Bone2dDef[];
+  slots: SlotDef[];
+  skins: Record<string, SkinData2d>;
+  activeSkin: string;
+  ikConstraints: IkConstraint2d[];
+}
+
+export interface Bone2dDef {
+  name: string;
+  parentBone: string | null;
+  localPosition: [number, number];
+  localRotation: number;
+  localScale: [number, number];
+  length: number;
+  color: [number, number, number, number];
+}
+
+export interface SlotDef {
+  name: string;
+  boneName: string;
+  spritePart: string;
+  blendMode: 'normal' | 'additive' | 'multiply' | 'screen';
+  attachment: string | null;
+}
+
+export interface SkinData2d {
+  name: string;
+  attachments: Record<string, AttachmentData2d>;
+}
+
+export interface AttachmentData2d {
+  type: 'sprite' | 'mesh';
+  textureId: string;
+  offset?: [number, number];
+  rotation?: number;
+  scale?: [number, number];
+  vertices?: [number, number][];
+  uvs?: [number, number][];
+  triangles?: number[];
+}
+
+export interface IkConstraint2d {
+  name: string;
+  boneChain: string[];
+  targetEntityId: number;
+  bendDirection: number;
+  mix: number;
+}
+
+export interface SkeletalAnimation2d {
+  name: string;
+  duration: number;
+  looping: boolean;
+  tracks: Record<string, BoneKeyframe2d[]>;
+}
+
+export interface BoneKeyframe2d {
+  time: number;
+  position?: [number, number];
+  rotation?: number;
+  scale?: [number, number];
+  easing: 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out' | 'step';
+}
+
+// Tilemap types (Phase 2D-3)
+export interface TileMetadata {
+  tileId: number;
+  name: string | null;
+  collision: boolean;
+  animation: TileAnimation | null;
+}
+
+export interface TileAnimation {
+  frameIds: number[];
+  frameDuration: number;
+}
+
+export interface TilesetData {
+  assetId: string;
+  name: string | null;
+  tileSize: [number, number];
+  gridSize: [number, number];
+  spacing: number;
+  margin: number;
+  tiles: TileMetadata[];
+}
+
+export interface TilemapLayer {
+  name: string;
+  tiles: (number | null)[];
+  visible: boolean;
+  opacity: number;
+  isCollision: boolean;
+}
+
+export interface TilemapData {
+  tilesetAssetId: string;
+  tileSize: [number, number];
+  mapSize: [number, number];
+  layers: TilemapLayer[];
+  origin: 'TopLeft' | 'Center';
+}
 
 // Input binding data matching Rust's ActionDef
 export interface InputBinding {
@@ -133,6 +351,40 @@ export interface JointData {
   axis: [number, number, number];
   limits: { min: number; max: number } | null;
   motor: { targetVelocity: number; maxForce: number } | null;
+}
+
+// 2D Physics data matching Rust's Physics2dData struct
+export interface Physics2dData {
+  bodyType: 'dynamic' | 'static' | 'kinematic';
+  colliderShape: 'box' | 'circle' | 'capsule' | 'convex_polygon' | 'edge' | 'auto';
+  size: [number, number];
+  radius: number;
+  vertices: [number, number][];
+  mass: number;
+  friction: number;
+  restitution: number;
+  gravityScale: number;
+  isSensor: boolean;
+  lockRotation: boolean;
+  continuousDetection: boolean;
+  oneWayPlatform: boolean;
+  surfaceVelocity: [number, number];
+}
+
+// 2D Joint data matching Rust's PhysicsJoint2d struct
+export interface Joint2dData {
+  targetEntityId: number;
+  jointType: 'revolute' | 'prismatic' | 'rope' | 'spring';
+  localAnchor1: [number, number];
+  localAnchor2: [number, number];
+  limits?: [number, number];
+  motorVelocity?: number;
+  motorMaxForce?: number;
+  axis?: [number, number];
+  maxDistance?: number;
+  restLength?: number;
+  stiffness?: number;
+  damping?: number;
 }
 
 // Material data matching Rust's MaterialData struct
@@ -277,6 +529,29 @@ export interface AnimationPlaybackState {
   speed: number;
   isLooping: boolean;
   isFinished: boolean;
+}
+
+// Keyframe property animation (D-2)
+export interface AnimationKeyframe {
+  time: number;
+  value: number;
+  interpolation: 'step' | 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out';
+}
+
+export interface AnimationTrack {
+  target: string;  // PropertyTarget enum as snake_case string
+  keyframes: AnimationKeyframe[];
+}
+
+export interface AnimationClipData {
+  tracks: AnimationTrack[];
+  duration: number;
+  playMode: 'once' | 'loop' | 'ping_pong';
+  playing: boolean;
+  speed: number;
+  currentTime: number;
+  forward: boolean;
+  autoplay: boolean;
 }
 
 // Particle blend mode
@@ -469,6 +744,176 @@ export interface TerrainDataState {
   size: number;
 }
 
+// Game component data types matching Rust's game_components.rs
+export interface CharacterControllerData {
+  speed: number;
+  jumpHeight: number;
+  gravityScale: number;
+  canDoubleJump: boolean;
+}
+
+export interface HealthData {
+  maxHp: number;
+  currentHp: number;
+  invincibilitySecs: number;
+  respawnOnDeath: boolean;
+  respawnPoint: [number, number, number];
+}
+
+export interface CollectibleData {
+  value: number;
+  destroyOnCollect: boolean;
+  pickupSoundAsset: string | null;
+  rotateSpeed: number;
+}
+
+export interface DamageZoneData {
+  damagePerSecond: number;
+  oneShot: boolean;
+}
+
+export interface CheckpointData {
+  autoSave: boolean;
+}
+
+export interface TeleporterData {
+  targetPosition: [number, number, number];
+  cooldownSecs: number;
+}
+
+export type PlatformLoopMode = 'pingPong' | 'loop' | 'once';
+
+export interface MovingPlatformData {
+  speed: number;
+  waypoints: [number, number, number][];
+  pauseDuration: number;
+  loopMode: PlatformLoopMode;
+}
+
+export interface TriggerZoneData {
+  eventName: string;
+  oneShot: boolean;
+}
+
+export interface SpawnerData {
+  entityType: string;
+  intervalSecs: number;
+  maxCount: number;
+  spawnOffset: [number, number, number];
+  onTrigger: string | null;
+}
+
+export interface FollowerData {
+  targetEntityId: string | null;
+  speed: number;
+  stopDistance: number;
+  lookAtTarget: boolean;
+}
+
+export interface ProjectileData {
+  speed: number;
+  damage: number;
+  lifetimeSecs: number;
+  gravity: boolean;
+  destroyOnHit: boolean;
+}
+
+export type WinConditionType = 'score' | 'collectAll' | 'reachGoal';
+
+export interface WinConditionData {
+  conditionType: WinConditionType;
+  targetScore: number | null;
+  targetEntityId: string | null;
+}
+
+// Dialogue trigger data matching Rust's DialogueTriggerData struct
+export interface DialogueTriggerData {
+  treeId: string;
+  triggerRadius: number;
+  requireInteract: boolean;
+  interactKey: string;
+  oneShot: boolean;
+}
+
+// Mobile touch controls configuration
+export interface VirtualJoystickConfig {
+  position: 'bottom-left' | 'bottom-right';
+  size: number;
+  deadZone: number;
+  opacity: number;
+  mode: 'fixed' | 'floating';
+  actions: {
+    horizontal: string;
+    vertical: string | null;
+  };
+}
+
+export interface VirtualButtonConfig {
+  id: string;
+  action: string;
+  position: { x: number; y: number };
+  size: number;
+  icon: string;
+  label?: string;
+  opacity: number;
+}
+
+export interface MobileTouchConfig {
+  enabled: boolean;
+  autoDetect: boolean;
+  preset: string;
+  joystick: VirtualJoystickConfig | null;
+  lookJoystick?: VirtualJoystickConfig | null;
+  buttons: VirtualButtonConfig[];
+  preferredOrientation: 'any' | 'landscape' | 'portrait';
+  autoReduceQuality: boolean;
+}
+
+// Game camera modes matching Rust's GameCameraMode enum
+export type GameCameraMode = 'thirdPersonFollow' | 'firstPerson' | 'sideScroller' | 'topDown' | 'fixed' | 'orbital';
+
+// Game camera data matching Rust's GameCameraData struct
+export interface GameCameraData {
+  mode: GameCameraMode;
+  targetEntity: string | null;
+  // Mode-specific params
+  followDistance?: number;
+  followHeight?: number;
+  followLookAhead?: number;
+  followSmoothing?: number;
+  firstPersonHeight?: number;
+  firstPersonMouseSensitivity?: number;
+  sideScrollerDistance?: number;
+  sideScrollerHeight?: number;
+  topDownHeight?: number;
+  topDownAngle?: number;
+  orbitalDistance?: number;
+  orbitalAutoRotateSpeed?: number;
+}
+
+// Discriminated union for all game component types
+export type GameComponentData =
+  | { type: 'characterController'; characterController: CharacterControllerData }
+  | { type: 'health'; health: HealthData }
+  | { type: 'collectible'; collectible: CollectibleData }
+  | { type: 'damageZone'; damageZone: DamageZoneData }
+  | { type: 'checkpoint'; checkpoint: CheckpointData }
+  | { type: 'teleporter'; teleporter: TeleporterData }
+  | { type: 'movingPlatform'; movingPlatform: MovingPlatformData }
+  | { type: 'triggerZone'; triggerZone: TriggerZoneData }
+  | { type: 'spawner'; spawner: SpawnerData }
+  | { type: 'follower'; follower: FollowerData }
+  | { type: 'projectile'; projectile: ProjectileData }
+  | { type: 'winCondition'; winCondition: WinConditionData }
+  | { type: 'dialogueTrigger'; dialogueTrigger: DialogueTriggerData };
+
+// All available component type names
+export const GAME_COMPONENT_TYPES = [
+  'character_controller', 'health', 'collectible', 'damage_zone',
+  'checkpoint', 'teleporter', 'moving_platform', 'trigger_zone',
+  'spawner', 'follower', 'projectile', 'win_condition', 'dialogue_trigger',
+] as const;
+
 export interface EditorState {
   // Hierarchy filter
   hierarchyFilter: string;
@@ -542,6 +987,7 @@ export interface EditorState {
 
   // Animation state
   primaryAnimation: AnimationPlaybackState | null;
+  primaryAnimationClip: AnimationClipData | null;
 
   // Post-processing state
   postProcessing: PostProcessingData;
@@ -552,13 +998,62 @@ export interface EditorState {
   // Terrain state
   terrainData: Record<string, TerrainDataState>;
 
+  // 2D project state
+  projectType: ProjectType;
+  sprites: Record<string, SpriteData>;
+  camera2dData: Camera2dData | null;
+  sortingLayers: SortingLayerData[];
+  grid2d: Grid2dSettings;
+
+  // Sprite animation state (Phase 2D-2)
+  spriteSheets: Record<string, SpriteSheetData>;
+  spriteAnimators: Record<string, SpriteAnimatorData>;
+  animationStateMachines: Record<string, AnimationStateMachineData>;
+
+  // Skeletal 2D animation state (Phase 2D-5)
+  skeletons2d: Record<string, SkeletonData2d>;
+  skeletalAnimations2d: Record<string, SkeletalAnimation2d[]>;
+  selectedBone: string | null;
+
+  // 2D Physics state (Phase 2D-4)
+  physics2d: Record<string, Physics2dData>;
+  physics2dEnabled: Record<string, boolean>;
+  joints2d: Record<string, Joint2dData>;
+
+  // Tilemap state (Phase 2D-3)
+  tilesets: Record<string, TilesetData>;
+  tilemaps: Record<string, TilemapData>;
+  activeTilesetId: string | null;
+  tilemapActiveTool: 'paint' | 'erase' | 'fill' | 'rectangle' | 'picker' | null;
+  tilemapActiveLayerIndex: number | null;
+
   // Multi-scene
   scenes: Array<{ id: string; name: string; isStartScene: boolean }>;
   activeSceneId: string | null;
   sceneSwitching: boolean;
 
+  // Scene transitions
+  sceneTransition: {
+    active: boolean;
+    config: SceneTransitionConfig | null;
+    targetScene: string | null;
+  };
+  defaultTransition: SceneTransitionConfig;
+
   // HUD state (for in-game UI during play mode)
   hudElements: HudElement[];
+
+  // Game component state
+  allGameComponents: Record<string, GameComponentData[]>;
+  primaryGameComponents: GameComponentData[] | null;
+
+  // Game camera state
+  allGameCameras: Record<string, GameCameraData>;
+  activeGameCameraId: string | null;
+  primaryGameCamera: GameCameraData | null;
+
+  // Mobile touch controls
+  mobileTouchConfig: MobileTouchConfig;
 
   // Scene file state
   sceneName: string;
@@ -782,6 +1277,10 @@ export interface EditorState {
   setScenes: (scenes: Array<{ id: string; name: string; isStartScene: boolean }>, activeId: string | null) => void;
   setSceneSwitching: (switching: boolean) => void;
 
+  // Scene transition actions
+  startSceneTransition: (targetScene: string, configOverride?: Partial<SceneTransitionConfig>) => Promise<void>;
+  setDefaultTransition: (config: Partial<SceneTransitionConfig>) => void;
+
   // Procedural mesh operations
   extrudeShape: (shape: string, params: {
     radius?: number;
@@ -831,6 +1330,77 @@ export interface EditorState {
   updateDepthOfField: (data: DepthOfFieldData | null) => void;
   updateMotionBlur: (data: MotionBlurData | null) => void;
   setPostProcessing: (data: PostProcessingData) => void;
+
+  // Game component actions
+  addGameComponent: (entityId: string, component: GameComponentData) => void;
+  updateGameComponent: (entityId: string, component: GameComponentData) => void;
+  removeGameComponent: (entityId: string, componentName: string) => void;
+
+  // Game camera actions
+  setGameCamera: (entityId: string, data: GameCameraData) => void;
+  removeGameCamera: (entityId: string) => void;
+  setActiveGameCamera: (entityId: string | null) => void;
+  cameraShake: (entityId: string, intensity: number, duration: number) => void;
+  setEntityGameCamera: (entityId: string, data: GameCameraData | null) => void;
+  setActiveGameCameraId: (entityId: string | null) => void;
+
+  // Keyframe property animation actions (D-2)
+  createAnimationClip: (entityId: string, duration?: number, playMode?: string) => void;
+  addClipKeyframe: (entityId: string, target: string, time: number, value: number, interpolation?: string) => void;
+  removeClipKeyframe: (entityId: string, target: string, time: number) => void;
+  updateClipKeyframe: (entityId: string, target: string, time: number, value?: number, interpolation?: string, newTime?: number) => void;
+  setClipProperty: (entityId: string, duration?: number, playMode?: string, speed?: number, autoplay?: boolean) => void;
+  previewClip: (entityId: string, action: 'play' | 'stop' | 'seek', seekTime?: number) => void;
+  removeAnimationClip: (entityId: string) => void;
+
+  // Mobile touch controls actions
+  setMobileTouchConfig: (config: MobileTouchConfig) => void;
+  updateMobileTouchConfig: (partial: Partial<MobileTouchConfig>) => void;
+
+  // 2D project actions
+  setProjectType: (type: ProjectType) => void;
+  setSpriteData: (entityId: string, data: SpriteData) => void;
+  removeSpriteData: (entityId: string) => void;
+  setCamera2dData: (data: Camera2dData) => void;
+  setSortingLayers: (layers: SortingLayerData[]) => void;
+  addSortingLayer: (name: string) => void;
+  removeSortingLayer: (name: string) => void;
+  toggleLayerVisibility: (name: string) => void;
+  setGrid2d: (settings: Partial<Grid2dSettings>) => void;
+
+  // Sprite animation actions (Phase 2D-2)
+  setSpriteSheet: (entityId: string, data: SpriteSheetData) => void;
+  removeSpriteSheet: (entityId: string) => void;
+  setSpriteAnimator: (entityId: string, data: SpriteAnimatorData) => void;
+  removeSpriteAnimator: (entityId: string) => void;
+  setAnimationStateMachine: (entityId: string, data: AnimationStateMachineData) => void;
+  removeAnimationStateMachine: (entityId: string) => void;
+
+  // Skeletal 2D animation actions (Phase 2D-5)
+  setSkeleton2d: (entityId: string, data: SkeletonData2d) => void;
+  removeSkeleton2d: (entityId: string) => void;
+  setSkeletalAnimations2d: (entityId: string, animations: SkeletalAnimation2d[]) => void;
+  setSelectedBone: (boneName: string | null) => void;
+
+  // 2D Physics actions (Phase 2D-4)
+  setPhysics2d: (entityId: string, data: Physics2dData, enabled: boolean) => void;
+  updatePhysics2d: (entityId: string, data: Physics2dData) => void;
+  removePhysics2d: (entityId: string) => void;
+  togglePhysics2d: (entityId: string, enabled: boolean) => void;
+  setJoint2d: (entityId: string, data: Joint2dData) => void;
+  removeJoint2d: (entityId: string) => void;
+
+  // Tilemap actions (Phase 2D-3)
+  setTileset: (assetId: string, data: TilesetData) => void;
+  removeTileset: (assetId: string) => void;
+  setTilemapData: (entityId: string, data: TilemapData) => void;
+  removeTilemapData: (entityId: string) => void;
+  setActiveTileset: (assetId: string | null) => void;
+  setTilemapActiveTool: (tool: 'paint' | 'erase' | 'fill' | 'rectangle' | 'picker' | null) => void;
+  setTilemapActiveLayerIndex: (index: number | null) => void;
+
+  // Template loading
+  loadTemplate: (templateId: string) => Promise<void>;
 }
 
 // Command dispatcher type - will be set by useEngine hook
@@ -903,6 +1473,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   primaryParticle: null,
   particleEnabled: false,
   primaryAnimation: null,
+  primaryAnimationClip: null,
   sceneName: 'Untitled',
   sceneModified: false,
   autoSaveEnabled: true,
@@ -914,10 +1485,59 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   postProcessing: DEFAULT_POST_PROCESSING,
   qualityPreset: 'high' as QualityPreset,
   terrainData: {},
+  projectType: '3d',
+  sprites: {},
+  camera2dData: null,
+  sortingLayers: [
+    { name: 'Background', order: 0, visible: true },
+    { name: 'Default', order: 1, visible: true },
+    { name: 'Foreground', order: 2, visible: true },
+    { name: 'UI', order: 3, visible: true },
+  ],
+  grid2d: { enabled: false, size: 32, color: '#ffffff', opacity: 0.2, snapToGrid: false },
+  spriteSheets: {},
+  spriteAnimators: {},
+  animationStateMachines: {},
+  skeletons2d: {},
+  skeletalAnimations2d: {},
+  selectedBone: null,
+  physics2d: {},
+  physics2dEnabled: {},
+  joints2d: {},
+  tilesets: {},
+  tilemaps: {},
+  activeTilesetId: null,
+  tilemapActiveTool: null,
+  tilemapActiveLayerIndex: null,
   hudElements: [],
   scenes: [],
   activeSceneId: null,
   sceneSwitching: false,
+  sceneTransition: { active: false, config: null, targetScene: null },
+  defaultTransition: DEFAULT_TRANSITION,
+  allGameComponents: {},
+  primaryGameComponents: null,
+  allGameCameras: {},
+  activeGameCameraId: null,
+  primaryGameCamera: null,
+  mobileTouchConfig: {
+    enabled: true,
+    autoDetect: true,
+    preset: 'platformer',
+    joystick: {
+      position: 'bottom-left',
+      size: 120,
+      deadZone: 0.15,
+      opacity: 0.6,
+      mode: 'floating',
+      actions: { horizontal: 'move_right', vertical: 'move_forward' },
+    },
+    buttons: [
+      { id: 'jump', action: 'jump', position: { x: 85, y: 75 }, size: 80, icon: '↑', opacity: 0.6 },
+    ],
+    preferredOrientation: 'any',
+    autoReduceQuality: true,
+  },
 
   // Select a single entity or modify selection
   selectEntity: (id, mode) => {
@@ -1023,6 +1643,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       primaryLight: null,
       primaryParticle: null,
       particleEnabled: false,
+      primaryAnimationClip: null,
     });
 
     // Send command to Rust
@@ -2185,7 +2806,439 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setSceneSwitching: (switching: boolean) => {
     set({ sceneSwitching: switching });
   },
+
+  // Scene transition actions
+  startSceneTransition: async (targetScene, configOverride) => {
+    const { scenes, engineMode, defaultTransition } = get();
+
+    // Validate target scene exists
+    const targetExists = scenes.find(s => s.name === targetScene || s.id === targetScene);
+    if (!targetExists) {
+      console.error(`Scene "${targetScene}" not found`);
+      return;
+    }
+
+    const config = { ...defaultTransition, ...configOverride };
+
+    // Activate overlay
+    set({ sceneTransition: { active: true, config, targetScene } });
+
+    // Wait for fade-in (half duration)
+    const halfDuration = config.type === 'instant' ? 0 : config.duration / 2;
+    await new Promise(resolve => setTimeout(resolve, halfDuration));
+
+    // Stop current game if playing
+    if (engineMode === 'play' || engineMode === 'paused') {
+      if (dispatchCommand) {
+        dispatchCommand('stop', {});
+      }
+      // Small delay for engine to process stop
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    // Switch scene using sceneManager
+    try {
+      const { switchScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
+      const project = loadProjectScenes();
+
+      // Save current scene data before switching
+      if (dispatchCommand) {
+        dispatchCommand('export_scene', {});
+        // Small delay for export event
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      // Resolve target scene ID
+      let targetId = targetScene;
+      const byName = getSceneByName(project, targetScene);
+      if (byName) targetId = byName.id;
+
+      const result = switchScene(project, targetId);
+      if ('error' in result) {
+        console.error('Scene switch failed:', result.error);
+        set({ sceneTransition: { active: false, config: null, targetScene: null } });
+        return;
+      }
+
+      saveProjectScenes(result.project);
+      set({
+        scenes: result.project.scenes.map(s => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
+        activeSceneId: result.project.activeSceneId,
+      });
+
+      // Load the new scene data
+      if (result.sceneToLoad) {
+        get().loadScene(JSON.stringify(result.sceneToLoad));
+      } else {
+        get().newScene();
+      }
+    } catch (err) {
+      console.error('Scene transition error:', err);
+      set({ sceneTransition: { active: false, config: null, targetScene: null } });
+      return;
+    }
+
+    // Restart game in new scene
+    if (dispatchCommand) {
+      dispatchCommand('play', {});
+    }
+
+    // Wait for fade-out (second half)
+    await new Promise(resolve => setTimeout(resolve, halfDuration));
+
+    // Deactivate overlay
+    set({ sceneTransition: { active: false, config: null, targetScene: null } });
+  },
+
+  setDefaultTransition: (config) => {
+    set((state) => ({
+      defaultTransition: { ...state.defaultTransition, ...config },
+    }));
+  },
+
+  // Game component actions
+  addGameComponent: (entityId, component) => {
+    if (dispatchCommand) {
+      dispatchCommand('add_game_component', { entityId, component });
+    }
+  },
+  updateGameComponent: (entityId, component) => {
+    if (dispatchCommand) {
+      dispatchCommand('update_game_component', { entityId, component });
+    }
+  },
+  removeGameComponent: (entityId, componentName) => {
+    if (dispatchCommand) {
+      dispatchCommand('remove_game_component', { entityId, componentName });
+    }
+  },
+
+  // Game camera actions
+  setGameCamera: (entityId, data) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_game_camera', { entityId, ...data });
+    }
+  },
+  removeGameCamera: (entityId) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_game_camera', { entityId, mode: null });
+    }
+  },
+  setActiveGameCamera: (entityId) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_active_game_camera', { entityId });
+    }
+  },
+  cameraShake: (entityId, intensity, duration) => {
+    if (dispatchCommand) {
+      dispatchCommand('camera_shake', { entityId, intensity, duration });
+    }
+  },
+  setEntityGameCamera: (entityId, data) => {
+    set((state) => {
+      const allGameCameras = { ...state.allGameCameras };
+      if (data) {
+        allGameCameras[entityId] = data;
+      } else {
+        delete allGameCameras[entityId];
+      }
+      return {
+        allGameCameras,
+        primaryGameCamera: entityId === state.primaryId ? data : state.primaryGameCamera,
+      };
+    });
+  },
+  setActiveGameCameraId: (entityId) => {
+    set({ activeGameCameraId: entityId });
+  },
+
+  // Keyframe property animation actions (D-2)
+  createAnimationClip: (entityId, duration, playMode) => {
+    if (dispatchCommand) {
+      dispatchCommand('create_animation_clip', { entityId, duration, playMode });
+    }
+  },
+  addClipKeyframe: (entityId, target, time, value, interpolation) => {
+    if (dispatchCommand) {
+      dispatchCommand('add_clip_keyframe', { entityId, target, time, value, interpolation });
+    }
+  },
+  removeClipKeyframe: (entityId, target, time) => {
+    if (dispatchCommand) {
+      dispatchCommand('remove_clip_keyframe', { entityId, target, time });
+    }
+  },
+  updateClipKeyframe: (entityId, target, time, value, interpolation, newTime) => {
+    if (dispatchCommand) {
+      dispatchCommand('update_clip_keyframe', { entityId, target, time, value, interpolation, newTime });
+    }
+  },
+  setClipProperty: (entityId, duration, playMode, speed, autoplay) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_clip_property', { entityId, duration, playMode, speed, autoplay });
+    }
+  },
+  previewClip: (entityId, action, seekTime) => {
+    if (dispatchCommand) {
+      dispatchCommand('preview_clip', { entityId, action, seekTime });
+    }
+  },
+  removeAnimationClip: (entityId) => {
+    if (dispatchCommand) {
+      dispatchCommand('remove_animation_clip', { entityId });
+    }
+  },
+
+  // Mobile touch controls actions
+  setMobileTouchConfig: (config) => set({ mobileTouchConfig: config }),
+  updateMobileTouchConfig: (partial) => set((state) => ({
+    mobileTouchConfig: { ...state.mobileTouchConfig, ...partial },
+  })),
+
+  // 2D project actions
+  setProjectType: (type) => set({ projectType: type }),
+  setSpriteData: (entityId, data) => set((s) => ({ sprites: { ...s.sprites, [entityId]: data } })),
+  removeSpriteData: (entityId) => set((s) => {
+    const next = { ...s.sprites };
+    delete next[entityId];
+    return { sprites: next };
+  }),
+  setCamera2dData: (data) => set({ camera2dData: data }),
+  setSortingLayers: (layers) => set({ sortingLayers: layers }),
+  addSortingLayer: (name) => set((s) => ({
+    sortingLayers: [...s.sortingLayers, { name, order: s.sortingLayers.length, visible: true }],
+  })),
+  removeSortingLayer: (name) => set((s) => ({
+    sortingLayers: s.sortingLayers.filter((l) => l.name !== name),
+  })),
+  toggleLayerVisibility: (name) => set((s) => ({
+    sortingLayers: s.sortingLayers.map((l) => l.name === name ? { ...l, visible: !l.visible } : l),
+  })),
+  setGrid2d: (settings) => set((s) => ({ grid2d: { ...s.grid2d, ...settings } })),
+
+  // Sprite animation actions (Phase 2D-2)
+  setSpriteSheet: (entityId, data) => set((s) => ({
+    spriteSheets: { ...s.spriteSheets, [entityId]: data }
+  })),
+
+  removeSpriteSheet: (entityId) => set((s) => {
+    const sheets = { ...s.spriteSheets };
+    delete sheets[entityId];
+    return { spriteSheets: sheets };
+  }),
+
+  setSpriteAnimator: (entityId, data) => set((s) => ({
+    spriteAnimators: { ...s.spriteAnimators, [entityId]: data }
+  })),
+
+  removeSpriteAnimator: (entityId) => set((s) => {
+    const animators = { ...s.spriteAnimators };
+    delete animators[entityId];
+    return { spriteAnimators: animators };
+  }),
+
+  setAnimationStateMachine: (entityId, data) => set((s) => ({
+    animationStateMachines: { ...s.animationStateMachines, [entityId]: data }
+  })),
+
+  removeAnimationStateMachine: (entityId) => set((s) => {
+    const machines = { ...s.animationStateMachines };
+    delete machines[entityId];
+    return { animationStateMachines: machines };
+  }),
+
+  // Skeletal 2D animation actions
+  setSkeleton2d: (entityId, data) => set((s) => ({
+    skeletons2d: { ...s.skeletons2d, [entityId]: data }
+  })),
+
+  removeSkeleton2d: (entityId) => set((s) => {
+    const skeletons = { ...s.skeletons2d };
+    delete skeletons[entityId];
+    return { skeletons2d: skeletons };
+  }),
+
+  setSkeletalAnimations2d: (entityId, animations) => set((s) => ({
+    skeletalAnimations2d: { ...s.skeletalAnimations2d, [entityId]: animations }
+  })),
+
+  setSelectedBone: (boneName) => set({ selectedBone: boneName }),
+
+  // 2D Physics actions
+  setPhysics2d: (entityId, data, enabled) => set((s) => ({
+    physics2d: { ...s.physics2d, [entityId]: data },
+    physics2dEnabled: { ...s.physics2dEnabled, [entityId]: enabled },
+  })),
+
+  updatePhysics2d: (entityId, data) => {
+    set((s) => ({
+      physics2d: { ...s.physics2d, [entityId]: data },
+    }));
+
+    if (dispatchCommand) {
+      dispatchCommand('update_physics2d', {
+        entityId,
+        bodyType: data.bodyType,
+        colliderShape: data.colliderShape,
+        size: data.size,
+        radius: data.radius,
+        vertices: data.vertices,
+        mass: data.mass,
+        friction: data.friction,
+        restitution: data.restitution,
+        gravityScale: data.gravityScale,
+        isSensor: data.isSensor,
+        lockRotation: data.lockRotation,
+        continuousDetection: data.continuousDetection,
+        oneWayPlatform: data.oneWayPlatform,
+        surfaceVelocity: data.surfaceVelocity,
+      });
+    }
+  },
+
+  removePhysics2d: (entityId) => {
+    set((s) => {
+      const physics2d = { ...s.physics2d };
+      const physics2dEnabled = { ...s.physics2dEnabled };
+      delete physics2d[entityId];
+      delete physics2dEnabled[entityId];
+      return { physics2d, physics2dEnabled };
+    });
+
+    if (dispatchCommand) {
+      dispatchCommand('remove_physics2d', { entityId });
+    }
+  },
+
+  togglePhysics2d: (entityId, enabled) => {
+    set((s) => ({
+      physics2dEnabled: { ...s.physics2dEnabled, [entityId]: enabled },
+    }));
+
+    if (dispatchCommand) {
+      dispatchCommand('toggle_physics2d', { entityId, enabled });
+    }
+  },
+
+  setJoint2d: (entityId, data) => {
+    set((s) => ({
+      joints2d: { ...s.joints2d, [entityId]: data },
+    }));
+
+    if (dispatchCommand) {
+      dispatchCommand('create_joint2d', {
+        entityId,
+        targetEntityId: data.targetEntityId,
+        jointType: data.jointType,
+        localAnchor1: data.localAnchor1,
+        localAnchor2: data.localAnchor2,
+        limits: data.limits,
+        motorVelocity: data.motorVelocity,
+        motorMaxForce: data.motorMaxForce,
+        axis: data.axis,
+        maxDistance: data.maxDistance,
+        restLength: data.restLength,
+        stiffness: data.stiffness,
+        damping: data.damping,
+      });
+    }
+  },
+
+  removeJoint2d: (entityId) => {
+    set((s) => {
+      const joints2d = { ...s.joints2d };
+      delete joints2d[entityId];
+      return { joints2d };
+    });
+
+    if (dispatchCommand) {
+      dispatchCommand('remove_joint2d', { entityId });
+    }
+  },
+
+  // Tilemap actions (Phase 2D-3)
+  setTileset: (assetId, data) => {
+    set((s) => ({
+      tilesets: { ...s.tilesets, [assetId]: data },
+    }));
+  },
+
+  removeTileset: (assetId) => {
+    set((s) => {
+      const tilesets = { ...s.tilesets };
+      delete tilesets[assetId];
+      return { tilesets };
+    });
+  },
+
+  setTilemapData: (entityId, data) => {
+    set((s) => ({
+      tilemaps: { ...s.tilemaps, [entityId]: data },
+    }));
+  },
+
+  removeTilemapData: (entityId) => {
+    set((s) => {
+      const tilemaps = { ...s.tilemaps };
+      delete tilemaps[entityId];
+      return { tilemaps };
+    });
+  },
+
+  setActiveTileset: (assetId) => {
+    set({ activeTilesetId: assetId });
+  },
+
+  setTilemapActiveTool: (tool) => {
+    set({ tilemapActiveTool: tool });
+  },
+
+  setTilemapActiveLayerIndex: (index) => {
+    set({ tilemapActiveLayerIndex: index });
+  },
+
+  // Template loading
+  loadTemplate: async (templateId: string) => {
+    const { loadTemplate: loadTpl } = await import('@/data/templates');
+    const template = await loadTpl(templateId);
+    if (!template) {
+      console.error(`Template not found: ${templateId}`);
+      return;
+    }
+
+    const state = get();
+
+    // 1. Clear current scene
+    if (dispatchCommand) {
+      dispatchCommand('new_scene', {});
+    }
+
+    // 2. Set scene name
+    set({ sceneName: template.name, sceneModified: false });
+
+    // 3. Load scene data (entities, environment, lights, physics, game components)
+    if (dispatchCommand) {
+      dispatchCommand('load_scene', { json: JSON.stringify(template.sceneData) });
+    }
+
+    // 4. Wait briefly for entities to register, then load scripts
+    setTimeout(() => {
+      for (const [entityId, script] of Object.entries(template.scripts)) {
+        state.setScript(entityId, script.source, script.enabled);
+      }
+    }, 200);
+
+    // 5. Apply input preset
+    if (template.inputPreset) {
+      state.setInputPreset(template.inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
+    }
+  },
 }));
+
+// Expose store for E2E tests (dev/test only)
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  (window as unknown as Record<string, unknown>).__EDITOR_STORE = useEditorStore;
+}
 
 // Play tick callback for script runner
 type PlayTickCallback = (data: unknown) => void;

@@ -22,11 +22,13 @@ use crate::core::{
     entity_factory,
     entity_id::{EntityId, EntityName, EntityVisible},
     environment::{EnvironmentPlugin, EnvironmentSettings},
+    game_camera::{GameCameraData, ActiveGameCamera, FirstPersonState, OrbitalState},
     history::{self, EntitySnapshot as HistEntitySnapshot, HistoryStack, TransformSnapshot},
     post_processing::{PostProcessingPlugin, PostProcessingSettings},
     input::{InputMap, InputPlugin, InputState},
     lighting::{LightData, LightingPlugin},
     physics::{PhysicsData, PhysicsEnabled, PhysicsPlugin},
+    physics_2d::{Physics2dData, Physics2dEnabled, PhysicsJoint2d},
     material::{MaterialData, MaterialPlugin},
     observability::ObservabilityPlugin,
     pending_commands::{self, EntityType, PendingCommands},
@@ -146,7 +148,8 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
         .add_plugins(ShaderEffectsPlugin)
-        .add_plugins(CameraControlPlugin);
+        .add_plugins(CameraControlPlugin)
+        .add_plugins(core::game_camera::GameCameraPlugin);
 
     // Editor-only plugins
     #[cfg(not(feature = "runtime"))]
@@ -278,6 +281,14 @@ impl Plugin for SelectionPlugin {
                 apply_force_applications,
                 apply_script_updates,
             ))
+            // 2D Physics systems (always-active, metadata-only)
+            .add_systems(Update, (
+                apply_physics2d_updates,
+                apply_physics2d_toggles,
+                apply_force_applications2d,
+                apply_impulse_applications2d,
+                apply_raycast2d_requests,
+            ))
             // Collision/raycast systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 read_collision_events,
@@ -348,6 +359,7 @@ impl Plugin for SelectionPlugin {
                     apply_set_skybox_requests,
                     apply_remove_skybox_requests,
                     apply_update_skybox_requests,
+                    apply_custom_skybox_requests,
                     apply_post_processing_updates,
                     apply_shader_updates,
                     apply_shader_removals,
@@ -369,6 +381,8 @@ impl Plugin for SelectionPlugin {
                     emit_particle_on_selection,
                     emit_shader_on_selection,
                     emit_animation_on_selection,
+                    emit_game_camera_on_selection,
+                    emit_skeleton2d_on_selection,
                     visibility::sync_visibility,
                 ).chain().in_set(EditorSystemSet))
                 .add_systems(Update, poll_animation_state.in_set(EditorSystemSet))
@@ -384,8 +398,19 @@ impl Plugin for SelectionPlugin {
                     apply_create_joint_requests,
                     apply_update_joint_requests,
                     apply_remove_joint_requests,
+                ))
+                .add_systems(Update, (
+                    apply_create_joint2d_requests,
+                    apply_remove_joint2d_requests,
+                    apply_gravity2d_updates,
+                    apply_debug_physics2d_toggle,
+                    handle_physics2d_query,
+                ))
+                .add_systems(Update, (
                     apply_scene_export,
                     apply_scene_load,
+                ))
+                .add_systems(Update, (
                     apply_new_scene,
                     apply_gltf_import,
                     apply_texture_load,
@@ -395,6 +420,31 @@ impl Plugin for SelectionPlugin {
                     apply_place_asset,
                     apply_delete_asset,
                     apply_instantiate_prefab,
+                ))
+                .add_systems(Update, (
+                    apply_game_component_adds,
+                    apply_game_component_updates,
+                    apply_game_component_removals,
+                    process_game_component_queries,
+                ))
+                .add_systems(Update, (
+                    apply_set_game_camera_requests,
+                    apply_set_active_game_camera_requests,
+                    apply_camera_shake_requests,
+                    process_game_camera_queries,
+                ))
+                .add_systems(Update, (
+                    apply_skeleton2d_creates,
+                    apply_bone2d_adds,
+                    apply_bone2d_removes,
+                    apply_bone2d_updates,
+                    apply_skeletal_animation2d_creates,
+                    apply_keyframe2d_adds,
+                    apply_skeletal_animation2d_plays,
+                    apply_skeleton2d_skin_sets,
+                    apply_ik_chain2d_creates,
+                    handle_skeleton2d_query,
+                    apply_auto_weight_skeleton2d,
                 ))
                 .add_systems(PostUpdate, (
                     emit_scene_graph_updates,
@@ -446,7 +496,10 @@ fn apply_mode_change_requests(
     particle_snapshot_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_snapshot_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_snapshot_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
-    procedural_joint_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>, Option<&core::physics::JointData>)>,
+    procedural_joint_query: Query<(&EntityId, Option<&crate::core::procedural_mesh::ProceduralMeshData>, Option<&core::physics::JointData>, Option<&core::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+    sprite_snapshot_query: Query<(&EntityId, Option<&core::sprite::SpriteData>)>,
+    tilemap_snapshot_query: Query<(&EntityId, Option<&core::tilemap::TilemapData>, Option<&core::tilemap::TilemapEnabled>)>,
+    skeleton2d_snapshot_query: Query<(&EntityId, Option<&core::skeleton2d::SkeletonData2d>, Option<&core::skeleton2d::SkeletonEnabled2d>, Option<&core::skeletal_animation2d::SkeletalAnimation2d>)>,
     runtime_query: Query<Entity, With<core::engine_mode::RuntimeEntity>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -462,7 +515,7 @@ fn apply_mode_change_requests(
                 // Snapshot the scene (uses read-only query p0)
                 {
                     let snapshot_query = queries.p0();
-                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &particle_snapshot_query, &shader_snapshot_query, &csg_snapshot_query, &procedural_joint_query, &selection);
+                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &particle_snapshot_query, &shader_snapshot_query, &csg_snapshot_query, &procedural_joint_query, &sprite_snapshot_query, &tilemap_snapshot_query, &skeleton2d_snapshot_query, &selection);
                 }
                 // Clear selection for play mode
                 selection.clear();
@@ -989,6 +1042,73 @@ fn apply_update_skybox_requests(
     }
 }
 
+/// System that applies custom skybox requests from the bridge.
+#[cfg(not(feature = "runtime"))]
+fn apply_custom_skybox_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut settings: ResMut<EnvironmentSettings>,
+    mut images: ResMut<Assets<Image>>,
+    camera_query: Query<Entity, With<core::camera::EditorCamera>>,
+    mut commands: Commands,
+) {
+    use base64::Engine as _;
+    use bevy::image::{ImageType, CompressedImageFormats, ImageSampler};
+    use bevy::render::render_asset::RenderAssetUsages;
+
+    for request in pending.custom_skybox_requests.drain(..) {
+        // Parse data URL: "data:image/png;base64,AAAA..."
+        let raw_base64 = if let Some(comma_pos) = request.data_base64.find(',') {
+            &request.data_base64[comma_pos + 1..]
+        } else {
+            // Raw base64 without data URL prefix
+            request.data_base64.as_str()
+        };
+
+        // Decode base64 to raw bytes
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(raw_base64) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!("Failed to decode custom skybox base64: {}", e);
+                continue;
+            }
+        };
+
+        // Create Image from bytes (assume PNG for skybox cubemaps)
+        let image = match Image::from_buffer(
+            &bytes,
+            ImageType::Extension("png"),
+            CompressedImageFormats::NONE,
+            true,
+            ImageSampler::Default,
+            RenderAssetUsages::RENDER_WORLD,
+        ) {
+            Ok(img) => img,
+            Err(e) => {
+                tracing::error!("Failed to create image from custom skybox bytes: {}", e);
+                continue;
+            }
+        };
+
+        let handle = images.add(image);
+
+        // Update settings
+        settings.skybox_preset = None;
+        settings.skybox_asset_id = Some(request.asset_id.clone());
+
+        // Apply to camera
+        if let Ok(camera_entity) = camera_query.single() {
+            commands.entity(camera_entity).insert(bevy::core_pipeline::Skybox {
+                image: handle,
+                brightness: settings.skybox_brightness,
+                rotation: bevy::math::Quat::IDENTITY,
+            });
+        }
+
+        tracing::info!("Applied custom skybox: {}", request.asset_id);
+        events::emit_environment_changed(&settings);
+    }
+}
+
 /// System that applies pending post-processing updates from the bridge.
 #[cfg(not(feature = "runtime"))]
 fn apply_post_processing_updates(
@@ -1324,6 +1444,12 @@ fn process_query_requests(
             QueryRequest::ListJoints => {
                 // Handled by process_joint_queries system to avoid system parameter limit
             }
+            QueryRequest::GameComponentState { .. } => {
+                // Handled by process_game_component_queries system to avoid system parameter limit
+            }
+            QueryRequest::AnimationClipState { .. } => {
+                // Animation clip state is emitted via selection events and other apply systems
+            }
         }
     }
 }
@@ -1649,6 +1775,224 @@ fn apply_remove_joint_requests(
     }
 }
 
+// ============================================================================
+// 2D Physics Systems (Metadata-only)
+// ============================================================================
+
+/// System that applies pending 2D physics update requests (always-active, metadata-only).
+fn apply_physics2d_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut Physics2dData)>,
+    phys2d_enabled_query: Query<&EntityId, With<Physics2dEnabled>>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for update in pending.physics2d_updates.drain(..) {
+        for (entity_id, mut current_physics) in query.iter_mut() {
+            if entity_id.0 == update.entity_id {
+                let old_physics = current_physics.clone();
+                *current_physics = update.physics_data.clone();
+
+                // Record for undo (using Physics2dChange action)
+                history.push(core::history::UndoableAction::Physics2dChange {
+                    entity_id: update.entity_id.clone(),
+                    old_physics: Some(old_physics),
+                    new_physics: Some(update.physics_data.clone()),
+                });
+
+                // Emit change event
+                let enabled = phys2d_enabled_query.iter().any(|eid| eid.0 == update.entity_id);
+                events::emit_physics2d_changed(&update.entity_id, &update.physics_data, enabled);
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies pending 2D physics toggle requests (always-active, metadata-only).
+fn apply_physics2d_toggles(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId, Option<&Physics2dData>, Option<&Physics2dEnabled>)>,
+) {
+    for toggle in pending.physics2d_toggles.drain(..) {
+        for (entity, entity_id, physics_data, phys2d_enabled) in query.iter() {
+            if entity_id.0 == toggle.entity_id {
+                if toggle.enabled {
+                    // Enable physics: add Physics2dEnabled marker and Physics2dData if missing
+                    if phys2d_enabled.is_none() {
+                        commands.entity(entity).insert(Physics2dEnabled);
+                    }
+                    if physics_data.is_none() {
+                        commands.entity(entity).insert(Physics2dData::default());
+                    }
+                    let data = physics_data.cloned().unwrap_or_default();
+                    events::emit_physics2d_changed(&toggle.entity_id, &data, true);
+                } else {
+                    // Disable physics: remove Physics2dEnabled marker
+                    if phys2d_enabled.is_some() {
+                        commands.entity(entity).remove::<Physics2dEnabled>();
+                    }
+                    if let Some(data) = physics_data {
+                        events::emit_physics2d_changed(&toggle.entity_id, data, false);
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies 2D joint creation requests (editor-only, metadata-only).
+fn apply_create_joint2d_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for request in pending.create_joint2d_requests.drain(..) {
+        // Find the entity to add the joint to
+        for (entity, entity_id) in query.iter() {
+            if entity_id.0 == request.entity_id {
+                commands.entity(entity).insert(request.joint_data.clone());
+
+                // Record for undo
+                history.push(core::history::UndoableAction::Joint2dChange {
+                    entity_id: request.entity_id.clone(),
+                    old_joint: None,
+                    new_joint: Some(request.joint_data.clone()),
+                });
+
+                // Emit change event
+                events::emit_joint2d_changed(&request.entity_id, &request.joint_data);
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies 2D joint removal requests (editor-only, metadata-only).
+fn apply_remove_joint2d_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId, &PhysicsJoint2d)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for request in pending.remove_joint2d_requests.drain(..) {
+        for (entity, entity_id, joint_data) in query.iter() {
+            if entity_id.0 == request.entity_id {
+                let old_joint = joint_data.clone();
+                commands.entity(entity).remove::<PhysicsJoint2d>();
+
+                // Record for undo
+                history.push(core::history::UndoableAction::Joint2dChange {
+                    entity_id: request.entity_id.clone(),
+                    old_joint: Some(old_joint),
+                    new_joint: None,
+                });
+
+                // No event needed — removal is implicit
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies 2D force applications (always-active, metadata-only).
+/// In metadata-only mode, this just emits events for the web layer to handle.
+fn apply_force_applications2d(
+    mut pending: ResMut<PendingCommands>,
+) {
+    for application in pending.force_applications2d.drain(..) {
+        // In metadata-only mode, just log. Future Rapier integration will apply actual force.
+        tracing::info!(
+            "2D force application (metadata-only): entity={}, force=({}, {})",
+            application.entity_id,
+            application.force_x,
+            application.force_y
+        );
+    }
+}
+
+/// System that applies 2D impulse applications (always-active, metadata-only).
+/// In metadata-only mode, this just emits events for the web layer to handle.
+fn apply_impulse_applications2d(
+    mut pending: ResMut<PendingCommands>,
+) {
+    for application in pending.impulse_applications2d.drain(..) {
+        // In metadata-only mode, just log. Future Rapier integration will apply actual impulse.
+        tracing::info!(
+            "2D impulse application (metadata-only): entity={}, impulse=({}, {})",
+            application.entity_id,
+            application.impulse_x,
+            application.impulse_y
+        );
+    }
+}
+
+/// System that processes 2D raycast requests (always-active, metadata-only).
+fn apply_raycast2d_requests(
+    mut pending: ResMut<PendingCommands>,
+) {
+    for request in pending.raycast2d_requests.drain(..) {
+        // In metadata-only mode, always miss. Future Rapier integration will do actual raycasts.
+        tracing::info!(
+            "2D raycast (metadata-only): origin=({}, {}), dir=({}, {}), max_distance={}",
+            request.origin_x,
+            request.origin_y,
+            request.dir_x,
+            request.dir_y,
+            request.max_distance
+        );
+        events::emit_raycast2d_miss();
+    }
+}
+
+/// System that applies 2D gravity updates (editor-only, metadata-only).
+fn apply_gravity2d_updates(
+    mut pending: ResMut<PendingCommands>,
+) {
+    for update in pending.gravity2d_updates.drain(..) {
+        // In metadata-only mode, just log. Future Rapier integration will update actual gravity.
+        tracing::info!(
+            "2D gravity update (metadata-only): ({}, {})",
+            update.gravity_x,
+            update.gravity_y
+        );
+    }
+}
+
+/// System that applies 2D debug physics toggles (editor-only, metadata-only).
+fn apply_debug_physics2d_toggle(
+    mut pending: ResMut<PendingCommands>,
+) {
+    for toggle in pending.debug_physics2d_toggles.drain(..) {
+        // In metadata-only mode, just log. Future Rapier integration will toggle debug rendering.
+        tracing::info!("2D debug physics toggle (metadata-only): {}", toggle.enabled);
+    }
+}
+
+/// System that handles 2D physics query requests (editor-only).
+fn handle_physics2d_query(
+    mut pending: ResMut<PendingCommands>,
+    physics_query: Query<(&EntityId, &Physics2dData, Option<&Physics2dEnabled>)>,
+) {
+    let requests: Vec<pending_commands::QueryRequest> = pending.query_requests
+        .drain(..)
+        .filter(|req| matches!(req, pending_commands::QueryRequest::Physics2dState { .. }))
+        .collect();
+
+    for request in requests {
+        if let pending_commands::QueryRequest::Physics2dState { entity_id } = request {
+            // Find the entity
+            let found = physics_query.iter().find(|(eid, _, _)| eid.0 == entity_id);
+            if let Some((eid, physics_data, phys2d_enabled)) = found {
+                let enabled = phys2d_enabled.is_some();
+                events::emit_physics2d_changed(&eid.0, physics_data, enabled);
+            }
+        }
+    }
+}
+
 /// System that reads collision events from Rapier and emits them to JS.
 /// Runs always (mode-gated internally by checking if physics is active).
 fn read_collision_events(
@@ -1741,7 +2085,7 @@ fn apply_scene_export(
     audio_export_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
-    csg_procedural_joint_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>, Option<&core::procedural_mesh::ProceduralMeshData>, Option<&core::physics::JointData>)>,
+    csg_procedural_joint_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>, Option<&core::procedural_mesh::ProceduralMeshData>, Option<&core::physics::JointData>, Option<&core::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     child_of_query: Query<&ChildOf>,
     eid_query: Query<&EntityId>,
 ) {
@@ -1792,11 +2136,11 @@ fn apply_scene_export(
             .find(|(seid, _)| seid.0 == eid.0)
             .and_then(|(_, sed)| sed.cloned());
 
-        // Look up csg + procedural mesh + joint data from combined query
-        let (csg_mesh_data, procedural_mesh_data, joint_data) = csg_procedural_joint_query.iter()
-            .find(|(ceid, _, _, _)| ceid.0 == eid.0)
-            .map(|(_, cmd, pmd, jd)| (cmd.cloned(), pmd.cloned(), jd.cloned()))
-            .unwrap_or((None, None, None));
+        // Look up csg + procedural mesh + joint + game component + game camera data from combined query
+        let (csg_mesh_data, procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = csg_procedural_joint_query.iter()
+            .find(|(ceid, _, _, _, _, _, _)| ceid.0 == eid.0)
+            .map(|(_, cmd, pmd, jd, gc, gcd, agc)| (cmd.cloned(), pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some()))
+            .unwrap_or((None, None, None, None, None, false));
 
         snapshots.push(HistEntitySnapshot {
             entity_id: eid.0.clone(),
@@ -1820,6 +2164,22 @@ fn apply_scene_export(
             terrain_mesh_data: None,
             procedural_mesh_data,
             joint_data,
+            game_components,
+            animation_clip_data: None,
+            game_camera_data,
+            active_game_camera,
+            sprite_data,
+            physics2d_data: None,
+            physics2d_enabled: false,
+            joint2d_data: None,
+            tilemap_data: None,
+            tilemap_enabled: false,
+            skeleton2d_data: None,
+            skeleton2d_enabled: false,
+            skeletal_animations: None,
+            skeleton2d_data: None,
+            skeleton2d_enabled: false,
+            skeletal_animations: None,
         });
     }
 
@@ -1832,6 +2192,7 @@ fn apply_scene_export(
         &post_processing_settings,
         &bus_config,
         snapshots,
+        None,
     );
 
     match serde_json::to_string(&scene_file) {
@@ -1880,7 +2241,7 @@ fn apply_scene_load(
         }
     };
 
-    if scene_file.format_version != 1 && scene_file.format_version != 2 {
+    if scene_file.format_version > 3 {
         tracing::error!("Unsupported scene format version: {}", scene_file.format_version);
         return;
     }
@@ -2872,7 +3233,6 @@ fn apply_csg_requests(
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_data_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
-    mesh_assets: Res<Assets<Mesh>>,
     mut history: ResMut<HistoryStack>,
     mut selection: ResMut<Selection>,
     mut selection_events: EventWriter<SelectionChangedEvent>,
@@ -2910,12 +3270,12 @@ fn apply_csg_requests(
         };
 
         // 3. Get actual Mesh assets
-        let Some(a_mesh) = mesh_assets.get(&a_mesh_handle.0) else {
+        let Some(a_mesh) = meshes.get(&a_mesh_handle.0) else {
             tracing::warn!("CSG: could not load mesh asset for entity A");
             events::emit_csg_error("Could not load mesh for entity A");
             continue;
         };
-        let Some(b_mesh) = mesh_assets.get(&b_mesh_handle.0) else {
+        let Some(b_mesh) = meshes.get(&b_mesh_handle.0) else {
             tracing::warn!("CSG: could not load mesh asset for entity B");
             events::emit_csg_error("Could not load mesh for entity B");
             continue;
@@ -3038,6 +3398,19 @@ fn apply_csg_requests(
                 terrain_mesh_data: None,
                 procedural_mesh_data: None,
                 joint_data: None,
+                game_components: None,
+                animation_clip_data: None,
+                game_camera_data: None,
+                active_game_camera: false,
+                sprite_data: None,
+                physics2d_data: None,
+                physics2d_enabled: false,
+                joint2d_data: None,
+                tilemap_data: None,
+                tilemap_enabled: false,
+                skeleton2d_data: None,
+                skeleton2d_enabled: false,
+                skeletal_animations: None,
             }
         };
 
@@ -3081,6 +3454,22 @@ fn apply_csg_requests(
             terrain_mesh_data: None,
             procedural_mesh_data: None,
             joint_data: None,
+            game_components: None,
+            animation_clip_data: None,
+            game_camera_data: None,
+            active_game_camera: false,
+            sprite_data: None,
+            physics2d_data: None,
+            physics2d_enabled: false,
+            joint2d_data: None,
+            tilemap_data: None,
+            tilemap_enabled: false,
+            skeleton2d_data: None,
+            skeleton2d_enabled: false,
+            skeletal_animations: None,
+            skeleton2d_data: None,
+            skeleton2d_enabled: false,
+            skeletal_animations: None,
         };
 
         // 9. Push history action
@@ -3533,6 +3922,27 @@ fn emit_animation_on_selection(
     }
 }
 
+/// Emit game camera data when selection changes.
+#[cfg(not(feature = "runtime"))]
+fn emit_game_camera_on_selection(
+    selection: Res<Selection>,
+    camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+    mut selection_events: EventReader<SelectionChangedEvent>,
+) {
+    for _event in selection_events.read() {
+        if let Some(primary) = selection.primary {
+            if let Ok((eid, cam_data, active)) = camera_query.get(primary) {
+                if let Some(data) = cam_data {
+                    events::emit_game_camera_changed(&eid.0, &data.mode, &data.target_entity);
+                }
+                if active.is_some() {
+                    events::emit_active_game_camera_changed(&eid.0);
+                }
+            }
+        }
+    }
+}
+
 /// Periodically emit animation state while playing (throttled to ~200ms).
 #[cfg(not(feature = "runtime"))]
 fn poll_animation_state(
@@ -3934,6 +4344,16 @@ fn apply_extrude_requests(
                 terrain_mesh_data: None,
                 procedural_mesh_data: Some(mesh_data),
                 joint_data: None,
+                game_components: None,
+                animation_clip_data: None,
+                game_camera_data: None,
+                active_game_camera: false,
+                sprite_data: None,
+                physics2d_data: None,
+                physics2d_enabled: false,
+                joint2d_data: None,
+                tilemap_data: None,
+                tilemap_enabled: false,
             },
         });
 
@@ -4058,6 +4478,16 @@ fn apply_lathe_requests(
                 terrain_mesh_data: None,
                 procedural_mesh_data: Some(mesh_data),
                 joint_data: None,
+                game_components: None,
+                animation_clip_data: None,
+                game_camera_data: None,
+                active_game_camera: false,
+                sprite_data: None,
+                physics2d_data: None,
+                physics2d_enabled: false,
+                joint2d_data: None,
+                tilemap_data: None,
+                tilemap_enabled: false,
             },
         });
 
@@ -4235,6 +4665,16 @@ fn apply_array_requests(
                 terrain_mesh_data: None,
                 procedural_mesh_data: src_procedural_mesh_data.clone(),
                 joint_data: None,
+                game_components: None,
+                animation_clip_data: None,
+                game_camera_data: None,
+                active_game_camera: false,
+                sprite_data: None,
+                physics2d_data: None,
+                physics2d_enabled: false,
+                joint2d_data: None,
+                tilemap_data: None,
+                tilemap_enabled: false,
             });
         }
 
@@ -4329,6 +4769,16 @@ fn apply_combine_requests(
                     terrain_mesh_data: None,
                     procedural_mesh_data: src_procedural_mesh_data,
                     joint_data: None,
+                    game_components: None,
+                    animation_clip_data: None,
+                    game_camera_data: None,
+                    active_game_camera: false,
+                    sprite_data: None,
+                    physics2d_data: None,
+                    physics2d_enabled: false,
+                    joint2d_data: None,
+                    tilemap_data: None,
+                    tilemap_enabled: false,
                 });
 
                 if request.delete_sources {
@@ -4404,6 +4854,16 @@ fn apply_combine_requests(
                 terrain_mesh_data: None,
                 procedural_mesh_data: Some(mesh_data),
                 joint_data: None,
+                game_components: None,
+                animation_clip_data: None,
+                game_camera_data: None,
+                active_game_camera: false,
+                sprite_data: None,
+                physics2d_data: None,
+                physics2d_enabled: false,
+                joint2d_data: None,
+                tilemap_data: None,
+                tilemap_enabled: false,
             },
         });
 
@@ -4464,5 +4924,691 @@ fn apply_instantiate_prefab(
 
         // Mark scene graph as dirty to trigger update event
         cache.dirty = true;
+    }
+}
+
+// ---- Game Component Apply Systems ----
+
+fn apply_game_component_adds(
+    mut pending: ResMut<PendingCommands>,
+    mut entity_query: Query<(Entity, &EntityId, Option<&mut core::game_components::GameComponents>)>,
+    mut commands: Commands,
+    mut history: ResMut<HistoryStack>,
+) {
+    let requests: Vec<_> = pending.game_component_adds.drain(..).collect();
+    for request in requests {
+        let Some((entity, _eid, existing)) = entity_query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id) else {
+            continue;
+        };
+
+        let component_data = match core::game_components::build_game_component(&request.component_type, &request.properties_json) {
+            Ok(data) => data,
+            Err(e) => {
+                log(&format!("Failed to build game component: {}", e));
+                continue;
+            }
+        };
+
+        let old_components = existing.as_ref().map(|gc| gc.as_ref().clone());
+
+        if let Some(mut gc) = existing {
+            gc.add(component_data);
+            let new_components = Some(gc.clone());
+            events::emit_game_component_changed(&request.entity_id, &gc.components);
+            history.push(core::history::UndoableAction::GameComponentChange {
+                entity_id: request.entity_id,
+                old_components,
+                new_components,
+            });
+        } else {
+            let mut gc = core::game_components::GameComponents::default();
+            gc.add(component_data);
+            let new_components = Some(gc.clone());
+            events::emit_game_component_changed(&request.entity_id, &gc.components);
+            commands.entity(entity).insert(gc);
+            history.push(core::history::UndoableAction::GameComponentChange {
+                entity_id: request.entity_id,
+                old_components: None,
+                new_components,
+            });
+        }
+    }
+}
+
+fn apply_game_component_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut entity_query: Query<(&EntityId, &mut core::game_components::GameComponents)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    let requests: Vec<_> = pending.game_component_updates.drain(..).collect();
+    for request in requests {
+        let Some((_eid, mut gc)) = entity_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id) else {
+            continue;
+        };
+
+        let component_data = match core::game_components::build_game_component(&request.component_type, &request.properties_json) {
+            Ok(data) => data,
+            Err(e) => {
+                log(&format!("Failed to build game component: {}", e));
+                continue;
+            }
+        };
+
+        let old_components = Some(gc.clone());
+        gc.add(component_data); // add replaces existing of same type
+        let new_components = Some(gc.clone());
+
+        events::emit_game_component_changed(&request.entity_id, &gc.components);
+        history.push(core::history::UndoableAction::GameComponentChange {
+            entity_id: request.entity_id,
+            old_components,
+            new_components,
+        });
+    }
+}
+
+fn apply_game_component_removals(
+    mut pending: ResMut<PendingCommands>,
+    mut entity_query: Query<(&EntityId, &mut core::game_components::GameComponents)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    let requests: Vec<_> = pending.game_component_removals.drain(..).collect();
+    for request in requests {
+        let Some((_eid, mut gc)) = entity_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id) else {
+            continue;
+        };
+
+        let old_components = Some(gc.clone());
+        gc.remove(&request.component_name);
+        let new_components = Some(gc.clone());
+
+        events::emit_game_component_changed(&request.entity_id, &gc.components);
+        history.push(core::history::UndoableAction::GameComponentChange {
+            entity_id: request.entity_id,
+            old_components,
+            new_components,
+        });
+    }
+}
+
+fn process_game_component_queries(
+    mut pending: ResMut<PendingCommands>,
+    gc_query: Query<(&EntityId, Option<&core::game_components::GameComponents>)>,
+) {
+    let requests: Vec<_> = pending.query_requests.iter()
+        .filter(|r| matches!(r, core::pending_commands::QueryRequest::GameComponentState { .. }))
+        .cloned()
+        .collect();
+
+    // Remove processed requests
+    pending.query_requests.retain(|r| !matches!(r, core::pending_commands::QueryRequest::GameComponentState { .. }));
+
+    for request in requests {
+        if let core::pending_commands::QueryRequest::GameComponentState { entity_id } = request {
+            let components = gc_query.iter()
+                .find(|(eid, _)| eid.0 == entity_id)
+                .and_then(|(_, gc)| gc.map(|gc| &gc.components))
+                .cloned()
+                .unwrap_or_default();
+
+            let data = serde_json::json!({
+                "entityId": entity_id,
+                "components": components,
+            });
+            events::emit_event("QUERY_GAME_COMPONENTS", &data);
+        }
+    }
+}
+
+// ---- Game Camera Apply Systems ----
+
+fn apply_set_game_camera_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut entity_query: Query<(Entity, &EntityId, Option<&GameCameraData>)>,
+    mut commands: Commands,
+) {
+    let requests: Vec<_> = pending.set_game_camera_requests.drain(..).collect();
+    for request in requests {
+        let Some((entity, _eid, _existing)) = entity_query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id) else {
+            continue;
+        };
+
+        let camera_data = GameCameraData {
+            mode: request.mode.clone(),
+            target_entity: request.target_entity.clone(),
+            ..Default::default()
+        };
+
+        commands.entity(entity).insert(camera_data);
+
+        // Insert state components if needed
+        match &request.mode {
+            core::game_camera::GameCameraMode::FirstPerson { .. } => {
+                commands.entity(entity).insert(FirstPersonState::default());
+            }
+            core::game_camera::GameCameraMode::Orbital { .. } => {
+                commands.entity(entity).insert(OrbitalState::default());
+            }
+            _ => {}
+        }
+
+        events::emit_game_camera_changed(&request.entity_id, &request.mode, &request.target_entity);
+    }
+}
+
+fn apply_set_active_game_camera_requests(
+    mut pending: ResMut<PendingCommands>,
+    entity_query: Query<(Entity, &EntityId)>,
+    active_query: Query<Entity, With<ActiveGameCamera>>,
+    mut commands: Commands,
+) {
+    let requests: Vec<_> = pending.set_active_game_camera_requests.drain(..).collect();
+    for request in requests {
+        // Remove ActiveGameCamera from all current holders
+        for entity in active_query.iter() {
+            commands.entity(entity).remove::<ActiveGameCamera>();
+        }
+
+        // Add to the new entity
+        if let Some((entity, _)) = entity_query.iter().find(|(_, eid)| eid.0 == request.entity_id) {
+            commands.entity(entity).insert(ActiveGameCamera);
+            events::emit_active_game_camera_changed(&request.entity_id);
+        }
+    }
+}
+
+fn apply_camera_shake_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut camera_query: Query<&mut GameCameraData, With<ActiveGameCamera>>,
+) {
+    let requests: Vec<_> = pending.camera_shake_requests.drain(..).collect();
+    for request in requests {
+        if let Ok(mut camera_data) = camera_query.single_mut() {
+            camera_data.shake_intensity = request.intensity;
+            camera_data.shake_duration = request.duration;
+            camera_data.shake_timer = request.duration;
+        }
+    }
+}
+
+fn process_game_camera_queries(
+    mut pending: ResMut<PendingCommands>,
+    camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+) {
+    let requests: Vec<_> = pending.query_requests.iter()
+        .filter(|r| matches!(r, core::pending_commands::QueryRequest::GameCameraState { .. }))
+        .cloned()
+        .collect();
+
+    pending.query_requests.retain(|r| !matches!(r, core::pending_commands::QueryRequest::GameCameraState { .. }));
+
+    for request in requests {
+        if let core::pending_commands::QueryRequest::GameCameraState { entity_id } = request {
+            if let Some((_, cam_data, active)) = camera_query.iter().find(|(eid, _, _)| eid.0 == entity_id) {
+                let data = serde_json::json!({
+                    "entityId": entity_id,
+                    "gameCameraData": cam_data,
+                    "isActive": active.is_some(),
+                });
+                events::emit_event("QUERY_GAME_CAMERA", &data);
+            }
+        }
+    }
+}
+
+// ========== Skeleton 2D Systems ==========
+
+#[cfg(not(feature = "runtime"))]
+fn apply_skeleton2d_creates(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut history: ResMut<HistoryStack>,
+    entity_query: Query<(Entity, &EntityId)>,
+) {
+    let requests: Vec<_> = pending.create_skeleton2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((entity, _)) = entity_query.iter().find(|(_, eid)| eid.0 == request.entity_id) {
+            let old_snapshot = entity_factory::EntitySnapshot {
+                entity_id: request.entity_id.clone(),
+                entity_type: core::pending_commands::EntityType::Empty,
+                name: String::new(),
+                transform: entity_factory::TransformSnapshot::default(),
+                visible: true,
+                material: None,
+                light: None,
+                physics: None,
+                physics_enabled: false,
+                script: None,
+                audio: None,
+                audio_enabled: false,
+                particle: None,
+                particle_enabled: false,
+                shader: None,
+                terrain_data: None,
+                terrain_mesh: None,
+                csg_data: None,
+                procedural_mesh_data: None,
+                animation_clip_data: None,
+                game_components: None,
+                game_camera: None,
+                is_active_game_camera: false,
+                sprite_data: None,
+                skeleton2d_data: None,
+                skeleton2d_enabled: false,
+                skeletal_animations: None,
+            };
+
+            commands.entity(entity).insert((
+                request.skeleton_data.clone(),
+                core::skeleton2d::SkeletonEnabled2d,
+            ));
+
+            let new_snapshot = entity_factory::EntitySnapshot {
+                skeleton2d_data: Some(request.skeleton_data.clone()),
+                skeleton2d_enabled: true,
+                ..old_snapshot.clone()
+            };
+
+            history.push(entity_factory::UndoableAction::SkeletonChange {
+                entity_id: request.entity_id.clone(),
+                old_snapshot,
+                new_snapshot,
+            });
+
+            events::emit_skeleton2d_updated(&request.entity_id, &request.skeleton_data, true);
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_bone2d_adds(
+    mut pending: ResMut<PendingCommands>,
+    mut skeleton_query: Query<(&EntityId, &mut core::skeleton2d::SkeletonData2d, Option<&core::skeleton2d::SkeletonEnabled2d>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    let requests: Vec<_> = pending.add_bone2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((_, mut skeleton_data, enabled)) = skeleton_query.iter_mut().find(|(eid, _, _)| eid.0 == request.entity_id) {
+            let old_skeleton = skeleton_data.clone();
+            skeleton_data.bones.push(request.bone);
+
+            history.push(entity_factory::UndoableAction::SkeletonChange {
+                entity_id: request.entity_id.clone(),
+                old_snapshot: entity_factory::EntitySnapshot {
+                    entity_id: request.entity_id.clone(),
+                    entity_type: core::pending_commands::EntityType::Empty,
+                    name: String::new(),
+                    transform: entity_factory::TransformSnapshot::default(),
+                    visible: true,
+                    material: None,
+                    light: None,
+                    physics: None,
+                    physics_enabled: false,
+                    script: None,
+                    audio: None,
+                    audio_enabled: false,
+                    particle: None,
+                    particle_enabled: false,
+                    shader: None,
+                    terrain_data: None,
+                    terrain_mesh: None,
+                    csg_data: None,
+                    procedural_mesh_data: None,
+                    animation_clip_data: None,
+                    game_components: None,
+                    game_camera: None,
+                    is_active_game_camera: false,
+                    sprite_data: None,
+                    skeleton2d_data: Some(old_skeleton),
+                    skeleton2d_enabled: enabled.is_some(),
+                    skeletal_animations: None,
+                },
+                new_snapshot: entity_factory::EntitySnapshot {
+                    entity_id: request.entity_id.clone(),
+                    entity_type: core::pending_commands::EntityType::Empty,
+                    name: String::new(),
+                    transform: entity_factory::TransformSnapshot::default(),
+                    visible: true,
+                    material: None,
+                    light: None,
+                    physics: None,
+                    physics_enabled: false,
+                    script: None,
+                    audio: None,
+                    audio_enabled: false,
+                    particle: None,
+                    particle_enabled: false,
+                    shader: None,
+                    terrain_data: None,
+                    terrain_mesh: None,
+                    csg_data: None,
+                    procedural_mesh_data: None,
+                    animation_clip_data: None,
+                    game_components: None,
+                    game_camera: None,
+                    is_active_game_camera: false,
+                    sprite_data: None,
+                    skeleton2d_data: Some(skeleton_data.clone()),
+                    skeleton2d_enabled: enabled.is_some(),
+                    skeletal_animations: None,
+                },
+            });
+
+            events::emit_skeleton2d_updated(&request.entity_id, &skeleton_data, enabled.is_some());
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_bone2d_removes(
+    mut pending: ResMut<PendingCommands>,
+    mut skeleton_query: Query<(&EntityId, &mut core::skeleton2d::SkeletonData2d, Option<&core::skeleton2d::SkeletonEnabled2d>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    let requests: Vec<_> = pending.remove_bone2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((_, mut skeleton_data, enabled)) = skeleton_query.iter_mut().find(|(eid, _, _)| eid.0 == request.entity_id) {
+            let old_skeleton = skeleton_data.clone();
+            skeleton_data.bones.retain(|bone| bone.name != request.bone_name);
+
+            history.push(entity_factory::UndoableAction::SkeletonChange {
+                entity_id: request.entity_id.clone(),
+                old_snapshot: entity_factory::EntitySnapshot {
+                    entity_id: request.entity_id.clone(),
+                    entity_type: core::pending_commands::EntityType::Empty,
+                    name: String::new(),
+                    transform: entity_factory::TransformSnapshot::default(),
+                    visible: true,
+                    material: None,
+                    light: None,
+                    physics: None,
+                    physics_enabled: false,
+                    script: None,
+                    audio: None,
+                    audio_enabled: false,
+                    particle: None,
+                    particle_enabled: false,
+                    shader: None,
+                    terrain_data: None,
+                    terrain_mesh: None,
+                    csg_data: None,
+                    procedural_mesh_data: None,
+                    animation_clip_data: None,
+                    game_components: None,
+                    game_camera: None,
+                    is_active_game_camera: false,
+                    sprite_data: None,
+                    skeleton2d_data: Some(old_skeleton),
+                    skeleton2d_enabled: enabled.is_some(),
+                    skeletal_animations: None,
+                },
+                new_snapshot: entity_factory::EntitySnapshot {
+                    entity_id: request.entity_id.clone(),
+                    entity_type: core::pending_commands::EntityType::Empty,
+                    name: String::new(),
+                    transform: entity_factory::TransformSnapshot::default(),
+                    visible: true,
+                    material: None,
+                    light: None,
+                    physics: None,
+                    physics_enabled: false,
+                    script: None,
+                    audio: None,
+                    audio_enabled: false,
+                    particle: None,
+                    particle_enabled: false,
+                    shader: None,
+                    terrain_data: None,
+                    terrain_mesh: None,
+                    csg_data: None,
+                    procedural_mesh_data: None,
+                    animation_clip_data: None,
+                    game_components: None,
+                    game_camera: None,
+                    is_active_game_camera: false,
+                    sprite_data: None,
+                    skeleton2d_data: Some(skeleton_data.clone()),
+                    skeleton2d_enabled: enabled.is_some(),
+                    skeletal_animations: None,
+                },
+            });
+
+            events::emit_skeleton2d_updated(&request.entity_id, &skeleton_data, enabled.is_some());
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_bone2d_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut skeleton_query: Query<(&EntityId, &mut core::skeleton2d::SkeletonData2d, Option<&core::skeleton2d::SkeletonEnabled2d>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    let requests: Vec<_> = pending.update_bone2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((_, mut skeleton_data, enabled)) = skeleton_query.iter_mut().find(|(eid, _, _)| eid.0 == request.entity_id) {
+            let old_skeleton = skeleton_data.clone();
+
+            if let Some(bone) = skeleton_data.bones.iter_mut().find(|b| b.name == request.bone_name) {
+                if let Some(pos) = request.local_position {
+                    bone.local_position = pos;
+                }
+                if let Some(rot) = request.local_rotation {
+                    bone.local_rotation = rot;
+                }
+                if let Some(scale) = request.local_scale {
+                    bone.local_scale = scale;
+                }
+                if let Some(len) = request.length {
+                    bone.length = len;
+                }
+                if let Some(col) = request.color {
+                    bone.color = col;
+                }
+            }
+
+            history.push(entity_factory::UndoableAction::SkeletonChange {
+                entity_id: request.entity_id.clone(),
+                old_snapshot: entity_factory::EntitySnapshot {
+                    entity_id: request.entity_id.clone(),
+                    entity_type: core::pending_commands::EntityType::Empty,
+                    name: String::new(),
+                    transform: entity_factory::TransformSnapshot::default(),
+                    visible: true,
+                    material: None,
+                    light: None,
+                    physics: None,
+                    physics_enabled: false,
+                    script: None,
+                    audio: None,
+                    audio_enabled: false,
+                    particle: None,
+                    particle_enabled: false,
+                    shader: None,
+                    terrain_data: None,
+                    terrain_mesh: None,
+                    csg_data: None,
+                    procedural_mesh_data: None,
+                    animation_clip_data: None,
+                    game_components: None,
+                    game_camera: None,
+                    is_active_game_camera: false,
+                    sprite_data: None,
+                    skeleton2d_data: Some(old_skeleton),
+                    skeleton2d_enabled: enabled.is_some(),
+                    skeletal_animations: None,
+                },
+                new_snapshot: entity_factory::EntitySnapshot {
+                    entity_id: request.entity_id.clone(),
+                    entity_type: core::pending_commands::EntityType::Empty,
+                    name: String::new(),
+                    transform: entity_factory::TransformSnapshot::default(),
+                    visible: true,
+                    material: None,
+                    light: None,
+                    physics: None,
+                    physics_enabled: false,
+                    script: None,
+                    audio: None,
+                    audio_enabled: false,
+                    particle: None,
+                    particle_enabled: false,
+                    shader: None,
+                    terrain_data: None,
+                    terrain_mesh: None,
+                    csg_data: None,
+                    procedural_mesh_data: None,
+                    animation_clip_data: None,
+                    game_components: None,
+                    game_camera: None,
+                    is_active_game_camera: false,
+                    sprite_data: None,
+                    skeleton2d_data: Some(skeleton_data.clone()),
+                    skeleton2d_enabled: enabled.is_some(),
+                    skeletal_animations: None,
+                },
+            });
+
+            events::emit_skeleton2d_updated(&request.entity_id, &skeleton_data, enabled.is_some());
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_skeletal_animation2d_creates(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    entity_query: Query<(Entity, &EntityId)>,
+) {
+    let requests: Vec<_> = pending.create_skeletal_animation2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((entity, _)) = entity_query.iter().find(|(_, eid)| eid.0 == request.entity_id) {
+            commands.entity(entity).insert(request.animation);
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_keyframe2d_adds(
+    mut pending: ResMut<PendingCommands>,
+    mut anim_query: Query<(&EntityId, &mut core::skeletal_animation2d::SkeletalAnimation2d)>,
+) {
+    let requests: Vec<_> = pending.add_keyframe2d_requests.drain(..).collect();
+    for request in requests {
+        for (eid, mut anim) in anim_query.iter_mut() {
+            if eid.0 == request.entity_id && anim.name == request.animation_name {
+                anim.tracks.entry(request.bone_name).or_default().push(request.keyframe);
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_skeletal_animation2d_plays(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    entity_query: Query<(Entity, &EntityId)>,
+) {
+    let requests: Vec<_> = pending.play_skeletal_animation2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((entity, _)) = entity_query.iter().find(|(_, eid)| eid.0 == request.entity_id) {
+            let player = core::skeletal_animation2d::SkeletalAnimPlayer2d {
+                current_animation: Some(request.animation_name.clone()),
+                time: 0.0,
+                speed: request.speed,
+                playing: true,
+                blend_animations: vec![],
+            };
+            commands.entity(entity).insert(player);
+            events::emit_skeletal_animation2d_playing(&request.entity_id, &request.animation_name);
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_skeleton2d_skin_sets(
+    mut pending: ResMut<PendingCommands>,
+    mut skeleton_query: Query<(&EntityId, &mut core::skeleton2d::SkeletonData2d)>,
+) {
+    let requests: Vec<_> = pending.set_skeleton2d_skin_requests.drain(..).collect();
+    for request in requests {
+        if let Some((_, mut skeleton_data)) = skeleton_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id) {
+            skeleton_data.active_skin = request.skin_name.clone();
+            events::emit_skeleton2d_skin_changed(&request.entity_id, &request.skin_name);
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_ik_chain2d_creates(
+    mut pending: ResMut<PendingCommands>,
+    mut skeleton_query: Query<(&EntityId, &mut core::skeleton2d::SkeletonData2d)>,
+) {
+    let requests: Vec<_> = pending.create_ik_chain2d_requests.drain(..).collect();
+    for request in requests {
+        if let Some((_, mut skeleton_data)) = skeleton_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id) {
+            skeleton_data.ik_constraints.push(request.constraint);
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn handle_skeleton2d_query(
+    mut pending: ResMut<PendingCommands>,
+    skeleton_query: Query<(&EntityId, Option<&core::skeleton2d::SkeletonData2d>, Option<&core::skeleton2d::SkeletonEnabled2d>)>,
+) {
+    let requests: Vec<_> = pending.query_requests.iter()
+        .filter(|r| matches!(r, core::pending_commands::QueryRequest::Skeleton2dState { .. }))
+        .cloned()
+        .collect();
+
+    pending.query_requests.retain(|r| !matches!(r, core::pending_commands::QueryRequest::Skeleton2dState { .. }));
+
+    for request in requests {
+        if let core::pending_commands::QueryRequest::Skeleton2dState { entity_id } = request {
+            if let Some((_, skeleton_data, enabled)) = skeleton_query.iter().find(|(eid, _, _)| eid.0 == entity_id) {
+                if let Some(data) = skeleton_data {
+                    events::emit_skeleton2d_updated(&entity_id, data, enabled.is_some());
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "runtime"))]
+fn apply_auto_weight_skeleton2d(
+    mut pending: ResMut<PendingCommands>,
+) {
+    let requests: Vec<_> = pending.auto_weight_skeleton2d_requests.drain(..).collect();
+    for _request in requests {
+        // Placeholder for auto-weight algorithm
+        // This would require complex mesh-to-skeleton weight calculations
+    }
+}
+
+/// Emit skeleton2d changed events on selection changes and skeleton2d data changes.
+#[cfg(not(feature = "runtime"))]
+fn emit_skeleton2d_on_selection(
+    selection: Res<Selection>,
+    query: Query<(&EntityId, &core::skeleton2d::SkeletonData2d, Option<&core::skeleton2d::SkeletonEnabled2d>), Changed<core::skeleton2d::SkeletonData2d>>,
+    selection_query: Query<(&EntityId, Option<&core::skeleton2d::SkeletonData2d>, Option<&core::skeleton2d::SkeletonEnabled2d>)>,
+    mut selection_events: EventReader<SelectionChangedEvent>,
+) {
+    // Emit on selection change
+    for _event in selection_events.read() {
+        if let Some(primary) = selection.primary {
+            if let Ok((entity_id, skeleton_data, skel_enabled)) = selection_query.get(primary) {
+                if let Some(data) = skeleton_data {
+                    events::emit_skeleton2d_updated(&entity_id.0, data, skel_enabled.is_some());
+                }
+            }
+        }
+    }
+
+    // Emit when skeleton2d data changes on selected entity
+    if let Some(primary) = selection.primary {
+        if let Ok((entity_id, skeleton_data, skel_enabled)) = query.get(primary) {
+            events::emit_skeleton2d_updated(&entity_id.0, skeleton_data, skel_enabled.is_some());
+        }
     }
 }

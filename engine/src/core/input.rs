@@ -78,6 +78,20 @@ pub struct InputState {
     pub actions: HashMap<String, ActionValue>,
 }
 
+impl InputState {
+    pub fn is_action_active(&self, name: &str) -> bool {
+        self.actions.get(name).map_or(false, |v| v.pressed)
+    }
+
+    pub fn is_action_just_pressed(&self, name: &str) -> bool {
+        self.actions.get(name).map_or(false, |v| v.just_pressed)
+    }
+
+    pub fn get_axis(&self, name: &str) -> f32 {
+        self.actions.get(name).map_or(0.0, |v| v.axis_value)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Presets
 // ---------------------------------------------------------------------------

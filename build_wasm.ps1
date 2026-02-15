@@ -51,6 +51,35 @@ Write-Host "=== wasm-bindgen WebGPU ===" -ForegroundColor Cyan
 & $wasmBindgen --target web --out-dir "pkg-webgpu" $wasmBinary
 if ($LASTEXITCODE -ne 0) { Write-Host "wasm-bindgen (webgpu) FAILED" -ForegroundColor Red; exit 1 }
 
+# --- wasm-opt pass (optional, warn if not found) ---
+$wasmOpt = $null
+# Check cargo bin first, then PATH
+$cargoWasmOpt = Join-Path (Join-Path $cargoHome "bin") "wasm-opt.exe"
+if (Test-Path $cargoWasmOpt) {
+    $wasmOpt = $cargoWasmOpt
+} else {
+    $wasmOpt = Get-Command wasm-opt -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+}
+
+if ($wasmOpt) {
+    Write-Host "=== Running wasm-opt (Oz) ===" -ForegroundColor Cyan
+    foreach ($pkg in @("pkg-webgl2", "pkg-webgpu")) {
+        $wasmFile = Join-Path $pkg "forge_engine_bg.wasm"
+        if (Test-Path $wasmFile) {
+            $sizeBefore = (Get-Item $wasmFile).Length / 1MB
+            & $wasmOpt -Oz --enable-bulk-memory -o $wasmFile $wasmFile
+            if ($LASTEXITCODE -eq 0) {
+                $sizeAfter = (Get-Item $wasmFile).Length / 1MB
+                Write-Host ("  {0}: {1:N1} MB -> {2:N1} MB" -f $pkg, $sizeBefore, $sizeAfter) -ForegroundColor DarkGray
+            } else {
+                Write-Host "  wasm-opt failed for $pkg (non-fatal)" -ForegroundColor Yellow
+            }
+        }
+    }
+} else {
+    Write-Host "wasm-opt not found — skipping optimization. Install via: cargo install wasm-opt" -ForegroundColor Yellow
+}
+
 Write-Host "=== Copying to web/public ===" -ForegroundColor Cyan
 
 # Create directories if needed

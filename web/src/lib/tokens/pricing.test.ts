@@ -57,11 +57,11 @@ describe('TOKEN_COSTS', () => {
 });
 
 describe('TIER_MONTHLY_TOKENS', () => {
-  it('only studio tier gets monthly tokens', () => {
-    expect(TIER_MONTHLY_TOKENS.free).toBe(0);
-    expect(TIER_MONTHLY_TOKENS.starter).toBe(0);
-    expect(TIER_MONTHLY_TOKENS.creator).toBe(0);
-    expect(TIER_MONTHLY_TOKENS.studio).toBe(5000);
+  it('all tiers get monthly tokens', () => {
+    expect(TIER_MONTHLY_TOKENS.starter).toBe(50);
+    expect(TIER_MONTHLY_TOKENS.hobbyist).toBe(300);
+    expect(TIER_MONTHLY_TOKENS.creator).toBe(1000);
+    expect(TIER_MONTHLY_TOKENS.pro).toBe(3000);
   });
 });
 

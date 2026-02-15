@@ -13,7 +13,7 @@ export async function PUT(
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  const tierCheck = assertTier(authResult.ctx.user, ['starter', 'creator', 'studio']);
+  const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
 
   const { provider } = await params;

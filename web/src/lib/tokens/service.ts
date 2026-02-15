@@ -241,7 +241,7 @@ export async function creditAddonTokens(
 /** Reset monthly tokens on billing cycle renewal */
 export async function resetMonthlyTokens(
   userId: string,
-  tier: 'free' | 'starter' | 'creator' | 'studio'
+  tier: 'starter' | 'hobbyist' | 'creator' | 'pro'
 ): Promise<void> {
   const db = getDb();
   const allocation = TIER_MONTHLY_TOKENS[tier];

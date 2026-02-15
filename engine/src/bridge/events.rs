@@ -511,6 +511,21 @@ pub fn emit_collision_event(entity_a: &str, entity_b: &str, started: bool) {
     emit_event("COLLISION_EVENT", &CollisionPayload { entity_a, entity_b, started });
 }
 
+/// Emit a game component changed event for an entity.
+pub fn emit_game_component_changed(entity_id: &str, components: &[crate::core::game_components::GameComponentData]) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GameComponentPayload<'a> {
+        entity_id: &'a str,
+        components: &'a [crate::core::game_components::GameComponentData],
+    }
+
+    emit_event("GAME_COMPONENT_CHANGED", &GameComponentPayload {
+        entity_id,
+        components,
+    });
+}
+
 /// Emit a raycast result event.
 pub fn emit_raycast_result(request_id: &str, hit_entity: Option<&str>, point: [f32; 3], distance: f32) {
     #[derive(Serialize)]
@@ -522,4 +537,149 @@ pub fn emit_raycast_result(request_id: &str, hit_entity: Option<&str>, point: [f
         distance: f32,
     }
     emit_event("RAYCAST_RESULT", &RaycastPayload { request_id, hit_entity, point, distance });
+}
+
+/// Emit a game camera changed event.
+pub fn emit_game_camera_changed(entity_id: &str, mode: &crate::core::game_camera::GameCameraMode, target_entity: &Option<String>) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GameCameraPayload<'a> {
+        entity_id: &'a str,
+        mode: &'a crate::core::game_camera::GameCameraMode,
+        target_entity: &'a Option<String>,
+    }
+    emit_event("GAME_CAMERA_CHANGED", &GameCameraPayload { entity_id, mode, target_entity });
+}
+
+/// Emit an active game camera changed event.
+pub fn emit_active_game_camera_changed(entity_id: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ActiveGameCameraPayload<'a> {
+        entity_id: &'a str,
+    }
+    emit_event("ACTIVE_GAME_CAMERA_CHANGED", &ActiveGameCameraPayload { entity_id });
+}
+
+// ============================================================================
+// 2D Physics Events
+// ============================================================================
+
+/// Emit a 2D physics changed event for an entity.
+pub fn emit_physics2d_changed(entity_id: &str, physics_data: &crate::core::physics_2d::Physics2dData, enabled: bool) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Physics2dPayload<'a> {
+        entity_id: &'a str,
+        enabled: bool,
+        #[serde(flatten)]
+        data: &'a crate::core::physics_2d::Physics2dData,
+    }
+
+    emit_event("PHYSICS2D_CHANGED", &Physics2dPayload {
+        entity_id,
+        enabled,
+        data: physics_data,
+    });
+}
+
+/// Emit a 2D joint changed event for an entity.
+pub fn emit_joint2d_changed(entity_id: &str, joint_data: &crate::core::physics_2d::PhysicsJoint2d) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Joint2dPayload<'a> {
+        entity_id: &'a str,
+        #[serde(flatten)]
+        data: &'a crate::core::physics_2d::PhysicsJoint2d,
+    }
+
+    emit_event("JOINT2D_CHANGED", &Joint2dPayload {
+        entity_id,
+        data: joint_data,
+    });
+}
+
+/// Emit a 2D raycast hit event.
+pub fn emit_raycast2d_hit(entity_id: &str, point_x: f32, point_y: f32, normal_x: f32, normal_y: f32, distance: f32) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Raycast2dHitPayload<'a> {
+        entity_id: &'a str,
+        point_x: f32,
+        point_y: f32,
+        normal_x: f32,
+        normal_y: f32,
+        distance: f32,
+    }
+
+    emit_event("RAYCAST2D_HIT", &Raycast2dHitPayload {
+        entity_id,
+        point_x,
+        point_y,
+        normal_x,
+        normal_y,
+        distance,
+    });
+}
+
+/// Emit a 2D raycast miss event.
+pub fn emit_raycast2d_miss() {
+    #[derive(Serialize)]
+    struct Raycast2dMissPayload {}
+
+    emit_event("RAYCAST2D_MISS", &Raycast2dMissPayload {});
+}
+
+/// Emit a skeleton2d updated event.
+pub fn emit_skeleton2d_updated(entity_id: &str, data: &crate::core::skeleton2d::SkeletonData2d, enabled: bool) {
+    use serde_wasm_bindgen::to_value;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Skeleton2dPayload<'a> {
+        entity_id: &'a str,
+        data: &'a crate::core::skeleton2d::SkeletonData2d,
+        enabled: bool,
+    }
+
+    let payload = Skeleton2dPayload {
+        entity_id,
+        data,
+        enabled,
+    };
+
+    match to_value(&payload) {
+        Ok(js_value) => emit_event("SKELETON2D_UPDATED", &js_value),
+        Err(e) => super::log(&format!("Error serializing skeleton2d data: {:?}", e)),
+    }
+}
+
+/// Emit a skeletal animation 2D playing event.
+pub fn emit_skeletal_animation2d_playing(entity_id: &str, animation_name: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SkeletalAnimation2dPlayingPayload<'a> {
+        entity_id: &'a str,
+        animation_name: &'a str,
+    }
+
+    emit_event("SKELETAL_ANIMATION2D_PLAYING", &SkeletalAnimation2dPlayingPayload {
+        entity_id,
+        animation_name,
+    });
+}
+
+/// Emit a skeleton2d skin changed event.
+pub fn emit_skeleton2d_skin_changed(entity_id: &str, skin_name: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Skeleton2dSkinChangedPayload<'a> {
+        entity_id: &'a str,
+        skin_name: &'a str,
+    }
+
+    emit_event("SKELETON2D_SKIN_CHANGED", &Skeleton2dSkinChangedPayload {
+        entity_id,
+        skin_name,
+    });
 }

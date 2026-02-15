@@ -10,9 +10,9 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 const PRICE_IDS: Record<string, string | undefined> = {
-  starter: process.env.STRIPE_PRICE_STARTER,
+  hobbyist: process.env.STRIPE_PRICE_STARTER,
   creator: process.env.STRIPE_PRICE_CREATOR,
-  studio: process.env.STRIPE_PRICE_STUDIO,
+  pro: process.env.STRIPE_PRICE_STUDIO,
 };
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
@@ -20,7 +20,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 /**
  * POST /api/billing/checkout
  * Create a Stripe Checkout session for a subscription upgrade.
- * Body: { tier: 'starter' | 'creator' | 'studio' }
+ * Body: { tier: 'hobbyist' | 'creator' | 'pro' }
  */
 export async function POST(req: Request) {
   const authResult = await authenticateRequest();
@@ -29,9 +29,9 @@ export async function POST(req: Request) {
   const body = await req.json();
   const { tier } = body;
 
-  if (!tier || !['starter', 'creator', 'studio'].includes(tier)) {
+  if (!tier || !['hobbyist', 'creator', 'pro'].includes(tier)) {
     return NextResponse.json(
-      { error: 'Invalid tier. Choose: starter, creator, or studio' },
+      { error: 'Invalid tier. Choose: hobbyist, creator, or pro' },
       { status: 400 }
     );
   }

@@ -4,6 +4,11 @@ export const TOKEN_COSTS = {
   chat_short: 5,
   chat_long: 15,
 
+  // Chat (new granular)
+  chat_standard: 1,
+  chat_premium: 5,
+  chat_premium_opus: 15,
+
   // 3D Generation
   '3d_generation_standard': 100,
   '3d_generation_high': 200,
@@ -23,6 +28,9 @@ export const TOKEN_COSTS = {
   // SFX
   sfx_generation: 20,
 
+  // Skybox
+  skybox_generation: 50,
+
   // Compound (estimated averages — actual cost may vary)
   compound_scene_simple: 50,
   compound_scene_complex: 300,
@@ -32,10 +40,10 @@ export type OperationType = keyof typeof TOKEN_COSTS;
 
 /** Monthly token allocation per tier */
 export const TIER_MONTHLY_TOKENS = {
-  free: 0,
-  starter: 0,
-  creator: 0,
-  studio: 5000,
+  starter: 50,
+  hobbyist: 300,
+  creator: 1000,
+  pro: 3000,
 } as const;
 
 /** Add-on token packages */

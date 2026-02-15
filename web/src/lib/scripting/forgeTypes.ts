@@ -42,6 +42,20 @@ declare namespace forge {
     function getEntitiesInRadius(position: [number, number, number], radius: number): string[];
     /** Stop play mode (return to edit) */
     function reset(): void;
+    /** Load a different scene with optional transition effect (play mode only) */
+    function load(sceneName: string, transition?: Partial<{
+      type: 'fade' | 'wipe' | 'instant';
+      duration: number;
+      color: string;
+      direction: 'left' | 'right' | 'up' | 'down';
+      easing: 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out';
+    }>): void;
+    /** Restart the current scene */
+    function restart(): void;
+    /** Get current scene name */
+    function getCurrent(): string;
+    /** Get list of all scene names */
+    function getAll(): string[];
   }
 
   namespace input {
@@ -53,6 +67,10 @@ declare namespace forge {
     function justReleased(action: string): boolean;
     /** Get axis value (-1 to 1) */
     function getAxis(action: string): number;
+    /** Check if the current device supports touch input */
+    function isTouchDevice(): boolean;
+    /** Trigger haptic feedback (vibration pattern in ms) */
+    function vibrate(pattern: number[]): void;
   }
 
   namespace physics {
@@ -72,6 +90,56 @@ declare namespace forge {
     function onCollisionExit(entityId: string, callback: (otherEntityId: string) => void): void;
     /** Remove all collision callbacks for this entity */
     function offCollision(entityId: string): void;
+  }
+
+  namespace physics2d {
+    /** Apply a continuous force (2D) */
+    function applyForce(entityId: string, forceX: number, forceY: number): void;
+    /** Apply an instant impulse (2D) */
+    function applyImpulse(entityId: string, impulseX: number, impulseY: number): void;
+    /** Set linear velocity directly (2D) */
+    function setVelocity(entityId: string, vx: number, vy: number): void;
+    /** Get current velocity (2D) */
+    function getVelocity(entityId: string): { x: number; y: number } | null;
+    /** Set angular velocity (radians per second) */
+    function setAngularVelocity(entityId: string, omega: number): void;
+    /** Get current angular velocity (radians per second) */
+    function getAngularVelocity(entityId: string): number | null;
+    /** Perform a raycast and return the first hit */
+    function raycast(originX: number, originY: number, dirX: number, dirY: number, maxDistance?: number): Promise<{
+      entityId: string;
+      entityName: string;
+      point: { x: number; y: number };
+      normal: { x: number; y: number };
+      distance: number;
+    } | null>;
+    /** Check if entity is on the ground (downward raycast) */
+    function isGrounded(entityId: string, distance?: number): Promise<boolean>;
+    /** Set global gravity (default: [0, -9.81]) */
+    function setGravity(x: number, y: number): void;
+    /** Register a callback for when this entity collides with another (collision start) */
+    function onCollisionEnter(callback: (event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void): () => void;
+    /** Register a callback for when this entity stops colliding with another (collision end) */
+    function onCollisionExit(callback: (event: { entityId: string; otherEntityId: string; otherEntityName: string }) => void): () => void;
+  }
+
+  namespace tilemap {
+    /** Get tile ID at position (returns null if empty or out of bounds) */
+    function getTile(tilemapId: string, x: number, y: number, layer?: number): number | null;
+    /** Set a single tile at position (use null to clear) */
+    function setTile(tilemapId: string, x: number, y: number, tileId: number | null, layer?: number): void;
+    /** Fill a rectangular region with a tile */
+    function fillRect(tilemapId: string, x: number, y: number, w: number, h: number, tileId: number | null, layer?: number): void;
+    /** Clear a single tile */
+    function clearTile(tilemapId: string, x: number, y: number, layer?: number): void;
+    /** Convert world coordinates to tile coordinates */
+    function worldToTile(tilemapId: string, worldX: number, worldY: number): [number, number];
+    /** Convert tile coordinates to world coordinates */
+    function tileToWorld(tilemapId: string, tileX: number, tileY: number): [number, number];
+    /** Get map dimensions in tiles [width, height] */
+    function getMapSize(tilemapId: string): [number, number];
+    /** Resize the tilemap (clears tiles outside new bounds) */
+    function resize(tilemapId: string, width: number, height: number, anchor?: 'top-left' | 'center'): void;
   }
 
   namespace audio {
@@ -159,6 +227,26 @@ declare namespace forge {
     function removeText(id: string): void;
     /** Clear all HUD elements */
     function clear(): void;
+
+    /** Show a UI Builder screen by name or ID */
+    function showScreen(screenNameOrId: string): void;
+    /** Hide a UI Builder screen by name or ID */
+    function hideScreen(screenNameOrId: string): void;
+    /** Toggle a UI Builder screen's visibility */
+    function toggleScreen(screenNameOrId: string): void;
+    /** Check if a screen is currently visible */
+    function isScreenVisible(screenNameOrId: string): boolean;
+    /** Hide all UI Builder screens */
+    function hideAllScreens(): void;
+
+    /** Update a widget's text content at runtime */
+    function setWidgetText(screenNameOrId: string, widgetNameOrId: string, text: string): void;
+    /** Update a widget's visibility */
+    function setWidgetVisible(screenNameOrId: string, widgetNameOrId: string, visible: boolean): void;
+    /** Update a widget's style property at runtime */
+    function setWidgetStyle(screenNameOrId: string, widgetNameOrId: string, style: Record<string, unknown>): void;
+    /** Get a widget's current bound value */
+    function getWidgetValue(screenNameOrId: string, widgetNameOrId: string): unknown;
   }
 
   namespace time {
@@ -173,6 +261,98 @@ declare namespace forge {
     function get(key: string): any;
     /** Set a shared state value */
     function set(key: string, value: any): void;
+  }
+
+  namespace screen {
+    /** Get current screen orientation */
+    const orientation: string;
+  }
+
+  namespace camera {
+    /** Set the camera mode */
+    function setMode(mode: 'thirdPersonFollow' | 'firstPerson' | 'sideScroller' | 'topDown' | 'fixed' | 'orbital'): void;
+    /** Set camera follow target by entity ID */
+    function setTarget(entityId: string): void;
+    /** Trigger camera shake */
+    function shake(intensity: number, duration: number): void;
+    /** Get the current camera mode */
+    function getMode(): string;
+    /** Set a camera property */
+    function setProperty(property: string, value: number): void;
+  }
+
+  namespace dialogue {
+    /** Start a dialogue tree by tree ID */
+    function start(treeId: string): void;
+    /** Check if a dialogue is currently active */
+    function isActive(): boolean;
+    /** End the current dialogue */
+    function end(): void;
+    /** Advance to the next node (text nodes only) */
+    function advance(): void;
+    /** Skip typewriter animation */
+    function skip(): void;
+    /** Set a dialogue variable */
+    function setVariable(treeId: string, key: string, value: any): void;
+    /** Get a dialogue variable */
+    function getVariable(treeId: string, key: string): any;
+    /** Register a callback for dialogue start events */
+    function onStart(callback: (treeId: string) => void): void;
+    /** Register a callback for dialogue end events */
+    function onEnd(callback: () => void): void;
+    /** Register a callback for choice selection events */
+    function onChoice(callback: (choiceId: string, choiceText: string) => void): void;
+  }
+
+  namespace sprite {
+    /** Play an animation clip by name */
+    function playAnimation(entityId: string, clipName: string): void;
+    /** Stop the current animation */
+    function stopAnimation(entityId: string): void;
+    /** Set animation playback speed */
+    function setAnimSpeed(entityId: string, speed: number): void;
+    /** Set an animation state machine parameter */
+    function setAnimParam(entityId: string, paramName: string, value: number | boolean): void;
+    /** Get the current frame index */
+    function getCurrentFrame(entityId: string): number;
+  }
+
+  namespace skeleton {
+    /** Add a bone to the skeleton */
+    function addBone(entityId: string, bone: Partial<{ name: string; parentBone: string | null; position: [number, number]; rotation: number; length: number }>): void;
+    /** Remove a bone from the skeleton */
+    function removeBone(entityId: string, boneName: string): void;
+    /** Update bone properties */
+    function updateBone(entityId: string, boneName: string, updates: Partial<{ position: [number, number]; rotation: number; scale: [number, number]; length: number }>): void;
+    /** Get all bones in the skeleton */
+    function getBones(entityId: string): Array<{ name: string; position: [number, number]; rotation: number; scale: [number, number] }> | null;
+    /** Play a skeletal animation */
+    function playAnimation(entityId: string, animName: string, options?: { loop?: boolean; speed?: number; crossfade?: number }): void;
+    /** Stop the current skeletal animation */
+    function stopAnimation(entityId: string): void;
+    /** Set the active skin */
+    function setSkin(entityId: string, skinName: string): void;
+    /** Get the current active skin name */
+    function getSkin(entityId: string): string | null;
+    /** Set an IK constraint target position */
+    function setIkTarget(entityId: string, constraintName: string, targetX: number, targetY: number): void;
+  }
+
+  namespace skeleton2d {
+    /** Create a skeleton for 2D animation */
+    function createSkeleton(entityId: string): void;
+    /** Add a bone to the skeleton */
+    function addBone(entityId: string, boneName: string, parentBone: string | null, x: number, y: number, rotation: number, length: number): void;
+    /** Remove a bone from the skeleton */
+    function removeBone(entityId: string, boneName: string): void;
+    /** Update bone properties */
+    function updateBone(entityId: string, boneName: string, x: number, y: number, rotation: number, length: number): void;
+    /** Set the active skin */
+    function setSkin(entityId: string, skinName: string): void;
+    /** Play a skeletal animation */
+    function playAnimation(entityId: string, animationName: string): void;
+    /** Get all bones in the skeleton */
+    function getBones(entityId: string): Array<{ name: string; x: number; y: number; rotation: number; length: number }> | null;
   }
 }
 

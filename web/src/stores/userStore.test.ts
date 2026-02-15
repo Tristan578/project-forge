@@ -12,7 +12,7 @@ describe('userStore', () => {
   beforeEach(() => {
     // Reset store to initial state
     useUserStore.setState({
-      tier: 'free',
+      tier: 'starter',
       tokenBalance: null,
       isLoading: false,
       error: null,
@@ -21,9 +21,9 @@ describe('userStore', () => {
   });
 
   describe('Initial State', () => {
-    it('should initialize with free tier', () => {
+    it('should initialize with starter tier', () => {
       const state = useUserStore.getState();
-      expect(state.tier).toBe('free');
+      expect(state.tier).toBe('starter');
     });
 
     it('should initialize with null token balance', () => {
@@ -48,10 +48,10 @@ describe('userStore', () => {
   });
 
   describe('Tier Management', () => {
-    it('should update tier to starter', () => {
+    it('should update tier to hobbyist', () => {
       const { setTier } = useUserStore.getState();
-      setTier('starter');
-      expect(useUserStore.getState().tier).toBe('starter');
+      setTier('hobbyist');
+      expect(useUserStore.getState().tier).toBe('hobbyist');
     });
 
     it('should update tier to creator', () => {
@@ -60,29 +60,29 @@ describe('userStore', () => {
       expect(useUserStore.getState().tier).toBe('creator');
     });
 
-    it('should update tier to studio', () => {
+    it('should update tier to pro', () => {
       const { setTier } = useUserStore.getState();
-      setTier('studio');
-      expect(useUserStore.getState().tier).toBe('studio');
+      setTier('pro');
+      expect(useUserStore.getState().tier).toBe('pro');
     });
 
-    it('should update tier back to free', () => {
+    it('should update tier back to starter', () => {
       useUserStore.setState({ tier: 'creator' });
       const { setTier } = useUserStore.getState();
-      setTier('free');
-      expect(useUserStore.getState().tier).toBe('free');
+      setTier('starter');
+      expect(useUserStore.getState().tier).toBe('starter');
     });
   });
 
   describe('Permission Checks - AI Access', () => {
-    it('should deny AI access for free tier', () => {
-      useUserStore.setState({ tier: 'free' });
+    it('should deny AI access for starter tier', () => {
+      useUserStore.setState({ tier: 'starter' });
       const { canUseAI } = useUserStore.getState();
       expect(canUseAI()).toBe(false);
     });
 
-    it('should allow AI access for starter tier', () => {
-      useUserStore.setState({ tier: 'starter' });
+    it('should allow AI access for hobbyist tier', () => {
+      useUserStore.setState({ tier: 'hobbyist' });
       const { canUseAI } = useUserStore.getState();
       expect(canUseAI()).toBe(true);
     });
@@ -93,22 +93,22 @@ describe('userStore', () => {
       expect(canUseAI()).toBe(true);
     });
 
-    it('should allow AI access for studio tier', () => {
-      useUserStore.setState({ tier: 'studio' });
+    it('should allow AI access for pro tier', () => {
+      useUserStore.setState({ tier: 'pro' });
       const { canUseAI } = useUserStore.getState();
       expect(canUseAI()).toBe(true);
     });
   });
 
   describe('Permission Checks - MCP Access', () => {
-    it('should deny MCP access for free tier', () => {
-      useUserStore.setState({ tier: 'free' });
+    it('should deny MCP access for starter tier', () => {
+      useUserStore.setState({ tier: 'starter' });
       const { canUseMCP } = useUserStore.getState();
       expect(canUseMCP()).toBe(false);
     });
 
-    it('should deny MCP access for starter tier', () => {
-      useUserStore.setState({ tier: 'starter' });
+    it('should deny MCP access for hobbyist tier', () => {
+      useUserStore.setState({ tier: 'hobbyist' });
       const { canUseMCP } = useUserStore.getState();
       expect(canUseMCP()).toBe(false);
     });
@@ -119,22 +119,22 @@ describe('userStore', () => {
       expect(canUseMCP()).toBe(true);
     });
 
-    it('should allow MCP access for studio tier', () => {
-      useUserStore.setState({ tier: 'studio' });
+    it('should allow MCP access for pro tier', () => {
+      useUserStore.setState({ tier: 'pro' });
       const { canUseMCP } = useUserStore.getState();
       expect(canUseMCP()).toBe(true);
     });
   });
 
   describe('Permission Checks - Publishing', () => {
-    it('should deny publishing for free tier', () => {
-      useUserStore.setState({ tier: 'free' });
+    it('should deny publishing for starter tier', () => {
+      useUserStore.setState({ tier: 'starter' });
       const { canPublish } = useUserStore.getState();
       expect(canPublish()).toBe(false);
     });
 
-    it('should allow publishing for starter tier', () => {
-      useUserStore.setState({ tier: 'starter' });
+    it('should allow publishing for hobbyist tier', () => {
+      useUserStore.setState({ tier: 'hobbyist' });
       const { canPublish } = useUserStore.getState();
       expect(canPublish()).toBe(true);
     });
@@ -145,22 +145,22 @@ describe('userStore', () => {
       expect(canPublish()).toBe(true);
     });
 
-    it('should allow publishing for studio tier', () => {
-      useUserStore.setState({ tier: 'studio' });
+    it('should allow publishing for pro tier', () => {
+      useUserStore.setState({ tier: 'pro' });
       const { canPublish } = useUserStore.getState();
       expect(canPublish()).toBe(true);
     });
   });
 
   describe('Permission Checks - Token Purchases', () => {
-    it('should deny token purchases for free tier', () => {
-      useUserStore.setState({ tier: 'free' });
+    it('should deny token purchases for starter tier', () => {
+      useUserStore.setState({ tier: 'starter' });
       const { canBuyTokens } = useUserStore.getState();
       expect(canBuyTokens()).toBe(false);
     });
 
-    it('should allow token purchases for starter tier', () => {
-      useUserStore.setState({ tier: 'starter' });
+    it('should allow token purchases for hobbyist tier', () => {
+      useUserStore.setState({ tier: 'hobbyist' });
       const { canBuyTokens } = useUserStore.getState();
       expect(canBuyTokens()).toBe(true);
     });
@@ -171,15 +171,15 @@ describe('userStore', () => {
       expect(canBuyTokens()).toBe(true);
     });
 
-    it('should allow token purchases for studio tier', () => {
-      useUserStore.setState({ tier: 'studio' });
+    it('should allow token purchases for pro tier', () => {
+      useUserStore.setState({ tier: 'pro' });
       const { canBuyTokens } = useUserStore.getState();
       expect(canBuyTokens()).toBe(true);
     });
   });
 
   describe('Tier Transitions', () => {
-    const tiers: Tier[] = ['free', 'starter', 'creator', 'studio'];
+    const tiers: Tier[] = ['starter', 'hobbyist', 'creator', 'pro'];
 
     it('should handle all tier transitions', () => {
       const { setTier } = useUserStore.getState();

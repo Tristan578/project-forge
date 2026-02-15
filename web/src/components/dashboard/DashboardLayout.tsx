@@ -108,16 +108,16 @@ export function DashboardLayout() {
 
   return (
     <>
-      <div className="flex h-screen flex-col bg-[var(--color-bg-primary)]">
+      <div className="flex h-screen flex-col bg-zinc-950">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-6 py-4">
-          <h1 className="text-2xl font-bold text-[var(--color-text-primary)]">
+        <header className="flex items-center justify-between border-b border-zinc-700 bg-zinc-900 px-6 py-4">
+          <h1 className="text-2xl font-bold text-zinc-200">
             Project Forge
           </h1>
           <div className="flex items-center gap-3">
             <button
               onClick={() => setShowSettings(true)}
-              className="rounded p-2 text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-primary)]"
+              className="rounded p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
             >
               <Settings size={20} />
             </button>
@@ -129,12 +129,12 @@ export function DashboardLayout() {
         <main className="flex-1 overflow-y-auto p-8">
           {/* New Project Button */}
           <div className="mb-8 flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">
+            <h2 className="text-xl font-semibold text-zinc-200">
               My Projects
             </h2>
             <button
               onClick={() => setShowNewDialog(true)}
-              className="flex items-center gap-2 rounded-lg bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:opacity-90"
             >
               <Plus size={16} />
               New Project
@@ -143,7 +143,7 @@ export function DashboardLayout() {
 
           {/* Loading state */}
           {loading && (
-            <div className="text-center text-[var(--color-text-secondary)]">
+            <div className="text-center text-zinc-400">
               Loading projects...
             </div>
           )}
@@ -151,12 +151,12 @@ export function DashboardLayout() {
           {/* Empty state */}
           {!loading && projects.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20">
-              <p className="mb-4 text-lg text-[var(--color-text-secondary)]">
+              <p className="mb-4 text-lg text-zinc-400">
                 No projects yet. Create your first game!
               </p>
               <button
                 onClick={() => setShowNewDialog(true)}
-                className="rounded-lg bg-[var(--color-accent)] px-6 py-3 text-base font-medium text-white hover:opacity-90"
+                className="rounded-lg bg-blue-600 px-6 py-3 text-base font-medium text-white hover:opacity-90"
               >
                 Create Project
               </button>

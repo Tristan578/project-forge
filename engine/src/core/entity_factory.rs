@@ -3,11 +3,14 @@
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+use super::animation_clip::AnimationClipData;
 use super::asset_manager::AssetRef;
 use super::audio::{AudioData, AudioEnabled};
 use super::csg;
 use super::entity_id::{EntityId, EntityName, EntityVisible};
+use super::game_camera::{GameCameraData, ActiveGameCamera};
 use super::terrain::{self, TerrainEnabled};
+use super::tilemap::{TilemapData, TilemapEnabled};
 use super::history::{EntitySnapshot, HistoryStack, TransformSnapshot, UndoableAction};
 use super::lighting::LightData;
 use super::material::MaterialData;
@@ -126,6 +129,19 @@ pub fn apply_spawn_requests(
                 terrain_mesh_data: None,
                 procedural_mesh_data: None,
                 joint_data: None,
+                game_components: None,
+                animation_clip_data: None,
+                game_camera_data: None,
+                active_game_camera: false,
+                sprite_data: None,
+                physics2d_data: None,
+                physics2d_enabled: false,
+                joint2d_data: None,
+                tilemap_data: None,
+                tilemap_enabled: false,
+                skeleton2d_data: None,
+                skeleton2d_enabled: false,
+                skeletal_animations: None,
             },
         });
 
@@ -145,6 +161,10 @@ pub fn apply_delete_requests(
     csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
     procedural_mesh_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
     joint_query: Query<(&EntityId, Option<&JointData>)>,
+    game_component_query: Query<(&EntityId, Option<&super::game_components::GameComponents>)>,
+    animation_clip_query: Query<(&EntityId, Option<&AnimationClipData>)>,
+    game_camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+    sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
     mut selection: ResMut<Selection>,
     mut selection_events: EventWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
@@ -194,6 +214,27 @@ pub fn apply_delete_requests(
                         .find(|(jeid, _)| jeid.0 == eid.0)
                         .and_then(|(_, jd)| jd.cloned());
 
+                    // Look up game component data separately
+                    let game_components = game_component_query.iter()
+                        .find(|(gceid, _)| gceid.0 == eid.0)
+                        .and_then(|(_, gc)| gc.cloned());
+
+                    // Look up animation clip data separately
+                    let animation_clip_data = animation_clip_query.iter()
+                        .find(|(aceid, _)| aceid.0 == eid.0)
+                        .and_then(|(_, acd)| acd.cloned());
+
+                    // Look up game camera data separately
+                    let (game_camera_data, active_game_camera) = game_camera_query.iter()
+                        .find(|(gceid, _, _)| gceid.0 == eid.0)
+                        .map(|(_, gcd, agc)| (gcd.cloned(), agc.is_some()))
+                        .unwrap_or((None, false));
+
+                    // Look up sprite data separately
+                    let sprite_data = sprite_query.iter()
+                        .find(|(speid, _)| speid.0 == eid.0)
+                        .and_then(|(_, sd)| sd.cloned());
+
                     // Record delete action in history before deleting
                     history.push(UndoableAction::Delete {
                         snapshot: EntitySnapshot {
@@ -218,6 +259,19 @@ pub fn apply_delete_requests(
                             terrain_mesh_data: None,
                             procedural_mesh_data,
                             joint_data,
+                            game_components,
+                            animation_clip_data,
+                            game_camera_data,
+                            active_game_camera,
+                            sprite_data,
+                            physics2d_data: None,
+                            physics2d_enabled: false,
+                            joint2d_data: None,
+                            tilemap_data: None,
+                            tilemap_enabled: false,
+                            skeleton2d_data: None,
+                            skeleton2d_enabled: false,
+                            skeletal_animations: None,
                         },
                     });
 
@@ -282,6 +336,10 @@ pub fn apply_duplicate_requests(
     csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
     procedural_mesh_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
     joint_query: Query<(&EntityId, Option<&JointData>)>,
+    game_component_query: Query<(&EntityId, Option<&super::game_components::GameComponents>)>,
+    animation_clip_query: Query<(&EntityId, Option<&AnimationClipData>)>,
+    game_camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+    sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
     mut history: ResMut<HistoryStack>,
 ) {
     for request in pending.duplicate_requests.drain(..) {
@@ -324,6 +382,26 @@ pub fn apply_duplicate_requests(
             let src_joint_data = joint_query.iter()
                 .find(|(jeid, _)| jeid.0 == source_eid.0)
                 .and_then(|(_, jd)| jd.cloned());
+
+            // Look up game component data separately
+            let src_game_components = game_component_query.iter()
+                .find(|(gceid, _)| gceid.0 == source_eid.0)
+                .and_then(|(_, gc)| gc.cloned());
+
+            // Look up animation clip data separately
+            let src_animation_clip_data = animation_clip_query.iter()
+                .find(|(aceid, _)| aceid.0 == source_eid.0)
+                .and_then(|(_, acd)| acd.cloned());
+
+            // Look up game camera data separately (don't duplicate active state)
+            let src_game_camera_data = game_camera_query.iter()
+                .find(|(gceid, _, _)| gceid.0 == source_eid.0)
+                .and_then(|(_, gcd, _)| gcd.cloned());
+
+            // Look up sprite data separately
+            let src_sprite_data = sprite_query.iter()
+                .find(|(speid, _)| speid.0 == source_eid.0)
+                .and_then(|(_, sd)| sd.cloned());
 
             // Clone with offset
             let new_pos = transform.translation + Vec3::new(1.0, 0.0, 0.0);
@@ -440,6 +518,26 @@ pub fn apply_duplicate_requests(
                 entity_commands.insert(jd.clone());
             }
 
+            // Clone game components if present
+            if let Some(ref gc) = src_game_components {
+                entity_commands.insert(gc.clone());
+            }
+
+            // Clone animation clip data if present
+            if let Some(ref acd) = src_animation_clip_data {
+                entity_commands.insert(acd.clone());
+            }
+
+            // Clone game camera data if present (not active state)
+            if let Some(ref gcd) = src_game_camera_data {
+                entity_commands.insert(gcd.clone());
+            }
+
+            // Clone sprite data if present
+            if let Some(ref sd) = src_sprite_data {
+                entity_commands.insert(sd.clone());
+            }
+
             // Record duplicate action in history
             history.push(UndoableAction::Duplicate {
                 source_entity_id: source_eid.0.clone(),
@@ -469,6 +567,19 @@ pub fn apply_duplicate_requests(
                     terrain_mesh_data: None,
                     procedural_mesh_data: src_procedural_mesh_data,
                     joint_data: src_joint_data,
+                    game_components: src_game_components,
+                    animation_clip_data: src_animation_clip_data,
+                    game_camera_data: src_game_camera_data,
+                    active_game_camera: false, // Don't duplicate active state
+                    sprite_data: src_sprite_data,
+                    physics2d_data: None,
+                    physics2d_enabled: false,
+                    joint2d_data: None,
+                    tilemap_data: None,
+                    tilemap_enabled: false,
+                    skeleton2d_data: None,
+                    skeleton2d_enabled: false,
+                    skeletal_animations: None,
                 },
             });
         }
@@ -1070,6 +1181,19 @@ pub fn spawn_from_snapshot(
                 transform,
             )).id()
         }
+        EntityType::Sprite => {
+            // Sprite entities spawn with just metadata - actual rendering handled by sprite system
+            let sprite_data = snapshot.sprite_data.clone().unwrap_or_default();
+            commands.spawn((
+                snapshot.entity_type,
+                entity_id,
+                EntityName::new(&snapshot.name),
+                EntityVisible(snapshot.visible),
+                sprite_data,
+                super::sprite::SpriteEnabled,
+                transform,
+            )).id()
+        }
     };
 
     // Restore physics data if present
@@ -1108,6 +1232,51 @@ pub fn spawn_from_snapshot(
     // Restore joint data if present
     if let Some(jd) = &snapshot.joint_data {
         commands.entity(entity).insert(jd.clone());
+    }
+
+    // Restore game components if present
+    if let Some(gc) = &snapshot.game_components {
+        commands.entity(entity).insert(gc.clone());
+    }
+
+    // Restore animation clip data if present
+    if let Some(acd) = &snapshot.animation_clip_data {
+        commands.entity(entity).insert(acd.clone());
+    }
+
+    // Restore game camera data if present
+    if let Some(gcd) = &snapshot.game_camera_data {
+        commands.entity(entity).insert(gcd.clone());
+    }
+    if snapshot.active_game_camera {
+        commands.entity(entity).insert(ActiveGameCamera);
+    }
+
+    // Restore sprite data if present
+    if let Some(sd) = &snapshot.sprite_data {
+        commands.entity(entity).insert(sd.clone());
+        commands.entity(entity).insert(super::sprite::SpriteEnabled);
+    }
+
+    // Restore 2D physics data if present
+    if let Some(pd) = &snapshot.physics2d_data {
+        commands.entity(entity).insert(pd.clone());
+    }
+    if snapshot.physics2d_enabled {
+        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
+    }
+
+    // Restore 2D joint data if present
+    if let Some(jd) = &snapshot.joint2d_data {
+        commands.entity(entity).insert(jd.clone());
+    }
+
+    // Restore tilemap data if present
+    if let Some(tmd) = &snapshot.tilemap_data {
+        commands.entity(entity).insert(tmd.clone());
+    }
+    if snapshot.tilemap_enabled {
+        commands.entity(entity).insert(TilemapEnabled);
     }
 
     entity
@@ -1474,6 +1643,30 @@ fn execute_undo(
                 }
             }
         }
+        UndoableAction::GameComponentChange { entity_id, old_components, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref gc) = old_components {
+                        commands.entity(entity).insert(gc.clone());
+                    } else {
+                        commands.entity(entity).remove::<super::game_components::GameComponents>();
+                    }
+                    break;
+                }
+            }
+        }
+        UndoableAction::AnimationClipChange { entity_id, old_clip, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref acd) = old_clip {
+                        commands.entity(entity).insert(acd.clone());
+                    } else {
+                        commands.entity(entity).remove::<AnimationClipData>();
+                    }
+                    break;
+                }
+            }
+        }
     }
 }
 
@@ -1698,6 +1891,30 @@ fn execute_redo(
                         commands.entity(entity).insert(jd.clone());
                     } else {
                         commands.entity(entity).remove::<JointData>();
+                    }
+                    break;
+                }
+            }
+        }
+        UndoableAction::GameComponentChange { entity_id, new_components, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref gc) = new_components {
+                        commands.entity(entity).insert(gc.clone());
+                    } else {
+                        commands.entity(entity).remove::<super::game_components::GameComponents>();
+                    }
+                    break;
+                }
+            }
+        }
+        UndoableAction::AnimationClipChange { entity_id, new_clip, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref acd) = new_clip {
+                        commands.entity(entity).insert(acd.clone());
+                    } else {
+                        commands.entity(entity).remove::<AnimationClipData>();
                     }
                     break;
                 }

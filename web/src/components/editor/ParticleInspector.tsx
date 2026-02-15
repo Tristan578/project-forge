@@ -2,7 +2,9 @@
 
 import { useCallback } from 'react';
 import { useEditorStore, type ParticleData, type ParticlePreset, type EmissionShape, type GradientStop } from '@/stores/editorStore';
-import { Play, StopCircle, Zap, Trash2, Plus, Minus } from 'lucide-react';
+import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { Play, StopCircle, Zap, Trash2, Plus, Minus, HelpCircle } from 'lucide-react';
+import { InfoTooltip } from '@/components/ui/InfoTooltip';
 
 interface SliderRowProps {
   label: string;
@@ -14,10 +16,13 @@ interface SliderRowProps {
   onChange: (v: number) => void;
 }
 
-function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange }: SliderRowProps) {
+function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, term }: SliderRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
+      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+        {label}
+        {term && <InfoTooltip term={term} />}
+      </label>
       <input
         type="range"
         min={min}
@@ -43,10 +48,13 @@ interface CheckboxRowProps {
   onChange: (v: boolean) => void;
 }
 
-function CheckboxRow({ label, checked, onChange }: CheckboxRowProps) {
+function CheckboxRow({ label, checked, onChange, term }: CheckboxRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-24 shrink-0 text-xs text-zinc-400">{label}</label>
+      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+        {label}
+        {term && <InfoTooltip term={term} />}
+      </label>
       <input
         type="checkbox"
         checked={checked}
@@ -65,10 +73,13 @@ interface Vec3InputRowProps {
   step?: number;
 }
 
-function Vec3InputRow({ label, value, onChange, step = 0.1 }: Vec3InputRowProps) {
+function Vec3InputRow({ label, value, onChange, step = 0.1, term }: Vec3InputRowProps & { term?: string }) {
   return (
     <div className="space-y-1">
-      <label className="block text-xs text-zinc-400">{label}</label>
+      <label className="block text-xs text-zinc-400 flex items-center gap-1">
+        {label}
+        {term && <InfoTooltip term={term} />}
+      </label>
       <div className="grid grid-cols-3 gap-2">
         <input
           type="number"
@@ -110,6 +121,7 @@ export function ParticleInspector() {
   const playParticle = useEditorStore((s) => s.playParticle);
   const stopParticle = useEditorStore((s) => s.stopParticle);
   const burstParticle = useEditorStore((s) => s.burstParticle);
+  const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
 
   const handleUpdate = useCallback(
     (partial: Partial<ParticleData>) => {
@@ -244,9 +256,17 @@ export function ParticleInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4 mt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-        Particles
-      </h3>
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-1">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Particles
+          </h3>
+          <InfoTooltip text="Particle effects attached to this object" />
+          <button onClick={() => navigateDocs('features/particles')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+            <HelpCircle size={12} />
+          </button>
+        </div>
+      </div>
 
       {!primaryParticle ? (
         <button
@@ -259,7 +279,10 @@ export function ParticleInspector() {
         <div className="space-y-3">
           {/* Preset Dropdown */}
           <div className="flex items-center gap-2">
-            <label className="w-24 shrink-0 text-xs text-zinc-400">Preset</label>
+            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              Preset
+              <InfoTooltip term="particlePreset" />
+            </label>
             <select
               value={primaryParticle.preset}
               onChange={(e) => handlePresetChange(e.target.value as ParticlePreset)}
@@ -280,13 +303,16 @@ export function ParticleInspector() {
           </div>
 
           {/* Enable/Disable Toggle */}
-          <CheckboxRow label="Enabled" checked={particleEnabled} onChange={handleToggle} />
+          <CheckboxRow label="Enabled" checked={particleEnabled} onChange={handleToggle} term="particleEnabled" />
 
           {/* Spawner Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Spawner</h4>
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">Mode</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+                Mode
+                <InfoTooltip term="spawnMode" />
+              </label>
               <select
                 value={primaryParticle.spawnerMode.type}
                 onChange={(e) => handleSpawnerModeChange(e.target.value as 'continuous' | 'burst' | 'once')}
@@ -307,6 +333,7 @@ export function ParticleInspector() {
                 step={1}
                 precision={0}
                 onChange={handleSpawnerValueChange}
+                term="spawnRate"
               />
             ) : (
               <SliderRow
@@ -317,6 +344,7 @@ export function ParticleInspector() {
                 step={1}
                 precision={0}
                 onChange={handleSpawnerValueChange}
+                term="spawnCount"
               />
             )}
             <SliderRow
@@ -327,6 +355,7 @@ export function ParticleInspector() {
               step={100}
               precision={0}
               onChange={(v) => handleUpdate({ maxParticles: v })}
+              term="maxParticles"
             />
           </div>
 
@@ -341,6 +370,7 @@ export function ParticleInspector() {
               step={0.1}
               precision={1}
               onChange={(v) => handleUpdate({ lifetimeMin: v })}
+              term="particleLifetime"
             />
             <SliderRow
               label="Max (s)"
@@ -350,6 +380,7 @@ export function ParticleInspector() {
               step={0.1}
               precision={1}
               onChange={(v) => handleUpdate({ lifetimeMax: v })}
+              term="particleLifetime"
             />
           </div>
 
@@ -357,7 +388,10 @@ export function ParticleInspector() {
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Emission Shape</h4>
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">Shape</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+                Shape
+                <InfoTooltip term="emissionShape" />
+              </label>
               <select
                 value={primaryParticle.emissionShape.type}
                 onChange={(e) => handleEmissionShapeChange(e.target.value as EmissionShape['type'])}
@@ -380,6 +414,7 @@ export function ParticleInspector() {
                 step={0.1}
                 precision={1}
                 onChange={(v) => handleUpdate({ emissionShape: { type: 'sphere', radius: v } })}
+                term="emissionRadius"
               />
             )}
             {primaryParticle.emissionShape.type === 'cone' && (
@@ -400,6 +435,7 @@ export function ParticleInspector() {
                       },
                     })
                   }
+                  term="emissionRadius"
                 />
                 <SliderRow
                   label="Height"
@@ -417,6 +453,7 @@ export function ParticleInspector() {
                       },
                     })
                   }
+                  term="emissionRadius"
                 />
               </>
             )}
@@ -426,6 +463,7 @@ export function ParticleInspector() {
                 value={primaryParticle.emissionShape.halfExtents}
                 onChange={(v) => handleUpdate({ emissionShape: { type: 'box', halfExtents: v } })}
                 step={0.1}
+                term="emissionRadius"
               />
             )}
             {primaryParticle.emissionShape.type === 'circle' && (
@@ -437,6 +475,7 @@ export function ParticleInspector() {
                 step={0.1}
                 precision={1}
                 onChange={(v) => handleUpdate({ emissionShape: { type: 'circle', radius: v } })}
+                term="emissionRadius"
               />
             )}
           </div>
@@ -449,12 +488,14 @@ export function ParticleInspector() {
               value={primaryParticle.velocityMin}
               onChange={(v) => handleUpdate({ velocityMin: v })}
               step={0.1}
+              term="particleVelocity"
             />
             <Vec3InputRow
               label="Max"
               value={primaryParticle.velocityMax}
               onChange={(v) => handleUpdate({ velocityMax: v })}
               step={0.1}
+              term="particleVelocity"
             />
           </div>
 
@@ -466,6 +507,7 @@ export function ParticleInspector() {
               value={primaryParticle.acceleration}
               onChange={(v) => handleUpdate({ acceleration: v })}
               step={0.1}
+              term="particleAcceleration"
             />
             <SliderRow
               label="Linear Drag"
@@ -475,6 +517,7 @@ export function ParticleInspector() {
               step={0.1}
               precision={1}
               onChange={(v) => handleUpdate({ linearDrag: v })}
+              term="linearDrag"
             />
           </div>
 
@@ -489,6 +532,7 @@ export function ParticleInspector() {
               step={0.01}
               precision={2}
               onChange={(v) => handleUpdate({ sizeStart: v })}
+              term="particleStartSize"
             />
             <SliderRow
               label="End Size"
@@ -498,13 +542,17 @@ export function ParticleInspector() {
               step={0.01}
               precision={2}
               onChange={(v) => handleUpdate({ sizeEnd: v })}
+              term="particleEndSize"
             />
           </div>
 
           {/* Color Gradient Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Color Gradient</h4>
+              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600 flex items-center gap-1">
+                Color Gradient
+                <InfoTooltip term="colorGradient" />
+              </h4>
               <button
                 onClick={handleAddGradientStop}
                 className="rounded bg-zinc-700 p-1 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200"
@@ -566,7 +614,10 @@ export function ParticleInspector() {
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Rendering</h4>
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">Blend Mode</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+                Blend Mode
+                <InfoTooltip term="blendMode" />
+              </label>
               <select
                 value={primaryParticle.blendMode}
                 onChange={(e) => handleUpdate({ blendMode: e.target.value as 'additive' | 'alpha_blend' | 'premultiply' })}
@@ -579,7 +630,10 @@ export function ParticleInspector() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="w-24 shrink-0 text-xs text-zinc-400">Orientation</label>
+              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+                Orientation
+                <InfoTooltip term="particleOrientation" />
+              </label>
               <select
                 value={primaryParticle.orientation}
                 onChange={(e) => handleUpdate({ orientation: e.target.value as 'billboard' | 'velocity_aligned' | 'fixed' })}
@@ -591,7 +645,7 @@ export function ParticleInspector() {
                 <option value="fixed">Fixed</option>
               </select>
             </div>
-            <CheckboxRow label="World Space" checked={primaryParticle.worldSpace} onChange={(v) => handleUpdate({ worldSpace: v })} />
+            <CheckboxRow label="World Space" checked={primaryParticle.worldSpace} onChange={(v) => handleUpdate({ worldSpace: v })} term="worldSpace" />
           </div>
 
           {/* Playback Controls */}

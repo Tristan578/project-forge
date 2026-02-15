@@ -74,23 +74,23 @@ export async function resolveApiKey(
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
   if (!user) throw new Error(`User not found: ${userId}`);
 
-  // Studio tier always has platform key access
+  // Pro tier always has platform key access
   // Other paid tiers can use platform keys if they have addon tokens
-  if (user.tier === 'free') {
+  if (user.tier === 'starter') {
     throw new ApiKeyError(
       'TIER_NOT_ALLOWED',
-      `Free tier cannot use AI generation. Upgrade to Starter and add your own ${provider} API key, or upgrade to Studio for platform keys.`
+      `Starter tier cannot use AI generation. Upgrade to Hobbyist and add your own ${provider} API key, or upgrade to Pro for platform keys.`
     );
   }
 
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
   const totalAvailable = monthlyRemaining + user.addonTokens;
 
-  if (user.tier !== 'studio' && totalAvailable <= 0) {
+  if (user.tier !== 'pro' && totalAvailable <= 0) {
     throw new ApiKeyError(
       'NO_KEY_CONFIGURED',
       `No ${provider} API key configured. Add your own key in Settings, ` +
-        `upgrade to Studio tier, or purchase add-on tokens.`
+        `upgrade to Pro tier, or purchase add-on tokens.`
     );
   }
 

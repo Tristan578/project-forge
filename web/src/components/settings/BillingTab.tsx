@@ -55,13 +55,13 @@ export function BillingTab() {
 
   const getTierColor = (tierName: string) => {
     switch (tierName) {
-      case 'free':
-        return 'bg-zinc-600';
       case 'starter':
+        return 'bg-zinc-600';
+      case 'hobbyist':
         return 'bg-blue-600';
       case 'creator':
         return 'bg-purple-600';
-      case 'studio':
+      case 'pro':
         return 'bg-yellow-600';
       default:
         return 'bg-zinc-600';
@@ -79,7 +79,7 @@ export function BillingTab() {
 
   if (loading) {
     return (
-      <div className="p-4 text-center text-[var(--color-text-secondary)]">
+      <div className="p-4 text-center text-zinc-400">
         Loading billing information...
       </div>
     );
@@ -89,13 +89,13 @@ export function BillingTab() {
     <div className="p-4">
       {/* Current Plan */}
       <div className="mb-6">
-        <h3 className="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">
+        <h3 className="mb-3 text-sm font-semibold text-zinc-200">
           Current Plan
         </h3>
-        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-4">
+        <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="text-lg font-semibold capitalize text-[var(--color-text-primary)]">
+              <span className="text-lg font-semibold capitalize text-zinc-200">
                 {tier}
               </span>
               <span
@@ -106,17 +106,17 @@ export function BillingTab() {
                 {tier.toUpperCase()}
               </span>
             </div>
-            {tier === 'free' ? (
+            {tier === 'starter' ? (
               <button
                 onClick={handleUpgrade}
-                className="rounded bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white hover:opacity-90"
+                className="rounded bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
               >
                 Upgrade Plan
               </button>
             ) : (
               <button
                 onClick={handleManageSubscription}
-                className="flex items-center gap-1.5 rounded border border-[var(--color-border)] px-4 py-1.5 text-sm font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-bg-primary)]"
+                className="flex items-center gap-1.5 rounded border border-zinc-600 px-4 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-700"
               >
                 Manage Subscription
                 <ExternalLink size={14} />
@@ -124,8 +124,8 @@ export function BillingTab() {
             )}
           </div>
 
-          {tier !== 'free' && billingStatus?.billingCycleStart && (
-            <div className="space-y-2 text-sm text-[var(--color-text-secondary)]">
+          {tier !== 'starter' && billingStatus?.billingCycleStart && (
+            <div className="space-y-2 text-sm text-zinc-400">
               <div className="flex justify-between">
                 <span>Started:</span>
                 <span>{formatDate(billingStatus.billingCycleStart)}</span>
@@ -142,37 +142,37 @@ export function BillingTab() {
       </div>
 
       {/* Token Usage */}
-      {tier !== 'free' && tokenBalance && (
+      {tier !== 'starter' && tokenBalance && (
         <div>
-          <h3 className="mb-3 text-sm font-semibold text-[var(--color-text-primary)]">
+          <h3 className="mb-3 text-sm font-semibold text-zinc-200">
             Token Usage
           </h3>
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-4">
+          <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4">
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
-                <span className="text-[var(--color-text-secondary)]">
+                <span className="text-zinc-400">
                   Monthly tokens:
                 </span>
-                <span className="font-medium text-[var(--color-text-primary)]">
+                <span className="font-medium text-zinc-200">
                   {tokenBalance.monthlyRemaining.toLocaleString()} /{' '}
                   {tokenBalance.monthlyTotal.toLocaleString()}
                 </span>
               </div>
               {tokenBalance.addon > 0 && (
                 <div className="flex justify-between">
-                  <span className="text-[var(--color-text-secondary)]">
+                  <span className="text-zinc-400">
                     Add-on tokens:
                   </span>
-                  <span className="font-medium text-[var(--color-text-primary)]">
+                  <span className="font-medium text-zinc-200">
                     {tokenBalance.addon.toLocaleString()}
                   </span>
                 </div>
               )}
-              <div className="flex justify-between border-t border-[var(--color-border)] pt-3">
-                <span className="text-[var(--color-text-secondary)]">
+              <div className="flex justify-between border-t border-zinc-700 pt-3">
+                <span className="text-zinc-400">
                   Total available:
                 </span>
-                <span className="text-lg font-semibold text-[var(--color-text-primary)]">
+                <span className="text-lg font-semibold text-zinc-200">
                   {tokenBalance.total.toLocaleString()}
                 </span>
               </div>
@@ -182,13 +182,13 @@ export function BillingTab() {
       )}
 
       {/* Free tier message */}
-      {tier === 'free' && (
+      {tier === 'starter' && (
         <div className="rounded-lg border border-blue-600/30 bg-blue-600/10 p-4">
           <div className="mb-2 flex items-center gap-2 text-blue-400">
             <CreditCard size={16} />
             <span className="font-medium">Upgrade to unlock more features</span>
           </div>
-          <p className="text-sm text-[var(--color-text-secondary)]">
+          <p className="text-sm text-zinc-400">
             Get cloud saves, AI features, and more projects with a paid plan.
           </p>
         </div>
