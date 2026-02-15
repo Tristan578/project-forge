@@ -632,8 +632,6 @@ pub fn emit_raycast2d_miss() {
 
 /// Emit a skeleton2d updated event.
 pub fn emit_skeleton2d_updated(entity_id: &str, data: &crate::core::skeleton2d::SkeletonData2d, enabled: bool) {
-    use serde_wasm_bindgen::to_value;
-
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Skeleton2dPayload<'a> {
@@ -642,16 +640,11 @@ pub fn emit_skeleton2d_updated(entity_id: &str, data: &crate::core::skeleton2d::
         enabled: bool,
     }
 
-    let payload = Skeleton2dPayload {
+    emit_event("SKELETON2D_UPDATED", &Skeleton2dPayload {
         entity_id,
         data,
         enabled,
-    };
-
-    match to_value(&payload) {
-        Ok(js_value) => emit_event("SKELETON2D_UPDATED", &js_value),
-        Err(e) => super::log(&format!("Error serializing skeleton2d data: {:?}", e)),
-    }
+    });
 }
 
 /// Emit a skeletal animation 2D playing event.
@@ -682,4 +675,33 @@ pub fn emit_skeleton2d_skin_changed(entity_id: &str, skin_name: &str) {
         entity_id,
         skin_name,
     });
+}
+
+/// Emit a reverb zone changed event for an entity.
+pub fn emit_reverb_zone_changed(entity_id: &str, data: &crate::core::reverb_zone::ReverbZoneData, enabled: bool) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ReverbZonePayload<'a> {
+        entity_id: &'a str,
+        enabled: bool,
+        #[serde(flatten)]
+        data: &'a crate::core::reverb_zone::ReverbZoneData,
+    }
+
+    emit_event("REVERB_ZONE_CHANGED", &ReverbZonePayload {
+        entity_id,
+        enabled,
+        data,
+    });
+}
+
+/// Emit a reverb zone removed event.
+pub fn emit_reverb_zone_removed(entity_id: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ReverbZoneRemovedPayload<'a> {
+        entity_id: &'a str,
+    }
+
+    emit_event("REVERB_ZONE_REMOVED", &ReverbZoneRemovedPayload { entity_id });
 }

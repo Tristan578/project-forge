@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, type AnimationClipData, type JointData, type GameCameraData, setCommandDispatcher, firePlayTick } from '@/stores/editorStore';
+import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type MaterialData, type LightData, type AmbientLightData, type EnvironmentData, type EngineMode, type PhysicsData, type InputBinding, type InputPreset, type AssetMetadata, type ScriptData, type PostProcessingData, type AudioBusDef, type ParticleData, type AnimationPlaybackState, type AnimationClipData, type JointData, type GameCameraData, type ReverbZoneData, type ReverbShape, setCommandDispatcher, firePlayTick } from '@/stores/editorStore';
 import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 
 // Event types matching Rust's event emission
@@ -195,6 +195,32 @@ interface AudioChangedEvent {
     rolloffFactor?: number;
     autoplay?: boolean;
     bus?: string;
+  };
+}
+
+interface ReverbZoneChangedEvent {
+  type: 'REVERB_ZONE_CHANGED';
+  payload: {
+    entityId: string;
+    enabled: boolean;
+    shape: {
+      type: 'box' | 'sphere';
+      size?: [number, number, number];
+      radius?: number;
+    };
+    preset: string;
+    wetMix: number;
+    decayTime: number;
+    preDelay: number;
+    blendRadius: number;
+    priority: number;
+  };
+}
+
+interface ReverbZoneRemovedEvent {
+  type: 'REVERB_ZONE_REMOVED';
+  payload: {
+    entityId: string;
   };
 }
 
@@ -452,7 +478,7 @@ interface TilesetLoadedEvent {
   payload: import('@/stores/editorStore').TilesetData & { assetId: string };
 }
 
-type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent | CollisionEventEvent | RaycastResultEvent | JointChangedEvent | GameComponentChangedEvent | AnimationClipChangedEvent | GameCameraChangedEvent | ActiveGameCameraChangedEvent | SpriteUpdatedEvent | SpriteSheetUpdatedEvent | SpriteAnimatorUpdatedEvent | AnimationStateMachineUpdatedEvent | Skeleton2dUpdatedEvent | SkeletalAnimation2dPlayingEvent | Skeleton2dSkinChangedEvent | ProjectTypeChangedEvent | Camera2dUpdatedEvent | Physics2dUpdatedEvent | Joint2dUpdatedEvent | Physics2dRemovedEvent | TilemapUpdatedEvent | TilemapRemovedEvent | TilesetLoadedEvent;
+type EngineEvent = SelectionChangedEvent | SceneGraphUpdateEvent | TransformChangedEvent | HistoryChangedEvent | SnapSettingsChangedEvent | ViewPresetChangedEvent | CoordinateModeChangedEvent | MaterialChangedEvent | LightChangedEvent | AmbientLightChangedEvent | EnvironmentChangedEvent | ReparentResultEvent | EngineModeChangedEvent | PhysicsChangedEvent | DebugPhysicsChangedEvent | InputBindingsChangedEvent | AssetImportedEvent | AssetDeletedEvent | AssetListEvent | ScriptChangedEvent | SceneExportedEvent | SceneLoadedEvent | AudioChangedEvent | AudioPlaybackEvent | ReverbZoneChangedEvent | ReverbZoneRemovedEvent | AudioBusesChangedEvent | PostProcessingChangedEvent | ParticleChangedEvent | AnimationStateChangedEvent | AnimationListChangedEvent | ShaderChangedEvent | CsgCompletedEvent | CsgErrorEvent | TerrainChangedEvent | ProceduralMeshCreatedEvent | ProceduralMeshErrorEvent | ArrayCompletedEvent | QualityChangedEvent | PlayTickEvent | CollisionEventEvent | RaycastResultEvent | JointChangedEvent | GameComponentChangedEvent | AnimationClipChangedEvent | GameCameraChangedEvent | ActiveGameCameraChangedEvent | SpriteUpdatedEvent | SpriteSheetUpdatedEvent | SpriteAnimatorUpdatedEvent | AnimationStateMachineUpdatedEvent | Skeleton2dUpdatedEvent | SkeletalAnimation2dPlayingEvent | Skeleton2dSkinChangedEvent | ProjectTypeChangedEvent | Camera2dUpdatedEvent | Physics2dUpdatedEvent | Joint2dUpdatedEvent | Physics2dRemovedEvent | TilemapUpdatedEvent | TilemapRemovedEvent | TilesetLoadedEvent;
 
 // Debounced auto-save: triggers export_scene command after 2s of inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -732,6 +758,29 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
           } else {
             useEditorStore.getState().setEntityAudio(entityId, null);
           }
+          break;
+        }
+
+        case 'REVERB_ZONE_CHANGED': {
+          const { entityId, enabled, shape, ...zoneData } = event.payload;
+          const reverbShape: ReverbShape = shape.type === 'sphere'
+            ? { type: 'sphere', radius: shape.radius ?? 5 }
+            : { type: 'box', size: shape.size ?? [10, 5, 10] };
+          const reverbZone: ReverbZoneData = {
+            shape: reverbShape,
+            preset: zoneData.preset,
+            wetMix: zoneData.wetMix,
+            decayTime: zoneData.decayTime,
+            preDelay: zoneData.preDelay,
+            blendRadius: zoneData.blendRadius,
+            priority: zoneData.priority,
+          };
+          useEditorStore.getState().setReverbZone(entityId, reverbZone, enabled);
+          break;
+        }
+
+        case 'REVERB_ZONE_REMOVED': {
+          useEditorStore.getState().removeReverbZone(event.payload.entityId);
           break;
         }
 

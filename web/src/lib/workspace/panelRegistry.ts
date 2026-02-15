@@ -105,6 +105,14 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 200,
     minHeight: 150,
   },
+  timeline: {
+    id: 'timeline',
+    title: 'Timeline',
+    component: 'timeline',
+    minWidth: 400,
+    minHeight: 150,
+    renderer: 'always',
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */

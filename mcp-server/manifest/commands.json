@@ -2577,6 +2577,140 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "set_reverb_zone",
+      "description": "Configure reverb zone on entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity to attach reverb zone to"
+          },
+          "shape": {
+            "type": "string",
+            "enum": ["box", "sphere"],
+            "description": "Box or Sphere"
+          },
+          "sizeX": {
+            "type": "number",
+            "description": "Box width (X axis)"
+          },
+          "sizeY": {
+            "type": "number",
+            "description": "Box height (Y axis)"
+          },
+          "sizeZ": {
+            "type": "number",
+            "description": "Box depth (Z axis)"
+          },
+          "radius": {
+            "type": "number",
+            "description": "Sphere radius"
+          },
+          "reverbType": {
+            "type": "string",
+            "enum": ["hall", "room", "cave", "outdoor", "custom"],
+            "description": "Reverb preset type"
+          },
+          "wetMix": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Wet/dry mix (0-1)"
+          },
+          "decayTime": {
+            "type": "number",
+            "minimum": 0.1,
+            "maximum": 10,
+            "description": "Decay time in seconds"
+          },
+          "preDelay": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Pre-delay in milliseconds"
+          },
+          "priority": {
+            "type": "number",
+            "description": "Priority for overlapping zones"
+          }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remove_reverb_zone",
+      "description": "Remove reverb zone from entity",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity to remove reverb zone from"
+          }
+        },
+        "required": ["entityId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_music_intensity",
+      "description": "Set adaptive music intensity level (0.0-1.0) to control stem layering",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "intensity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Intensity level (0.0-1.0)"
+          }
+        },
+        "required": ["intensity"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_music_stems",
+      "description": "Configure adaptive music stems (pad, bass, melody, drums) for dynamic layering",
+      "category": "audio",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "drums": {
+            "type": "string",
+            "description": "Asset ID for drums stem"
+          },
+          "bass": {
+            "type": "string",
+            "description": "Asset ID for bass stem"
+          },
+          "melody": {
+            "type": "string",
+            "description": "Asset ID for melody stem"
+          },
+          "pad": {
+            "type": "string",
+            "description": "Asset ID for pad/ambient stem"
+          },
+          "bpm": {
+            "type": "number",
+            "description": "Beats per minute for quantization"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_particle",
       "description": "Set or update particle effect on an entity. Creates a GPU particle emitter with configurable emission, velocity, color gradient, and rendering options.",
       "category": "particles",
@@ -4893,6 +5027,269 @@
       },
       "tokenCost": 100,
       "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_sprite",
+      "description": "Generate a sprite image from a text prompt using AI",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Description of the sprite to generate"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "pixel-art",
+              "hand-drawn",
+              "vector",
+              "realistic"
+            ],
+            "description": "Art style preset"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "32x32",
+              "64x64",
+              "128x128",
+              "256x256",
+              "512x512",
+              "1024x1024"
+            ],
+            "description": "Sprite dimensions"
+          },
+          "removeBackground": {
+            "type": "boolean",
+            "description": "Remove background after generation"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      },
+      "tokenCost": 15,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_sprite_sheet",
+      "description": "Generate animated sprite sheet from a source sprite",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "sourceAssetId": {
+            "type": "string",
+            "description": "Asset ID of reference sprite"
+          },
+          "frameCount": {
+            "type": "number",
+            "description": "Number of animation frames (2-8)"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "pixel-art",
+              "hand-drawn",
+              "vector",
+              "realistic"
+            ],
+            "description": "Art style preset"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "32x32",
+              "64x64",
+              "128x128",
+              "256x256"
+            ],
+            "description": "Frame dimensions"
+          }
+        },
+        "required": [
+          "sourceAssetId"
+        ]
+      },
+      "tokenCost": 60,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_character",
+      "description": "Generate character with multiple poses",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Character description"
+          },
+          "poses": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "idle",
+                "walk",
+                "run",
+                "jump",
+                "attack"
+              ]
+            },
+            "description": "Poses to generate"
+          },
+          "style": {
+            "type": "string",
+            "enum": [
+              "pixel-art",
+              "hand-drawn",
+              "vector",
+              "realistic"
+            ],
+            "description": "Art style preset"
+          }
+        },
+        "required": [
+          "prompt",
+          "poses"
+        ]
+      },
+      "tokenCost": 80,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "generate_tileset",
+      "description": "Generate a complete tileset grid",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Tileset description (e.g., 'grass terrain')"
+          },
+          "tileSize": {
+            "type": "number",
+            "enum": [
+              16,
+              32,
+              48,
+              64
+            ],
+            "description": "Individual tile size in pixels"
+          },
+          "gridSize": {
+            "type": "string",
+            "enum": [
+              "4x4",
+              "8x8",
+              "16x16"
+            ],
+            "description": "Tileset grid dimensions"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      },
+      "tokenCost": 50,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "remove_background",
+      "description": "Remove background from a sprite image",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "description": "Asset ID of sprite to process"
+          }
+        },
+        "required": [
+          "assetId"
+        ]
+      },
+      "tokenCost": 5,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "apply_style_transfer",
+      "description": "Apply a different art style to an existing sprite",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "description": "Source sprite asset ID"
+          },
+          "targetStyle": {
+            "type": "string",
+            "enum": [
+              "pixel-art",
+              "hand-drawn",
+              "vector",
+              "realistic"
+            ],
+            "description": "Target art style"
+          }
+        },
+        "required": [
+          "assetId",
+          "targetStyle"
+        ]
+      },
+      "tokenCost": 10,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "set_project_style",
+      "description": "Set the default art style for all future sprite generations",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "preset": {
+            "type": "string",
+            "enum": [
+              "pixel-art",
+              "hand-drawn",
+              "vector",
+              "realistic"
+            ],
+            "description": "Style preset"
+          }
+        },
+        "required": [
+          "preset"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "get_sprite_generation_status",
+      "description": "Check the status of a pending sprite generation job",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "description": "Generation job ID"
+          }
+        },
+        "required": [
+          "jobId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "generation:read"
     },
     {
       "name": "create_ui_screen",

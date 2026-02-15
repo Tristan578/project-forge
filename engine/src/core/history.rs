@@ -94,6 +94,12 @@ pub struct EntitySnapshot {
     /// Audio data (if entity has audio)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audio_data: Option<AudioData>,
+    /// Reverb zone data (if entity has reverb zone)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverb_zone_data: Option<super::reverb_zone::ReverbZoneData>,
+    /// Whether reverb zone is enabled on this entity
+    #[serde(default)]
+    pub reverb_zone_enabled: bool,
     /// Particle data (if entity has particles configured)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub particle_data: Option<ParticleData>,
@@ -238,6 +244,13 @@ pub enum UndoableAction {
         entity_id: String,
         old_audio: Option<AudioData>,
         new_audio: Option<AudioData>,
+    },
+
+    /// Reverb zone configuration changed
+    ReverbZoneChange {
+        entity_id: String,
+        old_reverb: Option<super::reverb_zone::ReverbZoneData>,
+        new_reverb: Option<super::reverb_zone::ReverbZoneData>,
     },
 
     /// Particle configuration changed

@@ -478,6 +478,20 @@ export interface AudioData {
   bus: string;
 }
 
+export type ReverbShape =
+  | { type: 'box'; size: [number, number, number] }
+  | { type: 'sphere'; radius: number };
+
+export interface ReverbZoneData {
+  shape: ReverbShape;
+  preset: string; // "hall" | "room" | "cave" | "outdoor" | "custom"
+  wetMix: number; // 0.0-1.0
+  decayTime: number; // seconds
+  preDelay: number; // milliseconds
+  blendRadius: number; // distance from edge to start blending
+  priority: number; // higher wins in overlaps
+}
+
 // Shader effect data matching Rust's ShaderEffectData struct
 export interface ShaderEffectData {
   shaderType: string; // "none" | "dissolve" | "hologram" | "force_field" | "lava_flow" | "toon" | "fresnel_glow"
@@ -981,6 +995,10 @@ export interface EditorState {
   audioBuses: AudioBusDef[];
   mixerPanelOpen: boolean;
 
+  // Reverb zone state
+  reverbZones: Record<string, ReverbZoneData>;
+  reverbZonesEnabled: Record<string, boolean>;
+
   // Particle state
   primaryParticle: ParticleData | null;
   particleEnabled: boolean;
@@ -1203,6 +1221,11 @@ export interface EditorState {
 
   // Audio layering/transition actions (JS-only, no WASM dispatch)
   crossfadeAudio: (fromEntityId: string, toEntityId: string, durationMs: number) => void;
+
+  // Reverb zone actions
+  setReverbZone: (entityId: string, data: ReverbZoneData, enabled: boolean) => void;
+  removeReverbZone: (entityId: string) => void;
+  updateReverbZone: (entityId: string, data: ReverbZoneData) => void;
   fadeInAudio: (entityId: string, durationMs: number) => void;
   fadeOutAudio: (entityId: string, durationMs: number) => void;
   playOneShotAudio: (assetId: string, options?: { position?: [number, number, number]; bus?: string; volume?: number; pitch?: number }) => void;
@@ -1470,6 +1493,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     { name: 'voice', volume: 1.0, muted: false, soloed: false, effects: [] },
   ],
   mixerPanelOpen: false,
+  reverbZones: {},
+  reverbZonesEnabled: {},
   primaryParticle: null,
   particleEnabled: false,
   primaryAnimation: null,
@@ -2584,6 +2609,28 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         releaseMs: rule.releaseMs ?? 500,
       });
     });
+  },
+
+  // Reverb zone actions
+  setReverbZone: (entityId, data, enabled) => {
+    set((state) => ({
+      reverbZones: { ...state.reverbZones, [entityId]: data },
+      reverbZonesEnabled: { ...state.reverbZonesEnabled, [entityId]: enabled },
+    }));
+  },
+
+  removeReverbZone: (entityId) => {
+    set((state) => {
+      const { [entityId]: _, ...restZones } = state.reverbZones;
+      const { [entityId]: _enabled, ...restEnabled } = state.reverbZonesEnabled;
+      return { reverbZones: restZones, reverbZonesEnabled: restEnabled };
+    });
+  },
+
+  updateReverbZone: (entityId, data) => {
+    if (dispatchCommand) {
+      dispatchCommand('set_reverb_zone', { entityId, reverbZoneData: data });
+    }
   },
 
   // Particle actions

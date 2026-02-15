@@ -20,6 +20,9 @@ export const providerEnum = pgEnum('provider', [
   'hyper3d',
   'elevenlabs',
   'suno',
+  'openai',
+  'replicate',
+  'removebg',
 ]);
 
 export const tokenSourceEnum = pgEnum('token_source', ['monthly', 'addon', 'mixed']);
@@ -248,5 +251,5 @@ export type NewPublishedGame = typeof publishedGames.$inferInsert;
 export type TransactionType = 'monthly_grant' | 'purchase' | 'deduction' | 'refund' | 'rollover' | 'earned' | 'adjustment';
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
-export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno';
+export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';
 export type ApiKeyScope = 'scene:read' | 'scene:write' | 'ai:generate' | 'project:manage';

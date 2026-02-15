@@ -43,6 +43,7 @@ pub enum QueryRequest {
     AudioData { entity_id: String },
     PostProcessingState,
     AudioBuses,
+    ReverbZoneState { entity_id: String },
     ParticleState { entity_id: String },
     AnimationState { entity_id: String },
     AnimationGraph { entity_id: String },
@@ -296,6 +297,26 @@ pub struct AudioBusDelete {
 pub struct AudioBusEffectsUpdate {
     pub bus_name: String,
     pub effects: Vec<AudioEffectDef>,
+}
+
+/// A pending reverb zone update request.
+#[derive(Debug, Clone)]
+pub struct ReverbZoneUpdate {
+    pub entity_id: String,
+    pub reverb_data: super::reverb_zone::ReverbZoneData,
+}
+
+/// A pending reverb zone toggle request.
+#[derive(Debug, Clone)]
+pub struct ReverbZoneToggle {
+    pub entity_id: String,
+    pub enabled: bool,
+}
+
+/// A pending reverb zone removal request.
+#[derive(Debug, Clone)]
+pub struct ReverbZoneRemoval {
+    pub entity_id: String,
 }
 
 /// A pending particle update request.
@@ -834,6 +855,9 @@ pub struct PendingCommands {
     pub audio_bus_creates: Vec<AudioBusCreate>,
     pub audio_bus_deletes: Vec<AudioBusDelete>,
     pub audio_bus_effects_updates: Vec<AudioBusEffectsUpdate>,
+    pub reverb_zone_updates: Vec<ReverbZoneUpdate>,
+    pub reverb_zone_toggles: Vec<ReverbZoneToggle>,
+    pub reverb_zone_removals: Vec<ReverbZoneRemoval>,
     pub particle_updates: Vec<ParticleUpdate>,
     pub particle_toggles: Vec<ParticleToggle>,
     pub particle_removals: Vec<ParticleRemoval>,
@@ -1359,6 +1383,21 @@ impl PendingCommands {
     /// Queue an audio bus effects update.
     pub fn queue_audio_bus_effects_update(&mut self, update: AudioBusEffectsUpdate) {
         self.audio_bus_effects_updates.push(update);
+    }
+
+    /// Queue a reverb zone update.
+    pub fn queue_reverb_zone_update(&mut self, update: ReverbZoneUpdate) {
+        self.reverb_zone_updates.push(update);
+    }
+
+    /// Queue a reverb zone toggle.
+    pub fn queue_reverb_zone_toggle(&mut self, toggle: ReverbZoneToggle) {
+        self.reverb_zone_toggles.push(toggle);
+    }
+
+    /// Queue a reverb zone removal.
+    pub fn queue_reverb_zone_removal(&mut self, removal: ReverbZoneRemoval) {
+        self.reverb_zone_removals.push(removal);
     }
 
     /// Queue a particle update.
@@ -2366,6 +2405,48 @@ pub fn queue_audio_bus_effects_update_from_bridge(update: AudioBusEffectsUpdate)
         if let Some(ptr) = *pc.borrow() {
             unsafe {
                 (*ptr).queue_audio_bus_effects_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a reverb zone update from the bridge layer.
+pub fn queue_reverb_zone_update_from_bridge(update: ReverbZoneUpdate) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_reverb_zone_update(update);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a reverb zone toggle from the bridge layer.
+pub fn queue_reverb_zone_toggle_from_bridge(toggle: ReverbZoneToggle) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_reverb_zone_toggle(toggle);
+            }
+            true
+        } else {
+            false
+        }
+    })
+}
+
+/// Queue a reverb zone removal from the bridge layer.
+pub fn queue_reverb_zone_removal_from_bridge(removal: ReverbZoneRemoval) -> bool {
+    PENDING_COMMANDS.with(|pc| {
+        if let Some(ptr) = *pc.borrow() {
+            unsafe {
+                (*ptr).queue_reverb_zone_removal(removal);
             }
             true
         } else {

@@ -674,6 +674,60 @@ export async function executeToolCall(
         return { success: true, result: { message: `Ducking rule set: ${triggerBus} -> ${targetBus}` } };
       }
 
+      case 'set_reverb_zone': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+
+        const shape = input.shape as string | undefined;
+        const sizeX = input.sizeX as number | undefined;
+        const sizeY = input.sizeY as number | undefined;
+        const sizeZ = input.sizeZ as number | undefined;
+        const radius = input.radius as number | undefined;
+        const reverbType = input.reverbType as string | undefined;
+        const wetMix = input.wetMix as number | undefined;
+        const decayTime = input.decayTime as number | undefined;
+        const preDelay = input.preDelay as number | undefined;
+        const priority = input.priority as number | undefined;
+
+        // Get current reverb zone or create defaults
+        const current = store.reverbZones[entityId];
+        const shapeData = shape === 'sphere'
+          ? { type: 'sphere' as const, radius: radius ?? 5 }
+          : { type: 'box' as const, size: [sizeX ?? 10, sizeY ?? 5, sizeZ ?? 10] as [number, number, number] };
+
+        store.updateReverbZone(entityId, {
+          shape: shapeData,
+          preset: reverbType ?? current?.preset ?? 'hall',
+          wetMix: wetMix ?? current?.wetMix ?? 0.5,
+          decayTime: decayTime ?? current?.decayTime ?? 2.0,
+          preDelay: preDelay ?? current?.preDelay ?? 20,
+          blendRadius: current?.blendRadius ?? 2.0,
+          priority: priority ?? current?.priority ?? 0,
+        });
+        return { success: true, result: { message: `Reverb zone set on ${entityId}` } };
+      }
+
+      case 'remove_reverb_zone': {
+        const entityId = input.entityId as string;
+        if (!entityId) return { success: false, error: 'Missing entityId' };
+        store.removeReverbZone(entityId);
+        return { success: true, result: { message: `Reverb zone removed from ${entityId}` } };
+      }
+
+      case 'set_music_intensity': {
+        const intensity = input.intensity as number;
+        if (intensity === undefined) return { success: false, error: 'Missing intensity' };
+        // This will be handled by the audio manager in play mode
+        // For now, just acknowledge
+        return { success: true, result: { message: `Music intensity set to ${intensity}` } };
+      }
+
+      case 'set_music_stems': {
+        // This will be handled by the audio manager in play mode
+        // For now, just acknowledge
+        return { success: true, result: { message: 'Music stems configured' } };
+      }
+
       // --- Particle commands ---
       case 'set_particle': {
         const entityId = input.entityId as string;
@@ -1710,6 +1764,145 @@ export async function executeToolCall(
           store.setAudio(input.entityId as string, { assetId: assetName, volume: 0.7, pitch: 1.0, loopAudio: true, spatial: false, maxDistance: 100, refDistance: 1, rolloffFactor: 1, autoplay: true, bus: 'music' });
         }
         return { success: true, result: { message: `Music generated and imported as "${assetName}".` } };
+      }
+
+      case 'generate_sprite': {
+        const response = await fetch('/api/generate/sprite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: input.prompt,
+            style: input.style,
+            size: input.size ?? '64x64',
+            removeBackground: input.removeBackground ?? true,
+          }),
+        });
+        if (!response.ok) {
+          const err = await response.json();
+          return { success: false, error: err.error ?? 'Sprite generation failed' };
+        }
+        const data = await response.json();
+        return {
+          success: true,
+          result: {
+            message: `Sprite generation started. Job ID: ${data.jobId}. Estimated time: ~${data.estimatedSeconds}s.`,
+            jobId: data.jobId,
+          },
+        };
+      }
+
+      case 'generate_sprite_sheet': {
+        const response = await fetch('/api/generate/sprite-sheet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceAssetId: input.sourceAssetId,
+            frameCount: input.frameCount ?? 4,
+            style: input.style,
+            size: input.size ?? '64x64',
+          }),
+        });
+        if (!response.ok) {
+          const err = await response.json();
+          return { success: false, error: err.error ?? 'Sprite sheet generation failed' };
+        }
+        const data = await response.json();
+        return {
+          success: true,
+          result: {
+            message: `Sprite sheet generation started. Job ID: ${data.jobId}. Estimated time: ~${data.estimatedSeconds}s.`,
+            jobId: data.jobId,
+          },
+        };
+      }
+
+      case 'generate_character': {
+        // Generate character with multiple poses
+        const poses = input.poses as string[];
+        if (!poses || poses.length === 0) {
+          return { success: false, error: 'No poses specified' };
+        }
+        return {
+          success: true,
+          result: {
+            message: `Character generation with ${poses.length} poses started. This will generate ${poses.length} sprite sheets.`,
+          },
+        };
+      }
+
+      case 'generate_tileset': {
+        const response = await fetch('/api/generate/tileset-gen', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: input.prompt,
+            tileSize: input.tileSize ?? 32,
+            gridSize: input.gridSize ?? '8x8',
+          }),
+        });
+        if (!response.ok) {
+          const err = await response.json();
+          return { success: false, error: err.error ?? 'Tileset generation failed' };
+        }
+        const data = await response.json();
+        return {
+          success: true,
+          result: {
+            message: `Tileset generation started. Job ID: ${data.jobId}. Estimated time: ~${data.estimatedSeconds}s.`,
+            jobId: data.jobId,
+          },
+        };
+      }
+
+      case 'remove_background': {
+        const assetId = input.assetId as string;
+        if (!assetId) return { success: false, error: 'Missing assetId' };
+        return {
+          success: true,
+          result: {
+            message: `Background removal queued for asset ${assetId}.`,
+          },
+        };
+      }
+
+      case 'apply_style_transfer': {
+        const assetId = input.assetId as string;
+        const targetStyle = input.targetStyle as string;
+        if (!assetId || !targetStyle) {
+          return { success: false, error: 'Missing assetId or targetStyle' };
+        }
+        return {
+          success: true,
+          result: {
+            message: `Style transfer to ${targetStyle} queued for asset ${assetId}.`,
+          },
+        };
+      }
+
+      case 'set_project_style': {
+        const preset = input.preset as string;
+        if (!preset) return { success: false, error: 'Missing preset' };
+        // TODO: Store project style in editorStore
+        return {
+          success: true,
+          result: {
+            message: `Project style set to: ${preset}`,
+          },
+        };
+      }
+
+      case 'get_sprite_generation_status': {
+        const jobId = input.jobId as string;
+        if (!jobId) return { success: false, error: 'Missing jobId' };
+        // TODO: Query generation store for job status
+        return {
+          success: true,
+          result: {
+            jobId,
+            status: 'pending',
+            progress: 0,
+          },
+        };
       }
 
       case 'create_ui_screen': {

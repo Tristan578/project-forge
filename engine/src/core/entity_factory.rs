@@ -121,6 +121,8 @@ pub fn apply_spawn_requests(
                 asset_ref: None,
                 script_data: None,
                 audio_data: None,
+                reverb_zone_data: None,
+                reverb_zone_enabled: false,
                 particle_data: None,
                 particle_enabled: false,
                 shader_effect_data: None,
@@ -156,6 +158,7 @@ pub fn apply_delete_requests(
     query: Query<(Entity, &EntityId, &EntityName, &Transform, &EntityVisible, Option<&EntityType>, Option<&MaterialData>, Option<&LightData>, Option<&PhysicsData>, Option<&PhysicsEnabled>, Option<&AssetRef>), Without<Undeletable>>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    reverb_zone_query: Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>)>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
@@ -187,6 +190,12 @@ pub fn apply_delete_requests(
                     let audio_data = audio_query.iter()
                         .find(|(audio_eid, _)| audio_eid.0 == eid.0)
                         .and_then(|(_, ad)| ad.cloned());
+
+                    // Look up reverb zone data separately
+                    let (reverb_zone_data, reverb_zone_enabled) = reverb_zone_query.iter()
+                        .find(|(rzeid, _, _)| rzeid.0 == eid.0)
+                        .map(|(_, rzd, rze)| (rzd.cloned(), rze.is_some()))
+                        .unwrap_or((None, false));
 
                     // Look up particle data separately
                     let (particle_data, particle_enabled) = particle_query.iter()
@@ -251,6 +260,8 @@ pub fn apply_delete_requests(
                             asset_ref: asset_ref.cloned(),
                             script_data,
                             audio_data,
+                            reverb_zone_data,
+                            reverb_zone_enabled,
                             particle_data,
                             particle_enabled,
                             shader_effect_data,
@@ -331,6 +342,7 @@ pub fn apply_duplicate_requests(
     )>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    reverb_zone_query: Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>)>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
@@ -356,6 +368,12 @@ pub fn apply_duplicate_requests(
             let src_audio_data: Option<AudioData> = audio_query.iter()
                 .find(|(audio_eid, _)| audio_eid.0 == source_eid.0)
                 .and_then(|(_, ad)| ad.cloned());
+
+            // Look up reverb zone data separately
+            let (src_reverb_zone_data, src_reverb_zone_enabled) = reverb_zone_query.iter()
+                .find(|(rzeid, _, _)| rzeid.0 == source_eid.0)
+                .map(|(_, rzd, rze)| (rzd.cloned(), rze.is_some()))
+                .unwrap_or((None, false));
 
             // Look up particle data separately
             let (src_particle_data, src_particle_enabled) = particle_query.iter()
@@ -559,6 +577,8 @@ pub fn apply_duplicate_requests(
                     asset_ref: src_asset_ref.cloned(),
                     script_data: src_script_data,
                     audio_data: src_audio_data,
+                    reverb_zone_data: src_reverb_zone_data,
+                    reverb_zone_enabled: src_reverb_zone_enabled,
                     particle_data: src_particle_data,
                     particle_enabled: src_particle_enabled,
                     shader_effect_data: src_shader_data,
@@ -1215,6 +1235,13 @@ pub fn spawn_from_snapshot(
     if let Some(ad) = &snapshot.audio_data {
         commands.entity(entity).insert(ad.clone());
         commands.entity(entity).insert(AudioEnabled);
+    }
+    // Restore reverb zone data if present
+    if let Some(rzd) = &snapshot.reverb_zone_data {
+        commands.entity(entity).insert(rzd.clone());
+    }
+    if snapshot.reverb_zone_enabled {
+        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
     }
     // Restore particle data if present
     if let Some(pd) = &snapshot.particle_data {

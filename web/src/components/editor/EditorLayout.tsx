@@ -21,6 +21,8 @@ import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel';
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
+import { TutorialOverlay } from './TutorialOverlay';
+import { OnboardingChecklist } from './OnboardingChecklist';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
@@ -250,6 +252,8 @@ export function EditorLayout() {
         <ChatOverlay />
         <SceneTransitionOverlay />
         <DialogueOverlay />
+        <TutorialOverlay />
+        <OnboardingChecklist />
         <WelcomeModal />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
       </div>
@@ -295,6 +299,8 @@ export function EditorLayout() {
       <ChatOverlay />
       <SceneTransitionOverlay />
       <DialogueOverlay />
+      <TutorialOverlay />
+      <OnboardingChecklist />
       <WelcomeModal />
       <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>

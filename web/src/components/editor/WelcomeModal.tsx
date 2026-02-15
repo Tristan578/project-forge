@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useSyncExternalStore } from 'react';
-import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen } from 'lucide-react';
+import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen, GraduationCap } from 'lucide-react';
 import { TemplateGallery } from './TemplateGallery';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useOnboardingStore } from '@/stores/onboardingStore';
 
 const STORAGE_KEY = 'forge-welcomed';
 
@@ -23,6 +24,7 @@ export function WelcomeModal() {
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
+  const startTutorial = useOnboardingStore((s) => s.startTutorial);
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -38,6 +40,11 @@ export function WelcomeModal() {
 
   const handleOpenDocs = () => {
     navigateDocs('getting-started/editor-overview');
+    handleDismiss();
+  };
+
+  const handleStartTutorial = () => {
+    startTutorial('first-scene');
     handleDismiss();
   };
 
@@ -73,10 +80,27 @@ export function WelcomeModal() {
             />
           </div>
 
+          {/* Tutorial section */}
+          <div className="mb-3 rounded border border-blue-700/50 bg-blue-900/20 p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <GraduationCap size={16} className="text-blue-400" />
+              <h3 className="text-sm font-semibold text-zinc-200">First Time Here?</h3>
+            </div>
+            <p className="mb-3 text-xs text-zinc-400">
+              Take a 3-minute guided tutorial to learn the basics of building 3D scenes.
+            </p>
+            <button
+              onClick={handleStartTutorial}
+              className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
+            >
+              Start Tutorial
+            </button>
+          </div>
+
           {/* Template selection section */}
           <div className="mb-5 rounded border border-zinc-700 bg-zinc-800/50 p-4">
             <div className="mb-2 flex items-center gap-2">
-              <Sparkles size={16} className="text-blue-400" />
+              <Sparkles size={16} className="text-purple-400" />
               <h3 className="text-sm font-semibold text-zinc-200">Start from a Template</h3>
             </div>
             <p className="mb-3 text-xs text-zinc-400">
@@ -84,7 +108,7 @@ export function WelcomeModal() {
             </p>
             <button
               onClick={() => setShowTemplates(true)}
-              className="w-full rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 transition-colors"
+              className="w-full rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-600 transition-colors"
             >
               Browse Templates
             </button>

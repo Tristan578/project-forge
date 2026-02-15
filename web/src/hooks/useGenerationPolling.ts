@@ -148,6 +148,10 @@ export function useGenerationPolling() {
         return '/api/generate/skybox/status';
       case 'music':
         return '/api/generate/music/status';
+      case 'sprite':
+      case 'sprite_sheet':
+      case 'tileset':
+        return '/api/generate/sprite/status';
       default:
         throw new Error(`Unknown generation type: ${type}`);
     }

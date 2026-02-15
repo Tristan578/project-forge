@@ -448,6 +448,12 @@ function buildForgeApi(scriptEntityId: string) {
       fadeOut: (eid: string, durationMs: number) => {
         pendingCommands.push({ cmd: 'audio_fade_out', entityId: eid, durationMs });
       },
+      setMusicIntensity: (level: number) => {
+        pendingCommands.push({ cmd: 'set_music_intensity', intensity: level });
+      },
+      loadStems: (stems: Record<string, string>) => {
+        pendingCommands.push({ cmd: 'set_music_stems', stems });
+      },
     },
 
     // --- UI/HUD system ---

@@ -16,6 +16,7 @@ use crate::core::{
     asset_manager::{AssetRef, AssetRegistry},
     audio::{AudioBusConfig, AudioData, AudioEnabled},
     particles::{ParticleData, ParticleEnabled},
+    reverb_zone::{ReverbZoneData, ReverbZoneEnabled},
     camera::CameraControlPlugin,
     commands::CommandResponse,
     engine_mode::{EngineMode, SceneSnapshot, ModeChangeRequest},
@@ -266,7 +267,8 @@ impl Plugin for SelectionPlugin {
             // Always-active systems: run in both editor and runtime
             .add_systems(Update, process_query_requests)
             .add_systems(Update, process_terrain_queries)
-            .add_systems(Update, process_quality_queries);
+            .add_systems(Update, process_quality_queries)
+            .add_systems(Update, process_reverb_zone_queries);
 
         #[cfg(not(feature = "runtime"))]
         app.add_systems(Update, process_joint_queries);
@@ -301,6 +303,8 @@ impl Plugin for SelectionPlugin {
                 apply_audio_removals,
                 apply_audio_playback,
                 apply_audio_bus_updates,
+                apply_reverb_zone_updates,
+                apply_reverb_zone_toggles,
             ))
             // Audio bus systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
@@ -378,6 +382,7 @@ impl Plugin for SelectionPlugin {
                     emit_joint_on_selection,
                     emit_script_on_selection,
                     emit_audio_on_selection,
+                    emit_reverb_zone_on_selection,
                     emit_particle_on_selection,
                     emit_shader_on_selection,
                     emit_animation_on_selection,
@@ -493,6 +498,7 @@ fn apply_mode_change_requests(
     )>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>)>,
+    reverb_zone_snapshot_query: Query<(&EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>)>,
     particle_snapshot_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_snapshot_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_snapshot_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
@@ -515,7 +521,7 @@ fn apply_mode_change_requests(
                 // Snapshot the scene (uses read-only query p0)
                 {
                     let snapshot_query = queries.p0();
-                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &particle_snapshot_query, &shader_snapshot_query, &csg_snapshot_query, &procedural_joint_query, &sprite_snapshot_query, &tilemap_snapshot_query, &skeleton2d_snapshot_query, &selection);
+                    *snapshot = core::engine_mode::snapshot_scene(&snapshot_query, &script_query, &audio_query, &reverb_zone_snapshot_query, &particle_snapshot_query, &shader_snapshot_query, &csg_snapshot_query, &procedural_joint_query, &sprite_snapshot_query, &tilemap_snapshot_query, &skeleton2d_snapshot_query, &selection);
                 }
                 // Clear selection for play mode
                 selection.clear();
@@ -1384,6 +1390,9 @@ fn process_query_requests(
                     }
                 }
             }
+            QueryRequest::ReverbZoneState { entity_id } => {
+                // Note: reverb zone query handled in separate process_reverb_zone_queries to avoid param limit
+            }
             QueryRequest::ScriptTemplates => {
                 #[derive(serde::Serialize)]
                 #[serde(rename_all = "camelCase")]
@@ -1509,6 +1518,37 @@ fn apply_quality_presets(
             *quality = crate::core::quality::QualitySettings::from_preset(preset);
             events::emit_quality_changed(&quality);
             tracing::info!("Applied quality preset: {}", request.preset);
+        }
+    }
+}
+
+/// Process reverb zone query requests separately to stay under 16 system parameter limit.
+fn process_reverb_zone_queries(
+    mut pending: ResMut<PendingCommands>,
+    reverb_zone_query: Query<(&EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
+        if matches!(req, QueryRequest::ReverbZoneState { .. }) {
+            Some(req.clone())
+        } else {
+            None
+        }
+    }).collect();
+
+    for request in requests {
+        if let QueryRequest::ReverbZoneState { entity_id } = request {
+            for (eid, reverb_zone_data, rz_enabled) in reverb_zone_query.iter() {
+                if eid.0 == entity_id {
+                    if let Some(data) = reverb_zone_data {
+                        events::emit_reverb_zone_changed(&entity_id, data, rz_enabled.is_some());
+                    }
+                    break;
+                }
+            }
+            // Remove the processed request
+            pending.query_requests.retain(|r| !matches!(r, QueryRequest::ReverbZoneState { entity_id: ref eid } if eid == &entity_id));
         }
     }
 }
@@ -2156,6 +2196,8 @@ fn apply_scene_export(
             asset_ref: asset_ref.cloned(),
             script_data,
             audio_data,
+            reverb_zone_data: None,
+            reverb_zone_enabled: false,
             particle_data,
             particle_enabled,
             shader_effect_data,
@@ -2168,15 +2210,12 @@ fn apply_scene_export(
             animation_clip_data: None,
             game_camera_data,
             active_game_camera,
-            sprite_data,
+            sprite_data: None,
             physics2d_data: None,
             physics2d_enabled: false,
             joint2d_data: None,
             tilemap_data: None,
             tilemap_enabled: false,
-            skeleton2d_data: None,
-            skeleton2d_enabled: false,
-            skeletal_animations: None,
             skeleton2d_data: None,
             skeleton2d_enabled: false,
             skeletal_animations: None,
@@ -2949,6 +2988,107 @@ fn emit_audio_on_selection(
 }
 
 // ---------------------------------------------------------------------------
+// Reverb Zone systems
+// ---------------------------------------------------------------------------
+
+/// System that applies pending reverb zone updates (always-active).
+fn apply_reverb_zone_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for update in pending.reverb_zone_updates.drain(..) {
+        for (entity, entity_id, current_reverb_zone, rz_enabled) in query.iter() {
+            if entity_id.0 == update.entity_id {
+                let old_reverb_zone = current_reverb_zone.cloned();
+
+                // Insert or update reverb zone component
+                commands.entity(entity).insert(update.reverb_zone_data.clone());
+
+                // Record for undo
+                history.push(core::history::UndoableAction::ReverbZoneChange {
+                    entity_id: update.entity_id.clone(),
+                    old_reverb_zone,
+                    new_reverb_zone: Some(update.reverb_zone_data.clone()),
+                });
+
+                // Emit change event
+                let enabled = rz_enabled.is_some();
+                events::emit_reverb_zone_changed(&update.entity_id, &update.reverb_zone_data, enabled);
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies pending reverb zone toggle requests (always-active).
+fn apply_reverb_zone_toggles(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    query: Query<(Entity, &EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>)>,
+) {
+    for toggle in pending.reverb_zone_toggles.drain(..) {
+        for (entity, entity_id, reverb_zone_data, rz_enabled) in query.iter() {
+            if entity_id.0 == toggle.entity_id {
+                if toggle.enabled {
+                    // Enable reverb zone: add ReverbZoneEnabled marker and ReverbZoneData if missing
+                    if rz_enabled.is_none() {
+                        commands.entity(entity).insert(ReverbZoneEnabled);
+                    }
+                    if reverb_zone_data.is_none() {
+                        commands.entity(entity).insert(ReverbZoneData::default());
+                    }
+                    // Emit change event
+                    let data = reverb_zone_data.cloned().unwrap_or_default();
+                    events::emit_reverb_zone_changed(&toggle.entity_id, &data, true);
+                } else {
+                    // Disable reverb zone: remove ReverbZoneEnabled marker
+                    if rz_enabled.is_some() {
+                        commands.entity(entity).remove::<ReverbZoneEnabled>();
+                    }
+                    // Emit change event
+                    if let Some(data) = reverb_zone_data {
+                        events::emit_reverb_zone_changed(&toggle.entity_id, data, false);
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
+/// Editor-only: emit reverb zone data when entity is selected.
+#[cfg(not(feature = "runtime"))]
+fn emit_reverb_zone_on_selection(
+    selection: Res<Selection>,
+    query: Query<(&EntityId, &ReverbZoneData), Changed<ReverbZoneData>>,
+    selection_query: Query<(&EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>)>,
+    mut selection_events: EventReader<SelectionChangedEvent>,
+) {
+    // Emit on selection change
+    for _event in selection_events.read() {
+        if let Some(primary) = selection.primary {
+            if let Ok((entity_id, reverb_zone_data, rz_enabled)) = selection_query.get(primary) {
+                if let Some(data) = reverb_zone_data {
+                    events::emit_reverb_zone_changed(&entity_id.0, data, rz_enabled.is_some());
+                }
+            }
+        }
+    }
+
+    // Emit when reverb zone data changes on selected entity
+    if let Some(primary) = selection.primary {
+        if let Ok((entity_id, reverb_zone_data)) = query.get(primary) {
+            // Check if enabled
+            if let Ok((_, _, rz_enabled)) = selection_query.get(primary) {
+                events::emit_reverb_zone_changed(&entity_id.0, reverb_zone_data, rz_enabled.is_some());
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Particle systems
 // ---------------------------------------------------------------------------
 
@@ -3390,6 +3530,8 @@ fn apply_csg_requests(
                 asset_ref,
                 script_data,
                 audio_data,
+                reverb_zone_data: None,
+                reverb_zone_enabled: false,
                 particle_data,
                 particle_enabled,
                 shader_effect_data,
@@ -3464,9 +3606,6 @@ fn apply_csg_requests(
             joint2d_data: None,
             tilemap_data: None,
             tilemap_enabled: false,
-            skeleton2d_data: None,
-            skeleton2d_enabled: false,
-            skeletal_animations: None,
             skeleton2d_data: None,
             skeleton2d_enabled: false,
             skeletal_animations: None,
@@ -4336,6 +4475,8 @@ fn apply_extrude_requests(
                 asset_ref: None,
                 script_data: None,
                 audio_data: None,
+                reverb_zone_data: None,
+                reverb_zone_enabled: false,
                 particle_data: None,
                 particle_enabled: false,
                 shader_effect_data: None,
@@ -4354,6 +4495,9 @@ fn apply_extrude_requests(
                 joint2d_data: None,
                 tilemap_data: None,
                 tilemap_enabled: false,
+                skeleton2d_data: None,
+                skeleton2d_enabled: false,
+                skeletal_animations: None,
             },
         });
 
@@ -4470,6 +4614,8 @@ fn apply_lathe_requests(
                 asset_ref: None,
                 script_data: None,
                 audio_data: None,
+                reverb_zone_data: None,
+                reverb_zone_enabled: false,
                 particle_data: None,
                 particle_enabled: false,
                 shader_effect_data: None,
@@ -4488,6 +4634,9 @@ fn apply_lathe_requests(
                 joint2d_data: None,
                 tilemap_data: None,
                 tilemap_enabled: false,
+                skeleton2d_data: None,
+                skeleton2d_enabled: false,
+                skeletal_animations: None,
             },
         });
 
@@ -4657,6 +4806,8 @@ fn apply_array_requests(
                 asset_ref: asset_ref.cloned(),
                 script_data: src_script_data.clone(),
                 audio_data: src_audio_data.clone(),
+                reverb_zone_data: None,
+                reverb_zone_enabled: false,
                 particle_data: src_particle_data.clone(),
                 particle_enabled: src_particle_enabled,
                 shader_effect_data: src_shader_data.clone(),
@@ -4675,6 +4826,9 @@ fn apply_array_requests(
                 joint2d_data: None,
                 tilemap_data: None,
                 tilemap_enabled: false,
+                skeleton2d_data: None,
+                skeleton2d_enabled: false,
+                skeletal_animations: None,
             });
         }
 
@@ -4761,6 +4915,8 @@ fn apply_combine_requests(
                     asset_ref: None,
                     script_data: src_script_data,
                     audio_data: src_audio_data,
+                    reverb_zone_data: None,
+                    reverb_zone_enabled: false,
                     particle_data: src_particle_data,
                     particle_enabled: src_particle_enabled,
                     shader_effect_data: src_shader_data,
@@ -4779,6 +4935,9 @@ fn apply_combine_requests(
                     joint2d_data: None,
                     tilemap_data: None,
                     tilemap_enabled: false,
+                    skeleton2d_data: None,
+                    skeleton2d_enabled: false,
+                    skeletal_animations: None,
                 });
 
                 if request.delete_sources {
@@ -4846,6 +5005,8 @@ fn apply_combine_requests(
                 asset_ref: None,
                 script_data: None,
                 audio_data: None,
+                reverb_zone_data: None,
+                reverb_zone_enabled: false,
                 particle_data: None,
                 particle_enabled: false,
                 shader_effect_data: None,
@@ -4864,6 +5025,9 @@ fn apply_combine_requests(
                 joint2d_data: None,
                 tilemap_data: None,
                 tilemap_enabled: false,
+                skeleton2d_data: None,
+                skeleton2d_enabled: false,
+                skeletal_animations: None,
             },
         });
 

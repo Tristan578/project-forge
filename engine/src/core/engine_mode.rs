@@ -117,6 +117,7 @@ pub fn snapshot_scene(
     )>,
     script_query: &Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: &Query<(&EntityId, Option<&AudioData>)>,
+    reverb_zone_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>)>,
     particle_query: &Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_query: &Query<(&EntityId, Option<&ShaderEffectData>)>,
     csg_query: &Query<(&EntityId, Option<&CsgMeshData>)>,
@@ -153,6 +154,12 @@ pub fn snapshot_scene(
         let audio_data = audio_query.iter()
             .find(|(audio_eid, _)| audio_eid.0 == eid.0)
             .and_then(|(_, ad)| ad.cloned());
+
+        // Look up reverb zone data separately
+        let (reverb_zone_data, reverb_zone_enabled) = reverb_zone_query.iter()
+            .find(|(rz_eid, _, _)| rz_eid.0 == eid.0)
+            .map(|(_, rzd, rze)| (rzd.cloned(), rze.is_some()))
+            .unwrap_or((None, false));
 
         // Look up particle data separately
         let (particle_data, particle_enabled) = particle_query.iter()
@@ -207,6 +214,8 @@ pub fn snapshot_scene(
             asset_ref: asset_ref.cloned(),
             script_data,
             audio_data,
+            reverb_zone_data,
+            reverb_zone_enabled,
             particle_data,
             particle_enabled,
             shader_effect_data,

@@ -28,6 +28,9 @@ const PLATFORM_KEY_ENV: Record<Provider, string> = {
   hyper3d: 'PLATFORM_HYPER3D_KEY',
   elevenlabs: 'PLATFORM_ELEVENLABS_KEY',
   suno: 'PLATFORM_SUNO_KEY',
+  openai: 'PLATFORM_OPENAI_KEY',
+  replicate: 'PLATFORM_REPLICATE_KEY',
+  removebg: 'PLATFORM_REMOVEBG_KEY',
 };
 
 function getPlatformKey(provider: Provider): string {

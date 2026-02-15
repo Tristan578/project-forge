@@ -41,6 +41,8 @@ use super::pending_commands::{
     queue_audio_update_from_bridge, queue_audio_removal_from_bridge, queue_audio_playback_from_bridge,
     queue_audio_bus_update_from_bridge, queue_audio_bus_create_from_bridge,
     queue_audio_bus_delete_from_bridge, queue_audio_bus_effects_update_from_bridge,
+    queue_reverb_zone_update_from_bridge, queue_reverb_zone_toggle_from_bridge,
+    queue_reverb_zone_removal_from_bridge,
     queue_post_processing_update_from_bridge,
     queue_particle_update_from_bridge, queue_particle_toggle_from_bridge,
     queue_particle_removal_from_bridge, queue_particle_preset_from_bridge,
@@ -83,6 +85,7 @@ use super::pending_commands::{
     ScriptUpdate, ScriptRemoval,
     AudioUpdate, AudioRemoval, AudioPlayback,
     AudioBusUpdate, AudioBusCreate, AudioBusDelete, AudioBusEffectsUpdate,
+    ReverbZoneUpdate, ReverbZoneToggle, ReverbZoneRemoval,
     ParticleUpdate, ParticleToggle, ParticleRemoval, ParticlePresetRequest, ParticlePlayback,
     TerrainSpawnRequest, TerrainUpdate, TerrainSculpt,
     ExtrudeRequest, LatheRequest, ArrayRequest, CombineRequest,
@@ -245,6 +248,17 @@ pub fn dispatch(command: &str, payload: serde_json::Value) -> CommandResult {
         "delete_audio_bus" => handle_delete_audio_bus(payload),
         "get_audio_buses" => handle_query(QueryRequest::AudioBuses),
         "set_bus_effects" => handle_set_bus_effects(payload),
+        // Reverb zone commands
+        "set_reverb_zone" => handle_set_reverb_zone(payload),
+        "toggle_reverb_zone" => handle_toggle_reverb_zone(payload),
+        "remove_reverb_zone" => handle_remove_reverb_zone(payload),
+        "get_reverb_zone" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .ok_or("Missing entityId")?
+                .to_string();
+            handle_query(QueryRequest::ReverbZoneState { entity_id })
+        },
         // Particle commands
         "set_particle" => handle_set_particle(payload),
         "remove_particle" => handle_remove_particle(payload),
@@ -1919,6 +1933,79 @@ fn handle_set_bus_effects(payload: serde_json::Value) -> CommandResult {
 
     if queue_audio_bus_effects_update_from_bridge(update) {
         tracing::info!("Queued audio bus effects update: {}", data.bus_name);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reverb zone handlers
+// ---------------------------------------------------------------------------
+
+/// Payload for set_reverb_zone command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetReverbZonePayload {
+    entity_id: String,
+    #[serde(flatten)]
+    reverb_data: super::reverb_zone::ReverbZoneData,
+}
+
+/// Handle set_reverb_zone command.
+fn handle_set_reverb_zone(payload: serde_json::Value) -> CommandResult {
+    let data: SetReverbZonePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_reverb_zone payload: {}", e))?;
+
+    let update = ReverbZoneUpdate {
+        entity_id: data.entity_id.clone(),
+        reverb_data: data.reverb_data,
+    };
+
+    if queue_reverb_zone_update_from_bridge(update) {
+        tracing::info!("Queued reverb zone update for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle toggle_reverb_zone command.
+fn handle_toggle_reverb_zone(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+    let enabled = payload.get("enabled")
+        .and_then(|v| v.as_bool())
+        .ok_or("Missing enabled")?;
+
+    let toggle = ReverbZoneToggle {
+        entity_id: entity_id.clone(),
+        enabled,
+    };
+
+    if queue_reverb_zone_toggle_from_bridge(toggle) {
+        tracing::info!("Queued reverb zone toggle for entity: {}", entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_reverb_zone command.
+fn handle_remove_reverb_zone(payload: serde_json::Value) -> CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let removal = ReverbZoneRemoval {
+        entity_id: entity_id.clone(),
+    };
+
+    if queue_reverb_zone_removal_from_bridge(removal) {
+        tracing::info!("Queued reverb zone removal for entity: {}", entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

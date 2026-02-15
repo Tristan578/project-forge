@@ -24,6 +24,7 @@ import { SpriteAnimationInspector } from './SpriteAnimationInspector';
 import { SkeletonInspector } from './SkeletonInspector';
 import { Camera2dInspector } from './Camera2dInspector';
 import { TilemapInspector } from './TilemapInspector';
+import { ReverbZoneInspector } from './ReverbZoneInspector';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   copyTransformProperty,
@@ -343,6 +344,9 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Audio section (for all entities) */}
       <AudioInspector />
+
+      {/* Reverb Zone section (for all entities in 3D) */}
+      {!is2D && primaryId && <ReverbZoneInspector entityId={primaryId} />}
 
       {/* Particle section (for all entities) */}
       <ParticleInspector />

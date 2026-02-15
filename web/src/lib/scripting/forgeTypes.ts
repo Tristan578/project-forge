@@ -182,6 +182,11 @@ declare namespace forge {
     function fadeIn(entityId: string, durationMs: number): void;
     /** Fade out audio on an entity (stops after fade) */
     function fadeOut(entityId: string, durationMs: number): void;
+
+    /** Set adaptive music intensity (0.0-1.0) — controls stem layering */
+    function setMusicIntensity(level: number): void;
+    /** Load multi-stem music (pad, bass, melody, drums) for adaptive playback */
+    function loadStems(stems: Record<string, string>): void;
   }
 
   namespace particles {

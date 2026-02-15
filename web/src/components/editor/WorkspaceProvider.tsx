@@ -21,6 +21,7 @@ import { AudioMixerPanel } from './AudioMixerPanel';
 import { DocsPanel } from './DocsPanel';
 import { DialogueTreeEditor } from './DialogueTreeEditor';
 import { TilesetPanel } from './TilesetPanel';
+import { TimelinePanel } from './TimelinePanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -125,6 +126,14 @@ function TilesetPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function TimelinePanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <TimelinePanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -139,6 +148,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   docs: DocsPanelWrapper,
   'dialogue-editor': DialogueEditorPanelWrapper,
   tileset: TilesetPanelWrapper,
+  timeline: TimelinePanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----

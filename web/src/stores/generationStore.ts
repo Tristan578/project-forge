@@ -6,7 +6,7 @@
 
 import { create } from 'zustand';
 
-export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music';
+export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music' | 'sprite' | 'sprite_sheet' | 'tileset';
 export type GenerationStatus = 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
 
 export interface GenerationJob {
