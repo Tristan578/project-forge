@@ -1,9 +1,9 @@
 //! Bridge systems for edit mode (polygon modeling).
 
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
+use bevy::render::mesh::{Indices, VertexAttributeValues};
 use crate::core::entity_id::EntityId;
-use crate::core::edit_mode::{EditModeData, SelectionMode, MeshOperation};
+use crate::core::edit_mode::{EditModeData, SelectionMode};
 use crate::core::pending_commands::PendingCommands;
 use super::events::emit_event;
 
@@ -12,44 +12,36 @@ use super::events::emit_event;
 pub fn apply_edit_mode_requests(
     mut commands: Commands,
     mut pending: ResMut<PendingCommands>,
-    mut edit_mode_query: Query<(&EntityId, Option<&mut EditModeData>)>,
+    mut edit_mode_query: Query<(Entity, &EntityId, Option<&mut EditModeData>)>,
     mesh_query: Query<&Mesh3d>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     // Enter edit mode
     for request in pending.enter_edit_mode_requests.drain(..) {
-        if let Some((_, edit_mode_opt)) = edit_mode_query.iter_mut().find(|(id, _)| id.0 == request.entity_id) {
+        if let Some((entity, _eid, edit_mode_opt)) = edit_mode_query.iter_mut().find(|(_e, id, _)| id.0 == request.entity_id) {
             if let Some(mut edit_mode) = edit_mode_opt {
                 edit_mode.active = true;
                 edit_mode.selected_indices.clear();
             } else {
-                // Insert new EditModeData component
-                if let Some(entity) = edit_mode_query.iter().find(|(id, _)| id.0 == request.entity_id).map(|(id, _)| id) {
-                    let entity_ref = edit_mode_query.get(entity.entity()).ok();
-                    if let Some((_, _)) = entity_ref {
-                        commands.entity(entity.entity()).insert(EditModeData {
-                            active: true,
-                            ..Default::default()
-                        });
-                    }
-                }
+                commands.entity(entity).insert(EditModeData {
+                    active: true,
+                    ..Default::default()
+                });
             }
 
             // Emit event
             emit_event("edit_mode_entered", &serde_json::json!({ "entityId": request.entity_id }));
 
             // Get mesh stats and emit
-            if let Some(entity_id_comp) = edit_mode_query.iter().find(|(id, _)| id.0 == request.entity_id).map(|(id, _)| id) {
-                if let Ok(mesh_handle) = mesh_query.get(entity_id_comp.entity()) {
-                    if let Some(mesh) = meshes.get(&mesh_handle.0) {
-                        let (vertex_count, edge_count, face_count) = get_mesh_stats(mesh);
-                        emit_event("edit_mode_mesh_stats", &serde_json::json!({
-                            "entityId": request.entity_id,
-                            "vertexCount": vertex_count,
-                            "edgeCount": edge_count,
-                            "faceCount": face_count,
-                        }));
-                    }
+            if let Ok(mesh_handle) = mesh_query.get(entity) {
+                if let Some(mesh) = meshes.get(&mesh_handle.0) {
+                    let (vertex_count, edge_count, face_count) = get_mesh_stats(mesh);
+                    emit_event("edit_mode_mesh_stats", &serde_json::json!({
+                        "entityId": request.entity_id,
+                        "vertexCount": vertex_count,
+                        "edgeCount": edge_count,
+                        "faceCount": face_count,
+                    }));
                 }
             }
         }
@@ -57,7 +49,7 @@ pub fn apply_edit_mode_requests(
 
     // Exit edit mode
     for request in pending.exit_edit_mode_requests.drain(..) {
-        if let Some((_, Some(mut edit_mode))) = edit_mode_query.iter_mut().find(|(id, _)| id.0 == request.entity_id) {
+        if let Some((_entity, _eid, Some(mut edit_mode))) = edit_mode_query.iter_mut().find(|(_e, id, _)| id.0 == request.entity_id) {
             edit_mode.active = false;
             edit_mode.selected_indices.clear();
             emit_event("edit_mode_exited", &serde_json::json!({ "entityId": request.entity_id }));
@@ -66,7 +58,7 @@ pub fn apply_edit_mode_requests(
 
     // Set selection mode
     for request in pending.set_selection_mode_requests.drain(..) {
-        if let Some((_, Some(mut edit_mode))) = edit_mode_query.iter_mut().find(|(id, _)| id.0 == request.entity_id) {
+        if let Some((_entity, _eid, Some(mut edit_mode))) = edit_mode_query.iter_mut().find(|(_e, id, _)| id.0 == request.entity_id) {
             let mode = match request.mode.as_str() {
                 "vertex" => SelectionMode::Vertex,
                 "edge" => SelectionMode::Edge,
@@ -80,23 +72,19 @@ pub fn apply_edit_mode_requests(
 
     // Select elements
     for request in pending.select_elements_requests.drain(..) {
-        if let Some((_, Some(mut edit_mode))) = edit_mode_query.iter_mut().find(|(id, _)| id.0 == request.entity_id) {
+        if let Some((_entity, _eid, Some(mut edit_mode))) = edit_mode_query.iter_mut().find(|(_e, id, _)| id.0 == request.entity_id) {
             edit_mode.selected_indices = request.indices;
         }
     }
 
     // Mesh operations
     for request in pending.mesh_operation_requests.drain(..) {
-        // Find the entity
-        let entity_data = edit_mode_query.iter().find(|(id, _)| id.0 == request.entity_id);
-        if let Some((entity_id_comp, _)) = entity_data {
-            // Get mesh handle
-            if let Ok(mesh_handle) = mesh_query.get(entity_id_comp.entity()) {
+        let entity_data = edit_mode_query.iter().find(|(_e, id, _)| id.0 == request.entity_id);
+        if let Some((entity, _eid, _)) = entity_data {
+            if let Ok(mesh_handle) = mesh_query.get(entity) {
                 if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
-                    // Parse operation params
                     let params: serde_json::Value = serde_json::from_str(&request.params).unwrap_or_default();
 
-                    // Perform the operation
                     match request.operation.as_str() {
                         "extrude" => {
                             let indices: Vec<u32> = params.get("indices")
@@ -136,9 +124,9 @@ pub fn apply_edit_mode_requests(
 
     // Recalculate normals
     for request in pending.recalc_normals_requests.drain(..) {
-        let entity_data = edit_mode_query.iter().find(|(id, _)| id.0 == request.entity_id);
-        if let Some((entity_id_comp, _)) = entity_data {
-            if let Ok(mesh_handle) = mesh_query.get(entity_id_comp.entity()) {
+        let entity_data = edit_mode_query.iter().find(|(_e, id, _)| id.0 == request.entity_id);
+        if let Some((entity, _eid, _)) = entity_data {
+            if let Ok(mesh_handle) = mesh_query.get(entity) {
                 if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
                     if request.smooth {
                         recalculate_smooth_normals(mesh);
@@ -184,21 +172,18 @@ fn get_mesh_stats(mesh: &Mesh) -> (usize, usize, usize) {
         None => 0,
     };
 
-    // Edges = 3 * faces (approximate, doesn't account for shared edges)
     let edge_count = face_count * 3;
 
     (vertex_count, edge_count, face_count)
 }
 
 fn perform_extrude(mesh: &mut Mesh, indices: &[u32], distance: f32, direction: [f32; 3]) {
-    // Get current vertices
     let positions = if let Some(VertexAttributeValues::Float32x3(ref mut pos)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
         pos
     } else {
         return;
     };
 
-    // Move selected vertices
     let dir = Vec3::from(direction).normalize_or_zero();
     for &idx in indices {
         if let Some(pos) = positions.get_mut(idx as usize) {
@@ -210,30 +195,24 @@ fn perform_extrude(mesh: &mut Mesh, indices: &[u32], distance: f32, direction: [
 }
 
 fn perform_subdivide(mesh: &mut Mesh, _level: u32) {
-    // Simple subdivision: just recalculate normals for now
-    // Full Catmull-Clark subdivision would be complex
     recalculate_smooth_normals(mesh);
 }
 
 fn recalculate_smooth_normals(mesh: &mut Mesh) {
-    // Get positions
     let positions = if let Some(VertexAttributeValues::Float32x3(ref pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         pos.clone()
     } else {
         return;
     };
 
-    // Initialize normals to zero
     let mut normals = vec![[0.0f32; 3]; positions.len()];
 
-    // Get indices
     let indices = match mesh.indices() {
         Some(Indices::U32(idx)) => idx.iter().map(|&i| i as usize).collect::<Vec<_>>(),
         Some(Indices::U16(idx)) => idx.iter().map(|&i| i as usize).collect::<Vec<_>>(),
         None => return,
     };
 
-    // Accumulate face normals
     for face in indices.chunks(3) {
         if face.len() != 3 { continue; }
         let (i0, i1, i2) = (face[0], face[1], face[2]);
@@ -250,7 +229,6 @@ fn recalculate_smooth_normals(mesh: &mut Mesh) {
         }
     }
 
-    // Normalize
     for normal in &mut normals {
         let n = Vec3::from(*normal).normalize_or_zero();
         *normal = n.to_array();
@@ -260,7 +238,6 @@ fn recalculate_smooth_normals(mesh: &mut Mesh) {
 }
 
 fn recalculate_flat_normals(mesh: &mut Mesh) {
-    // Get positions
     let positions = if let Some(VertexAttributeValues::Float32x3(ref pos)) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         pos.clone()
     } else {
@@ -269,14 +246,12 @@ fn recalculate_flat_normals(mesh: &mut Mesh) {
 
     let mut normals = vec![[0.0f32; 3]; positions.len()];
 
-    // Get indices
     let indices = match mesh.indices() {
         Some(Indices::U32(idx)) => idx.iter().map(|&i| i as usize).collect::<Vec<_>>(),
         Some(Indices::U16(idx)) => idx.iter().map(|&i| i as usize).collect::<Vec<_>>(),
         None => return,
     };
 
-    // Calculate face normals (flat shading)
     for face in indices.chunks(3) {
         if face.len() != 3 { continue; }
         let (i0, i1, i2) = (face[0], face[1], face[2]);

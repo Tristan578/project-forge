@@ -12,17 +12,17 @@ use crate::core::{
 pub fn apply_lod_commands(
     mut commands: Commands,
     mut pending: ResMut<PendingCommands>,
-    mut query: Query<(&EntityId, Option<&mut LodData>)>,
+    mut query: Query<(Entity, &EntityId, Option<&mut LodData>)>,
 ) {
     // Process set_lod requests
     for request in pending.set_lod_requests.drain(..) {
-        if let Some((entity, lod_data)) = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id) {
+        if let Some((entity, _eid, lod_data)) = query.iter_mut().find(|(_e, eid, _)| eid.0 == request.entity_id) {
             if let Some(mut lod) = lod_data {
                 lod.lod_distances = request.lod_distances;
                 lod.auto_generate = request.auto_generate;
                 lod.lod_ratios = request.lod_ratios;
             } else {
-                commands.entity(entity.entity()).insert(LodData {
+                commands.entity(entity).insert(LodData {
                     lod_distances: request.lod_distances,
                     auto_generate: request.auto_generate,
                     lod_ratios: request.lod_ratios,
