@@ -4,11 +4,7 @@ use bevy::prelude::*;
 use crate::core::{
     entity_id::EntityId,
     lod::{LodData, PerformanceBudget},
-    pending::{
-        SetLodRequest, GenerateLodsRequest, SetPerformanceBudgetRequest,
-        GetPerformanceStatsRequest, OptimizeSceneRequest, SetLodDistancesRequest,
-        PendingCommands,
-    },
+    pending::PendingCommands,
 };
 
 /// System that processes pending LOD commands.
@@ -19,7 +15,7 @@ pub fn apply_lod_commands(
     mut query: Query<(&EntityId, Option<&mut LodData>)>,
 ) {
     // Process set_lod requests
-    for request in pending.set_lod_requests.borrow_mut().drain(..) {
+    for request in pending.set_lod_requests.drain(..) {
         if let Some((entity, lod_data)) = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id) {
             if let Some(mut lod) = lod_data {
                 lod.lod_distances = request.lod_distances;
@@ -37,18 +33,17 @@ pub fn apply_lod_commands(
     }
 
     // Process generate_lods requests (stub - TODO: implement mesh decimation)
-    for _request in pending.generate_lods_requests.borrow_mut().drain(..) {
-        // Stub: LOD mesh generation would happen here
+    for _request in pending.generate_lods_requests.drain(..) {
         tracing::info!("LOD generation requested (not yet implemented)");
     }
 
     // Process optimize_scene requests (stub)
-    for _request in pending.optimize_scene_requests.borrow_mut().drain(..) {
+    for _request in pending.optimize_scene_requests.drain(..) {
         tracing::info!("Scene optimization requested (not yet implemented)");
     }
 
     // Process set_lod_distances requests (stub - applies global LOD distances)
-    for _request in pending.set_lod_distances_requests.borrow_mut().drain(..) {
+    for _request in pending.set_lod_distances_requests.drain(..) {
         tracing::info!("Global LOD distances set (not yet implemented)");
     }
 }
@@ -61,7 +56,7 @@ pub fn apply_performance_budget_commands(
     mut budget_query: Query<&mut PerformanceBudget>,
 ) {
     // Process set_performance_budget requests
-    for request in pending.set_performance_budget_requests.borrow_mut().drain(..) {
+    for request in pending.set_performance_budget_requests.drain(..) {
         if let Ok(mut budget) = budget_query.get_single_mut() {
             budget.max_triangles = request.max_triangles;
             budget.max_draw_calls = request.max_draw_calls;
@@ -79,7 +74,7 @@ pub fn apply_performance_budget_commands(
     }
 
     // Process get_performance_stats requests (stub - would emit stats event)
-    for _request in pending.get_performance_stats_requests.borrow_mut().drain(..) {
+    for _request in pending.get_performance_stats_requests.drain(..) {
         tracing::info!("Performance stats requested (not yet implemented)");
         // TODO: emit_performance_stats() with real metrics
     }
