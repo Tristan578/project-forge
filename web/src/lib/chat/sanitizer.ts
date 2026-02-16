@@ -8,10 +8,19 @@
  *
  * @param input - Raw user message
  * @returns Sanitized string (max 4000 chars, stripped of control characters)
+ * @throws Error if prompt injection is detected
  */
 export function sanitizeChatInput(input: string): string {
   if (typeof input !== 'string') {
     return '';
+  }
+
+  // Check for prompt injection patterns
+  const injectionCheck = detectPromptInjection(input);
+  if (injectionCheck.detected) {
+    throw new Error(
+      `Prompt injection detected: ${injectionCheck.pattern || 'unknown pattern'}`
+    );
   }
 
   // Remove control characters (except tab, newline, carriage return)
@@ -178,37 +187,90 @@ export function validateBodySize(body: string, maxBytes: number): boolean {
 
 /**
  * Detect common prompt injection patterns.
- * Returns true if suspicious patterns are found.
+ * Returns object with detection status and identified pattern.
  *
  * @param input - User input to check
- * @returns True if injection detected
+ * @returns Object with detected flag and matched pattern name
  */
-export function detectPromptInjection(input: string): boolean {
+export function detectPromptInjection(input: string): {
+  detected: boolean;
+  pattern?: string;
+} {
   if (typeof input !== 'string') {
-    return false;
+    return { detected: false };
   }
 
   const lowerInput = input.toLowerCase();
 
-  // Common injection patterns
-  const injectionPatterns = [
-    /ignore\s+(all\s+)?(previous|above|system|prior)\s+(instructions?|prompts?|rules?|commands?)/i,
-    /ignore\s+above/i,
-    /forget\s+(everything|all|instructions?|context)/i,
-    /new\s+(instruction|rule|prompt|system|role):/i,
-    /you\s+are\s+now\s+/i,
-    /system\s*:\s*/i,
-    /\[system\]/i,
-    /<\|im_start\|>/i,
-    /<\|im_end\|>/i,
-    /\{\{.*system.*\}\}/i,
+  // System override markers
+  const systemMarkers = [
+    { regex: /\[system\s*:/i, name: '[SYSTEM: marker' },
+    { regex: /\[instruction\s*:/i, name: '[INSTRUCTION: marker' },
+    { regex: /\[override\s*:/i, name: '[OVERRIDE: marker' },
+    { regex: /\[admin\s*:/i, name: '[ADMIN: marker' },
   ];
 
-  for (const pattern of injectionPatterns) {
-    if (pattern.test(lowerInput)) {
-      return true;
+  for (const { regex, name } of systemMarkers) {
+    if (regex.test(lowerInput)) {
+      return { detected: true, pattern: name };
     }
   }
 
-  return false;
+  // System prompt headers
+  const promptHeaders = [
+    { regex: /###\s+system\s/i, name: '### System header' },
+    { regex: /##\s+system\s+prompt/i, name: '## System Prompt header' },
+    { regex: /---\s*begin\s+override\s*---/i, name: '---BEGIN OVERRIDE--- delimiter' },
+  ];
+
+  for (const { regex, name } of promptHeaders) {
+    if (regex.test(lowerInput)) {
+      return { detected: true, pattern: name };
+    }
+  }
+
+  // Instruction disregard patterns
+  const disregardPatterns = [
+    { regex: /ignore\s+previous\s+instructions?/i, name: 'ignore previous instructions' },
+    { regex: /ignore\s+above/i, name: 'ignore above' },
+    { regex: /disregard\s+all/i, name: 'disregard all' },
+  ];
+
+  for (const { regex, name } of disregardPatterns) {
+    if (regex.test(lowerInput)) {
+      return { detected: true, pattern: name };
+    }
+  }
+
+  // Role assumption patterns
+  const rolePatterns = [
+    { regex: /you\s+are\s+now\s+/i, name: 'you are now' },
+    { regex: /act\s+as\s+if\s+/i, name: 'act as if' },
+    { regex: /pretend\s+you\s+are\s+/i, name: 'pretend you are' },
+  ];
+
+  for (const { regex, name } of rolePatterns) {
+    if (regex.test(lowerInput)) {
+      return { detected: true, pattern: name };
+    }
+  }
+
+  // Additional common injection patterns
+  const extraPatterns = [
+    { regex: /ignore\s+all\s+(previous|above|system|prior)\s+(instructions?|prompts?|rules?|commands?)/i, name: 'ignore all [context]' },
+    { regex: /forget\s+(everything|all|instructions?|context)/i, name: 'forget [memory]' },
+    { regex: /new\s+(instruction|rule|prompt|system|role)\s*:/i, name: 'new [item]:' },
+    { regex: /system\s*:\s*/i, name: 'system: marker' },
+    { regex: /<\|im_start\|>/i, name: '<|im_start|> token' },
+    { regex: /<\|im_end\|>/i, name: '<|im_end|> token' },
+    { regex: /\{\{.*system.*\}\}/i, name: '{{system}} template' },
+  ];
+
+  for (const { regex, name } of extraPatterns) {
+    if (regex.test(lowerInput)) {
+      return { detected: true, pattern: name };
+    }
+  }
+
+  return { detected: false };
 }

@@ -119,6 +119,51 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      - name: Check WASM binary size (WebGL2)
+        working-directory: engine
+        run: |
+          WEBGL2_SIZE=$(stat -f%z pkg-webgl2/forge_engine_bg.wasm 2>/dev/null || stat -c%s pkg-webgl2/forge_engine_bg.wasm 2>/dev/null)
+          WEBGL2_SIZE_MB=$((WEBGL2_SIZE / 1000000))
+          echo "WebGL2 WASM binary size: ${WEBGL2_SIZE_MB} MB"
+          echo "WebGL2 binary size: ${WEBGL2_SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
+          if [ $WEBGL2_SIZE_MB -gt 60 ]; then
+            echo "ERROR: WebGL2 binary exceeds 60MB threshold!" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      - name: Check WASM binary size (WebGPU)
+        working-directory: engine
+        run: |
+          WEBGPU_SIZE=$(stat -f%z pkg-webgpu/forge_engine_bg.wasm 2>/dev/null || stat -c%s pkg-webgpu/forge_engine_bg.wasm 2>/dev/null)
+          WEBGPU_SIZE_MB=$((WEBGPU_SIZE / 1000000))
+          echo "WebGPU WASM binary size: ${WEBGPU_SIZE_MB} MB"
+          echo "WebGPU binary size: ${WEBGPU_SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
+          if [ $WEBGPU_SIZE_MB -gt 60 ]; then
+            echo "ERROR: WebGPU binary exceeds 60MB threshold!" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+  rust-audit:
+    name: Rust Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine -> target
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        working-directory: engine
+        run: cargo audit
+
   security:
     name: Security Audit
     runs-on: ubuntu-latest
