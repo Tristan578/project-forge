@@ -1,0 +1,123 @@
+# Project Forge — Copilot Instructions
+
+## Project Overview
+
+Project Forge is a browser-based, AI-native 2D/3D game engine. It is a polyglot monorepo with three pipelines:
+
+- **engine/** — Rust (Bevy 0.16) compiled to WebAssembly via wasm-bindgen. Pure game logic (ECS systems, physics, rendering, animation) lives in `engine/src/core/`. The JS interop bridge lives in `engine/src/bridge/`. The bridge is the ONLY module that imports `web-sys` or `wasm-bindgen`.
+- **web/** — TypeScript/React (Next.js 16) editor frontend. State management via Zustand stores with discrete slices. Strict TypeScript mode, zero ESLint warnings enforced.
+- **mcp-server/** — TypeScript MCP server (Model Context Protocol SDK) exposing 329 engine commands as AI-callable tools. Communicates with the editor via WebSocket bridge.
+
+## Architecture Principles
+
+- **Command-driven design**: Every engine operation is a JSON command. The UI, MCP server, and external agents all use the same `handle_command()` code path. Never create a UI-only shortcut that bypasses the command system.
+- **Layered boundaries**: Engine core → Bridge → WebSocket → Editor UI. Do not add `web-sys` imports outside `engine/src/bridge/`. Do not add direct WASM calls outside `web/src/hooks/useEngine`.
+- **ECS pattern (Bevy)**: Use `Query<>`, `ResMut<>`, `EventReader<>` for system parameters. Do not store mutable state outside Bevy's World. Prefer small, focused systems over large multi-query systems.
+- **Store slices (Zustand)**: Each concern gets its own slice (editor, chat, user, collaboration, publish, etc.). Use selectors to prevent unnecessary re-renders. Do not prop-drill — consume stores directly.
+
+## Coding Standards
+
+### Rust (engine/)
+- Target: `wasm32-unknown-unknown`. Never use `std::fs`, `std::net`, or other non-WASM APIs in engine code.
+- All `unsafe` blocks MUST have a `// SAFETY:` comment explaining invariants.
+- Use `serde` with `serde_wasm_bindgen` for all JS ↔ Rust serialization. Do not use manual JSON string building.
+- Prefer `Result<T, E>` over panics. Use `anyhow` for error chains in bridge code.
+- Keep `bridge/` modules under 300 lines. Split large modules by concern.
+- Feature flags: `webgl2` and `webgpu` features control rendering backend. Use `#[cfg(feature = "...")]` for conditional compilation.
+
+### TypeScript (web/, mcp-server/)
+- Strict mode enabled. Never use `any` type. Avoid `as` type casts — use Zod schemas for runtime validation instead.
+- All chat handler arguments MUST be validated with Zod schemas before use. Never trust `args` directly.
+- Use `z.object()` with `.parse()` for handler inputs. Return descriptive error messages on validation failure.
+- Numeric values from user/AI input must be bounds-checked (e.g., rotation clamped to ±π, positions finite).
+- Use named exports. One component/function per file for React components.
+- Prefer `const` over `let`. Never use `var`.
+
+### CSS/Styling
+- Tailwind CSS for all styling. No inline styles or CSS modules.
+- Follow existing color token system in `tailwind.config.ts`.
+
+## Security Rules
+
+- **Prompt injection**: All user/AI chat input passes through `sanitizeChatInput()` in `web/src/lib/chat/sanitizer.ts`. This function detects prompt injection patterns and throws on detection. Never bypass the sanitizer for any input that reaches the Anthropic API.
+- **WebSocket auth**: The MCP server WebSocket bridge uses Bearer token auth via `FORGE_WS_TOKEN` env var. Any new transport or connection endpoint must implement equivalent authentication.
+- **API keys**: Provider API keys (OpenAI, ElevenLabs, Meshy, etc.) are encrypted with AES-256-GCM in `web/src/lib/encryption.ts`. Never log, expose in URLs, or include in client-side bundles.
+- **Clerk auth**: All API routes must validate session via `api-auth.ts`. Never expose authenticated endpoints without `requireAuth()`.
+- **Dependency audit**: Rust dependencies are audited via `cargo audit` in CI. npm dependencies via `npm audit`. Do not add dependencies with known critical vulnerabilities.
+- **No secrets in code**: Never commit API keys, tokens, or credentials. Use environment variables with `.env.local` (gitignored).
+
+## Testing Patterns
+
+### Web (vitest)
+- Test files live alongside source: `foo.ts` → `foo.test.ts`
+- Use `describe/it/expect` pattern. Descriptive test names: `it('should reject invalid entity IDs')`
+- Mock WASM bridge with `vi.mock()` for unit tests. Do not import real engine in web tests.
+- Zustand stores: Test each slice independently. Use `act()` for state mutations.
+
+### MCP Server (vitest)
+- Test command manifests, search, and tool registration.
+- Mock WebSocket connections for transport tests.
+
+### Rust Engine (cargo test — NEEDS WORK)
+- Engine currently has zero tests. When adding tests:
+- Use `#[cfg(test)] mod tests` at the bottom of each module.
+- Test ECS systems by creating a minimal `App` with required components and running the system.
+- Test bridge serialization with round-trip `serde` tests.
+- Do not test rendering directly (no GPU in CI). Test logic and state only.
+
+## Build Commands
+
+```
+# Engine (WASM)
+cd engine && cargo build --target wasm32-unknown-unknown --release --features webgl2
+# or use the build script:
+./build_wasm.sh           # Mac/Linux
+./build_wasm.ps1          # Windows
+
+# Web editor
+cd web && npm install && npm run dev     # development
+cd web && npm run build                  # production
+
+# MCP server
+cd mcp-server && npm install && npx tsc  # compile
+cd mcp-server && npx vitest run          # test
+
+# Full lint
+cd web && npx eslint --max-warnings 0
+```
+
+## CI/CD Pipeline
+
+GitHub Actions workflow at `.github/workflows/ci.yml` runs on every PR and push to main:
+- **build-web**: `npm run build` + `npx vitest run` + `npx eslint --max-warnings 0`
+- **build-wasm**: Dual build (WebGL2 + WebGPU) + binary size check (60MB threshold)
+- **rust-audit**: `cargo audit` on engine dependencies
+- All three jobs must pass before merge.
+
+## WASM Binary Size
+
+The engine WASM binary is ~53MB. CI enforces a 60MB threshold. When adding new Bevy plugins or Rust dependencies, check the impact on binary size. Use `opt-level = "z"`, LTO, and `strip = true` (already configured in `Cargo.toml`). Consider making heavy dependencies feature-gated.
+
+## Key File Locations
+
+- `engine/src/core/` — Pure Rust game systems (physics, rendering, animation)
+- `engine/src/bridge/` — WASM ↔ JS interop layer (only place that imports web-sys)
+- `engine/Cargo.toml` — Rust dependencies and build config
+- `web/src/app/` — Next.js pages and API routes
+- `web/src/components/` — React UI components
+- `web/src/stores/` — Zustand state management
+- `web/src/lib/chat/` — AI chat system (sanitizer, handlers, executor)
+- `web/src/lib/chat/handlers/` — Per-domain chat command handlers
+- `web/src/hooks/useEngine.ts` — WASM lifecycle management
+- `mcp-server/src/` — MCP tool definitions and transport
+- `mcp-server/src/transport/websocket.ts` — WebSocket bridge to editor
+- `.github/workflows/ci.yml` — CI/CD pipeline
+
+## Outstanding Work (from evaluation)
+
+These items are known gaps. Copilot should actively help address them:
+- Add Zod validation schemas to all chat command handlers in `web/src/lib/chat/handlers/`
+- Add `#[cfg(test)]` unit tests to Rust engine modules, especially `bridge/animation.rs` and `bridge/edit_mode.rs`
+- Add `// SAFETY:` comments to unsafe blocks in `bridge/core_systems.rs` and `bridge/events.rs`
+- Create ADRs in `docs/architecture/` explaining Bevy selection, CRDT strategy, and feature flag design
+- Extract magic numbers (0.2s poll interval, particle limits) to configuration constants
