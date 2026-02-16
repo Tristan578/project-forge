@@ -34,6 +34,12 @@ export class EditorBridge {
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
+        // Clear any existing reconnect timer to prevent overlapping connections
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+
         // P0 Security Fix: WebSocket Authentication
         // Require Bearer token from FORGE_WS_TOKEN environment variable if set.
         // This protects against unauthorized access to the editor bridge.
