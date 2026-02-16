@@ -8,19 +8,10 @@
  *
  * @param input - Raw user message
  * @returns Sanitized string (max 4000 chars, stripped of control characters)
- * @throws Error if prompt injection is detected
  */
 export function sanitizeChatInput(input: string): string {
   if (typeof input !== 'string') {
     return '';
-  }
-
-  // Check for prompt injection patterns
-  const injectionCheck = detectPromptInjection(input);
-  if (injectionCheck.detected) {
-    throw new Error(
-      `Prompt injection detected: ${injectionCheck.pattern || 'unknown pattern'}`
-    );
   }
 
   // Remove control characters (except tab, newline, carriage return)
@@ -204,10 +195,10 @@ export function detectPromptInjection(input: string): {
 
   // System override markers
   const systemMarkers = [
-    { regex: /\[system\s*:/i, name: '[SYSTEM: marker' },
-    { regex: /\[instruction\s*:/i, name: '[INSTRUCTION: marker' },
-    { regex: /\[override\s*:/i, name: '[OVERRIDE: marker' },
-    { regex: /\[admin\s*:/i, name: '[ADMIN: marker' },
+    { regex: /\[system\s*[\]:]/i, name: '[SYSTEM] marker' },
+    { regex: /\[instruction\s*[\]:]/i, name: '[INSTRUCTION] marker' },
+    { regex: /\[override\s*[\]:]/i, name: '[OVERRIDE] marker' },
+    { regex: /\[admin\s*[\]:]/i, name: '[ADMIN] marker' },
   ];
 
   for (const { regex, name } of systemMarkers) {
