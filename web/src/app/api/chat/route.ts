@@ -182,7 +182,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Detect prompt injection attempts
-    if (msg.role === 'user' && detectPromptInjection(msg.content)) {
+    const injectionCheck = detectPromptInjection(msg.content);
+    if (msg.role === 'user' && injectionCheck.detected) {
       return Response.json(
         { error: 'Message contains suspicious patterns.' },
         { status: 400 }

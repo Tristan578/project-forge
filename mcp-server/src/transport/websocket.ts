@@ -17,6 +17,11 @@ export class EditorBridge {
   private connected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Exponential backoff state for reconnection (P2 security fix)
+  private reconnectAttempt: number = 0;
+  private MAX_RECONNECT_DELAY = 30000; // 30 seconds
+  private BASE_RECONNECT_DELAY = 1000; // 1 second
+
   // Latest cached scene state (updated by editor push events)
   public sceneGraph: unknown = null;
   public selection: unknown = null;
@@ -29,10 +34,36 @@ export class EditorBridge {
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url);
+        // Clear any existing reconnect timer to prevent overlapping connections
+        if (this.reconnectTimer) {
+          clearTimeout(this.reconnectTimer);
+          this.reconnectTimer = null;
+        }
+
+        // P0 Security Fix: WebSocket Authentication
+        // Require Bearer token from FORGE_WS_TOKEN environment variable if set.
+        // This protects against unauthorized access to the editor bridge.
+        // In development mode (no token), local connections are allowed but logged.
+        const wsToken = process.env.FORGE_WS_TOKEN;
+        const headers: Record<string, string> = {};
+
+        if (wsToken) {
+          headers['Authorization'] = `Bearer ${wsToken}`;
+        } else {
+          console.warn(
+            '[EditorBridge] No FORGE_WS_TOKEN set. Running in development mode. ' +
+            'Set FORGE_WS_TOKEN environment variable for production security.'
+          );
+        }
+
+        this.ws = new WebSocket(this.url, {
+          headers,
+        });
 
         this.ws.on('open', () => {
           this.connected = true;
+          // Reset exponential backoff on successful connection
+          this.reconnectAttempt = 0;
           resolve();
         });
 
@@ -53,10 +84,19 @@ export class EditorBridge {
             pending.reject(new Error('Editor connection closed'));
             this.pendingCommands.delete(id);
           }
-          // Auto-reconnect after 5s
+          // P2 Security Fix: Exponential backoff reconnection
+          // Prevents connection storms by increasing delay exponentially
+          this.reconnectAttempt++;
+          const delay = Math.min(
+            this.BASE_RECONNECT_DELAY * Math.pow(2, this.reconnectAttempt - 1),
+            this.MAX_RECONNECT_DELAY
+          );
+          console.log(
+            `[EditorBridge] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempt})`
+          );
           this.reconnectTimer = setTimeout(() => {
             this.connect().catch(() => {});
-          }, 5000);
+          }, delay);
         });
 
         this.ws.on('error', (err) => {

@@ -53,7 +53,8 @@ export function validateProjectSecurity(
     }
 
     // Check for injection patterns in entity names
-    if (detectPromptInjection(entity.name)) {
+    const injectionCheck = detectPromptInjection(entity.name);
+    if (injectionCheck.detected) {
       issues.push({
         severity: 'medium',
         category: 'entity_name',
