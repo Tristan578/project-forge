@@ -1,0 +1,119 @@
+name: Auto-fix failed CI with Copilot
+
+on:
+  workflow_run:
+    workflows: ["CI"]  # Must match your CI workflow name exactly
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  create-fix-issue:
+    # Only run when CI fails on a PR branch (not main)
+    if: >
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch != 'main' &&
+      github.event.workflow_run.head_branch != 'master'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get failed workflow details
+        id: workflow-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+
+            // Get failed jobs
+            const jobs = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+            });
+
+            const failedJobs = jobs.data.jobs.filter(j => j.conclusion === 'failure');
+
+            let failureDetails = '';
+            for (const job of failedJobs) {
+              failureDetails += `### ❌ ${job.name}\n`;
+
+              // Get job logs (step-level detail)
+              const failedSteps = job.steps?.filter(s => s.conclusion === 'failure') || [];
+              for (const step of failedSteps) {
+                failureDetails += `- **Step failed:** ${step.name}\n`;
+              }
+              failureDetails += `- [View logs](${job.html_url})\n\n`;
+            }
+
+            const issueBody = `## CI Failure — Auto-generated for Copilot
+
+**Branch:** \`${run.head_branch}\`
+**Commit:** [\`${run.head_sha.substring(0, 7)}\`](${run.html_url})
+**Workflow:** ${run.name}
+**Run:** [#${run.run_number}](${run.html_url})
+
+## Failed Jobs
+
+${failureDetails}
+
+## Instructions for Copilot
+
+1. Check out branch \`${run.head_branch}\`
+2. Read the CI workflow at \`.github/workflows/ci.yml\` to understand what checks run
+3. Read the Copilot instructions at \`.github/copilot-instructions.md\` for project context
+4. Analyze the failure(s) above and identify root cause
+5. Fix the code to make CI pass
+6. Run the relevant checks locally before committing:
+   - For web failures: \`cd web && npm run build && npx vitest run && npx eslint --max-warnings 0\`
+   - For WASM failures: \`cd engine && cargo build --target wasm32-unknown-unknown --release --features webgl2\`
+   - For audit failures: \`cd engine && cargo audit\`
+
+**Important:** Follow the coding standards in \`.github/copilot-instructions.md\`. Do not weaken CI checks or add \`eslint-disable\` comments without justification.`;
+
+            core.setOutput('title', `fix(ci): auto-fix CI failure on \`${run.head_branch}\` (run #${run.run_number})`);
+            core.setOutput('body', issueBody);
+            core.setOutput('branch', run.head_branch);
+
+      - name: Create issue and assign to Copilot
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.COPILOT_ASSIGN_PAT }}
+          script: |
+            const title = `${{ steps.workflow-info.outputs.title }}`;
+            const body = `${{ steps.workflow-info.outputs.body }}`;
+
+            // Check if an open issue already exists for this branch
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'copilot-autofix',
+            });
+
+            const branch = `${{ steps.workflow-info.outputs.branch }}`;
+            const duplicate = existing.data.find(i => i.title.includes(branch));
+
+            if (duplicate) {
+              // Update existing issue instead of creating a new one
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: duplicate.number,
+                body: `CI failed again. Updated failure details:\n\n${body}`,
+              });
+              console.log(`Updated existing issue #${duplicate.number}`);
+              return;
+            }
+
+            // Create new issue
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              body: body,
+              labels: ['copilot-autofix', 'ci-failure'],
+              assignees: ['copilot'],  // Assigns to Copilot coding agent
+            });
+
+            console.log(`Created issue #${issue.data.number}: ${issue.data.html_url}`);
