@@ -185,10 +185,6 @@ describe('detectPromptInjection', () => {
     expect(detectPromptInjection('[INSTRUCTION: follow these steps').detected).toBe(true);
     expect(detectPromptInjection('[OVERRIDE: new behavior').detected).toBe(true);
     expect(detectPromptInjection('[ADMIN: privileged command').detected).toBe(true);
-    expect(detectPromptInjection('[SYSTEM: do something').detected).toBe(true);
-    expect(detectPromptInjection('[INSTRUCTION: follow these steps').detected).toBe(true);
-    expect(detectPromptInjection('[OVERRIDE: new behavior').detected).toBe(true);
-    expect(detectPromptInjection('[ADMIN: privileged command').detected).toBe(true);
   });
 
   it('detects special tokens', () => {
