@@ -33,9 +33,22 @@ The fix has been committed to the `auto-eval/security-and-ci-fixes` branch:
 - Message: "fix: Update cargo-audit to v0.22.1 to resolve time crate compilation error"
 
 ## Next Steps
-The commit needs to be pushed to the remote `auto-eval/security-and-ci-fixes` branch to trigger CI and validate the fix.
 
-Once pushed and CI passes, PR #2 should be ready for review and merge.
+### Option 1: Apply the Patch (Recommended)
+A patch file has been created at `issues/pr2-cargo-audit-fix.patch`. To apply it to PR #2:
+
+```bash
+git checkout auto-eval/security-and-ci-fixes
+git am issues/pr2-cargo-audit-fix.patch
+git push origin auto-eval/security-and-ci-fixes
+```
+
+### Option 2: Manual Fix
+Edit `.github/workflows/ci.yml` line 169 on the `auto-eval/security-and-ci-fixes` branch:
+- Change: `cargo install cargo-audit --version 0.20.0 --locked`
+- To: `cargo install cargo-audit --version 0.22.1 --locked`
+
+Once applied and pushed, CI should pass and PR #2 will be ready for review and merge.
 
 ## Files Changed
 - `.github/workflows/ci.yml` (line 169): Updated cargo-audit version
