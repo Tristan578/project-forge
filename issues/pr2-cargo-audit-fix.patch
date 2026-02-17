@@ -1,0 +1,26 @@
+From 676e234f1751998f3f55304bca6a44c7669fda70 Mon Sep 17 00:00:00 2001
+From: "copilot-swe-agent[bot]" <198982749+Copilot@users.noreply.github.com>
+Date: Tue, 17 Feb 2026 03:23:25 +0000
+Subject: [PATCH] fix: Update cargo-audit to v0.22.1 to resolve time crate
+ compilation error
+
+---
+ .github/workflows/ci.yml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 8a90be1..bb4622c 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -166,7 +166,7 @@ jobs:
+           workspaces: engine -> target
+ 
+       - name: Install cargo-audit
+-        run: cargo install cargo-audit --version 0.20.0 --locked
++        run: cargo install cargo-audit --version 0.22.1 --locked
+ 
+       - name: Run cargo audit
+         working-directory: engine
+-- 
+2.52.0
+
