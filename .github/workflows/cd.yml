@@ -100,7 +100,7 @@ jobs:
           workspaces: engine -> target
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.108
 
       - name: Build WebGL2
         working-directory: engine
@@ -149,7 +149,7 @@ jobs:
           workspaces: engine -> target
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.108
 
       - name: Build WASM binaries
         working-directory: engine
