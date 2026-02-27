@@ -256,6 +256,7 @@ jobs:
         run: npx playwright test --project=chromium --grep-invert @engine
         env:
           CI: true
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
