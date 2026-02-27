@@ -42,6 +42,41 @@ pub struct Camera2dBounds {
     pub max_y: f32,
 }
 
+// === Sprite Animation Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct SpriteSheetUpdate {
+    pub entity_id: String,
+    pub sprite_sheet_data: crate::core::sprite::SpriteSheetData,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteSheetRemoval {
+    pub entity_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteAnimatorUpdate {
+    pub entity_id: String,
+    pub animator_data: crate::core::sprite::SpriteAnimatorData,
+}
+
+#[derive(Debug, Clone)]
+pub struct SpriteAnimatorRemoval {
+    pub entity_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnimationStateMachineUpdate {
+    pub entity_id: String,
+    pub state_machine_data: crate::core::sprite::AnimationStateMachineData,
+}
+
+#[derive(Debug, Clone)]
+pub struct AnimationStateMachineRemoval {
+    pub entity_id: String,
+}
+
 // === Queue Methods ===
 
 impl PendingCommands {
@@ -59,6 +94,30 @@ impl PendingCommands {
 
     pub fn queue_camera_2d_data_update(&mut self, update: Camera2dDataUpdate) {
         self.camera_2d_data_updates.push(update);
+    }
+
+    pub fn queue_sprite_sheet_update(&mut self, update: SpriteSheetUpdate) {
+        self.sprite_sheet_updates.push(update);
+    }
+
+    pub fn queue_sprite_sheet_removal(&mut self, removal: SpriteSheetRemoval) {
+        self.sprite_sheet_removals.push(removal);
+    }
+
+    pub fn queue_sprite_animator_update(&mut self, update: SpriteAnimatorUpdate) {
+        self.sprite_animator_updates.push(update);
+    }
+
+    pub fn queue_sprite_animator_removal(&mut self, removal: SpriteAnimatorRemoval) {
+        self.sprite_animator_removals.push(removal);
+    }
+
+    pub fn queue_animation_state_machine_update(&mut self, update: AnimationStateMachineUpdate) {
+        self.animation_state_machine_updates.push(update);
+    }
+
+    pub fn queue_animation_state_machine_removal(&mut self, removal: AnimationStateMachineRemoval) {
+        self.animation_state_machine_removals.push(removal);
     }
 }
 
@@ -78,4 +137,28 @@ pub fn queue_sprite_removal_from_bridge(removal: SpriteRemoval) -> bool {
 
 pub fn queue_camera_2d_data_update_from_bridge(update: Camera2dDataUpdate) -> bool {
     super::with_pending(|pc| pc.queue_camera_2d_data_update(update)).is_some()
+}
+
+pub fn queue_sprite_sheet_update_from_bridge(update: SpriteSheetUpdate) -> bool {
+    super::with_pending(|pc| pc.queue_sprite_sheet_update(update)).is_some()
+}
+
+pub fn queue_sprite_sheet_removal_from_bridge(removal: SpriteSheetRemoval) -> bool {
+    super::with_pending(|pc| pc.queue_sprite_sheet_removal(removal)).is_some()
+}
+
+pub fn queue_sprite_animator_update_from_bridge(update: SpriteAnimatorUpdate) -> bool {
+    super::with_pending(|pc| pc.queue_sprite_animator_update(update)).is_some()
+}
+
+pub fn queue_sprite_animator_removal_from_bridge(removal: SpriteAnimatorRemoval) -> bool {
+    super::with_pending(|pc| pc.queue_sprite_animator_removal(removal)).is_some()
+}
+
+pub fn queue_animation_state_machine_update_from_bridge(update: AnimationStateMachineUpdate) -> bool {
+    super::with_pending(|pc| pc.queue_animation_state_machine_update(update)).is_some()
+}
+
+pub fn queue_animation_state_machine_removal_from_bridge(removal: AnimationStateMachineRemoval) -> bool {
+    super::with_pending(|pc| pc.queue_animation_state_machine_removal(removal)).is_some()
 }

@@ -334,6 +334,18 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, sprite::apply_sprite_data_updates)
             .add_systems(Update, sprite::apply_sprite_removals)
             .add_systems(Update, sprite::sync_sprite_rendering)
+            // Sprite animation pipeline (always-active): sheet slicing, frame timing, state machine
+            .add_systems(Update, (
+                sprite::apply_sprite_sheet_updates,
+                sprite::apply_sprite_sheet_removals,
+                sprite::apply_sprite_animator_updates,
+                sprite::apply_sprite_animator_removals,
+                sprite::apply_animation_state_machine_updates,
+                sprite::apply_animation_state_machine_removals,
+            ))
+            .add_systems(Update, sprite::sync_sprite_sheet_atlas)
+            .add_systems(Update, sprite::evaluate_animation_state_machine)
+            .add_systems(Update, sprite::animate_sprite_frames)
             // 2D camera systems (always-active): project type + Camera2d management
             .add_systems(Update, sprite::apply_project_type_changes)
             .add_systems(Update, sprite::apply_camera_2d_updates)

@@ -233,6 +233,12 @@ pub struct PendingCommands {
     pub sprite_data_updates: Vec<SpriteDataUpdate>,
     pub sprite_removals: Vec<SpriteRemoval>,
     pub camera_2d_data_updates: Vec<Camera2dDataUpdate>,
+    pub sprite_sheet_updates: Vec<SpriteSheetUpdate>,
+    pub sprite_sheet_removals: Vec<SpriteSheetRemoval>,
+    pub sprite_animator_updates: Vec<SpriteAnimatorUpdate>,
+    pub sprite_animator_removals: Vec<SpriteAnimatorRemoval>,
+    pub animation_state_machine_updates: Vec<AnimationStateMachineUpdate>,
+    pub animation_state_machine_removals: Vec<AnimationStateMachineRemoval>,
     // scene domain
     pub scene_export_requests: Vec<SceneExportRequest>,
     pub scene_load_requests: Vec<SceneLoadRequest>,

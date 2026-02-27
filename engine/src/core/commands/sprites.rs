@@ -552,6 +552,151 @@ fn handle_auto_weight_skeleton2d(payload: serde_json::Value) -> super::CommandRe
     }
 }
 
+/// Handle set_sprite_sheet command.
+/// Payload: { entityId, assetId, sliceMode, frames, clips }
+fn handle_set_sprite_sheet(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    // Remove entityId from the payload and deserialize the rest as SpriteSheetData
+    let mut obj = payload;
+    if let Some(map) = obj.as_object_mut() {
+        map.remove("entityId");
+    }
+    let sprite_sheet_data: crate::core::sprite::SpriteSheetData =
+        serde_json::from_value(obj)
+            .map_err(|e| format!("Invalid sprite sheet data: {}", e))?;
+
+    if queue_sprite_sheet_update_from_bridge(SpriteSheetUpdate {
+        entity_id,
+        sprite_sheet_data,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_sprite_sheet command.
+/// Payload: { entityId }
+fn handle_remove_sprite_sheet(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_sprite_sheet_removal_from_bridge(SpriteSheetRemoval { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_sprite_animator command.
+/// Payload: { entityId, spriteSheetId, currentClip?, frameIndex, playing, speed }
+fn handle_set_sprite_animator(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let sprite_sheet_id = payload.get("spriteSheetId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing spriteSheetId")?
+        .to_string();
+
+    let current_clip = payload.get("currentClip")
+        .and_then(|v| if v.is_null() { None } else { v.as_str() })
+        .map(|s| s.to_string());
+
+    let frame_index = payload.get("frameIndex")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    let playing = payload.get("playing")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let speed = payload.get("speed")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0) as f32;
+
+    let animator_data = crate::core::sprite::SpriteAnimatorData {
+        sprite_sheet_id,
+        current_clip,
+        frame_index,
+        playing,
+        speed,
+    };
+
+    if queue_sprite_animator_update_from_bridge(SpriteAnimatorUpdate {
+        entity_id,
+        animator_data,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_sprite_animator command.
+/// Payload: { entityId }
+fn handle_remove_sprite_animator(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_sprite_animator_removal_from_bridge(SpriteAnimatorRemoval { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_animation_state_machine command.
+/// Payload: { entityId, states, transitions, currentState, parameters }
+fn handle_set_animation_state_machine(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let mut obj = payload;
+    if let Some(map) = obj.as_object_mut() {
+        map.remove("entityId");
+    }
+    let state_machine_data: crate::core::sprite::AnimationStateMachineData =
+        serde_json::from_value(obj)
+            .map_err(|e| format!("Invalid state machine data: {}", e))?;
+
+    if queue_animation_state_machine_update_from_bridge(AnimationStateMachineUpdate {
+        entity_id,
+        state_machine_data,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_animation_state_machine command.
+/// Payload: { entityId }
+fn handle_remove_animation_state_machine(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_animation_state_machine_removal_from_bridge(AnimationStateMachineRemoval { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
     match command {
         "set_project_type" => Some(handle_set_project_type(payload.clone())),
@@ -567,6 +712,12 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         }
         "update_camera_2d" => Some(handle_update_camera_2d(payload.clone())),
         "get_camera_2d" => Some(super::handle_query(QueryRequest::Camera2dState)),
+        "set_sprite_sheet" => Some(handle_set_sprite_sheet(payload.clone())),
+        "remove_sprite_sheet" => Some(handle_remove_sprite_sheet(payload.clone())),
+        "set_sprite_animator" => Some(handle_set_sprite_animator(payload.clone())),
+        "remove_sprite_animator" => Some(handle_remove_sprite_animator(payload.clone())),
+        "set_animation_state_machine" => Some(handle_set_animation_state_machine(payload.clone())),
+        "remove_animation_state_machine" => Some(handle_remove_animation_state_machine(payload.clone())),
         "create_skeleton2d" => Some(handle_create_skeleton2d(payload.clone())),
         "add_bone2d" => Some(handle_add_bone2d(payload.clone())),
         "remove_bone2d" => Some(handle_remove_bone2d(payload.clone())),
