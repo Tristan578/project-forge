@@ -141,7 +141,13 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
     const entityId = args.entityId as string;
     const slotName = args.slotName as string;
     const assetId = args.assetId as string;
-    if (!entityId || !slotName || !assetId) return { success: false, error: 'Missing required params' };
+    const missingParams: string[] = [];
+    if (!entityId) missingParams.push('entityId');
+    if (!slotName) missingParams.push('slotName');
+    if (!assetId) missingParams.push('assetId');
+    if (missingParams.length > 0) {
+      return { success: false, error: `Missing required params: ${missingParams.join(', ')}` };
+    }
     store.addAudioLayer(entityId, slotName, assetId, {
       volume: args.volume as number | undefined,
       loop: args.loop as boolean | undefined,

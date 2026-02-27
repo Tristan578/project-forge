@@ -959,10 +959,9 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   create_skeletal_animation2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, animName, fps = 24, looping = true } = args as {
+      const { entityId, animName, looping = true } = args as {
         entityId: string;
         animName: string;
-        fps?: number;
         looping?: boolean;
       };
 
@@ -973,8 +972,6 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
         looping,
         tracks: {},
       };
-      // Suppress fps lint warning — stored in UI state for frame rate context
-      void fps;
 
       ctx.store.setSkeletalAnimations2d(entityId, [...existing, anim]);
       return { success: true, result: { message: `Created skeletal animation "${animName}"` } };

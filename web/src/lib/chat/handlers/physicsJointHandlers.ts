@@ -191,7 +191,7 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
     const shape = args.shape as string;
     if (!shape) return { success: false, error: 'Missing shape parameter' };
     if (!['circle', 'square', 'hexagon', 'star'].includes(shape)) {
-      return { success: false, error: 'Invalid shape. Must be: circle, square, hexagon, or star' };
+      return { success: false, error: 'Invalid shape. Must be one of: circle, square, hexagon, star' };
     }
 
     ctx.store.extrudeShape(shape, {
