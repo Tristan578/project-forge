@@ -374,77 +374,135 @@ pub(super) fn apply_remove_joint2d_requests(
     }
 }
 
-/// System that applies 2D force applications (always-active, metadata-only).
-/// In metadata-only mode, this just emits events for the web layer to handle.
+/// System that applies 2D force applications (only works during Play mode).
 pub(super) fn apply_force_applications2d(
     mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    engine_mode: Res<EngineMode>,
+    query: Query<(Entity, &EntityId), With<bevy_rapier2d::prelude::RigidBody>>,
 ) {
+    if !engine_mode.is_playing() {
+        pending.force_applications2d.clear();
+        return;
+    }
+
     for application in pending.force_applications2d.drain(..) {
-        // In metadata-only mode, just log. Future Rapier integration will apply actual force.
-        tracing::info!(
-            "2D force application (metadata-only): entity={}, force=({}, {})",
-            application.entity_id,
-            application.force_x,
-            application.force_y
-        );
+        for (entity, entity_id) in query.iter() {
+            if entity_id.0 == application.entity_id {
+                commands.entity(entity).insert(
+                    bevy_rapier2d::prelude::ExternalForce {
+                        force: bevy_rapier2d::prelude::Vect::new(
+                            application.force_x,
+                            application.force_y,
+                        ),
+                        torque: 0.0,
+                    }
+                );
+                break;
+            }
+        }
     }
 }
 
-/// System that applies 2D impulse applications (always-active, metadata-only).
-/// In metadata-only mode, this just emits events for the web layer to handle.
+/// System that applies 2D impulse applications (only works during Play mode).
 pub(super) fn apply_impulse_applications2d(
     mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    engine_mode: Res<EngineMode>,
+    query: Query<(Entity, &EntityId), With<bevy_rapier2d::prelude::RigidBody>>,
 ) {
+    if !engine_mode.is_playing() {
+        pending.impulse_applications2d.clear();
+        return;
+    }
+
     for application in pending.impulse_applications2d.drain(..) {
-        // In metadata-only mode, just log. Future Rapier integration will apply actual impulse.
-        tracing::info!(
-            "2D impulse application (metadata-only): entity={}, impulse=({}, {})",
-            application.entity_id,
-            application.impulse_x,
-            application.impulse_y
-        );
+        for (entity, entity_id) in query.iter() {
+            if entity_id.0 == application.entity_id {
+                commands.entity(entity).insert(
+                    bevy_rapier2d::prelude::ExternalImpulse {
+                        impulse: bevy_rapier2d::prelude::Vect::new(
+                            application.impulse_x,
+                            application.impulse_y,
+                        ),
+                        torque_impulse: 0.0,
+                    }
+                );
+                break;
+            }
+        }
     }
 }
 
-/// System that processes 2D raycast requests (always-active, metadata-only).
+/// System that processes 2D raycast requests using Rapier 2D context.
 pub(super) fn apply_raycast2d_requests(
     mut pending: ResMut<PendingCommands>,
+    rapier_context: bevy_rapier2d::prelude::ReadRapierContext,
+    entity_id_query: Query<&EntityId>,
 ) {
     for request in pending.raycast2d_requests.drain(..) {
-        // In metadata-only mode, always miss. Future Rapier integration will do actual raycasts.
-        tracing::info!(
-            "2D raycast (metadata-only): origin=({}, {}), dir=({}, {}), max_distance={}",
-            request.origin_x,
-            request.origin_y,
-            request.dir_x,
-            request.dir_y,
-            request.max_distance
-        );
-        events::emit_raycast2d_miss();
+        let Ok(rapier_context) = rapier_context.single() else {
+            events::emit_raycast2d_miss();
+            continue;
+        };
+
+        let origin = bevy_rapier2d::prelude::Vect::new(request.origin_x, request.origin_y);
+        let direction = bevy_rapier2d::prelude::Vect::new(request.dir_x, request.dir_y);
+
+        if let Some((entity, toi)) = rapier_context.cast_ray(
+            origin,
+            direction,
+            request.max_distance,
+            true,
+            bevy_rapier2d::prelude::QueryFilter::default(),
+        ) {
+            let hit_point = origin + direction * toi;
+            if let Ok(eid) = entity_id_query.get(entity) {
+                // Compute a simple 2D normal (perpendicular to ray direction)
+                let dir_len = (direction.x * direction.x + direction.y * direction.y).sqrt();
+                let normal_x = if dir_len > 0.0 { -direction.y / dir_len } else { 0.0 };
+                let normal_y = if dir_len > 0.0 { direction.x / dir_len } else { 1.0 };
+                events::emit_raycast2d_hit(
+                    &eid.0,
+                    hit_point.x,
+                    hit_point.y,
+                    normal_x,
+                    normal_y,
+                    toi,
+                );
+            } else {
+                events::emit_raycast2d_miss();
+            }
+        } else {
+            events::emit_raycast2d_miss();
+        }
     }
 }
 
-/// System that applies 2D gravity updates (editor-only, metadata-only).
+/// System that applies 2D gravity updates to the Gravity2d resource.
 pub(super) fn apply_gravity2d_updates(
     mut pending: ResMut<PendingCommands>,
+    mut gravity: ResMut<crate::core::physics_2d_sim::Gravity2d>,
 ) {
     for update in pending.gravity2d_updates.drain(..) {
-        // In metadata-only mode, just log. Future Rapier integration will update actual gravity.
+        gravity.x = update.gravity_x;
+        gravity.y = update.gravity_y;
         tracing::info!(
-            "2D gravity update (metadata-only): ({}, {})",
+            "2D gravity updated: ({}, {})",
             update.gravity_x,
             update.gravity_y
         );
     }
 }
 
-/// System that applies 2D debug physics toggles (editor-only, metadata-only).
+/// System that applies 2D debug physics toggles.
 pub(super) fn apply_debug_physics2d_toggle(
     mut pending: ResMut<PendingCommands>,
+    mut debug_enabled: ResMut<crate::core::physics_2d_sim::DebugPhysics2dEnabled>,
 ) {
     for toggle in pending.debug_physics2d_toggles.drain(..) {
-        // In metadata-only mode, just log. Future Rapier integration will toggle debug rendering.
-        tracing::info!("2D debug physics toggle (metadata-only): {}", toggle.enabled);
+        debug_enabled.0 = toggle.enabled;
+        tracing::info!("2D debug physics rendering: {}", toggle.enabled);
     }
 }
 
@@ -490,6 +548,30 @@ pub(super) fn read_collision_events(
         let (entity_a, entity_b, started) = match event {
             bevy_rapier3d::prelude::CollisionEvent::Started(a, b, _) => (*a, *b, true),
             bevy_rapier3d::prelude::CollisionEvent::Stopped(a, b, _) => (*a, *b, false),
+        };
+
+        if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(entity_a), entity_id_query.get(entity_b)) {
+            events::emit_collision_event(&id_a.0, &id_b.0, started);
+        }
+    }
+}
+
+/// System that reads 2D collision events from Rapier 2D and emits them to JS.
+/// Runs always (mode-gated internally by checking if physics is active).
+pub(super) fn read_collision_events_2d(
+    mut collision_events: EventReader<bevy_rapier2d::prelude::CollisionEvent>,
+    entity_id_query: Query<&EntityId>,
+    engine_mode: Res<EngineMode>,
+) {
+    if !engine_mode.is_playing() {
+        collision_events.clear();
+        return;
+    }
+
+    for event in collision_events.read() {
+        let (entity_a, entity_b, started) = match event {
+            bevy_rapier2d::prelude::CollisionEvent::Started(a, b, _) => (*a, *b, true),
+            bevy_rapier2d::prelude::CollisionEvent::Stopped(a, b, _) => (*a, *b, false),
         };
 
         if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(entity_a), entity_id_query.get(entity_b)) {
