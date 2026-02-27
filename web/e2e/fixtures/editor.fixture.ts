@@ -25,7 +25,13 @@ export class EditorPage {
     await this.page.goto('/dev');
     // Wait for React to render (no WASM dependency)
     await this.page.waitForLoadState('networkidle');
-    await this.page.waitForTimeout(1000);
+    // Wait for editor layout to initialize (dockview panels)
+    await this.page.waitForSelector('[class*="dv-"], [data-testid="editor"]', {
+      timeout: 30_000,
+    }).catch(() => {
+      // Fallback: just wait a bit if dockview selectors aren't found
+    });
+    await this.page.waitForTimeout(2000);
   }
 
   /** Wait for a minimum entity count in the scene graph */
