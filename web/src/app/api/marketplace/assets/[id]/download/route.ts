@@ -51,7 +51,18 @@ export async function GET(
       return NextResponse.json({ error: 'No file available' }, { status: 404 });
     }
 
-    // Redirect to file URL (or return signed URL if using cloud storage)
+    // Validate URL against allowed domains to prevent open redirect
+    const allowedHosts = (process.env.ASSET_CDN_HOSTS || 'localhost').split(',').map(h => h.trim());
+    try {
+      const fileUrl = new URL(asset.assetFileUrl);
+      if (!allowedHosts.some(host => fileUrl.hostname === host || fileUrl.hostname.endsWith(`.${host}`))) {
+        console.error(`Blocked redirect to disallowed host: ${fileUrl.hostname}`);
+        return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
+      }
+    } catch {
+      return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
+    }
+
     return NextResponse.redirect(asset.assetFileUrl);
   } catch (error) {
     console.error('Error downloading asset:', error);

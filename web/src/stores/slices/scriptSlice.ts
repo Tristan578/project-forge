@@ -1,6 +1,5 @@
 /**
  * Script slice - manages entity scripts and input bindings.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

@@ -175,11 +175,10 @@ pub(super) fn register_gltf_animations(
 
         // Get the Gltf asset to discover animations
         let gltf_asset = gltf_handle_opt.and_then(|h| gltf_assets.get(h));
-        if gltf_asset.is_none() {
+        let Some(gltf) = gltf_asset else {
             // Asset not loaded yet, try next frame
             continue;
-        }
-        let gltf = gltf_asset.unwrap();
+        };
 
         if gltf.named_animations.is_empty() {
             // No animations in this glTF, mark as processed to avoid rechecking

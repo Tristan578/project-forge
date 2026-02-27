@@ -1,7 +1,7 @@
 /**
- * Zustand store for editor state management (REFACTORED).
+ * Zustand store for editor state management.
  *
- * This store is now composed of domain slices for better maintainability.
+ * This store is composed of domain slices for better maintainability.
  * All original exports are preserved for backward compatibility.
  */
 

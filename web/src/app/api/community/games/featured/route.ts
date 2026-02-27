@@ -38,7 +38,6 @@ export async function GET() {
         slug: publishedGames.slug,
         authorId: publishedGames.userId,
         authorName: users.displayName,
-        authorEmail: users.email,
         playCount: publishedGames.playCount,
         cdnUrl: publishedGames.cdnUrl,
         createdAt: publishedGames.createdAt,
@@ -64,8 +63,7 @@ export async function GET() {
         publishedGames.playCount,
         publishedGames.cdnUrl,
         publishedGames.createdAt,
-        users.displayName,
-        users.email
+        users.displayName
       );
 
     // Fetch tags for each game
@@ -90,7 +88,6 @@ export async function GET() {
       slug: string;
       authorId: string;
       authorName: string | null;
-      authorEmail: string | null;
       playCount: number;
       cdnUrl: string | null;
       createdAt: Date;
@@ -104,7 +101,7 @@ export async function GET() {
       description: g.description,
       slug: g.slug,
       authorId: g.authorId,
-      authorName: g.authorName || g.authorEmail?.split('@')[0] || 'Unknown',
+      authorName: g.authorName || 'Unknown',
       playCount: g.playCount,
       likeCount: Number(g.likeCount),
       avgRating: Number(g.avgRating),

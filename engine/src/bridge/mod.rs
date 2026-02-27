@@ -365,6 +365,11 @@ impl Plugin for SelectionPlugin {
                     core_systems::apply_selection_requests,
                 ).in_set(EditorSystemSet))
                 .add_systems(Update, (
+                    core_systems::apply_pending_visibility,
+                    core_systems::apply_pending_clear_selection,
+                    core_systems::apply_pending_gizmo_mode,
+                ).in_set(EditorSystemSet))
+                .add_systems(Update, (
                     core_systems::process_pick_buffer,
                     core_systems::emit_selection_events,
                     core_systems::emit_transform_on_selection,

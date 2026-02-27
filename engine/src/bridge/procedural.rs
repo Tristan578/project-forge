@@ -224,12 +224,16 @@ pub(super) fn apply_csg_requests(
             None
         };
         let source_b_snapshot = if request.delete_sources {
-            // Get b entity data again
-            let b_data = mesh_query.iter()
-                .find(|(_, eid, ..)| eid.0 == request.entity_id_b)
-                .unwrap();
-            let (_, b_eid, b_name, b_transform, b_visible, b_etype, b_mat, _, b_asset) = b_data;
-            Some(build_snapshot(b_eid, b_name, b_transform, b_visible, b_etype, b_mat, b_asset))
+            // Re-query entity B to obtain the full tuple needed for snapshot.
+            // The entity was already confirmed present above, so this should always succeed.
+            if let Some((_, b_eid, b_name, b_transform, b_visible, b_etype, b_mat, _, b_asset)) =
+                mesh_query.iter().find(|(_, eid, ..)| eid.0 == request.entity_id_b)
+            {
+                Some(build_snapshot(b_eid, b_name, b_transform, b_visible, b_etype, b_mat, b_asset))
+            } else {
+                tracing::warn!("CSG: entity B disappeared before snapshot could be taken");
+                None
+            }
         } else {
             None
         };
@@ -320,10 +324,22 @@ pub(super) fn apply_extrude_requests(
         // Extract mesh data for snapshot
         let (positions, normals, uvs, indices) = {
             use bevy::render::mesh::VertexAttributeValues;
-            let pos_attr = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
-            let norm_attr = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap();
-            let uv_attr = mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap();
-            let indices = mesh.indices().unwrap();
+            let Some(pos_attr) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
+                tracing::warn!("Extrude mesh missing POSITION attribute");
+                continue;
+            };
+            let Some(norm_attr) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else {
+                tracing::warn!("Extrude mesh missing NORMAL attribute");
+                continue;
+            };
+            let Some(uv_attr) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) else {
+                tracing::warn!("Extrude mesh missing UV_0 attribute");
+                continue;
+            };
+            let Some(indices) = mesh.indices() else {
+                tracing::warn!("Extrude mesh missing indices");
+                continue;
+            };
 
             let positions: Vec<[f32; 3]> = match pos_attr {
                 VertexAttributeValues::Float32x3(v) => v.clone(),
@@ -433,10 +449,22 @@ pub(super) fn apply_lathe_requests(
         // Extract mesh data for snapshot
         let (positions, normals, uvs, indices) = {
             use bevy::render::mesh::VertexAttributeValues;
-            let pos_attr = mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap();
-            let norm_attr = mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap();
-            let uv_attr = mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap();
-            let indices = mesh.indices().unwrap();
+            let Some(pos_attr) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
+                tracing::warn!("Lathe mesh missing POSITION attribute");
+                continue;
+            };
+            let Some(norm_attr) = mesh.attribute(Mesh::ATTRIBUTE_NORMAL) else {
+                tracing::warn!("Lathe mesh missing NORMAL attribute");
+                continue;
+            };
+            let Some(uv_attr) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) else {
+                tracing::warn!("Lathe mesh missing UV_0 attribute");
+                continue;
+            };
+            let Some(indices) = mesh.indices() else {
+                tracing::warn!("Lathe mesh missing indices");
+                continue;
+            };
 
             let positions: Vec<[f32; 3]> = match pos_attr {
                 VertexAttributeValues::Float32x3(v) => v.clone(),

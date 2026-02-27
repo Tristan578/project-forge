@@ -98,29 +98,6 @@ export class NetworkClient {
     return this.room;
   }
 
-  // Private helper to setup room event handlers (for when Colyseus is installed)
-  // private _setupRoomHandlers(): void {
-  //   if (!this.room) return;
-  //
-  //   this.room.onMessage('*', (type: string, message: unknown) => {
-  //     const handlers = this.messageHandlers.get(type);
-  //     if (handlers) {
-  //       handlers.forEach(handler => handler(message));
-  //     }
-  //   });
-  //
-  //   this.room.onStateChange((state: unknown) => {
-  //     this.stateChangeHandlers.forEach(handler => handler(state));
-  //   });
-  //
-  //   this.room.state.players.onAdd((player: unknown, sessionId: string) => {
-  //     this.playerJoinHandlers.forEach(handler => handler(sessionId));
-  //   });
-  //
-  //   this.room.state.players.onRemove((player: unknown, sessionId: string) => {
-  //     this.playerLeaveHandlers.forEach(handler => handler(sessionId));
-  //   });
-  // }
 }
 
 // Singleton instance for runtime use

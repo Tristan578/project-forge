@@ -203,7 +203,7 @@ function generateReadme(title: string): string {
   return `${title}
 ${'='.repeat(title.length)}
 
-This is a game created with Project Forge.
+This is a game created with GenForge.
 
 HOW TO PLAY:
 1. Extract all files from this ZIP archive
@@ -227,8 +227,8 @@ Node.js (http-server):
 Then open http://localhost:8000 in your browser.
 
 ---
-Created with Project Forge
-https://projectforge.dev
+Created with GenForge
+https://genforge.dev
 `;
 }
 

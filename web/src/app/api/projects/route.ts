@@ -24,7 +24,12 @@ export async function POST(req: Request) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  const body = await req.json();
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
   const { name, sceneData } = body;
 
   if (!name || typeof name !== 'string') {

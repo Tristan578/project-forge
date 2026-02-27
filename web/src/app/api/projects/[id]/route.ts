@@ -30,7 +30,12 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   if (!authResult.ok) return authResult.response;
 
   const { id } = await params;
-  const body = await req.json();
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
 
   const updates: {
     name?: string;

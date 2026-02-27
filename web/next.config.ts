@@ -29,6 +29,16 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        // Restrictive CSP for published/played games — no unsafe-eval needed
+        source: "/play/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; frame-ancestors 'none'",
+          },
+        ],
+      },
+      {
         source: "/:path*",
         headers: securityHeaders,
       },

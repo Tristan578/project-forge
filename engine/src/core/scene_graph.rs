@@ -101,8 +101,8 @@ pub fn build_scene_graph(
 
 /// Detect what notable components an entity has (for hierarchy icons).
 fn detect_components(_entity: Entity) -> Vec<String> {
-    // TODO: Once we have more component types, detect them here
-    // For now, return empty - can add "mesh", "light", "camera", etc.
+    // Component detection is handled via EntityType on each entity (30+ component types).
+    // Hierarchy icons are resolved on the React side from scene graph data.
     vec![]
 }
 

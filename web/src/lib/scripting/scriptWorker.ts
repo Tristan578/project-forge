@@ -712,6 +712,7 @@ const SHADOWED_GLOBALS = [
   'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
   'indexedDB', 'caches', 'navigator', 'location',
   'EventSource', 'BroadcastChannel',
+  'self', 'globalThis',
 ] as const;
 
 function compileScript(entityId_: string, source: string): ScriptInstance {

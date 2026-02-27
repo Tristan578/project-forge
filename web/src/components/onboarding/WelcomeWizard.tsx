@@ -28,7 +28,7 @@ export function WelcomeWizard({ onStartTutorial, onChooseTemplate, onSkip }: Wel
       <div className="bg-zinc-900 rounded-lg shadow-2xl max-w-2xl w-full p-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-zinc-100 mb-3">
-            Welcome to Project Forge!
+            Welcome to GenForge!
           </h1>
           <p className="text-zinc-400 text-lg">
             Your AI-powered game creation platform. How would you like to begin?

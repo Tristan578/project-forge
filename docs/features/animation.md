@@ -3,7 +3,7 @@
 Play and blend skeletal animations from imported glTF models.
 
 ## Overview
-Project Forge supports skeletal animation playback from glTF/GLB files. Import an animated model, and its animation clips become available for playback, crossfading, and blending.
+GenForge supports skeletal animation playback from glTF/GLB files. Import an animated model, and its animation clips become available for playback, crossfading, and blending.
 
 ## Importing Animated Models
 

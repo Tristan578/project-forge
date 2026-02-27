@@ -2,7 +2,7 @@
 //!
 //! Controls the engine mode state machine: Edit ↔ Play ↔ Paused.
 //! In Edit mode, the editor systems run (gizmos, picking, transforms).
-//! In Play mode, the game runtime systems run (future: physics, scripts).
+//! In Play mode, the game runtime systems run (including physics, scripts).
 //! Snapshot/restore ensures perfect state restoration on Stop.
 
 use bevy::prelude::*;

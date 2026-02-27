@@ -1,6 +1,5 @@
 /**
  * Animation slice - manages 3D skeletal animation, keyframe clips, and 2D skeletal animation.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

@@ -59,13 +59,10 @@ pub(super) fn apply_array_requests(
     use super::events::{emit_array_completed, emit_procedural_mesh_error};
 
     for request in pending.array_requests.drain(..) {
-        let source_found = query.iter().find(|(_, eid, ..)| eid.0 == request.entity_id);
-        if source_found.is_none() {
+        let Some((_src_entity, src_eid, src_name, src_transform, src_entity_type, mesh_h, mat_h, pl, dl, sl, mat_data, light_data, phys_data, phys_enabled, asset_ref)) = query.iter().find(|(_, eid, ..)| eid.0 == request.entity_id) else {
             emit_procedural_mesh_error(&format!("Source entity not found: {}", request.entity_id));
             continue;
-        }
-
-        let (_src_entity, src_eid, src_name, src_transform, src_entity_type, mesh_h, mat_h, pl, dl, sl, mat_data, light_data, phys_data, phys_enabled, asset_ref) = source_found.unwrap();
+        };
 
         let src_script_data = script_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, sd)| sd.cloned());
         let src_audio_data = audio_query.iter().find(|(eid, _)| eid.0 == src_eid.0).and_then(|(_, ad)| ad.cloned());

@@ -55,7 +55,8 @@ export async function deductTokens(
   operation: string,
   tokenCost: number,
   provider?: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
+  _retryCount = 0
 ): Promise<DeductResult | DeductError> {
   if (tokenCost <= 0) {
     // Free operations don't need deduction
@@ -132,8 +133,16 @@ export async function deductTokens(
     .returning({ id: users.id });
 
   if (updateResult.length === 0) {
-    // Race condition: balance changed between read and update. Retry once.
-    return deductTokens(userId, operation, tokenCost, provider, metadata);
+    // Race condition: balance changed between read and update. Retry up to 3 times.
+    if (_retryCount >= 3) {
+      return {
+        success: false,
+        error: 'INSUFFICIENT_TOKENS',
+        balance: await getTokenBalance(userId),
+        cost: tokenCost,
+      };
+    }
+    return deductTokens(userId, operation, tokenCost, provider, metadata, _retryCount + 1);
   }
 
   // Log usage
@@ -167,7 +176,7 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
   const [record] = await db
     .select()
     .from(tokenUsage)
-    .where(eq(tokenUsage.id, usageId))
+    .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
     .limit(1);
 
   if (!record) return;

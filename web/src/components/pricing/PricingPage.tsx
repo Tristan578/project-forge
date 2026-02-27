@@ -43,7 +43,7 @@ export function PricingPage() {
       {/* Header */}
       <header className="border-b border-zinc-800 px-6 py-4">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <h1 className="text-2xl font-bold">Project Forge</h1>
+          <h1 className="text-2xl font-bold">GenForge</h1>
           <div className="flex items-center gap-4">
             {isSignedIn ? (
               <button

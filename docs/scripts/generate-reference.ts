@@ -144,7 +144,7 @@ function generate(): void {
   const lines: string[] = [];
   lines.push('# Command Reference');
   lines.push('');
-  lines.push(`Complete reference for all ${manifest.commands.length} MCP commands available in Project Forge.`);
+  lines.push(`Complete reference for all ${manifest.commands.length} MCP commands available in GenForge.`);
   lines.push('');
   lines.push('> This file is auto-generated from `mcp-server/manifest/commands.json`.');
   lines.push('> Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.');

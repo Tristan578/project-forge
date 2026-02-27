@@ -5,7 +5,9 @@
 import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type EngineMode } from '@/stores/editorStore';
 import type { SetFn, GetFn } from './types';
 
-// Debounced auto-save: triggers export_scene command after 2s of inactivity
+const TRANSFORM_DEBOUNCE_MS = 2000;
+
+// Debounced auto-save: triggers export_scene command after inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
@@ -14,7 +16,7 @@ function scheduleAutoSave() {
     if (state.autoSaveEnabled && state.engineMode === 'edit') {
       state.saveScene();
     }
-  }, 2000);
+  }, TRANSFORM_DEBOUNCE_MS);
 }
 
 export function handleTransformEvent(

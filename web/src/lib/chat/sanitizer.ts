@@ -3,6 +3,10 @@
  * Prevents prompt injection, script injection, and malformed data.
  */
 
+const MAX_MESSAGE_LENGTH = 4000;
+const MAX_JSON_STRING_LENGTH = 1_000_000;
+const MAX_ARRAY_ELEMENTS = 100;
+
 /**
  * Sanitize user chat input to prevent prompt injection.
  *
@@ -18,7 +22,7 @@ export function sanitizeChatInput(input: string): string {
   let sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
   // Limit length
-  sanitized = sanitized.slice(0, 4000);
+  sanitized = sanitized.slice(0, MAX_MESSAGE_LENGTH);
 
   // Trim whitespace
   sanitized = sanitized.trim();
@@ -128,18 +132,18 @@ export function validateCommandArgs(
       validated[sanitizedKey] = sanitizeString(value);
     } else if (typeof value === 'number') {
       // Reasonable bounds for game engine values
-      validated[sanitizedKey] = clampNumber(value, -1e6, 1e6, 0);
+      validated[sanitizedKey] = clampNumber(value, -MAX_JSON_STRING_LENGTH, MAX_JSON_STRING_LENGTH, 0);
     } else if (typeof value === 'boolean') {
       validated[sanitizedKey] = value;
     } else if (Array.isArray(value)) {
       // Validate array elements
       validated[sanitizedKey] = value
-        .slice(0, 100) // Max 100 elements
+        .slice(0, MAX_ARRAY_ELEMENTS)
         .map((item) => {
           if (typeof item === 'string') {
             return sanitizeString(item, 200);
           } else if (typeof item === 'number') {
-            return clampNumber(item, -1e6, 1e6, 0);
+            return clampNumber(item, -MAX_JSON_STRING_LENGTH, MAX_JSON_STRING_LENGTH, 0);
           } else if (typeof item === 'boolean') {
             return item;
           }

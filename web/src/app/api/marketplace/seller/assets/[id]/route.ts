@@ -33,7 +33,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
-    const body = await req.json();
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     const { name, description, priceTokens, license, tags, status } = body;
 
     const updates: Record<string, unknown> = {};
@@ -43,10 +48,20 @@ export async function PATCH(
     if (license !== undefined) updates.license = license;
     if (tags !== undefined) updates.tags = tags;
     if (status !== undefined) {
-      updates.status = status;
-      if (status === 'published') {
-        updates.publishedAt = new Date();
+      // Sellers can only transition draft -> pending_review. Publishing requires admin review.
+      const allowedTransitions: Record<string, string[]> = {
+        draft: ['pending_review'],
+        pending_review: ['draft'], // Can withdraw back to draft
+        rejected: ['pending_review', 'draft'], // Can resubmit
+      };
+      const allowed = allowedTransitions[asset.status] || [];
+      if (!allowed.includes(status)) {
+        return NextResponse.json(
+          { error: `Cannot transition from '${asset.status}' to '${status}'` },
+          { status: 400 }
+        );
       }
+      updates.status = status;
     }
 
     await db

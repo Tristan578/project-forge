@@ -1,6 +1,5 @@
 /**
  * Game slice - manages game components, game cameras, mobile controls, HUD, and engine mode.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

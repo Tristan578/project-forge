@@ -4,7 +4,11 @@ import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import type { TokenPackage } from '@/lib/tokens/pricing';
 import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+function getStripe() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error('STRIPE_SECRET_KEY environment variable is not set');
+  return new Stripe(key, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+}
 
 const PACKAGE_PRICE_IDS: Record<string, string | undefined> = {
   spark: process.env.STRIPE_PRICE_TOKEN_SPARK,
@@ -20,7 +24,12 @@ export async function POST(req: Request) {
   const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
 
-  const body = await req.json();
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
   const pkg = body.package as string;
 
   if (!pkg || !(pkg in TOKEN_PACKAGES)) {
@@ -42,7 +51,7 @@ export async function POST(req: Request) {
   const pkgInfo = TOKEN_PACKAGES[pkg as TokenPackage];
 
   // Create Stripe Checkout session for one-time payment
-  const session = await stripe.checkout.sessions.create({
+  const session = await getStripe().checkout.sessions.create({
     mode: 'payment',
     customer: user.stripeCustomerId ?? undefined,
     customer_email: user.stripeCustomerId ? undefined : user.email,

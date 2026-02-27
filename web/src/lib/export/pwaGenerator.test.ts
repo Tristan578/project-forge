@@ -54,7 +54,7 @@ describe('pwaGenerator', () => {
       const manifest = generateManifest(options);
       const parsed = JSON.parse(manifest);
 
-      expect(parsed.description).toBe('My Game - Created with Project Forge');
+      expect(parsed.description).toBe('My Game - Created with GenForge');
     });
 
     it('uses provided description', () => {

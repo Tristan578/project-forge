@@ -79,6 +79,17 @@ pub enum SelectionMode {
     Toggle,
 }
 
+#[derive(Debug, Clone)]
+pub struct VisibilityRequest {
+    pub entity_id: String,
+    pub visible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct GizmoModeRequest {
+    pub mode: String,
+}
+
 // === Queue Methods ===
 
 impl PendingCommands {
@@ -128,6 +139,18 @@ impl PendingCommands {
 
     pub fn queue_selection(&mut self, request: SelectionRequest) {
         self.selection_requests.push(request);
+    }
+
+    pub fn queue_visibility(&mut self, request: VisibilityRequest) {
+        self.visibility_requests.push(request);
+    }
+
+    pub fn queue_clear_selection(&mut self) {
+        self.clear_selection_requests.push(());
+    }
+
+    pub fn queue_gizmo_mode(&mut self, request: GizmoModeRequest) {
+        self.gizmo_mode_requests.push(request);
     }
 
     pub fn queue_mode_change(&mut self, request: ModeChangeRequest) {
@@ -183,6 +206,18 @@ pub fn queue_coordinate_mode_update_from_bridge(mode: CoordinateMode) -> bool {
 
 pub fn queue_selection_from_bridge(request: SelectionRequest) -> bool {
     super::with_pending(|pc| pc.queue_selection(request)).is_some()
+}
+
+pub fn queue_visibility_from_bridge(request: VisibilityRequest) -> bool {
+    super::with_pending(|pc| pc.queue_visibility(request)).is_some()
+}
+
+pub fn queue_clear_selection_from_bridge() -> bool {
+    super::with_pending(|pc| pc.queue_clear_selection()).is_some()
+}
+
+pub fn queue_gizmo_mode_from_bridge(request: GizmoModeRequest) -> bool {
+    super::with_pending(|pc| pc.queue_gizmo_mode(request)).is_some()
 }
 
 pub fn queue_mode_change_from_bridge(request: ModeChangeRequest) -> bool {

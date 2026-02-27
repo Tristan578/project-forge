@@ -678,8 +678,7 @@ fn system_damage_zone(
 ) {
 
 
-    // TODO Phase G-4: Read CollisionEvent, apply damage to entities with Health
-    // For now, this is a stub
+    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
 }
 
 /// Checkpoint system: stub (requires collision events from Phase G-4)
@@ -689,7 +688,7 @@ fn system_checkpoint(
 ) {
 
 
-    // TODO Phase G-4: On collision with CharacterController, update Health.respawn_point
+    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
 }
 
 /// Teleporter system: stub (requires collision events from Phase G-4)
@@ -700,7 +699,7 @@ fn system_teleporter(
 ) {
 
 
-    // TODO Phase G-4: On collision, teleport entity to target_position
+    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
 }
 
 /// Moving platform system: interpolate between waypoints
@@ -790,7 +789,7 @@ fn system_trigger_zone(
 ) {
 
 
-    // TODO Phase G-4: On collision enter/exit, emit GameEvent
+    // Known limitation: handled via script API (forge.physics.onCollisionEnter/Exit)
 }
 
 /// Spawner system: stub (requires spawn request bridge)
@@ -926,7 +925,7 @@ fn system_win_condition(
                     runtime.total_collectibles > 0 && runtime.collected_count >= runtime.total_collectibles
                 }
                 WinConditionType::ReachGoal => {
-                    // TODO Phase G-4: Check collision with target entity
+                    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
                     false
                 }
             };

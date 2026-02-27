@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { getDb } from '@/lib/db/client';
 import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 
 export async function POST(
   _req: NextRequest,
@@ -115,15 +115,25 @@ export async function POST(
       return NextResponse.json({ error: 'Seller not found' }, { status: 404 });
     }
 
-    // Update buyer balance
-    await db
+    // Update buyer balance atomically — WHERE guards prevent race conditions
+    const updateResult = await db
       .update(users)
       .set({
-        earnedCredits: user.earnedCredits - earnedUsed,
-        addonTokens: user.addonTokens - addonUsed,
-        monthlyTokensUsed: user.monthlyTokensUsed + monthlyUsed,
+        earnedCredits: sql`${users.earnedCredits} - ${earnedUsed}`,
+        addonTokens: sql`${users.addonTokens} - ${addonUsed}`,
+        monthlyTokensUsed: sql`${users.monthlyTokensUsed} + ${monthlyUsed}`,
       })
-      .where(eq(users.id, user.id));
+      .where(and(
+        eq(users.id, user.id),
+        sql`${users.earnedCredits} >= ${earnedUsed}`,
+        sql`${users.addonTokens} >= ${addonUsed}`,
+        sql`(${users.monthlyTokens} - ${users.monthlyTokensUsed}) >= ${monthlyUsed}`,
+      ))
+      .returning({ id: users.id });
+
+    if (updateResult.length === 0) {
+      return NextResponse.json({ error: 'Balance changed, please retry' }, { status: 409 });
+    }
 
     // Update seller balance
     await db

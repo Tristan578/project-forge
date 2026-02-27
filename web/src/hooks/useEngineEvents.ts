@@ -62,8 +62,6 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       const parsedEvent = rawEvent as { type: string; payload: Record<string, unknown> };
       const { type, payload } = parsedEvent;
 
-      console.log('[Engine Event]', type, payload);
-
       const set = useEditorStore.setState;
       const get = useEditorStore.getState;
 
@@ -82,6 +80,5 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
     };
 
     wasmModule.set_event_callback(handleEvent);
-    console.log('[useEngineEvents] Event callback registered');
   }, [wasmModule]);
 }

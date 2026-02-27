@@ -110,7 +110,7 @@ function MobileBanner() {
 
   return (
     <div className="absolute top-10 left-2 right-2 z-20 flex items-center gap-2 rounded border border-amber-700/50 bg-amber-900/80 px-3 py-2 text-xs text-amber-200 shadow-lg">
-      <span className="flex-1">Project Forge is optimized for desktop browsers. Some features may be limited on mobile.</span>
+      <span className="flex-1">GenForge is optimized for desktop browsers. Some features may be limited on mobile.</span>
       <button onClick={handleDismiss} className="shrink-0 rounded p-0.5 hover:bg-amber-800">
         <X size={14} />
       </button>
@@ -217,7 +217,7 @@ export function EditorLayout() {
       <div className="relative h-screen w-screen bg-zinc-950">
         {/* Top bar - simplified */}
         <div className="flex h-8 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-2">
-          <span className="text-xs font-semibold text-zinc-400">Project Forge</span>
+          <span className="text-xs font-semibold text-zinc-400">GenForge</span>
           <PlayControls />
           <button
             onClick={() => setShortcutsOpen(true)}
@@ -269,7 +269,7 @@ export function EditorLayout() {
       {/* Top bar */}
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3">
         <div className="flex items-center gap-3">
-          <span className="text-xs font-semibold text-zinc-400">Project Forge</span>
+          <span className="text-xs font-semibold text-zinc-400">GenForge</span>
           <SceneToolbar />
         </div>
         <PlayControls />

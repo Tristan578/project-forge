@@ -3,10 +3,14 @@ import { auth } from '@clerk/nextjs/server';
 import { getDb } from '@/lib/db/client';
 import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { assertAdmin } from '@/lib/auth/api-auth';
 
 export async function PUT(request: NextRequest) {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const adminError = assertAdmin(userId);
+  if (adminError) return adminError;
 
   const body = await request.json();
   const db = getDb();
