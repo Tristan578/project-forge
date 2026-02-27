@@ -11,6 +11,7 @@ import {
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const SYSTEM_PROMPT = `You are an expert game creation assistant for GenForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
@@ -332,6 +333,8 @@ export async function POST(request: NextRequest) {
           }
         }
       } catch (err) {
+        captureException(err, { route: '/api/chat', model });
+
         // Refund tokens on API failure
         if (usageId) {
           await refundTokens(auth.ctx.user.id, usageId).catch(() => {});

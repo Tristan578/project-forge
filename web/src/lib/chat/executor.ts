@@ -12,8 +12,6 @@ import { materialHandlers } from './handlers/materialHandlers';
 import { queryHandlers } from './handlers/queryHandlers';
 import { editModeHandlers } from './handlers/editModeHandlers';
 import { audioHandlers } from './handlers/audioHandlers';
-import { multiplayerHandlers } from './handlers/multiplayerHandlers';
-import { collaborationHandlers } from './handlers/collaborationHandlers';
 import { securityHandlers } from './handlers/securityHandlers';
 import { exportHandlers } from './handlers/exportHandlers';
 import { shaderHandlers } from './handlers/shaderHandlers';
@@ -43,8 +41,6 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...queryHandlers,
   ...editModeHandlers,
   ...audioHandlers,
-  ...multiplayerHandlers,
-  ...collaborationHandlers,
   ...securityHandlers,
   ...exportHandlers,
   ...shaderHandlers,

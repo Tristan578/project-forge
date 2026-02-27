@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { listProjects, createProject } from '@/lib/projects/service';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * GET /api/projects
@@ -55,6 +56,7 @@ export async function POST(req: Request) {
         { status: 403 }
       );
     }
+    captureException(error, { route: '/api/projects', action: 'create' });
     throw error;
   }
 }

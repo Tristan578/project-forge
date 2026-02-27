@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { MeshyClient } from '@/lib/generate/meshyClient';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -74,6 +75,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
+    captureException(err, { route: '/api/generate/skybox', prompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -16,6 +16,7 @@ import {
   handleInvoicePaid,
   handleInvoicePaymentFailed,
 } from '@/lib/billing/subscription-lifecycle';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -70,6 +71,7 @@ export async function POST(req: Request) {
   } catch (err) {
     // Log but still return 200 to Stripe to prevent infinite retries on
     // application errors. The error is logged for manual investigation.
+    captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
   }
 
