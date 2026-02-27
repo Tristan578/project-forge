@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Export Pipeline', () => {
+test.describe('Export Pipeline @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Material Library', () => {
+test.describe('Material Library @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Publish Flow', () => {
+test.describe('Publish Flow @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

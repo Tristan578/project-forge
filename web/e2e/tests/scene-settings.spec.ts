@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Scene Settings', () => {
+test.describe('Scene Settings @engine', () => {
   test('scene settings panel can be opened', async ({ page, editor }) => {
     await editor.load();
 

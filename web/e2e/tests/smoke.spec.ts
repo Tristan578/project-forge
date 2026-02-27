@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Editor Smoke Tests', () => {
+test.describe('Editor Smoke Tests @engine', () => {
   test('page loads without console errors', async ({ page, editor }) => {
     const consoleErrors: string[] = [];
 

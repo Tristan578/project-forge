@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Visual Scripting', () => {
+test.describe('Visual Scripting @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

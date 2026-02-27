@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Audio Mixer', () => {
+test.describe('Audio Mixer @engine', () => {
   test('audio mixer panel can be opened from sidebar', async ({ page, editor }) => {
     await editor.load();
 

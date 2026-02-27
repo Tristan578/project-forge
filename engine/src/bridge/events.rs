@@ -710,6 +710,21 @@ pub fn emit_sprite_changed(entity_id: &str, sprite_data: Option<&crate::core::sp
     });
 }
 
+/// Emit a tilemap changed event for an entity.
+pub fn emit_tilemap_changed(entity_id: &str, tilemap_data: Option<&crate::core::tilemap::TilemapData>) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct TilemapPayload<'a> {
+        entity_id: &'a str,
+        tilemap: Option<&'a crate::core::tilemap::TilemapData>,
+    }
+
+    emit_event("TILEMAP_CHANGED", &TilemapPayload {
+        entity_id,
+        tilemap: tilemap_data,
+    });
+}
+
 /// Emit a reverb zone removed event.
 pub fn emit_reverb_zone_removed(entity_id: &str) {
     #[derive(Serialize)]

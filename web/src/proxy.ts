@@ -1,5 +1,5 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
 /**
  * Allowed origins for API requests in production.
@@ -17,42 +17,23 @@ const ALLOWED_ORIGINS =
         'http://localhost:3001',
       ];
 
-// Public routes that don't require authentication
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/api/auth/webhook(.*)',
-  '/api/stripe/webhook(.*)',
-  '/pricing',
-  '/dev(.*)',
-  '/play(.*)',
-  '/community(.*)',
-  '/api/community(.*)',
-  '/api/docs(.*)',
-  '/api-docs(.*)',
-  '/api/openapi(.*)',
-]);
-
-export const proxy = clerkMiddleware(async (auth, req) => {
+/**
+ * Shared CORS + security header logic.
+ */
+function handleCors(req: NextRequest): NextResponse | null {
   const origin = req.headers.get('origin');
   const { pathname } = req.nextUrl;
 
-  // CORS handling for API routes
   if (pathname.startsWith('/api/')) {
     const isAllowedOrigin =
-      !origin || // Same-origin requests have no origin header
+      !origin ||
       ALLOWED_ORIGINS.includes(origin) ||
       (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost'));
 
     if (!isAllowedOrigin) {
-      return NextResponse.json(
-        { error: 'Origin not allowed' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Origin not allowed' }, { status: 403 });
     }
 
-    // Handle preflight OPTIONS requests
     if (req.method === 'OPTIONS') {
       return new NextResponse(null, {
         status: 204,
@@ -60,38 +41,99 @@ export const proxy = clerkMiddleware(async (auth, req) => {
           'Access-Control-Allow-Origin': origin || '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Max-Age': '86400', // 24 hours
+          'Access-Control-Max-Age': '86400',
         },
       });
     }
   }
 
-  // Clerk authentication for protected routes
-  if (!isPublicRoute(req)) {
-    await auth.protect();
-  }
+  return null;
+}
 
-  // Continue with the request and add security headers
-  const response = NextResponse.next();
+function addSecurityHeaders(response: NextResponse, req: NextRequest): NextResponse {
+  const origin = req.headers.get('origin');
+  const { pathname } = req.nextUrl;
 
-  // Add CORS headers to API requests
   if (pathname.startsWith('/api/') && origin) {
     response.headers.set('Access-Control-Allow-Origin', origin);
     response.headers.set('Access-Control-Allow-Credentials', 'true');
   }
 
-  // Add security headers to all responses
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('X-XSS-Protection', '1; mode=block');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  response.headers.set(
-    'Permissions-Policy',
-    'camera=(), microphone=(), geolocation=()'
-  );
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
   return response;
-});
+}
+
+/**
+ * Non-Clerk passthrough middleware for CI/E2E.
+ * Applies CORS + security headers but skips authentication.
+ */
+function passthroughMiddleware(req: NextRequest): NextResponse {
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
+  return addSecurityHeaders(NextResponse.next(), req);
+}
+
+/**
+ * Build the proxy middleware.
+ *
+ * When valid Clerk keys are present, use clerkMiddleware for auth.
+ * When keys are missing or invalid (CI/E2E), use passthrough.
+ *
+ * We use a factory function to avoid importing @clerk/nextjs/server at
+ * the top level — Clerk validates keys at import time and throws a fatal
+ * error if they are missing or have invalid format.
+ */
+function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse> {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  // Both keys must be present and have valid Clerk format prefixes
+  if (!secretKey || !publishableKey || !secretKey.startsWith('sk_') || !publishableKey.startsWith('pk_')) {
+    return passthroughMiddleware;
+  }
+
+  // Keys look valid — import Clerk and build the authenticated middleware.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { clerkMiddleware, createRouteMatcher } = require('@clerk/nextjs/server');
+
+  const isPublicRoute = createRouteMatcher([
+    '/',
+    '/sign-in(.*)',
+    '/sign-up(.*)',
+    '/api/auth/webhook(.*)',
+    '/api/stripe/webhook(.*)',
+    '/pricing',
+    '/dev(.*)',
+    '/play(.*)',
+    '/terms(.*)',
+    '/privacy(.*)',
+    '/community(.*)',
+    '/api/community(.*)',
+    '/api/docs(.*)',
+    '/api-docs(.*)',
+    '/api/openapi(.*)',
+    '/api/sentry(.*)',
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return clerkMiddleware(async (auth: any, req: NextRequest) => {
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
+
+    if (!isPublicRoute(req)) {
+      await auth.protect();
+    }
+
+    return addSecurityHeaders(NextResponse.next(), req);
+  });
+}
+
+export const proxy = buildProxy();
 
 export const config = {
   matcher: [

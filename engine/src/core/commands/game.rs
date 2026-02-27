@@ -4,6 +4,7 @@ use crate::core::pending_commands::{
     queue_game_component_add_from_bridge, queue_game_component_update_from_bridge,
     queue_game_component_removal_from_bridge, queue_set_game_camera_from_bridge,
     queue_set_active_game_camera_from_bridge, queue_camera_shake_from_bridge,
+    queue_mouse_delta_from_bridge,
     GameComponentAddRequest, GameComponentUpdateRequest, GameComponentRemovalRequest,
     SetGameCameraRequest, SetActiveGameCameraRequest, CameraShakeRequest, QueryRequest,
 };
@@ -175,6 +176,19 @@ fn handle_camera_shake(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
+/// Handle mouse_delta command.
+/// Payload: { dx, dy }
+fn handle_mouse_delta(payload: serde_json::Value) -> super::CommandResult {
+    let dx = payload.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+    let dy = payload.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+
+    if queue_mouse_delta_from_bridge(dx, dy) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
     match command {
         "add_game_component" => Some(handle_add_game_component(payload.clone())),
@@ -191,6 +205,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_game_camera" => Some(handle_set_game_camera(payload.clone())),
         "set_active_game_camera" => Some(handle_set_active_game_camera(payload.clone())),
         "camera_shake" => Some(handle_camera_shake(payload.clone())),
+        "mouse_delta" => Some(handle_mouse_delta(payload.clone())),
         "get_game_camera" => {
             // NOTE: checks both "entityId" and "entity_id" field names
             let entity_id = payload.get("entityId")

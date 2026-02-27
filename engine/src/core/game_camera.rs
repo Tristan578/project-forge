@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use super::engine_mode::PlaySystemSet;
 use super::entity_id::EntityId;
+use super::pending_commands::PendingCommands;
 
 /// Marker component indicating this is the active game camera entity.
 /// Only one entity should have this at a time.
@@ -142,9 +143,48 @@ impl Plugin for GameCameraPlugin {
             .register_type::<ActiveGameCamera>()
             .register_type::<GameCameraMode>()
             .add_systems(Update, (
+                first_person_mouse_look,
                 game_camera_system,
-                update_orbital_angle,
-            ).in_set(PlaySystemSet));
+            ).chain().in_set(PlaySystemSet))
+            .add_systems(Update, update_orbital_angle.in_set(PlaySystemSet));
+    }
+}
+
+/// Reads mouse delta commands from the pending queue and updates FirstPersonState yaw/pitch.
+/// Runs in PlaySystemSet, BEFORE game_camera_system so updated values are used same frame.
+fn first_person_mouse_look(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&GameCameraData, &mut FirstPersonState), With<ActiveGameCamera>>,
+) {
+    // Drain all queued mouse deltas
+    let deltas: Vec<_> = pending.mouse_delta_requests.drain(..).collect();
+    if deltas.is_empty() {
+        return;
+    }
+
+    let Ok((camera_data, mut fp_state)) = query.single_mut() else {
+        return;
+    };
+
+    let (sensitivity, pitch_clamp) = match &camera_data.mode {
+        GameCameraMode::FirstPerson { mouse_sensitivity, pitch_clamp, .. } => {
+            (*mouse_sensitivity, *pitch_clamp)
+        }
+        _ => return, // Not in FirstPerson mode — ignore deltas
+    };
+
+    for delta in deltas {
+        // Apply sensitivity-scaled delta to yaw and pitch (in degrees)
+        // dx -> yaw (horizontal), dy -> pitch (vertical)
+        fp_state.yaw -= delta.dx * sensitivity;
+        fp_state.pitch -= delta.dy * sensitivity;
+
+        // Yaw: unlimited rotation, wrap at 360 degrees
+        fp_state.yaw = fp_state.yaw.rem_euclid(360.0);
+
+        // Pitch: clamp to prevent gimbal lock
+        let (min_pitch, max_pitch) = pitch_clamp;
+        fp_state.pitch = fp_state.pitch.clamp(min_pitch, max_pitch);
     }
 }
 

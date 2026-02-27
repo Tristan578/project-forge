@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Script Editor', () => {
+test.describe('Script Editor @engine', () => {
   test('script editor panel can be opened', async ({ editor }) => {
     await editor.load();
 

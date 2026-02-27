@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Templates & Prefabs', () => {
+test.describe('Templates & Prefabs @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

@@ -10,11 +10,11 @@ export class EditorPage {
   /** Navigate to /dev and wait for WASM engine to initialize */
   async load() {
     await this.page.goto('/dev');
-    // Wait for the WASM engine to report ready
+    // Wait for the WASM engine to report ready (longer timeout for CI runners)
     await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__FORGE_ENGINE_READY === true,
-      { timeout: 30_000 }
+      { timeout: 45_000 }
     );
     // Give dockview a moment to finish layout
     await this.page.waitForTimeout(500);

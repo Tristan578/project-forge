@@ -2,6 +2,7 @@
 
 import { useViewport } from '@/hooks/useViewport';
 import { useEngineEvents } from '@/hooks/useEngineEvents';
+import { usePointerLock } from '@/hooks/usePointerLock';
 import { getWasmModule } from '@/hooks/useEngine';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -20,6 +21,9 @@ export function CanvasArea() {
 
   // Connect engine events to Zustand store
   useEngineEvents({ wasmModule: getWasmModule() });
+
+  // Pointer lock for FirstPerson camera mouse look
+  usePointerLock(CANVAS_ID);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-zinc-950">
