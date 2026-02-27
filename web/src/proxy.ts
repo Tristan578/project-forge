@@ -1,5 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
 
 /**
  * Allowed origins for API requests in production.
@@ -27,32 +28,37 @@ const isPublicRoute = createRouteMatcher([
   '/pricing',
   '/dev(.*)',
   '/play(.*)',
+  '/terms(.*)',
+  '/privacy(.*)',
   '/community(.*)',
   '/api/community(.*)',
   '/api/docs(.*)',
   '/api-docs(.*)',
   '/api/openapi(.*)',
+  '/api/sentry(.*)',
 ]);
 
-export const proxy = clerkMiddleware(async (auth, req) => {
+// When CLERK_SECRET_KEY is missing (CI/E2E), skip Clerk auth entirely.
+// This allows the dev server to start without Clerk credentials.
+const hasClerkKey = !!process.env.CLERK_SECRET_KEY;
+
+/**
+ * Shared CORS + security header logic used by both Clerk and non-Clerk paths.
+ */
+function handleCors(req: NextRequest): NextResponse | null {
   const origin = req.headers.get('origin');
   const { pathname } = req.nextUrl;
 
-  // CORS handling for API routes
   if (pathname.startsWith('/api/')) {
     const isAllowedOrigin =
-      !origin || // Same-origin requests have no origin header
+      !origin ||
       ALLOWED_ORIGINS.includes(origin) ||
       (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost'));
 
     if (!isAllowedOrigin) {
-      return NextResponse.json(
-        { error: 'Origin not allowed' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Origin not allowed' }, { status: 403 });
     }
 
-    // Handle preflight OPTIONS requests
     if (req.method === 'OPTIONS') {
       return new NextResponse(null, {
         status: 204,
@@ -60,38 +66,56 @@ export const proxy = clerkMiddleware(async (auth, req) => {
           'Access-Control-Allow-Origin': origin || '*',
           'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-          'Access-Control-Max-Age': '86400', // 24 hours
+          'Access-Control-Max-Age': '86400',
         },
       });
     }
   }
 
-  // Clerk authentication for protected routes
-  if (!isPublicRoute(req)) {
-    await auth.protect();
-  }
+  return null;
+}
 
-  // Continue with the request and add security headers
-  const response = NextResponse.next();
+function addSecurityHeaders(response: NextResponse, req: NextRequest): NextResponse {
+  const origin = req.headers.get('origin');
+  const { pathname } = req.nextUrl;
 
-  // Add CORS headers to API requests
   if (pathname.startsWith('/api/') && origin) {
     response.headers.set('Access-Control-Allow-Origin', origin);
     response.headers.set('Access-Control-Allow-Credentials', 'true');
   }
 
-  // Add security headers to all responses
   response.headers.set('X-Content-Type-Options', 'nosniff');
   response.headers.set('X-Frame-Options', 'DENY');
   response.headers.set('X-XSS-Protection', '1; mode=block');
   response.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  response.headers.set(
-    'Permissions-Policy',
-    'camera=(), microphone=(), geolocation=()'
-  );
+  response.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
 
   return response;
-});
+}
+
+/**
+ * Non-Clerk passthrough middleware for CI/E2E (no CLERK_SECRET_KEY set).
+ * Applies CORS + security headers but skips authentication.
+ */
+function passthroughMiddleware(req: NextRequest): NextResponse {
+  const corsResponse = handleCors(req);
+  if (corsResponse) return corsResponse;
+
+  return addSecurityHeaders(NextResponse.next(), req);
+}
+
+export const proxy = hasClerkKey
+  ? clerkMiddleware(async (auth, req) => {
+      const corsResponse = handleCors(req);
+      if (corsResponse) return corsResponse;
+
+      if (!isPublicRoute(req)) {
+        await auth.protect();
+      }
+
+      return addSecurityHeaders(NextResponse.next(), req);
+    })
+  : passthroughMiddleware;
 
 export const config = {
   matcher: [
