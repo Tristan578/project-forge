@@ -355,20 +355,52 @@ pub(super) fn apply_new_scene(
 }
 
 /// System that processes glTF import requests.
-/// For now, registers the asset in the registry and spawns an empty GltfModel entity.
-/// Full glTF scene loading (mesh instantiation) requires the bevy_gltf feature and
-/// async asset loading, which will be implemented when we add bevy_gltf/bevy_scene features.
+/// Decodes base64 glTF/GLB data, writes to the in-memory asset source,
+/// loads via AssetServer, and spawns an entity with GltfSourceHandle.
+/// The actual scene mesh spawning happens in apply_gltf_scene_spawn
+/// once the asset finishes loading.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_gltf_import(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     mut asset_registry: ResMut<AssetRegistry>,
+    asset_server: Res<AssetServer>,
+    memory_dir: Res<crate::core::asset_manager::GltfMemoryDir>,
 ) {
-    use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource};
+    use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource, GltfSourceHandle};
+    use base64::Engine as _;
 
     for request in pending.gltf_import_requests.drain(..) {
         let asset_id = uuid::Uuid::new_v4().to_string();
         let file_size = request.data_base64.len() as u64;
+
+        // Parse data URL prefix if present: "data:model/gltf-binary;base64,AAAA..."
+        let raw_base64 = if let Some(comma_pos) = request.data_base64.find(',') {
+            &request.data_base64[comma_pos + 1..]
+        } else {
+            &request.data_base64
+        };
+
+        // Decode base64 to raw bytes
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(raw_base64) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!("Failed to decode base64 glTF data: {}", e);
+                continue;
+            }
+        };
+
+        // Determine the in-memory asset path using a unique name
+        let ext = if request.name.ends_with(".gltf") { "gltf" } else { "glb" };
+        let memory_path = format!("{}.{}", asset_id, ext);
+
+        // Write the decoded bytes to the in-memory asset directory
+        let path = std::path::Path::new(&memory_path);
+        memory_dir.0.insert_asset(path, bytes);
+
+        // Load the glTF asset via AssetServer from the "memory" source
+        let asset_path = format!("memory://{}", memory_path);
+        let gltf_handle: Handle<bevy::gltf::Gltf> = asset_server.load(&asset_path);
 
         // Register in asset registry
         asset_registry.assets.insert(asset_id.clone(), AssetMetadata {
@@ -379,7 +411,7 @@ pub(super) fn apply_gltf_import(
             source: AssetSource::Upload { filename: request.name.clone() },
         });
 
-        // Spawn a root entity for the model
+        // Spawn a root entity for the model with GltfSourceHandle
         let pos = request.position.unwrap_or(bevy::math::Vec3::ZERO);
         let entity_id = crate::core::entity_id::EntityId::default();
         let eid_str = entity_id.0.clone();
@@ -394,10 +426,103 @@ pub(super) fn apply_gltf_import(
                 asset_name: request.name.clone(),
                 asset_type: AssetKind::GltfModel,
             },
+            GltfSourceHandle(gltf_handle),
         ));
 
         events::emit_asset_imported(&asset_id, &request.name, "gltf_model", file_size);
         tracing::info!("Imported glTF asset: {} (entity: {})", request.name, eid_str);
+    }
+}
+
+/// System that watches for entities with GltfSourceHandle and spawns the glTF scene
+/// once the asset has finished loading. Also handles GltfModel entities spawned from
+/// snapshots (undo/redo, scene load) that have an AssetRef but no GltfSourceHandle —
+/// re-loads them from the in-memory asset source. Runs every frame (both editor and runtime).
+pub(super) fn apply_gltf_scene_spawn(
+    mut commands: Commands,
+    // Query 1: Entities with GltfSourceHandle waiting for asset to load
+    gltf_entities: Query<
+        (Entity, &crate::core::asset_manager::GltfSourceHandle, &crate::core::entity_id::EntityId),
+        Without<crate::core::asset_manager::GltfSceneSpawned>,
+    >,
+    // Query 2: GltfModel entities with AssetRef but no GltfSourceHandle (from snapshots)
+    unloaded_gltf_entities: Query<
+        (Entity, &EntityType, &crate::core::asset_manager::AssetRef, &crate::core::entity_id::EntityId),
+        (
+            Without<crate::core::asset_manager::GltfSourceHandle>,
+            Without<crate::core::asset_manager::GltfSceneSpawned>,
+        ),
+    >,
+    gltf_assets: Res<Assets<bevy::gltf::Gltf>>,
+    asset_server: Res<AssetServer>,
+    memory_dir: Res<crate::core::asset_manager::GltfMemoryDir>,
+) {
+    use crate::core::asset_manager::{AssetKind, GltfSceneSpawned, GltfSourceHandle};
+    use bevy::scene::SceneRoot;
+
+    // Phase 1: Spawn scenes for entities that already have GltfSourceHandle
+    for (entity, gltf_handle, eid) in gltf_entities.iter() {
+        // Check if the Gltf asset has finished loading
+        let Some(gltf) = gltf_assets.get(&gltf_handle.0) else {
+            continue; // Not loaded yet, try next frame
+        };
+
+        // Get the scene handle: prefer default_scene, fall back to first scene
+        let scene_handle = if let Some(ref default_scene) = gltf.default_scene {
+            default_scene.clone()
+        } else if let Some(first_scene) = gltf.scenes.first() {
+            first_scene.clone()
+        } else {
+            tracing::warn!("glTF asset for entity {} has no scenes", eid.0);
+            // Mark as processed even if no scene, to avoid re-checking
+            commands.entity(entity).insert(GltfSceneSpawned);
+            continue;
+        };
+
+        // Spawn the glTF scene as a child of our root entity
+        let scene_child = commands.spawn((
+            SceneRoot(scene_handle),
+            Transform::default(),
+        )).id();
+        commands.entity(scene_child).insert(ChildOf(entity));
+
+        // Mark the root entity as processed
+        commands.entity(entity).insert(GltfSceneSpawned);
+
+        tracing::info!("Spawned glTF scene for entity: {}", eid.0);
+    }
+
+    // Phase 2: Attach GltfSourceHandle to GltfModel entities from snapshots
+    // (e.g., after undo/redo or scene load, which spawn entities without GltfSourceHandle)
+    for (entity, entity_type, asset_ref, eid) in unloaded_gltf_entities.iter() {
+        // Only process GltfModel/GltfMesh entities with glTF assets
+        if !matches!(entity_type, EntityType::GltfModel | EntityType::GltfMesh) {
+            continue;
+        }
+        if asset_ref.asset_type != AssetKind::GltfModel {
+            continue;
+        }
+
+        // Check if the asset data is still in the memory dir by trying to load it.
+        // The memory dir path uses the asset ID as the filename.
+        let glb_path = std::path::Path::new(&asset_ref.asset_id).with_extension("glb");
+        let gltf_path = std::path::Path::new(&asset_ref.asset_id).with_extension("gltf");
+
+        let has_asset = memory_dir.0.get_asset(&glb_path).is_some()
+            || memory_dir.0.get_asset(&gltf_path).is_some();
+
+        if has_asset {
+            // Determine which extension the asset was stored with
+            let ext = if memory_dir.0.get_asset(&glb_path).is_some() { "glb" } else { "gltf" };
+            let asset_path = format!("memory://{}.{}", asset_ref.asset_id, ext);
+            let gltf_handle: Handle<bevy::gltf::Gltf> = asset_server.load(&asset_path);
+            commands.entity(entity).insert(GltfSourceHandle(gltf_handle));
+            tracing::info!("Re-loading glTF asset from memory for entity: {}", eid.0);
+        } else {
+            // Asset data not in memory — mark as spawned to avoid re-checking every frame
+            commands.entity(entity).insert(GltfSceneSpawned);
+            tracing::warn!("No in-memory data for glTF asset {} on entity {}", asset_ref.asset_id, eid.0);
+        }
     }
 }
 
@@ -534,13 +659,16 @@ pub(super) fn apply_remove_texture(
 }
 
 /// System that processes place-asset requests.
+/// When placing a glTF model, reloads from the in-memory asset source.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_place_asset(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
     asset_registry: Res<AssetRegistry>,
+    asset_server: Res<AssetServer>,
+    memory_dir: Res<crate::core::asset_manager::GltfMemoryDir>,
 ) {
-    use crate::core::asset_manager::AssetKind;
+    use crate::core::asset_manager::{AssetKind, GltfSourceHandle};
 
     for request in pending.place_asset_requests.drain(..) {
         if let Some(metadata) = asset_registry.assets.get(&request.asset_id) {
@@ -549,7 +677,7 @@ pub(super) fn apply_place_asset(
 
             match metadata.kind {
                 AssetKind::GltfModel => {
-                    commands.spawn((
+                    let mut ec = commands.spawn((
                         EntityType::GltfModel,
                         entity_id,
                         crate::core::entity_id::EntityName::new(&metadata.name),
@@ -561,6 +689,20 @@ pub(super) fn apply_place_asset(
                             asset_type: AssetKind::GltfModel,
                         },
                     ));
+
+                    // Try to load the glTF from the in-memory asset source
+                    let glb_path = std::path::Path::new(&request.asset_id).with_extension("glb");
+                    let gltf_path = std::path::Path::new(&request.asset_id).with_extension("gltf");
+                    if memory_dir.0.get_asset(&glb_path).is_some() {
+                        let asset_path = format!("memory://{}.glb", request.asset_id);
+                        let gltf_handle: Handle<bevy::gltf::Gltf> = asset_server.load(&asset_path);
+                        ec.insert(GltfSourceHandle(gltf_handle));
+                    } else if memory_dir.0.get_asset(&gltf_path).is_some() {
+                        let asset_path = format!("memory://{}.gltf", request.asset_id);
+                        let gltf_handle: Handle<bevy::gltf::Gltf> = asset_server.load(&asset_path);
+                        ec.insert(GltfSourceHandle(gltf_handle));
+                    }
+
                     tracing::info!("Placed asset: {}", metadata.name);
                 }
                 AssetKind::Texture => {

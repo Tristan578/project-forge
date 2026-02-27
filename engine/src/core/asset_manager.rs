@@ -57,7 +57,24 @@ pub enum AssetSource {
 #[derive(Component, Clone, Debug)]
 pub struct GltfSourceHandle(pub Handle<Gltf>);
 
+/// Marker component indicating that a glTF scene has been spawned for this entity.
+/// Used to prevent re-spawning on subsequent frames while waiting for asset load.
+#[derive(Component)]
+pub struct GltfSceneSpawned;
+
 /// Resource mapping asset IDs to loaded GPU texture handles.
 /// Populated by apply_texture_load in bridge, consumed by sync_material_data in core.
 #[derive(Resource, Default)]
 pub struct TextureHandleMap(pub HashMap<String, Handle<Image>>);
+
+/// Resource wrapping Bevy's in-memory asset Dir for glTF loading.
+/// The Dir is shared with the "memory" AssetSource registered at startup.
+/// Systems insert decoded glTF bytes here, and AssetServer loads from "memory://path".
+#[derive(Resource, Clone)]
+pub struct GltfMemoryDir(pub bevy::asset::io::memory::Dir);
+
+impl Default for GltfMemoryDir {
+    fn default() -> Self {
+        Self(bevy::asset::io::memory::Dir::default())
+    }
+}
