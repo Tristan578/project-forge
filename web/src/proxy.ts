@@ -1,4 +1,3 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
@@ -18,32 +17,8 @@ const ALLOWED_ORIGINS =
         'http://localhost:3001',
       ];
 
-// Public routes that don't require authentication
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/sign-in(.*)',
-  '/sign-up(.*)',
-  '/api/auth/webhook(.*)',
-  '/api/stripe/webhook(.*)',
-  '/pricing',
-  '/dev(.*)',
-  '/play(.*)',
-  '/terms(.*)',
-  '/privacy(.*)',
-  '/community(.*)',
-  '/api/community(.*)',
-  '/api/docs(.*)',
-  '/api-docs(.*)',
-  '/api/openapi(.*)',
-  '/api/sentry(.*)',
-]);
-
-// When CLERK_SECRET_KEY is missing (CI/E2E), skip Clerk auth entirely.
-// This allows the dev server to start without Clerk credentials.
-const hasClerkKey = !!process.env.CLERK_SECRET_KEY;
-
 /**
- * Shared CORS + security header logic used by both Clerk and non-Clerk paths.
+ * Shared CORS + security header logic.
  */
 function handleCors(req: NextRequest): NextResponse | null {
   const origin = req.headers.get('origin');
@@ -94,28 +69,71 @@ function addSecurityHeaders(response: NextResponse, req: NextRequest): NextRespo
 }
 
 /**
- * Non-Clerk passthrough middleware for CI/E2E (no CLERK_SECRET_KEY set).
+ * Non-Clerk passthrough middleware for CI/E2E.
  * Applies CORS + security headers but skips authentication.
  */
 function passthroughMiddleware(req: NextRequest): NextResponse {
   const corsResponse = handleCors(req);
   if (corsResponse) return corsResponse;
-
   return addSecurityHeaders(NextResponse.next(), req);
 }
 
-export const proxy = hasClerkKey
-  ? clerkMiddleware(async (auth, req) => {
-      const corsResponse = handleCors(req);
-      if (corsResponse) return corsResponse;
+/**
+ * Build the proxy middleware.
+ *
+ * When valid Clerk keys are present, use clerkMiddleware for auth.
+ * When keys are missing or invalid (CI/E2E), use passthrough.
+ *
+ * We use a factory function to avoid importing @clerk/nextjs/server at
+ * the top level — Clerk validates keys at import time and throws a fatal
+ * error if they are missing or have invalid format.
+ */
+function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse> {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-      if (!isPublicRoute(req)) {
-        await auth.protect();
-      }
+  // Both keys must be present and have valid Clerk format prefixes
+  if (!secretKey || !publishableKey || !secretKey.startsWith('sk_') || !publishableKey.startsWith('pk_')) {
+    return passthroughMiddleware;
+  }
 
-      return addSecurityHeaders(NextResponse.next(), req);
-    })
-  : passthroughMiddleware;
+  // Keys look valid — import Clerk and build the authenticated middleware.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { clerkMiddleware, createRouteMatcher } = require('@clerk/nextjs/server');
+
+  const isPublicRoute = createRouteMatcher([
+    '/',
+    '/sign-in(.*)',
+    '/sign-up(.*)',
+    '/api/auth/webhook(.*)',
+    '/api/stripe/webhook(.*)',
+    '/pricing',
+    '/dev(.*)',
+    '/play(.*)',
+    '/terms(.*)',
+    '/privacy(.*)',
+    '/community(.*)',
+    '/api/community(.*)',
+    '/api/docs(.*)',
+    '/api-docs(.*)',
+    '/api/openapi(.*)',
+    '/api/sentry(.*)',
+  ]);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return clerkMiddleware(async (auth: any, req: NextRequest) => {
+    const corsResponse = handleCors(req);
+    if (corsResponse) return corsResponse;
+
+    if (!isPublicRoute(req)) {
+      await auth.protect();
+    }
+
+    return addSecurityHeaders(NextResponse.next(), req);
+  });
+}
+
+export const proxy = buildProxy();
 
 export const config = {
   matcher: [

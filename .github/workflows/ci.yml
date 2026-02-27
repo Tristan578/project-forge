@@ -197,8 +197,6 @@ jobs:
         run: npx playwright test --project=chromium
         env:
           CI: true
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
-          CLERK_SECRET_KEY: sk_test_placeholder
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
