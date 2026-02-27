@@ -421,3 +421,282 @@ describe('compound tools: arrange_entities', () => {
     expect(store.updateTransform).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('compound tools: create_scene_from_description', () => {
+  it('creates entities from description array', async () => {
+    let spawnCount = 0;
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      spawnCount++;
+      // Simulate engine assigning a primaryId after spawn
+      (store as { primaryId: string | null }).primaryId = `spawned-${spawnCount}`;
+    });
+
+    const result = await executeToolCall('create_scene_from_description', {
+      entities: [
+        { name: 'Ground', type: 'plane', position: [0, 0, 0], scale: [10, 1, 10], material: { baseColor: '#228B22' } },
+        { name: 'Tree', type: 'cylinder', position: [3, 1, 2], scale: [0.5, 2, 0.5], material: { baseColor: '#8B4513' } },
+        { name: 'Sun', type: 'directional_light', position: [0, 10, 0], light: { color: '#FFFDD0', intensity: 2.0 } },
+      ],
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.spawnEntity).toHaveBeenCalledTimes(3);
+    expect(store.updateTransform).toHaveBeenCalled();
+    expect(store.updateMaterial).toHaveBeenCalled();
+    expect(store.updateLight).toHaveBeenCalled();
+  });
+
+  it('clears scene when clearExisting is true', async () => {
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      (store as { primaryId: string | null }).primaryId = 'new-entity';
+    });
+
+    await executeToolCall('create_scene_from_description', {
+      clearExisting: true,
+      entities: [{ name: 'Box', type: 'cube' }],
+    }, store);
+
+    expect(store.newScene).toHaveBeenCalled();
+  });
+
+  it('applies physics when entity specifies physics config', async () => {
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      (store as { primaryId: string | null }).primaryId = 'phys-entity';
+    });
+
+    const result = await executeToolCall('create_scene_from_description', {
+      entities: [
+        { name: 'Crate', type: 'cube', physics: { bodyType: 'dynamic', mass: 5 } },
+      ],
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.togglePhysics).toHaveBeenCalled();
+    expect(store.updatePhysics).toHaveBeenCalled();
+  });
+
+  it('sets environment when provided', async () => {
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      (store as { primaryId: string | null }).primaryId = 'e1';
+    });
+
+    await executeToolCall('create_scene_from_description', {
+      environment: { ambientBrightness: 0.5, skyboxPreset: 'sunset' },
+      entities: [{ name: 'Box', type: 'cube' }],
+    }, store);
+
+    expect(store.updateAmbientLight).toHaveBeenCalled();
+  });
+});
+
+describe('compound tools: create_level_layout', () => {
+  it('creates ground, walls, obstacles, and spawn points', async () => {
+    let spawnCount = 0;
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      spawnCount++;
+      (store as { primaryId: string | null }).primaryId = `level-${spawnCount}`;
+    });
+
+    const result = await executeToolCall('create_level_layout', {
+      ground: { type: 'plane', size: [20, 20] },
+      walls: [
+        { start: [0, 0], end: [10, 0], height: 3, thickness: 0.5 },
+      ],
+      obstacles: [
+        { name: 'Rock', type: 'sphere', position: [5, 1, 3] },
+      ],
+      spawnPoints: [{ position: [0, 1, 0] }],
+      goals: [{ position: [10, 1, 10] }],
+    }, store);
+
+    expect(result.success).toBe(true);
+    // Root + ground + 1 wall + 1 obstacle + 1 spawn + 1 goal = 6 spawns
+    expect(store.spawnEntity).toHaveBeenCalledTimes(6);
+    expect(store.reparentEntity).toHaveBeenCalled();
+  });
+
+  it('sets input preset when provided', async () => {
+    let spawnCount = 0;
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      spawnCount++;
+      (store as { primaryId: string | null }).primaryId = `level-${spawnCount}`;
+    });
+
+    await executeToolCall('create_level_layout', {
+      ground: { type: 'plane', size: [10, 10] },
+      inputPreset: 'platformer',
+    }, store);
+
+    expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+  });
+});
+
+describe('compound tools: setup_character', () => {
+  it('creates a character entity with physics and game component', async () => {
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      (store as { primaryId: string | null }).primaryId = 'player-1';
+    });
+
+    const result = await executeToolCall('setup_character', {
+      entityType: 'capsule',
+      position: [0, 1, 0],
+      inputPreset: 'fps',
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.spawnEntity).toHaveBeenCalledWith('capsule', 'Player');
+    expect(store.updateTransform).toHaveBeenCalled();
+    expect(store.togglePhysics).toHaveBeenCalled();
+    expect(store.addGameComponent).toHaveBeenCalled();
+    expect(store.setInputPreset).toHaveBeenCalledWith('fps');
+  });
+
+  it('adds health component by default', async () => {
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      (store as { primaryId: string | null }).primaryId = 'player-1';
+    });
+
+    await executeToolCall('setup_character', {}, store);
+
+    // addGameComponent should be called at least twice: characterController + health
+    expect(store.addGameComponent).toHaveBeenCalledTimes(2);
+  });
+
+  it('injects camera follow script', async () => {
+    const store = makeMockStore();
+    (store.spawnEntity as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      (store as { primaryId: string | null }).primaryId = 'player-1';
+    });
+
+    await executeToolCall('setup_character', { cameraFollow: true }, store);
+
+    expect(store.setScript).toHaveBeenCalled();
+  });
+});
+
+describe('compound tools: apply_style', () => {
+  it('applies palette colors to entities', async () => {
+    const store = makeMockStore({
+      sceneGraph: {
+        nodes: {
+          e1: { entityId: 'e1', name: 'A', parentId: null, children: [], components: ['Transform', 'Mesh3d'], visible: true },
+          e2: { entityId: 'e2', name: 'B', parentId: null, children: [], components: ['Transform', 'Mesh3d'], visible: true },
+          e3: { entityId: 'e3', name: 'C', parentId: null, children: [], components: ['Transform', 'Mesh3d'], visible: true },
+        },
+        rootIds: ['e1', 'e2', 'e3'],
+      },
+    });
+
+    const result = await executeToolCall('apply_style', {
+      palette: {
+        primary: '#FF0000',
+        secondary: '#00FF00',
+        accent: '#0000FF',
+      },
+    }, store);
+
+    expect(result.success).toBe(true);
+    // Should apply material to all 3 mesh entities
+    expect(store.updateMaterial).toHaveBeenCalledTimes(3);
+  });
+
+  it('applies lighting and post-processing settings', async () => {
+    const store = makeMockStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+
+    const result = await executeToolCall('apply_style', {
+      lighting: { ambientBrightness: 0.5, skybox: 'sunset' },
+      postProcessing: { bloom: { enabled: true, intensity: 0.3 } },
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.updateAmbientLight).toHaveBeenCalled();
+    expect(store.updatePostProcessing).toHaveBeenCalled();
+  });
+
+  it('targets specific entities when targetEntityIds provided', async () => {
+    const store = makeMockStore({
+      sceneGraph: {
+        nodes: {
+          e1: { entityId: 'e1', name: 'A', parentId: null, children: [], components: ['Mesh3d'], visible: true },
+          e2: { entityId: 'e2', name: 'B', parentId: null, children: [], components: ['Mesh3d'], visible: true },
+        },
+        rootIds: ['e1', 'e2'],
+      },
+    });
+
+    await executeToolCall('apply_style', {
+      targetEntityIds: ['e1'],
+      palette: { primary: '#FF0000' },
+    }, store);
+
+    // Should only apply to the targeted entity
+    expect(store.updateMaterial).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('compound tools: configure_game_mechanics', () => {
+  it('sets input preset and quality preset', async () => {
+    const store = makeMockStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+
+    const result = await executeToolCall('configure_game_mechanics', {
+      inputPreset: 'topdown',
+      qualityPreset: 'high',
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.setInputPreset).toHaveBeenCalledWith('topdown');
+    expect(store.setQualityPreset).toHaveBeenCalledWith('high');
+  });
+
+  it('configures custom input bindings', async () => {
+    const store = makeMockStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+
+    await executeToolCall('configure_game_mechanics', {
+      customBindings: [
+        { action: 'jump', key: 'Space' },
+        { action: 'crouch', key: 'ControlLeft' },
+      ],
+    }, store);
+
+    expect(store.setInputBinding).toHaveBeenCalledTimes(2);
+  });
+
+  it('configures entity physics and game components by name lookup', async () => {
+    const store = makeMockStore({
+      sceneGraph: {
+        nodes: {
+          e1: { entityId: 'e1', name: 'Enemy', parentId: null, children: [], components: [], visible: true },
+        },
+        rootIds: ['e1'],
+      },
+    });
+
+    const result = await executeToolCall('configure_game_mechanics', {
+      entityConfigs: [
+        {
+          entityName: 'Enemy',
+          physics: { bodyType: 'dynamic' },
+          gameComponents: [{ type: 'health', health: { maxHealth: 50 } }],
+        },
+      ],
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.togglePhysics).toHaveBeenCalled();
+    expect(store.addGameComponent).toHaveBeenCalled();
+  });
+});
