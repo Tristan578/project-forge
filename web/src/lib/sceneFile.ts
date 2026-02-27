@@ -2,6 +2,9 @@
  * Scene file I/O utilities — download, upload, and localStorage auto-save.
  */
 
+/** Maximum scene format version the web client supports. Must match engine. */
+export const CURRENT_FORMAT_VERSION = 3;
+
 const AUTOSAVE_KEY = 'forge:autosave';
 const AUTOSAVE_NAME_KEY = 'forge:autosave:name';
 const AUTOSAVE_TIME_KEY = 'forge:autosave:time';
@@ -27,7 +30,7 @@ export async function readSceneFile(file: File): Promise<string> {
   if (typeof parsed.formatVersion !== 'number') {
     throw new Error('Invalid scene file: missing formatVersion');
   }
-  if (parsed.formatVersion !== 1) {
+  if (parsed.formatVersion < 1 || parsed.formatVersion > CURRENT_FORMAT_VERSION) {
     throw new Error(`Unsupported scene format version: ${parsed.formatVersion}`);
   }
   return text;

@@ -246,12 +246,29 @@ pub(super) fn apply_scene_load(
         }
     }
 
+    // Spawn all entities and build a mapping from entity_id string -> Bevy Entity
+    let mut id_to_entity: std::collections::HashMap<String, Entity> = std::collections::HashMap::new();
     for snap in roots.iter().chain(children.iter()) {
-        entity_factory::spawn_from_snapshot(&mut commands, &mut meshes, &mut materials, snap);
+        let entity = entity_factory::spawn_from_snapshot(&mut commands, &mut meshes, &mut materials, snap);
+        id_to_entity.insert(snap.entity_id.clone(), entity);
     }
 
-    // 8. Reparent children (deferred — will happen next frame via ChildOf)
-    // TODO: implement reparenting from parent_id fields
+    // 8. Restore parent-child hierarchy from saved parent_id fields
+    for snap in &scene_file.entities {
+        if let Some(ref parent_id) = snap.parent_id {
+            if let (Some(&child_entity), Some(&parent_entity)) =
+                (id_to_entity.get(&snap.entity_id), id_to_entity.get(parent_id))
+            {
+                commands.entity(child_entity).insert(ChildOf(parent_entity));
+            } else {
+                tracing::warn!(
+                    "Could not restore parent for entity '{}': parent_id '{}' not found",
+                    snap.entity_id,
+                    parent_id,
+                );
+            }
+        }
+    }
 
     // 9. Update scene name
     scene_name.0 = scene_file.metadata.name.clone();

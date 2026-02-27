@@ -29,6 +29,7 @@ features = [
     "bevy_render",
     "bevy_core_pipeline",
     "bevy_pbr",
+    "bevy_sprite",
     "bevy_asset",
     "bevy_gizmos",
     "bevy_log",

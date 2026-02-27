@@ -695,6 +695,21 @@ pub fn emit_reverb_zone_changed(entity_id: &str, data: &crate::core::reverb_zone
     });
 }
 
+/// Emit a sprite changed event for an entity.
+pub fn emit_sprite_changed(entity_id: &str, sprite_data: Option<&crate::core::sprite::SpriteData>) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SpritePayload<'a> {
+        entity_id: &'a str,
+        sprite: Option<&'a crate::core::sprite::SpriteData>,
+    }
+
+    emit_event("SPRITE_CHANGED", &SpritePayload {
+        entity_id,
+        sprite: sprite_data,
+    });
+}
+
 /// Emit a reverb zone removed event.
 pub fn emit_reverb_zone_removed(entity_id: &str) {
     #[derive(Serialize)]
@@ -704,4 +719,35 @@ pub fn emit_reverb_zone_removed(entity_id: &str) {
     }
 
     emit_event("REVERB_ZONE_REMOVED", &ReverbZoneRemovedPayload { entity_id });
+}
+
+/// Emit a camera 2D state changed event.
+pub fn emit_camera_2d_changed(data: &crate::core::camera_2d::Camera2dData) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Camera2dPayload {
+        zoom: f32,
+        pixel_perfect: bool,
+        bounds: Option<Camera2dBoundsPayload>,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Camera2dBoundsPayload {
+        min_x: f32,
+        max_x: f32,
+        min_y: f32,
+        max_y: f32,
+    }
+
+    emit_event("CAMERA_2D_CHANGED", &Camera2dPayload {
+        zoom: data.zoom,
+        pixel_perfect: data.pixel_perfect,
+        bounds: data.bounds.as_ref().map(|b| Camera2dBoundsPayload {
+            min_x: b.min_x,
+            max_x: b.max_x,
+            min_y: b.min_y,
+            max_y: b.max_y,
+        }),
+    });
 }
