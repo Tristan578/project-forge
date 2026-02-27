@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Terrain & Procedural', () => {
+test.describe('Terrain & Procedural @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

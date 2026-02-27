@@ -15,25 +15,10 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    // In CI, run headed inside xvfb so Chrome gets a real display + GPU context.
-    // Headless mode disables GPU even with SwiftShader flags.
-    headless: !process.env.CI,
     launchOptions: {
       args: [
         '--enable-unsafe-webgpu',
         '--enable-features=Vulkan',
-        // CI: Force WebGL2 path via SwiftShader (no real GPU available).
-        // --disable-webgpu removes navigator.gpu so the app uses WebGL2 fallback.
-        // ANGLE + SwiftShader provides software WebGL2 rendering.
-        ...(process.env.CI
-          ? [
-              '--disable-webgpu',
-              '--use-gl=angle',
-              '--use-angle=swiftshader-webgl',
-              '--disable-gpu-sandbox',
-              '--no-sandbox',
-            ]
-          : []),
       ],
     },
   },

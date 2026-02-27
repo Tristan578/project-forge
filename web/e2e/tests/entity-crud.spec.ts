@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Entity CRUD Operations', () => {
+test.describe('Entity CRUD Operations @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

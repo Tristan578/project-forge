@@ -8,7 +8,7 @@ import { test, expect } from '../fixtures/editor.fixture';
  * Uses page.evaluate() to call store actions directly, bypassing
  * the AI API (no API key needed in CI).
  */
-test.describe('Chat Command Execution', () => {
+test.describe('Chat Command Execution @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });

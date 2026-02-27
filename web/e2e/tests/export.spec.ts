@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Export', () => {
+test.describe('Export @engine', () => {
   test('export dialog can be opened', async ({ page, editor }) => {
     await editor.load();
 

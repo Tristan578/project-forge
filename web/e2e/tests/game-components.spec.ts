@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Game Components', () => {
+test.describe('Game Components @engine', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.load();
   });
