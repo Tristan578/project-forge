@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/editor.fixture';
 
 test.describe('2D Workflows', () => {
   test.beforeEach(async ({ editor }) => {
-    await editor.loadPage();
+    await editor.load();
   });
 
   test('editor loads without errors', async ({ page }) => {
@@ -24,8 +24,7 @@ test.describe('2D Workflows', () => {
     // Look for 2D/3D project type selector
     const projectTypeUI = page.locator('button, select, [role="tab"]').filter({ hasText: /2d|3d|project.*type/i });
     const count = await projectTypeUI.count();
-    // May or may not be visible depending on UI state
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('editor has main canvas area', async ({ page }) => {
@@ -57,14 +56,14 @@ test.describe('2D Workflows', () => {
     const spriteOption = page.getByText(/sprite|2d/i, { exact: false });
     const count = await spriteOption.count();
     // Sprite option may exist in the add entity menu
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('toolbar shows gizmo mode buttons', async ({ page }) => {
     // Translate/Rotate/Scale gizmo buttons
     const gizmoBtn = page.locator('button[title*="Translate"], button[title*="Rotate"], button[title*="Scale"]');
     const count = await gizmoBtn.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('settings modal can be opened', async ({ page }) => {

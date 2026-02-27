@@ -2,7 +2,7 @@ import { test, expect } from '../fixtures/editor.fixture';
 
 test.describe('Dialogue Editor', () => {
   test.beforeEach(async ({ editor }) => {
-    await editor.loadPage();
+    await editor.load();
   });
 
   test('dialogue panel or tab exists in editor', async ({ page, editor: _editor }) => {
@@ -10,7 +10,7 @@ test.describe('Dialogue Editor', () => {
     const dialogueTab = page.locator('button, [role="tab"]').filter({ hasText: /dialogue/i });
     const count = await dialogueTab.count();
     // Dialogue may be behind a menu or tab - just verify it's findable
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('dialogue store initializes empty', async ({ page, editor: _editor }) => {
