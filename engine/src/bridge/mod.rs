@@ -18,6 +18,7 @@ mod mesh_ops;
 mod scripts;
 mod game;
 mod skeleton2d;
+mod sprite;
 mod edit_mode;
 
 use bevy::prelude::*;
@@ -249,6 +250,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<AudioBusConfig>()
             .init_resource::<QualitySettings>()
             .init_resource::<SkyboxHandles>()
+            .init_resource::<core::project_type::ProjectType>()
             .add_event::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
@@ -328,6 +330,14 @@ impl Plugin for SelectionPlugin {
             ))
             // Shader sync system (always-active)
             .add_systems(Update, material::sync_extended_material_data)
+            // Sprite rendering pipeline (always-active): sync SpriteData -> Bevy Sprite
+            .add_systems(Update, sprite::apply_sprite_data_updates)
+            .add_systems(Update, sprite::apply_sprite_removals)
+            .add_systems(Update, sprite::sync_sprite_rendering)
+            // 2D camera systems (always-active): project type + Camera2d management
+            .add_systems(Update, sprite::apply_project_type_changes)
+            .add_systems(Update, sprite::apply_camera_2d_updates)
+            .add_systems(Update, sprite::sync_camera_2d_rendering)
             .add_systems(PostUpdate, (
                 scene_graph::detect_entity_added,
                 scene_graph::detect_entity_removed,
@@ -385,6 +395,7 @@ impl Plugin for SelectionPlugin {
                     animation::emit_animation_on_selection,
                     game::emit_game_camera_on_selection,
                     skeleton2d::emit_skeleton2d_on_selection,
+                    sprite::emit_sprite_on_selection,
                     visibility::sync_visibility,
                 ).chain().in_set(EditorSystemSet))
                 .add_systems(Update, animation::poll_animation_state.in_set(EditorSystemSet))

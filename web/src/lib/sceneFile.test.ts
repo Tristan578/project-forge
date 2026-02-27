@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { readSceneFile, getAutoSave, clearAutoSave, downloadSceneFile } from './sceneFile';
+import { readSceneFile, getAutoSave, clearAutoSave, downloadSceneFile, CURRENT_FORMAT_VERSION } from './sceneFile';
 
 // ============ readSceneFile TESTS ============
 
@@ -29,6 +29,24 @@ describe('readSceneFile', () => {
     expect(result).toBe(JSON.stringify(sceneData));
   });
 
+  it('valid file with formatVersion 2 returns JSON string', async () => {
+    const sceneData = { formatVersion: 2, entities: [] };
+    const file = createFileWithText(JSON.stringify(sceneData), 'test.forge');
+
+    const result = await readSceneFile(file);
+
+    expect(result).toBe(JSON.stringify(sceneData));
+  });
+
+  it('valid file with formatVersion 3 returns JSON string', async () => {
+    const sceneData = { formatVersion: 3, entities: [] };
+    const file = createFileWithText(JSON.stringify(sceneData), 'test.forge');
+
+    const result = await readSceneFile(file);
+
+    expect(result).toBe(JSON.stringify(sceneData));
+  });
+
   it('missing formatVersion throws error', async () => {
     const sceneData = { entities: [] }; // No formatVersion
     const file = createFileWithText(JSON.stringify(sceneData), 'test.forge');
@@ -36,16 +54,23 @@ describe('readSceneFile', () => {
     await expect(readSceneFile(file)).rejects.toThrow('Invalid scene file: missing formatVersion');
   });
 
-  it('wrong formatVersion throws error', async () => {
-    const sceneData = { formatVersion: 2, entities: [] };
+  it('formatVersion 0 throws error', async () => {
+    const sceneData = { formatVersion: 0, entities: [] };
     const file = createFileWithText(JSON.stringify(sceneData), 'test.forge');
 
-    await expect(readSceneFile(file)).rejects.toThrow('Unsupported scene format version: 2');
+    await expect(readSceneFile(file)).rejects.toThrow('Unsupported scene format version: 0');
+  });
+
+  it('future formatVersion throws error', async () => {
+    const sceneData = { formatVersion: CURRENT_FORMAT_VERSION + 1, entities: [] };
+    const file = createFileWithText(JSON.stringify(sceneData), 'test.forge');
+
+    await expect(readSceneFile(file)).rejects.toThrow(`Unsupported scene format version: ${CURRENT_FORMAT_VERSION + 1}`);
   });
 
   it('valid complex scene with entities round-trips', async () => {
     const sceneData = {
-      formatVersion: 1,
+      formatVersion: 3,
       sceneName: 'TestScene',
       entities: [
         {

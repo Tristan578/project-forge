@@ -3,6 +3,8 @@
  * deleting named scenes within a project.
  */
 
+import { CURRENT_FORMAT_VERSION } from '../sceneFile';
+
 export interface SceneFileData {
   formatVersion: number;
   sceneName: string;
@@ -77,7 +79,7 @@ export function createScene(project: ProjectScenes, name: string): { project: Pr
     id,
     name: name || `Scene ${project.scenes.length + 1}`,
     isStartScene: false,
-    data: { formatVersion: 1, sceneName: name, entities: [] },
+    data: { formatVersion: CURRENT_FORMAT_VERSION, sceneName: name, entities: [] },
     createdAt: now,
     updatedAt: now,
   };

@@ -36,3 +36,8 @@ impl Default for Camera2dData {
 /// Marker component indicating 2D camera is enabled.
 #[derive(Component)]
 pub struct Camera2dEnabled;
+
+/// Marker component for the managed orthographic 2D camera entity.
+/// This is placed on the Bevy Camera entity that renders 2D content.
+#[derive(Component)]
+pub struct Managed2dCamera;
