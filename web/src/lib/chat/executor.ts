@@ -18,6 +18,18 @@ import { securityHandlers } from './handlers/securityHandlers';
 import { exportHandlers } from './handlers/exportHandlers';
 import { shaderHandlers } from './handlers/shaderHandlers';
 import { performanceHandlers } from './handlers/performanceHandlers';
+import { generationHandlers } from './handlers/generationHandlers';
+import { handlers2d } from './handlers/handlers2d';
+import { entityHandlers } from './handlers/entityHandlers';
+import { sceneManagementHandlers } from './handlers/sceneManagementHandlers';
+import { uiBuilderHandlers } from './handlers/uiBuilderHandlers';
+import { dialogueHandlers } from './handlers/dialogueHandlers';
+import { scriptLibraryHandlers } from './handlers/scriptLibraryHandlers';
+import { physicsJointHandlers } from './handlers/physicsJointHandlers';
+import { animationParticleHandlers } from './handlers/animationParticleHandlers';
+import { gameplayHandlers } from './handlers/gameplayHandlers';
+import { assetHandlers } from './handlers/assetHandlers';
+import { audioLegacyHandlers } from './handlers/audioLegacyHandlers';
 
 // Legacy fallback for handlers not yet migrated to the registry pattern
 import { executeToolCall as legacyExecuteToolCall } from './executor.legacy';
@@ -37,6 +49,18 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...exportHandlers,
   ...shaderHandlers,
   ...performanceHandlers,
+  ...generationHandlers,
+  ...handlers2d,
+  ...entityHandlers,
+  ...sceneManagementHandlers,
+  ...uiBuilderHandlers,
+  ...dialogueHandlers,
+  ...scriptLibraryHandlers,
+  ...physicsJointHandlers,
+  ...animationParticleHandlers,
+  ...gameplayHandlers,
+  ...assetHandlers,
+  ...audioLegacyHandlers,
 };
 
 /**
