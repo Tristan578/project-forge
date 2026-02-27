@@ -7,6 +7,12 @@ import type { ToolHandler } from './types';
 import type { GameCameraData, GameComponentData, EntityType, PlatformLoopMode, WinConditionType } from '@/stores/editorStore';
 import { MATERIAL_PRESETS, getPresetsByCategory, saveCustomMaterial, deleteCustomMaterial, loadCustomMaterials } from '@/lib/materialPresets';
 
+const VALID_COMPONENT_TYPES = [
+  'character_controller', 'health', 'collectible', 'damage_zone', 'checkpoint',
+  'teleporter', 'moving_platform', 'trigger_zone', 'spawner', 'follower',
+  'projectile', 'win_condition',
+].join(', ');
+
 function buildGameComponentFromInput(
   type: string,
   props: Record<string, unknown>
@@ -26,8 +32,8 @@ function buildGameComponentFromInput(
       return {
         type: 'health',
         health: {
-          maxHp: (props.maxHp as number) ?? 100,
-          currentHp: (props.currentHp as number) ?? (props.maxHp as number) ?? 100,
+          maxHp: (props.maxHealth as number) ?? (props.maxHp as number) ?? 100,
+          currentHp: (props.currentHealth as number) ?? (props.currentHp as number) ?? (props.maxHealth as number) ?? (props.maxHp as number) ?? 100,
           invincibilitySecs: (props.invincibilitySecs as number) ?? 0.5,
           respawnOnDeath: (props.respawnOnDeath as boolean) ?? true,
           respawnPoint: (props.respawnPoint as [number, number, number]) ?? [0, 1, 0],
@@ -138,7 +144,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
 
     const component = buildGameComponentFromInput(componentType, props);
     if (!component) {
-      return { success: false, error: `Unknown component type: ${componentType}` };
+      return { success: false, error: `Unknown component type: ${componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
     }
     ctx.store.addGameComponent(entityId, component);
     return { success: true, result: { message: `Added ${componentType}` } };
@@ -151,7 +157,7 @@ export const gameplayHandlers: Record<string, ToolHandler> = {
 
     const component = buildGameComponentFromInput(componentType, props);
     if (!component) {
-      return { success: false, error: `Unknown component type: ${componentType}` };
+      return { success: false, error: `Unknown component type: ${componentType}. Valid types: ${VALID_COMPONENT_TYPES}` };
     }
     ctx.store.updateGameComponent(entityId, component);
     return { success: true };
