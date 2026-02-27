@@ -77,6 +77,19 @@ pub struct AnimationStateMachineRemoval {
     pub entity_id: String,
 }
 
+// === Tilemap Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct TilemapDataUpdate {
+    pub entity_id: String,
+    pub tilemap_data: crate::core::tilemap::TilemapData,
+}
+
+#[derive(Debug, Clone)]
+pub struct TilemapDataRemoval {
+    pub entity_id: String,
+}
+
 // === Queue Methods ===
 
 impl PendingCommands {
@@ -118,6 +131,14 @@ impl PendingCommands {
 
     pub fn queue_animation_state_machine_removal(&mut self, removal: AnimationStateMachineRemoval) {
         self.animation_state_machine_removals.push(removal);
+    }
+
+    pub fn queue_tilemap_data_update(&mut self, update: TilemapDataUpdate) {
+        self.tilemap_data_updates.push(update);
+    }
+
+    pub fn queue_tilemap_data_removal(&mut self, removal: TilemapDataRemoval) {
+        self.tilemap_data_removals.push(removal);
     }
 }
 
@@ -161,4 +182,12 @@ pub fn queue_animation_state_machine_update_from_bridge(update: AnimationStateMa
 
 pub fn queue_animation_state_machine_removal_from_bridge(removal: AnimationStateMachineRemoval) -> bool {
     super::with_pending(|pc| pc.queue_animation_state_machine_removal(removal)).is_some()
+}
+
+pub fn queue_tilemap_data_update_from_bridge(update: TilemapDataUpdate) -> bool {
+    super::with_pending(|pc| pc.queue_tilemap_data_update(update)).is_some()
+}
+
+pub fn queue_tilemap_data_removal_from_bridge(removal: TilemapDataRemoval) -> bool {
+    super::with_pending(|pc| pc.queue_tilemap_data_removal(removal)).is_some()
 }

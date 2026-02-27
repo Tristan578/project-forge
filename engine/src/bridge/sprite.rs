@@ -30,8 +30,21 @@ use crate::core::{
         SpriteData, SpriteEnabled, SpriteSheetData, TransitionCondition,
         z_from_sorting,
     },
+    tilemap::{TilemapData, TilemapEnabled, TilemapOrigin},
+    tileset::TilesetData,
 };
 use super::{events, Selection, SelectionChangedEvent};
+
+/// Marker component for child entities that represent individual tile sprites.
+#[derive(Component)]
+pub struct TileEntity;
+
+/// Tracks a version counter so we know when to rebuild tile children.
+#[derive(Component, Default)]
+pub struct TilemapRenderState {
+    /// Number of layers * tiles last time we rendered.
+    pub last_hash: u64,
+}
 
 /// Newtype wrapper for Handle<TextureAtlasLayout> since Handle<T> is not a Component in Bevy 0.16.
 #[derive(Component)]
@@ -676,6 +689,263 @@ pub(super) fn evaluate_animation_state_machine(
                     animator.playing = true;
                 }
             }
+        }
+    }
+}
+
+// ========== Tilemap Systems ==========
+
+/// System that processes pending tilemap data updates from the bridge.
+/// Inserts/updates TilemapData and TilemapEnabled on matching entities.
+pub(super) fn apply_tilemap_data_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(Entity, &EntityId, Option<&mut TilemapData>)>,
+    mut commands: Commands,
+    mut history: ResMut<HistoryStack>,
+) {
+    for update in pending.tilemap_data_updates.drain(..) {
+        let found = query.iter_mut().find(|(_, eid, _)| eid.0 == update.entity_id);
+        let Some((entity, _, existing)) = found else { continue };
+
+        let old_tilemap = existing.as_deref().cloned();
+
+        if let Some(mut existing_data) = existing {
+            *existing_data = update.tilemap_data.clone();
+        } else {
+            commands.entity(entity)
+                .insert(update.tilemap_data.clone())
+                .insert(TilemapEnabled)
+                .insert(TilemapRenderState::default());
+        }
+
+        // Record undo
+        history.push(UndoableAction::TilemapChange {
+            entity_id: update.entity_id,
+            old_tilemap,
+            new_tilemap: Some(update.tilemap_data),
+        });
+    }
+}
+
+/// System that processes pending tilemap data removals from the bridge.
+pub(super) fn apply_tilemap_data_removals(
+    mut pending: ResMut<PendingCommands>,
+    query: Query<(Entity, &EntityId, Option<&TilemapData>)>,
+    tile_entities: Query<Entity, With<TileEntity>>,
+    children_query: Query<&Children>,
+    mut commands: Commands,
+    mut history: ResMut<HistoryStack>,
+) {
+    for removal in pending.tilemap_data_removals.drain(..) {
+        let found = query.iter().find(|(_, eid, _)| eid.0 == removal.entity_id);
+        let Some((entity, _, old_tilemap)) = found else { continue };
+
+        let old_tilemap_clone = old_tilemap.cloned();
+
+        // Despawn child tile entities
+        if let Ok(children) = children_query.get(entity) {
+            for child in children.iter() {
+                if tile_entities.contains(child) {
+                    commands.entity(child).despawn();
+                }
+            }
+        }
+
+        commands.entity(entity)
+            .remove::<TilemapData>()
+            .remove::<TilemapEnabled>()
+            .remove::<TilemapRenderState>();
+
+        // Record undo
+        history.push(UndoableAction::TilemapChange {
+            entity_id: removal.entity_id,
+            old_tilemap: old_tilemap_clone,
+            new_tilemap: None,
+        });
+    }
+}
+
+/// Compute a simple hash of the tilemap data for change detection.
+fn tilemap_data_hash(data: &TilemapData) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    // Hash structural properties
+    data.tileset_asset_id.hash(&mut hasher);
+    data.tile_size[0].hash(&mut hasher);
+    data.tile_size[1].hash(&mut hasher);
+    data.map_size[0].hash(&mut hasher);
+    data.map_size[1].hash(&mut hasher);
+    data.layers.len().hash(&mut hasher);
+    for layer in &data.layers {
+        layer.name.hash(&mut hasher);
+        layer.visible.hash(&mut hasher);
+        layer.is_collision.hash(&mut hasher);
+        // Hash a sample of tile data to detect changes
+        for tile in &layer.tiles {
+            tile.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+/// System that renders tilemap data as child sprite entities.
+/// When TilemapData changes (detected via hash), despawns old tile children and rebuilds.
+/// Each visible tile becomes a Sprite child with a TextureAtlas index.
+pub(super) fn sync_tilemap_rendering(
+    mut tilemap_query: Query<
+        (Entity, &TilemapData, &mut TilemapRenderState),
+        With<TilemapEnabled>,
+    >,
+    tile_entities: Query<Entity, With<TileEntity>>,
+    children_query: Query<&Children>,
+    tileset_query: Query<&TilesetData>,
+    texture_handles: Res<TextureHandleMap>,
+    mut atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut commands: Commands,
+    transform_query: Query<&Transform>,
+) {
+    for (tilemap_entity, tilemap_data, mut render_state) in tilemap_query.iter_mut() {
+        let current_hash = tilemap_data_hash(tilemap_data);
+        if current_hash == render_state.last_hash {
+            continue;
+        }
+        render_state.last_hash = current_hash;
+
+        // Despawn old tile children
+        if let Ok(children) = children_query.get(tilemap_entity) {
+            for child in children.iter() {
+                if tile_entities.contains(child) {
+                    commands.entity(child).despawn();
+                }
+            }
+        }
+
+        // Resolve tileset texture handle from the tilemap's tileset_asset_id
+        let Some(image_handle) = texture_handles.0.get(&tilemap_data.tileset_asset_id) else {
+            continue;
+        };
+
+        // Find the TilesetData component on any entity (tilesets are stored per-asset, not per-entity typically).
+        // For now, look up by matching asset_id.
+        let tileset_opt: Option<&TilesetData> = tileset_query.iter().find(|ts| ts.asset_id == tilemap_data.tileset_asset_id);
+
+        // Calculate atlas columns/rows from tileset or tilemap data
+        let tile_w = tilemap_data.tile_size[0];
+        let tile_h = tilemap_data.tile_size[1];
+
+        // Compute atlas grid from tileset if available, otherwise estimate
+        let (atlas_cols, atlas_rows) = if let Some(ts) = tileset_opt {
+            (ts.grid_size[0], ts.grid_size[1])
+        } else {
+            // Fallback: assume a reasonable default
+            (16u32, 16u32)
+        };
+
+        let spacing = tileset_opt.map(|ts| ts.spacing).unwrap_or(0);
+        let margin = tileset_opt.map(|ts| ts.margin).unwrap_or(0);
+
+        // Build the atlas layout
+        let layout = TextureAtlasLayout::from_grid(
+            UVec2::new(tile_w, tile_h),
+            atlas_cols,
+            atlas_rows,
+            Some(UVec2::new(spacing, spacing)),
+            Some(UVec2::new(margin, margin)),
+        );
+        let layout_handle = atlas_layouts.add(layout);
+
+        let map_w = tilemap_data.map_size[0] as i32;
+        let map_h = tilemap_data.map_size[1] as i32;
+
+        // Get the tilemap entity's world position for offset calculation
+        let tilemap_z = transform_query.get(tilemap_entity)
+            .map(|t| t.translation.z)
+            .unwrap_or(0.0);
+
+        // Base Z for tilemap layers. Layer 0 starts at the entity's Z, each layer adds 0.01.
+        let base_z = tilemap_z;
+
+        for (layer_idx, layer) in tilemap_data.layers.iter().enumerate() {
+            if !layer.visible {
+                continue;
+            }
+
+            let layer_z = base_z + (layer_idx as f32 * 0.01);
+            let alpha = layer.opacity;
+
+            for row in 0..map_h {
+                for col in 0..map_w {
+                    let tile_index = (row * map_w + col) as usize;
+                    let Some(tile_id) = layer.tiles.get(tile_index).copied().flatten() else {
+                        continue;
+                    };
+
+                    // Compute world position relative to the tilemap entity.
+                    // The tile positions are offsets from the tilemap entity's Transform.
+                    let (x, y) = match tilemap_data.origin {
+                        TilemapOrigin::TopLeft => {
+                            // X increases right, Y decreases down
+                            (
+                                col as f32 * tile_w as f32,
+                                -(row as f32 * tile_h as f32),
+                            )
+                        }
+                        TilemapOrigin::Center => {
+                            // Center the map
+                            let half_w = (map_w as f32 * tile_w as f32) / 2.0;
+                            let half_h = (map_h as f32 * tile_h as f32) / 2.0;
+                            (
+                                col as f32 * tile_w as f32 - half_w + (tile_w as f32 / 2.0),
+                                -(row as f32 * tile_h as f32) + half_h - (tile_h as f32 / 2.0),
+                            )
+                        }
+                    };
+
+                    let tile_sprite = Sprite {
+                        image: image_handle.clone(),
+                        color: Color::linear_rgba(1.0, 1.0, 1.0, alpha),
+                        custom_size: Some(Vec2::new(tile_w as f32, tile_h as f32)),
+                        texture_atlas: Some(TextureAtlas {
+                            layout: layout_handle.clone(),
+                            index: tile_id as usize,
+                        }),
+                        ..default()
+                    };
+
+                    commands.spawn((
+                        TileEntity,
+                        tile_sprite,
+                        Transform::from_xyz(x, y, layer_z),
+                        ChildOf(tilemap_entity),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// System that emits tilemap data when the primary selection has a TilemapData component (editor-only).
+#[cfg(not(feature = "runtime"))]
+pub(super) fn emit_tilemap_on_selection(
+    selection: Res<Selection>,
+    query: Query<(&EntityId, &TilemapData), Changed<TilemapData>>,
+    selection_query: Query<(&EntityId, Option<&TilemapData>)>,
+    mut selection_events: EventReader<SelectionChangedEvent>,
+) {
+    // Emit on selection change
+    for _event in selection_events.read() {
+        if let Some(primary) = selection.primary {
+            if let Ok((entity_id, tilemap_data)) = selection_query.get(primary) {
+                events::emit_tilemap_changed(&entity_id.0, tilemap_data);
+            }
+        }
+    }
+
+    // Emit when tilemap data changes on selected entity
+    if let Some(primary) = selection.primary {
+        if let Ok((entity_id, tilemap_data)) = query.get(primary) {
+            events::emit_tilemap_changed(&entity_id.0, Some(tilemap_data));
         }
     }
 }

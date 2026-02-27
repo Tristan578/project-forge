@@ -59,6 +59,12 @@ pub struct CameraShakeRequest {
     pub duration: f32,
 }
 
+#[derive(Debug, Clone)]
+pub struct MouseDeltaRequest {
+    pub dx: f32,
+    pub dy: f32,
+}
+
 // === Queue Methods ===
 
 impl PendingCommands {
@@ -96,6 +102,10 @@ impl PendingCommands {
 
     pub fn queue_camera_shake(&mut self, request: CameraShakeRequest) {
         self.camera_shake_requests.push(request);
+    }
+
+    pub fn queue_mouse_delta(&mut self, dx: f32, dy: f32) {
+        self.mouse_delta_requests.push(MouseDeltaRequest { dx, dy });
     }
 }
 
@@ -135,4 +145,8 @@ pub fn queue_set_active_game_camera_from_bridge(request: SetActiveGameCameraRequ
 
 pub fn queue_camera_shake_from_bridge(request: CameraShakeRequest) -> bool {
     super::with_pending(|pc| pc.queue_camera_shake(request)).is_some()
+}
+
+pub fn queue_mouse_delta_from_bridge(dx: f32, dy: f32) -> bool {
+    super::with_pending(|pc| pc.queue_mouse_delta(dx, dy)).is_some()
 }

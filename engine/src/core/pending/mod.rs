@@ -228,6 +228,7 @@ pub struct PendingCommands {
     pub set_game_camera_requests: Vec<SetGameCameraRequest>,
     pub set_active_game_camera_requests: Vec<SetActiveGameCameraRequest>,
     pub camera_shake_requests: Vec<CameraShakeRequest>,
+    pub mouse_delta_requests: Vec<MouseDeltaRequest>,
     // sprites domain
     pub set_project_type_requests: Vec<SetProjectTypeRequest>,
     pub sprite_data_updates: Vec<SpriteDataUpdate>,
@@ -239,6 +240,8 @@ pub struct PendingCommands {
     pub sprite_animator_removals: Vec<SpriteAnimatorRemoval>,
     pub animation_state_machine_updates: Vec<AnimationStateMachineUpdate>,
     pub animation_state_machine_removals: Vec<AnimationStateMachineRemoval>,
+    pub tilemap_data_updates: Vec<TilemapDataUpdate>,
+    pub tilemap_data_removals: Vec<TilemapDataRemoval>,
     // scene domain
     pub scene_export_requests: Vec<SceneExportRequest>,
     pub scene_load_requests: Vec<SceneLoadRequest>,

@@ -735,6 +735,49 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
             Some(super::handle_query(QueryRequest::Skeleton2dState { entity_id }))
         }
         "auto_weight_skeleton2d" => Some(handle_auto_weight_skeleton2d(payload.clone())),
+        "set_tilemap_data" => Some(handle_set_tilemap_data(payload.clone())),
+        "remove_tilemap_data" => Some(handle_remove_tilemap_data(payload.clone())),
         _ => None,
+    }
+}
+
+/// Handle set_tilemap_data command.
+/// Payload: { entityId, tilesetAssetId, tileSize, mapSize, layers, origin }
+fn handle_set_tilemap_data(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let mut obj = payload;
+    if let Some(map) = obj.as_object_mut() {
+        map.remove("entityId");
+    }
+    let tilemap_data: crate::core::tilemap::TilemapData =
+        serde_json::from_value(obj)
+            .map_err(|e| format!("Invalid tilemap data: {}", e))?;
+
+    if queue_tilemap_data_update_from_bridge(TilemapDataUpdate {
+        entity_id,
+        tilemap_data,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_tilemap_data command.
+/// Payload: { entityId }
+fn handle_remove_tilemap_data(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_tilemap_data_removal_from_bridge(TilemapDataRemoval { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
     }
 }

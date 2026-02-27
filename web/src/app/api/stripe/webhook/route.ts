@@ -4,9 +4,18 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import type { Tier } from '@/lib/db/schema';
-import { creditAddonTokens, resetMonthlyTokens } from '@/lib/tokens/service';
-import { updateUserStripe, updateUserTier } from '@/lib/auth/user-service';
+import { creditAddonTokens } from '@/lib/tokens/service';
+import { updateUserStripe } from '@/lib/auth/user-service';
 import type { TokenPackage } from '@/lib/tokens/pricing';
+import {
+  isEventProcessed,
+  markEventProcessed,
+  handleSubscriptionCreated,
+  handleSubscriptionUpdated,
+  handleSubscriptionDeleted,
+  handleInvoicePaid,
+  handleInvoicePaymentFailed,
+} from '@/lib/billing/subscription-lifecycle';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -22,6 +31,14 @@ function tierFromPriceId(priceId: string): Tier | null {
     [process.env.STRIPE_PRICE_STUDIO ?? '']: 'pro',
   };
   return map[priceId] ?? null;
+}
+
+/** Extract Stripe customer ID string from a customer field (string or object). */
+function resolveCustomerId(
+  customer: string | Stripe.Customer | Stripe.DeletedCustomer | null
+): string | null {
+  if (!customer) return null;
+  return typeof customer === 'string' ? customer : customer.id;
 }
 
 export async function POST(req: Request) {
@@ -43,92 +60,119 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
+  // Idempotency: skip duplicate webhook deliveries
+  if (isEventProcessed(event.id)) {
+    return NextResponse.json({ received: true, duplicate: true });
+  }
+
+  try {
+    await processEvent(event);
+  } catch (err) {
+    // Log but still return 200 to Stripe to prevent infinite retries on
+    // application errors. The error is logged for manual investigation.
+    console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
+  }
+
+  markEventProcessed(event.id);
+  return NextResponse.json({ received: true });
+}
+
+async function processEvent(event: Stripe.Event): Promise<void> {
   const db = getDb();
 
   switch (event.type) {
+    // -----------------------------------------------------------
     // New subscription created
-    case 'customer.subscription.created':
-    case 'customer.subscription.updated': {
+    // -----------------------------------------------------------
+    case 'customer.subscription.created': {
       const subscription = event.data.object as Stripe.Subscription;
-      const customerId =
-        typeof subscription.customer === 'string'
-          ? subscription.customer
-          : subscription.customer.id;
-      const priceId = subscription.items.data[0]?.price?.id;
-      const tier = priceId ? tierFromPriceId(priceId) : null;
-
-      // Find user by Stripe customer ID
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.stripeCustomerId, customerId))
-        .limit(1);
-
-      if (user && tier) {
-        await updateUserTier(user.id, tier);
-        await db
-          .update(users)
-          .set({ stripeSubscriptionId: subscription.id, updatedAt: new Date() })
-          .where(eq(users.id, user.id));
-
-        // Reset monthly tokens on subscription change
-        await resetMonthlyTokens(user.id, tier);
-      }
-      break;
-    }
-
-    // Subscription cancelled
-    case 'customer.subscription.deleted': {
-      const subscription = event.data.object as Stripe.Subscription;
-      const customerId =
-        typeof subscription.customer === 'string'
-          ? subscription.customer
-          : subscription.customer.id;
-
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.stripeCustomerId, customerId))
-        .limit(1);
-
-      if (user) {
-        await updateUserTier(user.id, 'starter');
-        await db
-          .update(users)
-          .set({
-            stripeSubscriptionId: null,
-            monthlyTokens: 0,
-            monthlyTokensUsed: 0,
-            updatedAt: new Date(),
-          })
-          .where(eq(users.id, user.id));
-      }
-      break;
-    }
-
-    // Invoice paid — monthly renewal
-    case 'invoice.paid': {
-      const invoice = event.data.object as Stripe.Invoice;
-      const customerId =
-        typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.id;
+      const customerId = resolveCustomerId(subscription.customer);
       if (!customerId) break;
 
-      const [user] = await db
-        .select()
-        .from(users)
-        .where(eq(users.stripeCustomerId, customerId))
-        .limit(1);
+      const priceId = subscription.items.data[0]?.price?.id;
+      const tier = priceId ? tierFromPriceId(priceId) : null;
+      if (!tier) break;
 
-      if (user) {
-        await resetMonthlyTokens(
-          user.id,
-          user.tier as 'starter' | 'hobbyist' | 'creator' | 'pro'
-        );
-      }
+      await handleSubscriptionCreated(customerId, subscription.id, tier);
       break;
     }
 
-    // One-time payment completed (token purchase)
+    // -----------------------------------------------------------
+    // Subscription updated (tier change, status change, etc.)
+    // -----------------------------------------------------------
+    case 'customer.subscription.updated': {
+      const subscription = event.data.object as Stripe.Subscription;
+      const customerId = resolveCustomerId(subscription.customer);
+      if (!customerId) break;
+
+      const priceId = subscription.items.data[0]?.price?.id;
+      const tier = priceId ? tierFromPriceId(priceId) : null;
+      if (!tier) break;
+
+      await handleSubscriptionUpdated(
+        customerId,
+        subscription.id,
+        tier,
+        subscription.status
+      );
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // Subscription cancelled / deleted
+    // -----------------------------------------------------------
+    case 'customer.subscription.deleted': {
+      const subscription = event.data.object as Stripe.Subscription;
+      const customerId = resolveCustomerId(subscription.customer);
+      if (!customerId) break;
+
+      await handleSubscriptionDeleted(customerId, subscription.id);
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // Invoice paid -- monthly renewal token grant
+    // -----------------------------------------------------------
+    case 'invoice.paid': {
+      const invoice = event.data.object as Stripe.Invoice;
+      const customerId = resolveCustomerId(invoice.customer);
+      if (!customerId) break;
+
+      const subField = invoice.parent?.subscription_details?.subscription ?? null;
+      const subscriptionId =
+        typeof subField === 'string'
+          ? subField
+          : subField?.id ?? null;
+
+      await handleInvoicePaid(customerId, invoice.id, subscriptionId);
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // Invoice payment failed -- grace period handling
+    // -----------------------------------------------------------
+    case 'invoice.payment_failed': {
+      const invoice = event.data.object as Stripe.Invoice;
+      const customerId = resolveCustomerId(invoice.customer);
+      if (!customerId) break;
+
+      const attemptCount = invoice.attempt_count ?? 1;
+      const nextAttempt = invoice.next_payment_attempt
+        ? new Date(invoice.next_payment_attempt * 1000)
+        : null;
+
+      await handleInvoicePaymentFailed(
+        customerId,
+        invoice.id,
+        attemptCount,
+        nextAttempt
+      );
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // One-time payment completed (token add-on purchase)
+    // -----------------------------------------------------------
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
       if (session.mode !== 'payment') break;
@@ -145,14 +189,21 @@ export async function POST(req: Request) {
 
         // Save Stripe customer ID if not already stored
         if (session.customer) {
-          const stripeCustomerId =
-            typeof session.customer === 'string' ? session.customer : session.customer.id;
-          await updateUserStripe(userId, stripeCustomerId);
+          const stripeCustomerId = resolveCustomerId(session.customer);
+          if (stripeCustomerId) {
+            const [user] = await db
+              .select({ id: users.id, stripeCustomerId: users.stripeCustomerId })
+              .from(users)
+              .where(eq(users.id, userId))
+              .limit(1);
+
+            if (user && !user.stripeCustomerId) {
+              await updateUserStripe(userId, stripeCustomerId);
+            }
+          }
         }
       }
       break;
     }
   }
-
-  return NextResponse.json({ received: true });
 }
