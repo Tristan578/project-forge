@@ -16,7 +16,14 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
     launchOptions: {
-      args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan'],
+      args: [
+        '--enable-unsafe-webgpu',
+        '--enable-features=Vulkan',
+        // Software rendering for CI (SwiftShader bundled in Chrome)
+        ...(process.env.CI
+          ? ['--use-gl=angle', '--use-angle=swiftshader-webgl', '--disable-gpu-sandbox']
+          : []),
+      ],
     },
   },
 
