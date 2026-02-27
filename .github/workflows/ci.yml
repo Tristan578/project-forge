@@ -153,9 +153,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-wasm]
     timeout-minutes: 30
-    # E2E tests require GPU (WebGPU/WebGL2) which CI runners lack.
-    # Non-blocking until we add GPU runners or split UI-only tests.
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
