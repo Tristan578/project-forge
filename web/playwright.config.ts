@@ -22,9 +22,12 @@ export default defineConfig({
       args: [
         '--enable-unsafe-webgpu',
         '--enable-features=Vulkan',
-        // Software rendering for CI (SwiftShader bundled in Chrome)
+        // CI: Force WebGL2 path via SwiftShader (no real GPU available).
+        // --disable-webgpu removes navigator.gpu so the app uses WebGL2 fallback.
+        // ANGLE + SwiftShader provides software WebGL2 rendering.
         ...(process.env.CI
           ? [
+              '--disable-webgpu',
               '--use-gl=angle',
               '--use-angle=swiftshader-webgl',
               '--disable-gpu-sandbox',
