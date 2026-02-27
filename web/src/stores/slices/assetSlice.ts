@@ -1,6 +1,5 @@
 /**
  * Asset slice - manages asset registry and texture loading.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

@@ -53,7 +53,6 @@ export async function GET(
         content: assetReviews.content,
         createdAt: assetReviews.createdAt,
         userName: users.displayName,
-        userEmail: users.email,
       })
       .from(assetReviews)
       .leftJoin(users, eq(assetReviews.userId, users.id))
@@ -67,13 +66,12 @@ export async function GET(
       content: string | null;
       createdAt: Date;
       userName: string | null;
-      userEmail: string | null;
     }) => ({
       id: r.id,
       rating: r.rating,
       content: r.content,
       createdAt: r.createdAt.toISOString(),
-      userName: r.userName || r.userEmail?.split('@')[0] || 'Anonymous',
+      userName: r.userName || 'Anonymous',
     }));
 
     return NextResponse.json({

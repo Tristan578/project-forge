@@ -1,5 +1,5 @@
 /**
- * Shared test fixtures for Project Forge tests.
+ * Shared test fixtures for GenForge tests.
  *
  * Provides factory functions for creating test data with sensible defaults
  * that can be partially overridden.

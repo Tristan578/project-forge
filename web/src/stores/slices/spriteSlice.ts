@@ -1,6 +1,5 @@
 /**
  * Sprite slice - manages 2D sprites, tilemaps, sprite animations, and sorting layers.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

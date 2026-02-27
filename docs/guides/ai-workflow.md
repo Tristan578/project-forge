@@ -3,7 +3,7 @@
 Use AI (MCP) to build games faster with natural language commands.
 
 ## Overview
-Project Forge exposes all editor capabilities as MCP (Model Context Protocol) tools. AI assistants like Claude can use these tools to create scenes, modify entities, configure physics, write scripts, and more — all from natural language instructions.
+GenForge exposes all editor capabilities as MCP (Model Context Protocol) tools. AI assistants like Claude can use these tools to create scenes, modify entities, configure physics, write scripts, and more — all from natural language instructions.
 
 ## Getting Started with MCP
 
@@ -11,7 +11,7 @@ Project Forge exposes all editor capabilities as MCP (Model Context Protocol) to
 The MCP server runs alongside the editor:
 1. Start the editor: `cd web && npm run dev`
 2. The MCP server connects via WebSocket to the running editor
-3. Configure your AI client (Claude Desktop, Claude Code) to use the Project Forge MCP server
+3. Configure your AI client (Claude Desktop, Claude Code) to use the GenForge MCP server
 
 ### Available Tools
 The MCP server provides **115 tools** covering:

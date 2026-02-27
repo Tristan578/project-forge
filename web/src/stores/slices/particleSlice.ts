@@ -1,6 +1,5 @@
 /**
  * Particle slice - manages particle systems.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

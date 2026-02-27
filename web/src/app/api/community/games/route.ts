@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     const sort = searchParams.get('sort') || 'trending';
     const tag = searchParams.get('tag');
     const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
 
     const offset = (page - 1) * limit;
 
@@ -24,10 +24,11 @@ export async function GET(req: NextRequest) {
 
     // Add search filter
     if (query) {
+      const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
       baseConditions.push(
         or(
-          ilike(publishedGames.title, `%${query}%`),
-          ilike(publishedGames.description, `%${query}%`)
+          ilike(publishedGames.title, `%${escapedQuery}%`),
+          ilike(publishedGames.description, `%${escapedQuery}%`)
         )!
       );
     }
@@ -59,7 +60,6 @@ export async function GET(req: NextRequest) {
         slug: publishedGames.slug,
         authorId: publishedGames.userId,
         authorName: users.displayName,
-        authorEmail: users.email,
         playCount: publishedGames.playCount,
         cdnUrl: publishedGames.cdnUrl,
         createdAt: publishedGames.createdAt,
@@ -83,8 +83,7 @@ export async function GET(req: NextRequest) {
         publishedGames.playCount,
         publishedGames.cdnUrl,
         publishedGames.createdAt,
-        users.displayName,
-        users.email
+        users.displayName
       );
 
     // Apply sorting and fetch
@@ -145,7 +144,6 @@ export async function GET(req: NextRequest) {
       slug: string;
       authorId: string;
       authorName: string | null;
-      authorEmail: string | null;
       playCount: number;
       cdnUrl: string | null;
       createdAt: Date;
@@ -159,7 +157,7 @@ export async function GET(req: NextRequest) {
       description: g.description,
       slug: g.slug,
       authorId: g.authorId,
-      authorName: g.authorName || g.authorEmail?.split('@')[0] || 'Unknown',
+      authorName: g.authorName || 'Unknown',
       playCount: g.playCount,
       likeCount: Number(g.likeCount),
       avgRating: Number(g.avgRating),

@@ -1,6 +1,6 @@
 # Installation & Setup
 
-Get Project Forge running on your machine.
+Get GenForge running on your machine.
 
 ## Prerequisites
 
@@ -13,8 +13,8 @@ Get Project Forge running on your machine.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-org/project-forge.git
-   cd project-forge
+   git clone https://github.com/your-org/genforge.git
+   cd genforge
    ```
 
 2. **Build the WASM engine** (produces both WebGPU and WebGL2 binaries)
@@ -33,11 +33,11 @@ Get Project Forge running on your machine.
    npm run dev
    ```
 
-5. **Open the editor** at `http://localhost:3000/dev`
+5. **Open the editor** at `http://localhost:3000/dev` (local development only — bypasses authentication)
 
 ## Browser Requirements
 
-Project Forge uses **WebGPU** for rendering when available, with automatic fallback to **WebGL2**.
+GenForge uses **WebGPU** for rendering when available, with automatic fallback to **WebGL2**.
 
 | Browser | WebGPU | WebGL2 |
 |---------|--------|--------|

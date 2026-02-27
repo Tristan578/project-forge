@@ -35,6 +35,19 @@ export async function authenticateRequest(): Promise<
   return { ok: true, ctx: { user, clerkId } };
 }
 
+/**
+ * Check if the authenticated user is an admin.
+ * Admin user IDs are set via ADMIN_USER_IDS env var (comma-separated Clerk IDs).
+ * Returns a 403 response if not an admin, or null if authorized.
+ */
+export function assertAdmin(clerkId: string): NextResponse | null {
+  const adminIds = (process.env.ADMIN_USER_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!adminIds.includes(clerkId)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+  }
+  return null;
+}
+
 /** Check if user tier allows a specific action */
 export function assertTier(
   user: User,

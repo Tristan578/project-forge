@@ -17,6 +17,9 @@ use crate::core::{
         ReparentRequest, SnapSettingsUpdate, CameraPresetRequest, EntityType,
         InputBindingUpdate, InputPresetRequest, InputBindingRemoval,
         QueryRequest, SelectionRequest, SelectionMode, queue_selection_from_bridge,
+        VisibilityRequest, queue_visibility_from_bridge,
+        queue_clear_selection_from_bridge,
+        GizmoModeRequest, queue_gizmo_mode_from_bridge,
     },
     history::{queue_undo_from_bridge, queue_redo_from_bridge},
     viewport::{self, ResizePayload},
@@ -71,10 +74,8 @@ fn handle_resize(payload: serde_json::Value) -> CommandResult {
 }
 
 /// Update the entire scene graph from JSON.
-fn handle_update_scene(payload: serde_json::Value) -> CommandResult {
-    // TODO: Parse scene graph and update Bevy world
-    tracing::info!("Updating scene: {:?}", payload);
-    Ok(())
+fn handle_update_scene(_payload: serde_json::Value) -> CommandResult {
+    Err("update_scene is not implemented. Use individual spawn/delete/update commands instead.".to_string())
 }
 
 /// Payload for spawn_entity command.
@@ -114,9 +115,15 @@ fn handle_despawn_entity(payload: serde_json::Value) -> CommandResult {
         .and_then(|v| v.as_str())
         .ok_or("Missing entity id")?;
 
-    // TODO: Remove entity from Bevy ECS
-    tracing::info!("Despawning entity: {}", entity_id);
-    Ok(())
+    let request = DeleteRequest {
+        entity_ids: vec![entity_id.to_string()],
+    };
+
+    if queue_delete_from_bridge(request) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
 }
 
 /// Payload for update_transform command.
@@ -151,10 +158,8 @@ fn handle_update_transform(payload: serde_json::Value) -> CommandResult {
 }
 
 /// Set the active camera parameters.
-fn handle_set_camera(payload: serde_json::Value) -> CommandResult {
-    // TODO: Update camera in Bevy ECS
-    tracing::info!("Setting camera: {:?}", payload);
-    Ok(())
+fn handle_set_camera(_payload: serde_json::Value) -> CommandResult {
+    Err("set_camera is not implemented. Camera is controlled via orbit camera. Use focus_camera or set camera_preset commands instead.".to_string())
 }
 
 /// Select a single entity by ID.
@@ -193,18 +198,42 @@ fn handle_select_entities(payload: serde_json::Value) -> CommandResult {
         .and_then(|v| v.as_str())
         .unwrap_or("replace");
 
-    tracing::info!("Select entities: {:?} (mode: {})", entity_ids, mode);
+    let ids: Vec<String> = entity_ids.iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
 
-    // TODO: Queue a batch selection command event
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    // First entity uses the requested mode, rest use Add
+    for (i, id) in ids.iter().enumerate() {
+        let selection_mode = if i == 0 {
+            match mode {
+                "add" => SelectionMode::Add,
+                "toggle" => SelectionMode::Toggle,
+                _ => SelectionMode::Replace,
+            }
+        } else {
+            SelectionMode::Add
+        };
+
+        queue_selection_from_bridge(SelectionRequest {
+            entity_id: id.clone(),
+            mode: selection_mode,
+        });
+    }
+
     Ok(())
 }
 
 /// Clear all selection.
 fn handle_clear_selection(_payload: serde_json::Value) -> CommandResult {
-    tracing::info!("Clear selection");
-
-    // TODO: Queue a clear selection command event
-    Ok(())
+    if queue_clear_selection_from_bridge() {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
 }
 
 /// Set entity visibility.
@@ -218,10 +247,14 @@ fn handle_set_visibility(payload: serde_json::Value) -> CommandResult {
         .and_then(|v| v.as_bool())
         .ok_or("Missing visible boolean")?;
 
-    tracing::info!("Set visibility: {} = {}", entity_id, visible);
-
-    // TODO: Queue a visibility command event for the visibility system to process
-    Ok(())
+    if queue_visibility_from_bridge(VisibilityRequest {
+        entity_id: entity_id.to_string(),
+        visible,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
 }
 
 /// Set gizmo mode.
@@ -231,13 +264,16 @@ fn handle_set_gizmo_mode(payload: serde_json::Value) -> CommandResult {
         .and_then(|v| v.as_str())
         .ok_or("Missing mode")?;
 
-    tracing::info!("Set gizmo mode: {}", mode);
-
-    // Note: The actual mode change is handled via a queued event
-    // that the gizmo system will process in the next frame.
-    // For now, we just validate the mode string.
     match mode {
-        "translate" | "rotate" | "scale" => Ok(()),
+        "translate" | "rotate" | "scale" => {
+            if queue_gizmo_mode_from_bridge(GizmoModeRequest {
+                mode: mode.to_string(),
+            }) {
+                Ok(())
+            } else {
+                Err("PendingCommands resource not initialized".to_string())
+            }
+        }
         _ => Err(format!("Invalid gizmo mode: {}", mode)),
     }
 }

@@ -1,6 +1,5 @@
 /**
  * Audio slice - manages audio, buses, reverb zones, and audio effects.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

@@ -78,7 +78,7 @@ impl From<&ViewportResource> for ViewportUpdated {
     }
 }
 
-// Global viewport state (will be moved to Bevy Resource when ECS is integrated)
+// Global viewport state (Bevy handles resize via the ViewportResource)
 use std::sync::RwLock;
 static VIEWPORT: RwLock<ViewportResource> = RwLock::new(ViewportResource {
     logical_width: 0,
@@ -100,10 +100,6 @@ pub fn handle_resize(payload: ResizePayload) -> Result<ViewportUpdated, String> 
 
     let mut viewport = VIEWPORT.write().map_err(|e| e.to_string())?;
     viewport.update(&payload);
-
-    // TODO: When Bevy is integrated, this will:
-    // 1. Update the ViewportResource in the Bevy World
-    // 2. Trigger the sync_camera_projection system
 
     Ok(ViewportUpdated::from(&*viewport))
 }

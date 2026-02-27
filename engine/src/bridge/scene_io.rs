@@ -182,12 +182,11 @@ pub(super) fn apply_scene_load(
     mut selection_events: EventWriter<SelectionChangedEvent>,
 ) {
     let requests: Vec<_> = pending.scene_load_requests.drain(..).collect();
-    if requests.is_empty() {
-        return;
-    }
 
     // Process only the last load request (if multiple queued)
-    let request = requests.into_iter().last().unwrap();
+    let Some(request) = requests.into_iter().last() else {
+        return;
+    };
 
     let scene_file: scene_file::SceneFile = match serde_json::from_str(&request.json) {
         Ok(sf) => sf,

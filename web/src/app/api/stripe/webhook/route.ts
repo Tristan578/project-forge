@@ -8,7 +8,11 @@ import { creditAddonTokens, resetMonthlyTokens } from '@/lib/tokens/service';
 import { updateUserStripe, updateUserTier } from '@/lib/auth/user-service';
 import type { TokenPackage } from '@/lib/tokens/pricing';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+function getStripe() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error('STRIPE_SECRET_KEY environment variable is not set');
+  return new Stripe(key, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+}
 
 // Map Stripe price IDs to tiers
 function tierFromPriceId(priceId: string): Tier | null {
@@ -34,7 +38,7 @@ export async function POST(req: Request) {
 
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(body, sig, WEBHOOK_SECRET);
+    event = getStripe().webhooks.constructEvent(body, sig, WEBHOOK_SECRET);
   } catch {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }

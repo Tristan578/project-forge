@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const sort = (searchParams.get('sort') || 'popular') as 'newest' | 'popular' | 'top_rated' | 'price_low' | 'price_high' | 'free';
     const priceFilter = (searchParams.get('price') || 'all') as 'all' | 'free' | 'paid';
     const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
 
     // Build base query
     const conditions = [eq(marketplaceAssets.status, 'published')];
@@ -22,10 +22,11 @@ export async function GET(req: NextRequest) {
     }
 
     if (query) {
+      const escapedQuery = query.replace(/[%_\\]/g, '\\$&');
       conditions.push(
         or(
-          ilike(marketplaceAssets.name, `%${query}%`),
-          ilike(marketplaceAssets.description, `%${query}%`),
+          ilike(marketplaceAssets.name, `%${escapedQuery}%`),
+          ilike(marketplaceAssets.description, `%${escapedQuery}%`),
           sql`${query} = ANY(${marketplaceAssets.tags})`
         )!
       );

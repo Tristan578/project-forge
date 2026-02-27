@@ -3,15 +3,15 @@
  */
 
 export const PROJECT_LIMITS = {
-  free: 1,
-  starter: 10,
+  starter: 3,
+  hobbyist: 10,
   creator: 50,
-  studio: Infinity,
+  pro: Infinity,
 } as const;
 
 export const ENTITY_LIMITS = {
-  free: 50,
-  starter: 500,
+  starter: 50,
+  hobbyist: 500,
   creator: 2000,
-  studio: 10000,
+  pro: 10000,
 } as const;

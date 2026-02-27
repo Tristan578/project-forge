@@ -200,9 +200,7 @@ fn handle_remove_custom_shader(payload: serde_json::Value) -> super::CommandResu
 
 /// Handle list_shaders command — returns hardcoded shader list.
 fn handle_list_shaders(_payload: serde_json::Value) -> super::CommandResult {
-    // This is a simple query that doesn't need queuing — return immediately via emit_event
-    // For now, just return Ok(). The query system will handle emitting the result.
-    Ok(())
+    Err("list_shaders is not implemented. Shader management is handled via the React UI.".to_string())
 }
 
 /// Payload for update_light command.

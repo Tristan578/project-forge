@@ -5,12 +5,41 @@ import { audioManager } from '@/lib/audio/audioManager';
 
 // Commands allowed from user scripts (maps to forge.* API surface)
 const SCRIPT_ALLOWED_COMMANDS = new Set([
-  'set_transform', 'spawn_entity', 'despawn_entity',
+  // Transform / entity lifecycle
+  'update_transform', 'spawn_entity', 'delete_entities',
   'set_visibility', 'update_material',
+  // 3D physics
   'apply_force', 'set_velocity', 'apply_impulse',
-  'play_audio', 'stop_audio', 'set_audio_volume',
-  'play_animation', 'set_animation_speed', 'stop_animation',
+  // 2D physics
+  'apply_force2d', 'apply_impulse2d', 'set_velocity2d',
+  'set_angular_velocity2d', 'set_gravity2d',
+  // Audio (routed to WASM)
+  'play_audio', 'stop_audio', 'pause_audio', 'set_audio', 'update_audio_bus',
+  // Audio layering (handled JS-side via audioManager but listed for completeness)
+  'audio_add_layer', 'audio_remove_layer', 'audio_remove_all_layers',
+  'audio_crossfade', 'audio_play_one_shot', 'audio_fade_in', 'audio_fade_out',
+  'set_music_intensity', 'set_music_stems',
+  // 3D animation
+  'play_animation', 'pause_animation', 'resume_animation', 'stop_animation',
+  'set_animation_speed', 'set_animation_loop',
+  'set_animation_blend_weight', 'set_clip_speed',
+  // Sprite animation
+  'play_sprite_animation', 'stop_sprite_animation',
+  'set_sprite_anim_speed', 'set_sprite_anim_param',
+  // Particles
+  'set_particle_preset', 'toggle_particle', 'burst_particle',
+  // Camera
   'camera_follow', 'camera_stop_follow', 'camera_set_position', 'camera_look_at',
+  // Tilemap
+  'set_tile', 'fill_tiles', 'clear_tiles', 'resize_tilemap',
+  // Skeletal 2D
+  'create_skeleton2d', 'add_bone2d', 'remove_bone2d', 'update_bone2d',
+  'set_skeleton2d_skin', 'play_skeletal_animation2d', 'stop_skeletal_animation2d',
+  'set_ik_target2d',
+  // Input
+  'vibrate',
+  // Scene control
+  'stop',
 ]);
 
 const WATCHDOG_TIMEOUT_MS = 5000;

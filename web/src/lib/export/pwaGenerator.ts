@@ -20,7 +20,7 @@ export function generateManifest(options: PwaOptions): string {
   const {
     title,
     shortName = title.slice(0, 12),
-    description = `${title} - Created with Project Forge`,
+    description = `${title} - Created with GenForge`,
     backgroundColor,
     themeColor,
     orientation = 'any',
@@ -60,7 +60,7 @@ export function generateManifest(options: PwaOptions): string {
  * Generate service worker for offline caching
  */
 export function generateServiceWorker(): string {
-  return `// Project Forge Game - Service Worker
+  return `// GenForge Game - Service Worker
 const CACHE_NAME = 'forge-game-v1';
 const urlsToCache = [
   '.',

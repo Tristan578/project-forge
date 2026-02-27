@@ -10,8 +10,9 @@ import {
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
-const SYSTEM_PROMPT = `You are an expert game creation assistant for Project Forge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
+const SYSTEM_PROMPT = `You are an expert game creation assistant for GenForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
 ## What You Can Do
 You have access to 118 MCP commands across 19 categories:
@@ -139,6 +140,10 @@ export async function POST(request: NextRequest) {
   // 1. Authenticate
   const auth = await authenticateRequest();
   if (!auth.ok) return auth.response;
+
+  // 1b. Rate limit: 10 requests per minute per user
+  const rl = rateLimit(`chat:${auth.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Validate request size (max 10KB)
   const bodyText = await request.text();

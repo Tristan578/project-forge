@@ -19,12 +19,11 @@ import { exportHandlers } from './handlers/exportHandlers';
 import { shaderHandlers } from './handlers/shaderHandlers';
 import { performanceHandlers } from './handlers/performanceHandlers';
 
-// Import the legacy executor temporarily
+// Legacy fallback for handlers not yet migrated to the registry pattern
 import { executeToolCall as legacyExecuteToolCall } from './executor.legacy';
 
 /**
  * Merged handler registry.
- * TODO: Complete the migration by creating remaining handler files.
  */
 const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolCallContext) => Promise<ExecutionResult>> = {
   ...transformHandlers,

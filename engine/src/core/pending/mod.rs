@@ -135,6 +135,9 @@ pub struct PendingCommands {
     pub camera_preset_requests: Vec<CameraPresetRequest>,
     pub coordinate_mode_update: Option<crate::core::gizmo::CoordinateMode>,
     pub selection_requests: Vec<SelectionRequest>,
+    pub visibility_requests: Vec<VisibilityRequest>,
+    pub clear_selection_requests: Vec<()>,
+    pub gizmo_mode_requests: Vec<GizmoModeRequest>,
     pub mode_change_requests: Vec<crate::core::engine_mode::ModeChangeRequest>,
     // material domain
     pub material_updates: Vec<MaterialUpdate>,

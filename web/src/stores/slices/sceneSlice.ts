@@ -1,6 +1,5 @@
 /**
  * Scene slice - manages scene file state, multi-scene, export, cloud state, terrain, and scene transitions.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

@@ -67,8 +67,8 @@ pub(super) fn apply_physics_toggles(
                         let default_data = PhysicsData::default();
                         events::emit_physics_changed(&toggle.entity_id, &default_data, true);
                         commands.entity(entity).insert(default_data);
-                    } else {
-                        events::emit_physics_changed(&toggle.entity_id, physics_data.unwrap(), true);
+                    } else if let Some(pd) = physics_data {
+                        events::emit_physics_changed(&toggle.entity_id, pd, true);
                     }
                 } else {
                     // Disable physics: remove PhysicsEnabled marker (keep PhysicsData)

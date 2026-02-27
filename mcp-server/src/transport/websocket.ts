@@ -7,7 +7,7 @@ interface PendingCommand {
 }
 
 /**
- * WebSocket bridge to the running Project Forge editor.
+ * WebSocket bridge to the running GenForge editor.
  * Sends commands and receives responses/scene state.
  */
 export class EditorBridge {
@@ -92,7 +92,7 @@ export class EditorBridge {
   async executeCommand(name: string, payload: Record<string, unknown>): Promise<unknown> {
     if (!this.connected || !this.ws) {
       throw new Error(
-        'Not connected to the editor. Make sure the Project Forge editor is running.'
+        'Not connected to the editor. Make sure the GenForge editor is running.'
       );
     }
 

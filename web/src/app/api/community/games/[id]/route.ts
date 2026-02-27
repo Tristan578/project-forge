@@ -22,7 +22,6 @@ export async function GET(
         slug: publishedGames.slug,
         authorId: publishedGames.userId,
         authorName: users.displayName,
-        authorEmail: users.email,
         playCount: publishedGames.playCount,
         cdnUrl: publishedGames.cdnUrl,
         status: publishedGames.status,
@@ -46,8 +45,7 @@ export async function GET(
         publishedGames.cdnUrl,
         publishedGames.status,
         publishedGames.createdAt,
-        users.displayName,
-        users.email
+        users.displayName
       );
 
     if (gameResult.length === 0) {
@@ -71,7 +69,6 @@ export async function GET(
         createdAt: gameComments.createdAt,
         authorId: gameComments.userId,
         authorName: users.displayName,
-        authorEmail: users.email,
       })
       .from(gameComments)
       .leftJoin(users, eq(gameComments.userId, users.id))
@@ -99,7 +96,7 @@ export async function GET(
       description: game.description,
       slug: game.slug,
       authorId: game.authorId,
-      authorName: game.authorName || game.authorEmail?.split('@')[0] || 'Unknown',
+      authorName: game.authorName || 'Unknown',
       playCount: game.playCount,
       likeCount: Number(game.likeCount),
       avgRating: Number(game.avgRating),
@@ -116,13 +113,12 @@ export async function GET(
         createdAt: Date;
         authorId: string | null;
         authorName: string | null;
-        authorEmail: string | null;
       }) => ({
         id: c.id,
         content: c.content,
         parentId: c.parentId,
         authorId: c.authorId,
-        authorName: c.authorName || c.authorEmail?.split('@')[0] || 'Unknown',
+        authorName: c.authorName || 'Unknown',
         createdAt: c.createdAt.toISOString(),
       })),
     };

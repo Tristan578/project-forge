@@ -23,7 +23,6 @@ export async function GET(
         createdAt: gameComments.createdAt,
         authorId: gameComments.userId,
         authorName: users.displayName,
-        authorEmail: users.email,
       })
       .from(gameComments)
       .leftJoin(users, eq(gameComments.userId, users.id))
@@ -36,13 +35,12 @@ export async function GET(
       createdAt: Date;
       authorId: string | null;
       authorName: string | null;
-      authorEmail: string | null;
     }) => ({
       id: c.id,
       content: c.content,
       parentId: c.parentId,
       authorId: c.authorId,
-      authorName: c.authorName || c.authorEmail?.split('@')[0] || 'Unknown',
+      authorName: c.authorName || 'Unknown',
       createdAt: c.createdAt.toISOString(),
     }));
 
@@ -103,7 +101,6 @@ export async function POST(
     const author = await db
       .select({
         displayName: users.displayName,
-        email: users.email,
       })
       .from(users)
       .where(eq(users.id, authResult.ctx.user.id))
@@ -116,8 +113,7 @@ export async function POST(
           content: comment.content,
           parentId: comment.parentId,
           authorId: authResult.ctx.user.id,
-          authorName:
-            author[0]?.displayName || author[0]?.email?.split('@')[0] || 'Unknown',
+          authorName: author[0]?.displayName || 'Unknown',
           createdAt: comment.createdAt.toISOString(),
         },
       },

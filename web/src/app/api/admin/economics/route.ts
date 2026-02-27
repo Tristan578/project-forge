@@ -3,10 +3,14 @@ import { auth } from '@clerk/nextjs/server';
 import { getDb } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
+import { assertAdmin } from '@/lib/auth/api-auth';
 
 export async function GET() {
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  const adminError = assertAdmin(userId);
+  if (adminError) return adminError;
 
   const db = getDb();
 

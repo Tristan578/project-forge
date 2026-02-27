@@ -16,7 +16,12 @@ export async function POST(
     if (!authResult.ok) return authResult.response;
 
     const { id: gameId } = await params;
-    const body = await req.json();
+    let body;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    }
     const { rating } = body;
 
     // Validate rating

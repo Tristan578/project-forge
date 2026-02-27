@@ -3,7 +3,7 @@
 Save scenes as `.forge` files, auto-save to browser storage, and manage cloud projects.
 
 ## Overview
-Project Forge uses a JSON-based `.forge` file format for scene persistence. Scenes can be saved locally, auto-saved to browser localStorage, or stored in the cloud (with an account).
+GenForge uses a JSON-based `.forge` file format for scene persistence. Scenes can be saved locally, auto-saved to browser localStorage, or stored in the cloud (with an account).
 
 ## Saving Scenes
 
@@ -46,7 +46,7 @@ The `.forge` file is a JSON document containing:
 The editor auto-saves to browser localStorage every 30 seconds. If you close and reopen, your last session is restored.
 
 ## Cloud Storage
-With a Project Forge account, scenes save to the cloud:
+With a GenForge account, scenes save to the cloud:
 - Automatic cloud sync
 - Access from any device
 - Project dashboard for managing scenes

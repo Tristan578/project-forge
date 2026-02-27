@@ -1,6 +1,5 @@
 /**
  * Material slice - manages material and shader effect state.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

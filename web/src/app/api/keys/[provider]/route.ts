@@ -24,7 +24,12 @@ export async function PUT(
     );
   }
 
-  const body = await req.json();
+  let body;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
   const key = body.key as string;
   if (!key || typeof key !== 'string' || key.length < 8) {
     return NextResponse.json({ error: 'Invalid API key' }, { status: 400 });

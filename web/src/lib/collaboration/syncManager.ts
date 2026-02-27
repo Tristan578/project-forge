@@ -1,10 +1,12 @@
 /**
- * Collaboration sync manager - infrastructure-ready layer.
- * NOTE: yjs and @hocuspocus/provider are NOT installed.
- * This module uses dynamic imports with graceful fallbacks.
+ * Collaboration sync manager - stub/facade layer.
+ *
+ * STUB: yjs and @hocuspocus/provider are NOT installed.
+ * This module exists as an infrastructure-ready placeholder that uses
+ * dynamic imports with graceful fallbacks so the app compiles without
+ * those packages present. When real-time collaboration is enabled, install
+ * the packages and remove the dynamic-import pattern.
  */
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 export interface SyncChangeEvent {
   type: 'entity_update' | 'entity_create' | 'entity_delete';
@@ -40,8 +42,10 @@ export class CollaborationSyncManager {
    */
   async connect(projectId: string, userId: string): Promise<void> {
     try {
-      // Dynamic import (will fail gracefully if packages not installed)
+      // Dynamic import (will fail gracefully if packages not installed).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const Y = await import('yjs' as any).catch(() => null);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { HocuspocusProvider } = await import('@hocuspocus/provider' as any).catch(() => ({ HocuspocusProvider: null }));
 
       if (!Y || !HocuspocusProvider) {
@@ -50,10 +54,10 @@ export class CollaborationSyncManager {
       }
 
       // Create Yjs document
-      this.doc = new Y.Doc();
+      this.doc = new (Y as { Doc: new () => unknown }).Doc();
 
       // Connect to HocusPocus server (stub URL - replace with actual server)
-      this.provider = new HocuspocusProvider({
+      this.provider = new (HocuspocusProvider as new (opts: unknown) => unknown)({
         url: `ws://localhost:1234`,
         name: `project-${projectId}`,
         document: this.doc,
@@ -61,11 +65,13 @@ export class CollaborationSyncManager {
       });
 
       // Listen for changes
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this.doc as any).on('update', (_update: Uint8Array, _origin: unknown) => {
         this.emitChanges([]);
       });
 
       // Listen for awareness updates
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this.provider as any).on('awarenessUpdate', ({ states }: { states: Map<number, unknown> }) => {
         this.emitAwarenessUpdate(states as Map<number, AwarenessState>);
       });
@@ -81,7 +87,9 @@ export class CollaborationSyncManager {
    * Disconnect from the session.
    */
   disconnect(): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (this.provider && typeof (this.provider as any).destroy === 'function') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this.provider as any).destroy();
     }
     this.doc = null;
@@ -99,7 +107,9 @@ export class CollaborationSyncManager {
     if (!this.connected || !this.doc) return;
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entities = (this.doc as any).getMap('entities');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entity = entities.get(entityId) || (this.doc as any).Map();
       entity.set(field, value);
       entities.set(entityId, entity);
@@ -115,6 +125,7 @@ export class CollaborationSyncManager {
     if (!this.connected || !this.doc) return;
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entities = (this.doc as any).getMap('entities');
       entities.set(entityId, snapshot);
     } catch (err) {
@@ -129,6 +140,7 @@ export class CollaborationSyncManager {
     if (!this.connected || !this.doc) return;
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const entities = (this.doc as any).getMap('entities');
       entities.delete(entityId);
     } catch (err) {
@@ -143,6 +155,7 @@ export class CollaborationSyncManager {
     if (!this.connected || !this.provider) return;
 
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const awareness = (this.provider as any).awareness;
       if (awareness && typeof awareness.setLocalState === 'function') {
         awareness.setLocalState(state);

@@ -8,6 +8,7 @@ use bevy::picking::events::Pressed;
 use bevy::ecs::system::ParamSet;
 
 use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
+use crate::core::gizmo::ActiveGizmoMode;
 use crate::core::pending::EntityType;
 use crate::core::selection::{Selection, SelectionChangedEvent};
 use crate::core::scene_graph::SceneGraphCache;
@@ -443,5 +444,51 @@ pub(super) fn apply_pending_snap_settings(
     for _ in pending.grid_toggles.drain(..) {
         snap_settings.grid_visible = !snap_settings.grid_visible;
         events::emit_snap_settings_changed(&snap_settings);
+    }
+}
+
+/// System that applies pending visibility requests from the bridge.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_pending_visibility(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut EntityVisible)>,
+) {
+    for request in pending.visibility_requests.drain(..) {
+        for (entity_id, mut entity_visible) in query.iter_mut() {
+            if entity_id.0 == request.entity_id {
+                entity_visible.0 = request.visible;
+                break;
+            }
+        }
+    }
+}
+
+/// System that applies pending clear-selection requests from the bridge.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_pending_clear_selection(
+    mut pending: ResMut<PendingCommands>,
+    mut selection: ResMut<Selection>,
+    mut selection_events: EventWriter<SelectionChangedEvent>,
+) {
+    for _ in pending.clear_selection_requests.drain(..) {
+        selection.clear();
+        selection_events.write(SelectionChangedEvent {
+            selected_ids: vec![],
+            primary_id: None,
+            primary_name: None,
+        });
+    }
+}
+
+/// System that applies pending gizmo mode requests from the bridge.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_pending_gizmo_mode(
+    mut pending: ResMut<PendingCommands>,
+    mut active_mode: ResMut<ActiveGizmoMode>,
+) {
+    for request in pending.gizmo_mode_requests.drain(..) {
+        if let Some(mode) = ActiveGizmoMode::from_str(&request.mode) {
+            *active_mode = mode;
+        }
     }
 }

@@ -55,7 +55,7 @@ export function WelcomeModal() {
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
         <div className="mx-4 w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
           <h2 className="mb-1 text-lg font-semibold text-zinc-100">
-            Welcome to Project Forge
+            Welcome to GenForge
           </h2>
           <p className="mb-5 text-sm text-zinc-400">
             A 3D game editor in your browser. Here are some quick tips to get started:

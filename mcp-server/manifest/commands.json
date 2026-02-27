@@ -4039,7 +4039,7 @@
     },
     {
       "name": "search_docs",
-      "description": "Search Project Forge documentation by keyword. Returns ranked results with snippets.",
+      "description": "Search GenForge documentation by keyword. Returns ranked results with snippets.",
       "category": "docs",
       "parameters": {
         "type": "object",

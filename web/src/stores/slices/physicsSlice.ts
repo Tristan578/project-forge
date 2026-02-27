@@ -1,6 +1,5 @@
 /**
  * Physics slice - manages 3D and 2D physics state.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

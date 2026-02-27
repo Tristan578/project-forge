@@ -43,8 +43,10 @@ export async function POST(request: NextRequest) {
     .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
     .limit(1);
 
-  // Get project data
-  const [project] = await db.select().from(projects).where(eq(projects.id, projectId)).limit(1);
+  // Get project data (verify ownership)
+  const [project] = await db.select().from(projects)
+    .where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+    .limit(1);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
   const gameUrl = `/play/${clerkId}/${slug}`;

@@ -1,6 +1,5 @@
 /**
  * Lighting slice - manages lights, environment, and skybox.
- * TODO: Extract full implementation from editorStore.ts
  */
 
 import { StateCreator } from 'zustand';

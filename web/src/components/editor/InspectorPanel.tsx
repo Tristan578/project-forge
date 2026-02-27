@@ -36,16 +36,7 @@ import {
   getPropertyFromClipboard,
   readTransformFromClipboard,
 } from '@/lib/transformClipboard';
-
-// Convert radians to degrees
-function radToDeg(rad: number): number {
-  return (rad * 180) / Math.PI;
-}
-
-// Convert degrees to radians
-function degToRad(deg: number): number {
-  return (deg * Math.PI) / 180;
-}
+import { radToDeg, degToRad } from '@/lib/colorUtils';
 
 export const InspectorPanel = memo(function InspectorPanel() {
   const primaryId = useEditorStore((s) => s.primaryId);

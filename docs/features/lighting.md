@@ -3,7 +3,7 @@
 Illuminate your scene with point, directional, and spot lights plus ambient lighting and fog.
 
 ## Overview
-Lighting defines the mood and visibility of your scene. Project Forge supports three light types plus global ambient light and distance fog.
+Lighting defines the mood and visibility of your scene. GenForge supports three light types plus global ambient light and distance fog.
 
 ## Light Types
 

@@ -8,8 +8,8 @@ import { NextResponse } from 'next/server';
 const ALLOWED_ORIGINS =
   process.env.NODE_ENV === 'production'
     ? [
-        'https://projectforge.app',
-        'https://www.projectforge.app',
+        'https://genforge.app',
+        'https://www.genforge.app',
       ]
     : [
         'http://localhost:3000',
@@ -26,6 +26,12 @@ const isPublicRoute = createRouteMatcher([
   '/api/stripe/webhook(.*)',
   '/pricing',
   '/dev(.*)',
+  '/play(.*)',
+  '/community(.*)',
+  '/api/community(.*)',
+  '/api/docs(.*)',
+  '/api-docs(.*)',
+  '/api/openapi(.*)',
 ]);
 
 export const proxy = clerkMiddleware(async (auth, req) => {
