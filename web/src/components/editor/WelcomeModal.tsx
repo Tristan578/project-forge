@@ -5,7 +5,7 @@ import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen, GraduationCa
 import { TemplateGallery } from './TemplateGallery';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
-import { getRecentProjects, type RecentProject } from '@/lib/workspace/recentProjects';
+import { getRecentProjects } from '@/lib/workspace/recentProjects';
 
 const STORAGE_KEY = 'forge-welcomed';
 
@@ -27,12 +27,9 @@ export function WelcomeModal() {
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
 
-  // Load recent projects (only on client, once)
-  const recentProjects = useSyncExternalStore(
-    noop,
-    () => getRecentProjects().slice(0, 5),
-    () => [] as RecentProject[],
-  );
+  // Load recent projects once on mount (useState lazy init avoids referential instability
+  // that useSyncExternalStore would cause with array snapshots — Object.is([], []) is false)
+  const [recentProjects] = useState(() => getRecentProjects().slice(0, 5));
 
   const handleDismiss = () => {
     setDismissed(true);
