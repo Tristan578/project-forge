@@ -7,6 +7,7 @@ import type { ToolHandler } from './types';
 import { useEditorStore } from '@/stores/editorStore';
 import { exportGame, downloadBlob } from '@/lib/export/exportEngine';
 import { getPreset, EXPORT_PRESETS } from '@/lib/export/presets';
+import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 
 export const exportHandlers: Record<string, ToolHandler> = {
   export_project_zip: async (params) => {
@@ -25,6 +26,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
         bgColor: presetConfig?.loadingScreen.backgroundColor || '#18181b',
         includeDebug: presetConfig?.includeDebug || false,
         preset: presetConfig,
+        customLoadingScreen: store.loadingScreenConfig ?? undefined,
       });
 
       downloadBlob(blob, `${gameTitle.replace(/[^a-z0-9_-]/gi, '_')}.zip`);
@@ -57,6 +59,7 @@ export const exportHandlers: Record<string, ToolHandler> = {
         bgColor: presetConfig?.loadingScreen.backgroundColor || '#0f172a',
         includeDebug: presetConfig?.includeDebug || false,
         preset: presetConfig,
+        customLoadingScreen: store.loadingScreenConfig ?? undefined,
       });
 
       downloadBlob(blob, `${gameTitle.replace(/[^a-z0-9_-]/gi, '_')}_pwa.zip`);
@@ -73,10 +76,38 @@ export const exportHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  set_loading_screen: async (_params) => {
+  set_loading_screen: async (params) => {
+    const {
+      backgroundColor = '#18181b',
+      progressBarColor = '#6366f1',
+      progressStyle = 'bar',
+      title,
+      subtitle,
+      logoDataUrl,
+    } = params as Partial<LoadingScreenConfig>;
+
+    const validStyles = ['bar', 'spinner', 'dots', 'none'] as const;
+    if (!validStyles.includes(progressStyle as typeof validStyles[number])) {
+      return {
+        success: false,
+        error: `Invalid progressStyle: ${progressStyle}. Must be one of: ${validStyles.join(', ')}`,
+      };
+    }
+
+    const config: LoadingScreenConfig = {
+      backgroundColor,
+      progressBarColor,
+      progressStyle: progressStyle as LoadingScreenConfig['progressStyle'],
+      title,
+      subtitle,
+      logoDataUrl,
+    };
+
+    useEditorStore.getState().setLoadingScreenConfig(config);
+
     return {
-      success: false,
-      error: 'Loading screen customization is not yet implemented. The export system uses a default loading screen. Custom loading screens require editor store integration planned for a future release.',
+      success: true,
+      message: `Loading screen configured: ${progressStyle} style, bg=${backgroundColor}`,
     };
   },
 

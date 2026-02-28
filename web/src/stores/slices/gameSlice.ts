@@ -4,6 +4,7 @@
 
 import { StateCreator } from 'zustand';
 import type { GameComponentData, GameCameraData, MobileTouchConfig, HudElement, EngineMode } from './types';
+import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 
 export interface GameSlice {
   allGameComponents: Record<string, GameComponentData[]>;
@@ -14,6 +15,7 @@ export interface GameSlice {
   mobileTouchConfig: MobileTouchConfig;
   hudElements: HudElement[];
   engineMode: EngineMode;
+  loadingScreenConfig: LoadingScreenConfig | null;
 
   addGameComponent: (entityId: string, component: GameComponentData) => void;
   updateGameComponent: (entityId: string, component: GameComponentData) => void;
@@ -27,6 +29,7 @@ export interface GameSlice {
   setMobileTouchConfig: (config: MobileTouchConfig) => void;
   updateMobileTouchConfig: (partial: Partial<MobileTouchConfig>) => void;
   setHudElements: (elements: HudElement[]) => void;
+  setLoadingScreenConfig: (config: LoadingScreenConfig | null) => void;
   play: () => void;
   stop: () => void;
   pause: () => void;
@@ -57,6 +60,7 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   },
   hudElements: [],
   engineMode: 'edit',
+  loadingScreenConfig: null,
 
   addGameComponent: (entityId, component) => {
     set(state => ({
@@ -111,6 +115,7 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
     set({ mobileTouchConfig: { ...state.mobileTouchConfig, ...partial } });
   },
   setHudElements: (elements) => set({ hudElements: elements }),
+  setLoadingScreenConfig: (config) => set({ loadingScreenConfig: config }),
   play: () => {
     if (dispatchCommand) dispatchCommand('play', {});
   },
