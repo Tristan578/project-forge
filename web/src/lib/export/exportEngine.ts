@@ -1,5 +1,5 @@
 import { bundleScripts } from './scriptBundler';
-import { generateGameHTML, type GameTemplateOptions } from './gameTemplate';
+import { generateGameHTML, type GameTemplateOptions, type EmbeddedWasmData } from './gameTemplate';
 import { useEditorStore } from '@/stores/editorStore';
 import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
@@ -59,7 +59,10 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   }
 
   // Default: Single HTML export
-  // 6. Generate HTML
+  // 6. Fetch WASM engine files for inlining
+  const embeddedWasm = await fetchWasmForInlining();
+
+  // 7. Generate HTML with embedded WASM
   const html = generateGameHTML({
     title: options.title,
     bgColor: options.bgColor,
@@ -69,6 +72,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     includeDebug: options.includeDebug,
     uiData: uiDataJson,
     mobileTouchConfig: mobileTouchConfigJson,
+    embeddedWasm: Object.keys(embeddedWasm).length > 0 ? embeddedWasm : undefined,
   });
 
   return new Blob([html], { type: 'text/html' });
@@ -129,6 +133,50 @@ function buildSceneFromStore(): unknown {
     entities: store.sceneGraph,
     // Additional data would come from the engine
   };
+}
+
+/**
+ * Fetch WASM engine files for inlining into single-HTML export.
+ * Returns base64-encoded JS glue and WASM binary for each available variant.
+ */
+async function fetchWasmForInlining(): Promise<Record<string, EmbeddedWasmData>> {
+  const result: Record<string, EmbeddedWasmData> = {};
+  const variants = ['webgl2', 'webgpu'];
+
+  for (const variant of variants) {
+    const runtimeBase = `/engine-pkg-${variant}-runtime/`;
+    const editorBase = `/engine-pkg-${variant}/`;
+
+    try {
+      let jsResponse = await fetch(runtimeBase + 'forge_engine.js');
+      if (!jsResponse.ok) jsResponse = await fetch(editorBase + 'forge_engine.js');
+
+      let wasmResponse = await fetch(runtimeBase + 'forge_engine_bg.wasm');
+      if (!wasmResponse.ok) wasmResponse = await fetch(editorBase + 'forge_engine_bg.wasm');
+
+      if (jsResponse.ok && wasmResponse.ok) {
+        const jsText = await jsResponse.text();
+        const wasmBuffer = await wasmResponse.arrayBuffer();
+        result[variant] = {
+          jsBase64: arrayBufferToBase64(new TextEncoder().encode(jsText).buffer as ArrayBuffer),
+          wasmBase64: arrayBufferToBase64(wasmBuffer),
+        };
+      }
+    } catch {
+      console.warn(`[Export] Could not fetch WASM for ${variant}, skipping`);
+    }
+  }
+
+  return result;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 export function downloadBlob(blob: Blob, filename: string) {

@@ -2,6 +2,11 @@ import { generateUIRuntimeCode } from './uiRuntime';
 import { generateTouchCSS, generateTouchJS } from './touchControls';
 import type { MobileTouchConfig } from './touchControls';
 
+export interface EmbeddedWasmData {
+  jsBase64: string;     // JS glue code, base64-encoded
+  wasmBase64: string;   // WASM binary, base64-encoded
+}
+
 export interface GameTemplateOptions {
   title: string;
   bgColor: string;
@@ -11,10 +16,11 @@ export interface GameTemplateOptions {
   includeDebug: boolean;
   uiData?: string;         // JSON-encoded GameUIData
   mobileTouchConfig?: string;  // JSON-encoded MobileTouchConfig
+  embeddedWasm?: Record<string, EmbeddedWasmData>;  // Inlined WASM for single-HTML portability
 }
 
 export function generateGameHTML(options: GameTemplateOptions): string {
-  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig } = options;
+  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig, embeddedWasm } = options;
 
   const canvasStyle = resolution === 'responsive'
     ? 'width: 100vw; height: 100vh;'
@@ -66,6 +72,8 @@ export function generateGameHTML(options: GameTemplateOptions): string {
 
   ${scriptBundle ? `<script>\n${scriptBundle}\n</script>` : ''}
 
+  ${embeddedWasm ? generateEmbeddedWasmScripts(embeddedWasm) : ''}
+
   <script type="module">
     // Detect WebGPU and load appropriate runtime
     async function init() {
@@ -74,18 +82,10 @@ export function generateGameHTML(options: GameTemplateOptions): string {
         const variant = hasWebGPU ? 'webgpu' : 'webgl2';
         ${includeDebug ? "console.log('[Forge] Using ' + variant + ' renderer');" : ''}
 
-        // Load WASM — prefer runtime variant (smaller, no editor systems)
-        // Falls back to editor variant if runtime isn't available
-        const basePath = window.__forgeBasePath || '.';
-        let wasm_module;
-        try {
-          wasm_module = await import(basePath + '/engine-pkg-' + variant + '-runtime/forge_engine.js');
-        } catch {
-          wasm_module = await import(basePath + '/engine-pkg-' + variant + '/forge_engine.js');
-        }
-        const { default: init_wasm, init_engine, handle_command, set_event_callback } = wasm_module;
+        ${embeddedWasm ? generateEmbeddedWasmLoader(includeDebug) : generateExternalWasmLoader()}
 
-        await init_wasm();
+        // Initialize WASM — pass binary directly when embedded, otherwise auto-fetches
+        await init_wasm(${embeddedWasm ? 'wasmBytes.buffer' : ''});
 
         // Set up event callback for script integration
         set_event_callback(function(eventType, eventPayload) {
@@ -183,4 +183,63 @@ function generateUIRuntimeScript(uiData: string): string {
   <script>
     ${runtimeCode}
   </script>`;
+}
+
+/**
+ * Generate hidden script tags containing base64-encoded WASM data for each variant.
+ */
+function generateEmbeddedWasmScripts(wasm: Record<string, EmbeddedWasmData>): string {
+  const tags: string[] = [];
+  for (const [variant, data] of Object.entries(wasm)) {
+    tags.push(`  <script id="forge-wasm-${variant}-js" type="text/plain">${data.jsBase64}</script>`);
+    tags.push(`  <script id="forge-wasm-${variant}-wasm" type="text/plain">${data.wasmBase64}</script>`);
+  }
+  return tags.join('\n');
+}
+
+/**
+ * Generate JS that loads WASM from embedded base64 data via Blob URLs.
+ */
+function generateEmbeddedWasmLoader(includeDebug: boolean): string {
+  return `// Load WASM from embedded base64 data (single-HTML portable)
+        var jsEl = document.getElementById('forge-wasm-' + variant + '-js');
+        var wasmEl = document.getElementById('forge-wasm-' + variant + '-wasm');
+        if (!jsEl && variant === 'webgpu') {
+          // Fall back to webgl2 if webgpu data not embedded
+          jsEl = document.getElementById('forge-wasm-webgl2-js');
+          wasmEl = document.getElementById('forge-wasm-webgl2-wasm');
+        }
+        if (!jsEl || !wasmEl) throw new Error('No embedded WASM data found');
+        ${includeDebug ? "console.log('[Forge] Loading embedded WASM for ' + variant);" : ''}
+
+        // Decode JS glue from base64 and create importable Blob URL
+        var jsCode = atob(jsEl.textContent);
+        var jsBlob = new Blob([jsCode], { type: 'text/javascript' });
+        var jsBlobUrl = URL.createObjectURL(jsBlob);
+
+        // Decode WASM binary from base64
+        var wasmB64 = wasmEl.textContent;
+        var wasmRaw = atob(wasmB64);
+        var wasmBytes = new Uint8Array(wasmRaw.length);
+        for (var i = 0; i < wasmRaw.length; i++) wasmBytes[i] = wasmRaw.charCodeAt(i);
+
+        // Dynamic import of the JS glue module from Blob URL
+        var wasm_module = await import(jsBlobUrl);
+        URL.revokeObjectURL(jsBlobUrl);
+        const { default: init_wasm, init_engine, handle_command, set_event_callback } = wasm_module;`;
+}
+
+/**
+ * Generate JS that loads WASM from external file paths (original behavior).
+ */
+function generateExternalWasmLoader(): string {
+  return `// Load WASM from external files (requires files alongside this HTML)
+        const basePath = window.__forgeBasePath || '.';
+        let wasm_module;
+        try {
+          wasm_module = await import(basePath + '/engine-pkg-' + variant + '-runtime/forge_engine.js');
+        } catch {
+          wasm_module = await import(basePath + '/engine-pkg-' + variant + '/forge_engine.js');
+        }
+        const { default: init_wasm, init_engine, handle_command, set_event_callback } = wasm_module;`;
 }
