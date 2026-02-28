@@ -14,16 +14,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing jobId parameter' }, { status: 400 });
   }
 
-  // DALL-E jobs return a URL directly (synchronous completion)
-  if (jobId.startsWith('http')) {
-    return NextResponse.json({
-      jobId,
-      status: 'completed',
-      progress: 100,
-      resultUrl: jobId,
-    });
-  }
-
   // Poll Replicate for prediction status
   let apiKey: string;
   try {
@@ -65,7 +55,7 @@ export async function GET(request: NextRequest) {
       status: mappedStatus,
       progress: mappedStatus === 'completed' ? 100 : mappedStatus === 'processing' ? 50 : 10,
       resultUrl,
-      error: mappedStatus === 'failed' ? 'Sprite generation failed' : undefined,
+      error: mappedStatus === 'failed' ? 'Tileset generation failed' : undefined,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Status check failed';

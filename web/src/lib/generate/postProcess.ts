@@ -85,7 +85,7 @@ export function postProcess(
     case 'sprite':
     case 'sprite_sheet':
     case 'tileset':
-      return postProcessSprite(type);
+      return postProcessSprite(type, prompt);
     default:
       return { ok: true, warnings: [], metadata: {} };
   }
@@ -322,12 +322,16 @@ function postProcessSkybox(): PostProcessResult {
 
 // ---- Sprite Post-Processing ----
 
-function postProcessSprite(type: GenerationType): PostProcessResult {
+function postProcessSprite(type: GenerationType, prompt: string): PostProcessResult {
+  const prefix = type === 'tileset' ? 'Tileset' : type === 'sprite_sheet' ? 'SpriteSheet' : 'Sprite';
+  const assetName = sanitizeAssetName(prompt, prefix);
+
   return {
     ok: true,
     warnings: [],
     metadata: {
       spriteType: type,
+      assetName,
       importedAt: Date.now(),
     },
   };
