@@ -417,6 +417,112 @@ describe('uiBuilderStore', () => {
     });
   });
 
+  describe('Screen Reordering', () => {
+    it('should reorder screens', () => {
+      const { createScreen, reorderScreens } = useUIBuilderStore.getState();
+      createScreen('Screen A');
+      createScreen('Screen B');
+      createScreen('Screen C');
+
+      reorderScreens(0, 2);
+
+      const state = useUIBuilderStore.getState();
+      expect(state.screens[0].name).toBe('Screen B');
+      expect(state.screens[1].name).toBe('Screen C');
+      expect(state.screens[2].name).toBe('Screen A');
+    });
+
+    it('should no-op when from equals to', () => {
+      const { createScreen, reorderScreens } = useUIBuilderStore.getState();
+      createScreen('Screen A');
+      createScreen('Screen B');
+
+      reorderScreens(0, 0);
+
+      const state = useUIBuilderStore.getState();
+      expect(state.screens[0].name).toBe('Screen A');
+    });
+
+    it('should no-op for out-of-bounds indices', () => {
+      const { createScreen, reorderScreens } = useUIBuilderStore.getState();
+      createScreen('Screen A');
+
+      reorderScreens(-1, 0);
+      reorderScreens(0, 5);
+
+      const state = useUIBuilderStore.getState();
+      expect(state.screens).toHaveLength(1);
+      expect(state.screens[0].name).toBe('Screen A');
+    });
+  });
+
+  describe('Widget Reparenting', () => {
+    it('should reparent widget to a new parent', () => {
+      const { createScreen, addWidget, reparentWidget } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const parentId = addWidget(screenId, 'panel');
+      const childId = addWidget(screenId, 'text');
+
+      reparentWidget(screenId, childId, parentId);
+
+      const state = useUIBuilderStore.getState();
+      const child = state.screens[0].widgets.find(w => w.id === childId);
+      const parent = state.screens[0].widgets.find(w => w.id === parentId);
+      expect(child?.parentWidgetId).toBe(parentId);
+      expect(parent?.children).toContain(childId);
+    });
+
+    it('should reparent widget to root (null parent)', () => {
+      const { createScreen, addWidget, reparentWidget } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const parentId = addWidget(screenId, 'panel');
+      const childId = addWidget(screenId, 'text');
+
+      // First reparent to parent
+      reparentWidget(screenId, childId, parentId);
+      // Then reparent back to root
+      reparentWidget(screenId, childId, null);
+
+      const state = useUIBuilderStore.getState();
+      const child = state.screens[0].widgets.find(w => w.id === childId);
+      const parent = state.screens[0].widgets.find(w => w.id === parentId);
+      expect(child?.parentWidgetId).toBeNull();
+      expect(parent?.children).not.toContain(childId);
+    });
+
+    it('should prevent reparenting to self', () => {
+      const { createScreen, addWidget, reparentWidget } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const widgetId = addWidget(screenId, 'panel');
+
+      reparentWidget(screenId, widgetId, widgetId);
+
+      const state = useUIBuilderStore.getState();
+      const widget = state.screens[0].widgets.find(w => w.id === widgetId);
+      expect(widget?.parentWidgetId).toBeNull();
+    });
+
+    it('should prevent circular reparenting', () => {
+      const { createScreen, addWidget, reparentWidget } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const grandparentId = addWidget(screenId, 'panel');
+      const parentId = addWidget(screenId, 'panel');
+      const childId = addWidget(screenId, 'text');
+
+      // Build hierarchy: grandparent -> parent -> child
+      reparentWidget(screenId, parentId, grandparentId);
+      reparentWidget(screenId, childId, parentId);
+
+      // Try to make grandparent a child of child (circular!)
+      reparentWidget(screenId, grandparentId, childId);
+
+      const state = useUIBuilderStore.getState();
+      const grandparent = state.screens[0].widgets.find(w => w.id === grandparentId);
+      // Should remain unchanged
+      expect(grandparent?.parentWidgetId).toBeNull();
+    });
+  });
+
   describe('Theme Management', () => {
     it('should apply global theme', () => {
       const theme: UITheme = {
@@ -434,6 +540,78 @@ describe('uiBuilderStore', () => {
 
       const state = useUIBuilderStore.getState();
       expect(state.globalTheme).toEqual(theme);
+    });
+
+    it('should propagate theme to existing widgets', () => {
+      const theme: UITheme = {
+        primaryColor: '#3b82f6',
+        secondaryColor: '#10b981',
+        backgroundColor: '#1f2937',
+        textColor: '#f9fafb',
+        fontFamily: 'Inter',
+        fontSize: 16,
+        borderRadius: 8,
+      };
+
+      const { createScreen, addWidget, applyTheme } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      addWidget(screenId, 'text');
+      addWidget(screenId, 'button');
+
+      applyTheme(theme);
+
+      const state = useUIBuilderStore.getState();
+      const textWidget = state.screens[0].widgets[0];
+      const buttonWidget = state.screens[0].widgets[1];
+
+      // Text widget should get theme text color and font
+      expect(textWidget.style.color).toBe('#f9fafb');
+      expect(textWidget.style.fontFamily).toBe('Inter');
+      expect(textWidget.style.fontSize).toBe(16);
+      expect(textWidget.style.borderRadius).toBe(8);
+
+      // Button should get secondary color as background
+      expect(buttonWidget.style.backgroundColor).toBe('#10b981');
+    });
+  });
+
+  describe('Screen Presets', () => {
+    it('should create game_over preset with expected widgets', () => {
+      const { createScreen } = useUIBuilderStore.getState();
+      createScreen('Game Over', 'game_over');
+
+      const state = useUIBuilderStore.getState();
+      const screen = state.screens[0];
+      expect(screen.widgets.length).toBeGreaterThanOrEqual(4);
+
+      const widgetNames = screen.widgets.map(w => w.name);
+      expect(widgetNames).toContain('game_over_title');
+      expect(widgetNames).toContain('retry_button');
+    });
+
+    it('should create inventory preset with grid widget', () => {
+      const { createScreen } = useUIBuilderStore.getState();
+      createScreen('Inventory', 'inventory');
+
+      const state = useUIBuilderStore.getState();
+      const screen = state.screens[0];
+      expect(screen.widgets.length).toBeGreaterThanOrEqual(3);
+
+      const gridWidget = screen.widgets.find(w => w.type === 'grid');
+      expect(gridWidget).toBeDefined();
+    });
+
+    it('should create dialog preset with speaker and text', () => {
+      const { createScreen } = useUIBuilderStore.getState();
+      createScreen('Dialog', 'dialog');
+
+      const state = useUIBuilderStore.getState();
+      const screen = state.screens[0];
+      expect(screen.widgets.length).toBeGreaterThanOrEqual(3);
+
+      const widgetNames = screen.widgets.map(w => w.name);
+      expect(widgetNames).toContain('speaker_name');
+      expect(widgetNames).toContain('dialog_text');
     });
   });
 
@@ -551,6 +729,100 @@ describe('uiBuilderStore', () => {
       const state = useUIBuilderStore.getState();
       expect(state.screens).toHaveLength(1);
       expect(state.screens[0].name).toBe('Test');
+    });
+
+    it('should undo widget add', () => {
+      const { createScreen, addWidget, uiUndo } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      addWidget(screenId, 'text');
+
+      // Undo the add_widget (last action)
+      uiUndo();
+
+      const state = useUIBuilderStore.getState();
+      expect(state.screens[0].widgets).toHaveLength(0);
+    });
+
+    it('should undo widget delete', () => {
+      const { createScreen, addWidget, removeWidget, uiUndo } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const widgetId = addWidget(screenId, 'button');
+
+      removeWidget(screenId, widgetId);
+      uiUndo();
+
+      const state = useUIBuilderStore.getState();
+      expect(state.screens[0].widgets).toHaveLength(1);
+      expect(state.screens[0].widgets[0].type).toBe('button');
+    });
+
+    it('should undo widget move', () => {
+      const { createScreen, addWidget, moveWidget, uiUndo } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const widgetId = addWidget(screenId, 'text');
+
+      moveWidget(screenId, widgetId, 200, 300);
+      uiUndo();
+
+      const state = useUIBuilderStore.getState();
+      const widget = state.screens[0].widgets[0];
+      expect(widget.x).toBe(50); // Default x
+      expect(widget.y).toBe(50); // Default y
+    });
+
+    it('should undo widget resize', () => {
+      const { createScreen, addWidget, resizeWidget, uiUndo } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const widgetId = addWidget(screenId, 'text');
+      const originalWidth = useUIBuilderStore.getState().screens[0].widgets[0].width;
+      const originalHeight = useUIBuilderStore.getState().screens[0].widgets[0].height;
+
+      resizeWidget(screenId, widgetId, 500, 400);
+      uiUndo();
+
+      const state = useUIBuilderStore.getState();
+      const widget = state.screens[0].widgets[0];
+      expect(widget.width).toBe(originalWidth);
+      expect(widget.height).toBe(originalHeight);
+    });
+
+    it('should undo screen update', () => {
+      const { createScreen, updateScreen, uiUndo } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      updateScreen(screenId, { backgroundColor: '#ff0000' });
+
+      uiUndo();
+
+      const state = useUIBuilderStore.getState();
+      expect(state.screens[0].backgroundColor).toBe('transparent');
+    });
+
+    it('should redo widget add', () => {
+      const { createScreen, addWidget, uiUndo, uiRedo } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      addWidget(screenId, 'button');
+
+      uiUndo(); // undo add_widget
+      expect(useUIBuilderStore.getState().screens[0].widgets).toHaveLength(0);
+
+      uiRedo();
+      expect(useUIBuilderStore.getState().screens[0].widgets).toHaveLength(1);
+      expect(useUIBuilderStore.getState().screens[0].widgets[0].type).toBe('button');
+    });
+
+    it('should redo widget move', () => {
+      const { createScreen, addWidget, moveWidget, uiUndo, uiRedo } = useUIBuilderStore.getState();
+      const screenId = createScreen('Test');
+      const widgetId = addWidget(screenId, 'text');
+
+      moveWidget(screenId, widgetId, 200, 300);
+      uiUndo();
+      uiRedo();
+
+      const state = useUIBuilderStore.getState();
+      const widget = state.screens[0].widgets[0];
+      expect(widget.x).toBe(200);
+      expect(widget.y).toBe(300);
     });
 
     it('should limit undo stack to 50 items', () => {
