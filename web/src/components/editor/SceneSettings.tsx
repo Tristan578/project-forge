@@ -6,6 +6,7 @@ import { useEditorStore, type AmbientLightData, type EnvironmentData, type Color
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useMultiplayerStore } from '@/stores/multiplayerStore';
 import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
+import { SceneStatistics } from './SceneStatistics';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
 
@@ -92,6 +93,9 @@ export function SceneSettings() {
 
   return (
     <div className="space-y-4">
+      {/* Scene Statistics */}
+      <SceneStatistics />
+
       {/* Quality Preset */}
       <div className="border-t border-zinc-800 pt-4">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
