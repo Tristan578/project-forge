@@ -64,6 +64,24 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      {
+        source: "/engine-pkg-webgl2-runtime/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
+      {
+        source: "/engine-pkg-webgpu-runtime/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
     ];
   },
 };

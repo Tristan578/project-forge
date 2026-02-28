@@ -118,6 +118,22 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      - name: Build WebGL2 Runtime (stripped editor)
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
+
+      - name: Run wasm-bindgen (WebGL2 Runtime)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Build WebGPU Runtime (stripped editor)
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
+
+      - name: Run wasm-bindgen (WebGPU Runtime)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -125,6 +141,8 @@ jobs:
           path: |
             engine/pkg-webgl2/
             engine/pkg-webgpu/
+            engine/pkg-webgl2-runtime/
+            engine/pkg-webgpu-runtime/
           retention-days: 1
 
   e2e:
@@ -168,8 +186,12 @@ jobs:
         run: |
           mkdir -p web/public/engine-pkg-webgl2
           mkdir -p web/public/engine-pkg-webgpu
+          mkdir -p web/public/engine-pkg-webgl2-runtime
+          mkdir -p web/public/engine-pkg-webgpu-runtime
           cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
           cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
+          cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
+          cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
 
       - name: Run Playwright tests (UI-only, skip @engine)
         working-directory: web
@@ -258,8 +280,12 @@ jobs:
         run: |
           mkdir -p web/public/engine-pkg-webgl2
           mkdir -p web/public/engine-pkg-webgpu
+          mkdir -p web/public/engine-pkg-webgl2-runtime
+          mkdir -p web/public/engine-pkg-webgpu-runtime
           cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
           cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
+          cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
+          cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
 
       - name: Pull Vercel environment
         working-directory: web

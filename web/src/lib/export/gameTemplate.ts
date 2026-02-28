@@ -74,11 +74,16 @@ export function generateGameHTML(options: GameTemplateOptions): string {
         const variant = hasWebGPU ? 'webgpu' : 'webgl2';
         ${includeDebug ? "console.log('[Forge] Using ' + variant + ' renderer');" : ''}
 
-        // For single HTML export, the WASM is loaded from the editor's public path
-        // For zip export, it's loaded from relative paths
+        // Load WASM — prefer runtime variant (smaller, no editor systems)
+        // Falls back to editor variant if runtime isn't available
         const basePath = window.__forgeBasePath || '.';
-        const { default: init_wasm, init_engine, handle_command, set_event_callback } =
-          await import(basePath + '/engine-pkg-' + variant + '/forge_engine.js');
+        let wasm_module;
+        try {
+          wasm_module = await import(basePath + '/engine-pkg-' + variant + '-runtime/forge_engine.js');
+        } catch {
+          wasm_module = await import(basePath + '/engine-pkg-' + variant + '/forge_engine.js');
+        }
+        const { default: init_wasm, init_engine, handle_command, set_event_callback } = wasm_module;
 
         await init_wasm();
 

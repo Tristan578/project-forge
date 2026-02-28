@@ -51,6 +51,24 @@ Write-Host "=== wasm-bindgen WebGPU ===" -ForegroundColor Cyan
 & $wasmBindgen --target web --out-dir "pkg-webgpu" $wasmBinary
 if ($LASTEXITCODE -ne 0) { Write-Host "wasm-bindgen (webgpu) FAILED" -ForegroundColor Red; exit 1 }
 
+# --- Runtime variants (stripped editor systems for exported games) ---
+
+Write-Host "=== Building WebGL2 Runtime variant ===" -ForegroundColor Cyan
+cargo build --target $wasmTarget --release --features webgl2,runtime
+if ($LASTEXITCODE -ne 0) { Write-Host "WebGL2 Runtime build FAILED" -ForegroundColor Red; exit 1 }
+
+Write-Host "=== wasm-bindgen WebGL2 Runtime ===" -ForegroundColor Cyan
+& $wasmBindgen --target web --out-dir "pkg-webgl2-runtime" $wasmBinary
+if ($LASTEXITCODE -ne 0) { Write-Host "wasm-bindgen (webgl2-runtime) FAILED" -ForegroundColor Red; exit 1 }
+
+Write-Host "=== Building WebGPU Runtime variant ===" -ForegroundColor Cyan
+cargo build --target $wasmTarget --release --features webgpu,runtime
+if ($LASTEXITCODE -ne 0) { Write-Host "WebGPU Runtime build FAILED" -ForegroundColor Red; exit 1 }
+
+Write-Host "=== wasm-bindgen WebGPU Runtime ===" -ForegroundColor Cyan
+& $wasmBindgen --target web --out-dir "pkg-webgpu-runtime" $wasmBinary
+if ($LASTEXITCODE -ne 0) { Write-Host "wasm-bindgen (webgpu-runtime) FAILED" -ForegroundColor Red; exit 1 }
+
 # --- wasm-opt pass (optional, warn if not found) ---
 $wasmOpt = $null
 # Check cargo bin first, then PATH
@@ -63,7 +81,7 @@ if (Test-Path $cargoWasmOpt) {
 
 if ($wasmOpt) {
     Write-Host "=== Running wasm-opt (Oz) ===" -ForegroundColor Cyan
-    foreach ($pkg in @("pkg-webgl2", "pkg-webgpu")) {
+    foreach ($pkg in @("pkg-webgl2", "pkg-webgpu", "pkg-webgl2-runtime", "pkg-webgpu-runtime")) {
         $wasmFile = Join-Path $pkg "forge_engine_bg.wasm"
         if (Test-Path $wasmFile) {
             $sizeBefore = (Get-Item $wasmFile).Length / 1MB
@@ -83,11 +101,14 @@ if ($wasmOpt) {
 Write-Host "=== Copying to web/public ===" -ForegroundColor Cyan
 
 # Create directories if needed
-New-Item -ItemType Directory -Force -Path (Join-Path $webPublic "engine-pkg-webgl2") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $webPublic "engine-pkg-webgpu") | Out-Null
+foreach ($dir in @("engine-pkg-webgl2", "engine-pkg-webgpu", "engine-pkg-webgl2-runtime", "engine-pkg-webgpu-runtime")) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $webPublic $dir) | Out-Null
+}
 
-# Copy both variants
+# Copy all variants (editor + runtime)
 Copy-Item -Path "pkg-webgl2\*" -Destination (Join-Path $webPublic "engine-pkg-webgl2") -Force
 Copy-Item -Path "pkg-webgpu\*" -Destination (Join-Path $webPublic "engine-pkg-webgpu") -Force
+Copy-Item -Path "pkg-webgl2-runtime\*" -Destination (Join-Path $webPublic "engine-pkg-webgl2-runtime") -Force
+Copy-Item -Path "pkg-webgpu-runtime\*" -Destination (Join-Path $webPublic "engine-pkg-webgpu-runtime") -Force
 
-Write-Host "=== Both WASM variants built successfully ===" -ForegroundColor Green
+Write-Host "=== All WASM variants built successfully (editor + runtime) ===" -ForegroundColor Green
