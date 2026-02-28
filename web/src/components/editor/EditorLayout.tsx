@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { HelpCircle, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CanvasArea } from './CanvasArea';
 import { SceneHierarchy } from './SceneHierarchy';
@@ -25,6 +25,7 @@ import { DialogueOverlay } from '../game/DialogueOverlay';
 import { TutorialOverlay } from './TutorialOverlay';
 import { OnboardingChecklist } from './OnboardingChecklist';
 import { PerformanceProfiler } from './PerformanceProfiler';
+import { HelpMenu } from './HelpMenu';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
@@ -242,13 +243,7 @@ export function EditorLayout() {
         <div className="flex h-8 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-2">
           <span className="text-xs font-semibold text-zinc-400">GenForge</span>
           <PlayControls />
-          <button
-            onClick={() => setShortcutsOpen(true)}
-            className="rounded p-1 text-zinc-500 hover:text-zinc-300"
-            title="Keyboard shortcuts"
-          >
-            <HelpCircle size={14} />
-          </button>
+          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} />
         </div>
 
         {/* Canvas fills remaining space */}
@@ -299,13 +294,7 @@ export function EditorLayout() {
         <div className="flex items-center gap-3">
           <PanelsMenu />
           <LayoutMenu />
-          <button
-            onClick={() => setShortcutsOpen(true)}
-            className="rounded p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
-            title="Keyboard shortcuts (?)"
-          >
-            <HelpCircle size={14} />
-          </button>
+          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} />
           <TokenBalance />
           {hasClerk && <UserButton afterSignOutUrl="/sign-in" />}
         </div>
