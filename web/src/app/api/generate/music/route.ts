@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = getTokenCost('music_generation');
 
   let apiKey: string;
+  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
       { prompt, durationSeconds, instrumental }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -77,6 +79,7 @@ export async function POST(request: NextRequest) {
         provider: 'suno',
         status: 'pending',
         estimatedSeconds: 60,
+        usageId,
       },
       { status: 201 }
     );

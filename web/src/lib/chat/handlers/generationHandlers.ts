@@ -20,6 +20,7 @@ function trackJob(opts: {
   prompt: string;
   provider: string;
   entityId?: string;
+  usageId?: string;
 }) {
   useGenerationStore.getState().addJob({
     id: opts.jobId,
@@ -31,6 +32,7 @@ function trackJob(opts: {
     provider: opts.provider,
     createdAt: Date.now(),
     entityId: opts.entityId,
+    usageId: opts.usageId,
   });
 }
 
@@ -118,6 +120,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'model',
       prompt: args.prompt as string,
       provider: (data.provider as string) ?? 'meshy',
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -144,6 +147,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'model',
       prompt: (args.prompt as string) ?? 'image-to-3d',
       provider: (data.provider as string) ?? 'meshy',
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -174,6 +178,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: args.prompt as string,
       provider: (data.provider as string) ?? 'meshy',
       entityId: args.entityId as string | undefined,
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -202,6 +207,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: args.prompt as string,
       provider: (data.provider as string) ?? 'meshy',
       entityId: args.entityId as string | undefined,
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -290,6 +296,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'skybox',
       prompt: args.prompt as string,
       provider: (data.provider as string) ?? 'meshy',
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -343,6 +350,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: args.prompt as string,
       provider: (data.provider as string) ?? 'suno',
       entityId: args.entityId as string | undefined,
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -371,6 +379,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'sprite',
       prompt: args.prompt as string,
       provider: (data.provider as string) ?? 'dalle3',
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -399,6 +408,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'sprite_sheet',
       prompt: `sprite-sheet from ${args.sourceAssetId}`,
       provider: (data.provider as string) ?? 'dalle3',
+      usageId: data.usageId as string | undefined,
     });
 
     return {
@@ -434,6 +444,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
           type: 'sprite',
           prompt,
           provider: (result.data.provider as string) ?? 'dalle3',
+          usageId: result.data.usageId as string | undefined,
         });
         jobIds.push(result.data.jobId as string);
       }
@@ -468,6 +479,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       type: 'tileset',
       prompt: args.prompt as string,
       provider: (data.provider as string) ?? 'dalle3',
+      usageId: data.usageId as string | undefined,
     });
 
     return {

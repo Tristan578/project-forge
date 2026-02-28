@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = getTokenCost('skybox_generation');
 
   let apiKey: string;
+  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
       { prompt, style }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -71,6 +73,7 @@ export async function POST(request: NextRequest) {
         provider: 'meshy',
         status: 'pending',
         estimatedSeconds: 90,
+        usageId,
       },
       { status: 201 }
     );

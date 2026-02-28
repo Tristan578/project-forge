@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
     style?: 'realistic' | 'stylized' | 'cartoon';
     tiling?: boolean;
     entityId?: string;
+    generateMaps?: Record<string, boolean>;
   };
 
   try {
@@ -25,7 +26,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { prompt, resolution = '1024', style = 'realistic', tiling = true, entityId } = body;
+  const { prompt, resolution = '1024', style = 'realistic', tiling = true, entityId, generateMaps } = body;
 
   // Validate
   if (!prompt || prompt.length < 3 || prompt.length > 500) {
@@ -39,6 +40,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = getTokenCost('texture_generation');
 
   let apiKey: string;
+  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -49,6 +51,7 @@ export async function POST(request: NextRequest) {
       { prompt, resolution, style, entityId }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -65,6 +68,7 @@ export async function POST(request: NextRequest) {
       resolution,
       style,
       tiling,
+      generateMaps,
     });
 
     return NextResponse.json(
@@ -73,6 +77,7 @@ export async function POST(request: NextRequest) {
         provider: 'meshy',
         status: 'pending',
         estimatedSeconds: 60,
+        usageId,
       },
       { status: 201 }
     );

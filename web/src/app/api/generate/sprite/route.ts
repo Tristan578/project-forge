@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
   const serviceName = actualProvider === 'dalle3' ? 'openai' : 'replicate';
 
   let apiKey: string;
+  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -59,6 +60,7 @@ export async function POST(request: NextRequest) {
       { prompt, style, size }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -91,6 +93,7 @@ export async function POST(request: NextRequest) {
         provider: actualProvider,
         status: result.status,
         estimatedSeconds: actualProvider === 'dalle3' ? 15 : 30,
+        usageId,
       },
       { status: 201 }
     );

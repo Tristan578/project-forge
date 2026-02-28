@@ -85,12 +85,13 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
       addJob({
         id: crypto.randomUUID(),
         jobId: data.jobId,
-        type: activeTab === 'single' ? 'texture' : 'texture', // TODO: Add sprite types
+        type: activeTab === 'single' ? 'sprite' : activeTab === 'sheet' ? 'sprite_sheet' : 'tileset',
         prompt: prompt.trim(),
         status: 'pending',
         progress: 0,
         provider: data.provider,
         createdAt: Date.now(),
+        usageId: data.usageId,
       });
 
       // Job started successfully
