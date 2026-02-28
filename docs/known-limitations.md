@@ -42,44 +42,45 @@ No actual networking is implemented. All multiplayer state is local simulation. 
 
 ## LOD & Performance (Phase 31)
 
-**Status: UI + metrics stubs**
+**Status: UI + metrics stubs, honest error responses**
 
 LOD (Level of Detail) includes:
 - `LodData` ECS component definition
 - LOD Inspector panel
-- Performance budget UI
+- Performance budget UI (set_performance_budget works, get_performance_stats returns local store data)
 
-The bridge systems drain the LOD request queues but log "not implemented" instead of generating mesh LODs or collecting real performance statistics.
+MCP handlers for LOD generation (set_entity_lod, generate_lods, optimize_scene, set_lod_distances) return `success: false` with descriptive errors explaining the feature requires engine-side mesh decimation.
 
 ## Advanced Audio (Phase 20)
 
-**Status: Basic audio works, adaptive features are stubs**
+**Status: Basic audio works, adaptive features return honest errors**
 
 Working:
 - Spatial audio playback
-- Audio bus routing
+- Audio bus routing and effects
 - Reverb zones
+- Audio layering and crossfades
 
-Stubs (console.log only):
+Not implemented (returns `success: false` with descriptive error):
 - Adaptive music (horizontal re-sequencing)
 - Audio occlusion
-- Audio snapshots
+- Music stem layering
 
 ## Shader Application (Phase 23)
 
 **Status: Editor and compiler work, application to entities does not**
 
-The shader node graph editor and WGSL compiler are functional — you can create node graphs and compile them to WGSL code. However, compiled shaders cannot be applied to entities at runtime. The "apply shader" pipeline is not connected end-to-end.
+The shader node graph editor and WGSL compiler are functional — you can create node graphs and compile them to WGSL code. However, applying compiled shaders to entity materials is not implemented. The `apply_shader_to_entity` handler returns `success: false` with an explanation.
 
 ## Game Component Runtime (Phase 5-D)
 
-**Status: 7 of 13 components work, 6 are stubs**
+**Status: 12 of 13 components work, 1 stub remaining**
 
-Working runtime behaviors: CharacterController, Health, Collectible, Projectile, MovingPlatform, Enemy, Inventory
+Working runtime behaviors: CharacterController, Health, Collectible, Projectile, MovingPlatform, Enemy, Inventory, DamageZone, Checkpoint, Teleporter, TriggerZone, Spawner
 
-Stub behaviors (empty runtime systems): DamageZone, Checkpoint, Teleporter, TriggerZone, Spawner, DialogueTrigger
+All 12 components have full Rust ECS systems with collision detection, damage application, teleportation, spawning, and event emission. The collision tracking system feeds data to DamageZone, Checkpoint, Teleporter, and TriggerZone.
 
-These stub components can be added to entities via the inspector but have no effect during play mode. Their functionality can be replicated using the script API.
+Stub behavior: DialogueTrigger (has no runtime system implementation)
 
 ## Scene Hierarchy on Load
 
