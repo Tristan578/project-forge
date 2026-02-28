@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames, users, projects, gameTags } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { moderateContent } from '@/lib/moderation/contentFilter';
 
 export async function POST(request: NextRequest) {
   const { userId: clerkId } = await auth();
@@ -18,6 +19,24 @@ export async function POST(request: NextRequest) {
 
   if (!projectId || !title || !slug) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  }
+
+  // Content moderation check on title and description
+  const titleMod = moderateContent(title);
+  if (titleMod.severity === 'block') {
+    return NextResponse.json(
+      { error: 'Game title contains prohibited content' },
+      { status: 422 }
+    );
+  }
+  if (description) {
+    const descMod = moderateContent(description);
+    if (descMod.severity === 'block') {
+      return NextResponse.json(
+        { error: 'Game description contains prohibited content' },
+        { status: 422 }
+      );
+    }
   }
 
   // Validate slug format
