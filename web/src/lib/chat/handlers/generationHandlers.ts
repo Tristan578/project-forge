@@ -6,6 +6,7 @@
 import type { ToolHandler, ExecutionResult } from './types';
 import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
+import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
 
 /** Generate a unique ID for client-side job tracking. */
 function makeJobId(): string {
@@ -103,9 +104,9 @@ async function queryStatus(
 }
 
 export const generationHandlers: Record<string, ToolHandler> = {
-  generate_3d_model: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_3d_model: async (args, ctx): Promise<ExecutionResult> => {
     const result = await generateFetch('/api/generate/model', {
-      prompt: args.prompt,
+      prompt: enrichPrompt(args.prompt as string, 'model', ctx.store),
       quality: args.quality ?? 'standard',
       artStyle: args.artStyle ?? 'realistic',
       negativePrompt: args.negativePrompt,
@@ -132,10 +133,13 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  generate_3d_from_image: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_3d_from_image: async (args, ctx): Promise<ExecutionResult> => {
+    const enrichedPrompt = args.prompt
+      ? enrichPrompt(args.prompt as string, 'model', ctx.store)
+      : undefined;
     const result = await generateFetch('/api/generate/model', {
       imageBase64: args.imageBase64,
-      prompt: args.prompt,
+      prompt: enrichedPrompt,
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -159,9 +163,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  generate_texture: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_texture: async (args, ctx): Promise<ExecutionResult> => {
     const result = await generateFetch('/api/generate/texture', {
-      prompt: args.prompt,
+      prompt: enrichPrompt(args.prompt as string, 'texture', ctx.store),
       entityId: args.entityId,
       resolution: args.resolution ?? '1024',
       style: args.style ?? 'realistic',
@@ -190,9 +194,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  generate_pbr_maps: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_pbr_maps: async (args, ctx): Promise<ExecutionResult> => {
     const result = await generateFetch('/api/generate/texture', {
-      prompt: args.prompt,
+      prompt: enrichPrompt(args.prompt as string, 'texture', ctx.store),
       entityId: args.entityId,
       maps: args.maps,
     });
@@ -220,8 +224,11 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_sfx: async (args, ctx): Promise<ExecutionResult> => {
+    // Find entity name for SFX context enrichment
+    const entityId = args.entityId as string | undefined;
+    const entityName = entityId ? ctx.store.sceneGraph.nodes[entityId]?.name : undefined;
     const result = await generateFetch('/api/generate/sfx', {
-      prompt: args.prompt,
+      prompt: enrichSfxPrompt(args.prompt as string, entityName, ctx.store),
       durationSeconds: args.durationSeconds ?? 5,
     });
     if (!result.ok) return { success: false, error: result.error };
@@ -251,9 +258,11 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_voice: async (args, ctx): Promise<ExecutionResult> => {
+    const speaker = args.speaker as string | undefined;
+    const baseStyle = (args.voiceStyle as string) ?? 'neutral';
     const result = await generateFetch('/api/generate/voice', {
       text: args.text,
-      voiceStyle: args.voiceStyle ?? 'neutral',
+      voiceStyle: enrichVoiceStyle(speaker, baseStyle),
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -281,9 +290,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  generate_skybox: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_skybox: async (args, ctx): Promise<ExecutionResult> => {
     const result = await generateFetch('/api/generate/skybox', {
-      prompt: args.prompt,
+      prompt: enrichPrompt(args.prompt as string, 'skybox', ctx.store),
       style: args.style ?? 'realistic',
     });
     if (!result.ok) return { success: false, error: result.error };
@@ -310,7 +319,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
 
   generate_music: async (args, ctx): Promise<ExecutionResult> => {
     const result = await generateFetch('/api/generate/music', {
-      prompt: args.prompt,
+      prompt: enrichMusicPrompt(args.prompt as string, ctx.store),
       durationSeconds: args.durationSeconds ?? 30,
       instrumental: args.instrumental ?? true,
     });
@@ -362,9 +371,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  generate_sprite: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_sprite: async (args, ctx): Promise<ExecutionResult> => {
     const result = await generateFetch('/api/generate/sprite', {
-      prompt: args.prompt,
+      prompt: enrichPrompt(args.prompt as string, 'sprite', ctx.store),
       style: args.style,
       size: args.size ?? '64x64',
       removeBackground: args.removeBackground ?? true,
@@ -420,7 +429,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  generate_character: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_character: async (args, ctx): Promise<ExecutionResult> => {
     const poses = args.poses as string[] | undefined;
     if (!poses || poses.length === 0) {
       return { success: false, error: 'No poses specified' };
@@ -429,7 +438,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
     // Generate each pose as a separate sprite generation job
     const jobIds: string[] = [];
     for (const pose of poses) {
-      const prompt = `${args.prompt as string} - ${pose} pose`;
+      const basePrompt = enrichPrompt(args.prompt as string, 'sprite', ctx.store);
+      const prompt = `${basePrompt} - ${pose} pose`;
       const result = await generateFetch('/api/generate/sprite', {
         prompt,
         style: args.style ?? 'cartoon',
@@ -463,9 +473,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  generate_tileset: async (args, _ctx): Promise<ExecutionResult> => {
+  generate_tileset: async (args, ctx): Promise<ExecutionResult> => {
     const result = await generateFetch('/api/generate/tileset-gen', {
-      prompt: args.prompt,
+      prompt: enrichPrompt(args.prompt as string, 'tileset', ctx.store),
       tileSize: args.tileSize ?? 32,
       gridSize: args.gridSize ?? '8x8',
     });
