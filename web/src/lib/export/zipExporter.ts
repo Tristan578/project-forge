@@ -28,7 +28,8 @@ interface ZipEntry {
 
 /**
  * Fetch WASM engine files from the running server's public directory.
- * Returns entries for both WebGL2 and WebGPU variants (if available).
+ * Uses runtime variants (stripped editor systems) for smaller exported games.
+ * Falls back to editor variants if runtime variants aren't available.
  */
 async function fetchWasmEngineFiles(): Promise<ZipEntry[]> {
   const entries: ZipEntry[] = [];
@@ -37,19 +38,27 @@ async function fetchWasmEngineFiles(): Promise<ZipEntry[]> {
 
   for (const variant of variants) {
     for (const file of files) {
-      const url = `/engine-pkg-${variant}/${file}`;
+      // Try runtime variant first (smaller, no editor systems)
+      const runtimeUrl = `/engine-pkg-${variant}-runtime/${file}`;
+      const editorUrl = `/engine-pkg-${variant}/${file}`;
+      // Exported games load from engine-pkg-{variant}/ paths (no -runtime suffix)
+      const exportPath = `engine-pkg-${variant}/${file}`;
+
       try {
-        const response = await fetch(url);
+        let response = await fetch(runtimeUrl);
+        if (!response.ok) {
+          // Fall back to editor variant
+          response = await fetch(editorUrl);
+        }
         if (response.ok) {
           const blob = await response.blob();
           entries.push({
-            path: `engine-pkg-${variant}/${file}`,
+            path: exportPath,
             content: blob,
           });
         }
       } catch {
-        // Variant not available, skip
-        console.warn(`[ZipExporter] Could not fetch ${url}, skipping`);
+        console.warn(`[ZipExporter] Could not fetch WASM for ${variant}/${file}, skipping`);
       }
     }
   }
