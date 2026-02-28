@@ -156,11 +156,9 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       return { success: false, error: `Compilation failed: ${result.error}` };
     }
 
-    // TODO: In future, this would apply the compiled WGSL to the entity's material
-    // For now, just return success with the compiled code
     return {
-      success: true,
-      result: `Shader graph "${graph.name}" compiled and ready to apply to entity ${entityId}. (Note: Shader application not yet implemented in engine - this is a placeholder for Phase 23 MVP)`,
+      success: false,
+      error: `Shader graph "${graph.name}" compiled to WGSL successfully, but applying custom shaders to entity materials is not yet implemented in the engine. The compiled code is available in the shader editor.`,
     };
   },
 

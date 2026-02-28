@@ -218,6 +218,6 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
   },
 
   set_music_stems: async (_args, _ctx) => {
-    return { success: true, result: { message: 'Music stems configured' } };
+    return { success: false, error: 'Music stem layering is not yet implemented. The adaptive music engine is planned for a future release.' };
   },
 };
