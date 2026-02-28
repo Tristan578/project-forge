@@ -20,6 +20,7 @@ import { useEffect, useRef } from 'react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
+import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_COUNT = 100; // 5 minutes
@@ -183,6 +184,17 @@ export function useGenerationPolling() {
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
+
+        // Run model quality analysis on the raw GLB
+        const qualityMetrics = await analyzeModelQuality(blob);
+        for (const warning of qualityMetrics.warnings) {
+          console.warn(`[ModelQuality] ${warning}`);
+        }
+
+        if (!qualityMetrics.validFormat) {
+          throw new Error('Downloaded file is not a valid GLB model');
+        }
+
         const base64 = await blobToBase64(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
@@ -191,7 +203,18 @@ export function useGenerationPolling() {
         updateJob(id, {
           status: 'completed',
           resultUrl: data.resultUrl,
-          metadata: { ...job.metadata, ...ppResult.metadata },
+          metadata: {
+            ...job.metadata,
+            ...ppResult.metadata,
+            quality: {
+              fileSize: qualityMetrics.fileSize,
+              sizeCategory: qualityMetrics.sizeCategory,
+              estimatedTriangles: qualityMetrics.estimatedTriangles,
+              polyBudget: qualityMetrics.polyBudget,
+              primitiveCount: qualityMetrics.primitiveCount,
+              materialCount: qualityMetrics.materialCount,
+            },
+          },
         });
       } else if (type === 'texture') {
         // Download PBR maps and apply to entity
