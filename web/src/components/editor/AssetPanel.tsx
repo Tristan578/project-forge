@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useRef, memo, useState, useEffect } from 'react';
-import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown } from 'lucide-react';
+import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown, Loader2 } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
 import { GenerateModelDialog } from './GenerateModelDialog';
@@ -72,6 +72,9 @@ export const AssetPanel = memo(function AssetPanel() {
   const [generateSoundOpen, setGenerateSoundOpen] = useState(false);
   const [generateMusicOpen, setGenerateMusicOpen] = useState(false);
   const [generateSkyboxOpen, setGenerateSkyboxOpen] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
+  const dragCounterRef = useRef(0);
 
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const importGltf = useEditorStore((s) => s.importGltf);
@@ -119,10 +122,25 @@ export const AssetPanel = memo(function AssetPanel() {
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    dragCounterRef.current = 0;
+    setIsDragging(false);
+
     const files = e.dataTransfer.files;
+    const validFiles: File[] = [];
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+      const ext = files[i].name.split('.').pop()?.toLowerCase();
+      if (ext === 'glb' || ext === 'gltf' || ['png', 'jpg', 'jpeg', 'webp'].includes(ext ?? '') || ['mp3', 'ogg', 'wav', 'flac'].includes(ext ?? '')) {
+        validFiles.push(files[i]);
+      }
+    }
+
+    if (validFiles.length === 0) return;
+    setImportProgress({ current: 0, total: validFiles.length });
+
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
       const ext = file.name.split('.').pop()?.toLowerCase();
+      setImportProgress({ current: i + 1, total: validFiles.length });
       if (ext === 'glb' || ext === 'gltf') {
         const base64 = await fileToBase64(file);
         importGltf(base64, file.name);
@@ -136,11 +154,29 @@ export const AssetPanel = memo(function AssetPanel() {
         importAudio(base64, file.name);
       }
     }
+
+    setImportProgress(null);
   }, [importGltf, loadTexture, importAudio, primaryId]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current++;
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounterRef.current--;
+    if (dragCounterRef.current === 0) {
+      setIsDragging(false);
+    }
   }, []);
 
   // Close AI dropdown on outside click
@@ -156,10 +192,37 @@ export const AssetPanel = memo(function AssetPanel() {
 
   return (
     <div
-      className="flex min-h-[140px] w-full flex-col border-t border-zinc-800 bg-zinc-900"
+      className="relative flex min-h-[140px] w-full flex-col border-t border-zinc-800 bg-zinc-900"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
     >
+      {/* Drag-over overlay */}
+      {isDragging && (
+        <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded border-2 border-dashed border-blue-500 bg-blue-500/10">
+          <div className="flex flex-col items-center gap-1">
+            <Upload size={24} className="text-blue-400" />
+            <span className="text-xs font-medium text-blue-400">Drop to import</span>
+          </div>
+        </div>
+      )}
+
+      {/* Import progress bar */}
+      {importProgress && (
+        <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-800/50 px-3 py-1.5">
+          <Loader2 size={12} className="animate-spin text-blue-400" />
+          <span className="text-xs text-zinc-400">
+            Importing {importProgress.current}/{importProgress.total}...
+          </span>
+          <div className="flex-1 rounded-full bg-zinc-700 h-1">
+            <div
+              className="h-1 rounded-full bg-blue-500 transition-all duration-200"
+              style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
       {/* Tab bar + import buttons */}
       <div className="flex items-center border-b border-zinc-800">
         <div className="flex flex-1">
