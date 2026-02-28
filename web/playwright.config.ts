@@ -4,10 +4,10 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 0 : 0,
-  workers: process.env.CI ? 4 : undefined,
+  retries: 0,
+  workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
-  timeout: process.env.CI ? 60_000 : 30_000,
+  timeout: 30_000,
   expect: { timeout: 10_000 },
 
   use: {
@@ -15,12 +15,10 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
-    launchOptions: {
-      args: [
-        '--enable-unsafe-webgpu',
-        '--enable-features=Vulkan',
-      ],
-    },
+    // Disable GPU for all E2E tests — @ui tests don't need it, and WebGPU/Vulkan
+    // flags crash headless Chrome even when engine loading is skipped.
+    // @engine tests requiring GPU should use a dedicated project config.
+    launchOptions: { args: ['--disable-gpu', '--no-sandbox'] },
   },
 
   projects: [

@@ -24,6 +24,11 @@ function detectWebGPU(): boolean {
 }
 
 async function loadWasm(): Promise<WasmModule> {
+  // Skip WASM loading when engine is explicitly disabled (CI E2E @ui tests)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (typeof window !== 'undefined' && (window as any).__SKIP_ENGINE) {
+    throw new Error('Engine loading skipped (__SKIP_ENGINE is set)');
+  }
   if (wasmModule) return wasmModule;
   if (initPromise) return initPromise;
 

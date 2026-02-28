@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Dialogue Editor @engine', () => {
+test.describe('Dialogue Editor @ui', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
@@ -23,9 +23,15 @@ test.describe('Dialogue Editor @engine', () => {
     });
     expect(hasDialogueState).toBe(true);
   });
+});
+
+test.describe('Dialogue Editor @engine', () => {
+  test.beforeEach(async ({ editor }) => {
+    await editor.load();
+  });
 
   test('editor layout includes all expected panel tabs', async ({ page, editor: _editor }) => {
-    // Verify the main editor panels are present
+    // Verify dockview panel tabs are present
     const tabs = page.locator('.dv-tab, [role="tab"]');
     const tabCount = await tabs.count();
     expect(tabCount).toBeGreaterThan(0);

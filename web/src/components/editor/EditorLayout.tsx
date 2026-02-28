@@ -128,6 +128,19 @@ function ChatOverlay() {
   const chatOverlayOpen = useWorkspaceStore((s) => s.chatOverlayOpen);
   const setChatOverlayOpen = useWorkspaceStore((s) => s.setChatOverlayOpen);
 
+  // Close on Escape key
+  useEffect(() => {
+    if (!chatOverlayOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setChatOverlayOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [chatOverlayOpen, setChatOverlayOpen]);
+
   if (!chatOverlayOpen) return null;
 
   return (
@@ -214,6 +227,12 @@ export function EditorLayout() {
     document.addEventListener('keydown', handleGlobalKeyDown);
     return () => document.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleGlobalKeyDown]);
+
+  // Signal that React has hydrated and event handlers are attached (used by E2E tests)
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__REACT_HYDRATED = true;
+  }, []);
 
   // --- Compact layout (mobile/tablet) --- unchanged
   if (layout.mode === 'compact') {

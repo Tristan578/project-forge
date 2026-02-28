@@ -20,18 +20,49 @@ export class EditorPage {
     await this.page.waitForTimeout(500);
   }
 
-  /** Navigate to /dev without waiting for WASM (for CSS-only tests) */
+  /** Navigate to /dev without waiting for WASM (for @ui tests in CI) */
   async loadPage() {
-    await this.page.goto('/dev');
-    // Wait for React to render (no WASM dependency)
-    await this.page.waitForLoadState('networkidle');
-    // Wait for editor layout to initialize (dockview panels)
-    await this.page.waitForSelector('[class*="dv-"], [data-testid="editor"]', {
-      timeout: 30_000,
-    }).catch(() => {
-      // Fallback: just wait a bit if dockview selectors aren't found
+    // Suppress onboarding overlays, PerformanceProfiler, and engine loading
+    await this.page.addInitScript(() => {
+      localStorage.setItem('forge-welcomed', '1');
+      localStorage.setItem('forge-mobile-dismissed', '1');
+      localStorage.setItem('forge-checklist-dismissed', '1');
+
+      // Skip WASM engine loading — prevents browser tab crash when
+      // engine assets don't exist (CI) or GPU is unavailable
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__SKIP_ENGINE = true;
+
+      // Inject CSS to hide PerformanceProfiler overlay and InitOverlay
+      const style = document.createElement('style');
+      style.setAttribute('data-e2e', 'suppress-overlays');
+      style.textContent = [
+        // Hide PerformanceProfiler (fixed bottom-left z-50)
+        '.fixed.bottom-4.left-4.z-50 { display: none !important; }',
+        // Hide InitOverlay (absolute full-screen z-50 with bg-zinc-950/95)
+        // Using attribute selector since Tailwind's / in class names needs escaping
+        '[class*="absolute"][class*="inset-0"][class*="z-50"][class*="bg-zinc-950"] { display: none !important; }',
+        // Hide Next.js dev overlay (<nextjs-portal>) which intercepts pointer events in CI
+        'nextjs-portal { display: none !important; pointer-events: none !important; }',
+      ].join('\n');
+      if (document.head) {
+        document.head.appendChild(style);
+      } else {
+        document.addEventListener('DOMContentLoaded', () =>
+          document.head.appendChild(style)
+        );
+      }
     });
-    await this.page.waitForTimeout(2000);
+
+    await this.page.goto('/dev');
+    await this.page.waitForLoadState('domcontentloaded');
+    // Wait for React hydration — ensures all event handlers (keyboard shortcuts,
+    // button clicks) are attached. This fires after EditorLayout mounts.
+    await this.page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__REACT_HYDRATED === true,
+      { timeout: 30_000 }
+    );
   }
 
   /** Wait for a minimum entity count in the scene graph */
@@ -98,7 +129,7 @@ export class EditorPage {
   /** Open settings modal */
   async openSettings() {
     await this.page.getByRole('button', { name: /settings/i }).click();
-    await this.page.waitForTimeout(300);
+    await expect(this.page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
   }
 
   /** Press keyboard shortcut */
