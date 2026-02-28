@@ -5,6 +5,7 @@
  */
 
 import { create } from 'zustand';
+import { useGenerationHistoryStore } from './generationHistoryStore';
 
 export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music' | 'sprite' | 'sprite_sheet' | 'tileset';
 export type GenerationStatus = 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
@@ -57,8 +58,23 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     set((state) => {
       const existing = state.jobs[id];
       if (!existing) return state;
+      const updated = { ...existing, ...updates };
+
+      // Auto-save completed jobs with results to generation history
+      if (updated.status === 'completed' && updated.resultUrl) {
+        useGenerationHistoryStore.getState().addEntry({
+          id: updated.id,
+          type: updated.type,
+          prompt: updated.prompt,
+          provider: updated.provider,
+          resultUrl: updated.resultUrl,
+          createdAt: updated.createdAt,
+          metadata: updated.metadata,
+        });
+      }
+
       return {
-        jobs: { ...state.jobs, [id]: { ...existing, ...updates } },
+        jobs: { ...state.jobs, [id]: updated },
       };
     }),
 
