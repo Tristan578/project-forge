@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { storeProviderKey, deleteProviderKey } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 const VALID_PROVIDERS: Provider[] = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno'];
 
@@ -12,6 +13,10 @@ export async function PUT(
 ) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Rate limit: 10 key management requests per minute per user
+  const rl = rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
@@ -46,6 +51,10 @@ export async function DELETE(
 ) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Rate limit: 10 key management requests per minute per user
+  const rl = rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { provider } = await params;
   if (!VALID_PROVIDERS.includes(provider as Provider)) {
