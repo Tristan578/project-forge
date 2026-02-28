@@ -76,7 +76,11 @@ pub struct HealthData {
     pub invincibility_secs: f32, // post-damage invincibility, default 0.5
     pub respawn_on_death: bool,  // default true
     pub respawn_point: [f32; 3], // world coords, default [0, 1, 0]
+    #[serde(default = "default_true")]
+    pub despawn_on_death: bool,  // despawn entity when hp <= 0 (if not respawning), default true
 }
+
+fn default_true() -> bool { true }
 
 impl Default for HealthData {
     fn default() -> Self {
@@ -86,6 +90,7 @@ impl Default for HealthData {
             invincibility_secs: 0.5,
             respawn_on_death: true,
             respawn_point: [0.0, 1.0, 0.0],
+            despawn_on_death: true,
         }
     }
 }
@@ -626,11 +631,18 @@ fn system_character_controller(
     }
 }
 
-/// Health system: tick invincibility timers, handle death
+/// Health system: tick invincibility timers, handle death/despawn
 fn system_health(
+    mut commands: Commands,
     time: Res<Time>,
     runtime: Option<ResMut<GameComponentRuntime>>,
-    mut entities: Query<(&EntityId, &mut GameComponents, &mut Transform)>,
+    mut entities: Query<(
+        Entity,
+        &EntityId,
+        &mut GameComponents,
+        &mut Transform,
+        Option<&super::engine_mode::RuntimeEntity>,
+    ), Without<super::entity_factory::Undeletable>>,
 ) {
 
 
@@ -643,25 +655,36 @@ fn system_health(
         *timer > 0.0
     });
 
+    // Collect entities to despawn (cannot despawn while iterating a mutable query)
+    let mut to_despawn: Vec<Entity> = Vec::new();
+
     // Check for death
-    for (eid, mut gc, mut transform) in entities.iter_mut() {
+    for (entity, eid, mut gc, mut transform, runtime_marker) in entities.iter_mut() {
         if let Some(GameComponentData::Health(health)) = gc.get_mut("health") {
             if health.current_hp <= 0.0 {
+                // Emit death event regardless of respawn/despawn behavior
+                runtime.pending_events.push(GameEvent {
+                    event_name: "entity_death".to_string(),
+                    source_entity_id: Some(eid.0.clone()),
+                    target_entity_id: None,
+                });
+
                 if health.respawn_on_death {
                     // Respawn at checkpoint
                     transform.translation = Vec3::from(health.respawn_point);
                     health.current_hp = health.max_hp;
-
-                    // Emit death event
-                    runtime.pending_events.push(GameEvent {
-                        event_name: "entity_death".to_string(),
-                        source_entity_id: Some(eid.0.clone()),
-                        target_entity_id: None,
-                    });
+                } else if health.despawn_on_death && runtime_marker.is_some() {
+                    // Only despawn RuntimeEntity entities (spawned during play mode).
+                    // Undeletable entities are already excluded via Without<Undeletable>.
+                    to_despawn.push(entity);
                 }
-                // Note: despawn on death would require Commands, deferred for now
             }
         }
+    }
+
+    // Despawn dead entities outside the query loop
+    for entity in to_despawn {
+        commands.entity(entity).despawn();
     }
 }
 

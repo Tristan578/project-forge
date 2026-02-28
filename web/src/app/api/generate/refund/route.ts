@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { refundTokens } from '@/lib/tokens/service';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -37,6 +38,7 @@ export async function POST(request: NextRequest) {
       success: true,
     });
   } catch (err) {
+    captureException(err, { route: '/api/generate/refund', usageId });
     const message = err instanceof Error ? err.message : 'Refund error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

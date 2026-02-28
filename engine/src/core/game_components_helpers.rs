@@ -33,6 +33,7 @@ pub fn build_game_component(component_type: &str, properties_json: &str) -> Resu
                     ];
                 }
             }
+            if let Some(v) = props.get("despawnOnDeath").and_then(|v| v.as_bool()) { data.despawn_on_death = v; }
             Ok(GameComponentData::Health(data))
         }
         "collectible" => {
