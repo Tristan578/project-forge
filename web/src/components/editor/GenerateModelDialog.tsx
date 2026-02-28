@@ -11,11 +11,20 @@ interface GenerateModelDialogProps {
 
 type ArtStyle = 'realistic' | 'cartoon' | 'low-poly' | 'pbr';
 type Quality = 'standard' | 'high';
+type PolyBudget = '10k' | '30k' | '50k' | '100k';
+
+const POLY_BUDGET_LABELS: Record<PolyBudget, string> = {
+  '10k': '10K (Mobile-friendly)',
+  '30k': '30K (Standard)',
+  '50k': '50K (High detail)',
+  '100k': '100K (Maximum detail)',
+};
 
 export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProps) {
   const [prompt, setPrompt] = useState('');
   const [artStyle, setArtStyle] = useState<ArtStyle>('realistic');
   const [quality, setQuality] = useState<Quality>('standard');
+  const [polyBudget, setPolyBudget] = useState<PolyBudget>('30k');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -43,6 +52,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
           quality,
           artStyle,
           negativePrompt: negativePrompt.trim() || undefined,
+          polyBudget,
         }),
       });
 
@@ -128,6 +138,21 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
             >
               <option value="standard">Standard (100 tokens)</option>
               <option value="high">High (200 tokens)</option>
+            </select>
+          </div>
+
+          {/* Poly Budget */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Poly Budget</label>
+            <select
+              value={polyBudget}
+              onChange={(e) => setPolyBudget(e.target.value as PolyBudget)}
+              disabled={isSubmitting}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
+            >
+              {(Object.entries(POLY_BUDGET_LABELS) as [PolyBudget, string][]).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
             </select>
           </div>
 
