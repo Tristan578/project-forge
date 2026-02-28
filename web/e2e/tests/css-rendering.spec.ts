@@ -18,8 +18,9 @@ test.describe('CSS & Visual Rendering Tests @ui', () => {
         // Check for transparent or rgba(0,0,0,0)
         if (bgColor === 'rgba(0, 0, 0, 0)' || bgColor === 'transparent') {
           const cls = el.getAttribute('class') || '';
-          // Ignore elements where bg- is part of a compound class (e.g., bg-black/30)
-          // or elements hidden by E2E test suppression
+          // Ignore elements hidden by E2E test suppression or backdrop overlays.
+          // Note: compound Tailwind bg- classes like bg-black/30 render with rgba alpha
+          // and won't be counted here because their computed backgroundColor is not transparent.
           if (cls.includes('e2e') || cls.includes('backdrop')) continue;
           count++;
         }

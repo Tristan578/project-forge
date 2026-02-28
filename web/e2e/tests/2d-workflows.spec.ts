@@ -58,7 +58,7 @@ test.describe('2D Workflows @ui', () => {
     // Translate/Rotate/Scale gizmo buttons are in the sidebar
     const gizmoBtn = page.locator('button[title*="Translate"], button[title*="Rotate"], button[title*="Scale"]');
     const count = await gizmoBtn.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('settings modal can be opened from sidebar', async ({ page }) => {

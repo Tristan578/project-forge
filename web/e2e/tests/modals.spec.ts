@@ -49,9 +49,8 @@ test.describe('Modals @ui', () => {
     const settingsHeading = page.locator('h2').filter({ hasText: /settings/i }).first();
     await expect(settingsHeading).toBeVisible({ timeout: 3000 });
 
-    // Find the close button (X icon SVG button near the Settings heading)
-    // The SettingsPanel has a close button with X icon in the same header row
-    const closeBtn = page.locator('.fixed').filter({ hasText: /settings/i }).locator('button').filter({ has: page.locator('svg') }).first();
+    // Find the close button by its accessible label
+    const closeBtn = page.locator('[role="dialog"]').getByRole('button', { name: /close/i });
     await closeBtn.click();
     await page.waitForTimeout(300);
 
