@@ -128,6 +128,19 @@ function ChatOverlay() {
   const chatOverlayOpen = useWorkspaceStore((s) => s.chatOverlayOpen);
   const setChatOverlayOpen = useWorkspaceStore((s) => s.setChatOverlayOpen);
 
+  // Close on Escape key
+  useEffect(() => {
+    if (!chatOverlayOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setChatOverlayOpen(false);
+      }
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [chatOverlayOpen, setChatOverlayOpen]);
+
   if (!chatOverlayOpen) return null;
 
   return (

@@ -28,9 +28,10 @@ test.describe('CSS & Visual Rendering Tests @ui', () => {
       return count;
     });
 
-    // Allow some transparent bg- elements (Tailwind opacity variants like bg-black/30
-    // render as rgba with alpha, which is valid)
-    expect(transparentCount).toBeLessThan(10);
+    // Allow transparent bg- elements: Tailwind utility classes like bg-transparent,
+    // bg-inherit, and dockview internal elements legitimately have transparent backgrounds.
+    // The threshold catches regressions where many elements lose their backgrounds.
+    expect(transparentCount).toBeLessThan(30);
   });
 
   test('all visible text elements have non-zero opacity', async ({ page, editor }) => {

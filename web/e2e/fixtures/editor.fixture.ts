@@ -22,17 +22,26 @@ export class EditorPage {
 
   /** Navigate to /dev without waiting for WASM (for @ui tests in CI) */
   async loadPage() {
-    // Suppress onboarding overlays and PerformanceProfiler BEFORE page loads
+    // Suppress onboarding overlays, PerformanceProfiler, and engine loading
     await this.page.addInitScript(() => {
       localStorage.setItem('forge-welcomed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
+      localStorage.setItem('forge-checklist-dismissed', '1');
+
+      // Skip WASM engine loading — prevents browser tab crash when
+      // engine assets don't exist (CI) or GPU is unavailable
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__SKIP_ENGINE = true;
 
       // Inject CSS to hide PerformanceProfiler overlay and InitOverlay
-      // so they don't block UI interactions in tests without WASM
       const style = document.createElement('style');
       style.setAttribute('data-e2e', 'suppress-overlays');
       style.textContent = [
+        // Hide PerformanceProfiler (fixed bottom-left z-50)
         '.fixed.bottom-4.left-4.z-50 { display: none !important; }',
+        // Hide InitOverlay (absolute full-screen z-50 with bg-zinc-950/95)
+        // Using attribute selector since Tailwind's / in class names needs escaping
+        '[class*="absolute"][class*="inset-0"][class*="z-50"][class*="bg-zinc-950"] { display: none !important; }',
       ].join('\n');
       if (document.head) {
         document.head.appendChild(style);
@@ -44,24 +53,16 @@ export class EditorPage {
     });
 
     await this.page.goto('/dev');
-    // Wait for page to be loaded (SSR HTML + client JS)
     await this.page.waitForLoadState('domcontentloaded');
-    // Wait for React hydration signal — EditorLayout sets this after mounting
-    // and attaching all event handlers (keyboard shortcuts, button clicks)
-    const hydrated = await this.page.waitForFunction(
+    // Wait for React hydration — ensures all event handlers (keyboard shortcuts,
+    // button clicks) are attached. This fires after EditorLayout mounts.
+    await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
       { timeout: 30_000 }
-    ).then(() => true).catch(() => false);
-
-    if (!hydrated) {
-      // Fallback: wait for visible elements + extra buffer
-      await this.page.waitForSelector(
-        'button[title="Settings"], button[title="Add Entity"]',
-        { timeout: 15_000 }
-      ).catch(() => {});
-      await this.page.waitForTimeout(2000);
-    }
+    );
+    // Brief buffer for layout/dockview stabilization
+    await this.page.waitForTimeout(500);
   }
 
   /** Wait for a minimum entity count in the scene graph */
