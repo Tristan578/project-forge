@@ -89,7 +89,6 @@ pub struct TilemapDataUpdate {
 pub struct TilemapDataRemoval {
     pub entity_id: String,
 }
-
 // === Queue Methods ===
 
 impl PendingCommands {
