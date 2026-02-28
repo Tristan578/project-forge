@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('AI Chat', () => {
+test.describe('AI Chat @engine', () => {
   test('chat overlay can be opened with Ctrl+K shortcut', async ({ page, editor }) => {
     await editor.loadPage();
 

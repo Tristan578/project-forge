@@ -119,15 +119,6 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
-      - name: Upload WASM artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: wasm-binaries
-          path: |
-            engine/pkg-webgl2/
-            engine/pkg-webgpu/
-          retention-days: 1
-
   build-nextjs:
     name: Next.js Production Build
     runs-on: ubuntu-latest
@@ -146,71 +137,8 @@ jobs:
       - run: npm run build
         working-directory: web
 
-  e2e:
-    name: E2E (UI)
-    runs-on: ubuntu-latest
-    needs: [build-wasm]
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Cache Playwright browsers
-        id: playwright-cache
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
-          restore-keys: |
-            playwright-${{ runner.os }}-
-
-      - name: Install Playwright chromium
-        working-directory: web
-        run: npx playwright install --with-deps chromium
-
-      - name: Download WASM artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: wasm-binaries
-          path: engine/
-
-      - name: Copy WASM to web/public
-        run: |
-          mkdir -p web/public/engine-pkg-webgl2
-          mkdir -p web/public/engine-pkg-webgpu
-          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
-          cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
-
-      - name: Run Playwright tests (UI-only, skip @engine)
-        working-directory: web
-        run: npx playwright test --project=chromium --grep-invert @engine
-        env:
-          CI: true
-
-      - name: Upload Playwright report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: web/playwright-report/
-          retention-days: 14
-
-      - name: Upload test results
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-results
-          path: web/test-results/
-          retention-days: 14
+  # E2E tests require WASM engine + GPU (wgpu) which CI runners lack.
+  # All E2E specs are tagged @engine. Run locally or in CD with real Clerk keys.
 
   security:
     name: Rust Security Audit
