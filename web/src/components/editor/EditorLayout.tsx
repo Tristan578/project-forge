@@ -215,6 +215,12 @@ export function EditorLayout() {
     return () => document.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleGlobalKeyDown]);
 
+  // Signal that React has hydrated and event handlers are attached (used by E2E tests)
+  useEffect(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (window as any).__REACT_HYDRATED = true;
+  }, []);
+
   // --- Compact layout (mobile/tablet) --- unchanged
   if (layout.mode === 'compact') {
     return (

@@ -82,7 +82,13 @@ test.describe('Modals @ui', () => {
   test('welcome modal appears on first visit', async ({ page }) => {
     // Navigate WITHOUT the fixture's loadPage() to avoid forge-welcomed suppression
     await page.goto('/dev');
-    await page.waitForLoadState('networkidle');
+
+    // Wait for React to hydrate before manipulating localStorage
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__REACT_HYDRATED === true,
+      { timeout: 60_000 }
+    );
 
     // Explicitly clear the welcome flag
     await page.evaluate(() => {
@@ -91,8 +97,12 @@ test.describe('Modals @ui', () => {
 
     // Reload to trigger first-visit experience
     await page.reload();
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    await page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__REACT_HYDRATED === true,
+      { timeout: 60_000 }
+    );
+    await page.waitForTimeout(500);
 
     // Welcome modal should be visible (fixed overlay with welcome text)
     const welcomeModal = page.locator('.fixed').filter({ hasText: /welcome|getting started/i }).first();

@@ -42,16 +42,15 @@ export class EditorPage {
       }
     });
     await this.page.goto('/dev');
-    // Wait for React to render (no WASM dependency)
-    await this.page.waitForLoadState('networkidle');
-    // Wait for editor layout to render (sidebar buttons are outside dockview)
-    await this.page.waitForSelector(
-      'button[title="Settings"], button[title="Add Entity"], [class*="dv-"]',
-      { timeout: 30_000 }
-    ).catch(() => {
-      // Sidebar or dockview may not render in all environments
-    });
-    await this.page.waitForTimeout(1500);
+    // Wait for React to fully hydrate — EditorLayout sets this flag after
+    // mounting and attaching all event handlers (keyboard shortcuts, etc.)
+    await this.page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => (window as any).__REACT_HYDRATED === true,
+      { timeout: 60_000 }
+    );
+    // Small buffer for any post-hydration rendering
+    await this.page.waitForTimeout(500);
   }
 
   /** Wait for a minimum entity count in the scene graph */
