@@ -127,7 +127,24 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
 
     emit_init_event("bevy_plugins", Some("Registering DefaultPlugins..."), None);
 
+    // Create shared in-memory directory for glTF assets.
+    // This Dir is Arc-based internally, so cloning is cheap.
+    let gltf_memory_dir = bevy::asset::io::memory::Dir::default();
+    let reader_dir = gltf_memory_dir.clone();
+
     let mut app = App::new();
+
+    // Register "memory" asset source BEFORE DefaultPlugins (which includes AssetPlugin).
+    // This allows loading glTF assets from decoded in-memory bytes via "memory://path.glb".
+    app.register_asset_source(
+        "memory",
+        bevy::asset::io::AssetSourceBuilder::default()
+            .with_reader(move || {
+                Box::new(bevy::asset::io::memory::MemoryAssetReader {
+                    root: reader_dir.clone(),
+                })
+            }),
+    );
 
     app.add_plugins(
             DefaultPlugins
@@ -147,6 +164,9 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
                     ..default()
                 }),
         );
+
+    // Insert the glTF memory directory resource (shared with the "memory" asset source reader)
+    app.insert_resource(core::asset_manager::GltfMemoryDir(gltf_memory_dir));
 
     // Picking and other plugins
     app.add_plugins(MeshPickingPlugin)
@@ -327,6 +347,8 @@ impl Plugin for SelectionPlugin {
         app.add_systems(Update, particles::sync_hanabi_effects);
 
         app
+            // glTF scene spawn system (always-active): spawns loaded glTF scenes as children
+            .add_systems(Update, scene_io::apply_gltf_scene_spawn)
             // Animation systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 animation::register_gltf_animations,

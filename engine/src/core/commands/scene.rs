@@ -83,7 +83,7 @@ fn handle_new_scene(_payload: serde_json::Value) -> super::CommandResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ImportGltfPayload {
-    data: String,
+    data_base64: String,
     name: String,
     position: Option<[f32; 3]>,
 }
@@ -94,7 +94,7 @@ fn handle_import_gltf(payload: serde_json::Value) -> super::CommandResult {
         .map_err(|e| format!("Invalid import_gltf payload: {}", e))?;
 
     let request = GltfImportRequest {
-        data_base64: data.data,
+        data_base64: data.data_base64,
         name: data.name.clone(),
         position: data.position.map(|p| Vec3::new(p[0], p[1], p[2])),
     };
