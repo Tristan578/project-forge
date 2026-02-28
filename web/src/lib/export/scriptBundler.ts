@@ -30,6 +30,7 @@ export function bundleScripts(
 
   // Minimal forge API (commands are queued and sent to WASM each frame)
   const pendingCommands = [];
+  const _audioPlaying = {};
 
   const forge = {
     log: function(msg) { console.log('[Script] ' + msg); },
@@ -47,12 +48,12 @@ export function bundleScripts(
       getAxis: function(action) { return window.__forgeInputState?.[action]?.axis_value || 0; },
     },
     audio: {
-      play: function(id) { pendingCommands.push({cmd: 'play_audio', entityId: id}); },
-      stop: function(id) { pendingCommands.push({cmd: 'stop_audio', entityId: id}); },
-      pause: function(id) { pendingCommands.push({cmd: 'pause_audio', entityId: id}); },
+      play: function(id) { pendingCommands.push({cmd: 'play_audio', entityId: id}); _audioPlaying[id] = true; },
+      stop: function(id) { pendingCommands.push({cmd: 'stop_audio', entityId: id}); _audioPlaying[id] = false; },
+      pause: function(id) { pendingCommands.push({cmd: 'pause_audio', entityId: id}); _audioPlaying[id] = false; },
       setVolume: function(id, v) { pendingCommands.push({cmd: 'set_audio', entityId: id, volume: v}); },
       setPitch: function(id, p) { pendingCommands.push({cmd: 'set_audio', entityId: id, pitch: p}); },
-      isPlaying: function(id) { return false; }, // TODO: query from runtime
+      isPlaying: function(id) { return !!_audioPlaying[id]; },
     },
     physics: {
       applyForce: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_force', entityId: id, force: [x,y,z]}); },
