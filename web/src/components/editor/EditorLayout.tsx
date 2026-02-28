@@ -19,6 +19,7 @@ import { DrawerPanel } from './DrawerPanel';
 import { MobileToolbar } from './MobileToolbar';
 import { WelcomeModal } from './WelcomeModal';
 import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel';
+import { FeedbackDialog } from './FeedbackDialog';
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
@@ -184,6 +185,7 @@ export function EditorLayout() {
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // Close drawers when switching away from compact mode (prev-value pattern)
   const [prevMode, setPrevMode] = useState(layout.mode);
@@ -253,7 +255,7 @@ export function EditorLayout() {
             )}
           </div>
           <PlayControls />
-          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} />
+          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} onOpenFeedback={() => setFeedbackOpen(true)} />
         </div>
 
         {/* Canvas fills remaining space */}
@@ -287,6 +289,7 @@ export function EditorLayout() {
         <WelcomeModal />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+        <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       </div>
     );
   }
@@ -308,7 +311,7 @@ export function EditorLayout() {
         <div className="flex items-center gap-3">
           <PanelsMenu />
           <LayoutMenu />
-          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} />
+          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} onOpenFeedback={() => setFeedbackOpen(true)} />
           <TokenBalance />
           {hasClerk && <UserButton afterSignOutUrl="/sign-in" />}
         </div>
@@ -334,6 +337,7 @@ export function EditorLayout() {
       <ShaderEditorPanel />
       <PerformanceProfiler />
       <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+        <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </div>
   );
 }
