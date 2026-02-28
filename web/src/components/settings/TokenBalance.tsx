@@ -5,8 +5,17 @@ import { useUserStore } from '@/stores/userStore';
 import { useUser } from '@clerk/nextjs';
 import { Coins } from 'lucide-react';
 
+// Clerk validates key format — hooks throw without ClerkProvider (CI E2E)
+const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
+const hasClerk = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
+
 /** Compact token balance display for the editor header */
 export function TokenBalance() {
+  if (!hasClerk) return null;
+  return <TokenBalanceInner />;
+}
+
+function TokenBalanceInner() {
   const { isSignedIn } = useUser();
   const { tier, tokenBalance, fetchBalance } = useUserStore();
 

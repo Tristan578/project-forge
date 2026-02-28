@@ -30,6 +30,10 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { UserButton } from '@clerk/nextjs';
 
+// Clerk validates key format — skip rendering Clerk components without a valid key (CI E2E)
+const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
+const hasClerk = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
+
 const MOBILE_DISMISSED_KEY = 'forge-mobile-dismissed';
 
 // ---- Mobile-only components (unchanged) ----
@@ -284,7 +288,7 @@ export function EditorLayout() {
             <HelpCircle size={14} />
           </button>
           <TokenBalance />
-          <UserButton afterSignOutUrl="/sign-in" />
+          {hasClerk && <UserButton afterSignOutUrl="/sign-in" />}
         </div>
       </div>
 
