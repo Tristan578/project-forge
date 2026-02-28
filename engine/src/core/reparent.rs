@@ -66,13 +66,17 @@ fn process_reparent(
 
     // 5. Add to new parent (or keep as root)
     if let Some(new_parent) = new_parent_entity {
-        commands.entity(new_parent).add_child(entity);
-
-        // Note: insert_index handling would require more complex logic
-        // using set_parent_in_place or reordering children
-        // For MVP, new children are added at the end
-        if request.insert_index.is_some() {
-            tracing::warn!("insert_index not yet implemented; child added at end");
+        if let Some(index) = request.insert_index {
+            // Insert at specific position (clamp to child count for graceful fallback)
+            let child_count = query
+                .iter()
+                .find(|(e, _, _, _)| *e == new_parent)
+                .and_then(|(_, _, _, children)| children.map(|c| c.len()))
+                .unwrap_or(0);
+            let clamped = index.min(child_count);
+            commands.entity(new_parent).insert_children(clamped, &[entity]);
+        } else {
+            commands.entity(new_parent).add_child(entity);
         }
     }
 
