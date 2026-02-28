@@ -4,6 +4,7 @@ import { gameComments, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { moderateContent } from '@/lib/moderation/contentFilter';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,7 +92,16 @@ export async function POST(
       );
     }
 
-    // Insert comment
+    // Content moderation check
+    const modResult = moderateContent(sanitized);
+    if (modResult.severity === 'block') {
+      return NextResponse.json(
+        { error: 'Comment contains prohibited content' },
+        { status: 422 }
+      );
+    }
+
+    // Insert comment (auto-flag if filter detects issues)
     const [comment] = await db
       .insert(gameComments)
       .values({
@@ -99,6 +109,7 @@ export async function POST(
         userId: authResult.ctx.user.id,
         content: sanitized,
         parentId: parentId || null,
+        flagged: modResult.severity === 'flag' ? 1 : 0,
       })
       .returning();
 
