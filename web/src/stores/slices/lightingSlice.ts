@@ -17,6 +17,7 @@ export interface LightingSlice {
   setEnvironment: (data: EnvironmentData) => void;
   updateEnvironment: (data: Partial<EnvironmentData>) => void;
   setSkybox: (preset: string) => void;
+  setCustomSkybox: (assetId: string, dataBase64: string) => void;
   removeSkybox: () => void;
   updateSkybox: (changes: { brightness?: number; iblIntensity?: number; rotation?: number }) => void;
 }
@@ -64,6 +65,9 @@ export const createLightingSlice: StateCreator<LightingSlice, [], [], LightingSl
   },
   setSkybox: (preset) => {
     if (dispatchCommand) dispatchCommand('set_skybox', { preset });
+  },
+  setCustomSkybox: (assetId, dataBase64) => {
+    if (dispatchCommand) dispatchCommand('set_custom_skybox', { assetId, dataBase64 });
   },
   removeSkybox: () => {
     if (dispatchCommand) dispatchCommand('remove_skybox', {});

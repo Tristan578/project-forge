@@ -21,6 +21,7 @@ export interface GenerationJob {
   resultUrl?: string;
   error?: string;
   entityId?: string;         // Target entity (for texture/audio attachment)
+  usageId?: string;          // Token usage ID for refund on failure
   metadata?: Record<string, unknown>;  // Type-specific data
 }
 

@@ -82,6 +82,11 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
 
         {/* Body */}
         <div className="space-y-4 p-4">
+          {/* Coming soon notice */}
+          <div className="rounded border border-amber-700/40 bg-amber-900/20 px-3 py-2 text-xs text-amber-300">
+            Music generation is in preview. The Suno API is invite-only and may not be available for all accounts. If generation fails, your tokens will be refunded.
+          </div>
+
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">

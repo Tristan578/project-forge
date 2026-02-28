@@ -146,9 +146,14 @@ export const materialHandlers: Record<string, ToolHandler> = {
     return { success: true };
   },
 
-  set_custom_skybox: async (_args) => {
-    // This command exists in MCP manifest but implementation is TODO
-    return { success: true, result: { message: 'Custom skybox generation will be handled by AI asset generation' } };
+  set_custom_skybox: async (args, { store }) => {
+    const assetId = args.assetId as string;
+    const dataBase64 = args.dataBase64 as string;
+    if (!assetId || !dataBase64) {
+      return { success: false, error: 'assetId and dataBase64 are required' };
+    }
+    store.setCustomSkybox(assetId, dataBase64);
+    return { success: true };
   },
 
   update_post_processing: async (args, { store }) => {

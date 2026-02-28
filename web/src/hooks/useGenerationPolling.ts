@@ -81,6 +81,7 @@ export function useGenerationPolling() {
 
       // Timeout after max polls
       if (pollCountsRef.current[id] > MAX_POLL_COUNT) {
+        await triggerRefund(id);
         updateJob(id, {
           status: 'failed',
           error: 'Generation timed out',
@@ -110,6 +111,7 @@ export function useGenerationPolling() {
           clearInterval(timersRef.current[id]);
           delete timersRef.current[id];
         } else if (data.status === 'failed') {
+          await triggerRefund(id);
           updateJob(id, {
             status: 'failed',
             error: data.error || 'Generation failed',
@@ -149,9 +151,11 @@ export function useGenerationPolling() {
       case 'music':
         return '/api/generate/music/status';
       case 'sprite':
-      case 'sprite_sheet':
-      case 'tileset':
         return '/api/generate/sprite/status';
+      case 'sprite_sheet':
+        return '/api/generate/sprite-sheet/status';
+      case 'tileset':
+        return '/api/generate/tileset-gen/status';
       default:
         throw new Error(`Unknown generation type: ${type}`);
     }
@@ -201,14 +205,14 @@ export function useGenerationPolling() {
 
         updateJob(id, { status: 'completed' });
       } else if (type === 'skybox') {
-        // Download equirectangular image and apply
+        // Download equirectangular image and apply as scene skybox
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
-        const _base64 = await blobToBase64(blob);
+        const base64 = await blobToBase64(blob);
 
-        // TODO: Implement set_custom_skybox command (Phase 14-D Rust work)
-        // For now, just mark as completed
+        useEditorStore.getState().setCustomSkybox(`generated_skybox_${id}`, base64);
+
         updateJob(id, { status: 'completed', resultUrl: data.resultUrl });
       } else if (type === 'music') {
         // Download audio and import
@@ -227,6 +231,20 @@ export function useGenerationPolling() {
         status: 'failed',
         error: err instanceof Error ? err.message : 'Download failed',
       });
+    }
+  }
+
+  async function triggerRefund(id: string) {
+    const job = useGenerationStore.getState().jobs[id];
+    if (!job?.usageId) return;
+    try {
+      await fetch('/api/generate/refund', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ usageId: job.usageId }),
+      });
+    } catch (err) {
+      console.error('Token refund failed:', err);
     }
   }
 

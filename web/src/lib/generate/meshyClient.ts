@@ -27,6 +27,7 @@ export interface TextToTextureParams {
   resolution?: string;
   style?: string;
   tiling?: boolean;
+  generateMaps?: Record<string, boolean>;
 }
 
 export interface TaskStatus {
@@ -138,6 +139,7 @@ export class MeshyClient {
         resolution: params.resolution || '1024',
         style: params.style || 'realistic',
         tiling: params.tiling ?? true,
+        ...(params.generateMaps && { generate_maps: params.generateMaps }),
       }),
       signal: AbortSignal.timeout(30000),
     });

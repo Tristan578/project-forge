@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
   let body: {
     text: string;
     voiceId?: string;
+    voiceStyle?: string;
     stability?: number;
     similarityBoost?: number;
     style?: number;
@@ -25,7 +26,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { text, voiceId, stability, similarityBoost, style } = body;
+  const { text, voiceId, stability, similarityBoost } = body;
+
+  // Map voice style strings to ElevenLabs numeric style values (0.0–1.0)
+  const voiceStyleMap: Record<string, number> = {
+    neutral: 0,
+    friendly: 0.3,
+    calm: 0.2,
+    excited: 1.0,
+    sinister: 0.7,
+  };
+  const style = body.voiceStyle ? (voiceStyleMap[body.voiceStyle] ?? 0) : body.style;
 
   // Validate
   if (!text || text.length < 1 || text.length > 1000) {
