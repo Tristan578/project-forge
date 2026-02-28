@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Modals @engine', () => {
+test.describe('Modals @ui', () => {
   test('settings modal opens and is visible', async ({ page, editor }) => {
     await editor.loadPage();
 

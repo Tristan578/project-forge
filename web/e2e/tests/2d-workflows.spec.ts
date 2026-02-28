@@ -1,6 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('2D Workflows @engine', () => {
+test.describe('2D Workflows @ui', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
