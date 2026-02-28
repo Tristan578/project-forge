@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { gameComments, users } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +64,10 @@ export async function POST(
     const db = getDb();
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
+
+    // Rate limit: 20 comments per minute per user
+    const rl = rateLimit(`comment:${authResult.ctx.user.id}`, 20, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const { id: gameId } = await params;
     const body = await req.json();

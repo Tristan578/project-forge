@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -17,6 +18,10 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
 export async function POST() {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Rate limit: 5 portal requests per minute per user
+  const rl = rateLimit(`billing-portal:${authResult.ctx.user.id}`, 5, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const user = authResult.ctx.user;
 

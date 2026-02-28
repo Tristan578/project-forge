@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server';
 import { getDb } from '@/lib/db/client';
 import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function POST(
   _req: NextRequest,
@@ -16,6 +17,10 @@ export async function POST(
     if (!clerkId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Rate limit: 10 purchase requests per minute per user
+    const rl = rateLimit(`purchase:${clerkId}`, 10, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     // Get user
     const [user] = await db.select().from(users).where(eq(users.clerkId, clerkId)).limit(1);

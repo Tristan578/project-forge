@@ -6,6 +6,7 @@ import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
 import type { ApiKeyScope } from '@/lib/db/schema';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 const VALID_SCOPES: ApiKeyScope[] = ['scene:read', 'scene:write', 'ai:generate', 'project:manage'];
 
@@ -13,6 +14,10 @@ const VALID_SCOPES: ApiKeyScope[] = ['scene:read', 'scene:write', 'ai:generate',
 export async function POST(req: Request) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Rate limit: 5 API key generation requests per minute per user
+  const rl = rateLimit(`apikey-gen:${authResult.ctx.user.id}`, 5, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // MCP keys require Creator+ tier
   const tierCheck = assertTier(authResult.ctx.user, ['creator', 'pro']);

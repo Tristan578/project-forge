@@ -3,6 +3,7 @@ import { auth } from '@clerk/nextjs/server';
 import { getDb } from '@/lib/db/client';
 import { users, assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function POST(
   req: NextRequest,
@@ -16,6 +17,10 @@ export async function POST(
     if (!clerkId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Rate limit: 20 review submissions per minute per user
+    const rl = rateLimit(`review:${clerkId}`, 20, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     let body;
     try {
