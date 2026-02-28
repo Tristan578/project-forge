@@ -81,13 +81,13 @@ test.describe('Modals @ui', () => {
   test('welcome modal appears on first visit', async ({ page }) => {
     // Navigate WITHOUT the fixture's loadPage() to avoid forge-welcomed suppression
     await page.goto('/dev');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
 
     // Wait for React hydration (welcome modal only renders client-side)
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
-      { timeout: 45_000 }
+      { timeout: 30_000 }
     ).catch(() => {});
 
     // Explicitly clear the welcome flag
@@ -97,11 +97,11 @@ test.describe('Modals @ui', () => {
 
     // Reload to trigger first-visit experience
     await page.reload();
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
-      { timeout: 45_000 }
+      { timeout: 30_000 }
     ).catch(() => {});
     await page.waitForTimeout(1000);
 

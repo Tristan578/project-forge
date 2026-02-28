@@ -20,14 +20,15 @@ export class EditorPage {
     await this.page.waitForTimeout(500);
   }
 
-  /** Navigate to /dev without waiting for WASM (for CSS-only tests) */
+  /** Navigate to /dev without waiting for WASM (for @ui tests in CI) */
   async loadPage() {
     // Suppress onboarding overlays and PerformanceProfiler BEFORE page loads
     await this.page.addInitScript(() => {
       localStorage.setItem('forge-welcomed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
 
-      // Inject CSS to hide PerformanceProfiler overlay (fixed bottom-left z-50)
+      // Inject CSS to hide PerformanceProfiler overlay and InitOverlay
+      // so they don't block UI interactions in tests without WASM
       const style = document.createElement('style');
       style.setAttribute('data-e2e', 'suppress-overlays');
       style.textContent = [
@@ -41,27 +42,26 @@ export class EditorPage {
         );
       }
     });
+
     await this.page.goto('/dev');
-    // Wait for React to render — SSR delivers HTML, then client JS hydrates
-    await this.page.waitForLoadState('networkidle');
-    // Wait for React hydration — EditorLayout sets __REACT_HYDRATED after
-    // mounting and attaching event handlers. Falls back to timeout if
-    // hydration doesn't complete (e.g. WASM errors prevent full mount).
-    await this.page.waitForFunction(
+    // Wait for page to be loaded (SSR HTML + client JS)
+    await this.page.waitForLoadState('domcontentloaded');
+    // Wait for React hydration signal — EditorLayout sets this after mounting
+    // and attaching all event handlers (keyboard shortcuts, button clicks)
+    const hydrated = await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
-      { timeout: 45_000 }
-    ).catch(() => {
-      // Hydration may not complete in all environments — fall back to
-      // waiting for visible elements (SSR-rendered) + buffer time
-    });
-    // Wait for sidebar buttons to be present (works even without hydration)
-    await this.page.waitForSelector(
-      'button[title="Settings"], button[title="Add Entity"], [class*="dv-"]',
-      { timeout: 10_000 }
-    ).catch(() => {});
-    // Buffer for post-hydration rendering
-    await this.page.waitForTimeout(1000);
+      { timeout: 30_000 }
+    ).then(() => true).catch(() => false);
+
+    if (!hydrated) {
+      // Fallback: wait for visible elements + extra buffer
+      await this.page.waitForSelector(
+        'button[title="Settings"], button[title="Add Entity"]',
+        { timeout: 15_000 }
+      ).catch(() => {});
+      await this.page.waitForTimeout(2000);
+    }
   }
 
   /** Wait for a minimum entity count in the scene graph */
