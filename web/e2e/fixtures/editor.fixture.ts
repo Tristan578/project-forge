@@ -42,6 +42,8 @@ export class EditorPage {
         // Hide InitOverlay (absolute full-screen z-50 with bg-zinc-950/95)
         // Using attribute selector since Tailwind's / in class names needs escaping
         '[class*="absolute"][class*="inset-0"][class*="z-50"][class*="bg-zinc-950"] { display: none !important; }',
+        // Hide Next.js dev overlay (<nextjs-portal>) which intercepts pointer events in CI
+        'nextjs-portal { display: none !important; pointer-events: none !important; }',
       ].join('\n');
       if (document.head) {
         document.head.appendChild(style);
@@ -61,8 +63,6 @@ export class EditorPage {
       () => (window as any).__REACT_HYDRATED === true,
       { timeout: 30_000 }
     );
-    // Brief buffer for layout/dockview stabilization
-    await this.page.waitForTimeout(500);
   }
 
   /** Wait for a minimum entity count in the scene graph */
@@ -129,7 +129,7 @@ export class EditorPage {
   /** Open settings modal */
   async openSettings() {
     await this.page.getByRole('button', { name: /settings/i }).click();
-    await this.page.waitForTimeout(300);
+    await expect(this.page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
   }
 
   /** Press keyboard shortcut */

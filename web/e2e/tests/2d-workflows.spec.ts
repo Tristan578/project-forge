@@ -12,7 +12,8 @@ test.describe('2D Workflows @ui', () => {
         consoleErrors.push(msg.text());
       }
     });
-    await page.waitForTimeout(1000);
+    // Collect errors over a brief window
+    await page.waitForTimeout(500);
     // Filter out expected WASM/WebGPU errors
     const realErrors = consoleErrors.filter(
       (e) => !e.includes('WebGPU') && !e.includes('wasm') && !e.includes('GPU')
@@ -44,10 +45,10 @@ test.describe('2D Workflows @ui', () => {
   });
 
   test('2D sprite types available in entity menu', async ({ page }) => {
-    await page.getByRole('button', { name: 'Add Entity' }).click();
-    await page.waitForTimeout(300);
+    const addBtn = page.getByRole('button', { name: 'Add Entity' });
+    await addBtn.click();
 
-    // Look for sprite or 2D entity options
+    // Look for sprite or 2D entity options (menu should appear after click)
     const spriteOption = page.getByText(/sprite|2d/i, { exact: false });
     const count = await spriteOption.count();
     // Sprite option may exist in the add entity menu
@@ -62,18 +63,17 @@ test.describe('2D Workflows @ui', () => {
   });
 
   test('settings modal can be opened from sidebar', async ({ page }) => {
-    // Settings button is in the sidebar (title="Settings")
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await expect(settingsBtn).toBeVisible({ timeout: 5000 });
     await settingsBtn.click();
-    await page.waitForTimeout(500);
 
-    // Settings modal renders as a fixed overlay containing "Settings" heading
-    const modal = page.locator('h2').filter({ hasText: /settings/i }).first();
-    await expect(modal).toBeVisible({ timeout: 3000 });
+    // Settings modal renders as a dialog with role="dialog"
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // Close it
     await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
   });
 });
 
