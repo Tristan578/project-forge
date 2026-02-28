@@ -119,6 +119,38 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      - name: Check WASM binary sizes
+        working-directory: engine
+        run: |
+          # Size thresholds in bytes (uncompressed .wasm after wasm-bindgen)
+          # Increase these when intentionally adding features; CI fails at +10%
+          WEBGL2_THRESHOLD=52428800   # 50 MB
+          WEBGPU_THRESHOLD=52428800   # 50 MB
+
+          WEBGL2_SIZE=$(stat -c%s pkg-webgl2/forge_engine_bg.wasm)
+          WEBGPU_SIZE=$(stat -c%s pkg-webgpu/forge_engine_bg.wasm)
+
+          echo "=== WASM Binary Sizes ==="
+          echo "WebGL2: $(numfmt --to=iec-i --suffix=B $WEBGL2_SIZE) ($WEBGL2_SIZE bytes)"
+          echo "WebGPU: $(numfmt --to=iec-i --suffix=B $WEBGPU_SIZE) ($WEBGPU_SIZE bytes)"
+          echo "========================="
+
+          FAILED=0
+
+          WEBGL2_LIMIT=$((WEBGL2_THRESHOLD * 110 / 100))
+          if [ "$WEBGL2_SIZE" -gt "$WEBGL2_LIMIT" ]; then
+            echo "::error::WebGL2 WASM binary too large: $(numfmt --to=iec-i --suffix=B $WEBGL2_SIZE) exceeds threshold $(numfmt --to=iec-i --suffix=B $WEBGL2_THRESHOLD) by more than 10%"
+            FAILED=1
+          fi
+
+          WEBGPU_LIMIT=$((WEBGPU_THRESHOLD * 110 / 100))
+          if [ "$WEBGPU_SIZE" -gt "$WEBGPU_LIMIT" ]; then
+            echo "::error::WebGPU WASM binary too large: $(numfmt --to=iec-i --suffix=B $WEBGPU_SIZE) exceeds threshold $(numfmt --to=iec-i --suffix=B $WEBGPU_THRESHOLD) by more than 10%"
+            FAILED=1
+          fi
+
+          exit $FAILED
+
   build-nextjs:
     name: Next.js Production Build
     runs-on: ubuntu-latest
