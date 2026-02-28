@@ -22,6 +22,11 @@ export class EditorPage {
 
   /** Navigate to /dev without waiting for WASM (for CSS-only tests) */
   async loadPage() {
+    // Suppress onboarding overlays in CI where localStorage starts empty
+    await this.page.addInitScript(() => {
+      localStorage.setItem('forge-welcomed', '1');
+      localStorage.setItem('forge-mobile-dismissed', '1');
+    });
     await this.page.goto('/dev');
     // Wait for React to render (no WASM dependency)
     await this.page.waitForLoadState('networkidle');
@@ -32,6 +37,17 @@ export class EditorPage {
       // Fallback: just wait a bit if dockview selectors aren't found
     });
     await this.page.waitForTimeout(2000);
+    // Disable pointer events on PerformanceProfiler overlay to prevent click interception
+    await this.page.evaluate(() => {
+      document.querySelectorAll('[class*="fixed"]').forEach(el => {
+        if (el instanceof HTMLElement && el.textContent?.includes('Performance')) {
+          el.style.pointerEvents = 'none';
+          el.querySelectorAll('*').forEach(child => {
+            if (child instanceof HTMLElement) child.style.pointerEvents = 'none';
+          });
+        }
+      });
+    });
   }
 
   /** Wait for a minimum entity count in the scene graph */
