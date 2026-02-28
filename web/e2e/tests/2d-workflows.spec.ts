@@ -79,7 +79,7 @@ test.describe('2D Workflows @ui', () => {
 
 test.describe('2D Workflows @engine', () => {
   test.beforeEach(async ({ editor }) => {
-    await editor.loadPage();
+    await editor.load();
   });
 
   test('editor panels are all visible', async ({ page }) => {

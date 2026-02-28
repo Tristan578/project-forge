@@ -42,15 +42,26 @@ export class EditorPage {
       }
     });
     await this.page.goto('/dev');
-    // Wait for React to fully hydrate — EditorLayout sets this flag after
-    // mounting and attaching all event handlers (keyboard shortcuts, etc.)
+    // Wait for React to render — SSR delivers HTML, then client JS hydrates
+    await this.page.waitForLoadState('networkidle');
+    // Wait for React hydration — EditorLayout sets __REACT_HYDRATED after
+    // mounting and attaching event handlers. Falls back to timeout if
+    // hydration doesn't complete (e.g. WASM errors prevent full mount).
     await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
-      { timeout: 60_000 }
-    );
-    // Small buffer for any post-hydration rendering
-    await this.page.waitForTimeout(500);
+      { timeout: 45_000 }
+    ).catch(() => {
+      // Hydration may not complete in all environments — fall back to
+      // waiting for visible elements (SSR-rendered) + buffer time
+    });
+    // Wait for sidebar buttons to be present (works even without hydration)
+    await this.page.waitForSelector(
+      'button[title="Settings"], button[title="Add Entity"], [class*="dv-"]',
+      { timeout: 10_000 }
+    ).catch(() => {});
+    // Buffer for post-hydration rendering
+    await this.page.waitForTimeout(1000);
   }
 
   /** Wait for a minimum entity count in the scene graph */

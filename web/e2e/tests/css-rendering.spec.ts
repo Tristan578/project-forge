@@ -133,7 +133,7 @@ test.describe('CSS & Visual Rendering Tests @ui', () => {
 
 test.describe('CSS Dockview Tests @engine', () => {
   test('panel headers are visible and styled correctly', async ({ page, editor }) => {
-    await editor.loadPage();
+    await editor.load();
 
     await page.waitForTimeout(500);
 

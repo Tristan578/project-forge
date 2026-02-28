@@ -27,7 +27,7 @@ test.describe('Dialogue Editor @ui', () => {
 
 test.describe('Dialogue Editor @engine', () => {
   test.beforeEach(async ({ editor }) => {
-    await editor.loadPage();
+    await editor.load();
   });
 
   test('editor layout includes all expected panel tabs', async ({ page, editor: _editor }) => {
