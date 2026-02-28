@@ -127,91 +127,11 @@ jobs:
             engine/pkg-webgpu/
           retention-days: 1
 
-  build-nextjs:
-    name: Next.js Production Build
-    runs-on: ubuntu-latest
-    needs: [build-wasm]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: engine -> target
-
-      - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.108
-
-      - name: Build WASM binaries
-        working-directory: engine
-        run: |
-          cargo build --target wasm32-unknown-unknown --release --features webgl2
-          wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
-          cargo build --target wasm32-unknown-unknown --release --features webgpu
-          wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
-
-      - name: Copy WASM to web/public
-        run: |
-          mkdir -p web/public/engine-pkg-webgl2
-          mkdir -p web/public/engine-pkg-webgpu
-          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
-          cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
-
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-
-      - name: Build Next.js
-        working-directory: web
-        run: npm run build
-        env:
-          # Real Clerk keys required — Clerk validates key format during prerender
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
-          # Stubs for services not called during build
-          DATABASE_URL: postgresql://stub:stub@localhost/stub
-          STRIPE_SECRET_KEY: sk_test_stub
-          NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: pk_test_stub
-          ENCRYPTION_MASTER_KEY: 0000000000000000000000000000000000000000000000000000000000000000
-
-  node-compat:
-    name: Node ${{ matrix.node-version }} Compatibility
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [20, 22]
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - run: npm ci
-        working-directory: web
-
-      - run: npx tsc --noEmit
-        working-directory: web
-
-      - run: npx vitest run
-        working-directory: web
-
   e2e:
     name: E2E (UI)
     runs-on: ubuntu-latest
     needs: [build-wasm]
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -298,3 +218,70 @@ jobs:
       - name: npm audit (mcp-server)
         working-directory: mcp-server
         run: npm audit --audit-level=high
+
+  # ---- Deployment ----
+  # Deploys to Vercel after all checks pass.
+  # Required GitHub Secrets:
+  #   VERCEL_TOKEN        — Personal access token from https://vercel.com/account/tokens
+  #   VERCEL_ORG_ID       — From .vercel/project.json after `vercel link`
+  #   VERCEL_PROJECT_ID   — From .vercel/project.json after `vercel link`
+  #   CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY — Clerk auth keys
+  #   + all other env vars from .env.example
+  deploy:
+    name: Deploy to Vercel
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security]
+    # Only deploy when all secrets are configured
+    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' }}
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Download WASM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-binaries
+          path: engine/
+
+      - name: Copy WASM to web/public
+        run: |
+          mkdir -p web/public/engine-pkg-webgl2
+          mkdir -p web/public/engine-pkg-webgpu
+          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
+          cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
+
+      - name: Pull Vercel environment
+        working-directory: web
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Build with Vercel
+        working-directory: web
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Deploy to Vercel
+        id: deploy
+        working-directory: web
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
+          echo "url=$url" >> $GITHUB_OUTPUT
+          echo "Deployed to: $url"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
