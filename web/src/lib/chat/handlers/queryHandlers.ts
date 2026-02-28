@@ -258,13 +258,23 @@ export const queryHandlers: Record<string, ToolHandler> = {
   get_sprite_generation_status: async (args, _ctx) => {
     const jobId = args.jobId as string;
     if (!jobId) return { success: false, error: 'Missing jobId' };
-    // TODO: Query generation store for job status
+
+    const { useGenerationStore } = await import('@/stores/generationStore');
+    const jobs = useGenerationStore.getState().jobs;
+    const job = Object.values(jobs).find((j) => j.jobId === jobId);
+
+    if (!job) {
+      return { success: false, error: `No generation job found with ID: ${jobId}` };
+    }
+
     return {
       success: true,
       result: {
-        jobId,
-        status: 'pending',
-        progress: 0,
+        jobId: job.jobId,
+        status: job.status,
+        progress: job.progress,
+        resultUrl: job.resultUrl,
+        error: job.error,
       },
     };
   },

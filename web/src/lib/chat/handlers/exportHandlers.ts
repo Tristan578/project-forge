@@ -7,7 +7,6 @@ import type { ToolHandler } from './types';
 import { useEditorStore } from '@/stores/editorStore';
 import { exportGame, downloadBlob } from '@/lib/export/exportEngine';
 import { getPreset, EXPORT_PRESETS } from '@/lib/export/presets';
-import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 
 export const exportHandlers: Record<string, ToolHandler> = {
   export_project_zip: async (params) => {
@@ -74,41 +73,10 @@ export const exportHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  set_loading_screen: async (params) => {
-    const {
-      backgroundColor,
-      progressBarColor,
-      progressStyle,
-      title,
-      subtitle,
-    } = params as {
-      backgroundColor?: string;
-      progressBarColor?: string;
-      progressStyle?: LoadingScreenConfig['progressStyle'];
-      title?: string;
-      subtitle?: string;
-    };
-
-    // Store loading screen config in editor store (we'll add this field)
-    // const _store = useEditorStore.getState();
-
-    // For now, just validate and return success
-    // In a full implementation, we'd persist this config
-    const config: LoadingScreenConfig = {
-      backgroundColor: backgroundColor || '#1a1a1a',
-      progressBarColor: progressBarColor || '#6366f1',
-      progressStyle: progressStyle || 'bar',
-      title,
-      subtitle,
-    };
-
-    // TODO: Add loadingScreenConfig to editorStore
-    console.log('[Export] Loading screen configured:', config);
-
+  set_loading_screen: async (_params) => {
     return {
-      success: true,
-      message: 'Loading screen customized',
-      data: config,
+      success: false,
+      error: 'Loading screen customization is not yet implemented. The export system uses a default loading screen. Custom loading screens require editor store integration planned for a future release.',
     };
   },
 
@@ -123,17 +91,9 @@ export const exportHandlers: Record<string, ToolHandler> = {
       };
     }
 
-    // Store selected preset (we'd add this to editorStore in full implementation)
-    console.log('[Export] Preset selected:', preset.name);
-
     return {
-      success: true,
-      message: `Export preset set to "${preset.name}"`,
-      data: {
-        preset: presetName,
-        description: preset.description,
-        format: preset.format,
-      },
+      success: false,
+      error: `Export preset "${preset.name}" recognized but not yet persisted. Export preset storage requires editor store integration planned for a future release.`,
     };
   },
 };
