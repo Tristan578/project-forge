@@ -857,6 +857,30 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "set_custom_skybox",
+      "description": "Apply a custom skybox from a base64-encoded image asset",
+      "category": "environment",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "description": "Asset identifier for the skybox image"
+          },
+          "dataBase64": {
+            "type": "string",
+            "description": "Base64-encoded image data"
+          }
+        },
+        "required": [
+          "assetId",
+          "dataBase64"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "update_post_processing",
       "description": "Update post-processing visual effects (bloom, chromatic aberration, color grading, sharpening, SSAO, depth of field, motion blur). Send only the effects you want to change.",
       "category": "rendering",
@@ -1256,6 +1280,48 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "set_camera_2d",
+      "description": "Configure 2D camera settings (zoom, pixel-perfect rendering, bounds)",
+      "category": "camera",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "zoom": {
+            "type": "number",
+            "description": "Camera zoom level (1.0 = default)"
+          },
+          "pixelPerfect": {
+            "type": "boolean",
+            "description": "Enable pixel-perfect rendering"
+          },
+          "bounds": {
+            "type": "object",
+            "properties": {
+              "min": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "max": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "description": "Camera bounds [min, max] or null for unbounded"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
     },
     {
       "name": "undo",
@@ -3854,6 +3920,107 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "mesh_inset",
+      "description": "Inset selected mesh faces inward by a specified amount (edit mode)",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "indices": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Face indices to inset (all selected faces if omitted)"
+          },
+          "amount": {
+            "type": "number",
+            "description": "Inset distance (default: 0.1)"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_bevel",
+      "description": "Bevel selected mesh edges with specified width and segment count (edit mode)",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "indices": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Edge indices to bevel (all selected edges if omitted)"
+          },
+          "width": {
+            "type": "number",
+            "description": "Bevel width (default: 0.1)"
+          },
+          "segments": {
+            "type": "number",
+            "description": "Number of bevel segments (default: 1)"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_loop_cut",
+      "description": "Add loop cuts (subdivisions) along a mesh edge (edit mode)",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "edgeIndex": {
+            "type": "number",
+            "description": "Edge index to cut along"
+          },
+          "cuts": {
+            "type": "number",
+            "description": "Number of cuts (default: 1)"
+          }
+        },
+        "required": [
+          "edgeIndex"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "mesh_delete",
+      "description": "Delete selected mesh elements by mode: face, edge, or vertex (edit mode)",
+      "category": "mesh",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "indices": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "description": "Element indices to delete (all selected if omitted)"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "face",
+              "edge",
+              "vertex"
+            ],
+            "description": "Deletion mode (default: face)"
+          }
+        }
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "spawn_terrain",
       "description": "Spawn a procedural terrain entity with noise-based heightmap",
       "category": "terrain",
@@ -4155,6 +4322,17 @@
       },
       "tokenCost": 1,
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_custom_materials",
+      "description": "List all custom materials saved in the material library",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     },
     {
       "name": "set_quality_preset",
@@ -5551,6 +5729,39 @@
       },
       "tokenCost": 0,
       "requiredScope": "generation:read"
+    },
+    {
+      "name": "get_generation_status",
+      "description": "Query the status of any AI generation job by ID",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "description": "Generation job ID to query"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "model",
+              "texture",
+              "skybox",
+              "music",
+              "sprite",
+              "voice",
+              "sprite_sheet",
+              "tileset"
+            ],
+            "description": "Job type (auto-detected if omitted)"
+          }
+        },
+        "required": [
+          "jobId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     },
     {
       "name": "create_ui_screen",
@@ -8102,6 +8313,42 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "set_sorting_layers",
+      "description": "Configure 2D sprite sorting layers and their render order",
+      "category": "sprite",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "layers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Layer name"
+                },
+                "order": {
+                  "type": "number",
+                  "description": "Render order (higher = drawn later)"
+                }
+              },
+              "required": [
+                "name",
+                "order"
+              ]
+            },
+            "description": "Array of sorting layer definitions"
+          }
+        },
+        "required": [
+          "layers"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_project_type",
       "description": "Switch between 2D and 3D project modes",
       "category": "editor",
@@ -8120,6 +8367,30 @@
         "required": [
           "project_type"
         ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "set_grid_2d",
+      "description": "Configure 2D grid settings for snap-to-grid placement",
+      "category": "editor",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable/disable grid display"
+          },
+          "size": {
+            "type": "number",
+            "description": "Grid cell size in world units"
+          },
+          "snapToGrid": {
+            "type": "boolean",
+            "description": "Enable snap-to-grid for entity placement"
+          }
+        }
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
