@@ -26,11 +26,14 @@ import { DialogueOverlay } from '../game/DialogueOverlay';
 import { TutorialOverlay } from './TutorialOverlay';
 import { OnboardingChecklist } from './OnboardingChecklist';
 import { PerformanceProfiler } from './PerformanceProfiler';
+import { GenerationStatus } from './GenerationStatus';
 import { HelpMenu } from './HelpMenu';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { useGenerationStore } from '@/stores/generationStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
+import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 import { UserButton } from '@clerk/nextjs';
 
 // Clerk validates key format — skip rendering Clerk components without a valid key (CI E2E)
@@ -179,7 +182,16 @@ export function EditorLayout() {
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
   const toggleChatOverlay = useWorkspaceStore((s) => s.toggleChatOverlay);
   const sceneName = useEditorStore((s) => s.sceneName);
+  const hydrateFromServer = useGenerationStore((s) => s.hydrateFromServer);
   const layout = useResponsiveLayout();
+
+  // Start generation job polling
+  useGenerationPolling();
+
+  // Hydrate generation jobs from server on mount
+  useEffect(() => {
+    hydrateFromServer();
+  }, [hydrateFromServer]);
 
   // Drawer state for compact mode
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
@@ -307,7 +319,10 @@ export function EditorLayout() {
           </span>
           <SceneToolbar />
         </div>
-        <PlayControls />
+        <div className="flex items-center gap-2">
+          <PlayControls />
+          <GenerationStatus />
+        </div>
         <div className="flex items-center gap-3">
           <PanelsMenu />
           <LayoutMenu />
