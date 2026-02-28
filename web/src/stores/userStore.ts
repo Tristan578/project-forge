@@ -15,6 +15,9 @@ export interface TokenBalance {
 interface UserState {
   // User data (populated after auth)
   tier: Tier;
+  displayName: string | null;
+  email: string | null;
+  createdAt: string | null;
   tokenBalance: TokenBalance | null;
   isLoading: boolean;
   error: string | null;
@@ -28,6 +31,8 @@ interface UserState {
   fetchBalance: () => Promise<void>;
   setTier: (tier: Tier) => void;
   fetchBillingStatus: () => Promise<void>;
+  fetchProfile: () => Promise<void>;
+  updateDisplayName: (name: string) => Promise<boolean>;
 
   // Derived checks
   canUseAI: () => boolean;
@@ -38,6 +43,9 @@ interface UserState {
 
 export const useUserStore = create<UserState>((set, get) => ({
   tier: 'starter',
+  displayName: null,
+  email: null,
+  createdAt: null,
   tokenBalance: null,
   isLoading: false,
   error: null,
@@ -81,6 +89,43 @@ export const useUserStore = create<UserState>((set, get) => ({
   canBuyTokens: () => {
     const { tier } = get();
     return tier !== 'starter';
+  },
+
+  fetchProfile: async () => {
+    try {
+      const res = await fetch('/api/user/profile');
+      if (!res.ok) return;
+      const data = await res.json();
+      set({
+        displayName: data.displayName,
+        email: data.email,
+        tier: data.tier,
+        createdAt: data.createdAt,
+      });
+    } catch {
+      // Silently fail — user may not be logged in
+    }
+  },
+
+  updateDisplayName: async (name: string) => {
+    try {
+      const res = await fetch('/api/user/profile', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName: name }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        set({ error: err.error ?? 'Failed to update display name' });
+        return false;
+      }
+      const data = await res.json();
+      set({ displayName: data.displayName, error: null });
+      return true;
+    } catch {
+      set({ error: 'Failed to update display name' });
+      return false;
+    }
   },
 
   fetchBillingStatus: async () => {
