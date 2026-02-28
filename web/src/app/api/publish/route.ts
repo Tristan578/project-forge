@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { getDb } from '@/lib/db/client';
-import { publishedGames, users, projects } from '@/lib/db/schema';
+import { publishedGames, users, projects, gameTags } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const body = await request.json();
-  const { projectId, title, slug, description } = body;
+  const { projectId, title, slug, description, tags } = body;
 
   if (!projectId || !title || !slug) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -56,8 +56,16 @@ export async function POST(request: NextRequest) {
 
   const gameUrl = `/play/${clerkId}/${slug}`;
 
+  // Validate tags
+  const validTags: string[] = Array.isArray(tags)
+    ? tags.filter((t: unknown) => typeof t === 'string' && t.trim().length > 0)
+        .map((t: string) => t.trim().toLowerCase().slice(0, 30))
+        .slice(0, 5)
+    : [];
+
   if (existingSlug.length > 0) {
     // Update existing publication (republish)
+    const gameDbId = existingSlug[0].id;
     const newVersion = existingSlug[0].version + 1;
     await db.update(publishedGames)
       .set({
@@ -68,9 +76,17 @@ export async function POST(request: NextRequest) {
         cdnUrl: gameUrl,
         updatedAt: new Date(),
       })
-      .where(eq(publishedGames.id, existingSlug[0].id));
+      .where(eq(publishedGames.id, gameDbId));
 
-    const [updated] = await db.select().from(publishedGames).where(eq(publishedGames.id, existingSlug[0].id));
+    // Replace tags
+    await db.delete(gameTags).where(eq(gameTags.gameId, gameDbId));
+    if (validTags.length > 0) {
+      await db.insert(gameTags).values(
+        validTags.map((tag) => ({ gameId: gameDbId, tag }))
+      );
+    }
+
+    const [updated] = await db.select().from(publishedGames).where(eq(publishedGames.id, gameDbId));
     return NextResponse.json({ publication: { ...updated, url: gameUrl } });
   }
 
@@ -86,6 +102,13 @@ export async function POST(request: NextRequest) {
       cdnUrl: gameUrl,
     })
     .returning();
+
+  // Insert tags
+  if (validTags.length > 0) {
+    await db.insert(gameTags).values(
+      validTags.map((tag) => ({ gameId: publication.id, tag }))
+    );
+  }
 
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });
 }

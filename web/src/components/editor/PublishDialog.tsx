@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Globe, Loader2, Check, AlertCircle } from 'lucide-react';
+import { X, Globe, Loader2, Check, AlertCircle, Copy, Tag } from 'lucide-react';
 import { usePublishStore } from '@/stores/publishStore';
 import { useEditorStore } from '@/stores/editorStore';
 
@@ -18,8 +18,11 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState('');
   const [slugAvailable, setSlugAvailable] = useState<boolean | null>(null);
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const isPublishing = usePublishStore((s) => s.isPublishing);
   const publishError = usePublishStore((s) => s.publishError);
@@ -32,7 +35,10 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
     if (isOpen && sceneName) {
       setTitle(sceneName);
       setSlug(sceneName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'my-game');
+      setTags([]);
+      setTagInput('');
       setPublishedUrl(null);
+      setCopied(false);
     }
   }
 
@@ -46,13 +52,35 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
     }
   }, [checkSlug]);
 
+  const handleAddTag = useCallback(() => {
+    const cleaned = tagInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+    if (cleaned && tags.length < 5 && !tags.includes(cleaned)) {
+      setTags((prev) => [...prev, cleaned]);
+    }
+    setTagInput('');
+  }, [tagInput, tags]);
+
+  const handleRemoveTag = useCallback((tag: string) => {
+    setTags((prev) => prev.filter((t) => t !== tag));
+  }, []);
+
+  const handleCopyUrl = useCallback(async (url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available
+    }
+  }, []);
+
   const handlePublish = useCallback(async () => {
     if (!projectId || !title || !slug) return;
-    const result = await publishGame(projectId, title, slug, description);
+    const result = await publishGame(projectId, title, slug, description, tags);
     if (result) {
       setPublishedUrl(result.url);
     }
-  }, [projectId, title, slug, description, publishGame]);
+  }, [projectId, title, slug, description, tags, publishGame]);
 
   if (!isOpen) return null;
 
@@ -78,7 +106,16 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
             </div>
             <div className="rounded bg-zinc-800 p-3">
               <p className="mb-1 text-xs text-zinc-500">Share this URL:</p>
-              <code className="text-sm text-blue-400">{window.location.origin}{publishedUrl}</code>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 text-sm text-blue-400 break-all">{window.location.origin}{publishedUrl}</code>
+                <button
+                  onClick={() => handleCopyUrl(`${window.location.origin}${publishedUrl}`)}
+                  className="shrink-0 rounded p-1.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                  title="Copy URL"
+                >
+                  {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                </button>
+              </div>
             </div>
             <button onClick={onClose}
               className="w-full rounded bg-zinc-700 py-2 text-sm text-zinc-300 hover:bg-zinc-600">
@@ -114,6 +151,44 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
               <textarea value={description} onChange={(e) => setDescription(e.target.value)}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-blue-500 focus:outline-none"
                 rows={2} placeholder="A brief description of your game" />
+            </div>
+
+            <div>
+              <label className="mb-1 flex items-center gap-1 text-xs text-zinc-400">
+                <Tag size={12} />
+                Tags (up to 5)
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddTag(); } }}
+                  className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 focus:border-blue-500 focus:outline-none"
+                  placeholder="e.g. platformer, puzzle"
+                  disabled={tags.length >= 5}
+                />
+                <button
+                  type="button"
+                  onClick={handleAddTag}
+                  disabled={!tagInput.trim() || tags.length >= 5}
+                  className="rounded bg-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-600 disabled:opacity-40"
+                >
+                  Add
+                </button>
+              </div>
+              {tags.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {tags.map((tag) => (
+                    <span key={tag} className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
+                      {tag}
+                      <button onClick={() => handleRemoveTag(tag)} className="text-zinc-500 hover:text-zinc-300">
+                        <X size={10} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             {publishError && (
