@@ -7,6 +7,7 @@ import type { ToolHandler, ExecutionResult } from './types';
 import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
+import { inferSfxCategory, getSpatialDefaults } from '@/lib/generate/postProcess';
 
 /** Generate a unique ID for client-side job tracking. */
 function makeJobId(): string {
@@ -237,15 +238,16 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const assetName = `sfx-${(args.prompt as string).slice(0, 20)}`;
     ctx.store.importAudio(data.audioBase64 as string, assetName);
     if (args.entityId) {
+      const spatial = getSpatialDefaults(inferSfxCategory(args.prompt as string));
       ctx.store.setAudio(args.entityId as string, {
         assetId: assetName,
-        volume: 1.0,
+        volume: spatial.volume,
         pitch: 1.0,
-        loopAudio: false,
-        spatial: true,
-        maxDistance: 30,
-        refDistance: 1,
-        rolloffFactor: 1,
+        loopAudio: spatial.loopAudio,
+        spatial: spatial.spatial,
+        maxDistance: spatial.maxDistance,
+        refDistance: spatial.refDistance,
+        rolloffFactor: spatial.rolloffFactor,
         autoplay: false,
         bus: 'sfx',
       });
@@ -270,15 +272,16 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const assetName = `voice-${(args.text as string).slice(0, 20)}`;
     ctx.store.importAudio(data.audioBase64 as string, assetName);
     if (args.entityId) {
+      const spatial = getSpatialDefaults('voice');
       ctx.store.setAudio(args.entityId as string, {
         assetId: assetName,
-        volume: 1.0,
+        volume: spatial.volume,
         pitch: 1.0,
-        loopAudio: false,
-        spatial: true,
-        maxDistance: 30,
-        refDistance: 1,
-        rolloffFactor: 1,
+        loopAudio: spatial.loopAudio,
+        spatial: spatial.spatial,
+        maxDistance: spatial.maxDistance,
+        refDistance: spatial.refDistance,
+        rolloffFactor: spatial.rolloffFactor,
         autoplay: false,
         bus: 'voice',
       });

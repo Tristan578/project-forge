@@ -19,6 +19,7 @@
 import { useEffect, useRef } from 'react';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_COUNT = 100; // 5 minutes
@@ -166,6 +167,17 @@ export function useGenerationPolling() {
     if (!job) return;
 
     try {
+      // Run post-processing pipeline
+      const ppConfig = type === 'sfx' || type === 'voice'
+        ? { sfxCategory: inferSfxCategory(job.prompt) }
+        : undefined;
+      const ppResult = postProcess(type as Parameters<typeof postProcess>[0], job.prompt, ppConfig);
+
+      // Log warnings
+      for (const warning of ppResult.warnings) {
+        console.warn(`[PostProcess] ${type}:`, warning);
+      }
+
       if (type === 'model') {
         // Download GLB and import
         if (!data.resultUrl) throw new Error('No result URL');
@@ -173,9 +185,14 @@ export function useGenerationPolling() {
         const blob = await downloadBinary(data.resultUrl);
         const base64 = await blobToBase64(blob);
 
-        useEditorStore.getState().importGltf(base64, `Generated_${job.prompt.slice(0, 20)}`);
+        const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
+        useEditorStore.getState().importGltf(base64, assetName);
 
-        updateJob(id, { status: 'completed', resultUrl: data.resultUrl });
+        updateJob(id, {
+          status: 'completed',
+          resultUrl: data.resultUrl,
+          metadata: { ...job.metadata, ...ppResult.metadata },
+        });
       } else if (type === 'texture') {
         // Download PBR maps and apply to entity
         if (!data.maps) throw new Error('No texture maps');
@@ -203,7 +220,10 @@ export function useGenerationPolling() {
           }
         }
 
-        updateJob(id, { status: 'completed' });
+        updateJob(id, {
+          status: 'completed',
+          metadata: { ...job.metadata, ...ppResult.metadata },
+        });
       } else if (type === 'skybox') {
         // Download equirectangular image and apply as scene skybox
         if (!data.resultUrl) throw new Error('No result URL');
@@ -213,7 +233,11 @@ export function useGenerationPolling() {
 
         useEditorStore.getState().setCustomSkybox(`generated_skybox_${id}`, base64);
 
-        updateJob(id, { status: 'completed', resultUrl: data.resultUrl });
+        updateJob(id, {
+          status: 'completed',
+          resultUrl: data.resultUrl,
+          metadata: { ...job.metadata, ...ppResult.metadata },
+        });
       } else if (type === 'music') {
         // Download audio and import
         if (!data.resultUrl) throw new Error('No result URL');
@@ -223,7 +247,11 @@ export function useGenerationPolling() {
 
         useEditorStore.getState().importAudio(base64, `Music_${job.prompt.slice(0, 20)}`);
 
-        updateJob(id, { status: 'completed', resultUrl: data.resultUrl });
+        updateJob(id, {
+          status: 'completed',
+          resultUrl: data.resultUrl,
+          metadata: { ...job.metadata, ...ppResult.metadata },
+        });
       }
     } catch (err) {
       console.error('Completion error:', err);
