@@ -7,15 +7,43 @@
 
 'use client';
 
-import { useState, useCallback, useRef, useMemo, memo, type MouseEvent } from 'react';
+import { useState, useCallback, useRef, useMemo, memo, type MouseEvent, type KeyboardEvent } from 'react';
 import { Layers } from 'lucide-react';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore, type SceneGraph } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { SceneNode } from './SceneNode';
 import { ContextMenu } from './ContextMenu';
 import { HierarchySearch } from './HierarchySearch';
 import { computeInvalidTargets, type DropTarget, type DropZone } from '@/lib/dndUtils';
 import { filterHierarchy } from '@/lib/hierarchyFilter';
+
+/**
+ * Build a flat, depth-first list of visible entity IDs for keyboard navigation.
+ * Respects expanded state and filter visibility.
+ */
+export function flattenVisibleNodes(
+  rootIds: string[],
+  graph: SceneGraph,
+  expandedIds: Set<string>,
+  visibleIds?: Set<string>,
+): string[] {
+  const result: string[] = [];
+
+  function walk(ids: string[]) {
+    for (const id of ids) {
+      if (visibleIds && !visibleIds.has(id)) continue;
+      const node = graph.nodes[id];
+      if (!node) continue;
+      result.push(id);
+      if (node.children.length > 0 && expandedIds.has(id)) {
+        walk(node.children);
+      }
+    }
+  }
+
+  walk(rootIds);
+  return result;
+}
 
 export const SceneHierarchy = memo(function SceneHierarchy() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -38,6 +66,125 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   const hasEntities = sceneGraph.rootIds.length > 0;
   const isFiltering = hierarchyFilter.trim().length > 0;
 
+  // Keyboard navigation state
+  const [focusedEntityId, setFocusedEntityId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  // Track expanded state — SceneNode defaults to expanded, so we start with all expanded
+  // We build from rootIds and assume all are expanded initially
+  const allNodeIds = useMemo(() => new Set(Object.keys(sceneGraph.nodes)), [sceneGraph]);
+  const effectiveExpandedIds = useMemo(() => {
+    // Start with all nodes expanded, then remove any explicitly collapsed
+    const expanded = new Set(allNodeIds);
+    for (const id of allNodeIds) {
+      if (expandedIds.has(id)) {
+        // Explicitly tracked — could be collapsed (we track collapse, not expand)
+      }
+    }
+    // expandedIds stores IDs that are COLLAPSED (toggled from default expanded)
+    for (const id of expandedIds) {
+      expanded.delete(id);
+    }
+    return expanded;
+  }, [allNodeIds, expandedIds]);
+
+  const flatNodeIds = useMemo(() => {
+    return flattenVisibleNodes(
+      isFiltering ? filterResult.filteredRootIds : sceneGraph.rootIds,
+      sceneGraph,
+      effectiveExpandedIds,
+      isFiltering ? filterResult.visibleIds : undefined,
+    );
+  }, [sceneGraph, effectiveExpandedIds, isFiltering, filterResult]);
+
+  // Rename editing state (declared before handleKeyDown so F2 can reference it)
+  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
+
+  const toggleExpanded = useCallback((entityId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(entityId)) {
+        next.delete(entityId);
+      } else {
+        next.add(entityId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (flatNodeIds.length === 0) return;
+
+    const currentIndex = focusedEntityId ? flatNodeIds.indexOf(focusedEntityId) : -1;
+
+    switch (e.key) {
+      case 'ArrowDown': {
+        e.preventDefault();
+        const nextIndex = currentIndex < flatNodeIds.length - 1 ? currentIndex + 1 : 0;
+        setFocusedEntityId(flatNodeIds[nextIndex]);
+        break;
+      }
+      case 'ArrowUp': {
+        e.preventDefault();
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : flatNodeIds.length - 1;
+        setFocusedEntityId(flatNodeIds[prevIndex]);
+        break;
+      }
+      case 'ArrowRight': {
+        e.preventDefault();
+        if (focusedEntityId) {
+          const node = sceneGraph.nodes[focusedEntityId];
+          if (node?.children.length) {
+            // If collapsed, expand. If already expanded, move to first child
+            if (!effectiveExpandedIds.has(focusedEntityId)) {
+              toggleExpanded(focusedEntityId);
+            } else if (node.children.length > 0) {
+              setFocusedEntityId(node.children[0]);
+            }
+          }
+        }
+        break;
+      }
+      case 'ArrowLeft': {
+        e.preventDefault();
+        if (focusedEntityId) {
+          const node = sceneGraph.nodes[focusedEntityId];
+          if (node?.children.length && effectiveExpandedIds.has(focusedEntityId)) {
+            // Collapse if expanded
+            toggleExpanded(focusedEntityId);
+          } else if (node?.parentId) {
+            // Move to parent
+            setFocusedEntityId(node.parentId);
+          }
+        }
+        break;
+      }
+      case 'Enter': {
+        e.preventDefault();
+        if (focusedEntityId) {
+          selectEntity(focusedEntityId, e.ctrlKey || e.metaKey ? 'toggle' : 'replace');
+        }
+        break;
+      }
+      case 'Delete': {
+        e.preventDefault();
+        if (focusedEntityId && selectedIds.has(focusedEntityId)) {
+          deleteSelectedEntities();
+        }
+        break;
+      }
+      case 'F2': {
+        e.preventDefault();
+        if (focusedEntityId) {
+          setEditingEntityId(focusedEntityId);
+        }
+        break;
+      }
+      default:
+        return; // Don't prevent default for unhandled keys
+    }
+  }, [flatNodeIds, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId]);
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     isOpen: boolean;
@@ -50,9 +197,6 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
     entityName: null,
     position: { x: 0, y: 0 },
   });
-
-  // Rename editing state
-  const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
 
   // Drag state
   const [dragState, setDragState] = useState<{
@@ -242,9 +386,13 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
 
       {/* Tree view */}
       <div
-        className="flex-1 overflow-y-auto py-1"
+        className="flex-1 overflow-y-auto py-1 outline-none"
+        tabIndex={0}
+        role="tree"
+        aria-label="Scene hierarchy"
         onClick={handleBackgroundClick}
         onContextMenu={handleBackgroundContextMenu}
+        onKeyDown={handleKeyDown}
         onDragOver={handleRootDragOver}
         onDrop={handleRootDrop}
       >
@@ -276,6 +424,9 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
                 filterTerm={isFiltering ? hierarchyFilter : undefined}
                 matchingIds={isFiltering ? filterResult.matchingIds : undefined}
                 visibleIds={isFiltering ? filterResult.visibleIds : undefined}
+                focusedEntityId={focusedEntityId}
+                onToggleExpand={toggleExpanded}
+                expandedIds={effectiveExpandedIds}
               />
             );
           })

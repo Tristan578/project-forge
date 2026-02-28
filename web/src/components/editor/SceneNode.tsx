@@ -36,6 +36,10 @@ interface SceneNodeProps {
   filterTerm?: string;
   matchingIds?: Set<string>;
   visibleIds?: Set<string>;
+  // Keyboard navigation props
+  focusedEntityId?: string | null;
+  onToggleExpand?: (entityId: string) => void;
+  expandedIds?: Set<string>;
 }
 
 // Icon mapping based on component types or entity names
@@ -82,8 +86,13 @@ export function SceneNode({
   filterTerm,
   matchingIds,
   visibleIds,
+  focusedEntityId,
+  onToggleExpand,
+  expandedIds,
 }: SceneNodeProps) {
-  const [isExpanded, setIsExpanded] = useState(true);
+  // Use external expanded state if provided, otherwise local state
+  const [localExpanded, setLocalExpanded] = useState(true);
+  const isExpanded = expandedIds ? expandedIds.has(node.entityId) : localExpanded;
   const inputRef = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   // Use a lazy initializer to avoid the linter warning
@@ -102,6 +111,14 @@ export function SceneNode({
   const hasChildren = node.children.length > 0;
 
   const iconType = getEntityIconName(node);
+
+  // Keyboard focus state — scroll into view when focused via keyboard
+  const isFocused = focusedEntityId === node.entityId;
+  useEffect(() => {
+    if (isFocused && rowRef.current) {
+      rowRef.current.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isFocused]);
 
   // Drag state
   const isInvalidTarget = invalidTargetIds?.has(node.entityId) ?? false;
@@ -158,9 +175,13 @@ export function SceneNode({
   const handleExpandClick = useCallback(
     (e: MouseEvent) => {
       e.stopPropagation();
-      setIsExpanded((prev) => !prev);
+      if (onToggleExpand) {
+        onToggleExpand(node.entityId);
+      } else {
+        setLocalExpanded((prev) => !prev);
+      }
     },
-    []
+    [node.entityId, onToggleExpand]
   );
 
   const handleContextMenuClick = useCallback(
@@ -248,13 +269,14 @@ export function SceneNode({
 
   // Get selection styling
   const getSelectionClasses = () => {
+    const focus = isFocused ? ' ring-1 ring-blue-400/60 ring-inset' : '';
     if (isPrimary) {
-      return 'bg-blue-600/30 border-l-2 border-blue-500';
+      return 'bg-blue-600/30 border-l-2 border-blue-500' + focus;
     }
     if (isSelected) {
-      return 'bg-blue-600/15 border-l-2 border-blue-400/50';
+      return 'bg-blue-600/15 border-l-2 border-blue-400/50' + focus;
     }
-    return 'hover:bg-white/5 border-l-2 border-transparent';
+    return 'hover:bg-white/5 border-l-2 border-transparent' + focus;
   };
 
   // Get visibility styling
@@ -393,6 +415,9 @@ export function SceneNode({
                   filterTerm={filterTerm}
                   matchingIds={matchingIds}
                   visibleIds={visibleIds}
+                  focusedEntityId={focusedEntityId}
+                  onToggleExpand={onToggleExpand}
+                  expandedIds={expandedIds}
                 />
               );
             })}
