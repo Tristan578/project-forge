@@ -62,13 +62,13 @@ describe('ExportDialog utilities', () => {
     });
 
     it('should stringify non-Error objects', () => {
-      const err = 'Network timeout';
+      const err: unknown = 'Network timeout';
       const message = err instanceof Error ? err.message : String(err);
       expect(message).toBe('Network timeout');
     });
 
     it('should handle null/undefined errors', () => {
-      const err = null;
+      const err: unknown = null;
       const message = err instanceof Error ? err.message : String(err);
       expect(message).toBe('null');
     });
