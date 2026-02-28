@@ -87,16 +87,27 @@ pub fn generate_extrude_mesh(shape: &ExtrudeShape, length: f32, _segments: u32) 
         uvs.push([u, 1.0]);
     }
 
-    // Compute proper normals for side faces (perpendicular to extrusion direction)
+    // Compute proper outward normals for side faces.
+    // Average the normals of the two adjacent edges at each vertex for smooth shading.
     for i in 0..cs_len {
+        let prev_i = (i + cs_len - 1) % cs_len;
         let next_i = (i + 1) % cs_len;
-        let dx = cross_section[next_i][0] - cross_section[i][0];
-        let dz = cross_section[next_i][1] - cross_section[i][1];
 
-        // Normal is perpendicular to the edge in XZ plane
-        // Rotate edge vector 90 degrees CCW in XZ plane
-        let nx = -dz;
-        let nz = dx;
+        // Edge from prev vertex to current: outward normal via CW rotation (dz, -dx)
+        let dx0 = cross_section[i][0] - cross_section[prev_i][0];
+        let dz0 = cross_section[i][1] - cross_section[prev_i][1];
+        let n0x = dz0;
+        let n0z = -dx0;
+
+        // Edge from current vertex to next: outward normal via CW rotation (dz, -dx)
+        let dx1 = cross_section[next_i][0] - cross_section[i][0];
+        let dz1 = cross_section[next_i][1] - cross_section[i][1];
+        let n1x = dz1;
+        let n1z = -dx1;
+
+        // Average and normalize
+        let nx = n0x + n1x;
+        let nz = n0z + n1z;
         let len = (nx * nx + nz * nz).sqrt();
         let (nx, nz) = if len > 0.0 { (nx / len, nz / len) } else { (0.0, 1.0) };
 
