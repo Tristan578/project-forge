@@ -36,6 +36,7 @@ pub mod pending_commands {
 }
 pub mod physics;
 pub mod physics_2d;
+pub mod physics_2d_sim;
 pub mod post_processing;
 pub mod procedural_mesh;
 pub mod project_type;

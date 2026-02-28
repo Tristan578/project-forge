@@ -5,8 +5,10 @@
 //! to the script sandbox via `forge.components.*`.
 
 use bevy::prelude::*;
+use bevy_rapier3d::prelude::CollisionEvent;
 use serde::{Deserialize, Serialize};
 
+use super::engine_mode::RuntimeEntity;
 use super::entity_id::EntityId;
 
 /// A single pre-built game behavior.
@@ -412,6 +414,11 @@ pub struct GameComponentRuntime {
     pub double_jump_states: std::collections::HashMap<String, u32>,
     /// Named game events emitted this frame (consumed by scripts)
     pub pending_events: Vec<GameEvent>,
+    /// Active collision pairs tracked per frame: (entity_a_id, entity_b_id)
+    /// Used for DamageZone continuous damage and TriggerZone enter/exit detection
+    pub active_collisions: std::collections::HashSet<(String, String)>,
+    /// Previous frame's active collisions (for detecting enter/exit transitions)
+    pub prev_collisions: std::collections::HashSet<(String, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -457,31 +464,35 @@ impl Plugin for GameComponentsPlugin {
             cleanup_game_component_runtime,
         ));
 
+        // Collision tracking must run first so game component systems see fresh data
+        app.add_systems(Update, system_track_collisions.in_set(PlaySystemSet));
+
         // Game component systems (PlaySystemSet only) - split into groups of 4
+        // These run after collision tracking
         app.add_systems(Update, (
             system_character_controller,
             system_health,
             system_collectible,
             system_damage_zone,
-        ).in_set(PlaySystemSet));
+        ).after(system_track_collisions).in_set(PlaySystemSet));
 
         app.add_systems(Update, (
             system_checkpoint,
             system_teleporter,
             system_moving_platform,
             system_trigger_zone,
-        ).in_set(PlaySystemSet));
+        ).after(system_track_collisions).in_set(PlaySystemSet));
 
         app.add_systems(Update, (
             system_spawner,
             system_follower,
             system_projectile,
             system_win_condition,
-        ).in_set(PlaySystemSet));
+        ).after(system_track_collisions).in_set(PlaySystemSet));
 
         app.add_systems(Update, (
             system_dialogue_trigger,
-        ).in_set(PlaySystemSet));
+        ).after(system_track_collisions).in_set(PlaySystemSet));
     }
 }
 
@@ -670,36 +681,222 @@ fn system_collectible(
     }
 }
 
-/// Damage zone system: stub (requires collision events from Phase G-4)
+/// Collision tracking system: reads Rapier CollisionEvents and updates the runtime's
+/// active_collisions set. Must run before all game component systems that need overlap info.
+fn system_track_collisions(
+    mut collision_events: EventReader<CollisionEvent>,
+    entity_id_query: Query<&EntityId>,
+    runtime: Option<ResMut<GameComponentRuntime>>,
+) {
+    let Some(mut runtime) = runtime else {
+        collision_events.clear();
+        return;
+    };
+
+    // Rotate: current -> prev, then rebuild current from events
+    runtime.prev_collisions = runtime.active_collisions.clone();
+
+    // Process collision events: Started adds pairs, Stopped removes them
+    for event in collision_events.read() {
+        match event {
+            CollisionEvent::Started(a, b, _) => {
+                if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(*a), entity_id_query.get(*b)) {
+                    // Store in canonical order for consistent lookups
+                    let pair = if id_a.0 <= id_b.0 {
+                        (id_a.0.clone(), id_b.0.clone())
+                    } else {
+                        (id_b.0.clone(), id_a.0.clone())
+                    };
+                    runtime.active_collisions.insert(pair);
+                }
+            }
+            CollisionEvent::Stopped(a, b, _) => {
+                if let (Ok(id_a), Ok(id_b)) = (entity_id_query.get(*a), entity_id_query.get(*b)) {
+                    let pair = if id_a.0 <= id_b.0 {
+                        (id_a.0.clone(), id_b.0.clone())
+                    } else {
+                        (id_b.0.clone(), id_a.0.clone())
+                    };
+                    runtime.active_collisions.remove(&pair);
+                }
+            }
+        }
+    }
+}
+
+/// Damage zone system: on physics overlap, reduce Health by damage_per_second * dt.
+/// If one_shot is true, sets health to 0 instantly.
 fn system_damage_zone(
-    _time: Res<Time>,
-    _runtime: Option<ResMut<GameComponentRuntime>>,
-    _entities: Query<(&EntityId, &GameComponents)>,
+    time: Res<Time>,
+    runtime: Option<ResMut<GameComponentRuntime>>,
+    mut entities: Query<(&EntityId, &mut GameComponents)>,
 ) {
+    let Some(runtime) = runtime else { return; };
+    let dt = time.delta_secs();
 
+    // Collect damage zone data: (entity_id, damage_per_second, one_shot)
+    let damage_zones: Vec<(String, f32, bool)> = entities
+        .iter()
+        .filter_map(|(eid, gc)| {
+            if let Some(GameComponentData::DamageZone(data)) = gc.get("damage_zone") {
+                Some((eid.0.clone(), data.damage_per_second, data.one_shot))
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
+    // For each active collision pair, check if one side is a damage zone
+    // and the other has Health
+    for (id_a, id_b) in &runtime.active_collisions {
+        for (dz_id, dps, one_shot) in &damage_zones {
+            // Determine which entity is the damage zone and which is the target
+            let target_id = if dz_id == id_a {
+                id_b
+            } else if dz_id == id_b {
+                id_a
+            } else {
+                continue;
+            };
+
+            // Check invincibility
+            if runtime.invincibility_timers.contains_key(target_id) {
+                continue;
+            }
+
+            // Apply damage to the target entity's Health component
+            if let Some((_eid, mut gc)) = entities.iter_mut().find(|(eid, _)| eid.0 == *target_id) {
+                if let Some(GameComponentData::Health(health)) = gc.get_mut("health") {
+                    if health.current_hp > 0.0 {
+                        if *one_shot {
+                            health.current_hp = 0.0;
+                        } else {
+                            health.current_hp -= dps * dt;
+                            if health.current_hp < 0.0 {
+                                health.current_hp = 0.0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
-/// Checkpoint system: stub (requires collision events from Phase G-4)
+/// Checkpoint system: when an entity with CharacterController overlaps a checkpoint,
+/// update that entity's Health respawn_point to the checkpoint's position.
 fn system_checkpoint(
-    _runtime: Option<ResMut<GameComponentRuntime>>,
-    _entities: Query<(&EntityId, &GameComponents, &Transform)>,
+    runtime: Option<Res<GameComponentRuntime>>,
+    mut entities: Query<(&EntityId, &mut GameComponents, &Transform)>,
 ) {
+    let Some(runtime) = runtime else { return; };
 
+    // Collect checkpoint positions: (entity_id, auto_save, position)
+    let checkpoints: Vec<(String, bool, Vec3)> = entities
+        .iter()
+        .filter_map(|(eid, gc, transform)| {
+            if let Some(GameComponentData::Checkpoint(data)) = gc.get("checkpoint") {
+                if data.auto_save {
+                    Some((eid.0.clone(), data.auto_save, transform.translation))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
+    // For each active collision, check if a checkpoint overlaps with a character controller
+    for (id_a, id_b) in &runtime.active_collisions {
+        for (cp_id, _auto_save, cp_pos) in &checkpoints {
+            let target_id = if cp_id == id_a {
+                id_b
+            } else if cp_id == id_b {
+                id_a
+            } else {
+                continue;
+            };
+
+            // Update the target's Health respawn_point if it has both CharacterController and Health
+            if let Some((_eid, mut gc, _transform)) = entities
+                .iter_mut()
+                .find(|(eid, _, _)| eid.0 == *target_id)
+            {
+                if gc.has("character_controller") {
+                    if let Some(GameComponentData::Health(health)) = gc.get_mut("health") {
+                        health.respawn_point = [cp_pos.x, cp_pos.y + 1.0, cp_pos.z];
+                    }
+                }
+            }
+        }
+    }
 }
 
-/// Teleporter system: stub (requires collision events from Phase G-4)
+/// Teleporter system: on trigger enter, teleport the colliding entity to target_position.
+/// Respects cooldown to prevent rapid re-triggering.
 fn system_teleporter(
-    _time: Res<Time>,
-    _runtime: Option<ResMut<GameComponentRuntime>>,
-    _entities: Query<(&EntityId, &GameComponents, &mut Transform)>,
+    time: Res<Time>,
+    runtime: Option<ResMut<GameComponentRuntime>>,
+    mut entities: Query<(&EntityId, &GameComponents, &mut Transform)>,
 ) {
+    let Some(mut runtime) = runtime else { return; };
+    let dt = time.delta_secs();
 
+    // Tick teleporter cooldowns
+    runtime.teleporter_cooldowns.retain(|_, timer| {
+        *timer -= dt;
+        *timer > 0.0
+    });
 
-    // Known limitation: handled via script API (forge.physics.onCollisionEnter)
+    // Collect teleporter data: (entity_id, target_position, cooldown_secs)
+    let teleporters: Vec<(String, [f32; 3], f32)> = entities
+        .iter()
+        .filter_map(|(eid, gc, _)| {
+            if let Some(GameComponentData::Teleporter(data)) = gc.get("teleporter") {
+                Some((eid.0.clone(), data.target_position, data.cooldown_secs))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Detect new collision enters (in active_collisions but NOT in prev_collisions)
+    let new_enters: Vec<(String, String)> = runtime
+        .active_collisions
+        .iter()
+        .filter(|pair| !runtime.prev_collisions.contains(*pair))
+        .cloned()
+        .collect();
+
+    for (id_a, id_b) in &new_enters {
+        for (tp_id, target_pos, cooldown) in &teleporters {
+            let target_id = if tp_id == id_a {
+                id_b
+            } else if tp_id == id_b {
+                id_a
+            } else {
+                continue;
+            };
+
+            // Check cooldown: use a key combining teleporter + target
+            let cooldown_key = format!("{}_{}", tp_id, target_id);
+            if runtime.teleporter_cooldowns.contains_key(&cooldown_key) {
+                continue;
+            }
+
+            // Teleport the target entity
+            if let Some((_eid, _gc, mut transform)) = entities
+                .iter_mut()
+                .find(|(eid, _, _)| eid.0 == *target_id)
+            {
+                transform.translation = Vec3::from(*target_pos);
+            }
+
+            // Set cooldown
+            runtime.teleporter_cooldowns.insert(cooldown_key, *cooldown);
+        }
+    }
 }
 
 /// Moving platform system: interpolate between waypoints
@@ -782,26 +979,182 @@ fn system_moving_platform(
     }
 }
 
-/// Trigger zone system: stub (requires collision events from Phase G-4)
+/// Trigger zone system: on collision enter/exit, emit named events for scripts.
+/// Supports one_shot mode (fires once then disables).
 fn system_trigger_zone(
-    _runtime: Option<ResMut<GameComponentRuntime>>,
-    _entities: Query<(&EntityId, &GameComponents)>,
+    runtime: Option<ResMut<GameComponentRuntime>>,
+    entities: Query<(&EntityId, &GameComponents)>,
 ) {
+    let Some(mut runtime) = runtime else { return; };
 
+    // Collect trigger zone data: (entity_id, event_name, one_shot)
+    let trigger_zones: Vec<(String, String, bool)> = entities
+        .iter()
+        .filter_map(|(eid, gc)| {
+            if let Some(GameComponentData::TriggerZone(data)) = gc.get("trigger_zone") {
+                Some((eid.0.clone(), data.event_name.clone(), data.one_shot))
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    // Known limitation: handled via script API (forge.physics.onCollisionEnter/Exit)
+    // Detect new enters: in active but not in prev
+    let new_enters: Vec<(String, String)> = runtime
+        .active_collisions
+        .iter()
+        .filter(|pair| !runtime.prev_collisions.contains(*pair))
+        .cloned()
+        .collect();
+
+    // Detect new exits: in prev but not in active
+    let new_exits: Vec<(String, String)> = runtime
+        .prev_collisions
+        .iter()
+        .filter(|pair| !runtime.active_collisions.contains(*pair))
+        .cloned()
+        .collect();
+
+    // Process enters
+    for (id_a, id_b) in &new_enters {
+        for (tz_id, event_name, one_shot) in &trigger_zones {
+            let other_id = if tz_id == id_a {
+                id_b
+            } else if tz_id == id_b {
+                id_a
+            } else {
+                continue;
+            };
+
+            // Check one_shot fired
+            if *one_shot && runtime.trigger_fired.get(tz_id).copied().unwrap_or(false) {
+                continue;
+            }
+
+            runtime.pending_events.push(GameEvent {
+                event_name: format!("{}_enter", event_name),
+                source_entity_id: Some(tz_id.clone()),
+                target_entity_id: Some(other_id.clone()),
+            });
+
+            if *one_shot {
+                runtime.trigger_fired.insert(tz_id.clone(), true);
+            }
+        }
+    }
+
+    // Process exits
+    for (id_a, id_b) in &new_exits {
+        for (tz_id, event_name, one_shot) in &trigger_zones {
+            let other_id = if tz_id == id_a {
+                id_b
+            } else if tz_id == id_b {
+                id_a
+            } else {
+                continue;
+            };
+
+            // Don't emit exit for one_shot triggers that have already fired
+            if *one_shot && runtime.trigger_fired.get(tz_id).copied().unwrap_or(false) {
+                continue;
+            }
+
+            runtime.pending_events.push(GameEvent {
+                event_name: format!("{}_exit", event_name),
+                source_entity_id: Some(tz_id.clone()),
+                target_entity_id: Some(other_id.clone()),
+            });
+        }
+    }
 }
 
-/// Spawner system: stub (requires spawn request bridge)
+/// Spawner system: timer-based entity spawning at intervals.
+/// Spawns basic mesh entities with RuntimeEntity marker so they are cleaned up on Stop.
 fn system_spawner(
-    _time: Res<Time>,
-    _runtime: Option<ResMut<GameComponentRuntime>>,
-    _entities: Query<(&EntityId, &GameComponents, &Transform)>,
+    time: Res<Time>,
+    runtime: Option<ResMut<GameComponentRuntime>>,
+    entities: Query<(&EntityId, &GameComponents, &Transform)>,
+    spawned_query: Query<&EntityId, With<RuntimeEntity>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let Some(mut runtime) = runtime else { return; };
+    let dt = time.delta_secs();
 
+    // Collect spawner info first to avoid borrow issues
+    let spawners: Vec<(String, SpawnerData, Vec3)> = entities
+        .iter()
+        .filter_map(|(eid, gc, transform)| {
+            if let Some(GameComponentData::Spawner(data)) = gc.get("spawner") {
+                Some((eid.0.clone(), data.clone(), transform.translation))
+            } else {
+                None
+            }
+        })
+        .collect();
 
-    // TODO: Tick spawn timer, spawn entities at intervals
-    // Requires bridge integration to spawn entities
+    for (spawner_id, data, spawner_pos) in &spawners {
+        // Skip if this spawner needs a trigger event and none was received
+        if let Some(trigger_name) = &data.on_trigger {
+            let has_trigger = runtime.pending_events.iter().any(|e| e.event_name == *trigger_name);
+            if !has_trigger {
+                // Still tick the timer but skip spawning
+                let state = runtime.spawner_states.entry(spawner_id.clone())
+                    .or_insert_with(|| SpawnerState { timer: 0.0, spawned_ids: Vec::new() });
+                state.timer = 0.0; // Reset timer — trigger-based spawners don't auto-tick
+                continue;
+            }
+        }
+
+        let state = runtime.spawner_states.entry(spawner_id.clone())
+            .or_insert_with(|| SpawnerState { timer: 0.0, spawned_ids: Vec::new() });
+
+        // Clean up references to despawned entities
+        state.spawned_ids.retain(|id| {
+            spawned_query.iter().any(|eid| eid.0 == *id)
+        });
+
+        // Tick timer
+        state.timer += dt;
+
+        // Check if it's time to spawn and we haven't reached max
+        if state.timer >= data.interval_secs && (state.spawned_ids.len() as u32) < data.max_count {
+            state.timer = 0.0;
+
+            // Calculate spawn position
+            let spawn_pos = *spawner_pos + Vec3::from(data.spawn_offset);
+
+            // Generate a unique ID for the spawned entity
+            let spawn_id = format!("spawned_{}_{}", spawner_id, uuid::Uuid::new_v4());
+
+            // Spawn a basic entity based on entity_type
+            let mesh_handle = match data.entity_type.as_str() {
+                "sphere" => meshes.add(Sphere::new(0.5)),
+                "cylinder" => meshes.add(Cylinder::new(0.5, 1.0)),
+                "capsule" => meshes.add(Capsule3d::new(0.25, 0.5)),
+                _ => meshes.add(Cuboid::new(1.0, 1.0, 1.0)), // Default: cube
+            };
+
+            let material_handle = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.8, 0.4, 0.2),
+                ..Default::default()
+            });
+
+            commands.spawn((
+                Mesh3d(mesh_handle),
+                MeshMaterial3d(material_handle),
+                Transform::from_translation(spawn_pos),
+                EntityId(spawn_id.clone()),
+                super::entity_id::EntityName(format!("Spawned {}", data.entity_type)),
+                super::entity_id::EntityVisible(true),
+                super::pending_commands::EntityType::Cube,
+                RuntimeEntity,
+            ));
+
+            state.spawned_ids.push(spawn_id);
+        }
+    }
 }
 
 /// Follower system: move entity toward target

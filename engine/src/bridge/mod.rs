@@ -43,6 +43,7 @@ use crate::core::{
     observability::ObservabilityPlugin,
     pending_commands::PendingCommands,
     physics::PhysicsPlugin,
+    physics_2d_sim::Physics2dPlugin,
     post_processing::PostProcessingPlugin,
     quality::QualitySettings,
     scene,
@@ -157,9 +158,11 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(PostProcessingPlugin)
         .add_plugins(InputPlugin)
         .add_plugins(PhysicsPlugin)
+        .add_plugins(Physics2dPlugin)
         .add_plugins(ShaderEffectsPlugin)
         .add_plugins(CameraControlPlugin)
-        .add_plugins(core::game_camera::GameCameraPlugin);
+        .add_plugins(core::game_camera::GameCameraPlugin)
+        .add_plugins(core::game_components::GameComponentsPlugin);
 
     // Editor-only plugins
     #[cfg(not(feature = "runtime"))]
@@ -288,6 +291,7 @@ impl Plugin for SelectionPlugin {
             // Collision/raycast systems (always-active, split to stay under tuple limit)
             .add_systems(Update, (
                 physics::read_collision_events,
+                physics::read_collision_events_2d,
                 physics::apply_raycast_queries,
             ))
             // Script and audio systems (always-active, split to stay under tuple limit)

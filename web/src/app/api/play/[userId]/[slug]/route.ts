@@ -1,0 +1,95 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getDb } from '@/lib/db/client';
+import { publishedGames, projects, users } from '@/lib/db/schema';
+import { eq, and, sql } from 'drizzle-orm';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * GET /api/play/[userId]/[slug]
+ * Public route -- fetches published game data for the player page.
+ * No authentication required (anyone with the link can play).
+ */
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ userId: string; slug: string }> }
+) {
+  try {
+    const { userId: clerkId, slug } = await params;
+
+    const db = getDb();
+
+    // Look up the user by their Clerk ID
+    const [user] = await db
+      .select({ id: users.id, displayName: users.displayName })
+      .from(users)
+      .where(eq(users.clerkId, clerkId))
+      .limit(1);
+
+    if (!user) {
+      return NextResponse.json({ error: 'Game not found' }, { status: 404 });
+    }
+
+    // Look up the published game by user ID + slug
+    const [game] = await db
+      .select()
+      .from(publishedGames)
+      .where(
+        and(
+          eq(publishedGames.userId, user.id),
+          eq(publishedGames.slug, slug)
+        )
+      )
+      .limit(1);
+
+    if (!game) {
+      return NextResponse.json({ error: 'Game not found' }, { status: 404 });
+    }
+
+    if (game.status !== 'published') {
+      return NextResponse.json(
+        { error: 'This game is not currently published' },
+        { status: 404 }
+      );
+    }
+
+    // Fetch the project scene data
+    const [project] = await db
+      .select({ sceneData: projects.sceneData })
+      .from(projects)
+      .where(eq(projects.id, game.projectId))
+      .limit(1);
+
+    if (!project) {
+      return NextResponse.json(
+        { error: 'Game data not found' },
+        { status: 404 }
+      );
+    }
+
+    // Increment play count (fire-and-forget)
+    db.update(publishedGames)
+      .set({ playCount: sql`${publishedGames.playCount} + 1` })
+      .where(eq(publishedGames.id, game.id))
+      .then(() => {})
+      .catch(() => {});
+
+    return NextResponse.json({
+      game: {
+        id: game.id,
+        title: game.title,
+        description: game.description,
+        slug: game.slug,
+        version: game.version,
+        creatorName: user.displayName || 'Unknown Creator',
+        sceneData: project.sceneData,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to fetch published game:', error);
+    return NextResponse.json(
+      { error: 'Failed to load game' },
+      { status: 500 }
+    );
+  }
+}
