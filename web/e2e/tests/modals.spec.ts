@@ -4,19 +4,24 @@ test.describe('Modals @ui', () => {
   test('settings modal opens and is visible', async ({ page, editor }) => {
     await editor.loadPage();
 
-    // Open settings modal
-    await editor.openSettings();
+    // Settings button is in the sidebar (title="Settings")
+    const settingsBtn = page.locator('button[title="Settings"]').first();
+    await expect(settingsBtn).toBeVisible({ timeout: 5000 });
+    await settingsBtn.click();
+    await page.waitForTimeout(500);
 
-    // Settings modal should be visible
-    const settingsModal = page.locator('[class*="fixed"]').filter({ hasText: /settings/i }).first();
-    await expect(settingsModal).toBeVisible();
+    // Settings modal has an h2 with "Settings" text
+    const settingsHeading = page.locator('h2').filter({ hasText: /settings/i }).first();
+    await expect(settingsHeading).toBeVisible({ timeout: 3000 });
   });
 
   test('settings modal has tabs', async ({ page, editor }) => {
     await editor.loadPage();
 
     // Open settings
-    await editor.openSettings();
+    const settingsBtn = page.locator('button[title="Settings"]').first();
+    await settingsBtn.click();
+    await page.waitForTimeout(500);
 
     // Look for tab buttons (Tokens, API Keys, Billing)
     const tokensTab = page.getByRole('button', { name: /tokens/i });
@@ -32,51 +37,65 @@ test.describe('Modals @ui', () => {
     expect(tabCount).toBeGreaterThan(0);
   });
 
-  test('settings modal can be closed', async ({ page, editor }) => {
+  test('settings modal can be closed with X button', async ({ page, editor }) => {
     await editor.loadPage();
 
     // Open settings
-    await editor.openSettings();
+    const settingsBtn = page.locator('button[title="Settings"]').first();
+    await settingsBtn.click();
+    await page.waitForTimeout(500);
 
-    // Find close button
-    const closeBtn = page.locator('button').filter({ hasText: /×|close/i }).first();
+    // Verify it opened
+    const settingsHeading = page.locator('h2').filter({ hasText: /settings/i }).first();
+    await expect(settingsHeading).toBeVisible({ timeout: 3000 });
+
+    // Find the close button (X icon SVG button near the Settings heading)
+    // The SettingsPanel has a close button with X icon in the same header row
+    const closeBtn = page.locator('.fixed').filter({ hasText: /settings/i }).locator('button').filter({ has: page.locator('svg') }).first();
     await closeBtn.click();
     await page.waitForTimeout(300);
 
     // Modal should be gone
-    const settingsModal = page.locator('[class*="fixed"]').filter({ hasText: /settings/i }).first();
-    const visible = await settingsModal.isVisible().catch(() => false);
-    expect(visible).toBe(false);
+    await expect(settingsHeading).not.toBeVisible();
   });
 
   test('settings modal can be closed with Escape key', async ({ page, editor }) => {
     await editor.loadPage();
 
     // Open settings
-    await editor.openSettings();
+    const settingsBtn = page.locator('button[title="Settings"]').first();
+    await settingsBtn.click();
+    await page.waitForTimeout(500);
+
+    // Verify it opened
+    const settingsHeading = page.locator('h2').filter({ hasText: /settings/i }).first();
+    await expect(settingsHeading).toBeVisible({ timeout: 3000 });
 
     // Press Escape
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
 
     // Modal should be gone
-    const settingsModal = page.locator('[class*="fixed"]').filter({ hasText: /settings/i }).first();
-    const visible = await settingsModal.isVisible().catch(() => false);
-    expect(visible).toBe(false);
+    await expect(settingsHeading).not.toBeVisible();
   });
 
-  test('welcome modal appears on first visit', async ({ page, editor: _editor }) => {
-    // Clear localStorage to simulate first visit
+  test('welcome modal appears on first visit', async ({ page }) => {
+    // Navigate WITHOUT the fixture's loadPage() to avoid forge-welcomed suppression
     await page.goto('/dev');
+    await page.waitForLoadState('networkidle');
+
+    // Explicitly clear the welcome flag
     await page.evaluate(() => {
       localStorage.removeItem('forge-welcomed');
     });
+
+    // Reload to trigger first-visit experience
     await page.reload();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
 
-    // Welcome modal should be visible
-    const welcomeModal = page.locator('[class*="fixed"]').filter({ hasText: /welcome|getting started/i }).first();
+    // Welcome modal should be visible (fixed overlay with welcome text)
+    const welcomeModal = page.locator('.fixed').filter({ hasText: /welcome|getting started/i }).first();
     const visible = await welcomeModal.isVisible().catch(() => false);
     expect(visible).toBe(true);
   });
@@ -85,45 +104,48 @@ test.describe('Modals @ui', () => {
     await editor.loadPage();
 
     // Press ? key (Shift+/)
-    await page.keyboard.press('?');
-    await page.waitForTimeout(300);
+    await page.keyboard.press('Shift+/');
+    await page.waitForTimeout(500);
 
-    // Shortcuts modal should be visible
-    const shortcutsModal = page.locator('[class*="fixed"], [class*="modal"]').filter({ hasText: /shortcut|keyboard/i }).first();
-    const visible = await shortcutsModal.isVisible().catch(() => false);
-    expect(visible).toBe(true);
+    // Shortcuts panel has h2 "Keyboard Shortcuts"
+    const shortcutsHeading = page.locator('h2').filter({ hasText: /keyboard shortcuts/i }).first();
+    await expect(shortcutsHeading).toBeVisible({ timeout: 3000 });
   });
 
   test('keyboard shortcuts modal can be closed with Escape', async ({ page, editor }) => {
     await editor.loadPage();
 
-    // Open shortcuts with ?
-    await page.keyboard.press('?');
-    await page.waitForTimeout(300);
+    // Open shortcuts with ? (Shift+/)
+    await page.keyboard.press('Shift+/');
+    await page.waitForTimeout(500);
+
+    // Verify it opened
+    const shortcutsHeading = page.locator('h2').filter({ hasText: /keyboard shortcuts/i }).first();
+    await expect(shortcutsHeading).toBeVisible({ timeout: 3000 });
 
     // Close with Escape
     await page.keyboard.press('Escape');
     await page.waitForTimeout(300);
 
     // Modal should be gone
-    const shortcutsModal = page.locator('[class*="fixed"], [class*="modal"]').filter({ hasText: /shortcut|keyboard/i }).first();
-    const visible = await shortcutsModal.isVisible().catch(() => false);
-    expect(visible).toBe(false);
+    await expect(shortcutsHeading).not.toBeVisible();
   });
 
   test('modals appear above other content (z-index)', async ({ page, editor }) => {
     await editor.loadPage();
 
     // Open settings modal
-    await editor.openSettings();
+    const settingsBtn = page.locator('button[title="Settings"]').first();
+    await settingsBtn.click();
+    await page.waitForTimeout(500);
 
-    // Check z-index of modal
-    const settingsModal = page.locator('[class*="fixed"]').filter({ hasText: /settings/i }).first();
-    const zIndex = await settingsModal.evaluate((el) => {
+    // Settings modal backdrop is a fixed overlay with z-[60]
+    const backdrop = page.locator('.fixed').filter({ hasText: /settings/i }).first();
+    const zIndex = await backdrop.evaluate((el) => {
       return parseInt(window.getComputedStyle(el).zIndex, 10);
     });
 
-    // Should be a high z-index (typically 50+)
+    // Should be a high z-index (settings uses z-[60])
     expect(zIndex).toBeGreaterThan(40);
   });
 });

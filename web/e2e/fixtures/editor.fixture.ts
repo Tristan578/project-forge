@@ -22,32 +22,36 @@ export class EditorPage {
 
   /** Navigate to /dev without waiting for WASM (for CSS-only tests) */
   async loadPage() {
-    // Suppress onboarding overlays in CI where localStorage starts empty
+    // Suppress onboarding overlays and PerformanceProfiler BEFORE page loads
     await this.page.addInitScript(() => {
       localStorage.setItem('forge-welcomed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
+
+      // Inject CSS to hide PerformanceProfiler overlay (fixed bottom-left z-50)
+      const style = document.createElement('style');
+      style.setAttribute('data-e2e', 'suppress-overlays');
+      style.textContent = [
+        '.fixed.bottom-4.left-4.z-50 { display: none !important; }',
+      ].join('\n');
+      if (document.head) {
+        document.head.appendChild(style);
+      } else {
+        document.addEventListener('DOMContentLoaded', () =>
+          document.head.appendChild(style)
+        );
+      }
     });
     await this.page.goto('/dev');
     // Wait for React to render (no WASM dependency)
     await this.page.waitForLoadState('networkidle');
-    // Wait for editor layout to initialize (dockview panels)
-    await this.page.waitForSelector('[class*="dv-"], [data-testid="editor"]', {
-      timeout: 30_000,
-    }).catch(() => {
-      // Fallback: just wait a bit if dockview selectors aren't found
+    // Wait for editor layout to render (sidebar buttons are outside dockview)
+    await this.page.waitForSelector(
+      'button[title="Settings"], button[title="Add Entity"], [class*="dv-"]',
+      { timeout: 30_000 }
+    ).catch(() => {
+      // Sidebar or dockview may not render in all environments
     });
-    await this.page.waitForTimeout(2000);
-    // Disable pointer events on PerformanceProfiler overlay to prevent click interception
-    await this.page.evaluate(() => {
-      document.querySelectorAll('[class*="fixed"]').forEach(el => {
-        if (el instanceof HTMLElement && el.textContent?.includes('Performance')) {
-          el.style.pointerEvents = 'none';
-          el.querySelectorAll('*').forEach(child => {
-            if (child instanceof HTMLElement) child.style.pointerEvents = 'none';
-          });
-        }
-      });
-    });
+    await this.page.waitForTimeout(1500);
   }
 
   /** Wait for a minimum entity count in the scene graph */

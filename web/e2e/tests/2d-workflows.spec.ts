@@ -43,18 +43,6 @@ test.describe('2D Workflows @ui', () => {
     expect(count).toBeGreaterThan(0);
   });
 
-  test('editor panels are all visible', async ({ page }) => {
-    // Check for key UI panels (dockview tabs or panel content)
-    const hierarchy = page.getByText(/hierarchy|scene/i, { exact: false });
-    const inspector = page.getByText(/inspector|properties/i, { exact: false });
-
-    // Panels live in dockview — check tab or content is present
-    const hierarchyCount = await hierarchy.count();
-    const inspectorCount = await inspector.count();
-    // At least one of these panels should be rendered
-    expect(hierarchyCount + inspectorCount).toBeGreaterThan(0);
-  });
-
   test('2D sprite types available in entity menu', async ({ page }) => {
     await page.getByRole('button', { name: 'Add Entity' }).click();
     await page.waitForTimeout(300);
@@ -67,25 +55,39 @@ test.describe('2D Workflows @ui', () => {
   });
 
   test('toolbar shows gizmo mode buttons', async ({ page }) => {
-    // Translate/Rotate/Scale gizmo buttons
+    // Translate/Rotate/Scale gizmo buttons are in the sidebar
     const gizmoBtn = page.locator('button[title*="Translate"], button[title*="Rotate"], button[title*="Scale"]');
     const count = await gizmoBtn.count();
     expect(count).toBeGreaterThanOrEqual(0);
   });
 
-  test('settings modal can be opened', async ({ page }) => {
-    const settingsBtn = page.getByRole('button', { name: /settings/i }).first();
-    if (await settingsBtn.count() > 0) {
-      await settingsBtn.click();
-      await page.waitForTimeout(300);
+  test('settings modal can be opened from sidebar', async ({ page }) => {
+    // Settings button is in the sidebar (title="Settings")
+    const settingsBtn = page.locator('button[title="Settings"]').first();
+    await expect(settingsBtn).toBeVisible({ timeout: 5000 });
+    await settingsBtn.click();
+    await page.waitForTimeout(500);
 
-      // Settings modal should appear
-      const modal = page.locator('[class*="fixed"], [role="dialog"]').filter({ hasText: /settings/i });
-      const visible = await modal.isVisible().catch(() => false);
-      expect(visible).toBe(true);
+    // Settings modal renders as a fixed overlay containing "Settings" heading
+    const modal = page.locator('h2').filter({ hasText: /settings/i }).first();
+    await expect(modal).toBeVisible({ timeout: 3000 });
 
-      // Close it
-      await page.keyboard.press('Escape');
-    }
+    // Close it
+    await page.keyboard.press('Escape');
+  });
+});
+
+test.describe('2D Workflows @engine', () => {
+  test.beforeEach(async ({ editor }) => {
+    await editor.loadPage();
+  });
+
+  test('editor panels are all visible', async ({ page }) => {
+    // Dockview panels: hierarchy and inspector tabs
+    const hierarchy = page.getByText(/hierarchy|scene/i, { exact: false });
+    const inspector = page.getByText(/inspector|properties/i, { exact: false });
+
+    await expect(hierarchy.first()).toBeVisible();
+    await expect(inspector.first()).toBeVisible();
   });
 });

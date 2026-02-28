@@ -23,9 +23,15 @@ test.describe('Dialogue Editor @ui', () => {
     });
     expect(hasDialogueState).toBe(true);
   });
+});
+
+test.describe('Dialogue Editor @engine', () => {
+  test.beforeEach(async ({ editor }) => {
+    await editor.loadPage();
+  });
 
   test('editor layout includes all expected panel tabs', async ({ page, editor: _editor }) => {
-    // Verify the main editor panels are present
+    // Verify dockview panel tabs are present
     const tabs = page.locator('.dv-tab, [role="tab"]');
     const tabCount = await tabs.count();
     expect(tabCount).toBeGreaterThan(0);

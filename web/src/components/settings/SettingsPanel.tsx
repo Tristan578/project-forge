@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Settings, Coins, Key, CreditCard, X } from 'lucide-react';
 import { TokenDashboard } from './TokenDashboard';
 import { ApiKeyManager } from './ApiKeyManager';
@@ -15,9 +15,22 @@ interface SettingsPanelProps {
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('tokens');
 
+  // Close on Escape key
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    },
+    [onClose]
+  );
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70">
-      <div className="h-[600px] w-[500px] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70" onClick={onClose}>
+      <div className="h-[600px] w-[500px] overflow-hidden rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
           <div className="flex items-center gap-2">
