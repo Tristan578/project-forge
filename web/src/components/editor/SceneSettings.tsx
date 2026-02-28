@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useState } from 'react';
-import { Sparkles, HelpCircle, Smartphone, Wifi } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
+import { Sparkles, HelpCircle, Smartphone, Wifi, Upload } from 'lucide-react';
 import { useEditorStore, type AmbientLightData, type EnvironmentData, type ColorGradingSectionData, type QualityPreset } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useMultiplayerStore } from '@/stores/multiplayerStore';
@@ -38,7 +38,25 @@ export function SceneSettings() {
   const mobileTouchConfig = useEditorStore((s) => s.mobileTouchConfig);
   const setMobileTouchConfig = useEditorStore((s) => s.setMobileTouchConfig);
   const updateMobileTouchConfig = useEditorStore((s) => s.updateMobileTouchConfig);
+  const setCustomSkybox = useEditorStore((s) => s.setCustomSkybox);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
+  const skyboxFileRef = useRef<HTMLInputElement>(null);
+
+  const handleSkyboxUpload = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const file = files[0];
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        const assetId = `user_skybox_${Date.now()}`;
+        setCustomSkybox(assetId, base64);
+      };
+      reader.readAsDataURL(file);
+    },
+    [setCustomSkybox]
+  );
 
   const handleAmbientUpdate = useCallback(
     (partial: Partial<AmbientLightData>) => {
@@ -150,14 +168,31 @@ export function SceneSettings() {
               <HelpCircle size={12} />
             </button>
           </div>
-          <button
-            onClick={() => setGenerateSkyboxOpen(true)}
-            className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
-            title="Generate skybox with AI"
-          >
-            <Sparkles size={10} />
-            Generate Skybox
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => skyboxFileRef.current?.click()}
+              className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-[10px] text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+              title="Upload skybox image (HDR, PNG, JPG)"
+            >
+              <Upload size={10} />
+              Upload
+            </button>
+            <button
+              onClick={() => setGenerateSkyboxOpen(true)}
+              className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-[10px] text-purple-400 hover:bg-purple-900/50"
+              title="Generate skybox with AI"
+            >
+              <Sparkles size={10} />
+              Generate
+            </button>
+          </div>
+          <input
+            ref={skyboxFileRef}
+            type="file"
+            accept=".png,.jpg,.jpeg,.hdr,.exr,.webp"
+            className="hidden"
+            onChange={(e) => handleSkyboxUpload(e.target.files)}
+          />
         </div>
 
         <div className="space-y-3">
@@ -180,11 +215,13 @@ export function SceneSettings() {
           <div className="flex items-center gap-2">
             <label className="w-20 shrink-0 text-xs text-zinc-400">Skybox<InfoTooltip term="skybox" /></label>
             <select
-              value={environment.skyboxPreset || 'none'}
+              value={environment.skyboxAssetId ? '__custom__' : (environment.skyboxPreset || 'none')}
               onChange={(e) => {
                 const value = e.target.value;
                 if (value === 'none') {
                   removeSkybox();
+                } else if (value === '__custom__') {
+                  // Custom is display-only; use Upload button
                 } else {
                   setSkybox(value);
                 }
@@ -198,11 +235,12 @@ export function SceneSettings() {
               <option value="overcast">Overcast</option>
               <option value="night">Night</option>
               <option value="bright_day">Bright Day</option>
+              {environment.skyboxAssetId && <option value="__custom__">Custom Upload</option>}
             </select>
           </div>
 
           {/* Skybox Brightness (shown when skybox active) */}
-          {environment.skyboxPreset && (
+          {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label className="w-20 shrink-0 text-xs text-zinc-400">Brightness<InfoTooltip term="skyboxBrightness" /></label>
               <input
@@ -221,7 +259,7 @@ export function SceneSettings() {
           )}
 
           {/* IBL Intensity (shown when skybox active) */}
-          {environment.skyboxPreset && (
+          {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label className="w-20 shrink-0 text-xs text-zinc-400">IBL<InfoTooltip term="ibl" /></label>
               <input
@@ -240,7 +278,7 @@ export function SceneSettings() {
           )}
 
           {/* IBL Rotation (shown when skybox active) */}
-          {environment.skyboxPreset && (
+          {(environment.skyboxPreset || environment.skyboxAssetId) && (
             <div className="flex items-center gap-2">
               <label className="w-20 shrink-0 text-xs text-zinc-400">Rotation<InfoTooltip term="skyboxRotation" /></label>
               <input
