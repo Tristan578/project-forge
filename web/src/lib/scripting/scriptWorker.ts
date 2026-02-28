@@ -51,6 +51,7 @@ let entityInfos: Record<string, EntityInfo> = {};
 let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
 const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
+const audioPlayingState = new Map<string, boolean>();
 let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;
 const uiElements: Map<string, UIElement> = new Map();
@@ -387,12 +388,15 @@ function buildForgeApi(scriptEntityId: string) {
     audio: {
       play: (eid: string) => {
         pendingCommands.push({ cmd: 'play_audio', entityId: eid });
+        audioPlayingState.set(eid, true);
       },
       stop: (eid: string) => {
         pendingCommands.push({ cmd: 'stop_audio', entityId: eid });
+        audioPlayingState.set(eid, false);
       },
       pause: (eid: string) => {
         pendingCommands.push({ cmd: 'pause_audio', entityId: eid });
+        audioPlayingState.set(eid, false);
       },
       setVolume: (eid: string, volume: number) => {
         pendingCommands.push({ cmd: 'set_audio', entityId: eid, volume });
@@ -400,8 +404,8 @@ function buildForgeApi(scriptEntityId: string) {
       setPitch: (eid: string, pitch: number) => {
         pendingCommands.push({ cmd: 'set_audio', entityId: eid, pitch });
       },
-      isPlaying: (_eid: string) => {
-        return false;
+      isPlaying: (eid: string) => {
+        return audioPlayingState.get(eid) ?? false;
       },
       setBusVolume: (busName: string, volume: number) => {
         pendingCommands.push({ cmd: 'update_audio_bus', busName, volume });
