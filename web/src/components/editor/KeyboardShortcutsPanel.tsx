@@ -1,58 +1,16 @@
 'use client';
 
-import { useEffect, useCallback } from 'react';
-import { X } from 'lucide-react';
-
-interface ShortcutGroup {
-  title: string;
-  shortcuts: { keys: string; action: string }[];
-}
-
-const SHORTCUT_GROUPS: ShortcutGroup[] = [
-  {
-    title: 'Selection',
-    shortcuts: [
-      { keys: 'Click', action: 'Select entity' },
-      { keys: 'Ctrl + Click', action: 'Multi-select' },
-      { keys: 'Ctrl + A', action: 'Select all' },
-      { keys: 'Esc', action: 'Deselect all' },
-    ],
-  },
-  {
-    title: 'Transform',
-    shortcuts: [
-      { keys: 'W', action: 'Translate mode' },
-      { keys: 'E', action: 'Rotate mode' },
-      { keys: 'R', action: 'Scale mode' },
-    ],
-  },
-  {
-    title: 'History',
-    shortcuts: [
-      { keys: 'Ctrl + Z', action: 'Undo' },
-      { keys: 'Ctrl + Shift + Z', action: 'Redo' },
-    ],
-  },
-  {
-    title: 'Scene',
-    shortcuts: [
-      { keys: 'Ctrl + S', action: 'Save scene' },
-      { keys: 'Ctrl + D', action: 'Duplicate selected' },
-      { keys: 'Delete', action: 'Delete selected' },
-      { keys: 'F', action: 'Focus on selected' },
-    ],
-  },
-  {
-    title: 'View',
-    shortcuts: [
-      { keys: '1', action: 'Top view' },
-      { keys: '2', action: 'Front view' },
-      { keys: '3', action: 'Right view' },
-      { keys: '4', action: 'Perspective view' },
-      { keys: 'G', action: 'Toggle grid' },
-    ],
-  },
-];
+import { useState, useEffect, useCallback } from 'react';
+import { X, RotateCcw } from 'lucide-react';
+import {
+  getMergedBindings,
+  getEffectiveKey,
+  groupByCategory,
+  eventToKeyCombo,
+  saveCustomBinding,
+  resetBinding,
+  resetAllBindings,
+} from '@/lib/workspace/keybindings';
 
 interface KeyboardShortcutsPanelProps {
   open: boolean;
@@ -60,21 +18,77 @@ interface KeyboardShortcutsPanelProps {
 }
 
 export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanelProps) {
+  const [editingAction, setEditingAction] = useState<string | null>(null);
+  const [bindings, setBindings] = useState(() => getMergedBindings());
+
+  const grouped = groupByCategory(bindings);
+
+  const refreshBindings = useCallback(() => {
+    setBindings(getMergedBindings());
+  }, []);
+
+  // Reload bindings when panel opens (prev-value pattern)
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    if (open) {
+      setBindings(getMergedBindings());
+    } else {
+      setEditingAction(null);
+    }
+  }
+
+  // Close on Escape (only if not editing a binding)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (editingAction) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (e.key === 'Escape') {
+          // Cancel editing
+          setEditingAction(null);
+          return;
+        }
+
+        const combo = eventToKeyCombo(e);
+        if (combo) {
+          saveCustomBinding(editingAction, combo);
+          setEditingAction(null);
+          refreshBindings();
+        }
+        return;
+      }
+
       if (e.key === 'Escape') onClose();
     },
-    [onClose]
+    [editingAction, onClose, refreshBindings]
   );
 
   useEffect(() => {
     if (open) {
-      document.addEventListener('keydown', handleKeyDown);
-      return () => document.removeEventListener('keydown', handleKeyDown);
+      document.addEventListener('keydown', handleKeyDown, true);
+      return () => document.removeEventListener('keydown', handleKeyDown, true);
     }
   }, [open, handleKeyDown]);
 
+  const handleReset = useCallback((action: string) => {
+    resetBinding(action);
+    refreshBindings();
+  }, [refreshBindings]);
+
+  const handleResetAll = useCallback(() => {
+    resetAllBindings();
+    refreshBindings();
+  }, [refreshBindings]);
+
   if (!open) return null;
+
+  // Non-rebindable shortcuts shown as static info
+  const staticShortcuts = [
+    { keys: 'Click', action: 'Select entity' },
+    { keys: 'Ctrl + Click', action: 'Multi-select' },
+  ];
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onClose}>
@@ -84,36 +98,90 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-semibold text-zinc-100">Keyboard Shortcuts</h2>
-          <button
-            onClick={onClose}
-            className="rounded p-1 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleResetAll}
+              className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+              title="Reset all to defaults"
+            >
+              <RotateCcw size={10} />
+              Reset All
+            </button>
+            <button
+              onClick={onClose}
+              className="rounded p-1 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
+        {/* Static (mouse) shortcuts */}
+        <div className="mb-3">
+          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-500">Mouse</h3>
+          <div className="space-y-1">
+            {staticShortcuts.map((s) => (
+              <div key={s.keys} className="flex items-center justify-between text-sm">
+                <span className="text-zinc-400">{s.action}</span>
+                <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] font-mono text-zinc-300">
+                  {s.keys}
+                </kbd>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Customizable bindings */}
         <div className="grid grid-cols-2 gap-4">
-          {SHORTCUT_GROUPS.map((group) => (
-            <div key={group.title}>
-              <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-                {group.title}
+          {Object.entries(grouped).map(([category, categoryBindings]) => (
+            <div key={category}>
+              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                {category}
               </h3>
               <div className="space-y-1">
-                {group.shortcuts.map((s) => (
-                  <div key={s.keys} className="flex items-center justify-between text-sm">
-                    <span className="text-zinc-400">{s.action}</span>
-                    <kbd className="rounded bg-zinc-800 px-1.5 py-0.5 text-[11px] font-mono text-zinc-300">
-                      {s.keys}
-                    </kbd>
-                  </div>
-                ))}
+                {categoryBindings.map((binding) => {
+                  const isEditing = editingAction === binding.action;
+                  const isCustomized = binding.customKey !== null;
+                  const effectiveKey = getEffectiveKey(binding);
+
+                  return (
+                    <div key={binding.action} className="flex items-center justify-between text-sm group">
+                      <span className="text-zinc-400">{binding.label}</span>
+                      <div className="flex items-center gap-1">
+                        {isCustomized && !isEditing && (
+                          <button
+                            onClick={() => handleReset(binding.action)}
+                            className="opacity-0 group-hover:opacity-100 rounded p-0.5 text-zinc-600 hover:text-zinc-400 transition-opacity"
+                            title="Reset to default"
+                          >
+                            <RotateCcw size={10} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setEditingAction(isEditing ? null : binding.action)}
+                          className={`rounded px-1.5 py-0.5 text-[11px] font-mono transition-colors ${
+                            isEditing
+                              ? 'bg-blue-600 text-white animate-pulse'
+                              : isCustomized
+                                ? 'bg-blue-900/50 text-blue-300 hover:bg-blue-900/70'
+                                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                          }`}
+                          title={isEditing ? 'Press a key combo...' : 'Click to rebind'}
+                        >
+                          {isEditing ? 'Press key...' : effectiveKey}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ))}
         </div>
 
-        <p className="mt-4 text-center text-[11px] text-zinc-600">
-          Press <kbd className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-400">?</kbd> to toggle this panel
+        <p className="mt-4 text-center text-[10px] text-zinc-600">
+          Click any shortcut to rebind it. Press <kbd className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-400">Esc</kbd> to cancel.
+          Press <kbd className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-400">?</kbd> to toggle this panel.
         </p>
       </div>
     </div>
