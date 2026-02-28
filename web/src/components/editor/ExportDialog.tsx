@@ -1,11 +1,17 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { X, Download, Loader2, Palette } from 'lucide-react';
+import { X, Download, Loader2, Palette, Code, Check } from 'lucide-react';
 import { exportGame, downloadBlob } from '@/lib/export/exportEngine';
 import { useEditorStore } from '@/stores/editorStore';
-import { EXPORT_PRESETS, getPreset } from '@/lib/export/presets';
+import { EXPORT_PRESETS, getPreset, type ExportFormat } from '@/lib/export/presets';
+import { generateResponsiveEmbedSnippet, generateEmbedSnippet } from '@/lib/export/embedGenerator';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
+
+function parseResolution(res: string): [number, number] {
+  const parts = res.split('x');
+  return [parseInt(parts[0], 10), parseInt(parts[1], 10)];
+}
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -18,7 +24,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const setExporting = useEditorStore((s) => s.setExporting);
 
   const [title, setTitle] = useState(sceneName);
-  const [mode, setMode] = useState<'single-html' | 'zip' | 'pwa'>('single-html');
+  const [mode, setMode] = useState<ExportFormat>('single-html');
   const [resolution, setResolution] = useState<'responsive' | '1920x1080' | '1280x720'>('responsive');
   const [bgColor, setBgColor] = useState('#18181b');
   const [includeDebug, setIncludeDebug] = useState(false);
@@ -29,6 +35,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     progressBarColor: '#6366f1',
     progressStyle: 'bar',
   });
+  const [embedSnippet, setEmbedSnippet] = useState<string | null>(null);
+  const [snippetCopied, setSnippetCopied] = useState(false);
 
   // Sync title with scene name when it changes (React-documented pattern)
   const [prevSceneName, setPrevSceneName] = useState(sceneName);
@@ -68,7 +76,15 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.${extension}`;
       downloadBlob(blob, filename);
 
-      onClose();
+      // Show embed snippet for embed mode
+      if (mode === 'embed') {
+        const snippet = resolution === 'responsive'
+          ? generateResponsiveEmbedSnippet(title)
+          : generateEmbedSnippet(title, ...parseResolution(resolution));
+        setEmbedSnippet(snippet);
+      } else {
+        onClose();
+      }
     } catch (err) {
       console.error('[Export] Failed to export game:', err);
       alert('Export failed: ' + (err instanceof Error ? err.message : String(err)));
@@ -77,7 +93,56 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     }
   }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, setExporting, onClose]);
 
+  const handleCopySnippet = useCallback(() => {
+    if (!embedSnippet) return;
+    navigator.clipboard.writeText(embedSnippet).then(() => {
+      setSnippetCopied(true);
+      setTimeout(() => setSnippetCopied(false), 2000);
+    });
+  }, [embedSnippet]);
+
   if (!isOpen) return null;
+
+  // Show embed snippet after successful embed export
+  if (embedSnippet) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+        <div className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
+          <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
+            <h2 className="text-base font-semibold text-zinc-100">Embed Code</h2>
+            <button
+              onClick={() => { setEmbedSnippet(null); onClose(); }}
+              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          <div className="p-4 space-y-3">
+            <p className="text-xs text-zinc-400">
+              Game exported! Copy the embed code below to add it to your website:
+            </p>
+            <pre className="rounded bg-zinc-800 p-3 text-xs text-zinc-300 overflow-x-auto whitespace-pre-wrap border border-zinc-700">
+              {embedSnippet}
+            </pre>
+            <button
+              onClick={handleCopySnippet}
+              className="flex w-full items-center justify-center gap-2 rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              {snippetCopied ? <><Check size={14} /> Copied!</> : <><Code size={14} /> Copy Embed Code</>}
+            </button>
+          </div>
+          <div className="flex items-center justify-end border-t border-zinc-700 px-4 py-3">
+            <button
+              onClick={() => { setEmbedSnippet(null); onClose(); }}
+              className="rounded px-3 py-1.5 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -166,6 +231,17 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                 />
                 <span className="text-sm text-zinc-300">PWA (Progressive Web App)</span>
                 <span className="text-xs text-zinc-500">(Installable)</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="radio"
+                  checked={mode === 'embed'}
+                  onChange={() => setMode('embed')}
+                  disabled={isExporting}
+                  className="text-blue-500"
+                />
+                <span className="text-sm text-zinc-300">Embed (iframe)</span>
+                <span className="text-xs text-zinc-500">(For websites)</span>
               </label>
             </div>
           </div>
