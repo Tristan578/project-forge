@@ -14,12 +14,29 @@ interface Comment {
 
 interface CommentSectionProps {
   comments: Comment[];
+  gameId: string;
   onAddComment: (content: string, parentId?: string) => void;
 }
 
-export function CommentSection({ comments, onAddComment }: CommentSectionProps) {
+export function CommentSection({ comments, gameId, onAddComment }: CommentSectionProps) {
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [content, setContent] = useState('');
+  const [flaggedIds, setFlaggedIds] = useState<Set<string>>(new Set());
+
+  const handleFlag = async (commentId: string) => {
+    try {
+      const res = await fetch(`/api/community/games/${gameId}/flag`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ commentId }),
+      });
+      if (res.ok) {
+        setFlaggedIds((prev) => new Set(prev).add(commentId));
+      }
+    } catch {
+      // silently fail
+    }
+  };
 
   const topLevelComments = comments.filter((c) => !c.parentId);
 
@@ -105,7 +122,12 @@ export function CommentSection({ comments, onAddComment }: CommentSectionProps) 
                       {formatDate(comment.createdAt)}
                     </span>
                   </div>
-                  <button className="text-zinc-500 hover:text-zinc-400">
+                  <button
+                    onClick={() => handleFlag(comment.id)}
+                    disabled={flaggedIds.has(comment.id)}
+                    className={`text-zinc-500 hover:text-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed ${flaggedIds.has(comment.id) ? 'text-red-500' : ''}`}
+                    title={flaggedIds.has(comment.id) ? 'Reported' : 'Report comment'}
+                  >
                     <Flag className="w-4 h-4" />
                   </button>
                 </div>
@@ -132,7 +154,12 @@ export function CommentSection({ comments, onAddComment }: CommentSectionProps) 
                             {formatDate(reply.createdAt)}
                           </span>
                         </div>
-                        <button className="text-zinc-500 hover:text-zinc-400">
+                        <button
+                          onClick={() => handleFlag(reply.id)}
+                          disabled={flaggedIds.has(reply.id)}
+                          className={`text-zinc-500 hover:text-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed ${flaggedIds.has(reply.id) ? 'text-red-500' : ''}`}
+                          title={flaggedIds.has(reply.id) ? 'Reported' : 'Report comment'}
+                        >
                           <Flag className="w-4 h-4" />
                         </button>
                       </div>

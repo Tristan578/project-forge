@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { X, Play, Heart, GitFork, ExternalLink } from 'lucide-react';
+import { X, Play, Heart, GitFork, ExternalLink, Share2, Check } from 'lucide-react';
 import { StarRating } from './StarRating';
 import { CommentSection } from './CommentSection';
 import { useCommunityStore } from '@/stores/communityStore';
@@ -39,6 +39,7 @@ interface GameDetailModalProps {
 export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
   const [game, setGame] = useState<GameDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
   const { likedGameIds, userRatings, likeGame, unlikeGame, rateGame, forkGame } =
     useCommunityStore();
   const router = useRouter();
@@ -81,6 +82,17 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
       onClose();
     } catch (err) {
       console.error('Failed to fork game:', err);
+    }
+  };
+
+  const handleShare = async () => {
+    const url = game?.cdnUrl ? `${window.location.origin}${game.cdnUrl}` : window.location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available
     }
   };
 
@@ -176,6 +188,13 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
               <GitFork className="w-5 h-5" />
               Fork
             </button>
+            <button
+              onClick={handleShare}
+              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 text-zinc-300 rounded hover:bg-zinc-700"
+            >
+              {copied ? <Check className="w-5 h-5 text-green-400" /> : <Share2 className="w-5 h-5" />}
+              {copied ? 'Copied!' : 'Share'}
+            </button>
             <div className="ml-auto flex items-center gap-2">
               <span className="text-sm text-zinc-400">Your rating:</span>
               <StarRating
@@ -247,6 +266,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
           {/* Comments */}
           <CommentSection
             comments={game.comments}
+            gameId={gameId}
             onAddComment={handleAddComment}
           />
         </div>
