@@ -3,11 +3,11 @@ import { generateGameHTML, type GameTemplateOptions } from './gameTemplate';
 import { useEditorStore } from '@/stores/editorStore';
 import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
-import type { ExportPreset } from './presets';
+import type { ExportFormat, ExportPreset } from './presets';
 
 export interface ExportOptions {
   title: string;
-  mode: 'single-html' | 'zip' | 'pwa';
+  mode: ExportFormat;
   resolution: GameTemplateOptions['resolution'];
   bgColor: string;
   includeDebug: boolean;
@@ -42,8 +42,8 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
   const mobileTouchConfigJson = mobileTouchConfig?.enabled ? JSON.stringify(mobileTouchConfig) : undefined;
 
   // 5. Branch based on export mode
-  if (options.mode === 'zip' || options.mode === 'pwa') {
-    // ZIP or PWA export with separated assets
+  if (options.mode === 'zip' || options.mode === 'pwa' || options.mode === 'embed') {
+    // ZIP, PWA, or Embed export with separated assets
     const zipOptions: ZipExportOptions = {
       format: options.mode,
       includeSourceMaps: options.preset?.includeSourceMaps ?? false,

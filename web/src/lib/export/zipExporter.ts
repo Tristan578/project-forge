@@ -8,10 +8,12 @@ import { extractAssets } from './assetExtractor';
 import type { GameTemplateOptions } from './gameTemplate';
 import { bundleScripts } from './scriptBundler';
 import { generateLoadingHtml, generateLoadingScript, type LoadingScreenConfig } from './loadingScreen';
+import { generatePostMessageBridge } from './embedGenerator';
+import type { ExportFormat } from './presets';
 import type { ScriptData } from '@/stores/editorStore';
 
 export interface ZipExportOptions {
-  format: 'single-html' | 'zip' | 'pwa';
+  format: ExportFormat;
   includeSourceMaps: boolean;
   compressTextures: boolean;
   customLoadingScreen?: LoadingScreenConfig;
@@ -128,6 +130,7 @@ export async function exportAsZip(
   const hasWebGL2 = wasmEntries.some(e => e.path.includes('engine-pkg-webgl2'));
 
   // Generate main HTML with real WASM loading
+  const isEmbed = options.format === 'embed';
   const html = generateZipIndexHtml({
     title: options.title,
     bgColor: options.bgColor,
@@ -137,6 +140,7 @@ export async function exportAsZip(
     loadingScript,
     hasWebGPU,
     hasWebGL2,
+    embedBridge: isEmbed ? generatePostMessageBridge() : undefined,
   });
 
   entries.push({
@@ -144,11 +148,26 @@ export async function exportAsZip(
     content: html,
   });
 
-  // 6. Add README
-  entries.push({
-    path: 'README.txt',
-    content: generateReadme(options.title),
-  });
+  // 6. Add format-specific files
+  if (isEmbed) {
+    entries.push({
+      path: 'README.txt',
+      content: generateEmbedReadme(options.title),
+    });
+  } else {
+    entries.push({
+      path: 'README.txt',
+      content: generateReadme(options.title),
+    });
+  }
+
+  // Add .itch.toml for itch.io compatibility (always include for ZIP/PWA/embed)
+  if (options.format !== 'single-html') {
+    entries.push({
+      path: '.itch.toml',
+      content: generateItchToml(options.title),
+    });
+  }
 
   // 7. Create ZIP
   return await createZip(entries);
@@ -166,8 +185,9 @@ function generateZipIndexHtml(options: {
   loadingScript: string;
   hasWebGPU: boolean;
   hasWebGL2: boolean;
+  embedBridge?: string;
 }): string {
-  const { title, bgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2 } = options;
+  const { title, bgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge } = options;
 
   const debugScript = includeDebug
     ? `
@@ -227,6 +247,7 @@ function generateZipIndexHtml(options: {
   <script>
     ${debugScript}
     ${loadingScript}
+    ${embedBridge || ''}
   </script>
 
   <script type="module">
@@ -546,6 +567,75 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+/**
+ * Generate .itch.toml manifest for itch.io uploads.
+ * Tells the itch.io butler/app which file to launch.
+ */
+function generateItchToml(title: string): string {
+  return `# itch.io manifest — ${title}
+# See https://itch.io/docs/itch/integrating/manifest.html
+
+[[actions]]
+name = "Play"
+path = "index.html"
+`;
+}
+
+/**
+ * Generate README for embed exports.
+ */
+function generateEmbedReadme(title: string): string {
+  return `${title} — Embeddable Game
+${'='.repeat(title.length + 20)}
+
+This game was exported for iframe embedding from GenForge.
+
+EMBEDDING:
+Use the following HTML to embed this game on your website:
+
+  <iframe
+    src="index.html"
+    title="${title}"
+    width="960"
+    height="540"
+    frameborder="0"
+    allowfullscreen
+    allow="autoplay; gamepad; fullscreen"
+    sandbox="allow-scripts allow-same-origin allow-popups"
+    style="border: none;"
+  ></iframe>
+
+Or use a responsive container:
+
+  <div style="position: relative; width: 100%; aspect-ratio: 16/9;">
+    <iframe
+      src="index.html"
+      title="${title}"
+      style="position: absolute; inset: 0; width: 100%; height: 100%; border: none;"
+      allowfullscreen
+      allow="autoplay; gamepad; fullscreen"
+      sandbox="allow-scripts allow-same-origin allow-popups"
+    ></iframe>
+  </div>
+
+PARENT PAGE COMMUNICATION:
+The embedded game sends postMessage events to the parent window:
+
+  window.addEventListener('message', function(event) {
+    if (event.data.source !== 'forge-game') return;
+    console.log(event.data.type, event.data.data);
+    // Types: 'loading', 'ready', 'resize', 'error'
+  });
+
+HOSTING:
+Upload these files to any web server. WASM requires HTTP (not file://).
+
+---
+Created with GenForge
+https://genforge.dev
+`;
 }
 
 /**

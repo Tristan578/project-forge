@@ -5,10 +5,12 @@
 
 import type { LoadingScreenConfig } from './loadingScreen';
 
+export type ExportFormat = 'single-html' | 'zip' | 'pwa' | 'embed';
+
 export interface ExportPreset {
   name: string;
   description: string;
-  format: 'single-html' | 'zip' | 'pwa';
+  format: ExportFormat;
   includeSourceMaps: boolean;
   compressTextures: boolean;
   resolution: 'responsive' | '1920x1080' | '1280x720';
@@ -99,6 +101,23 @@ export const EXPORT_PRESETS: Record<string, ExportPreset> = {
       progressStyle: 'spinner',
       title: undefined,
       subtitle: 'Installing...',
+    },
+  },
+
+  embed: {
+    name: 'Embed',
+    description: 'Iframe-embeddable game for websites and blogs',
+    format: 'embed',
+    includeSourceMaps: false,
+    compressTextures: true,
+    resolution: 'responsive',
+    includeDebug: false,
+    loadingScreen: {
+      backgroundColor: '#000000',
+      progressBarColor: '#6366f1',
+      progressStyle: 'spinner',
+      title: undefined,
+      subtitle: undefined,
     },
   },
 
