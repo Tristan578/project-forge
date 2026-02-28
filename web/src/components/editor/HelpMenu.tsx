@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { HelpCircle, Keyboard, BookOpen, GraduationCap, RotateCcw } from 'lucide-react';
+import { HelpCircle, Keyboard, BookOpen, GraduationCap, RotateCcw, MessageSquareText } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
@@ -9,9 +9,10 @@ const WELCOMED_KEY = 'forge-welcomed';
 
 interface HelpMenuProps {
   onOpenShortcuts: () => void;
+  onOpenFeedback: () => void;
 }
 
-export function HelpMenu({ onOpenShortcuts }: HelpMenuProps) {
+export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -101,6 +102,11 @@ export function HelpMenu({ onOpenShortcuts }: HelpMenuProps) {
     openPanel('docs');
   };
 
+  const handleOpenFeedback = () => {
+    close();
+    onOpenFeedback();
+  };
+
   // Track item index for ref assignment
   let itemIndex = 0;
   const getItemRef = () => {
@@ -163,6 +169,13 @@ export function HelpMenu({ onOpenShortcuts }: HelpMenuProps) {
             icon={<RotateCcw size={14} />}
             label="Show Welcome Screen"
             onClick={handleResetWelcome}
+          />
+          <div className="my-1 h-px bg-zinc-800" role="separator" />
+          <MenuItem
+            ref={getItemRef()}
+            icon={<MessageSquareText size={14} />}
+            label="Send Feedback"
+            onClick={handleOpenFeedback}
           />
         </div>
       )}

@@ -29,6 +29,8 @@ export const tokenSourceEnum = pgEnum('token_source', ['monthly', 'addon', 'mixe
 
 export const tokenPackageEnum = pgEnum('token_package', ['spark', 'blaze', 'inferno']);
 
+export const feedbackTypeEnum = pgEnum('feedback_type', ['bug', 'feature', 'general']);
+
 export const transactionTypeEnum = pgEnum('transaction_type', [
   'monthly_grant', 'purchase', 'deduction', 'refund', 'rollover', 'earned', 'adjustment',
 ]);
@@ -439,6 +441,22 @@ export const sellerProfiles = pgTable(
   ]
 );
 
+export const feedback = pgTable(
+  'feedback',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id),
+    type: feedbackTypeEnum('type').notNull(),
+    description: text('description').notNull(),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_feedback_user').on(table.userId),
+    index('idx_feedback_type').on(table.type),
+  ]
+);
+
 // --- Types ---
 
 export type User = typeof users.$inferSelect;
@@ -478,3 +496,7 @@ export type ApiKeyScope = 'scene:read' | 'scene:write' | 'ai:generate' | 'projec
 export type AssetCategory = 'model_3d' | 'sprite' | 'texture' | 'audio' | 'script' | 'prefab' | 'template' | 'shader' | 'animation';
 export type AssetStatus = 'draft' | 'pending_review' | 'published' | 'rejected' | 'removed';
 export type AssetLicense = 'standard' | 'extended';
+
+export type Feedback = typeof feedback.$inferSelect;
+export type NewFeedback = typeof feedback.$inferInsert;
+export type FeedbackType = 'bug' | 'feature' | 'general';
