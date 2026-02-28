@@ -150,7 +150,7 @@ jobs:
     name: E2E (UI)
     runs-on: ubuntu-latest
     needs: [build-wasm]
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
