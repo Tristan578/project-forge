@@ -1,6 +1,26 @@
 import { eq } from 'drizzle-orm';
 import { getDb } from '../db/client';
-import { users } from '../db/schema';
+import {
+  users,
+  apiKeys,
+  providerKeys,
+  tokenUsage,
+  tokenPurchases,
+  projects,
+  publishedGames,
+  costLog,
+  creditTransactions,
+  gameRatings,
+  gameComments,
+  gameLikes,
+  gameForks,
+  gameTags,
+  userFollows,
+  assetReviews,
+  assetPurchases,
+  sellerProfiles,
+  marketplaceAssets,
+} from '../db/schema';
 import type { Tier, User } from '../db/schema';
 
 /** Find or create a user from Clerk webhook data */
@@ -75,4 +95,93 @@ export async function updateUserStripe(
       updatedAt: new Date(),
     })
     .where(eq(users.id, userId));
+}
+
+/** Update user display name */
+export async function updateDisplayName(
+  userId: string,
+  displayName: string
+): Promise<User> {
+  const db = getDb();
+  const trimmed = displayName.trim();
+  if (trimmed.length === 0) throw new Error('Display name cannot be empty');
+  if (trimmed.length > 50) throw new Error('Display name must be 50 characters or less');
+
+  const [user] = await db
+    .update(users)
+    .set({ displayName: trimmed, updatedAt: new Date() })
+    .where(eq(users.id, userId))
+    .returning();
+
+  if (!user) throw new Error('User not found');
+  return user;
+}
+
+/** Cascading hard delete of a user and all their data */
+export async function deleteUserAccount(userId: string): Promise<void> {
+  const db = getDb();
+
+  // Get user's published game IDs for dependent table cleanup
+  const userGames = await db
+    .select({ id: publishedGames.id })
+    .from(publishedGames)
+    .where(eq(publishedGames.userId, userId));
+  const gameIds = userGames.map((g) => g.id);
+
+  // Get user's project IDs for dependent table cleanup
+  const userProjects = await db
+    .select({ id: projects.id })
+    .from(projects)
+    .where(eq(projects.userId, userId));
+  const projectIds = userProjects.map((p) => p.id);
+
+  // Delete in dependency order (children first)
+
+  // 1. Community data on user's games
+  if (gameIds.length > 0) {
+    for (const gameId of gameIds) {
+      await db.delete(gameRatings).where(eq(gameRatings.gameId, gameId));
+      await db.delete(gameComments).where(eq(gameComments.gameId, gameId));
+      await db.delete(gameLikes).where(eq(gameLikes.gameId, gameId));
+      await db.delete(gameTags).where(eq(gameTags.gameId, gameId));
+      await db.delete(gameForks).where(eq(gameForks.originalGameId, gameId));
+    }
+  }
+
+  // 2. User's own community interactions on other games
+  await db.delete(gameRatings).where(eq(gameRatings.userId, userId));
+  await db.delete(gameComments).where(eq(gameComments.userId, userId));
+  await db.delete(gameLikes).where(eq(gameLikes.userId, userId));
+  await db.delete(gameForks).where(eq(gameForks.userId, userId));
+  await db.delete(userFollows).where(eq(userFollows.followerId, userId));
+  await db.delete(userFollows).where(eq(userFollows.followingId, userId));
+
+  // 3. Marketplace data
+  await db.delete(assetReviews).where(eq(assetReviews.userId, userId));
+  await db.delete(assetPurchases).where(eq(assetPurchases.buyerId, userId));
+  await db.delete(marketplaceAssets).where(eq(marketplaceAssets.sellerId, userId));
+  await db.delete(sellerProfiles).where(eq(sellerProfiles.userId, userId));
+
+  // 4. Published games (after community data is cleaned)
+  if (gameIds.length > 0) {
+    await db.delete(publishedGames).where(eq(publishedGames.userId, userId));
+  }
+
+  // 5. Projects (after published games that reference them)
+  if (projectIds.length > 0) {
+    await db.delete(projects).where(eq(projects.userId, userId));
+  }
+
+  // 6. Financial data
+  await db.delete(costLog).where(eq(costLog.userId, userId));
+  await db.delete(creditTransactions).where(eq(creditTransactions.userId, userId));
+  await db.delete(tokenUsage).where(eq(tokenUsage.userId, userId));
+  await db.delete(tokenPurchases).where(eq(tokenPurchases.userId, userId));
+
+  // 7. Keys
+  await db.delete(apiKeys).where(eq(apiKeys.userId, userId));
+  await db.delete(providerKeys).where(eq(providerKeys.userId, userId));
+
+  // 8. User record
+  await db.delete(users).where(eq(users.id, userId));
 }

@@ -87,13 +87,18 @@ test.describe('Modals @ui', () => {
     await expect(welcomeModal).toBeVisible({ timeout: 5000 });
   });
 
-  test('keyboard shortcuts modal opens with ? key', async ({ page, editor }) => {
+  test('keyboard shortcuts modal opens via Help menu', async ({ page, editor }) => {
     await editor.loadPage();
 
-    // Open shortcuts via the toolbar button (? keyboard shortcut is unreliable in headless)
-    const shortcutsBtn = page.locator('button[title="Keyboard shortcuts (?)"]').first();
-    await expect(shortcutsBtn).toBeVisible({ timeout: 5000 });
-    await shortcutsBtn.click();
+    // Open the Help dropdown menu
+    const helpBtn = page.locator('button[aria-label="Help menu"]').first();
+    await expect(helpBtn).toBeVisible({ timeout: 5000 });
+    await helpBtn.click();
+
+    // Click "Keyboard Shortcuts" menu item
+    const shortcutsItem = page.getByRole('menuitem', { name: /keyboard shortcuts/i });
+    await expect(shortcutsItem).toBeVisible({ timeout: 5000 });
+    await shortcutsItem.click();
 
     const shortcutsHeading = page.locator('h2').filter({ hasText: /keyboard shortcuts/i }).first();
     await expect(shortcutsHeading).toBeVisible({ timeout: 5000 });
@@ -102,8 +107,11 @@ test.describe('Modals @ui', () => {
   test('keyboard shortcuts modal can be closed with Escape', async ({ page, editor }) => {
     await editor.loadPage();
 
-    const shortcutsBtn = page.locator('button[title="Keyboard shortcuts (?)"]').first();
-    await shortcutsBtn.click();
+    // Open the Help dropdown menu, then Keyboard Shortcuts
+    const helpBtn = page.locator('button[aria-label="Help menu"]').first();
+    await helpBtn.click();
+    const shortcutsItem = page.getByRole('menuitem', { name: /keyboard shortcuts/i });
+    await shortcutsItem.click();
 
     const shortcutsHeading = page.locator('h2').filter({ hasText: /keyboard shortcuts/i }).first();
     await expect(shortcutsHeading).toBeVisible({ timeout: 5000 });
