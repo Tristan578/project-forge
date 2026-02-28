@@ -457,6 +457,47 @@ export const feedback = pgTable(
   ]
 );
 
+// --- Generation Jobs ---
+
+export const jobStatusEnum = pgEnum('job_status', [
+  'pending', 'processing', 'downloading', 'completed', 'failed', 'cancelled',
+]);
+
+export const generationTypeEnum = pgEnum('generation_type', [
+  'model', 'texture', 'sfx', 'voice', 'skybox', 'music', 'sprite', 'sprite_sheet', 'tileset',
+]);
+
+export const generationJobs = pgTable(
+  'generation_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    projectId: uuid('project_id').references(() => projects.id),
+    provider: text('provider').notNull(),
+    providerJobId: text('provider_job_id').notNull(),
+    type: generationTypeEnum('type').notNull(),
+    prompt: text('prompt').notNull(),
+    parameters: jsonb('parameters').notNull().default({}),
+    status: jobStatusEnum('status').notNull().default('pending'),
+    progress: integer('progress').notNull().default(0),
+    errorMessage: text('error_message'),
+    resultUrl: text('result_url'),
+    resultMeta: jsonb('result_meta'),
+    imported: integer('imported').notNull().default(0),
+    tokenCost: integer('token_cost').notNull().default(0),
+    tokenUsageId: text('token_usage_id'),
+    refunded: integer('refunded').notNull().default(0),
+    entityId: text('entity_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_generation_jobs_user_status').on(table.userId, table.status),
+    index('idx_generation_jobs_user_created').on(table.userId, table.createdAt),
+  ]
+);
+
 // --- Types ---
 
 export type User = typeof users.$inferSelect;
@@ -489,6 +530,9 @@ export type NewMarketplaceAsset = typeof marketplaceAssets.$inferInsert;
 export type AssetPurchase = typeof assetPurchases.$inferSelect;
 export type AssetReview = typeof assetReviews.$inferSelect;
 export type SellerProfile = typeof sellerProfiles.$inferSelect;
+
+export type GenerationJob = typeof generationJobs.$inferSelect;
+export type NewGenerationJob = typeof generationJobs.$inferInsert;
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';

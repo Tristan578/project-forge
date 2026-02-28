@@ -7,7 +7,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useGenerationStore, type GenerationJob } from '../generationStore';
 
 describe('generationStore', () => {
@@ -23,9 +23,15 @@ describe('generationStore', () => {
   };
 
   beforeEach(() => {
+    // Mock fetch for addJob persistence (fire-and-forget)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ job: { id: 'db-1' }, jobs: [] }),
+    }));
     // Reset store to initial state
     useGenerationStore.setState({
       jobs: {},
+      hydrated: false,
     });
   });
 
@@ -349,6 +355,130 @@ describe('generationStore', () => {
       const state = useGenerationStore.getState();
       expect(state.jobs['client-123'].status).toBe('failed');
       expect(state.jobs['client-123'].error).toBe('API timeout');
+    });
+  });
+
+  describe('Server Persistence', () => {
+    it('should POST to /api/jobs when adding a job', async () => {
+      const { addJob } = useGenerationStore.getState();
+      addJob(mockJob);
+
+      // Wait for fire-and-forget
+      await new Promise((r) => setTimeout(r, 10));
+
+      const fetchMock = vi.mocked(fetch);
+      const postCalls = fetchMock.mock.calls.filter(
+        (c) => c[0] === '/api/jobs' && (c[1] as RequestInit)?.method === 'POST'
+      );
+      expect(postCalls).toHaveLength(1);
+    });
+
+    it('should store dbId after server responds', async () => {
+      const { addJob } = useGenerationStore.getState();
+      addJob(mockJob);
+
+      // Wait for fire-and-forget
+      await new Promise((r) => setTimeout(r, 50));
+
+      const state = useGenerationStore.getState();
+      expect(state.jobs['client-123'].dbId).toBe('db-1');
+    });
+
+    it('should PATCH status to server when dbId exists', async () => {
+      useGenerationStore.setState({
+        jobs: { 'client-123': { ...mockJob, dbId: 'db-xyz' } },
+      });
+
+      useGenerationStore.getState().updateJob('client-123', { status: 'completed', progress: 100 });
+
+      await new Promise((r) => setTimeout(r, 10));
+
+      const fetchMock = vi.mocked(fetch);
+      const patchCalls = fetchMock.mock.calls.filter(
+        (c) => c[0] === '/api/jobs/db-xyz' && (c[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(patchCalls).toHaveLength(1);
+    });
+  });
+
+  describe('hydrateFromServer', () => {
+    it('should restore active jobs from server', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          jobs: [
+            {
+              id: 'srv-1',
+              providerJobId: 'prov-1',
+              provider: 'meshy',
+              type: 'model',
+              prompt: 'A castle',
+              status: 'processing',
+              progress: 40,
+              createdAt: '2024-01-01T00:00:00Z',
+              updatedAt: '2024-01-01T00:01:00Z',
+            },
+          ],
+        }),
+      } as Response);
+
+      await useGenerationStore.getState().hydrateFromServer();
+
+      const state = useGenerationStore.getState();
+      const jobs = Object.values(state.jobs);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].prompt).toBe('A castle');
+      expect(jobs[0].dbId).toBe('srv-1');
+      expect(state.hydrated).toBe(true);
+    });
+
+    it('should set hydrated=true when no active jobs', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ jobs: [] }),
+      } as Response);
+
+      await useGenerationStore.getState().hydrateFromServer();
+      expect(useGenerationStore.getState().hydrated).toBe(true);
+    });
+
+    it('should set hydrated=true on network error', async () => {
+      vi.mocked(fetch).mockRejectedValueOnce(new Error('Network error'));
+
+      await useGenerationStore.getState().hydrateFromServer();
+      expect(useGenerationStore.getState().hydrated).toBe(true);
+    });
+
+    it('should merge hydrated jobs with existing in-memory jobs', async () => {
+      // Add in-memory job first
+      useGenerationStore.setState({
+        jobs: { 'local-1': { ...mockJob, id: 'local-1' } },
+      });
+
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          jobs: [
+            {
+              id: 'srv-1',
+              providerJobId: 'prov-1',
+              provider: 'meshy',
+              type: 'texture',
+              prompt: 'Wood texture',
+              status: 'pending',
+              progress: 0,
+              createdAt: '2024-01-01T00:00:00Z',
+              updatedAt: '2024-01-01T00:00:00Z',
+            },
+          ],
+        }),
+      } as Response);
+
+      await useGenerationStore.getState().hydrateFromServer();
+
+      const jobs = useGenerationStore.getState().jobs;
+      expect(Object.keys(jobs)).toHaveLength(2);
+      expect(jobs['local-1']).toBeDefined();
     });
   });
 });
