@@ -131,8 +131,6 @@ jobs:
   build-nextjs:
     name: Next.js Production Build
     runs-on: ubuntu-latest
-    env:
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
     steps:
       - uses: actions/checkout@v4
 
@@ -197,7 +195,6 @@ jobs:
         run: npx playwright test --project=chromium --grep-invert @engine
         env:
           CI: true
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_placeholder
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
