@@ -46,7 +46,6 @@ pub struct TilemapRenderState {
     pub last_hash: u64,
 }
 
-
 /// Newtype wrapper for Handle<TextureAtlasLayout> since Handle<T> is not a Component in Bevy 0.16.
 #[derive(Component)]
 pub struct AtlasLayoutHandle(pub Handle<TextureAtlasLayout>);
