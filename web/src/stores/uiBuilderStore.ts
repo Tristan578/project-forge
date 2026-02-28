@@ -395,8 +395,15 @@ export const useUIBuilderStore = create<UIBuilderState>((set, get) => ({
 
   setActiveScreen: (screenId: string | null) => set({ activeScreenId: screenId }),
 
-  reorderScreens: (_fromIndex: number, _toIndex: number) => {
-    // TODO: Implement screen reordering if needed
+  reorderScreens: (fromIndex: number, toIndex: number) => {
+    set((state) => {
+      const screens = [...state.screens];
+      if (fromIndex < 0 || fromIndex >= screens.length || toIndex < 0 || toIndex >= screens.length) return state;
+      if (fromIndex === toIndex) return state;
+      const [moved] = screens.splice(fromIndex, 1);
+      screens.splice(toIndex, 0, moved);
+      return { screens };
+    });
   },
 
   updateScreen: (screenId: string, updates: Partial<UIScreen>) => {
@@ -606,8 +613,58 @@ export const useUIBuilderStore = create<UIBuilderState>((set, get) => ({
     return newWidgetId;
   },
 
-  reparentWidget: (_screenId: string, _widgetId: string, _newParentId: string | null) => {
-    // TODO: Implement widget reparenting with circular reference check
+  reparentWidget: (screenId: string, widgetId: string, newParentId: string | null) => {
+    const state = get();
+    const screen = state.screens.find((s) => s.id === screenId);
+    if (!screen) return;
+
+    const widget = screen.widgets.find((w) => w.id === widgetId);
+    if (!widget) return;
+
+    // No-op if already has the same parent
+    if (widget.parentWidgetId === newParentId) return;
+
+    // Prevent reparenting to self
+    if (newParentId === widgetId) return;
+
+    // Circular reference check: newParentId must not be a descendant of widgetId
+    if (newParentId !== null) {
+      const isDescendant = (ancestorId: string, targetId: string): boolean => {
+        const ancestor = screen.widgets.find((w) => w.id === ancestorId);
+        if (!ancestor) return false;
+        for (const childId of ancestor.children) {
+          if (childId === targetId) return true;
+          if (isDescendant(childId, targetId)) return true;
+        }
+        return false;
+      };
+      if (isDescendant(widgetId, newParentId)) return;
+    }
+
+    const oldParentId = widget.parentWidgetId;
+
+    set((state) => ({
+      screens: state.screens.map((s) => {
+        if (s.id !== screenId) return s;
+        return {
+          ...s,
+          widgets: s.widgets.map((w) => {
+            if (w.id === widgetId) {
+              return { ...w, parentWidgetId: newParentId };
+            }
+            // Remove from old parent's children
+            if (oldParentId !== null && w.id === oldParentId) {
+              return { ...w, children: w.children.filter((c) => c !== widgetId) };
+            }
+            // Add to new parent's children
+            if (newParentId !== null && w.id === newParentId) {
+              return { ...w, children: [...w.children, widgetId] };
+            }
+            return w;
+          }),
+        };
+      }),
+    }));
   },
 
   reorderWidget: (screenId: string, widgetId: string, direction: 'up' | 'down') => {
@@ -705,8 +762,26 @@ export const useUIBuilderStore = create<UIBuilderState>((set, get) => ({
   },
 
   applyTheme: (theme: UITheme) => {
-    set({ globalTheme: theme });
-    // TODO: Apply theme to all widgets
+    set((state) => ({
+      globalTheme: theme,
+      screens: state.screens.map((screen) => ({
+        ...screen,
+        widgets: screen.widgets.map((widget) => ({
+          ...widget,
+          style: {
+            ...widget.style,
+            color: theme.textColor,
+            fontFamily: theme.fontFamily,
+            fontSize: theme.fontSize,
+            borderRadius: theme.borderRadius,
+            backgroundColor:
+              widget.type === 'button' || widget.type === 'panel'
+                ? theme.secondaryColor
+                : widget.style.backgroundColor,
+          },
+        })),
+      })),
+    }));
   },
 
   copyWidget: (screenId: string, widgetId: string) => {
@@ -808,9 +883,88 @@ export const useUIBuilderStore = create<UIBuilderState>((set, get) => ({
           };
         });
         break;
-      // TODO: Implement other undo types
-      default:
-        set({ undoStack: newUndoStack, redoStack: [...redoStack, action] });
+      case 'update_screen':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId ? { ...s, ...action.before } : s
+          ),
+          undoStack: newUndoStack,
+          redoStack: [...redoStack, action],
+        }));
+        break;
+      case 'add_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? { ...s, widgets: s.widgets.filter((w) => w.id !== action.widget.id) }
+              : s
+          ),
+          undoStack: newUndoStack,
+          redoStack: [...redoStack, action],
+        }));
+        break;
+      case 'delete_widget':
+        set((state) => ({
+          screens: state.screens.map((s) => {
+            if (s.id !== action.screenId) return s;
+            const newWidgets = [...s.widgets];
+            newWidgets.splice(action.index, 0, action.widget);
+            return { ...s, widgets: newWidgets };
+          }),
+          undoStack: newUndoStack,
+          redoStack: [...redoStack, action],
+        }));
+        break;
+      case 'update_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? {
+                  ...s,
+                  widgets: s.widgets.map((w) =>
+                    w.id === action.widgetId ? ({ ...w, ...action.before } as UIWidget) : w
+                  ),
+                }
+              : s
+          ),
+          undoStack: newUndoStack,
+          redoStack: [...redoStack, action],
+        }));
+        break;
+      case 'move_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? {
+                  ...s,
+                  widgets: s.widgets.map((w) =>
+                    w.id === action.widgetId ? { ...w, x: action.beforeX, y: action.beforeY } : w
+                  ),
+                }
+              : s
+          ),
+          undoStack: newUndoStack,
+          redoStack: [...redoStack, action],
+        }));
+        break;
+      case 'resize_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? {
+                  ...s,
+                  widgets: s.widgets.map((w) =>
+                    w.id === action.widgetId
+                      ? { ...w, width: action.beforeW, height: action.beforeH }
+                      : w
+                  ),
+                }
+              : s
+          ),
+          undoStack: newUndoStack,
+          redoStack: [...redoStack, action],
+        }));
+        break;
     }
   },
 
@@ -837,9 +991,87 @@ export const useUIBuilderStore = create<UIBuilderState>((set, get) => ({
           redoStack: newRedoStack,
         }));
         break;
-      // TODO: Implement other redo types
-      default:
-        set({ undoStack: [...undoStack, action], redoStack: newRedoStack });
+      case 'update_screen':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId ? { ...s, ...action.after } : s
+          ),
+          undoStack: [...undoStack, action],
+          redoStack: newRedoStack,
+        }));
+        break;
+      case 'add_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? { ...s, widgets: [...s.widgets, action.widget] }
+              : s
+          ),
+          undoStack: [...undoStack, action],
+          redoStack: newRedoStack,
+        }));
+        break;
+      case 'delete_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? { ...s, widgets: s.widgets.filter((w) => w.id !== action.widget.id) }
+              : s
+          ),
+          undoStack: [...undoStack, action],
+          redoStack: newRedoStack,
+        }));
+        break;
+      case 'update_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? {
+                  ...s,
+                  widgets: s.widgets.map((w) =>
+                    w.id === action.widgetId ? ({ ...w, ...action.after } as UIWidget) : w
+                  ),
+                }
+              : s
+          ),
+          undoStack: [...undoStack, action],
+          redoStack: newRedoStack,
+        }));
+        break;
+      case 'move_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? {
+                  ...s,
+                  widgets: s.widgets.map((w) =>
+                    w.id === action.widgetId ? { ...w, x: action.afterX, y: action.afterY } : w
+                  ),
+                }
+              : s
+          ),
+          undoStack: [...undoStack, action],
+          redoStack: newRedoStack,
+        }));
+        break;
+      case 'resize_widget':
+        set((state) => ({
+          screens: state.screens.map((s) =>
+            s.id === action.screenId
+              ? {
+                  ...s,
+                  widgets: s.widgets.map((w) =>
+                    w.id === action.widgetId
+                      ? { ...w, width: action.afterW, height: action.afterH }
+                      : w
+                  ),
+                }
+              : s
+          ),
+          undoStack: [...undoStack, action],
+          redoStack: newRedoStack,
+        }));
+        break;
     }
   },
 
@@ -1101,7 +1333,163 @@ function createPresetWidgets(preset: ScreenPreset): UIWidget[] {
       }));
       break;
 
-    // TODO: Implement other presets (game_over, inventory, dialog)
+    case 'game_over':
+      // Dark overlay
+      widgets.push(createWidget('panel', {
+        name: 'overlay',
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100,
+        config: { layout: 'free', gap: 0, alignItems: 'center' as const },
+        style: { backgroundColor: 'rgba(0,0,0,0.8)' },
+      }));
+      // Game Over title
+      widgets.push(createWidget('text', {
+        name: 'game_over_title',
+        x: 30,
+        y: 25,
+        width: 40,
+        height: 10,
+        config: { content: 'Game Over', binding: null },
+        style: { fontSize: 48, textAlign: 'center' as const, fontWeight: 'bold' as const, color: '#ef4444' },
+      }));
+      // Final score
+      widgets.push(createWidget('text', {
+        name: 'final_score',
+        x: 35,
+        y: 40,
+        width: 30,
+        height: 6,
+        config: { content: 'Score: {{score}}', binding: null },
+        style: { fontSize: 24, textAlign: 'center' as const },
+      }));
+      // Retry button
+      widgets.push(createWidget('button', {
+        name: 'retry_button',
+        x: 40,
+        y: 55,
+        width: 20,
+        height: 6,
+        config: {
+          label: 'Retry',
+          hoverStyle: { opacity: 0.8 },
+          activeStyle: { opacity: 0.6 },
+          action: { type: 'scene_reset' },
+        },
+      }));
+      // Main Menu button
+      widgets.push(createWidget('button', {
+        name: 'menu_button',
+        x: 40,
+        y: 65,
+        width: 20,
+        height: 6,
+        config: {
+          label: 'Main Menu',
+          hoverStyle: { opacity: 0.8 },
+          activeStyle: { opacity: 0.6 },
+          action: { type: 'none' },
+        },
+      }));
+      break;
+
+    case 'inventory':
+      // Inventory panel background
+      widgets.push(createWidget('panel', {
+        name: 'inventory_bg',
+        x: 10,
+        y: 5,
+        width: 80,
+        height: 90,
+        config: { layout: 'vertical', gap: 4, alignItems: 'stretch' as const },
+        style: { backgroundColor: 'rgba(24,24,27,0.95)', borderWidth: 1, borderColor: '#3f3f46' },
+      }));
+      // Title
+      widgets.push(createWidget('text', {
+        name: 'inventory_title',
+        x: 12,
+        y: 8,
+        width: 76,
+        height: 5,
+        config: { content: 'Inventory', binding: null },
+        style: { fontSize: 24, fontWeight: 'bold' as const },
+      }));
+      // Item grid
+      widgets.push(createWidget('grid', {
+        name: 'item_grid',
+        x: 12,
+        y: 16,
+        width: 76,
+        height: 65,
+        config: {
+          columns: 6,
+          rows: 4,
+          cellWidth: 64,
+          cellHeight: 64,
+          gap: 4,
+          itemBinding: null,
+          cellTemplate: null,
+        },
+      }));
+      // Close button
+      widgets.push(createWidget('button', {
+        name: 'close_button',
+        x: 82,
+        y: 6,
+        width: 6,
+        height: 4,
+        config: {
+          label: 'X',
+          hoverStyle: { opacity: 0.8 },
+          activeStyle: { opacity: 0.6 },
+          action: { type: 'none' },
+        },
+      }));
+      break;
+
+    case 'dialog':
+      // Dialog backdrop (bottom-center)
+      widgets.push(createWidget('panel', {
+        name: 'dialog_box',
+        x: 10,
+        y: 70,
+        width: 80,
+        height: 25,
+        config: { layout: 'vertical', gap: 2, alignItems: 'start' as const },
+        style: { backgroundColor: 'rgba(24,24,27,0.95)', borderWidth: 1, borderColor: '#3f3f46', borderRadius: 8 },
+      }));
+      // Speaker name
+      widgets.push(createWidget('text', {
+        name: 'speaker_name',
+        x: 12,
+        y: 72,
+        width: 20,
+        height: 4,
+        config: { content: 'Speaker', binding: null },
+        style: { fontSize: 16, fontWeight: 'bold' as const, color: '#60a5fa' },
+      }));
+      // Dialog text
+      widgets.push(createWidget('text', {
+        name: 'dialog_text',
+        x: 12,
+        y: 77,
+        width: 76,
+        height: 12,
+        config: { content: 'Dialog text goes here...', binding: null },
+        style: { fontSize: 14, lineHeight: 1.5 },
+      }));
+      // Continue indicator
+      widgets.push(createWidget('text', {
+        name: 'continue_hint',
+        x: 75,
+        y: 90,
+        width: 14,
+        height: 3,
+        config: { content: 'Click to continue ▶', binding: null },
+        style: { fontSize: 12, textAlign: 'right' as const, color: '#a1a1aa' },
+      }));
+      break;
   }
 
   return widgets;
