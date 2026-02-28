@@ -8,7 +8,7 @@
 'use client';
 
 import { useState, useCallback, useRef, useMemo, memo, type MouseEvent, type KeyboardEvent } from 'react';
-import { Layers } from 'lucide-react';
+import { Layers, Loader2 } from 'lucide-react';
 import { useEditorStore, type SceneGraph } from '@/stores/editorStore';
 import { getWasmModule } from '@/hooks/useEngine';
 import { SceneNode } from './SceneNode';
@@ -435,10 +435,34 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
             <span>No matching entities</span>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center h-full text-neutral-500 text-sm">
-            <Layers className="w-8 h-8 mb-2 opacity-50" />
-            <span>No entities in scene</span>
-            <span className="text-xs mt-1">Waiting for engine...</span>
+          <div className="flex flex-col h-full">
+            {/* Loading skeleton */}
+            <div className="space-y-1 px-2 py-2">
+              <div className="flex items-center gap-2 px-2 py-1">
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700" />
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700" />
+                <div className="h-3 w-24 animate-pulse rounded bg-neutral-700" />
+              </div>
+              <div className="flex items-center gap-2 px-2 py-1 pl-6">
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700/60" />
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700/60" />
+                <div className="h-3 w-20 animate-pulse rounded bg-neutral-700/60" />
+              </div>
+              <div className="flex items-center gap-2 px-2 py-1 pl-6">
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700/60" />
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700/60" />
+                <div className="h-3 w-16 animate-pulse rounded bg-neutral-700/60" />
+              </div>
+              <div className="flex items-center gap-2 px-2 py-1">
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700" />
+                <div className="h-3 w-3 animate-pulse rounded bg-neutral-700" />
+                <div className="h-3 w-28 animate-pulse rounded bg-neutral-700" />
+              </div>
+            </div>
+            <div className="flex flex-1 flex-col items-center justify-center text-neutral-500 text-sm">
+              <Loader2 className="w-5 h-5 mb-2 animate-spin opacity-40" />
+              <span className="text-xs">Loading scene entities...</span>
+            </div>
           </div>
         )}
 
