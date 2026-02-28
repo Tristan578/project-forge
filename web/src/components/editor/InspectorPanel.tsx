@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, memo } from 'react';
-import { Copy, ClipboardPaste } from 'lucide-react';
+import { Copy, ClipboardPaste, MousePointerClick } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 import { Vec3Input } from './Vec3Input';
@@ -29,6 +29,7 @@ import { EditModeInspector } from './EditModeInspector';
 import AdaptiveMusicInspector from './AdaptiveMusicInspector';
 import { NetworkSettingsInspector } from './NetworkSettingsInspector';
 import { LodInspector } from './LodInspector';
+import { InspectorErrorBoundary } from './InspectorErrorBoundary';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   copyTransformProperty,
@@ -187,10 +188,16 @@ export const InspectorPanel = memo(function InspectorPanel() {
     }
   }, [handlePositionChange, handleRotationChange, handleScaleChange]);
 
-  // No selection — show Scene Settings
+  // No selection — show empty state hint + Scene Settings
   if (!primaryId) {
     return (
       <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
+        <div className="mb-4 flex flex-col items-center gap-2 rounded border border-zinc-800 bg-zinc-800/40 p-4">
+          <MousePointerClick size={20} className="text-zinc-600" />
+          <p className="text-xs text-zinc-500 text-center">
+            Select an entity in the hierarchy or viewport to inspect its properties
+          </p>
+        </div>
         <h2 className="mb-4 text-sm font-semibold text-zinc-300">Scene Settings</h2>
         <SceneSettings />
         <InputBindingsPanel />
@@ -306,66 +313,122 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* 2D Sprite section (only for sprite entities in 2D projects) */}
-      {is2D && entityType.includes('Sprite') && <SpriteInspector />}
+      {is2D && entityType.includes('Sprite') && (
+        <InspectorErrorBoundary section="Sprite">
+          <SpriteInspector />
+        </InspectorErrorBoundary>
+      )}
 
       {/* Sprite Animation section (for sprites with animation data) */}
-      {is2D && entityType.includes('Sprite') && <SpriteAnimationInspector />}
+      {is2D && entityType.includes('Sprite') && (
+        <InspectorErrorBoundary section="Sprite Animation">
+          <SpriteAnimationInspector />
+        </InspectorErrorBoundary>
+      )}
 
       {/* Skeletal 2D Animation section (for entities with skeleton data in 2D projects) */}
       {is2D && primaryId && (hasSkeleton || entityType.includes('Sprite')) && (
-        <SkeletonInspector entityId={primaryId} />
+        <InspectorErrorBoundary section="Skeleton 2D">
+          <SkeletonInspector entityId={primaryId} />
+        </InspectorErrorBoundary>
       )}
 
       {/* 2D Camera section (only for camera2d entities in 2D projects) */}
-      {is2D && entityType.includes('Camera2d') && <Camera2dInspector />}
+      {is2D && entityType.includes('Camera2d') && (
+        <InspectorErrorBoundary section="Camera 2D">
+          <Camera2dInspector />
+        </InspectorErrorBoundary>
+      )}
 
       {/* Tilemap section (only in 2D projects) */}
-      {is2D && <TilemapInspector />}
+      {is2D && (
+        <InspectorErrorBoundary section="Tilemap">
+          <TilemapInspector />
+        </InspectorErrorBoundary>
+      )}
 
       {/* Light section (only for light entities in 3D projects) */}
-      {!is2D && primaryLight && <LightInspector />}
+      {!is2D && primaryLight && (
+        <InspectorErrorBoundary section="Light">
+          <LightInspector />
+        </InspectorErrorBoundary>
+      )}
 
       {/* Material section (only for mesh entities in 3D projects — mutually exclusive with light) */}
-      {!is2D && !primaryLight && <MaterialInspector />}
+      {!is2D && !primaryLight && (
+        <InspectorErrorBoundary section="Material">
+          <MaterialInspector />
+        </InspectorErrorBoundary>
+      )}
 
       {/* LOD section (only for mesh entities in 3D projects) */}
-      {!is2D && !primaryLight && <LodInspector />}
+      {!is2D && !primaryLight && (
+        <InspectorErrorBoundary section="LOD">
+          <LodInspector />
+        </InspectorErrorBoundary>
+      )}
 
       {/* Physics section (conditional based on project type) */}
-      {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
+      <InspectorErrorBoundary section="Physics">
+        {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
+      </InspectorErrorBoundary>
 
       {/* Joint section (for entities with physics) */}
-      <JointInspector />
+      <InspectorErrorBoundary section="Joints">
+        <JointInspector />
+      </InspectorErrorBoundary>
 
       {/* Terrain section (for terrain entities) */}
-      <TerrainInspector />
+      <InspectorErrorBoundary section="Terrain">
+        <TerrainInspector />
+      </InspectorErrorBoundary>
 
       {/* Audio section (for all entities) */}
-      <AudioInspector />
+      <InspectorErrorBoundary section="Audio">
+        <AudioInspector />
+      </InspectorErrorBoundary>
 
       {/* Reverb Zone section (for all entities in 3D) */}
-      {!is2D && primaryId && <ReverbZoneInspector entityId={primaryId} />}
+      {!is2D && primaryId && (
+        <InspectorErrorBoundary section="Reverb Zone">
+          <ReverbZoneInspector entityId={primaryId} />
+        </InspectorErrorBoundary>
+      )}
 
       {/* Adaptive Music section (global) */}
-      <AdaptiveMusicInspector />
+      <InspectorErrorBoundary section="Adaptive Music">
+        <AdaptiveMusicInspector />
+      </InspectorErrorBoundary>
 
       {/* Particle section (for all entities) */}
-      <ParticleInspector />
+      <InspectorErrorBoundary section="Particles">
+        <ParticleInspector />
+      </InspectorErrorBoundary>
 
       {/* Animation section (for glTF entities with animations) */}
-      <AnimationInspector />
+      <InspectorErrorBoundary section="Animation">
+        <AnimationInspector />
+      </InspectorErrorBoundary>
 
       {/* Keyframe property animation (D-2) */}
-      <AnimationClipInspector />
+      <InspectorErrorBoundary section="Animation Clips">
+        <AnimationClipInspector />
+      </InspectorErrorBoundary>
 
       {/* Game Components section */}
-      <GameComponentInspector />
+      <InspectorErrorBoundary section="Game Components">
+        <GameComponentInspector />
+      </InspectorErrorBoundary>
 
       {/* Game Camera section */}
-      <GameCameraInspector />
+      <InspectorErrorBoundary section="Game Camera">
+        <GameCameraInspector />
+      </InspectorErrorBoundary>
 
       {/* Edit Mode section */}
-      <EditModeInspector />
+      <InspectorErrorBoundary section="Edit Mode">
+        <EditModeInspector />
+      </InspectorErrorBoundary>
 
       {/* Script section */}
       <div className="border-t border-zinc-800 pt-4 mt-4">
@@ -398,12 +461,16 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Network settings section */}
-      <div className="border-t border-zinc-800 pt-4 mt-4">
-        <NetworkSettingsInspector />
-      </div>
+      <InspectorErrorBoundary section="Network Settings">
+        <div className="border-t border-zinc-800 pt-4 mt-4">
+          <NetworkSettingsInspector />
+        </div>
+      </InspectorErrorBoundary>
 
       {/* Input bindings section */}
-      <InputBindingsPanel />
+      <InspectorErrorBoundary section="Input Bindings">
+        <InputBindingsPanel />
+      </InspectorErrorBoundary>
     </div>
   );
 });
