@@ -1,10 +1,11 @@
 'use client';
 
 import { useState, useSyncExternalStore } from 'react';
-import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen, GraduationCap } from 'lucide-react';
+import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen, GraduationCap, Clock } from 'lucide-react';
 import { TemplateGallery } from './TemplateGallery';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
+import { getRecentProjects } from '@/lib/workspace/recentProjects';
 
 const STORAGE_KEY = 'forge-welcomed';
 
@@ -25,6 +26,10 @@ export function WelcomeModal() {
   const [showTemplates, setShowTemplates] = useState(false);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
+
+  // Load recent projects once on mount (useState lazy init avoids referential instability
+  // that useSyncExternalStore would cause with array snapshots — Object.is([], []) is false)
+  const [recentProjects] = useState(() => getRecentProjects().slice(0, 5));
 
   const handleDismiss = () => {
     setDismissed(true);
@@ -79,6 +84,30 @@ export function WelcomeModal() {
               text="Press F1 to open the documentation browser, or click help buttons in inspector panels."
             />
           </div>
+
+          {/* Recent projects */}
+          {recentProjects.length > 0 && (
+            <div className="mb-3 rounded border border-zinc-700 bg-zinc-800/50 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Clock size={14} className="text-zinc-400" />
+                <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500">Recent Projects</h3>
+              </div>
+              <div className="space-y-1">
+                {recentProjects.map((p) => (
+                  <a
+                    key={p.id}
+                    href={`/editor/${p.id}`}
+                    className="flex items-center justify-between rounded px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700/50 transition-colors"
+                  >
+                    <span className="truncate">{p.name}</span>
+                    <span className="ml-2 shrink-0 text-[10px] text-zinc-600">
+                      {formatRelativeTime(p.openedAt)}
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Tutorial section */}
           <div className="mb-3 rounded border border-blue-700/50 bg-blue-900/20 p-4">
@@ -147,6 +176,17 @@ export function WelcomeModal() {
       <TemplateGallery isOpen={showTemplates} onClose={handleTemplateClose} />
     </>
   );
+}
+
+function formatRelativeTime(ts: number): string {
+  const diffMin = Math.round((Date.now() - ts) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffH = Math.round(diffMin / 60);
+  if (diffH < 24) return `${diffH}h ago`;
+  const diffD = Math.round(diffH / 24);
+  if (diffD < 30) return `${diffD}d ago`;
+  return `${Math.round(diffD / 30)}mo ago`;
 }
 
 function Tip({ icon: Icon, text }: { icon: typeof MousePointerClick; text: string }) {

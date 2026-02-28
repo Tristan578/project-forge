@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { EditorLayout } from '@/components/editor/EditorLayout';
 import { useEditorStore } from '@/stores/editorStore';
+import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 
 export default function EditorPage() {
   const params = useParams();
@@ -32,6 +33,7 @@ export default function EditorPage() {
         const project = await res.json();
         setProjectId(projectId);
         setSceneName(project.name);
+        trackProjectOpen(projectId, project.name);
 
         // Load the scene data into the engine
         const sceneJson = JSON.stringify(project.sceneData);

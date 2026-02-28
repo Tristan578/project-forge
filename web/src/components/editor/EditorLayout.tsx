@@ -28,6 +28,7 @@ import { PerformanceProfiler } from './PerformanceProfiler';
 import { HelpMenu } from './HelpMenu';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useEditorStore } from '@/stores/editorStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { UserButton } from '@clerk/nextjs';
 
@@ -176,6 +177,7 @@ export function EditorLayout() {
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
   const toggleChatOverlay = useWorkspaceStore((s) => s.toggleChatOverlay);
+  const sceneName = useEditorStore((s) => s.sceneName);
   const layout = useResponsiveLayout();
 
   // Drawer state for compact mode
@@ -241,7 +243,15 @@ export function EditorLayout() {
       <div className="relative h-screen w-screen bg-zinc-950">
         {/* Top bar - simplified */}
         <div className="flex h-8 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-2">
-          <span className="text-xs font-semibold text-zinc-400">GenForge</span>
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="shrink-0 text-xs font-semibold text-zinc-400">GenForge</span>
+            {sceneName !== 'Untitled' && (
+              <>
+                <span className="text-zinc-700">/</span>
+                <span className="truncate text-[10px] text-zinc-500">{sceneName}</span>
+              </>
+            )}
+          </div>
           <PlayControls />
           <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} />
         </div>
@@ -288,6 +298,10 @@ export function EditorLayout() {
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3">
         <div className="flex items-center gap-3">
           <span className="text-xs font-semibold text-zinc-400">GenForge</span>
+          <div className="h-3 w-px bg-zinc-700" />
+          <span className="max-w-[200px] truncate text-xs text-zinc-500" title={sceneName}>
+            {sceneName}
+          </span>
           <SceneToolbar />
         </div>
         <PlayControls />
