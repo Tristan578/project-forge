@@ -123,9 +123,10 @@ jobs:
         working-directory: engine
         run: |
           # Size thresholds in bytes (uncompressed .wasm after wasm-bindgen)
-          # Increase these when intentionally adding features; CI fails at +10%
-          WEBGL2_THRESHOLD=52428800   # 50 MB
-          WEBGPU_THRESHOLD=52428800   # 50 MB
+          # Current sizes: ~26 MB each. Increase when intentionally adding features.
+          # CI fails if size exceeds threshold by more than 10%.
+          WEBGL2_THRESHOLD=36700160   # 35 MB
+          WEBGPU_THRESHOLD=36700160   # 35 MB
 
           WEBGL2_SIZE=$(stat -c%s pkg-webgl2/forge_engine_bg.wasm)
           WEBGPU_SIZE=$(stat -c%s pkg-webgpu/forge_engine_bg.wasm)
