@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useRef } from 'react';
-import { X, Image as ImageIcon } from 'lucide-react';
+import { useCallback, useRef, useState } from 'react';
+import { X, Image as ImageIcon, Pencil } from 'lucide-react';
 import { useEditorStore, type SpriteData, type SpriteAnchor } from '@/stores/editorStore';
+import { PixelArtEditor } from './PixelArtEditor';
 
 /** Anchor point grid positions */
 const ANCHOR_GRID: SpriteAnchor[][] = [
@@ -17,6 +18,7 @@ export function SpriteInspector() {
   const sortingLayers = useEditorStore((s) => s.sortingLayers);
   const assetRegistry = useEditorStore((s) => s.assetRegistry);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [pixelEditorOpen, setPixelEditorOpen] = useState(false);
 
   const handleUpdate = useCallback(
     (_partial: Partial<SpriteData>) => {
@@ -138,6 +140,20 @@ export function SpriteInspector() {
             accept=".png,.jpg,.jpeg,.webp"
             className="hidden"
             onChange={(e) => handleTextureUpload(e.target.files)}
+          />
+
+          {/* Pixel Art Editor */}
+          <button
+            onClick={() => setPixelEditorOpen(true)}
+            className="flex w-full items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-400 hover:border-blue-600 hover:text-blue-400"
+          >
+            <Pencil size={12} />
+            <span>Draw Pixel Art</span>
+          </button>
+          <PixelArtEditor
+            open={pixelEditorOpen}
+            onClose={() => setPixelEditorOpen(false)}
+            entityId={primaryId}
           />
         </div>
 
