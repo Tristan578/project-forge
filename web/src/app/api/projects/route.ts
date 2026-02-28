@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /**
  * GET /api/projects
@@ -24,6 +25,10 @@ export async function GET() {
 export async function POST(req: Request) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Rate limit: 10 project creation requests per minute per user
+  const rl = rateLimit(`projects-create:${authResult.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   let body;
   try {

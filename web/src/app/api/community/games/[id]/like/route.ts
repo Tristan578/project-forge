@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { gameLikes } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,10 @@ export async function POST(
     const db = getDb();
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
+
+    // Rate limit: 30 like/unlike actions per minute per user
+    const rl = rateLimit(`like:${authResult.ctx.user.id}`, 30, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const { id: gameId } = await params;
 

@@ -3,10 +3,15 @@ import { auth } from '@clerk/nextjs/server';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, users, projects } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function POST(request: NextRequest) {
   const { userId: clerkId } = await auth();
   if (!clerkId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+  // Rate limit: 10 publish requests per minute per user
+  const rl = rateLimit(`publish:${clerkId}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const body = await request.json();
   const { projectId, title, slug, description } = body;

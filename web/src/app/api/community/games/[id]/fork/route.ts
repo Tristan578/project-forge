@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, gameForks, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,10 @@ export async function POST(
     const db = getDb();
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
+
+    // Rate limit: 10 fork requests per minute per user
+    const rl = rateLimit(`fork:${authResult.ctx.user.id}`, 10, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const { id: gameId } = await params;
 
