@@ -766,3 +766,29 @@ pub fn emit_camera_2d_changed(data: &crate::core::camera_2d::Camera2dData) {
         }),
     });
 }
+
+/// Emit a LOD level changed event for an entity.
+pub fn emit_lod_changed(entity_id: &str, current_lod: u8, distances: &[f32; 3]) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct LodChangedPayload<'a> {
+        entity_id: &'a str,
+        current_lod: u8,
+        distances: &'a [f32; 3],
+    }
+
+    emit_event("LOD_CHANGED", &LodChangedPayload { entity_id, current_lod, distances });
+}
+
+/// Emit performance stats.
+pub fn emit_performance_stats(fps: f32, frame_time_ms: f32, entity_count: u32) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PerformanceStatsPayload {
+        fps: f32,
+        frame_time_ms: f32,
+        entity_count: u32,
+    }
+
+    emit_event("PERFORMANCE_STATS", &PerformanceStatsPayload { fps, frame_time_ms, entity_count });
+}

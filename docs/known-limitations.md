@@ -23,7 +23,7 @@ The 2D engine has two tiers of readiness:
 | Feature | Phase | What exists | What's missing |
 |---------|-------|-------------|----------------|
 | 2D Joints | 2D-4 | `Joint2dData` ECS component, inspector UI, MCP commands | No Rapier joint components created — no constraint solving, motors, or limits |
-| 2D Skeletal Animation | 2D-5 | `SkeletonData2d` with bones/slots/skins/IK, fully wired inspector UI (create/delete skeleton, bone CRUD, skin switching, animation playback), 11 MCP commands | No bone rendering, no vertex skinning, no keyframe interpolation, no IK solving |
+| 2D Skeletal Animation | 2D-5 | `SkeletonData2d` with bones/slots/skins/IK, fully wired inspector UI, runtime systems (keyframe interpolation with 5 easing modes, 2-bone analytical IK solver, Gizmos bone rendering in editor), 11 MCP commands | No vertex skinning (bones drive transforms but don't deform meshes) |
 
 **Workaround:** For joint-connected 2D objects, use 3D physics joints with an orthographic camera. For skeletal animation, use sprite animation state machines instead.
 
@@ -52,14 +52,17 @@ No actual networking is implemented. All multiplayer state is local simulation. 
 
 ## LOD & Performance (Phase 31)
 
-**Status: UI + metrics stubs, honest error responses**
+**Status: Distance-based LOD switching works, mesh decimation not available**
 
 LOD (Level of Detail) includes:
-- `LodData` ECS component definition
-- LOD Inspector panel with distance/ratio sliders and honest status feedback when generation is attempted
-- Performance budget UI (`set_performance_budget` works, `get_performance_stats` returns local store data)
+- `LodData` ECS component with per-entity distance thresholds
+- Runtime `update_lod_levels` system: calculates camera distance, updates `current_lod` (0-3), emits `LOD_CHANGED` events
+- LOD Inspector panel with distance/ratio sliders and honest status feedback
+- Performance budget UI (`set_performance_budget` works, `get_performance_stats` emits real FPS/frame-time/entity-count)
+- `set_lod_distances` propagates global distance thresholds to all entities
 
-MCP handlers for LOD generation (`set_entity_lod`, `generate_lods`, `optimize_scene`, `set_lod_distances`) return `success: false` with descriptive errors explaining the feature requires engine-side mesh decimation.
+Remaining limitation:
+- Automatic LOD mesh generation (`generate_lods`, `optimize_scene`) requires a mesh decimation library (e.g. meshopt) not yet integrated. LOD level is tracked and emitted but mesh detail is not swapped.
 
 ## Advanced Audio (Phase 20)
 
