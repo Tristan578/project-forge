@@ -2,20 +2,30 @@
 
 This document provides an honest accounting of features that are partially implemented or UI-only facades. Features listed here have editor UI and MCP command definitions, but limited or no engine integration.
 
-## 2D Subsystem (Phases 2D-1 through 2D-5)
+> **Last updated:** 2026-02-28
 
-**Status: UI scaffolding only — no Bevy engine integration**
+## 2D Subsystem
 
-The 2D system includes inspector panels, store slices, and MCP command definitions for:
-- Sprites and sprite sheets
-- Sprite animation and state machines
-- Tilemap editing (multi-layer)
-- 2D physics (colliders, joints)
-- 2D skeletal animation (bones, skins, IK)
+The 2D engine has two tiers of readiness:
 
-These features render UI in the editor but do not create or modify Bevy ECS components. Commands are dispatched to the engine but the pending queue handlers are stubs. The Rust `bridge/skeleton2d.rs` and sprite-related systems exist but are not fully wired to produce rendered output in the canvas.
+### Working (full Bevy ECS integration)
 
-**Workaround:** Use the 3D engine for all game creation. 2D games can be approximated using orthographic cameras with 3D primitives.
+| Feature | Phase | Notes |
+|---------|-------|-------|
+| Sprites | 2D-1 | Real `Sprite` components with textures, tinting, flip, anchor, sorting layers |
+| Camera 2D | 2D-1 | Real `Camera2d` + `OrthographicProjection` with zoom sync |
+| Sprite Animation | 2D-2 | `TextureAtlas` frame advancement, per-frame timing, looping, ping-pong, state machines with bool/float/trigger conditions |
+| Tilemaps | 2D-3 | Child `Sprite` entities per tile, multi-layer rendering, visibility, opacity, grid/manual atlas slicing |
+| 2D Physics (bodies & colliders) | 2D-4 | Full Rapier2D simulation — rigid bodies, 5 collider shapes, mass/friction/restitution, sensors, CCD, gravity scale, debug rendering |
+
+### Not implemented (metadata stored, no runtime behavior)
+
+| Feature | Phase | What exists | What's missing |
+|---------|-------|-------------|----------------|
+| 2D Joints | 2D-4 | `Joint2dData` ECS component, inspector UI, MCP commands | No Rapier joint components created — no constraint solving, motors, or limits |
+| 2D Skeletal Animation | 2D-5 | `SkeletonData2d` with bones/slots/skins/IK, inspector UI, MCP commands | No bone rendering, no vertex skinning, no keyframe interpolation, no IK solving |
+
+**Workaround:** For joint-connected 2D objects, use 3D physics joints with an orthographic camera. For skeletal animation, use sprite animation state machines instead.
 
 ## Editor Collaboration (Phase 24)
 
@@ -47,13 +57,13 @@ No actual networking is implemented. All multiplayer state is local simulation. 
 LOD (Level of Detail) includes:
 - `LodData` ECS component definition
 - LOD Inspector panel
-- Performance budget UI (set_performance_budget works, get_performance_stats returns local store data)
+- Performance budget UI (`set_performance_budget` works, `get_performance_stats` returns local store data)
 
-MCP handlers for LOD generation (set_entity_lod, generate_lods, optimize_scene, set_lod_distances) return `success: false` with descriptive errors explaining the feature requires engine-side mesh decimation.
+MCP handlers for LOD generation (`set_entity_lod`, `generate_lods`, `optimize_scene`, `set_lod_distances`) return `success: false` with descriptive errors explaining the feature requires engine-side mesh decimation.
 
 ## Advanced Audio (Phase 20)
 
-**Status: Basic audio works, adaptive features return honest errors**
+**Status: Core audio works, adaptive features return honest errors**
 
 Working:
 - Spatial audio playback
@@ -71,17 +81,3 @@ Not implemented (returns `success: false` with descriptive error):
 **Status: Editor and compiler work, application to entities does not**
 
 The shader node graph editor and WGSL compiler are functional — you can create node graphs and compile them to WGSL code. However, applying compiled shaders to entity materials is not implemented. The `apply_shader_to_entity` handler returns `success: false` with an explanation.
-
-## Game Component Runtime (Phase 5-D)
-
-**Status: 12 of 13 components work, 1 stub remaining**
-
-Working runtime behaviors: CharacterController, Health, Collectible, Projectile, MovingPlatform, Enemy, Inventory, DamageZone, Checkpoint, Teleporter, TriggerZone, Spawner
-
-All 12 components have full Rust ECS systems with collision detection, damage application, teleportation, spawning, and event emission. The collision tracking system feeds data to DamageZone, Checkpoint, Teleporter, and TriggerZone.
-
-Stub behavior: DialogueTrigger (has no runtime system implementation)
-
-## Scene Hierarchy on Load
-
-Parent-child relationships are saved in `.forge` files but are not fully restored when loading a scene. Entities load with correct transforms but may lose their hierarchy (reparenting).
