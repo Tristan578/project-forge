@@ -39,7 +39,7 @@ export async function PATCH(
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
-    const { name, description, priceTokens, license, tags, status } = body;
+    const { name, description, priceTokens, license, tags, status, previewUrl, assetFileUrl, assetFileSize } = body;
 
     const updates: Record<string, unknown> = {};
     if (name !== undefined) updates.name = name;
@@ -47,6 +47,9 @@ export async function PATCH(
     if (priceTokens !== undefined) updates.priceTokens = priceTokens;
     if (license !== undefined) updates.license = license;
     if (tags !== undefined) updates.tags = tags;
+    if (previewUrl !== undefined) updates.previewUrl = previewUrl;
+    if (assetFileUrl !== undefined) updates.assetFileUrl = assetFileUrl;
+    if (assetFileSize !== undefined) updates.assetFileSize = assetFileSize;
     if (status !== undefined) {
       // Sellers can only transition draft -> pending_review. Publishing requires admin review.
       const allowedTransitions: Record<string, string[]> = {
