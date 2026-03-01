@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { X, Download, Loader2, Palette, Code, Check } from 'lucide-react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { X, Download, Loader2, Palette, Code, Check, AlertTriangle } from 'lucide-react';
 import { exportGame, downloadBlob } from '@/lib/export/exportEngine';
 import { useEditorStore } from '@/stores/editorStore';
 import { EXPORT_PRESETS, getPreset, type ExportFormat } from '@/lib/export/presets';
@@ -37,6 +37,20 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   });
   const [embedSnippet, setEmbedSnippet] = useState<string | null>(null);
   const [snippetCopied, setSnippetCopied] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Close on Escape key
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isExporting) {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isExporting, onClose]);
 
   // Sync title with scene name when it changes (React-documented pattern)
   const [prevSceneName, setPrevSceneName] = useState(sceneName);
@@ -59,6 +73,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
   const handleExport = useCallback(async () => {
     setExporting(true);
+    setExportError(null);
     try {
       const preset = selectedPreset ? getPreset(selectedPreset) : undefined;
 
@@ -87,7 +102,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       }
     } catch (err) {
       console.error('[Export] Failed to export game:', err);
-      alert('Export failed: ' + (err instanceof Error ? err.message : String(err)));
+      setExportError(err instanceof Error ? err.message : String(err));
     } finally {
       setExporting(false);
     }
@@ -106,10 +121,10 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   // Show embed snippet after successful embed export
   if (embedSnippet) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-        <div className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={(e) => { if (e.target === e.currentTarget) { setEmbedSnippet(null); onClose(); } }}>
+        <div role="dialog" aria-labelledby="embed-dialog-title" aria-modal="true" className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
           <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
-            <h2 className="text-base font-semibold text-zinc-100">Embed Code</h2>
+            <h2 id="embed-dialog-title" className="text-base font-semibold text-zinc-100">Embed Code</h2>
             <button
               onClick={() => { setEmbedSnippet(null); onClose(); }}
               className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
@@ -145,11 +160,11 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={(e) => { if (e.target === e.currentTarget && !isExporting) onClose(); }}>
+      <div ref={dialogRef} role="dialog" aria-labelledby="export-dialog-title" aria-modal="true" className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
-          <h2 className="text-base font-semibold text-zinc-100">Export Game</h2>
+          <h2 id="export-dialog-title" className="text-base font-semibold text-zinc-100">Export Game</h2>
           <button
             onClick={onClose}
             disabled={isExporting}
@@ -381,6 +396,30 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
             )}
           </div>
         </div>
+
+        {/* Error display */}
+        {exportError && (
+          <div className="mx-4 mb-0 flex items-start gap-2 rounded border border-red-900/50 bg-red-950/20 p-3">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-400" />
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-medium text-red-400">Export failed</p>
+              <p className="mt-0.5 text-xs text-red-400/70 break-all line-clamp-3">{exportError}</p>
+            </div>
+            <button
+              onClick={() => setExportError(null)}
+              className="shrink-0 rounded p-0.5 text-red-400/50 hover:text-red-400"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
+
+        {/* Title validation hint */}
+        {!title.trim() && !isExporting && (
+          <div className="mx-4 mb-0 mt-1">
+            <p className="text-xs text-amber-500/70">A game title is required to export</p>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 border-t border-zinc-700 px-4 py-3">
