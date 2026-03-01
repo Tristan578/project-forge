@@ -64,8 +64,17 @@ jobs:
       - run: npm ci
         working-directory: web
 
-      - run: npx vitest run
+      - name: Run tests with coverage
         working-directory: web
+        run: npx vitest run --coverage --coverage.reporter=text --coverage.reporter=json-summary --coverage.reporter=json
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: web/coverage/
+          retention-days: 14
 
   test-mcp:
     name: MCP Tests
@@ -196,7 +205,7 @@ jobs:
         run: npx playwright test --grep @ui --project=chromium
 
   security:
-    name: Rust Security Audit
+    name: Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -220,3 +229,12 @@ jobs:
       - name: npm audit (mcp-server)
         working-directory: mcp-server
         run: npm audit --audit-level=high
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Rust dependency audit
+        working-directory: engine
+        run: cargo audit
