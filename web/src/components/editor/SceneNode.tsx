@@ -302,7 +302,14 @@ export function SceneNode({
   };
 
   return (
-    <div className={getVisibilityClasses()}>
+    <div
+      role="treeitem"
+      aria-selected={isSelected}
+      aria-expanded={hasChildren ? isExpanded : undefined}
+      aria-level={depth + 1}
+      aria-label={node.name}
+      className={getVisibilityClasses()}
+    >
       {/* Drop indicator BEFORE */}
       {isDropTarget && dropTarget?.zone === 'before' && (
         <div
@@ -329,6 +336,8 @@ export function SceneNode({
             !hasChildren ? 'invisible' : ''
           }`}
           onClick={handleExpandClick}
+          aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
+          tabIndex={-1}
         >
           {isExpanded ? (
             <ChevronDown className="w-3 h-3" />
@@ -342,6 +351,9 @@ export function SceneNode({
           className="w-4 h-4 flex items-center justify-center text-neutral-500 hover:text-neutral-300"
           onClick={handleVisibilityClick}
           title={node.visible ? 'Hide entity' : 'Show entity'}
+          aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
+          aria-pressed={!node.visible}
+          tabIndex={-1}
         >
           {node.visible ? (
             <Eye className="w-3 h-3" />
@@ -390,7 +402,7 @@ export function SceneNode({
 
       {/* Children */}
       {hasChildren && isExpanded && (
-        <div>
+        <div role="group">
           {node.children
             .filter((childId) => !visibleIds || visibleIds.has(childId))
             .map((childId) => {
