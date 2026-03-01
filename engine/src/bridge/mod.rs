@@ -392,7 +392,9 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, (
                 skeleton2d::advance_skeleton_animation,
                 skeleton2d::solve_ik_constraints_2d,
-            ));
+            ))
+            // LOD runtime: distance-based LOD level switching
+            .add_systems(Update, performance::update_lod_levels);
 
         // Editor-only systems and observers
         #[cfg(not(feature = "runtime"))]
