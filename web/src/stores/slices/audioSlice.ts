@@ -105,8 +105,8 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
     const state = get();
     set({ mixerPanelOpen: !state.mixerPanelOpen });
   },
-  crossfadeAudio: (_fromEntityId, _toEntityId, _durationMs) => {
-    // JS-only implementation (no WASM dispatch)
+  crossfadeAudio: (fromEntityId, toEntityId, durationMs) => {
+    audioManager.crossfade(fromEntityId, toEntityId, durationMs);
   },
   setReverbZone: (entityId, data, enabled) => {
     set(state => ({
