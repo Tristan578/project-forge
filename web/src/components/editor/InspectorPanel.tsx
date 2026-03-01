@@ -30,6 +30,7 @@ import AdaptiveMusicInspector from './AdaptiveMusicInspector';
 import { NetworkSettingsInspector } from './NetworkSettingsInspector';
 import { LodInspector } from './LodInspector';
 import { InspectorErrorBoundary } from './InspectorErrorBoundary';
+import { CollapsibleSection } from './CollapsibleSection';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import {
   copyTransformProperty,
@@ -243,212 +244,252 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Transform section */}
       {primaryTransform && (
-        <div className="space-y-4">
-          <div className="border-t border-zinc-800 pt-4">
-            {/* Transform header with Copy All / Paste All */}
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                <span>Transform <InfoTooltip text="The position, rotation, and size of this object in the 3D world" /></span>
-              </h3>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={handleCopyAll}
-                  title="Copy transform"
-                  className={buttonClass}
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePasteAll}
-                  title="Paste transform"
-                  className={buttonClass}
-                >
-                  <ClipboardPaste className="w-3.5 h-3.5" />
-                </button>
-              </div>
+        <CollapsibleSection
+          id="transform"
+          title="Transform"
+          headerRight={
+            <div className="flex items-center gap-1">
+              <InfoTooltip text="The position, rotation, and size of this object in the 3D world" />
+              <button
+                type="button"
+                onClick={handleCopyAll}
+                title="Copy transform"
+                className={buttonClass}
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handlePasteAll}
+                title="Paste transform"
+                className={buttonClass}
+              >
+                <ClipboardPaste className="w-3.5 h-3.5" />
+              </button>
             </div>
+          }
+        >
+          <div className="space-y-3">
+            <Vec3Input
+              label="Position"
+              value={primaryTransform.position}
+              onChange={handlePositionChange}
+              onReset={() => handlePositionChange([0, 0, 0])}
+              defaultValue={[0, 0, 0]}
+              onCopy={handleCopyPosition}
+              onPaste={handlePastePosition}
+              step={0.1}
+              precision={3}
+            />
 
-            <div className="space-y-3">
-              <Vec3Input
-                label="Position"
-                value={primaryTransform.position}
-                onChange={handlePositionChange}
-                onReset={() => handlePositionChange([0, 0, 0])}
-                defaultValue={[0, 0, 0]}
-                onCopy={handleCopyPosition}
-                onPaste={handlePastePosition}
-                step={0.1}
-                precision={3}
-              />
+            <Vec3Input
+              label="Rotation"
+              value={rotationDeg}
+              onChange={handleRotationChange}
+              onReset={() => handleRotationChange([0, 0, 0])}
+              defaultValue={[0, 0, 0]}
+              onCopy={handleCopyRotation}
+              onPaste={handlePasteRotation}
+              step={1}
+              precision={1}
+            />
 
-              <Vec3Input
-                label="Rotation"
-                value={rotationDeg}
-                onChange={handleRotationChange}
-                onReset={() => handleRotationChange([0, 0, 0])}
-                defaultValue={[0, 0, 0]}
-                onCopy={handleCopyRotation}
-                onPaste={handlePasteRotation}
-                step={1}
-                precision={1}
-              />
-
-              <Vec3Input
-                label="Scale"
-                value={primaryTransform.scale}
-                onChange={handleScaleChange}
-                onReset={() => handleScaleChange([1, 1, 1])}
-                defaultValue={[1, 1, 1]}
-                onCopy={handleCopyScale}
-                onPaste={handlePasteScale}
-                step={0.1}
-                precision={3}
-                min={0.001}
-              />
-            </div>
+            <Vec3Input
+              label="Scale"
+              value={primaryTransform.scale}
+              onChange={handleScaleChange}
+              onReset={() => handleScaleChange([1, 1, 1])}
+              defaultValue={[1, 1, 1]}
+              onCopy={handleCopyScale}
+              onPaste={handlePasteScale}
+              step={0.1}
+              precision={3}
+              min={0.001}
+            />
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* 2D Sprite section (only for sprite entities in 2D projects) */}
       {is2D && entityType.includes('Sprite') && (
         <InspectorErrorBoundary section="Sprite">
-          <SpriteInspector />
+          <CollapsibleSection id="sprite" title="Sprite">
+            <SpriteInspector />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* Sprite Animation section (for sprites with animation data) */}
       {is2D && entityType.includes('Sprite') && (
         <InspectorErrorBoundary section="Sprite Animation">
-          <SpriteAnimationInspector />
+          <CollapsibleSection id="sprite-animation" title="Sprite Animation">
+            <SpriteAnimationInspector />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* Skeletal 2D Animation section (for entities with skeleton data in 2D projects) */}
       {is2D && primaryId && (hasSkeleton || entityType.includes('Sprite')) && (
         <InspectorErrorBoundary section="Skeleton 2D">
-          <SkeletonInspector entityId={primaryId} />
+          <CollapsibleSection id="skeleton-2d" title="Skeleton 2D">
+            <SkeletonInspector entityId={primaryId} />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* 2D Camera section (only for camera2d entities in 2D projects) */}
       {is2D && entityType.includes('Camera2d') && (
         <InspectorErrorBoundary section="Camera 2D">
-          <Camera2dInspector />
+          <CollapsibleSection id="camera-2d" title="Camera 2D">
+            <Camera2dInspector />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* Tilemap section (only in 2D projects) */}
       {is2D && (
         <InspectorErrorBoundary section="Tilemap">
-          <TilemapInspector />
+          <CollapsibleSection id="tilemap" title="Tilemap">
+            <TilemapInspector />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* Light section (only for light entities in 3D projects) */}
       {!is2D && primaryLight && (
         <InspectorErrorBoundary section="Light">
-          <LightInspector />
+          <CollapsibleSection id="light" title="Light">
+            <LightInspector />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* Material section (only for mesh entities in 3D projects — mutually exclusive with light) */}
       {!is2D && !primaryLight && (
         <InspectorErrorBoundary section="Material">
-          <MaterialInspector />
+          <CollapsibleSection id="material" title="Material">
+            <MaterialInspector />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* LOD section (only for mesh entities in 3D projects) */}
       {!is2D && !primaryLight && (
         <InspectorErrorBoundary section="LOD">
-          <LodInspector />
+          <CollapsibleSection id="lod" title="LOD">
+            <LodInspector />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* Physics section (conditional based on project type) */}
       <InspectorErrorBoundary section="Physics">
-        {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
+        <CollapsibleSection id="physics" title="Physics">
+          {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Joint section (for entities with physics) */}
       <InspectorErrorBoundary section="Joints">
-        <JointInspector />
+        <CollapsibleSection id="joints" title="Joints">
+          <JointInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Terrain section (for terrain entities) */}
       <InspectorErrorBoundary section="Terrain">
-        <TerrainInspector />
+        <CollapsibleSection id="terrain" title="Terrain">
+          <TerrainInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Audio section (for all entities) */}
       <InspectorErrorBoundary section="Audio">
-        <AudioInspector />
+        <CollapsibleSection id="audio" title="Audio">
+          <AudioInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Reverb Zone section (for all entities in 3D) */}
       {!is2D && primaryId && (
         <InspectorErrorBoundary section="Reverb Zone">
-          <ReverbZoneInspector entityId={primaryId} />
+          <CollapsibleSection id="reverb-zone" title="Reverb Zone">
+            <ReverbZoneInspector entityId={primaryId} />
+          </CollapsibleSection>
         </InspectorErrorBoundary>
       )}
 
       {/* Adaptive Music section (global) */}
       <InspectorErrorBoundary section="Adaptive Music">
-        <AdaptiveMusicInspector />
+        <CollapsibleSection id="adaptive-music" title="Adaptive Music">
+          <AdaptiveMusicInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Particle section (for all entities) */}
       <InspectorErrorBoundary section="Particles">
-        <ParticleInspector />
+        <CollapsibleSection id="particles" title="Particles">
+          <ParticleInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Animation section (for glTF entities with animations) */}
       <InspectorErrorBoundary section="Animation">
-        <AnimationInspector />
+        <CollapsibleSection id="animation" title="Animation">
+          <AnimationInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Keyframe property animation (D-2) */}
       <InspectorErrorBoundary section="Animation Clips">
-        <AnimationClipInspector />
+        <CollapsibleSection id="animation-clips" title="Animation Clips">
+          <AnimationClipInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Game Components section */}
       <InspectorErrorBoundary section="Game Components">
-        <GameComponentInspector />
+        <CollapsibleSection id="game-components" title="Game Components">
+          <GameComponentInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Game Camera section */}
       <InspectorErrorBoundary section="Game Camera">
-        <GameCameraInspector />
+        <CollapsibleSection id="game-camera" title="Game Camera">
+          <GameCameraInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Edit Mode section */}
       <InspectorErrorBoundary section="Edit Mode">
-        <EditModeInspector />
+        <CollapsibleSection id="edit-mode" title="Edit Mode">
+          <EditModeInspector />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Script section */}
-      <div className="border-t border-zinc-800 pt-4 mt-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            <span>Script <InfoTooltip term="script" /></span>
-          </h3>
-          {hasScript && (
-            <span className="rounded bg-green-900/30 px-1.5 py-0.5 text-[10px] text-green-400">
-              Active
-            </span>
-          )}
-        </div>
+      <CollapsibleSection
+        id="script"
+        title="Script"
+        headerRight={
+          <>
+            <InfoTooltip term="script" />
+            {hasScript && (
+              <span className="rounded bg-green-900/30 px-1.5 py-0.5 text-[10px] text-green-400 ml-1">
+                Active
+              </span>
+            )}
+          </>
+        }
+      >
         <button
           onClick={() => setRightPanelTab('script')}
-          className="mt-2 w-full rounded bg-zinc-800 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+          className="w-full rounded bg-zinc-800 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
         >
           {hasScript ? 'Edit Script' : 'Add Script'}
         </button>
-      </div>
+      </CollapsibleSection>
 
       {/* Show skeleton if we have selection but no transform yet */}
       {!primaryTransform && (
@@ -462,14 +503,16 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Network settings section */}
       <InspectorErrorBoundary section="Network Settings">
-        <div className="border-t border-zinc-800 pt-4 mt-4">
+        <CollapsibleSection id="network-settings" title="Network Settings">
           <NetworkSettingsInspector />
-        </div>
+        </CollapsibleSection>
       </InspectorErrorBoundary>
 
       {/* Input bindings section */}
       <InspectorErrorBoundary section="Input Bindings">
-        <InputBindingsPanel />
+        <CollapsibleSection id="input-bindings" title="Input Bindings">
+          <InputBindingsPanel />
+        </CollapsibleSection>
       </InspectorErrorBoundary>
     </div>
   );
