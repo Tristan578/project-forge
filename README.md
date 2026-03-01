@@ -6,7 +6,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 
 ## Features
 
-> **Note:** Some features listed below are UI scaffolding only. See [Known Limitations](docs/known-limitations.md) for details on which features are fully functional vs. partially implemented.
+> **Status key:** Features marked **(UI only)** have inspector panels and store state but no engine integration yet — interactions update the UI but don't affect the WASM rendering engine. See [Known Limitations](docs/known-limitations.md) for architectural constraints.
 
 ### AI & Automation
 - **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want ("build a platformer level") and the AI spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
@@ -27,7 +27,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Dynamic Lighting** — Point, directional, and spot lights with real-time shadows and ambient light controls
 - **Skybox & Environment Maps** — 5 built-in procedural cubemap presets (Studio, Sunset, Overcast, Night, Bright Day) with adjustable brightness, IBL, and rotation
 - **Physics** — Rigid body dynamics, colliders, forces, joints (fixed, revolute, spherical, prismatic, rope, spring), collision events, and raycasting powered by Rapier 3D
-- **Audio** — Spatial 3D audio, bus mixer with effect chains (reverb, delay, EQ, compressor), adaptive music (vertical layering, horizontal re-sequencing), reverb zones, crossfade, ducking
+- **Audio** — Spatial 3D audio, bus mixer with effect chains (reverb, delay, EQ, compressor), adaptive music (vertical stem layering), reverb zones, crossfade, ducking
 - **GPU Particles** — 9 built-in presets (fire, smoke, sparks, rain, snow, explosions, etc.) with full customization via WebGPU compute shaders
 - **Skeletal Animation** — glTF animation playback with transport controls, crossfade, blend weights, per-clip speed, and script API
 - **Keyframe Animation** — Custom animation clips with position/rotation/scale/color keyframes, easing modes, and timeline editor
@@ -39,14 +39,16 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Post-Processing** — Bloom, chromatic aberration, color grading, CAS sharpening, SSAO (WebGPU), depth of field, and motion blur
 - **LOD System** — Level-of-detail component with distance thresholds, performance budget tracking
 
-### 2D Engine
-- **2D Project Type** — Dedicated 2D mode with orthographic camera, sorting layers, and sprite-specific tools
-- **Sprite System** — Import PNG/WebP sprites, SpriteInspector, sorting layers (Background/Default/Foreground/UI)
-- **Sprite Animation** — Sprite sheet slicing, animation clips, state machines with parameter-driven transitions
-- **Tilemap System** — Multi-layer tilemaps, paint/erase/fill/rectangle tools, auto-tiling (4-bit/8-bit bitmask), tile palette
-- **2D Physics** — Rapier 2D with 6 collider shapes, 4 joint types, one-way platforms, surface velocity, raycasting
-- **Skeletal 2D Animation** — Bone hierarchy, skins, IK constraints, blend trees, keyframe animation, weight painting
-- **AI Sprite Generation** — Generate pixel art characters, tilesets, and sprite sheets via AI providers
+### 2D Engine (UI only)
+> The 2D subsystem has full inspector UIs and Zustand state management, but no Bevy engine integration yet. Interactions update the editor UI; rendering and simulation require engine-side implementation.
+
+- **2D Project Type** — Dedicated 2D mode with orthographic camera, sorting layers, and sprite-specific tools **(UI only)**
+- **Sprite System** — Import PNG/WebP sprites, SpriteInspector, sorting layers (Background/Default/Foreground/UI) **(UI only)**
+- **Sprite Animation** — Sprite sheet slicing, animation clips, state machines with parameter-driven transitions **(UI only)**
+- **Tilemap System** — Multi-layer tilemaps, paint/erase/fill/rectangle tools, tile palette **(UI only)**
+- **2D Physics** — Inspector for 6 collider shapes, 4 joint types, one-way platforms, surface velocity **(UI only)**
+- **Skeletal 2D Animation** — Bone hierarchy, skins, IK constraints, blend trees, keyframe animation **(UI only)**
+- **AI Sprite Generation** — Generate pixel art characters, tilesets, and sprite sheets via DALL-E 3 and SDXL
 
 ### Editor
 - **Dockable Workspace** — Movable, resizable panels with preset layouts and persistent user customization
@@ -70,7 +72,6 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Guided Onboarding** — Welcome wizard, interactive tutorials, context-sensitive tips
 - **In-Editor Documentation** — Browsable docs panel with BM25 search, help buttons on inspectors, F1 shortcut
 - **Pre-Built Game Components** — 13 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
-- **Editor Collaboration** — Real-time multi-user editing with WebSocket sync and CRDT conflict resolution
 - **Responsive Layout** — Adaptive UI with compact (mobile), condensed (laptop), and full desktop modes
 
 ## Architecture
@@ -193,7 +194,7 @@ project-forge/
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
-| `cd web && npx vitest run` | Run web tests (~900 tests) |
+| `cd web && npx vitest run` | Run web tests (~2000 tests) |
 | `cd mcp-server && npx vitest run` | Run MCP server tests |
 
 ### Key conventions
