@@ -47,6 +47,20 @@ interface DuckingRule {
   releaseMs: number;
 }
 
+interface StemConfig {
+  assetId: string;
+  baseVolume: number;
+  /** Intensity range [min, max] — stem volume scales from 0 to baseVolume within this range */
+  intensityRange: [number, number];
+}
+
+interface AdaptiveMusicTrack {
+  trackId: string;
+  stems: Map<string, StemConfig>;
+  intensity: number;
+  bus: string;
+}
+
 class AudioManager {
   private ctx: AudioContext | null = null;
   private instances: Map<string, AudioInstance> = new Map();
@@ -59,6 +73,7 @@ class AudioManager {
   private activeDuckTriggers: Map<string, number> = new Map();
   private occlusionEnabled: Set<string> = new Set();
   private occlusionFilters: Map<string, BiquadFilterNode> = new Map();
+  private adaptiveTracks: Map<string, AdaptiveMusicTrack> = new Map();
 
   /**
    * Lazily initialize AudioContext (handles browser autoplay policy).
@@ -1106,6 +1121,128 @@ class AudioManager {
 
     this.irBuffers.set(presetIndex, buffer);
     return buffer;
+  }
+
+  // --- Adaptive Music ---
+
+  /**
+   * Set up an adaptive music track with multiple stems.
+   * Each stem has an intensity range that controls its volume.
+   * Low intensity: only ambient/pad stems play. High intensity: all stems play.
+   */
+  setAdaptiveMusic(
+    trackId: string,
+    stems: Array<{ name: string; assetId: string; baseVolume?: number; intensityRange?: [number, number] }>,
+    options?: { bus?: string; initialIntensity?: number }
+  ): void {
+    // Stop any existing track with this ID
+    this.stopAdaptiveMusic(trackId);
+
+    const bus = options?.bus ?? 'music';
+    const stemMap = new Map<string, StemConfig>();
+
+    // Default intensity ranges: ambient 0-0.3, pad 0-0.5, melody 0.3-0.8, drums 0.5-1.0
+    const defaultRanges: Record<string, [number, number]> = {
+      ambient: [0, 0.3],
+      pad: [0, 0.5],
+      bass: [0.2, 0.7],
+      melody: [0.3, 0.8],
+      drums: [0.5, 1.0],
+      percussion: [0.5, 1.0],
+    };
+
+    for (const stem of stems) {
+      const range = stem.intensityRange ?? defaultRanges[stem.name.toLowerCase()] ?? [0, 1];
+      stemMap.set(stem.name, {
+        assetId: stem.assetId,
+        baseVolume: stem.baseVolume ?? 1.0,
+        intensityRange: range,
+      });
+    }
+
+    const track: AdaptiveMusicTrack = {
+      trackId,
+      stems: stemMap,
+      intensity: options?.initialIntensity ?? 0,
+      bus,
+    };
+
+    this.adaptiveTracks.set(trackId, track);
+
+    // Create audio layers for each stem
+    for (const [stemName, config] of stemMap) {
+      const entityId = `adaptive_${trackId}`;
+      const vol = this.computeStemVolume(config, track.intensity);
+      this.addLayer(entityId, stemName, config.assetId, {
+        volume: vol,
+        loop: true,
+        bus,
+      });
+    }
+  }
+
+  /**
+   * Set the intensity of an adaptive music track (0.0 = calm, 1.0 = max action).
+   * Smoothly ramps stem volumes based on their intensity ranges.
+   */
+  setMusicIntensity(trackId: string, intensity: number, rampMs?: number): void {
+    const track = this.adaptiveTracks.get(trackId);
+    if (!track) {
+      console.warn(`[AudioManager] Adaptive track not found: ${trackId}`);
+      return;
+    }
+
+    const clamped = Math.max(0, Math.min(1, intensity));
+    track.intensity = clamped;
+
+    const ctx = this.ctx;
+    if (!ctx) return;
+
+    const rampDuration = (rampMs ?? 500) / 1000;
+    const now = ctx.currentTime;
+    const entityId = `adaptive_${trackId}`;
+
+    for (const [stemName, config] of track.stems) {
+      const key = this.instanceKey(entityId, stemName);
+      const instance = this.instances.get(key);
+      if (!instance) continue;
+
+      const targetVol = this.computeStemVolume(config, clamped);
+      instance.gainNode.gain.cancelScheduledValues(now);
+      instance.gainNode.gain.setValueAtTime(instance.gainNode.gain.value, now);
+      instance.gainNode.gain.linearRampToValueAtTime(targetVol, now + rampDuration);
+    }
+  }
+
+  /**
+   * Stop and remove an adaptive music track.
+   */
+  stopAdaptiveMusic(trackId: string): void {
+    const track = this.adaptiveTracks.get(trackId);
+    if (!track) return;
+
+    const entityId = `adaptive_${trackId}`;
+    this.removeAllLayers(entityId);
+    this.adaptiveTracks.delete(trackId);
+  }
+
+  /**
+   * Get current intensity for an adaptive music track.
+   */
+  getMusicIntensity(trackId: string): number {
+    return this.adaptiveTracks.get(trackId)?.intensity ?? 0;
+  }
+
+  /**
+   * Compute stem volume based on intensity and the stem's range.
+   */
+  private computeStemVolume(config: StemConfig, intensity: number): number {
+    const [min, max] = config.intensityRange;
+    if (intensity <= min) return 0;
+    if (intensity >= max) return config.baseVolume;
+    // Linear interpolation within the range
+    const t = (intensity - min) / (max - min);
+    return config.baseVolume * t;
   }
 
   /**

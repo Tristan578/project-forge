@@ -4,6 +4,7 @@
 
 import { StateCreator } from 'zustand';
 import type { AudioData, AudioBusDef, AudioEffectDef, ReverbZoneData } from './types';
+import { audioManager } from '@/lib/audio/audioManager';
 
 export interface AudioSlice {
   primaryAudio: AudioData | null;
@@ -126,12 +127,30 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
     set(state => ({ reverbZones: { ...state.reverbZones, [entityId]: data } }));
     if (dispatchCommand) dispatchCommand('update_reverb_zone', { entityId, ...data });
   },
-  fadeInAudio: (_entityId, _durationMs) => {},
-  fadeOutAudio: (_entityId, _durationMs) => {},
-  playOneShotAudio: (_assetId, _options) => {},
-  addAudioLayer: (_entityId, _slotName, _assetId, _options) => {},
-  removeAudioLayer: (_entityId, _slotName) => {},
-  setDuckingRule: (_rule) => {},
+  fadeInAudio: (entityId, durationMs) => {
+    audioManager.fadeIn(entityId, durationMs);
+  },
+  fadeOutAudio: (entityId, durationMs) => {
+    audioManager.fadeOut(entityId, durationMs);
+  },
+  playOneShotAudio: (assetId, options) => {
+    audioManager.playOneShot(assetId, options);
+  },
+  addAudioLayer: (entityId, slotName, assetId, options) => {
+    audioManager.addLayer(entityId, slotName, assetId, options);
+  },
+  removeAudioLayer: (entityId, slotName) => {
+    audioManager.removeLayer(entityId, slotName);
+  },
+  setDuckingRule: (rule) => {
+    audioManager.addDuckingRule({
+      triggerBus: rule.triggerBus,
+      targetBus: rule.targetBus,
+      duckLevel: rule.duckLevel ?? 0.3,
+      attackMs: rule.attackMs ?? 50,
+      releaseMs: rule.releaseMs ?? 300,
+    });
+  },
   setAdaptiveMusicIntensity: (intensity) => set({ adaptiveMusicIntensity: intensity }),
   setCurrentMusicSegment: (segment) => set({ currentMusicSegment: segment }),
 });
