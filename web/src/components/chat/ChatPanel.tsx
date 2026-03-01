@@ -52,6 +52,7 @@ export function ChatPanel() {
             onClick={clearChat}
             className="text-zinc-600 hover:text-zinc-400"
             title="Clear chat"
+            aria-label="Clear chat"
           >
             <Trash2 size={13} />
           </button>
@@ -59,7 +60,7 @@ export function ChatPanel() {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+      <div ref={scrollRef} aria-live="polite" aria-label="Chat messages" className="flex-1 overflow-y-auto">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
             <MessageSquare size={28} className="text-zinc-700" />
@@ -99,7 +100,7 @@ export function ChatPanel() {
 
         {/* Error display */}
         {error && (
-          <div className="mx-3 mb-2 rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
+          <div role="alert" className="mx-3 mb-2 rounded border border-red-900/50 bg-red-900/20 px-3 py-2 text-xs text-red-400">
             {error}
           </div>
         )}
