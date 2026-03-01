@@ -179,6 +179,7 @@ export function ChatInput() {
                   delete refs[name];
                   useChatStore.setState({ pendingEntityRefs: refs });
                 }}
+                aria-label={`Remove reference to ${name}`}
                 className="text-purple-400 hover:text-purple-200"
               >
                 &times;
@@ -221,6 +222,7 @@ export function ChatInput() {
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           placeholder="Describe what you want... (@ to reference entities)"
+          aria-label="Chat message"
           disabled={isStreaming}
           rows={1}
           className="flex-1 resize-none rounded-md border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 outline-none focus:border-zinc-600"
@@ -228,6 +230,7 @@ export function ChatInput() {
         {isStreaming ? (
           <button
             onClick={stopStreaming}
+            aria-label="Stop streaming"
             className="flex h-8 w-8 items-center justify-center rounded-md bg-red-600/20 text-red-400 hover:bg-red-600/30"
             title="Stop"
           >
@@ -237,6 +240,7 @@ export function ChatInput() {
           <button
             onClick={handleSend}
             disabled={!text.trim() && images.length === 0}
+            aria-label="Send message"
             className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 disabled:opacity-30 disabled:hover:bg-blue-600/20"
             title="Send"
           >
@@ -250,6 +254,7 @@ export function ChatInput() {
         <select
           value={activeModel}
           onChange={(e) => setModel(e.target.value as ChatModel)}
+          aria-label="AI model"
           className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400 outline-none"
         >
           {MODEL_OPTIONS.map((opt) => (
@@ -259,6 +264,7 @@ export function ChatInput() {
 
         <button
           onClick={() => setThinkingEnabled(!thinkingEnabled)}
+          aria-pressed={thinkingEnabled}
           className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] transition-colors ${
             thinkingEnabled
               ? 'bg-amber-600/20 text-amber-400'
@@ -272,6 +278,7 @@ export function ChatInput() {
 
         <button
           onClick={() => setApprovalMode(!approvalMode)}
+          aria-pressed={approvalMode}
           className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] transition-colors ${
             approvalMode
               ? 'bg-amber-600/20 text-amber-400'
@@ -285,6 +292,7 @@ export function ChatInput() {
 
         <button
           onClick={() => fileInputRef.current?.click()}
+          aria-label="Attach image"
           className="text-zinc-500 hover:text-zinc-300"
           title="Attach image"
         >
@@ -293,6 +301,8 @@ export function ChatInput() {
 
         <button
           onClick={toggleVoice}
+          aria-label={isRecording ? 'Stop recording' : 'Voice input'}
+          aria-pressed={isRecording}
           className={`${isRecording ? 'text-red-400 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`}
           title={isRecording ? 'Stop recording' : 'Voice input'}
         >
