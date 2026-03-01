@@ -4,12 +4,16 @@ import { type ReactElement, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
+import type { Bone2dDef } from '@/stores/slices/types';
 
 export function SkeletonInspector({ entityId }: { entityId: string }) {
   const skeleton = useEditorStore((s) => s.skeletons2d[entityId]);
   const animations = useEditorStore((s) => s.skeletalAnimations2d[entityId] ?? []);
   const selectedBone = useEditorStore((s) => s.selectedBone);
   const setSelectedBone = useEditorStore((s) => s.setSelectedBone);
+  const setSkeleton2d = useEditorStore((s) => s.setSkeleton2d);
+  const removeSkeleton2d = useEditorStore((s) => s.removeSkeleton2d);
+  const playAnimation = useEditorStore((s) => s.playAnimation);
 
   const [newBoneName, setNewBoneName] = useState('');
   const [selectedSkin, setSelectedSkin] = useState(skeleton?.activeSkin ?? 'default');
@@ -20,8 +24,13 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
         <div className="text-sm text-gray-400 mb-2">No skeleton data</div>
         <button
           onClick={() => {
-            // TODO: Implement CreateSkeleton2d command in Rust engine (Phase 2D-5)
-            alert('Skeleton creation will be implemented in Phase 2D-5 Rust engine');
+            setSkeleton2d(entityId, {
+              bones: [],
+              slots: [],
+              skins: {},
+              activeSkin: 'default',
+              ikConstraints: [],
+            });
           }}
           className="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded flex items-center justify-center gap-2 text-sm"
         >
@@ -34,33 +43,50 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
 
   const handleAddBone = () => {
     if (!newBoneName.trim()) return;
-    // TODO: Implement AddBone2d command in Rust engine (Phase 2D-5)
-    alert(`Add bone '${newBoneName}' will be implemented in Phase 2D-5`);
+    const bone: Bone2dDef = {
+      name: newBoneName.trim(),
+      parentBone: selectedBone ?? null,
+      localPosition: [0, 0],
+      localRotation: 0,
+      localScale: [1, 1],
+      length: 1,
+      color: [1, 1, 1, 1],
+    };
+    setSkeleton2d(entityId, { ...skeleton, bones: [...skeleton.bones, bone] });
     setNewBoneName('');
   };
 
   const handleDeleteBone = (boneName: string) => {
-    // TODO: Implement RemoveBone2d command in Rust engine (Phase 2D-5)
-    alert(`Remove bone '${boneName}' will be implemented in Phase 2D-5`);
+    setSkeleton2d(entityId, {
+      ...skeleton,
+      bones: skeleton.bones.filter(b => b.name !== boneName),
+    });
     if (selectedBone === boneName) {
       setSelectedBone(null);
     }
   };
 
-  const handleUpdateBone = (_boneName: string, _field: string, _value: number | number[]) => {
-    // TODO: Implement UpdateBone2d command in Rust engine (Phase 2D-5)
-    // This will update bone properties in the Rust engine
+  const handleUpdateBone = (boneName: string, field: string, value: number | number[]) => {
+    const bones = skeleton.bones.map(b => {
+      if (b.name !== boneName) return b;
+      switch (field) {
+        case 'position': return { ...b, localPosition: value as [number, number] };
+        case 'rotation': return { ...b, localRotation: value as number };
+        case 'scale': return { ...b, localScale: value as [number, number] };
+        case 'length': return { ...b, length: value as number };
+        default: return b;
+      }
+    });
+    setSkeleton2d(entityId, { ...skeleton, bones });
   };
 
   const handleSkinChange = (skinName: string) => {
     setSelectedSkin(skinName);
-    // TODO: Implement SetSkeleton2dSkin command in Rust engine (Phase 2D-5)
-    alert(`Set skin to '${skinName}' will be implemented in Phase 2D-5`);
+    setSkeleton2d(entityId, { ...skeleton, activeSkin: skinName });
   };
 
   const handlePlayAnimation = (animName: string) => {
-    // TODO: Implement PlaySkeletalAnimation2d command in Rust engine (Phase 2D-5)
-    alert(`Play animation '${animName}' will be implemented in Phase 2D-5`);
+    playAnimation(entityId, animName);
   };
 
   const selectedBoneData = skeleton.bones.find(b => b.name === selectedBone);
@@ -276,8 +302,8 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
       <button
         onClick={() => {
           if (confirm('Remove skeleton data?')) {
-            // TODO: Implement RemoveSkeleton2d command in Rust engine (Phase 2D-5)
-            alert('Remove skeleton will be implemented in Phase 2D-5');
+            removeSkeleton2d(entityId);
+            setSelectedBone(null);
           }
         }}
         className="w-full px-3 py-2 bg-red-600 hover:bg-red-700 rounded flex items-center justify-center gap-2 text-sm"

@@ -12,13 +12,16 @@ export function LodInspector() {
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const sceneGraph = useEditorStore((state) => state.sceneGraph);
 
-  // For now, use local state until LOD events are wired from Rust
+  // Local state — LOD configuration is stored locally until engine-side mesh
+  // decimation is implemented. Distance/ratio values are preserved for when
+  // the engine integration is added.
   const [lodData, setLodData] = useState<LodData>({
     lodDistances: [20, 50, 100],
     autoGenerate: false,
     lodRatios: [0.5, 0.25, 0.1],
     currentLod: 0,
   });
+  const [generateStatus, setGenerateStatus] = useState<string | null>(null);
 
   const primaryId = Array.from(selectedIds)[0];
   const entity = primaryId ? sceneGraph.nodes[primaryId] : null;
@@ -28,8 +31,6 @@ export function LodInspector() {
       const newDistances: [number, number, number] = [...lodData.lodDistances] as [number, number, number];
       newDistances[index] = value;
       setLodData((prev) => ({ ...prev, lodDistances: newDistances }));
-
-      // TODO: Wire to Rust engine when LOD system is fully implemented
     },
     [lodData.lodDistances]
   );
@@ -39,8 +40,6 @@ export function LodInspector() {
       const newRatios: [number, number, number] = [...lodData.lodRatios] as [number, number, number];
       newRatios[index] = value;
       setLodData((prev) => ({ ...prev, lodRatios: newRatios }));
-
-      // TODO: Wire to Rust engine when LOD system is fully implemented
     },
     [lodData.lodRatios]
   );
@@ -48,12 +47,10 @@ export function LodInspector() {
   const handleAutoGenerateToggle = useCallback(() => {
     const newValue = !lodData.autoGenerate;
     setLodData((prev) => ({ ...prev, autoGenerate: newValue }));
-
-    // TODO: Wire to Rust engine when LOD system is fully implemented
   }, [lodData.autoGenerate]);
 
   const handleGenerateLods = useCallback(() => {
-    // TODO: Wire to Rust engine when LOD generation is implemented
+    setGenerateStatus('LOD mesh generation requires engine-side mesh decimation which is not yet implemented. Distance and ratio settings are saved for when this feature is available.');
   }, []);
 
   if (!entity) {
@@ -180,6 +177,13 @@ export function LodInspector() {
       >
         Generate LOD Meshes
       </button>
+
+      {/* Status Message */}
+      {generateStatus && (
+        <div className="mt-2 text-xs text-amber-400 bg-amber-900/20 rounded px-2 py-1.5">
+          {generateStatus}
+        </div>
+      )}
 
       {/* Current LOD Level Display */}
       <div className="mt-3 text-xs text-gray-400">
