@@ -63,21 +63,24 @@ MCP handlers for LOD generation (`set_entity_lod`, `generate_lods`, `optimize_sc
 
 ## Advanced Audio (Phase 20)
 
-**Status: Core audio works, adaptive features return honest errors**
+**Status: Mostly implemented**
 
 Working:
 - Spatial audio playback
 - Audio bus routing and effects
 - Reverb zones
 - Audio layering and crossfades
-
-Not implemented (returns `success: false` with descriptive error):
-- Adaptive music (horizontal re-sequencing)
-- Audio occlusion
+- Adaptive music with stem mixing and intensity control
+- Audio occlusion (per-entity low-pass filtering)
 - Music stem layering
+
+Remaining limitation:
+- Occlusion is filter-based only — no automatic raycasting integration to detect obstructions. The `updateOcclusionState()` API must be called manually from game scripts.
 
 ## Shader Application (Phase 23)
 
-**Status: Editor and compiler work, application to entities does not**
+**Status: Built-in effects work, arbitrary custom WGSL does not**
 
-The shader node graph editor and WGSL compiler are functional — you can create node graphs and compile them to WGSL code. However, applying compiled shaders to entity materials is not implemented. The `apply_shader_to_entity` handler returns `success: false` with an explanation.
+The shader node graph editor compiles to WGSL, and compiled shaders can be applied to entities when they map to one of the 7 built-in effects (dissolve, hologram, force_field, lava_flow, toon, fresnel_glow). The `apply_shader_to_entity` handler infers the effect type from the compiled code. You can also apply effects directly by passing `shaderType`.
+
+Arbitrary custom WGSL shaders (those that don't match a built-in effect) cannot be applied — they require a dynamic material pipeline that is not yet implemented.
