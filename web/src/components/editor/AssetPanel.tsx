@@ -49,6 +49,7 @@ function AssetCard({ asset }: { asset: AssetMetadata }) {
           e.stopPropagation();
           deleteAsset(asset.id);
         }}
+        aria-label={`Delete asset ${asset.name}`}
         title="Delete asset"
       >
         <Trash2 size={12} />
@@ -256,38 +257,46 @@ export const AssetPanel = memo(function AssetPanel() {
               <button
                 className="flex items-center gap-1 rounded bg-purple-900/30 px-2 py-0.5 text-xs text-purple-400 hover:bg-purple-900/50"
                 onClick={() => setShowAiDropdown(!showAiDropdown)}
+                aria-label="AI Generate"
+                aria-expanded={showAiDropdown}
+                aria-haspopup="true"
                 title="AI Generate"
               >
                 <Sparkles size={14} />
                 <ChevronDown size={10} />
               </button>
               {showAiDropdown && (
-                <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 shadow-xl">
+                <div role="menu" aria-label="AI generation options" className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 shadow-xl">
                   <button
+                    role="menuitem"
                     onClick={() => { setGenerateModelOpen(true); setShowAiDropdown(false); }}
                     className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                   >
                     Generate 3D Model
                   </button>
                   <button
+                    role="menuitem"
                     onClick={() => { setGenerateTextureOpen(true); setShowAiDropdown(false); }}
                     className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                   >
                     Generate Texture
                   </button>
                   <button
+                    role="menuitem"
                     onClick={() => { setGenerateSoundOpen(true); setShowAiDropdown(false); }}
                     className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                   >
                     Generate Sound
                   </button>
                   <button
+                    role="menuitem"
                     onClick={() => { setGenerateMusicOpen(true); setShowAiDropdown(false); }}
                     className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                   >
                     Generate Music
                   </button>
                   <button
+                    role="menuitem"
                     onClick={() => { setGenerateSkyboxOpen(true); setShowAiDropdown(false); }}
                     className="w-full px-3 py-2 text-left text-xs text-zinc-300 hover:bg-zinc-800"
                   >
@@ -300,6 +309,7 @@ export const AssetPanel = memo(function AssetPanel() {
             <button
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               onClick={() => gltfInputRef.current?.click()}
+              aria-label="Import 3D model"
               title="Import 3D model (.glb/.gltf)"
             >
               <Upload size={14} />
@@ -307,6 +317,7 @@ export const AssetPanel = memo(function AssetPanel() {
             <button
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               onClick={() => textureInputRef.current?.click()}
+              aria-label="Import texture"
               title="Import texture (.png/.jpg)"
             >
               <ImageIcon size={14} />
@@ -314,6 +325,7 @@ export const AssetPanel = memo(function AssetPanel() {
             <button
               className="rounded px-1.5 py-0.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
               onClick={() => audioInputRef.current?.click()}
+              aria-label="Import audio"
               title="Import audio (.mp3/.ogg/.wav)"
             >
               <Music size={14} />
