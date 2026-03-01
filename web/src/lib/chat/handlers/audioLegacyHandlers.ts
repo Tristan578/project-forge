@@ -217,7 +217,24 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { message: `Reverb zone removed from ${entityId}` } };
   },
 
-  set_music_stems: async (_args, _ctx) => {
-    return { success: false, error: 'Music stem layering is not yet implemented. The adaptive music engine is planned for a future release.' };
+  set_music_stems: async (args, _ctx) => {
+    try {
+      const { trackId, stems } = args as {
+        trackId?: string;
+        stems: Array<{ name: string; assetId: string; baseVolume?: number; intensityRange?: [number, number] }>;
+      };
+
+      if (!stems || !Array.isArray(stems) || stems.length === 0) {
+        return { success: false, error: 'Missing required parameter: stems' };
+      }
+
+      const { audioManager } = await import('@/lib/audio/audioManager');
+      const id = trackId ?? 'default';
+      audioManager.setAdaptiveMusic(id, stems);
+
+      return { success: true, result: { message: `Set ${stems.length} music stems for track "${id}"` } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to set music stems' };
+    }
   },
 };
