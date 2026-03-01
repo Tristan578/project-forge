@@ -131,7 +131,24 @@ export function WidgetTree() {
             {/* Render children (if expanded) */}
             {hasChildren && isExpanded && (
               <div className="ml-4 space-y-1 border-l border-zinc-700 pl-2">
-                {/* TODO: Render child widgets recursively */}
+                {widget.children.map((childId) => {
+                  const child = activeScreen.widgets.find((w) => w.id === childId);
+                  if (!child) return null;
+                  return (
+                    <div
+                      key={child.id}
+                      onClick={() => selectWidget(child.id)}
+                      className={`flex items-center gap-1 rounded px-2 py-1 text-xs cursor-pointer transition-colors ${
+                        child.id === selectedWidgetId
+                          ? 'bg-blue-600/20 border border-blue-600/40 text-zinc-200'
+                          : 'bg-zinc-800 border border-transparent hover:bg-zinc-750 text-zinc-400'
+                      }`}
+                    >
+                      <span className="text-zinc-600 text-[10px]">{child.type}</span>{' '}
+                      <span className="flex-1 truncate">{child.name}</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
