@@ -22,6 +22,7 @@ export function PlayControls() {
           onClick={resume}
           className="flex h-6 w-6 items-center justify-center rounded text-green-400 hover:bg-zinc-700"
           title="Resume (Ctrl+P)"
+          aria-label="Resume"
         >
           <Play size={13} fill="currentColor" />
         </button>
@@ -31,6 +32,7 @@ export function PlayControls() {
           disabled={!isEdit}
           className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-green-400 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
           title="Play (Ctrl+P)"
+          aria-label="Play"
         >
           <Play size={13} fill={isEdit ? 'none' : 'currentColor'} />
         </button>
@@ -42,6 +44,7 @@ export function PlayControls() {
         disabled={!isPlaying}
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-yellow-400 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
         title="Pause"
+        aria-label="Pause"
       >
         <Pause size={13} />
       </button>
@@ -52,15 +55,20 @@ export function PlayControls() {
         disabled={isEdit}
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-red-400 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
         title="Stop"
+        aria-label="Stop"
       >
         <Square size={13} />
       </button>
 
       {/* Mode indicator */}
       {!isEdit && (
-        <span className={`ml-1 text-[10px] font-medium uppercase tracking-wider ${
-          isPlaying ? 'text-green-400' : 'text-yellow-400'
-        }`}>
+        <span
+          role="status"
+          aria-live="polite"
+          className={`ml-1 text-[10px] font-medium uppercase tracking-wider ${
+            isPlaying ? 'text-green-400' : 'text-yellow-400'
+          }`}
+        >
           {isPlaying ? 'Playing' : 'Paused'}
         </span>
       )}

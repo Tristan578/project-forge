@@ -116,6 +116,7 @@ export function HierarchySearch({ matchCount }: HierarchySearchProps) {
           onChange={handleChange}
           onKeyDown={handleKeyDown}
           placeholder="Search entities..."
+          aria-label="Search entities"
           className="
             w-full pl-7 pr-7 py-1 text-sm
             bg-neutral-800 text-neutral-200
@@ -137,6 +138,7 @@ export function HierarchySearch({ matchCount }: HierarchySearchProps) {
               onClick={handleClear}
               className="p-0.5 text-neutral-500 hover:text-neutral-300 rounded hover:bg-neutral-700"
               title="Clear filter (Esc)"
+              aria-label="Clear search filter"
             >
               <X className="w-3.5 h-3.5" />
             </button>
