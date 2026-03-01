@@ -34,6 +34,8 @@ interface ContextMenuProps {
   onFocus: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  /** Number of currently selected entities (for bulk operation labels) */
+  selectionCount?: number;
 }
 
 function isDivider(item: MenuItemOrDivider): item is MenuDivider {
@@ -48,6 +50,7 @@ export function ContextMenu({
   onFocus,
   onDuplicate,
   onDelete,
+  selectionCount = 1,
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [clampedPosition, setClampedPosition] = useState(position);
@@ -57,7 +60,8 @@ export function ContextMenu({
     setClampedPosition(position);
   }, [position]);
 
-  // Menu item definitions
+  // Menu item definitions (multi-select aware labels)
+  const isMulti = selectionCount > 1;
   const menuItems: MenuItemOrDivider[] = [
     {
       id: 'rename',
@@ -65,6 +69,7 @@ export function ContextMenu({
       icon: Edit3,
       shortcut: 'F2',
       action: onRename,
+      disabled: isMulti, // Can only rename one entity at a time
     },
     {
       id: 'focus',
@@ -76,7 +81,7 @@ export function ContextMenu({
     { type: 'divider' },
     {
       id: 'duplicate',
-      label: 'Duplicate',
+      label: isMulti ? `Duplicate ${selectionCount} entities` : 'Duplicate',
       icon: Copy,
       shortcut: 'Ctrl+D',
       action: onDuplicate,
@@ -84,7 +89,7 @@ export function ContextMenu({
     { type: 'divider' },
     {
       id: 'delete',
-      label: 'Delete',
+      label: isMulti ? `Delete ${selectionCount} entities` : 'Delete',
       icon: Trash2,
       shortcut: 'Delete',
       action: onDelete,

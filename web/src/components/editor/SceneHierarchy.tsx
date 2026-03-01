@@ -295,19 +295,25 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
 
   const handleDuplicate = useCallback(() => {
     if (contextMenu.entityId) {
-      // Ensure entity is selected, then duplicate
-      selectEntity(contextMenu.entityId, 'replace');
+      // If entity is already in multi-selection, duplicate from current selection
+      // Otherwise, select just this entity first
+      if (!selectedIds.has(contextMenu.entityId)) {
+        selectEntity(contextMenu.entityId, 'replace');
+      }
       duplicateSelectedEntity();
     }
-  }, [contextMenu.entityId, selectEntity, duplicateSelectedEntity]);
+  }, [contextMenu.entityId, selectedIds, selectEntity, duplicateSelectedEntity]);
 
   const handleDelete = useCallback(() => {
     if (contextMenu.entityId) {
-      // Ensure entity is selected, then delete
-      selectEntity(contextMenu.entityId, 'replace');
+      // If entity is already in multi-selection, delete all selected
+      // Otherwise, select just this entity first
+      if (!selectedIds.has(contextMenu.entityId)) {
+        selectEntity(contextMenu.entityId, 'replace');
+      }
       deleteSelectedEntities();
     }
-  }, [contextMenu.entityId, selectEntity, deleteSelectedEntities]);
+  }, [contextMenu.entityId, selectedIds, selectEntity, deleteSelectedEntities]);
 
   // Drag handlers
   const handleDragStart = useCallback((entityId: string, entityName: string) => {
@@ -504,6 +510,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
           onFocus={handleFocus}
           onDuplicate={handleDuplicate}
           onDelete={handleDelete}
+          selectionCount={contextMenu.entityId && selectedIds.has(contextMenu.entityId) ? selectedIds.size : 1}
         />
       )}
     </div>
