@@ -20,6 +20,7 @@ function ToolButton({ icon, active, onClick, title }: ToolButtonProps) {
     <button
       onClick={onClick}
       title={title}
+      aria-label={title}
       className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
         active
           ? 'bg-zinc-800 text-white'

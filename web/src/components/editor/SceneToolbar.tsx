@@ -156,6 +156,7 @@ export function SceneToolbar() {
         disabled={!isEdit}
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
         title="Save (Ctrl+S)"
+        aria-label="Save"
       >
         <Save size={13} />
       </button>
@@ -180,6 +181,7 @@ export function SceneToolbar() {
         disabled={!isEdit}
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
         title="Load Scene"
+        aria-label="Load scene"
       >
         <FolderOpen size={13} />
       </button>
@@ -190,6 +192,7 @@ export function SceneToolbar() {
         disabled={!isEdit}
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
         title="New Scene (Ctrl+Shift+N)"
+        aria-label="New scene"
       >
         <FilePlus size={13} />
       </button>
@@ -200,6 +203,7 @@ export function SceneToolbar() {
         disabled={!isEdit}
         className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
         title="Export Game"
+        aria-label="Export game"
       >
         <Download size={13} />
       </button>
