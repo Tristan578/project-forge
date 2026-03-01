@@ -21,9 +21,9 @@ test.describe('Modals @ui', () => {
     const dialog = page.locator('[role="dialog"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
-    const tokensTab = dialog.getByRole('button', { name: /tokens/i });
-    const keysTab = dialog.getByRole('button', { name: /api.*keys|keys/i });
-    const billingTab = dialog.getByRole('button', { name: /billing/i });
+    const tokensTab = dialog.getByRole('tab', { name: /tokens/i });
+    const keysTab = dialog.getByRole('tab', { name: /api.*keys|keys/i });
+    const billingTab = dialog.getByRole('tab', { name: /billing/i });
 
     const tabCount = await Promise.all([
       tokensTab.isVisible().catch(() => false),
