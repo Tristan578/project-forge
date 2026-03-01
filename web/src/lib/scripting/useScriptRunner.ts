@@ -365,6 +365,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           entities: tickData.entities,
           entityInfos: tickData.entityInfos,
           inputState: tickData.inputState,
+          audioPlayingStates: audioManager.getPlayingStates(),
         });
       });
 
