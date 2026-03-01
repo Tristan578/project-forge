@@ -387,7 +387,12 @@ impl Plugin for SelectionPlugin {
                 scene_graph::detect_visibility_changed,
                 scene_graph::detect_parent_changed,
                 scene_graph::build_scene_graph,
-            ).chain());
+            ).chain())
+            // Skeletal 2D runtime systems (animation playback + IK solving)
+            .add_systems(Update, (
+                skeleton2d::advance_skeleton_animation,
+                skeleton2d::solve_ik_constraints_2d,
+            ));
 
         // Editor-only systems and observers
         #[cfg(not(feature = "runtime"))]
@@ -506,6 +511,7 @@ impl Plugin for SelectionPlugin {
                     skeleton2d::handle_skeleton2d_query,
                     skeleton2d::apply_auto_weight_skeleton2d,
                 ))
+                .add_systems(Update, skeleton2d::render_skeleton_bones)
                 .add_systems(Update, (
                     performance::apply_lod_commands,
                     performance::apply_performance_budget_commands,

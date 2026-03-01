@@ -3,11 +3,12 @@ use crate::core::{
     entity_id::EntityId,
     entity_factory,
     pending_commands::{PendingCommands, QueryRequest},
-    skeleton2d::{SkeletonData2d, SkeletonEnabled2d},
-    skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d},
+    skeleton2d::{SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d},
+    skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
     history::UndoableAction,
 };
 use crate::bridge::{events, Selection, SelectionChangedEvent};
+use std::collections::HashMap;
 
 // ========== Skeleton 2D Systems ==========
 
@@ -234,6 +235,272 @@ pub(super) fn apply_auto_weight_skeleton2d(
     for _request in requests {
         // Placeholder for auto-weight algorithm
         // This would require complex mesh-to-skeleton weight calculations
+    }
+}
+
+// ========== Runtime Systems ==========
+
+/// Advance skeletal animation playback, interpolating bone transforms from keyframes.
+pub(super) fn advance_skeleton_animation(
+    time: Res<Time>,
+    mut query: Query<(
+        &mut SkeletonData2d,
+        &SkeletalAnimation2d,
+        &mut SkeletalAnimPlayer2d,
+    )>,
+) {
+    for (mut skeleton, animation, mut player) in query.iter_mut() {
+        if !player.playing {
+            continue;
+        }
+        let Some(ref current_anim) = player.current_animation else {
+            continue;
+        };
+        if *current_anim != animation.name {
+            continue;
+        }
+
+        // Advance time
+        player.time += time.delta_secs() * player.speed;
+
+        // Handle looping / clamp
+        if player.time >= animation.duration {
+            if animation.looping {
+                player.time %= animation.duration;
+            } else {
+                player.time = animation.duration;
+                player.playing = false;
+            }
+        }
+
+        let t = player.time;
+
+        // Interpolate each bone track
+        for bone in skeleton.bones.iter_mut() {
+            if let Some(keyframes) = animation.tracks.get(&bone.name) {
+                if keyframes.is_empty() {
+                    continue;
+                }
+                interpolate_bone(bone, keyframes, t);
+            }
+        }
+    }
+}
+
+/// Interpolate bone properties from keyframes at the given time.
+fn interpolate_bone(bone: &mut Bone2dDef, keyframes: &[BoneKeyframe], t: f32) {
+    // Find the two keyframes surrounding `t`
+    let mut prev_idx = 0;
+    for (i, kf) in keyframes.iter().enumerate() {
+        if kf.time <= t {
+            prev_idx = i;
+        }
+    }
+
+    let prev = &keyframes[prev_idx];
+    let next_idx = if prev_idx + 1 < keyframes.len() {
+        prev_idx + 1
+    } else if keyframes.len() > 1 {
+        0 // wrap for looping
+    } else {
+        prev_idx // single keyframe
+    };
+    let next = &keyframes[next_idx];
+
+    let alpha = if (next.time - prev.time).abs() < 1e-6 {
+        0.0
+    } else {
+        ((t - prev.time) / (next.time - prev.time)).clamp(0.0, 1.0)
+    };
+
+    let eased = apply_easing(alpha, prev.easing);
+
+    if let (Some(p0), Some(p1)) = (prev.position, next.position) {
+        bone.local_position = [
+            p0[0] + (p1[0] - p0[0]) * eased,
+            p0[1] + (p1[1] - p0[1]) * eased,
+        ];
+    } else if let Some(p) = prev.position {
+        bone.local_position = p;
+    }
+
+    if let (Some(r0), Some(r1)) = (prev.rotation, next.rotation) {
+        bone.local_rotation = r0 + (r1 - r0) * eased;
+    } else if let Some(r) = prev.rotation {
+        bone.local_rotation = r;
+    }
+
+    if let (Some(s0), Some(s1)) = (prev.scale, next.scale) {
+        bone.local_scale = [
+            s0[0] + (s1[0] - s0[0]) * eased,
+            s0[1] + (s1[1] - s0[1]) * eased,
+        ];
+    } else if let Some(s) = prev.scale {
+        bone.local_scale = s;
+    }
+}
+
+fn apply_easing(t: f32, easing: EasingType2d) -> f32 {
+    match easing {
+        EasingType2d::Linear => t,
+        EasingType2d::EaseIn => t * t,
+        EasingType2d::EaseOut => 1.0 - (1.0 - t) * (1.0 - t),
+        EasingType2d::EaseInOut => {
+            if t < 0.5 {
+                2.0 * t * t
+            } else {
+                1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
+            }
+        }
+        EasingType2d::Step => if t >= 1.0 { 1.0 } else { 0.0 },
+    }
+}
+
+/// Compute world-space bone transforms from the skeleton hierarchy.
+fn compute_bone_world_transforms(bones: &[Bone2dDef]) -> HashMap<String, (Vec2, f32, Vec2)> {
+    let mut world_transforms: HashMap<String, (Vec2, f32, Vec2)> = HashMap::new();
+
+    // Build parent index for efficient lookup
+    let bone_index: HashMap<&str, usize> = bones
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.name.as_str(), i))
+        .collect();
+
+    // Process bones in order (parents before children assumed by convention)
+    for bone in bones {
+        let (parent_pos, parent_rot) = if let Some(ref parent_name) = bone.parent_bone {
+            if let Some(&(pos, rot, _scale)) = world_transforms.get(parent_name.as_str()) {
+                // Offset along parent bone's direction by parent length
+                let parent_bone = &bones[bone_index[parent_name.as_str()]];
+                let parent_rad = rot.to_radians();
+                let end_pos = pos + Vec2::new(
+                    parent_bone.length * parent_rad.cos(),
+                    parent_bone.length * parent_rad.sin(),
+                );
+                (end_pos, rot)
+            } else {
+                (Vec2::ZERO, 0.0)
+            }
+        } else {
+            (Vec2::ZERO, 0.0)
+        };
+
+        let world_rot = parent_rot + bone.local_rotation;
+        let rot_rad = parent_rot.to_radians();
+        let local_offset = Vec2::new(bone.local_position[0], bone.local_position[1]);
+        let rotated_offset = Vec2::new(
+            local_offset.x * rot_rad.cos() - local_offset.y * rot_rad.sin(),
+            local_offset.x * rot_rad.sin() + local_offset.y * rot_rad.cos(),
+        );
+        let world_pos = parent_pos + rotated_offset;
+        let world_scale = Vec2::new(bone.local_scale[0], bone.local_scale[1]);
+
+        world_transforms.insert(bone.name.clone(), (world_pos, world_rot, world_scale));
+    }
+
+    world_transforms
+}
+
+/// Render skeleton bones as gizmo lines in the editor (edit mode only).
+#[cfg(not(feature = "runtime"))]
+pub(super) fn render_skeleton_bones(
+    query: Query<(&Transform, &SkeletonData2d, &SkeletonEnabled2d)>,
+    mut gizmos: Gizmos,
+) {
+    for (transform, skeleton, _) in query.iter() {
+        let entity_pos = transform.translation.truncate();
+        let world_transforms = compute_bone_world_transforms(&skeleton.bones);
+
+        for bone in &skeleton.bones {
+            if let Some(&(bone_pos, bone_rot, _)) = world_transforms.get(&bone.name) {
+                let start = entity_pos + bone_pos;
+                let rot_rad = bone_rot.to_radians();
+                let end = start + Vec2::new(
+                    bone.length * rot_rad.cos(),
+                    bone.length * rot_rad.sin(),
+                );
+
+                let color = Color::srgba(bone.color[0], bone.color[1], bone.color[2], bone.color[3]);
+
+                // Draw bone line
+                gizmos.line_2d(start, end, color);
+
+                // Draw joint circle at bone origin
+                gizmos.circle_2d(Isometry2d::from_translation(start), 2.0, color);
+            }
+        }
+    }
+}
+
+/// Solve 2-bone IK constraints using analytical method.
+pub(super) fn solve_ik_constraints_2d(
+    mut skeleton_query: Query<(&EntityId, &mut SkeletonData2d)>,
+    target_query: Query<(&EntityId, &Transform)>,
+) {
+    for (_, mut skeleton) in skeleton_query.iter_mut() {
+        let constraints: Vec<IkConstraint2d> = skeleton.ik_constraints.clone();
+        for constraint in &constraints {
+            if constraint.bone_chain.len() < 2 || constraint.mix <= 0.0 {
+                continue;
+            }
+
+            // Find target position
+            let target_pos = target_query
+                .iter()
+                .find(|(eid, _)| eid.0 == constraint.target_entity_id.to_string())
+                .map(|(_, t)| t.translation.truncate());
+
+            let Some(target) = target_pos else {
+                continue;
+            };
+
+            let bone1_name = &constraint.bone_chain[0];
+            let bone2_name = &constraint.bone_chain[1];
+
+            // Get bone lengths
+            let bone1_len = skeleton.bones.iter().find(|b| &b.name == bone1_name).map(|b| b.length).unwrap_or(1.0);
+            let bone2_len = skeleton.bones.iter().find(|b| &b.name == bone2_name).map(|b| b.length).unwrap_or(1.0);
+
+            // Get bone1 world position (from its parent chain)
+            let world_transforms = compute_bone_world_transforms(&skeleton.bones);
+            let bone1_pos = world_transforms.get(bone1_name.as_str()).map(|t| t.0).unwrap_or(Vec2::ZERO);
+
+            // 2-bone analytical IK
+            let dx = target.x - bone1_pos.x;
+            let dy = target.y - bone1_pos.y;
+            let dist = (dx * dx + dy * dy).sqrt().min(bone1_len + bone2_len - 0.001);
+
+            if dist < 0.001 {
+                continue;
+            }
+
+            // Law of cosines for bone1 angle
+            let cos_angle1 = ((bone1_len * bone1_len + dist * dist - bone2_len * bone2_len)
+                / (2.0 * bone1_len * dist))
+                .clamp(-1.0, 1.0);
+            let angle_to_target = dy.atan2(dx);
+            let ik_angle1 = angle_to_target + constraint.bend_direction * cos_angle1.acos();
+
+            // Law of cosines for bone2 angle relative to bone1
+            let cos_angle2 = ((bone1_len * bone1_len + bone2_len * bone2_len - dist * dist)
+                / (2.0 * bone1_len * bone2_len))
+                .clamp(-1.0, 1.0);
+            let ik_angle2 = std::f32::consts::PI - constraint.bend_direction * cos_angle2.acos();
+
+            // Apply with mix factor
+            let mix = constraint.mix;
+            if let Some(bone1) = skeleton.bones.iter_mut().find(|b| &b.name == bone1_name) {
+                let fk_rot = bone1.local_rotation.to_radians();
+                let blended = fk_rot * (1.0 - mix) + ik_angle1 * mix;
+                bone1.local_rotation = blended.to_degrees();
+            }
+            if let Some(bone2) = skeleton.bones.iter_mut().find(|b| &b.name == bone2_name) {
+                let fk_rot = bone2.local_rotation.to_radians();
+                let blended = fk_rot * (1.0 - mix) + ik_angle2 * mix;
+                bone2.local_rotation = blended.to_degrees();
+            }
+        }
     }
 }
 
