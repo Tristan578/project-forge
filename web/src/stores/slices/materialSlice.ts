@@ -54,13 +54,13 @@ export const createMaterialSlice: StateCreator<
 
   updateShaderEffect: (entityId, data) => {
     if (dispatchCommand) {
-      dispatchCommand('update_shader_effect', { entityId, ...data });
+      dispatchCommand('set_custom_shader', { entityId, ...data });
     }
   },
 
   removeShaderEffect: (entityId) => {
     if (dispatchCommand) {
-      dispatchCommand('remove_shader_effect', { entityId });
+      dispatchCommand('remove_custom_shader', { entityId });
     }
   },
 });
