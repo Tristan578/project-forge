@@ -100,6 +100,19 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   // Rename editing state (declared before handleKeyDown so F2 can reference it)
   const [editingEntityId, setEditingEntityId] = useState<string | null>(null);
 
+  // Context menu state (declared before handleKeyDown so Shift+F10 can reference setContextMenu)
+  const [contextMenu, setContextMenu] = useState<{
+    isOpen: boolean;
+    entityId: string | null;
+    entityName: string | null;
+    position: { x: number; y: number };
+  }>({
+    isOpen: false,
+    entityId: null,
+    entityName: null,
+    position: { x: 0, y: 0 },
+  });
+
   const toggleExpanded = useCallback((entityId: string) => {
     setExpandedIds((prev) => {
       const next = new Set(prev);
@@ -180,23 +193,32 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
         }
         break;
       }
+      case 'F10': {
+        // Shift+F10: open context menu for focused entity (keyboard right-click)
+        if (e.shiftKey && focusedEntityId) {
+          e.preventDefault();
+          const node = sceneGraph.nodes[focusedEntityId];
+          if (node) {
+            // Position at the panel's center-ish area
+            const panel = containerRef.current;
+            const rect = panel?.getBoundingClientRect();
+            setContextMenu({
+              isOpen: true,
+              entityId: focusedEntityId,
+              entityName: node.name,
+              position: {
+                x: (rect?.left ?? 100) + 60,
+                y: (rect?.top ?? 100) + 40,
+              },
+            });
+          }
+        }
+        break;
+      }
       default:
         return; // Don't prevent default for unhandled keys
     }
   }, [flatNodeIds, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId]);
-
-  // Context menu state
-  const [contextMenu, setContextMenu] = useState<{
-    isOpen: boolean;
-    entityId: string | null;
-    entityName: string | null;
-    position: { x: number; y: number };
-  }>({
-    isOpen: false,
-    entityId: null,
-    entityName: null,
-    position: { x: 0, y: 0 },
-  });
 
   // Drag state
   const [dragState, setDragState] = useState<{
