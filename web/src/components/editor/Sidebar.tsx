@@ -21,6 +21,7 @@ function ToolButton({ icon, active, onClick, title }: ToolButtonProps) {
       onClick={onClick}
       title={title}
       aria-label={title}
+      aria-pressed={active ?? undefined}
       className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
         active
           ? 'bg-zinc-800 text-white'
@@ -178,7 +179,7 @@ export function Sidebar() {
   const showCombineButton = selectedArray.length >= 2;
 
   return (
-    <aside className="flex h-full w-14 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-3">
+    <aside role="toolbar" aria-label="Editor tools" className="flex h-full w-14 flex-col items-center gap-1 border-r border-zinc-800 bg-zinc-900 py-3">
       {/* Add Entity Menu */}
       <AddEntityMenu onSpawn={handleSpawnEntity} />
 

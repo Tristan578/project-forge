@@ -24,6 +24,8 @@ function PresetButton({ icon, label, shortcut, isActive, onClick }: PresetButton
     <button
       onClick={onClick}
       title={`${label} (${shortcut})`}
+      aria-label={`${label} (${shortcut})`}
+      aria-pressed={isActive}
       className={`
         flex items-center justify-center w-8 h-8 rounded
         transition-colors duration-150
@@ -43,7 +45,7 @@ export function ViewPresetButtons() {
   const setCameraPreset = useEditorStore((s) => s.setCameraPreset);
 
   return (
-    <div className="flex items-center gap-1 p-1 bg-neutral-800 rounded">
+    <div role="toolbar" aria-label="Camera view presets" className="flex items-center gap-1 p-1 bg-neutral-800 rounded">
       <PresetButton
         preset="top"
         icon={<ArrowUp className="w-4 h-4" />}
