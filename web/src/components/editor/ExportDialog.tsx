@@ -40,17 +40,48 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   const [exportError, setExportError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Close on Escape key
+  // Close on Escape key + focus trap
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isExporting) {
         onClose();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        const focusable = dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
       }
     };
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, isExporting, onClose]);
+
+  // Auto-focus dialog on open
+  useEffect(() => {
+    if (isOpen && dialogRef.current) {
+      requestAnimationFrame(() => {
+        dialogRef.current?.focus();
+      });
+    }
+  }, [isOpen]);
 
   // Sync title with scene name when it changes (React-documented pattern)
   const [prevSceneName, setPrevSceneName] = useState(sceneName);
@@ -127,6 +158,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
             <h2 id="embed-dialog-title" className="text-base font-semibold text-zinc-100">Embed Code</h2>
             <button
               onClick={() => { setEmbedSnippet(null); onClose(); }}
+              aria-label="Close embed dialog"
               className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
             >
               <X size={18} />
@@ -161,13 +193,14 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={(e) => { if (e.target === e.currentTarget && !isExporting) onClose(); }}>
-      <div ref={dialogRef} role="dialog" aria-labelledby="export-dialog-title" aria-modal="true" className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
+      <div ref={dialogRef} role="dialog" aria-labelledby="export-dialog-title" aria-modal="true" tabIndex={-1} className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl focus:outline-none">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
           <h2 id="export-dialog-title" className="text-base font-semibold text-zinc-100">Export Game</h2>
           <button
             onClick={onClose}
             disabled={isExporting}
+            aria-label="Close export dialog"
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 disabled:opacity-50"
           >
             <X size={18} />
@@ -399,7 +432,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
 
         {/* Error display */}
         {exportError && (
-          <div className="mx-4 mb-0 flex items-start gap-2 rounded border border-red-900/50 bg-red-950/20 p-3">
+          <div role="alert" className="mx-4 mb-0 flex items-start gap-2 rounded border border-red-900/50 bg-red-950/20 p-3">
             <AlertTriangle size={14} className="mt-0.5 shrink-0 text-red-400" />
             <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-red-400">Export failed</p>
@@ -407,6 +440,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
             </div>
             <button
               onClick={() => setExportError(null)}
+              aria-label="Dismiss error"
               className="shrink-0 rounded p-0.5 text-red-400/50 hover:text-red-400"
             >
               <X size={12} />
