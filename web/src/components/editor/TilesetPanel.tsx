@@ -16,6 +16,7 @@ export function TilesetPanel() {
   const tilesets = useEditorStore((s) => s.tilesets ?? {});
   const activeTilesetId = useEditorStore((s) => s.activeTilesetId);
   const setActiveTileset = useEditorStore((s) => s.setActiveTileset);
+  const setTileset = useEditorStore((s) => s.setTileset);
 
   const [selection, setSelection] = useState<TileSelection | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -36,17 +37,17 @@ export function TilesetPanel() {
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
-      // TODO: Show tileset import dialog with tile size/spacing/margin options
-      // For now, default to 32x32 tiles with no spacing/margin
-      const _assetId = `tileset_${Date.now()}`;
-      // dispatchCommand('import_tileset', {
-      //   asset_id: _assetId,
-      //   image_data: dataUrl,
-      //   tile_size: [32, 32],
-      //   spacing: 0,
-      //   margin: 0
-      // });
-      console.log('Import tileset:', file.name, dataUrl.substring(0, 50));
+      const assetId = `tileset_${Date.now()}`;
+      setTileset(assetId, {
+        assetId: dataUrl,
+        name: file.name.replace(/\.[^.]+$/, ''),
+        tileSize: [32, 32],
+        gridSize: [8, 8],
+        spacing: 0,
+        margin: 0,
+        tiles: [],
+      });
+      setActiveTileset(assetId);
     };
     reader.readAsDataURL(file);
 
@@ -54,7 +55,7 @@ export function TilesetPanel() {
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
-  }, []);
+  }, [setTileset, setActiveTileset]);
 
   const handleTileMouseDown = useCallback((tilesetId: string, tileX: number, tileY: number) => {
     setIsDragging(true);

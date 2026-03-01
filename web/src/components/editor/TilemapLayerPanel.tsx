@@ -17,37 +17,31 @@ export function TilemapLayerPanel() {
   const activeLayerIndex = useEditorStore((s) => s.tilemapActiveLayerIndex ?? 0);
   const setActiveLayerIndex = useEditorStore((s) => s.setTilemapActiveLayerIndex);
 
+  const setTilemapData = useEditorStore((s) => s.setTilemapData);
+
   const handleAddLayer = useCallback(() => {
     if (!primaryId || !tilemapData) return;
-    const _layerCount = tilemapData.layers.length;
-    // dispatchCommand('add_tilemap_layer', {
-    //   tilemap_id: primaryId,
-    //   name: `Layer ${_layerCount + 1}`
-    // });
-    console.log('Add layer');
-  }, [primaryId, tilemapData]);
+    const layerCount = tilemapData.layers.length;
+    const tileCount = tilemapData.mapSize[0] * tilemapData.mapSize[1];
+    const newLayer = { name: `Layer ${layerCount + 1}`, tiles: Array(tileCount).fill(null) as (number | null)[], visible: true, opacity: 1, isCollision: false };
+    setTilemapData(primaryId, { ...tilemapData, layers: [...tilemapData.layers, newLayer] });
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleRemoveLayer = useCallback((layerIndex: number) => {
     if (!primaryId || !tilemapData) return;
     const layer = tilemapData.layers[layerIndex];
     if (confirm(`Remove layer "${layer.name}"?`)) {
-      // dispatchCommand('remove_tilemap_layer', {
-      //   tilemap_id: primaryId,
-      //   layer: layerIndex
-      // });
-      console.log('Remove layer:', layerIndex);
+      setTilemapData(primaryId, { ...tilemapData, layers: tilemapData.layers.filter((_, i) => i !== layerIndex) });
     }
-  }, [primaryId, tilemapData]);
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleUpdateLayer = useCallback((layerIndex: number, partial: Partial<_TilemapLayer>) => {
     if (!primaryId || !tilemapData) return;
-    // dispatchCommand('set_tilemap_layer', {
-    //   tilemap_id: primaryId,
-    //   layer: layerIndex,
-    //   ...partial
-    // });
-    console.log('Update layer:', layerIndex, partial);
-  }, [primaryId, tilemapData]);
+    const updatedLayers = tilemapData.layers.map((layer, i) =>
+      i === layerIndex ? { ...layer, ...partial } : layer
+    );
+    setTilemapData(primaryId, { ...tilemapData, layers: updatedLayers });
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleLayerClick = useCallback((layerIndex: number) => {
     setActiveLayerIndex(layerIndex);

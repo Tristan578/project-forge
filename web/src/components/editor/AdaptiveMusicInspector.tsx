@@ -7,6 +7,7 @@
 
 import { useState, useCallback } from 'react';
 import { Play, Pause, Save, Upload } from 'lucide-react';
+import { useEditorStore } from '@/stores/editorStore';
 
 interface StemConfig {
   pad?: string;
@@ -27,9 +28,11 @@ interface AudioSnapshot {
 }
 
 export default function AdaptiveMusicInspector() {
-  const [intensity, setIntensity] = useState(0);
+  const intensity = useEditorStore((s) => s.adaptiveMusicIntensity);
+  const setAdaptiveMusicIntensity = useEditorStore((s) => s.setAdaptiveMusicIntensity);
+  const currentSegment = useEditorStore((s) => s.currentMusicSegment);
+  const setCurrentMusicSegment = useEditorStore((s) => s.setCurrentMusicSegment);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentSegment, setCurrentSegment] = useState('intro');
   const [stems, setStems] = useState<StemConfig>({ bpm: 120 });
   const [snapshots, setSnapshots] = useState<AudioSnapshot[]>([]);
   const [snapshotName, setSnapshotName] = useState('');
@@ -47,33 +50,31 @@ export default function AdaptiveMusicInspector() {
   }, []);
 
   const handleIntensityChange = useCallback((value: number) => {
-    setIntensity(value);
-    // TODO: Call dispatchCommand('set_music_intensity', { intensity: value });
-  }, []);
+    setAdaptiveMusicIntensity(value);
+  }, [setAdaptiveMusicIntensity]);
 
   const handlePlayPause = useCallback(() => {
     setIsPlaying(prev => !prev);
-    // TODO: Call adaptive music manager play/stop
   }, []);
 
   const handleSegmentChange = useCallback((segment: string) => {
-    setCurrentSegment(segment);
-    // TODO: Call dispatchCommand('transition_music_segment', { segment, quantized: true });
-  }, []);
+    setCurrentMusicSegment(segment);
+  }, [setCurrentMusicSegment]);
 
   const handleCreateSnapshot = useCallback(() => {
     if (!snapshotName.trim()) {
       alert('Please enter a snapshot name');
       return;
     }
-
-    // TODO: Call dispatchCommand('create_audio_snapshot', { name: snapshotName });
+    const newSnapshot: AudioSnapshot = { name: snapshotName.trim(), timestamp: Date.now(), buses: [] };
+    const updated = [...snapshots, newSnapshot];
+    setSnapshots(updated);
+    try { localStorage.setItem('audioSnapshots', JSON.stringify(updated)); } catch { /* ignore */ }
     setSnapshotName('');
-    loadSnapshots();
-  }, [snapshotName, loadSnapshots]);
+  }, [snapshotName, snapshots]);
 
   const handleApplySnapshot = useCallback((_name: string) => {
-    // TODO: Call dispatchCommand('apply_audio_snapshot', { name: _name, crossfadeDurationMs: 1000 });
+    // Snapshot application will be wired when engine-side adaptive music is implemented
   }, []);
 
   const handleStemChange = useCallback((stemName: keyof StemConfig, value: string | number) => {
@@ -81,8 +82,8 @@ export default function AdaptiveMusicInspector() {
   }, []);
 
   const handleConfigureStems = useCallback(() => {
-    // TODO: Call dispatchCommand('set_adaptive_music', stems);
-    console.log('Configuring stems:', stems);
+    // Stem configuration will be dispatched when engine-side adaptive music is implemented
+    void stems;
   }, [stems]);
 
   return (

@@ -17,86 +17,64 @@ export function TilemapInspector() {
   const tilesets = useEditorStore((s) => s.tilesets ?? {});
   const projectType = useEditorStore((s) => s.projectType);
 
+  const setTilemapData = useEditorStore((s) => s.setTilemapData);
+  const removeTilemapData = useEditorStore((s) => s.removeTilemapData);
+
   const handleAddTilemap = useCallback(() => {
     if (!primaryId) return;
-    // dispatchCommand('add_tilemap', {
-    //   entity_id: primaryId,
-    //   tileset_asset_id: '',
-    //   map_size: [20, 15],
-    //   tile_size: [32, 32],
-    //   origin: 'TopLeft'
-    // });
-    console.log('Add tilemap to entity:', primaryId);
-  }, [primaryId]);
+    setTilemapData(primaryId, {
+      tilesetAssetId: '',
+      mapSize: [20, 15],
+      tileSize: [32, 32],
+      layers: [{ name: 'Layer 1', tiles: Array(20 * 15).fill(null), visible: true, opacity: 1, isCollision: false }],
+      origin: 'TopLeft',
+    });
+  }, [primaryId, setTilemapData]);
 
   const handleRemoveTilemap = useCallback(() => {
     if (!primaryId) return;
     if (confirm('Remove tilemap from this entity?')) {
-      // dispatchCommand('remove_tilemap', { entity_id: primaryId });
-      console.log('Remove tilemap from entity:', primaryId);
+      removeTilemapData(primaryId);
     }
-  }, [primaryId]);
+  }, [primaryId, removeTilemapData]);
 
   const handleUpdateTileset = useCallback((tilesetId: string) => {
-    if (!primaryId) return;
-    // dispatchCommand('set_tilemap_tileset', {
-    //   entity_id: primaryId,
-    //   tileset_asset_id: tilesetId
-    // });
-    console.log('Update tileset:', tilesetId);
-  }, [primaryId]);
+    if (!primaryId || !tilemapData) return;
+    setTilemapData(primaryId, { ...tilemapData, tilesetAssetId: tilesetId });
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleUpdateMapSize = useCallback((width: number, height: number) => {
-    if (!primaryId) return;
-    // dispatchCommand('resize_tilemap', {
-    //   entity_id: primaryId,
-    //   width,
-    //   height,
-    //   anchor: 'top-left'
-    // });
-    console.log('Resize tilemap:', width, height);
-  }, [primaryId]);
+    if (!primaryId || !tilemapData) return;
+    setTilemapData(primaryId, { ...tilemapData, mapSize: [width, height] });
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleUpdateOrigin = useCallback((origin: 'TopLeft' | 'Center') => {
     if (!primaryId || !tilemapData) return;
-    // dispatchCommand('set_tilemap_origin', {
-    //   entity_id: primaryId,
-    //   origin
-    // });
-    console.log('Update origin:', origin);
-  }, [primaryId, tilemapData]);
+    setTilemapData(primaryId, { ...tilemapData, origin });
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleAddLayer = useCallback(() => {
     if (!primaryId || !tilemapData) return;
-    const _layerCount = tilemapData.layers.length;
-    // dispatchCommand('add_tilemap_layer', {
-    //   tilemap_id: primaryId,
-    //   name: `Layer ${_layerCount + 1}`
-    // });
-    console.log('Add layer');
-  }, [primaryId, tilemapData]);
+    const layerCount = tilemapData.layers.length;
+    const tileCount = tilemapData.mapSize[0] * tilemapData.mapSize[1];
+    const newLayer = { name: `Layer ${layerCount + 1}`, tiles: Array(tileCount).fill(null) as (number | null)[], visible: true, opacity: 1, isCollision: false };
+    setTilemapData(primaryId, { ...tilemapData, layers: [...tilemapData.layers, newLayer] });
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleRemoveLayer = useCallback((layerIndex: number) => {
     if (!primaryId || !tilemapData) return;
     if (confirm(`Remove layer "${tilemapData.layers[layerIndex].name}"?`)) {
-      // dispatchCommand('remove_tilemap_layer', {
-      //   tilemap_id: primaryId,
-      //   layer: layerIndex
-      // });
-      console.log('Remove layer:', layerIndex);
+      setTilemapData(primaryId, { ...tilemapData, layers: tilemapData.layers.filter((_, i) => i !== layerIndex) });
     }
-  }, [primaryId, tilemapData]);
+  }, [primaryId, tilemapData, setTilemapData]);
 
   const handleUpdateLayer = useCallback((layerIndex: number, partial: Partial<_TilemapLayer>) => {
     if (!primaryId || !tilemapData) return;
-    const layer = tilemapData.layers[layerIndex];
-    // dispatchCommand('set_tilemap_layer', {
-    //   tilemap_id: primaryId,
-    //   layer: layerIndex,
-    //   ...partial
-    // });
-    console.log('Update layer:', layerIndex, partial, layer);
-  }, [primaryId, tilemapData]);
+    const updatedLayers = tilemapData.layers.map((layer, i) =>
+      i === layerIndex ? { ...layer, ...partial } : layer
+    );
+    setTilemapData(primaryId, { ...tilemapData, layers: updatedLayers });
+  }, [primaryId, tilemapData, setTilemapData]);
 
   // Only show in 2D projects
   if (projectType !== '2d') return null;

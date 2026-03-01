@@ -30,18 +30,20 @@ export function SortingLayerPanel() {
     return [...sortingLayers].sort((a, b) => a.order - b.order);
   }, [sortingLayers]);
 
-  const handleToggleVisibility = useCallback((_layerName: string) => {
-    // TODO: dispatch sorting layer visibility toggle
-    // dispatchCommand('toggle_sorting_layer_visibility', { layerName: _layerName });
-  }, []);
+  const toggleLayerVisibility = useEditorStore((s) => s.toggleLayerVisibility);
+  const removeSortingLayer = useEditorStore((s) => s.removeSortingLayer);
+  const addSortingLayerAction = useEditorStore((s) => s.addSortingLayer);
+
+  const handleToggleVisibility = useCallback((layerName: string) => {
+    toggleLayerVisibility(layerName);
+  }, [toggleLayerVisibility]);
 
   const handleDeleteLayer = useCallback((layerName: string) => {
     if (DEFAULT_LAYERS.includes(layerName)) {
       return; // Can't delete default layers
     }
-    // TODO: dispatch sorting layer deletion
-    // dispatchCommand('delete_sorting_layer', { layerName });
-  }, []);
+    removeSortingLayer(layerName);
+  }, [removeSortingLayer]);
 
   const handleAddLayer = useCallback(() => {
     const trimmed = newLayerName.trim();
@@ -50,10 +52,9 @@ export function SortingLayerPanel() {
       alert(`Layer "${trimmed}" already exists`);
       return;
     }
-    // TODO: dispatch sorting layer creation
-    // dispatchCommand('add_sorting_layer', { name: trimmed, order: sortingLayers.length });
+    addSortingLayerAction(trimmed);
     setNewLayerName('');
-  }, [newLayerName, sortingLayers]);
+  }, [newLayerName, sortingLayers, addSortingLayerAction]);
 
   return (
     <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
