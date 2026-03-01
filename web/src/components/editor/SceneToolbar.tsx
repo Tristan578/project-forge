@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
-import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2 } from 'lucide-react';
+import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2 } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
 
 export function SceneToolbar() {
@@ -14,6 +14,12 @@ export function SceneToolbar() {
   const newScene = useEditorStore((s) => s.newScene);
   const setSceneName = useEditorStore((s) => s.setSceneName);
   const engineMode = useEditorStore((s) => s.engineMode);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
+  const canUndo = useEditorStore((s) => s.canUndo);
+  const canRedo = useEditorStore((s) => s.canRedo);
+  const undoDescription = useEditorStore((s) => s.undoDescription);
+  const redoDescription = useEditorStore((s) => s.redoDescription);
   const projectId = useEditorStore((s) => s.projectId);
   const cloudSaveStatus = useEditorStore((s) => s.cloudSaveStatus);
   const saveToCloud = useEditorStore((s) => s.saveToCloud);
@@ -119,6 +125,30 @@ export function SceneToolbar() {
           {sceneModified && <span className="ml-0.5 text-yellow-500">*</span>}
         </button>
       )}
+
+      {/* Undo button */}
+      <button
+        onClick={undo}
+        disabled={!isEdit || !canUndo}
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        title={canUndo && undoDescription ? `Undo: ${undoDescription} (Ctrl+Z)` : 'Undo (Ctrl+Z)'}
+        aria-label={canUndo && undoDescription ? `Undo: ${undoDescription}` : 'Undo'}
+      >
+        <Undo2 size={13} />
+      </button>
+
+      {/* Redo button */}
+      <button
+        onClick={redo}
+        disabled={!isEdit || !canRedo}
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200 disabled:opacity-30"
+        title={canRedo && redoDescription ? `Redo: ${redoDescription} (Ctrl+Shift+Z)` : 'Redo (Ctrl+Shift+Z)'}
+        aria-label={canRedo && redoDescription ? `Redo: ${redoDescription}` : 'Redo'}
+      >
+        <Redo2 size={13} />
+      </button>
+
+      <div className="mx-0.5 h-4 w-px bg-zinc-700" />
 
       {/* Save button */}
       <button
