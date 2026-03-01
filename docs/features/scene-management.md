@@ -3,7 +3,7 @@
 Manage entities in your scene: spawn, delete, duplicate, rename, organize in hierarchies, and search.
 
 ## Overview
-Every object in GenForge is an **entity** — meshes, lights, cameras, and more. The Scene Hierarchy panel shows all entities as a tree structure.
+Every object in SpawnForge is an **entity** — meshes, lights, cameras, and more. The Scene Hierarchy panel shows all entities as a tree structure.
 
 ## Spawning Entities
 

@@ -112,7 +112,7 @@ export function WelcomeModal() {
           className="mx-4 w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-2xl focus:outline-none"
         >
           <h2 id="welcome-modal-title" className="mb-1 text-lg font-semibold text-zinc-100">
-            Welcome to GenForge
+            Welcome to SpawnForge
           </h2>
           <p className="mb-5 text-sm text-zinc-400">
             A 3D game editor in your browser. Here are some quick tips to get started:

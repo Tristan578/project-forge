@@ -1,6 +1,6 @@
 # Installation & Setup
 
-Get GenForge running on your machine.
+Get SpawnForge running on your machine.
 
 ## Prerequisites
 
@@ -13,8 +13,8 @@ Get GenForge running on your machine.
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/your-org/genforge.git
-   cd genforge
+   git clone https://github.com/your-org/spawnforge.git
+   cd spawnforge
    ```
 
 2. **Build the WASM engine** (produces both WebGPU and WebGL2 binaries)
@@ -37,7 +37,7 @@ Get GenForge running on your machine.
 
 ## Browser Requirements
 
-GenForge uses **WebGPU** for rendering when available, with automatic fallback to **WebGL2**.
+SpawnForge uses **WebGPU** for rendering when available, with automatic fallback to **WebGL2**.
 
 | Browser | WebGPU | WebGL2 |
 |---------|--------|--------|

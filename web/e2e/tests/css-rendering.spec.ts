@@ -116,8 +116,8 @@ test.describe('CSS & Visual Rendering Tests @ui', () => {
   test('no critical layout shifts during load', async ({ page, editor }) => {
     await editor.loadPage();
 
-    // Use a known stable element: the top bar (h-8 with GenForge text)
-    const topBar = page.locator('span').filter({ hasText: 'GenForge' }).first();
+    // Use a known stable element: the top bar (h-8 with SpawnForge text)
+    const topBar = page.locator('span').filter({ hasText: 'SpawnForge' }).first();
     const initialBox = await topBar.boundingBox();
 
     // Wait for any async layout changes

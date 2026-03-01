@@ -1,10 +1,10 @@
-# GenForge Documentation
+# SpawnForge Documentation
 
-Welcome to GenForge — an AI-powered platform for creating 2D/3D games in your browser.
+Welcome to SpawnForge — an AI-powered platform for creating 2D/3D games in your browser.
 
 ## Getting Started
 
-New to GenForge? Start here:
+New to SpawnForge? Start here:
 
 - [Installation & Setup](./getting-started/installation.md) — prerequisites, build, first run
 - [Your First Scene](./getting-started/first-scene.md) — create a scene step by step

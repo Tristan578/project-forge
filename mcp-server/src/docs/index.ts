@@ -100,7 +100,7 @@ export function registerDocs(server: McpServer): void {
   // ── Tool: search_docs ──
   server.tool(
     'search_docs',
-    'Search GenForge documentation by keyword. Returns ranked results with snippets.',
+    'Search SpawnForge documentation by keyword. Returns ranked results with snippets.',
     {
       query: z.string().describe('Search query (keywords or natural language question)'),
       maxResults: z.number().optional().describe('Maximum results to return (default: 10)'),

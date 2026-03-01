@@ -1,12 +1,12 @@
 # MCP Server Integration Guide
 
-Connect your AI agent to GenForge's MCP server to programmatically create and modify games.
+Connect your AI agent to SpawnForge's MCP server to programmatically create and modify games.
 
 ## Prerequisites
 
 - Node.js 18+
 - npm or yarn
-- A running GenForge editor instance at `http://localhost:3000` (the MCP server connects to it via WebSocket)
+- A running SpawnForge editor instance at `http://localhost:3000` (the MCP server connects to it via WebSocket)
 
 ## Installation
 
@@ -18,14 +18,14 @@ npm run build
 
 ## Architecture Overview
 
-The MCP server uses **stdio transport** to communicate with AI clients (Claude Desktop, Claude Code, Cursor). Separately, it maintains an outbound WebSocket connection to the running GenForge editor to relay commands and receive scene state.
+The MCP server uses **stdio transport** to communicate with AI clients (Claude Desktop, Claude Code, Cursor). Separately, it maintains an outbound WebSocket connection to the running SpawnForge editor to relay commands and receive scene state.
 
 ```
 AI Client (Claude Desktop / Claude Code)
     ↕  stdio (MCP protocol)
 MCP Server (mcp-server/dist/index.js)
     ↕  WebSocket (ws://localhost:3001/api/mcp/ws)
-GenForge Editor (Next.js dev server)
+SpawnForge Editor (Next.js dev server)
 ```
 
 The MCP server starts even when the editor is not running — tool calls will return an error until the editor comes online. It auto-reconnects every 5 seconds.
@@ -61,7 +61,7 @@ Add this to your Claude Desktop MCP configuration (`claude_desktop_config.json`)
 ```json
 {
   "mcpServers": {
-    "genforge": {
+    "spawnforge": {
       "command": "node",
       "args": ["/absolute/path/to/project-forge/mcp-server/dist/index.js"],
       "env": {
@@ -81,7 +81,7 @@ Add the MCP server to your Claude Code project configuration (`.claude/settings.
 ```json
 {
   "mcpServers": {
-    "genforge": {
+    "spawnforge": {
       "command": "node",
       "args": ["/absolute/path/to/project-forge/mcp-server/dist/index.js"]
     }
@@ -97,7 +97,7 @@ These tools work without an editor connection — they operate on the local docs
 
 | Tool | Description |
 |------|-------------|
-| `search_docs` | Search GenForge documentation using BM25 ranking. Returns ranked results with snippets. |
+| `search_docs` | Search SpawnForge documentation using BM25 ranking. Returns ranked results with snippets. |
 | `get_doc` | Retrieve a full documentation page by its path (e.g., `"features/physics"`). |
 | `list_doc_topics` | List all available documentation topics with titles and tags. |
 
@@ -287,7 +287,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 ## Troubleshooting
 
-**"Not connected to the editor"** — Start the GenForge dev server (`cd web && npm run dev`) and wait for it to be ready at `http://localhost:3000`. The MCP server will reconnect automatically within 5 seconds.
+**"Not connected to the editor"** — Start the SpawnForge dev server (`cd web && npm run dev`) and wait for it to be ready at `http://localhost:3000`. The MCP server will reconnect automatically within 5 seconds.
 
 **Tool calls return errors but the editor is running** — Check that `FORGE_EDITOR_WS_URL` points to the correct WebSocket endpoint. The default is `ws://localhost:3001/api/mcp/ws`.
 

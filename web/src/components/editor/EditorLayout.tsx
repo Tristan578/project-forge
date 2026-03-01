@@ -166,7 +166,7 @@ function MobileBanner() {
 
   return (
     <div className="absolute top-10 left-2 right-2 z-20 flex items-center gap-2 rounded border border-amber-700/50 bg-amber-900/80 px-3 py-2 text-xs text-amber-200 shadow-lg">
-      <span className="flex-1">GenForge is optimized for desktop browsers. Some features may be limited on mobile.</span>
+      <span className="flex-1">SpawnForge is optimized for desktop browsers. Some features may be limited on mobile.</span>
       <button onClick={handleDismiss} className="shrink-0 rounded p-0.5 hover:bg-amber-800">
         <X size={14} />
       </button>
@@ -304,7 +304,7 @@ export function EditorLayout() {
         {/* Top bar - simplified */}
         <div className="flex h-8 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-2">
           <div className="flex items-center gap-1.5 min-w-0">
-            <span className="shrink-0 text-xs font-semibold text-zinc-400">GenForge</span>
+            <span className="shrink-0 text-xs font-semibold text-zinc-400">SpawnForge</span>
             {sceneName !== 'Untitled' && (
               <>
                 <span className="text-zinc-700">/</span>
@@ -358,7 +358,7 @@ export function EditorLayout() {
       {/* Top bar */}
       <div className="flex h-8 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3">
         <div className="flex items-center gap-3">
-          <span className="text-xs font-semibold text-zinc-400">GenForge</span>
+          <span className="text-xs font-semibold text-zinc-400">SpawnForge</span>
           <div className="h-3 w-px bg-zinc-700" />
           <span className="max-w-[200px] truncate text-xs text-zinc-500" title={sceneName}>
             {sceneName}

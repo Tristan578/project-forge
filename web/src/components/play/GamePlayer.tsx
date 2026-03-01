@@ -124,7 +124,7 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
         setEngineState('ready');
       }, 500);
     } catch (err) {
-      console.error('[GenForge Play] Engine init failed:', err);
+      console.error('[SpawnForge Play] Engine init failed:', err);
       setEngineState('error');
       setError(
         err instanceof Error ? err.message : 'Failed to initialize game engine'
@@ -172,7 +172,7 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
             className="inline-flex items-center gap-2 rounded bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
           >
             <ArrowLeft size={14} />
-            Back to GenForge
+            Back to SpawnForge
           </Link>
         </div>
       </div>
@@ -203,7 +203,7 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
           <Link
             href="/"
             className="rounded p-1 text-zinc-500 transition-colors hover:text-zinc-300"
-            title="Back to GenForge"
+            title="Back to SpawnForge"
           >
             <ArrowLeft size={18} />
           </Link>

@@ -1,6 +1,6 @@
 # Editor Overview
 
-A guide to every panel and control in the GenForge editor.
+A guide to every panel and control in the SpawnForge editor.
 
 ## Layout
 

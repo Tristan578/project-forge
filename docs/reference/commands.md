@@ -1,6 +1,6 @@
 # Command Reference
 
-Complete reference for all 329 MCP commands available in GenForge.
+Complete reference for all 329 MCP commands available in SpawnForge.
 
 > This file is auto-generated from `mcp-server/manifest/commands.json`.
 > Run `npx tsx docs/scripts/generate-reference.ts` to regenerate.
@@ -2700,7 +2700,7 @@ Scope: `scene:read` | Token cost: 0
 
 ### `search_docs`
 
-Search GenForge documentation by keyword. Returns ranked results with snippets.
+Search SpawnForge documentation by keyword. Returns ranked results with snippets.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

@@ -24,7 +24,7 @@ export function LegalLayout({
       <header className="border-b border-zinc-800 px-6 py-4">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
           <Link href="/" className="text-2xl font-bold hover:text-zinc-300">
-            GenForge
+            SpawnForge
           </Link>
           <nav className="flex items-center gap-6 text-sm text-zinc-400">
             <Link href="/terms" className="hover:text-white">
@@ -89,7 +89,7 @@ export function LegalLayout({
       {/* Footer */}
       <footer className="mt-16 border-t border-zinc-800 px-6 py-8">
         <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 text-sm text-zinc-500 sm:flex-row sm:justify-between">
-          <p>&copy; {new Date().getFullYear()} GenForge. All rights reserved.</p>
+          <p>&copy; {new Date().getFullYear()} SpawnForge. All rights reserved.</p>
           <nav className="flex gap-6">
             <Link href="/terms" className="hover:text-zinc-300">
               Terms of Service

@@ -9,7 +9,7 @@ import { EditorBridge } from './transport/websocket.js';
 
 async function main() {
   const server = new McpServer({
-    name: 'genforge',
+    name: 'spawnforge',
     version: '0.1.0',
   });
 

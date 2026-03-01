@@ -112,7 +112,7 @@ export function DashboardLayout() {
         {/* Header */}
         <header className="flex items-center justify-between border-b border-zinc-700 bg-zinc-900 px-6 py-4">
           <h1 className="text-2xl font-bold text-zinc-200">
-            GenForge
+            SpawnForge
           </h1>
           <div className="flex items-center gap-3">
             <button

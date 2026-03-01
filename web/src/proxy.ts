@@ -8,8 +8,8 @@ import type { NextRequest } from 'next/server';
 const ALLOWED_ORIGINS =
   process.env.NODE_ENV === 'production'
     ? [
-        'https://genforge.app',
-        'https://www.genforge.app',
+        'https://spawnforge.ai',
+        'https://www.spawnforge.ai',
       ]
     : [
         'http://localhost:3000',
