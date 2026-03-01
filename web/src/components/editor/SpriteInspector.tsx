@@ -20,14 +20,16 @@ export function SpriteInspector() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [pixelEditorOpen, setPixelEditorOpen] = useState(false);
 
+  const setSpriteData = useEditorStore((s) => s.setSpriteData);
+  const loadTexture = useEditorStore((s) => s.loadTexture);
+
   const handleUpdate = useCallback(
-    (_partial: Partial<SpriteData>) => {
+    (partial: Partial<SpriteData>) => {
       if (primaryId && spriteData) {
-        // TODO: dispatch sprite update command
-        // dispatchCommand('update_sprite', { entityId: primaryId, ...partial });
+        setSpriteData(primaryId, { ...spriteData, ...partial });
       }
     },
-    [primaryId, spriteData]
+    [primaryId, spriteData, setSpriteData]
   );
 
   const handleTextureUpload = useCallback(async (files: FileList | null) => {
@@ -36,12 +38,11 @@ export function SpriteInspector() {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result as string;
-      const _base64 = result.split(',')[1];
-      // TODO: dispatch texture load + sprite texture update
-      // dispatchCommand('load_texture', { dataBase64: _base64, name: file.name, entityId: primaryId, slot: 'sprite' });
+      const base64 = result.split(',')[1];
+      loadTexture(base64, file.name, primaryId, 'sprite');
     };
     reader.readAsDataURL(file);
-  }, [primaryId]);
+  }, [primaryId, loadTexture]);
 
   const handleSelectTexture = useCallback((assetId: string) => {
     if (!primaryId) return;

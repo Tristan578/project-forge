@@ -6,14 +6,15 @@ import { useEditorStore, type Camera2dData } from '@/stores/editorStore';
 export function Camera2dInspector() {
   const camera2dData = useEditorStore((s) => s.camera2dData);
 
+  const setCamera2dData = useEditorStore((s) => s.setCamera2dData);
+
   const handleUpdate = useCallback(
-    (_partial: Partial<Camera2dData>) => {
+    (partial: Partial<Camera2dData>) => {
       if (camera2dData) {
-        // TODO: dispatch camera2d update command
-        // dispatchCommand('update_camera2d', { ..._partial });
+        setCamera2dData({ ...camera2dData, ...partial });
       }
     },
-    [camera2dData]
+    [camera2dData, setCamera2dData]
   );
 
   if (!camera2dData) return null;

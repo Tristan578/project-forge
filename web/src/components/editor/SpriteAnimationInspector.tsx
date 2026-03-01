@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 
 export function SpriteAnimationInspector() {
@@ -7,36 +8,40 @@ export function SpriteAnimationInspector() {
   const spriteSheets = useEditorStore((s) => s.spriteSheets);
   const spriteAnimators = useEditorStore((s) => s.spriteAnimators);
   const animationStateMachines = useEditorStore((s) => s.animationStateMachines);
+  const setSpriteAnimator = useEditorStore((s) => s.setSpriteAnimator);
+  const setAnimationStateMachine = useEditorStore((s) => s.setAnimationStateMachine);
 
-  if (!primaryId) return null;
-
-  const spriteSheet = spriteSheets[primaryId];
-  const animator = spriteAnimators[primaryId];
-  const stateMachine = animationStateMachines[primaryId];
-
-  if (!spriteSheet && !animator && !stateMachine) return null;
-
+  const spriteSheet = primaryId ? spriteSheets[primaryId] : undefined;
+  const animator = primaryId ? spriteAnimators[primaryId] : undefined;
+  const stateMachine = primaryId ? animationStateMachines[primaryId] : undefined;
   const clipNames = spriteSheet ? Object.keys(spriteSheet.clips) : [];
 
-  const handlePlayClip = (clipName: string) => {
-    // TODO: Implement command dispatch when Rust engine is ready
-    console.log('Play clip:', clipName);
-  };
+  const handlePlayClip = useCallback((clipName: string) => {
+    if (!primaryId || !animator) return;
+    setSpriteAnimator(primaryId, { ...animator, currentClip: clipName, playing: true });
+  }, [primaryId, animator, setSpriteAnimator]);
 
-  const handleStop = () => {
-    // TODO: Implement command dispatch when Rust engine is ready
-    console.log('Stop animation');
-  };
+  const handleStop = useCallback(() => {
+    if (!primaryId || !animator) return;
+    setSpriteAnimator(primaryId, { ...animator, playing: false });
+  }, [primaryId, animator, setSpriteAnimator]);
 
-  const handleSpeedChange = (speed: number) => {
-    // TODO: Implement command dispatch when Rust engine is ready
-    console.log('Set speed:', speed);
-  };
+  const handleSpeedChange = useCallback((speed: number) => {
+    if (!primaryId || !animator) return;
+    setSpriteAnimator(primaryId, { ...animator, speed });
+  }, [primaryId, animator, setSpriteAnimator]);
 
-  const handleSetAnimParam = (paramName: string, value: number | boolean) => {
-    // TODO: Implement command dispatch when Rust engine is ready
-    console.log('Set param:', paramName, value);
-  };
+  const handleSetAnimParam = useCallback((paramName: string, value: number | boolean) => {
+    if (!primaryId || !stateMachine) return;
+    const param = stateMachine.parameters[paramName];
+    if (!param) return;
+    setAnimationStateMachine(primaryId, {
+      ...stateMachine,
+      parameters: { ...stateMachine.parameters, [paramName]: { ...param, value: value as never } },
+    });
+  }, [primaryId, stateMachine, setAnimationStateMachine]);
+
+  if (!primaryId || (!spriteSheet && !animator && !stateMachine)) return null;
 
   return (
     <div className="space-y-4">
