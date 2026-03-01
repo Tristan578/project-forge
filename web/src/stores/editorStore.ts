@@ -101,6 +101,11 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createEditModeSlice(...args),
 }));
 
+// Expose store for E2E tests (dev/test only)
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  (window as unknown as Record<string, unknown>).__EDITOR_STORE = useEditorStore;
+}
+
 // Command dispatcher type - will be set by useEngine hook
 type CommandDispatcher = (command: string, payload: unknown) => void;
 let _dispatchCommand: CommandDispatcher | null = null;
