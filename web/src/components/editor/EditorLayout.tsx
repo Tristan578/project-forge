@@ -44,12 +44,39 @@ const MOBILE_DISMISSED_KEY = 'forge-mobile-dismissed';
 
 // ---- Mobile-only components (unchanged) ----
 
+const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'script', 'ui'];
+
 function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; onTabChange: (tab: RightPanelTab) => void }) {
   const hasUnread = useChatStore((s) => s.hasUnreadMessages);
 
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const idx = TAB_ORDER.indexOf(activeTab);
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        onTabChange(TAB_ORDER[(idx + 1) % TAB_ORDER.length]);
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        onTabChange(TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length]);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        onTabChange(TAB_ORDER[0]);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        onTabChange(TAB_ORDER[TAB_ORDER.length - 1]);
+      }
+    },
+    [activeTab, onTabChange]
+  );
+
   return (
-    <div className="flex border-b border-zinc-800">
+    <div role="tablist" aria-label="Right panel tabs" className="flex border-b border-zinc-800" onKeyDown={handleKeyDown}>
       <button
+        role="tab"
+        id="tab-inspector"
+        aria-selected={activeTab === 'inspector'}
+        aria-controls="tabpanel-inspector"
+        tabIndex={activeTab === 'inspector' ? 0 : -1}
         onClick={() => onTabChange('inspector')}
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'inspector'
@@ -60,6 +87,11 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         Inspector
       </button>
       <button
+        role="tab"
+        id="tab-chat"
+        aria-selected={activeTab === 'chat'}
+        aria-controls="tabpanel-chat"
+        tabIndex={activeTab === 'chat' ? 0 : -1}
         onClick={() => onTabChange('chat')}
         className={`relative flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'chat'
@@ -69,10 +101,15 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
       >
         AI Chat
         {hasUnread && activeTab !== 'chat' && (
-          <span className="absolute top-1 right-2 h-1.5 w-1.5 rounded-full bg-purple-400 animate-pulse" />
+          <span className="absolute top-1 right-2 h-1.5 w-1.5 rounded-full bg-purple-400 animate-pulse" aria-label="Unread messages" />
         )}
       </button>
       <button
+        role="tab"
+        id="tab-script"
+        aria-selected={activeTab === 'script'}
+        aria-controls="tabpanel-script"
+        tabIndex={activeTab === 'script' ? 0 : -1}
         onClick={() => onTabChange('script')}
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'script'
@@ -83,6 +120,11 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         Script
       </button>
       <button
+        role="tab"
+        id="tab-ui"
+        aria-selected={activeTab === 'ui'}
+        aria-controls="tabpanel-ui"
+        tabIndex={activeTab === 'ui' ? 0 : -1}
         onClick={() => onTabChange('ui')}
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'ui'
@@ -97,10 +139,14 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
 }
 
 function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
-  if (activeTab === 'inspector') return <InspectorPanel />;
-  if (activeTab === 'script') return <ScriptEditorPanel />;
-  if (activeTab === 'ui') return <UIBuilderPanel />;
-  return <ChatPanel />;
+  return (
+    <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+      {activeTab === 'inspector' && <InspectorPanel />}
+      {activeTab === 'script' && <ScriptEditorPanel />}
+      {activeTab === 'ui' && <UIBuilderPanel />}
+      {activeTab === 'chat' && <ChatPanel />}
+    </div>
+  );
 }
 
 function isMobileBannerDismissed(): boolean {
