@@ -104,7 +104,9 @@ describe('Shift+F10 keyboard context menu trigger', () => {
   });
 
   it('should use fallback when no rect available', () => {
-    const rect = undefined;
+    // Simulate the pattern from the component where rect may be null/undefined
+    const getRect = (): { left: number; top: number } | undefined => undefined;
+    const rect = getRect();
     const position = {
       x: (rect?.left ?? 100) + 60,
       y: (rect?.top ?? 100) + 40,
