@@ -82,18 +82,20 @@ export function PerformanceProfiler() {
       {/* Header */}
       <button
         onClick={handleToggle}
+        aria-expanded={isProfilerOpen}
+        aria-label={isProfilerOpen ? 'Collapse performance panel' : 'Expand performance panel'}
         className="w-full px-4 py-2 flex items-center justify-between hover:bg-gray-800 rounded-t-lg transition-colors"
       >
         <div className="flex items-center gap-2">
           <div className="font-medium">Performance</div>
           {hasWarnings && (
-            <AlertTriangle className="w-4 h-4 text-yellow-500" />
+            <AlertTriangle className="w-4 h-4 text-yellow-500" aria-hidden="true" />
           )}
         </div>
         {isProfilerOpen ? (
-          <ChevronDown className="w-4 h-4" />
+          <ChevronDown className="w-4 h-4" aria-hidden="true" />
         ) : (
-          <ChevronUp className="w-4 h-4" />
+          <ChevronUp className="w-4 h-4" aria-hidden="true" />
         )}
       </button>
 
@@ -124,7 +126,7 @@ export function PerformanceProfiler() {
             </div>
             <div className="h-8 bg-gray-800 rounded relative overflow-hidden">
               {/* Sparkline */}
-              <svg className="absolute inset-0 w-full h-full">
+              <svg className="absolute inset-0 w-full h-full" role="img" aria-label="FPS history sparkline">
                 <polyline
                   points={history
                     .map((s, i) => {
@@ -155,7 +157,7 @@ export function PerformanceProfiler() {
                 {stats.triangleCount.toLocaleString()} / {budget.maxTriangles.toLocaleString()}
               </span>
             </div>
-            <div className="h-2 bg-gray-800 rounded overflow-hidden">
+            <div className="h-2 bg-gray-800 rounded overflow-hidden" role="progressbar" aria-valuenow={Math.round(triangleUsage)} aria-valuemin={0} aria-valuemax={100} aria-label="Triangle budget usage">
               <div
                 className={`h-full transition-all ${
                   triangleUsage > budget.warningThreshold * 100
@@ -177,7 +179,7 @@ export function PerformanceProfiler() {
                 {stats.drawCalls} / {budget.maxDrawCalls}
               </span>
             </div>
-            <div className="h-2 bg-gray-800 rounded overflow-hidden">
+            <div className="h-2 bg-gray-800 rounded overflow-hidden" role="progressbar" aria-valuenow={Math.round(drawCallUsage)} aria-valuemin={0} aria-valuemax={100} aria-label="Draw call budget usage">
               <div
                 className={`h-full transition-all ${
                   drawCallUsage > budget.warningThreshold * 100
@@ -205,7 +207,7 @@ export function PerformanceProfiler() {
 
           {/* Warnings */}
           {hasWarnings && (
-            <div className="mt-3 pt-3 border-t border-gray-700 space-y-1">
+            <div role="alert" aria-label="Performance warnings" className="mt-3 pt-3 border-t border-gray-700 space-y-1">
               {warnings.map((warning, i) => (
                 <div key={i} className="flex items-start gap-2 text-yellow-400 text-sm">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
