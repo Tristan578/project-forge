@@ -2,7 +2,7 @@
 
 This document provides an honest accounting of features that are partially implemented or UI-only facades. Features listed here have editor UI and MCP command definitions, but limited or no engine integration.
 
-> **Last updated:** 2026-02-28
+> **Last updated:** 2026-03-01
 
 ## 2D Subsystem
 
@@ -23,7 +23,7 @@ The 2D engine has two tiers of readiness:
 | Feature | Phase | What exists | What's missing |
 |---------|-------|-------------|----------------|
 | 2D Joints | 2D-4 | `Joint2dData` ECS component, inspector UI, MCP commands | No Rapier joint components created — no constraint solving, motors, or limits |
-| 2D Skeletal Animation | 2D-5 | `SkeletonData2d` with bones/slots/skins/IK, inspector UI, MCP commands | No bone rendering, no vertex skinning, no keyframe interpolation, no IK solving |
+| 2D Skeletal Animation | 2D-5 | `SkeletonData2d` with bones/slots/skins/IK, fully wired inspector UI (create/delete skeleton, bone CRUD, skin switching, animation playback), 11 MCP commands | No bone rendering, no vertex skinning, no keyframe interpolation, no IK solving |
 
 **Workaround:** For joint-connected 2D objects, use 3D physics joints with an orthographic camera. For skeletal animation, use sprite animation state machines instead.
 
@@ -56,7 +56,7 @@ No actual networking is implemented. All multiplayer state is local simulation. 
 
 LOD (Level of Detail) includes:
 - `LodData` ECS component definition
-- LOD Inspector panel
+- LOD Inspector panel with distance/ratio sliders and honest status feedback when generation is attempted
 - Performance budget UI (`set_performance_budget` works, `get_performance_stats` returns local store data)
 
 MCP handlers for LOD generation (`set_entity_lod`, `generate_lods`, `optimize_scene`, `set_lod_distances`) return `success: false` with descriptive errors explaining the feature requires engine-side mesh decimation.
