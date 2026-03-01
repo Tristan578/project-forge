@@ -10,6 +10,7 @@ const ALLOWED_ORIGINS =
     ? [
         'https://spawnforge.ai',
         'https://www.spawnforge.ai',
+        ...(process.env.STAGING_URL ? [process.env.STAGING_URL] : []),
       ]
     : [
         'http://localhost:3000',
