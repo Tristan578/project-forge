@@ -6,9 +6,9 @@ const cspDirectives = [
   "default-src 'self'",
   // Dev mode needs 'unsafe-inline' for Next.js HMR/hydration inline scripts.
   // Production builds use external script files and don't need it.
-  `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval'${isDev ? " 'unsafe-inline'" : ""}`,
+  `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.accounts.dev${isDev ? " 'unsafe-inline'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  "img-src 'self' data: blob: https://img.clerk.com",
   "font-src 'self' data:",
   "connect-src 'self' https://*.clerk.accounts.dev https://api.anthropic.com https://api.meshy.ai https://api.elevenlabs.io https://studio-api.suno.ai https://api.hyper3d.ai",
   "worker-src 'self' blob:",
