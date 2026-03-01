@@ -8,6 +8,8 @@ import { useShaderEditorStore } from '@/stores/shaderEditorStore';
 import { SHADER_NODE_DEFINITIONS } from '@/lib/shaders/shaderNodeTypes';
 import { compileToWgsl } from '@/lib/shaders/wgslCompiler';
 
+const VALID_SHADER_TYPES = ['none', 'dissolve', 'hologram', 'force_field', 'lava_flow', 'toon', 'fresnel_glow'] as const;
+
 export const shaderHandlers: Record<string, ToolHandler> = {
   create_shader_graph: async (args) => {
     const name = args.name as string || 'Untitled Shader';
@@ -128,14 +130,24 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  apply_shader_to_entity: async (args) => {
-    const { entityId, graphId } = args as {
+  apply_shader_to_entity: async (args, ctx) => {
+    const { entityId, graphId, shaderType: explicitType } = args as {
       entityId: string;
       graphId?: string;
+      shaderType?: string;
     };
 
     if (!entityId) {
       return { success: false, error: 'Missing required parameter: entityId' };
+    }
+
+    // If an explicit shader type is provided, apply it directly
+    if (explicitType) {
+      if (!VALID_SHADER_TYPES.includes(explicitType as typeof VALID_SHADER_TYPES[number])) {
+        return { success: false, error: `Invalid shader type: ${explicitType}. Valid types: ${VALID_SHADER_TYPES.join(', ')}` };
+      }
+      ctx.store.updateShaderEffect(entityId, { shaderType: explicitType });
+      return { success: true, result: `Applied "${explicitType}" shader effect to entity ${entityId}` };
     }
 
     const store = useShaderEditorStore.getState();
@@ -156,10 +168,30 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       return { success: false, error: `Compilation failed: ${result.error}` };
     }
 
+    // Infer effect type from compiled WGSL
+    const inferred = inferShaderEffect(result.code ?? '');
+    if (!inferred) {
+      return {
+        success: false,
+        error: `Shader graph "${graph.name}" compiled successfully but could not be mapped to a built-in effect. Supported effects: ${VALID_SHADER_TYPES.filter(t => t !== 'none').join(', ')}. You can also pass shaderType directly.`,
+      };
+    }
+
+    ctx.store.updateShaderEffect(entityId, { shaderType: inferred });
+
     return {
-      success: false,
-      error: `Shader graph "${graph.name}" compiled to WGSL successfully, but applying custom shaders to entity materials is not yet implemented in the engine. The compiled code is available in the shader editor.`,
+      success: true,
+      result: `Applied "${inferred}" shader effect from graph "${graph.name}" to entity ${entityId}`,
     };
+  },
+
+  remove_shader_from_entity: async (args, ctx) => {
+    const { entityId } = args as { entityId: string };
+    if (!entityId) {
+      return { success: false, error: 'Missing required parameter: entityId' };
+    }
+    ctx.store.removeShaderEffect(entityId);
+    return { success: true, result: `Removed shader effect from entity ${entityId}` };
   },
 
   list_shader_presets: async () => {
@@ -180,3 +212,18 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     };
   },
 };
+
+/**
+ * Infer built-in shader effect type from compiled WGSL code.
+ * Each effect uses distinctive uniform names / patterns.
+ */
+function inferShaderEffect(wgslCode: string): string | null {
+  const code = wgslCode.toLowerCase();
+  if (code.includes('dissolve_threshold') || code.includes('dissolve')) return 'dissolve';
+  if (code.includes('scan_line_frequency') || code.includes('hologram')) return 'hologram';
+  if (code.includes('force_field') || code.includes('intersection_width')) return 'force_field';
+  if (code.includes('scroll_speed') && code.includes('distortion')) return 'lava_flow';
+  if (code.includes('toon_bands') || code.includes('toon')) return 'toon';
+  if (code.includes('fresnel_power') || code.includes('fresnel')) return 'fresnel_glow';
+  return null;
+}
