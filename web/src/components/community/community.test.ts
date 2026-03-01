@@ -125,15 +125,15 @@ describe('Admin featured games API contract', () => {
 describe('Share URL generation', () => {
   it('constructs correct play URL from cdnUrl', () => {
     const cdnUrl = '/play/user123/my-game';
-    const origin = 'https://genforge.app';
+    const origin = 'https://spawnforge.ai';
     const shareUrl = `${origin}${cdnUrl}`;
-    expect(shareUrl).toBe('https://genforge.app/play/user123/my-game');
+    expect(shareUrl).toBe('https://spawnforge.ai/play/user123/my-game');
   });
 
   it('handles null cdnUrl by using current location', () => {
     const cdnUrl: string | null = null;
-    const fallback = 'https://genforge.app/community';
-    const shareUrl = cdnUrl ? `https://genforge.app${cdnUrl}` : fallback;
-    expect(shareUrl).toBe('https://genforge.app/community');
+    const fallback = 'https://spawnforge.ai/community';
+    const shareUrl = cdnUrl ? `https://spawnforge.ai${cdnUrl}` : fallback;
+    expect(shareUrl).toBe('https://spawnforge.ai/community');
   });
 });

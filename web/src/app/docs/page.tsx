@@ -2,8 +2,8 @@ import { Suspense } from 'react';
 import { DocsPage } from '@/components/docs/DocsPage';
 
 export const metadata = {
-  title: 'Documentation - GenForge',
-  description: 'Learn how to build games with GenForge — guides, tutorials, and API reference.',
+  title: 'Documentation - SpawnForge',
+  description: 'Learn how to build games with SpawnForge — guides, tutorials, and API reference.',
 };
 
 export default function DocsRoute() {

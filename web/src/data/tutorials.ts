@@ -45,7 +45,7 @@ export const TUTORIAL_FIRST_SCENE: TutorialFlow = {
   steps: [
     {
       id: 'welcome',
-      title: 'Welcome to GenForge',
+      title: 'Welcome to SpawnForge',
       description: "Let's build your first 3D scene together. You'll create a colorful cube and add lighting. Click Next to begin.",
     },
     {

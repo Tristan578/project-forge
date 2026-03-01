@@ -24,7 +24,7 @@ describe('WelcomeModal dialog semantics', () => {
   });
 
   it('should have a title with the matching id', () => {
-    const titleText = 'Welcome to GenForge';
+    const titleText = 'Welcome to SpawnForge';
     const titleId = 'welcome-modal-title';
     expect(titleText).toBeTruthy();
     expect(titleId).toBe('welcome-modal-title');

@@ -3,8 +3,8 @@ import Link from 'next/link';
 import { LegalLayout } from '@/components/legal/LegalLayout';
 
 export const metadata: Metadata = {
-  title: 'Privacy Policy - GenForge',
-  description: 'GenForge Privacy Policy - AI-Powered Game Creation Platform',
+  title: 'Privacy Policy - SpawnForge',
+  description: 'SpawnForge Privacy Policy - AI-Powered Game Creation Platform',
 };
 
 const tableOfContents = [
@@ -33,7 +33,7 @@ export default function PrivacyPolicyPage() {
       <section id="introduction">
         <h2>1. Introduction</h2>
         <p>
-          GenForge (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;) respects your privacy and is committed
+          SpawnForge (&quot;we,&quot; &quot;us,&quot; or &quot;our&quot;) respects your privacy and is committed
           to protecting the personal information you share with us. This Privacy Policy
           explains how we collect, use, disclose, and safeguard your information when
           you use our web-based game creation platform (&quot;the Service&quot;).
@@ -65,7 +65,7 @@ export default function PrivacyPolicyPage() {
         <h3>2.2 Payment and Billing Data</h3>
         <p>
           When you subscribe to a paid plan, payment information is collected and
-          processed by Stripe, our payment processor. GenForge does not directly store
+          processed by Stripe, our payment processor. SpawnForge does not directly store
           your full credit card number, bank account number, or other sensitive payment
           credentials. We receive from Stripe:
         </p>
@@ -154,7 +154,7 @@ export default function PrivacyPolicyPage() {
       <section id="third-party-services">
         <h2>4. Third-Party Services</h2>
         <p>
-          GenForge integrates with third-party services that may collect and process your
+          SpawnForge integrates with third-party services that may collect and process your
           data according to their own privacy policies. These services include:
         </p>
 
@@ -175,7 +175,7 @@ export default function PrivacyPolicyPage() {
         <h3>4.2 Stripe (Payments)</h3>
         <p>
           We use Stripe to process payments and manage subscriptions. Stripe collects
-          and processes your payment information directly. GenForge does not have access
+          and processes your payment information directly. SpawnForge does not have access
           to your full payment card details. For more information, see{' '}
           <a
             href="https://stripe.com/privacy"
@@ -319,7 +319,7 @@ export default function PrivacyPolicyPage() {
 
         <h3>7.4 Right to Data Portability</h3>
         <p>
-          You have the right to export your data in a machine-readable format. GenForge
+          You have the right to export your data in a machine-readable format. SpawnForge
           provides export functionality for your game projects (as .forge files) and
           game exports (as standalone HTML/JS bundles). You may request a full data
           export by contacting us.
@@ -335,7 +335,7 @@ export default function PrivacyPolicyPage() {
         <h3>7.6 Exercising Your Rights</h3>
         <p>
           To exercise any of these rights, contact us at{' '}
-          <a href="mailto:privacy@genforge.com">privacy@genforge.com</a>. We will
+          <a href="mailto:privacy@spawnforge.ai">privacy@spawnforge.ai</a>. We will
           respond to your request within 30 days. We may ask you to verify your identity
           before processing your request.
         </p>
@@ -374,7 +374,7 @@ export default function PrivacyPolicyPage() {
           knowingly collect personal information from children under 13. If you are a
           parent or guardian and you are aware that your child has provided us with
           personal information without your consent, please contact us at{' '}
-          <a href="mailto:privacy@genforge.com">privacy@genforge.com</a>.
+          <a href="mailto:privacy@spawnforge.ai">privacy@spawnforge.ai</a>.
         </p>
         <p>
           If we become aware that we have collected personal information from a child
@@ -439,15 +439,15 @@ export default function PrivacyPolicyPage() {
         <ul>
           <li>
             <strong>Privacy inquiries:</strong>{' '}
-            <a href="mailto:privacy@genforge.com">privacy@genforge.com</a>
+            <a href="mailto:privacy@spawnforge.ai">privacy@spawnforge.ai</a>
           </li>
           <li>
             <strong>General inquiries:</strong>{' '}
-            <a href="mailto:legal@genforge.com">legal@genforge.com</a>
+            <a href="mailto:legal@spawnforge.ai">legal@spawnforge.ai</a>
           </li>
           <li>
             <strong>Website:</strong>{' '}
-            <a href="https://genforge.com">https://genforge.com</a>
+            <a href="https://spawnforge.ai">https://spawnforge.ai</a>
           </li>
         </ul>
         <p>

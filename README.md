@@ -1,4 +1,4 @@
-# GenForge
+# SpawnForge
 
 An open-source, AI-native 2D/3D game engine for the browser. Every capability — scene creation, materials, physics, scripting, audio, particles, tilemaps, animation, export — is exposed as a JSON command, making the entire editor fully controllable by LLMs and autonomous agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Build games by conversation, by code, or by hand.
 

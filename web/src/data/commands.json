@@ -4206,7 +4206,7 @@
     },
     {
       "name": "search_docs",
-      "description": "Search GenForge documentation by keyword. Returns ranked results with snippets.",
+      "description": "Search SpawnForge documentation by keyword. Returns ranked results with snippets.",
       "category": "docs",
       "parameters": {
         "type": "object",

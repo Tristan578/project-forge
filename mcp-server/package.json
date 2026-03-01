@@ -1,7 +1,7 @@
 {
   "name": "@project-forge/mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for GenForge game engine — exposes all editor commands as AI tools",
+  "description": "MCP server for SpawnForge game engine — exposes all editor commands as AI tools",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {

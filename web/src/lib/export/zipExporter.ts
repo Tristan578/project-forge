@@ -388,7 +388,7 @@ function generateReadme(title: string): string {
   return `${title}
 ${'='.repeat(title.length)}
 
-This is a game created with GenForge.
+This is a game created with SpawnForge.
 
 HOW TO PLAY:
 1. Extract all files from this ZIP archive
@@ -424,8 +424,8 @@ Node.js (http-server):
 Then open http://localhost:8000 in your browser.
 
 ---
-Created with GenForge
-https://genforge.dev
+Created with SpawnForge
+https://spawnforge.ai
 `;
 }
 
@@ -590,7 +590,7 @@ function generateEmbedReadme(title: string): string {
   return `${title} — Embeddable Game
 ${'='.repeat(title.length + 20)}
 
-This game was exported for iframe embedding from GenForge.
+This game was exported for iframe embedding from SpawnForge.
 
 EMBEDDING:
 Use the following HTML to embed this game on your website:
@@ -633,8 +633,8 @@ HOSTING:
 Upload these files to any web server. WASM requires HTTP (not file://).
 
 ---
-Created with GenForge
-https://genforge.dev
+Created with SpawnForge
+https://spawnforge.ai
 `;
 }
 

@@ -23,7 +23,7 @@ export function bundleScripts(
 
   // Build the runtime harness + per-entity script wrappers
   const code = `
-// GenForge - Script Bundle
+// SpawnForge - Script Bundle
 (function() {
   const scripts = {};
   const scriptState = {};

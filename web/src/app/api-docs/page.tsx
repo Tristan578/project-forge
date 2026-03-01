@@ -78,7 +78,7 @@ export default function ApiDocsPage() {
         }}
       >
         <span style={{ fontSize: '22px', fontWeight: 700, letterSpacing: '-0.5px' }}>
-          GenForge
+          SpawnForge
         </span>
         <span style={{ color: '#a78bfa', fontSize: '14px' }}>REST API Reference</span>
         <a

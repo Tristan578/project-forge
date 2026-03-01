@@ -3,7 +3,7 @@
 Add sound effects and music with spatial 3D audio, mixer buses, and layered audio.
 
 ## Overview
-Audio in GenForge works via the Web Audio API. Each entity can have an audio source with controls for volume, pitch, looping, and spatial positioning. The audio mixer provides buses for grouping and processing sounds.
+Audio in SpawnForge works via the Web Audio API. Each entity can have an audio source with controls for volume, pitch, looping, and spatial positioning. The audio mixer provides buses for grouping and processing sounds.
 
 ## Adding Audio
 

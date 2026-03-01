@@ -1,9 +1,9 @@
 Copilot instructions · MD
-# GenForge — Copilot Instructions
+# SpawnForge — Copilot Instructions
 
 ## Project Overview
 
-GenForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot monorepo with three pipelines:
+SpawnForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot monorepo with three pipelines:
 
 - **engine/** — Rust (Bevy 0.16) compiled to WebAssembly via wasm-bindgen. Pure game logic (ECS systems, physics, rendering, animation) lives in `engine/src/core/`. The JS interop bridge lives in `engine/src/bridge/`. The bridge is the ONLY module that imports `web-sys` or `wasm-bindgen`.
 - **web/** — TypeScript/React (Next.js 16) editor frontend. State management via Zustand stores with discrete slices. Strict TypeScript mode, zero ESLint warnings enforced.

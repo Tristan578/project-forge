@@ -22,7 +22,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GenForge",
+  title: "SpawnForge",
   description: "AI-Powered Game Creation Platform",
 };
 

@@ -374,9 +374,9 @@ function DocsHome({
       {/* Welcome */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-6 py-8 text-center">
         <BookOpen size={36} className="mx-auto mb-3 text-blue-400" />
-        <h2 className="text-2xl font-bold text-zinc-100">GenForge Documentation</h2>
+        <h2 className="text-2xl font-bold text-zinc-100">SpawnForge Documentation</h2>
         <p className="mx-auto mt-2 max-w-lg text-sm text-zinc-400">
-          Learn how to create games with GenForge. Browse guides, explore features, and reference
+          Learn how to create games with SpawnForge. Browse guides, explore features, and reference
           the scripting API.
         </p>
       </div>
@@ -391,7 +391,7 @@ function DocsHome({
           <div>
             <div className="text-sm font-semibold text-zinc-200">{indexDoc.title}</div>
             <div className="text-xs text-zinc-500">
-              Start here for an overview of GenForge
+              Start here for an overview of SpawnForge
             </div>
           </div>
         </button>

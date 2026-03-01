@@ -26,7 +26,7 @@ export async function generateMetadata({
       .limit(1);
 
     if (!user) {
-      return { title: 'Game Not Found - GenForge' };
+      return { title: 'Game Not Found - SpawnForge' };
     }
 
     const [game] = await db
@@ -41,15 +41,15 @@ export async function generateMetadata({
       .limit(1);
 
     if (!game) {
-      return { title: 'Game Not Found - GenForge' };
+      return { title: 'Game Not Found - SpawnForge' };
     }
 
     return {
-      title: `${game.title} - GenForge`,
-      description: game.description || `Play ${game.title} on GenForge`,
+      title: `${game.title} - SpawnForge`,
+      description: game.description || `Play ${game.title} on SpawnForge`,
     };
   } catch {
-    return { title: 'GenForge' };
+    return { title: 'SpawnForge' };
   }
 }
 

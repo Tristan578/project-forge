@@ -1,7 +1,7 @@
 import { GalleryPage } from '@/components/community/GalleryPage';
 
 export const metadata = {
-  title: 'Community Gallery - GenForge',
+  title: 'Community Gallery - SpawnForge',
   description: 'Discover and play games created by the community',
 };
 

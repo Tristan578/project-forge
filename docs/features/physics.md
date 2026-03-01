@@ -3,7 +3,7 @@
 Add realistic physics simulation with rigid bodies, colliders, forces, and constraints.
 
 ## Overview
-GenForge uses the Rapier physics engine for real-time 3D physics. Physics runs only during **Play mode** — in Edit mode, you configure physics properties; in Play mode, they simulate.
+SpawnForge uses the Rapier physics engine for real-time 3D physics. Physics runs only during **Play mode** — in Edit mode, you configure physics properties; in Play mode, they simulate.
 
 ## Enabling Physics
 

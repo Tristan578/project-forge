@@ -3,7 +3,7 @@
 Control the appearance of mesh entities with PBR (Physically Based Rendering) materials.
 
 ## Overview
-Every mesh entity has a material defining its visual appearance. GenForge uses the metallic-roughness PBR workflow, which simulates realistic lighting interactions.
+Every mesh entity has a material defining its visual appearance. SpawnForge uses the metallic-roughness PBR workflow, which simulates realistic lighting interactions.
 
 ## Core Properties
 

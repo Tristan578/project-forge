@@ -1,13 +1,13 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "GenForge REST API",
+    "title": "SpawnForge REST API",
     "version": "1.0.0",
-    "description": "REST API for GenForge — the AI-powered browser-based game creation platform.\n\nAll endpoints require a valid Clerk session cookie unless otherwise noted. Endpoints that consume AI tokens will return HTTP 402 when the user's token balance is insufficient.\n\n**Rate limits:**\n- `/api/chat`: 10 requests per minute per user\n- `/api/generate/refund`: 3 requests per minute per user\n\n**Token tiers:** `starter` | `hobbyist` | `creator` | `pro`"
+    "description": "REST API for SpawnForge — the AI-powered browser-based game creation platform.\n\nAll endpoints require a valid Clerk session cookie unless otherwise noted. Endpoints that consume AI tokens will return HTTP 402 when the user's token balance is insufficient.\n\n**Rate limits:**\n- `/api/chat`: 10 requests per minute per user\n- `/api/generate/refund`: 3 requests per minute per user\n\n**Token tiers:** `starter` | `hobbyist` | `creator` | `pro`"
   },
   "servers": [
     {
-      "url": "https://genforge.app",
+      "url": "https://spawnforge.ai",
       "description": "Production"
     },
     {
