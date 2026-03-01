@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { X, RotateCcw } from 'lucide-react';
 import {
   getMergedBindings,
@@ -20,6 +20,7 @@ interface KeyboardShortcutsPanelProps {
 export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanelProps) {
   const [editingAction, setEditingAction] = useState<string | null>(null);
   const [bindings, setBindings] = useState(() => getMergedBindings());
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const grouped = groupByCategory(bindings);
 
@@ -66,11 +67,38 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
   );
 
   useEffect(() => {
-    if (open) {
-      document.addEventListener('keydown', handleKeyDown, true);
-      return () => document.removeEventListener('keydown', handleKeyDown, true);
-    }
+    if (!open) return;
+
+    const handleFocusTrap = (e: KeyboardEvent) => {
+      if (e.key === 'Tab') {
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        const focusable = dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+        } else {
+          if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    document.addEventListener('keydown', handleFocusTrap);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, true);
+      document.removeEventListener('keydown', handleFocusTrap);
+    };
   }, [open, handleKeyDown]);
+
+  // Auto-focus dialog on open
+  useEffect(() => {
+    if (open) dialogRef.current?.focus();
+  }, [open]);
 
   const handleReset = useCallback((action: string) => {
     resetBinding(action);
@@ -93,14 +121,20 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60" onClick={onClose}>
       <div
-        className="mx-4 w-full max-w-lg rounded-lg border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shortcuts-dialog-title"
+        tabIndex={-1}
+        className="mx-4 w-full max-w-lg rounded-lg border border-zinc-700 bg-zinc-900 p-5 shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-zinc-100">Keyboard Shortcuts</h2>
+          <h2 id="shortcuts-dialog-title" className="text-base font-semibold text-zinc-100">Keyboard Shortcuts</h2>
           <div className="flex items-center gap-2">
             <button
               onClick={handleResetAll}
+              aria-label="Reset all shortcuts to defaults"
               className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
               title="Reset all to defaults"
             >
@@ -109,6 +143,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
             </button>
             <button
               onClick={onClose}
+              aria-label="Close keyboard shortcuts"
               className="rounded p-1 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"
             >
               <X size={16} />
@@ -151,6 +186,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
                         {isCustomized && !isEditing && (
                           <button
                             onClick={() => handleReset(binding.action)}
+                            aria-label={`Reset ${binding.label} to default`}
                             className="opacity-0 group-hover:opacity-100 rounded p-0.5 text-zinc-600 hover:text-zinc-400 transition-opacity"
                             title="Reset to default"
                           >
@@ -159,6 +195,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
                         )}
                         <button
                           onClick={() => setEditingAction(isEditing ? null : binding.action)}
+                          aria-label={isEditing ? `Press a key combo for ${binding.label}` : `Rebind ${binding.label} (${effectiveKey})`}
                           className={`rounded px-1.5 py-0.5 text-[11px] font-mono transition-colors ${
                             isEditing
                               ? 'bg-blue-600 text-white animate-pulse'
