@@ -107,13 +107,15 @@ export function InputBindingsPanel() {
     <div className="border-t border-zinc-800 pt-4">
       <button
         onClick={() => setCollapsed(!collapsed)}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? 'Expand input bindings' : 'Collapse input bindings'}
         className="flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wide text-zinc-500 hover:text-zinc-300"
       >
         <span className="flex items-center gap-1.5">
-          <Keyboard className="w-3.5 h-3.5" />
+          <Keyboard className="w-3.5 h-3.5" aria-hidden="true" />
           Input Bindings
         </span>
-        <span>{collapsed ? '+' : '-'}</span>
+        <span aria-hidden="true">{collapsed ? '+' : '-'}</span>
       </button>
 
       {!collapsed && (
@@ -125,6 +127,7 @@ export function InputBindingsPanel() {
               value={inputPreset ?? ''}
               onChange={(e) => handlePresetChange(e.target.value)}
               disabled={!isEditing}
+              aria-label="Input preset"
               className="w-full rounded bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 outline-none
                 focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
             >
@@ -153,6 +156,7 @@ export function InputBindingsPanel() {
                       {isEditing && (
                         <button
                           onClick={() => removeInputBinding(binding.actionName)}
+                          aria-label={`Remove ${binding.actionName} binding`}
                           className="text-zinc-600 hover:text-red-400"
                           title="Remove binding"
                         >
@@ -174,6 +178,7 @@ export function InputBindingsPanel() {
                           onClick={() =>
                             setRebindTarget({ actionName: binding.actionName, field: 'sources' })
                           }
+                          aria-label={`Rebind ${binding.actionName}`}
                           className={`rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 ${
                             rebindTarget?.actionName === binding.actionName && rebindTarget.field === 'sources'
                               ? 'bg-blue-600 text-white'
@@ -200,6 +205,7 @@ export function InputBindingsPanel() {
                             onClick={() =>
                               setRebindTarget({ actionName: binding.actionName, field: 'positiveKeys' })
                             }
+                            aria-label={`Rebind ${binding.actionName} positive key`}
                             className={`rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 ${
                               rebindTarget?.actionName === binding.actionName && rebindTarget.field === 'positiveKeys'
                                 ? 'bg-blue-600 text-white'
@@ -224,6 +230,7 @@ export function InputBindingsPanel() {
                             onClick={() =>
                               setRebindTarget({ actionName: binding.actionName, field: 'negativeKeys' })
                             }
+                            aria-label={`Rebind ${binding.actionName} negative key`}
                             className={`rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 ${
                               rebindTarget?.actionName === binding.actionName && rebindTarget.field === 'negativeKeys'
                                 ? 'bg-blue-600 text-white'
@@ -265,6 +272,7 @@ export function InputBindingsPanel() {
                   if (e.key === 'Enter') handleAddAction();
                   if (e.key === 'Escape') setAddingNew(false);
                 }}
+                aria-label="New action name"
                 className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
                 autoFocus
@@ -273,6 +281,7 @@ export function InputBindingsPanel() {
                 <select
                   value={newActionType}
                   onChange={(e) => setNewActionType(e.target.value as 'digital' | 'axis')}
+                  aria-label="Action type"
                   className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none"
                 >
                   <option value="digital">Digital</option>
