@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { Focus, Copy, Trash2, Edit3 } from 'lucide-react';
 
 interface MenuItem {
@@ -109,7 +109,22 @@ export function ContextMenu({
     };
   }, [isOpen, onClose]);
 
-  // Handle Escape key to close
+  // Track focused menu item index
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Get non-divider item indices for arrow navigation
+  const actionableIndices = menuItems
+    .map((item, i) => (isDivider(item) ? -1 : i))
+    .filter((i) => i >= 0);
+
+  // Focus the item at the given index
+  const focusItem = useCallback((idx: number) => {
+    setFocusedIndex(idx);
+    itemRefs.current[idx]?.focus();
+  }, []);
+
+  // Handle keyboard navigation (Escape, ArrowUp, ArrowDown, Home, End)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -118,6 +133,25 @@ export function ContextMenu({
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const currentPos = actionableIndices.indexOf(focusedIndex);
+        const nextPos = currentPos < actionableIndices.length - 1 ? currentPos + 1 : 0;
+        focusItem(actionableIndices[nextPos]);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const currentPos = actionableIndices.indexOf(focusedIndex);
+        const prevPos = currentPos > 0 ? currentPos - 1 : actionableIndices.length - 1;
+        focusItem(actionableIndices[prevPos]);
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        if (actionableIndices.length > 0) focusItem(actionableIndices[0]);
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        if (actionableIndices.length > 0) focusItem(actionableIndices[actionableIndices.length - 1]);
       }
     };
 
@@ -125,7 +159,22 @@ export function ContextMenu({
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, focusedIndex, actionableIndices, focusItem]);
+
+  // Auto-focus first item when menu opens
+  useEffect(() => {
+    if (isOpen && actionableIndices.length > 0) {
+      // Delay to allow layout effect to run first
+      requestAnimationFrame(() => {
+        focusItem(actionableIndices[0]);
+      });
+    }
+    if (!isOpen) {
+      setFocusedIndex(-1);
+    }
+  // Only trigger on open state changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Update clamped position after layout (before paint)
   useLayoutEffect(() => {
@@ -171,6 +220,8 @@ export function ContextMenu({
   return (
     <div
       ref={menuRef}
+      role="menu"
+      aria-label="Entity actions"
       className="fixed z-50 min-w-[180px] bg-neutral-800 border border-neutral-600 rounded-md shadow-lg py-1 text-sm"
       style={{
         left: `${clampedPosition.x}px`,
@@ -185,6 +236,7 @@ export function ContextMenu({
           return (
             <div
               key={`divider-${index}`}
+              role="separator"
               className="h-px bg-neutral-600 my-1 mx-2"
             />
           );
@@ -196,13 +248,17 @@ export function ContextMenu({
         return (
           <button
             key={item.id}
+            ref={(el) => { itemRefs.current[index] = el; }}
+            role="menuitem"
+            tabIndex={focusedIndex === index ? 0 : -1}
+            aria-disabled={isDisabled || undefined}
             className={`
-              w-full flex items-center gap-3 px-3 py-1.5 text-left
+              w-full flex items-center gap-3 px-3 py-1.5 text-left outline-none
               ${isDisabled
                 ? 'text-neutral-500 cursor-not-allowed'
                 : item.danger
-                  ? 'text-red-400 hover:bg-red-500/20'
-                  : 'text-neutral-200 hover:bg-white/10'
+                  ? 'text-red-400 hover:bg-red-500/20 focus:bg-red-500/20'
+                  : 'text-neutral-200 hover:bg-white/10 focus:bg-white/10'
               }
               transition-colors duration-75
             `}
