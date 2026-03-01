@@ -79,8 +79,12 @@ const CHECKLIST_TASKS: ChecklistTask[] = [
     description: 'Save an entity as a reusable prefab',
     category: 'advanced',
     checkCompletion: () => {
-      // Prefabs tracked via scene modifications (simplified check)
-      return false; // TODO: Add prefab count to EditorState
+      try {
+        const stored = localStorage.getItem('forge-prefabs');
+        if (!stored) return false;
+        const prefabs = JSON.parse(stored);
+        return Array.isArray(prefabs) && prefabs.some((p: { builtIn?: boolean }) => !p.builtIn);
+      } catch { return false; }
     },
   },
   {
