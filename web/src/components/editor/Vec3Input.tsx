@@ -92,6 +92,7 @@ export function Vec3Input({
               onClick={onCopy}
               disabled={disabled}
               title={`Copy ${label.toLowerCase()}`}
+              aria-label={`Copy ${label.toLowerCase()}`}
               className={buttonBaseClass}
             >
               <Copy className="w-3.5 h-3.5" />
@@ -105,6 +106,7 @@ export function Vec3Input({
               onClick={onPaste}
               disabled={disabled}
               title={`Paste ${label.toLowerCase()}`}
+              aria-label={`Paste ${label.toLowerCase()}`}
               className={buttonBaseClass}
             >
               <ClipboardPaste className="w-3.5 h-3.5" />
@@ -117,7 +119,8 @@ export function Vec3Input({
               type="button"
               onClick={onReset}
               disabled={disabled || !showReset}
-              title="Reset to default"
+              title={`Reset ${label.toLowerCase()} to default`}
+              aria-label={`Reset ${label.toLowerCase()} to default`}
               className={`
                 p-0.5 rounded transition-opacity duration-150
                 ${showReset
@@ -143,6 +146,7 @@ export function Vec3Input({
           min={min}
           max={max}
           disabled={disabled}
+          ariaLabel={`${label} X`}
         />
         <NumberInput
           label="Y"
@@ -154,6 +158,7 @@ export function Vec3Input({
           min={min}
           max={max}
           disabled={disabled}
+          ariaLabel={`${label} Y`}
         />
         <NumberInput
           label="Z"
@@ -165,6 +170,7 @@ export function Vec3Input({
           min={min}
           max={max}
           disabled={disabled}
+          ariaLabel={`${label} Z`}
         />
       </div>
     </div>

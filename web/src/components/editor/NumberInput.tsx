@@ -12,6 +12,7 @@ interface NumberInputProps {
   label?: string;
   labelColor?: string;
   disabled?: boolean;
+  ariaLabel?: string;
 }
 
 export function NumberInput({
@@ -24,6 +25,7 @@ export function NumberInput({
   label,
   labelColor = 'text-zinc-400',
   disabled = false,
+  ariaLabel,
 }: NumberInputProps) {
   const [editValue, setEditValue] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -101,6 +103,7 @@ export function NumberInput({
         onKeyDown={handleKeyDown}
         onWheel={handleWheel}
         disabled={disabled}
+        aria-label={ariaLabel ?? label}
         className="w-16 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed
           [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
