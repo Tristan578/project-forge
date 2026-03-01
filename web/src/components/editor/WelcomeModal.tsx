@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen, GraduationCap, Clock } from 'lucide-react';
 import { TemplateGallery } from './TemplateGallery';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -31,35 +31,87 @@ export function WelcomeModal() {
   // that useSyncExternalStore would cause with array snapshots — Object.is([], []) is false)
   const [recentProjects] = useState(() => getRecentProjects().slice(0, 5));
 
-  const handleDismiss = () => {
+  const handleDismiss = useCallback(() => {
     setDismissed(true);
     if (dontShowAgain) {
       localStorage.setItem(STORAGE_KEY, '1');
     }
-  };
+  }, [dontShowAgain]);
 
-  const handleTemplateClose = () => {
+  const handleTemplateClose = useCallback(() => {
     setShowTemplates(false);
     handleDismiss();
-  };
+  }, [handleDismiss]);
 
-  const handleOpenDocs = () => {
+  const handleOpenDocs = useCallback(() => {
     navigateDocs('getting-started/editor-overview');
     handleDismiss();
-  };
+  }, [navigateDocs, handleDismiss]);
 
-  const handleStartTutorial = () => {
+  const handleStartTutorial = useCallback(() => {
     startTutorial('first-scene');
     handleDismiss();
-  };
+  }, [startTutorial, handleDismiss]);
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus trap: cycle Tab within the dialog
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        handleDismiss();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const dialog = dialogRef.current;
+        if (!dialog) return;
+        const focusable = dialog.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+          if (document.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (document.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    },
+    [handleDismiss]
+  );
+
+  // Auto-focus the dialog when it becomes visible
+  useEffect(() => {
+    if (visible && dialogRef.current) {
+      requestAnimationFrame(() => {
+        dialogRef.current?.focus();
+      });
+    }
+  }, [visible]);
 
   if (!visible) return null;
 
   return (
     <>
       <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60">
-        <div className="mx-4 w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
-          <h2 className="mb-1 text-lg font-semibold text-zinc-100">
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="welcome-modal-title"
+          tabIndex={-1}
+          onKeyDown={handleKeyDown}
+          className="mx-4 w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-2xl focus:outline-none"
+        >
+          <h2 id="welcome-modal-title" className="mb-1 text-lg font-semibold text-zinc-100">
             Welcome to GenForge
           </h2>
           <p className="mb-5 text-sm text-zinc-400">
