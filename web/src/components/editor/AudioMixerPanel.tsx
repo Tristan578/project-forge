@@ -64,6 +64,7 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
           max="100"
           value={bus.volume * 100}
           onChange={(e) => onVolumeChange(parseFloat(e.target.value) / 100)}
+          aria-label={`${bus.name} volume`}
           className="h-32 cursor-pointer appearance-none bg-zinc-700 rounded
             [writing-mode:vertical-lr] [direction:rtl]
             [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-5
@@ -81,6 +82,8 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
       {/* Mute Button */}
       <button
         onClick={onMuteToggle}
+        aria-label={`Mute ${bus.name}`}
+        aria-pressed={bus.muted}
         className={`px-2 py-1 text-xs font-bold rounded transition-colors ${
           bus.muted
             ? 'bg-red-900/50 text-red-400 border border-red-700'
@@ -94,6 +97,8 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
       {!isMaster && (
         <button
           onClick={onSoloToggle}
+          aria-label={`Solo ${bus.name}`}
+          aria-pressed={bus.soloed}
           className={`px-2 py-1 text-xs font-bold rounded transition-colors ${
             bus.soloed
               ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700'
@@ -114,6 +119,8 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
                 e.preventDefault();
                 handleRemoveEffect(index);
               }}
+              aria-label={`Edit ${fx.effectType} effect`}
+              aria-expanded={editingEffect === index}
               className="w-full px-2 py-1 text-[10px] font-mono rounded bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 truncate"
               title={`${fx.effectType} (right-click to remove)`}
             >
@@ -268,6 +275,9 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
         <div className="relative">
           <button
             onClick={() => setShowEffectMenu(!showEffectMenu)}
+            aria-label={`Add effect to ${bus.name}`}
+            aria-expanded={showEffectMenu}
+            aria-haspopup="true"
             className="w-full px-2 py-1 text-[10px] rounded bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-400"
           >
             +FX
@@ -275,10 +285,11 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
 
           {/* Effect Menu Dropdown */}
           {showEffectMenu && (
-            <div className="absolute bottom-full left-0 mb-1 w-32 bg-zinc-800 border border-zinc-700 rounded shadow-lg z-50">
+            <div role="menu" aria-label="Audio effects" className="absolute bottom-full left-0 mb-1 w-32 bg-zinc-800 border border-zinc-700 rounded shadow-lg z-50">
               {['reverb', 'lowpass', 'highpass', 'compressor', 'delay'].map((type) => (
                 <button
                   key={type}
+                  role="menuitem"
                   onClick={() => handleAddEffect(type)}
                   className="w-full px-2 py-1 text-xs text-left text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
                 >
@@ -346,6 +357,7 @@ export const AudioMixerPanel = memo(function AudioMixerPanel() {
               onChange={(e) => setNewBusName(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleAddBus()}
               placeholder="Bus name..."
+              aria-label="New bus name"
               className="flex-1 rounded bg-zinc-900 px-2 py-1 text-xs text-zinc-200 outline-none focus:ring-1 focus:ring-blue-500"
               autoFocus
             />
