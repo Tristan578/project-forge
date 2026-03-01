@@ -20,7 +20,7 @@ export function DashboardLayout() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewDialog, setShowNewDialog] = useState(false);
-  const [_showSettings, setShowSettings] = useState(false);
+  // Settings page is at /settings (full page, not modal)
 
   useEffect(() => {
     fetchProjects();
@@ -116,8 +116,9 @@ export function DashboardLayout() {
           </h1>
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setShowSettings(true)}
+              onClick={() => router.push('/settings')}
               className="rounded p-2 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"
+              title="Account settings"
             >
               <Settings size={20} />
             </button>
