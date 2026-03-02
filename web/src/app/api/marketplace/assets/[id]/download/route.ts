@@ -55,18 +55,18 @@ export async function GET(
     const allowedHosts = (process.env.ASSET_CDN_HOSTS || 'localhost').split(',').map(h => h.trim());
     try {
       const fileUrl = new URL(asset.assetFileUrl);
-      // Only allow https (or http for localhost dev)
-      if (fileUrl.protocol !== 'https:' && fileUrl.hostname !== 'localhost') {
+      const localhostNames = ['localhost', '127.0.0.1', '::1'];
+      // Only allow https (or http for localhost/loopback dev)
+      if (fileUrl.protocol !== 'https:' && !localhostNames.includes(fileUrl.hostname)) {
         console.error(`Blocked redirect to non-HTTPS URL: ${fileUrl.protocol}`);
         return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
       }
-      // Split hostname into labels and check each allowed host by exact label match
+      // Check each allowed host by exact hostname or exact subdomain label match
       // to avoid incomplete substring sanitization (e.g. evil-cdn.com matching cdn.com)
       const hostLabels = fileUrl.hostname.split('.');
       const isAllowed = allowedHosts.some(host => {
         if (fileUrl.hostname === host) return true;
         const allowedLabels = host.split('.');
-        // Check that the hostname ends with the exact same labels as the allowed host
         if (hostLabels.length <= allowedLabels.length) return false;
         return allowedLabels.every((label, i) =>
           hostLabels[hostLabels.length - allowedLabels.length + i] === label
