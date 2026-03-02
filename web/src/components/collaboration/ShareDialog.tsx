@@ -33,10 +33,10 @@ export function ShareDialog({ isOpen, onClose, projectId }: ShareDialogProps) {
     }
   }, [shareUrl]);
 
-  const handleKick = useCallback((_userId: string) => {
-    // TODO: Implement kick functionality
-    console.log('Kick user not yet implemented');
-  }, []);
+  const { removeCollaborator } = useCollaborationStore();
+  const handleKick = useCallback((userId: string) => {
+    removeCollaborator(userId);
+  }, [removeCollaborator]);
 
   if (!isOpen) return null;
 

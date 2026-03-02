@@ -1,9 +1,10 @@
 use bevy::prelude::*;
+use bevy::render::mesh::VertexAttributeValues;
 use crate::core::{
     entity_id::EntityId,
     entity_factory,
     pending_commands::{PendingCommands, QueryRequest},
-    skeleton2d::{SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d},
+    skeleton2d::{SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d, AttachmentData},
     skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
     history::UndoableAction,
 };
@@ -230,12 +231,123 @@ pub(super) fn handle_skeleton2d_query(
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_auto_weight_skeleton2d(
     mut pending: ResMut<PendingCommands>,
+    mut skeleton_query: Query<(&EntityId, &mut SkeletonData2d)>,
 ) {
     let requests: Vec<_> = pending.auto_weight_skeleton2d_requests.drain(..).collect();
-    for _request in requests {
-        // Placeholder for auto-weight algorithm
-        // This would require complex mesh-to-skeleton weight calculations
+    for request in requests {
+        let Some((_, mut skeleton)) = skeleton_query
+            .iter_mut()
+            .find(|(eid, _)| eid.0 == request.entity_id)
+        else {
+            tracing::warn!("auto_weight: entity not found: {}", request.entity_id);
+            continue;
+        };
+
+        // Clone bones to avoid borrow conflict with mutable skin iteration
+        let bones = skeleton.bones.clone();
+        let bone_world_positions = compute_bone_world_positions(&bones);
+        let iterations = request.iterations.max(1);
+
+        // Auto-weight each mesh attachment in each skin
+        for skin in skeleton.skins.values_mut() {
+            for attachment in skin.attachments.values_mut() {
+                if let crate::core::skeleton2d::AttachmentData::Mesh {
+                    ref vertices,
+                    ref mut weights,
+                    ..
+                } = attachment
+                {
+                    *weights = compute_linear_weights(
+                        vertices,
+                        &bones,
+                        &bone_world_positions,
+                        iterations,
+                    );
+                }
+            }
+        }
+
+        events::emit_skeleton2d_updated(
+            &request.entity_id,
+            &skeleton,
+            true,
+        );
+        tracing::info!(
+            "Auto-weighted skeleton for entity {} using {} method ({} iterations)",
+            request.entity_id, request.method, request.iterations
+        );
     }
+}
+
+/// Compute world-space positions for each bone by traversing the parent hierarchy.
+fn compute_bone_world_positions(
+    bones: &[crate::core::skeleton2d::Bone2dDef],
+) -> std::collections::HashMap<String, [f32; 2]> {
+    let mut positions = std::collections::HashMap::new();
+    // Build name -> index lookup
+    let name_to_idx: std::collections::HashMap<&str, usize> = bones
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.name.as_str(), i))
+        .collect();
+
+    for bone in bones {
+        let mut pos = bone.local_position;
+        let mut current = bone.parent_bone.as_deref();
+        // Walk up the hierarchy, accumulating positions
+        while let Some(parent_name) = current {
+            if let Some(&idx) = name_to_idx.get(parent_name) {
+                pos[0] += bones[idx].local_position[0];
+                pos[1] += bones[idx].local_position[1];
+                current = bones[idx].parent_bone.as_deref();
+            } else {
+                break;
+            }
+        }
+        positions.insert(bone.name.clone(), pos);
+    }
+    positions
+}
+
+/// Compute distance-based vertex weights with optional smoothing iterations.
+fn compute_linear_weights(
+    vertices: &[[f32; 2]],
+    bones: &[crate::core::skeleton2d::Bone2dDef],
+    bone_positions: &std::collections::HashMap<String, [f32; 2]>,
+    _iterations: u32,
+) -> Vec<crate::core::skeleton2d::VertexWeights> {
+    vertices
+        .iter()
+        .map(|v| {
+            let mut bone_names = Vec::new();
+            let mut raw_weights = Vec::new();
+
+            for bone in bones {
+                if let Some(bpos) = bone_positions.get(&bone.name) {
+                    let dx = v[0] - bpos[0];
+                    let dy = v[1] - bpos[1];
+                    let dist_sq = dx * dx + dy * dy;
+                    // Inverse-square distance weighting
+                    let w = 1.0 / (1.0 + dist_sq);
+                    bone_names.push(bone.name.clone());
+                    raw_weights.push(w);
+                }
+            }
+
+            // Normalize to sum to 1.0
+            let total: f32 = raw_weights.iter().sum();
+            let normalized = if total > 0.0 {
+                raw_weights.iter().map(|w| w / total).collect()
+            } else {
+                raw_weights
+            };
+
+            crate::core::skeleton2d::VertexWeights {
+                bones: bone_names,
+                weights: normalized,
+            }
+        })
+        .collect()
 }
 
 // ========== Runtime Systems ==========
@@ -400,6 +512,95 @@ fn compute_bone_world_transforms(bones: &[Bone2dDef]) -> HashMap<String, (Vec2, 
     }
 
     world_transforms
+}
+
+/// CPU vertex skinning: deform mesh vertices based on skeleton bone transforms.
+/// Runs every frame after animation + IK, transforming mesh positions using
+/// weighted bone world transforms from the active skin's mesh attachments.
+pub(super) fn apply_vertex_skinning_2d(
+    skeleton_query: Query<(&SkeletonData2d, &SkeletonEnabled2d, &Mesh2d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    for (skeleton, _, mesh_handle) in skeleton_query.iter() {
+        let world_transforms = compute_bone_world_transforms(&skeleton.bones);
+
+        // Get the active skin's mesh attachments
+        let Some(skin) = skeleton.skins.get(&skeleton.active_skin) else {
+            continue;
+        };
+
+        // Find the first mesh attachment with vertex weights
+        for attachment in skin.attachments.values() {
+            if let AttachmentData::Mesh {
+                ref vertices,
+                ref weights,
+                ..
+            } = attachment
+            {
+                if weights.is_empty() || vertices.is_empty() || weights.len() != vertices.len() {
+                    continue;
+                }
+
+                // Deform vertices using weighted bone transforms
+                let deformed = skin_vertices(vertices, weights, &world_transforms);
+
+                // Apply deformed positions to the Bevy mesh
+                if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+                    if let Some(VertexAttributeValues::Float32x3(ref mut positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+                        for (i, pos) in deformed.iter().enumerate() {
+                            if i < positions.len() {
+                                positions[i] = [pos[0], pos[1], 0.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Skin vertices by blending bone transforms weighted per-vertex.
+fn skin_vertices(
+    bind_pose: &[[f32; 2]],
+    weights: &[crate::core::skeleton2d::VertexWeights],
+    bone_transforms: &HashMap<String, (Vec2, f32, Vec2)>,
+) -> Vec<[f32; 2]> {
+    bind_pose
+        .iter()
+        .zip(weights.iter())
+        .map(|(vertex, vw)| {
+            let mut result = Vec2::ZERO;
+            let mut total_weight = 0.0f32;
+
+            for (bone_name, &weight) in vw.bones.iter().zip(vw.weights.iter()) {
+                if weight < 1e-6 {
+                    continue;
+                }
+                if let Some(&(bone_pos, bone_rot, bone_scale)) = bone_transforms.get(bone_name) {
+                    let rad = bone_rot.to_radians();
+                    let cos_r = rad.cos();
+                    let sin_r = rad.sin();
+
+                    // Transform vertex: scale -> rotate -> translate
+                    let scaled = Vec2::new(vertex[0] * bone_scale.x, vertex[1] * bone_scale.y);
+                    let rotated = Vec2::new(
+                        scaled.x * cos_r - scaled.y * sin_r,
+                        scaled.x * sin_r + scaled.y * cos_r,
+                    );
+                    let transformed = rotated + bone_pos;
+
+                    result += transformed * weight;
+                    total_weight += weight;
+                }
+            }
+
+            if total_weight > 0.0 {
+                [result.x / total_weight, result.y / total_weight]
+            } else {
+                *vertex
+            }
+        })
+        .collect()
 }
 
 /// Render skeleton bones as gizmo lines in the editor (edit mode only).

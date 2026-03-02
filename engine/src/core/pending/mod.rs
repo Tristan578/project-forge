@@ -163,6 +163,7 @@ pub struct PendingCommands {
     pub physics2d_updates: Vec<Physics2dUpdate>,
     pub physics2d_toggles: Vec<Physics2dToggle>,
     pub create_joint2d_requests: Vec<CreateJoint2dRequest>,
+    pub update_joint2d_requests: Vec<UpdateJoint2dRequest>,
     pub remove_joint2d_requests: Vec<RemoveJoint2dRequest>,
     pub force_applications2d: Vec<ForceApplication2d>,
     pub impulse_applications2d: Vec<ImpulseApplication2d>,

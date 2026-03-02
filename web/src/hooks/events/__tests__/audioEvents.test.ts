@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createMockSetGet, createMockActions } from './eventTestUtils';
 
+// Mock the editor store module
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
     getState: vi.fn(),
@@ -9,13 +11,14 @@ vi.mock('@/stores/editorStore', () => ({
   },
 }));
 
+// Mock the audio manager (used by AUDIO_BUSES_CHANGED and AUDIO_PLAYBACK)
 vi.mock('@/lib/audio/audioManager', () => ({
   audioManager: {
+    applyBusConfig: vi.fn(),
     play: vi.fn(),
     stop: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
-    applyBusConfig: vi.fn(),
   },
 }));
 
@@ -27,6 +30,7 @@ describe('handleAudioEvent', () => {
   let mockSetGet: ReturnType<typeof createMockSetGet>;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -34,200 +38,573 @@ describe('handleAudioEvent', () => {
   });
 
   it('returns false for unknown event types', () => {
-    expect(handleAudioEvent('UNKNOWN', {}, mockSetGet.set, mockSetGet.get)).toBe(false);
+    const result = handleAudioEvent(
+      'UNKNOWN_EVENT',
+      {},
+      mockSetGet.set,
+      mockSetGet.get
+    );
+    expect(result).toBe(false);
   });
 
-  it('SCRIPT_CHANGED: calls setEntityScript', () => {
-    const payload = { entityId: 'ent-1', source: 'console.log(1)', enabled: true, template: null };
-    const result = handleAudioEvent('SCRIPT_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('SCRIPT_CHANGED', () => {
+    it('calls setEntityScript with entityId and script data', () => {
+      const payload = {
+        entityId: 'entity-1',
+        source: 'forge.log("hello");',
+        enabled: true,
+        template: 'basic',
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setEntityScript).toHaveBeenCalledWith('ent-1', {
-      source: 'console.log(1)',
-      enabled: true,
-      template: null,
+      const result = handleAudioEvent(
+        'SCRIPT_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setEntityScript).toHaveBeenCalledWith('entity-1', {
+        source: 'forge.log("hello");',
+        enabled: true,
+        template: 'basic',
+      });
+    });
+
+    it('handles null template', () => {
+      const payload = {
+        entityId: 'entity-2',
+        source: '// custom script',
+        enabled: false,
+        template: null,
+      };
+
+      const result = handleAudioEvent(
+        'SCRIPT_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setEntityScript).toHaveBeenCalledWith('entity-2', {
+        source: '// custom script',
+        enabled: false,
+        template: null,
+      });
     });
   });
 
-  it('AUDIO_CHANGED: sets entity audio with defaults', () => {
-    const payload = { entityId: 'ent-1', assetId: 'sound-1' };
-    const result = handleAudioEvent('AUDIO_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('AUDIO_CHANGED', () => {
+    it('constructs audio data with defaults and calls setEntityAudio', () => {
+      const payload = {
+        entityId: 'entity-audio-1',
+        assetId: 'sound-asset-1',
+        volume: 0.8,
+        pitch: 1.2,
+        loopAudio: true,
+        spatial: true,
+        maxDistance: 100,
+        refDistance: 2,
+        rolloffFactor: 1.5,
+        autoplay: true,
+        bus: 'music',
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setEntityAudio).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-      assetId: 'sound-1',
-      volume: 1.0,
-      pitch: 1.0,
-      loopAudio: false,
-      spatial: false,
-    }));
+      const result = handleAudioEvent(
+        'AUDIO_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-1', {
+        assetId: 'sound-asset-1',
+        volume: 0.8,
+        pitch: 1.2,
+        loopAudio: true,
+        spatial: true,
+        maxDistance: 100,
+        refDistance: 2,
+        rolloffFactor: 1.5,
+        autoplay: true,
+        bus: 'music',
+      });
+    });
+
+    it('fills in defaults for missing optional fields', () => {
+      const payload = {
+        entityId: 'entity-audio-2',
+        assetId: 'sound-asset-2',
+      };
+
+      const result = handleAudioEvent(
+        'AUDIO_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-2', {
+        assetId: 'sound-asset-2',
+        volume: 1.0,
+        pitch: 1.0,
+        loopAudio: false,
+        spatial: false,
+        maxDistance: 50,
+        refDistance: 1,
+        rolloffFactor: 1,
+        autoplay: false,
+        bus: 'sfx',
+      });
+    });
+
+    it('handles null assetId (audio exists but no asset assigned)', () => {
+      const payload = {
+        entityId: 'entity-audio-3',
+        assetId: null,
+      };
+
+      const result = handleAudioEvent(
+        'AUDIO_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-3', {
+        assetId: null,
+        volume: 1.0,
+        pitch: 1.0,
+        loopAudio: false,
+        spatial: false,
+        maxDistance: 50,
+        refDistance: 1,
+        rolloffFactor: 1,
+        autoplay: false,
+        bus: 'sfx',
+      });
+    });
+
+    it('clears audio when assetId is undefined (no audio data)', () => {
+      const payload = {
+        entityId: 'entity-audio-4',
+        // assetId intentionally omitted
+      };
+
+      const result = handleAudioEvent(
+        'AUDIO_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setEntityAudio).toHaveBeenCalledWith('entity-audio-4', null);
+    });
   });
 
-  it('AUDIO_CHANGED: respects provided values', () => {
-    const payload = {
-      entityId: 'ent-1',
-      assetId: 'sound-1',
-      volume: 0.5,
-      pitch: 1.5,
-      loopAudio: true,
-      spatial: true,
-      maxDistance: 100,
-      bus: 'music',
-    };
-    const result = handleAudioEvent('AUDIO_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('REVERB_ZONE_CHANGED', () => {
+    it('handles sphere shape reverb zone', () => {
+      const payload = {
+        entityId: 'reverb-1',
+        enabled: true,
+        shape: { type: 'sphere' as const, radius: 10 },
+        preset: 'large_hall',
+        wetMix: 0.6,
+        decayTime: 2.5,
+        preDelay: 0.02,
+        blendRadius: 3,
+        priority: 5,
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setEntityAudio).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-      volume: 0.5,
-      pitch: 1.5,
-      loopAudio: true,
-      spatial: true,
-      maxDistance: 100,
-      bus: 'music',
-    }));
-  });
+      const result = handleAudioEvent(
+        'REVERB_ZONE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
 
-  it('AUDIO_CHANGED: clears audio when assetId is undefined', () => {
-    const payload = { entityId: 'ent-1' };
-    const result = handleAudioEvent('AUDIO_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    expect(actions.setEntityAudio).toHaveBeenCalledWith('ent-1', null);
-  });
-
-  it('AUDIO_CHANGED: sets audio with null assetId', () => {
-    const payload = { entityId: 'ent-1', assetId: null };
-    const result = handleAudioEvent('AUDIO_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    expect(actions.setEntityAudio).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-      assetId: null,
-    }));
-  });
-
-  it('REVERB_ZONE_CHANGED: handles sphere shape', () => {
-    const payload = {
-      entityId: 'ent-1',
-      enabled: true,
-      shape: { type: 'sphere', radius: 10 },
-      preset: 'hall',
-      wetMix: 0.5,
-      decayTime: 2.0,
-      preDelay: 0.02,
-      blendRadius: 1,
-      priority: 0,
-    };
-    const result = handleAudioEvent('REVERB_ZONE_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    expect(actions.setReverbZone).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-      shape: { type: 'sphere', radius: 10 },
-      preset: 'hall',
-    }), true);
-  });
-
-  it('REVERB_ZONE_CHANGED: handles box shape', () => {
-    const payload = {
-      entityId: 'ent-1',
-      enabled: false,
-      shape: { type: 'box', size: [5, 3, 5] },
-      preset: 'room',
-      wetMix: 0.3,
-      decayTime: 1.0,
-      preDelay: 0.01,
-      blendRadius: 2,
-      priority: 1,
-    };
-    handleAudioEvent('REVERB_ZONE_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(actions.setReverbZone).toHaveBeenCalledWith('ent-1', expect.objectContaining({
-      shape: { type: 'box', size: [5, 3, 5] },
-    }), false);
-  });
-
-  it('REVERB_ZONE_REMOVED: calls removeReverbZone', () => {
-    const payload = { entityId: 'ent-1' };
-    const result = handleAudioEvent('REVERB_ZONE_REMOVED', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    expect(actions.removeReverbZone).toHaveBeenCalledWith('ent-1');
-  });
-
-  it('AUDIO_BUSES_CHANGED: calls setAudioBuses', () => {
-    const buses = [{ name: 'master', volume: 1.0 }, { name: 'sfx', volume: 0.8 }];
-    const payload = { buses };
-    const result = handleAudioEvent('AUDIO_BUSES_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    expect(actions.setAudioBuses).toHaveBeenCalledWith(buses);
-  });
-
-  it('AUDIO_PLAYBACK: returns true', () => {
-    const payload = { entityId: 'ent-1', action: 'play' };
-    const result = handleAudioEvent('AUDIO_PLAYBACK', payload as never, mockSetGet.set, mockSetGet.get);
-    expect(result).toBe(true);
-  });
-
-  it('INPUT_BINDINGS_CHANGED: converts Rust format to InputBinding array', () => {
-    const payload = {
-      actions: {
-        jump: {
-          name: 'jump',
-          actionType: { type: 'Digital' },
-          sources: [{ type: 'key', value: 'Space' }],
-          deadZone: 0,
+      expect(result).toBe(true);
+      expect(actions.setReverbZone).toHaveBeenCalledWith(
+        'reverb-1',
+        {
+          shape: { type: 'sphere', radius: 10 },
+          preset: 'large_hall',
+          wetMix: 0.6,
+          decayTime: 2.5,
+          preDelay: 0.02,
+          blendRadius: 3,
+          priority: 5,
         },
-        move_x: {
-          name: 'move_x',
-          actionType: {
-            type: 'Axis',
-            positive: [{ type: 'key', value: 'D' }],
-            negative: [{ type: 'key', value: 'A' }],
+        true
+      );
+    });
+
+    it('handles box shape reverb zone', () => {
+      const payload = {
+        entityId: 'reverb-2',
+        enabled: false,
+        shape: { type: 'box' as const, size: [20, 10, 15] },
+        preset: 'small_room',
+        wetMix: 0.3,
+        decayTime: 0.8,
+        preDelay: 0.01,
+        blendRadius: 1,
+        priority: 2,
+      };
+
+      const result = handleAudioEvent(
+        'REVERB_ZONE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setReverbZone).toHaveBeenCalledWith(
+        'reverb-2',
+        {
+          shape: { type: 'box', size: [20, 10, 15] },
+          preset: 'small_room',
+          wetMix: 0.3,
+          decayTime: 0.8,
+          preDelay: 0.01,
+          blendRadius: 1,
+          priority: 2,
+        },
+        false
+      );
+    });
+
+    it('defaults sphere radius to 5 when not provided', () => {
+      const payload = {
+        entityId: 'reverb-3',
+        enabled: true,
+        shape: { type: 'sphere' as const },
+        preset: 'outdoor',
+        wetMix: 0.2,
+        decayTime: 1.0,
+        preDelay: 0.0,
+        blendRadius: 2,
+        priority: 1,
+      };
+
+      const result = handleAudioEvent(
+        'REVERB_ZONE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setReverbZone).toHaveBeenCalledWith(
+        'reverb-3',
+        expect.objectContaining({
+          shape: { type: 'sphere', radius: 5 },
+        }),
+        true
+      );
+    });
+
+    it('defaults box size to [10,5,10] when not provided', () => {
+      const payload = {
+        entityId: 'reverb-4',
+        enabled: true,
+        shape: { type: 'box' as const },
+        preset: 'cave',
+        wetMix: 0.9,
+        decayTime: 4.0,
+        preDelay: 0.05,
+        blendRadius: 5,
+        priority: 10,
+      };
+
+      const result = handleAudioEvent(
+        'REVERB_ZONE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setReverbZone).toHaveBeenCalledWith(
+        'reverb-4',
+        expect.objectContaining({
+          shape: { type: 'box', size: [10, 5, 10] },
+        }),
+        true
+      );
+    });
+  });
+
+  describe('REVERB_ZONE_REMOVED', () => {
+    it('calls removeReverbZone with entityId', () => {
+      const payload = { entityId: 'reverb-5' };
+
+      const result = handleAudioEvent(
+        'REVERB_ZONE_REMOVED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.removeReverbZone).toHaveBeenCalledWith('reverb-5');
+    });
+  });
+
+  describe('AUDIO_BUSES_CHANGED', () => {
+    it('calls setAudioBuses with buses array', () => {
+      const payload = {
+        buses: [
+          { name: 'master', volume: 1.0, mute: false },
+          { name: 'sfx', volume: 0.8, mute: false },
+          { name: 'music', volume: 0.5, mute: true },
+        ],
+      };
+
+      const result = handleAudioEvent(
+        'AUDIO_BUSES_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setAudioBuses).toHaveBeenCalledWith(payload.buses);
+    });
+  });
+
+  describe('AUDIO_PLAYBACK', () => {
+    it('returns true for play action', () => {
+      const payload = { entityId: 'entity-1', action: 'play' };
+
+      const result = handleAudioEvent(
+        'AUDIO_PLAYBACK',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+    });
+
+    it('returns true for stop action', () => {
+      const payload = { entityId: 'entity-1', action: 'stop' };
+
+      const result = handleAudioEvent(
+        'AUDIO_PLAYBACK',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+    });
+
+    it('returns true for pause action', () => {
+      const payload = { entityId: 'entity-1', action: 'pause' };
+
+      const result = handleAudioEvent(
+        'AUDIO_PLAYBACK',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+    });
+
+    it('returns true for resume action', () => {
+      const payload = { entityId: 'entity-1', action: 'resume' };
+
+      const result = handleAudioEvent(
+        'AUDIO_PLAYBACK',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+    });
+  });
+
+  describe('INPUT_BINDINGS_CHANGED', () => {
+    it('converts Rust InputMap format to InputBinding array and calls setInputBindings', () => {
+      const payload = {
+        actions: {
+          move_forward: {
+            name: 'move_forward',
+            actionType: { type: 'Digital' },
+            sources: [{ type: 'Key', value: 'KeyW' }],
+            deadZone: 0.1,
           },
-          sources: [],
-          deadZone: 0.1,
+          jump: {
+            name: 'jump',
+            actionType: { type: 'Digital' },
+            sources: [{ type: 'Key', value: 'Space' }],
+            deadZone: 0.0,
+          },
         },
-      },
-      preset: 'fps',
-    };
-    const result = handleAudioEvent('INPUT_BINDINGS_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+        preset: 'fps',
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setInputBindings).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({ actionName: 'jump', actionType: 'digital', sources: ['Space'] }),
-        expect.objectContaining({ actionName: 'move_x', actionType: 'axis', positiveKeys: ['D'], negativeKeys: ['A'] }),
-      ]),
-      'fps'
-    );
+      const result = handleAudioEvent(
+        'INPUT_BINDINGS_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setInputBindings).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            actionName: 'move_forward',
+            actionType: 'digital',
+            sources: ['KeyW'],
+            deadZone: 0.1,
+          }),
+          expect.objectContaining({
+            actionName: 'jump',
+            actionType: 'digital',
+            sources: ['Space'],
+            deadZone: 0.0,
+          }),
+        ]),
+        'fps'
+      );
+    });
+
+    it('handles axis type with positive and negative keys', () => {
+      const payload = {
+        actions: {
+          move_horizontal: {
+            name: 'move_horizontal',
+            actionType: {
+              type: 'Axis',
+              positive: [{ type: 'Key', value: 'KeyD' }],
+              negative: [{ type: 'Key', value: 'KeyA' }],
+            },
+            sources: [],
+            deadZone: 0.15,
+          },
+        },
+        preset: null,
+      };
+
+      const result = handleAudioEvent(
+        'INPUT_BINDINGS_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setInputBindings).toHaveBeenCalledWith(
+        [
+          expect.objectContaining({
+            actionName: 'move_horizontal',
+            actionType: 'axis',
+            positiveKeys: ['KeyD'],
+            negativeKeys: ['KeyA'],
+            deadZone: 0.15,
+          }),
+        ],
+        null
+      );
+    });
   });
 
-  it('ASSET_IMPORTED: calls addAssetToRegistry', () => {
-    const payload = { assetId: 'a1', name: 'model.glb', kind: 'gltf_model', fileSize: 1024 };
-    const result = handleAudioEvent('ASSET_IMPORTED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('ASSET_IMPORTED', () => {
+    it('calls addAssetToRegistry with constructed asset metadata', () => {
+      const payload = {
+        assetId: 'asset-123',
+        name: 'tree.glb',
+        kind: 'gltf_model',
+        fileSize: 1024000,
+      };
 
-    expect(result).toBe(true);
-    expect(actions.addAssetToRegistry).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'a1',
-      name: 'model.glb',
-      kind: 'gltf_model',
-    }));
+      const result = handleAudioEvent(
+        'ASSET_IMPORTED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.addAssetToRegistry).toHaveBeenCalledWith({
+        id: 'asset-123',
+        name: 'tree.glb',
+        kind: 'gltf_model',
+        fileSize: 1024000,
+        source: { type: 'upload', filename: 'tree.glb' },
+      });
+    });
+
+    it('handles texture asset type', () => {
+      const payload = {
+        assetId: 'tex-456',
+        name: 'brick_diffuse.png',
+        kind: 'texture',
+        fileSize: 512000,
+      };
+
+      const result = handleAudioEvent(
+        'ASSET_IMPORTED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.addAssetToRegistry).toHaveBeenCalledWith({
+        id: 'tex-456',
+        name: 'brick_diffuse.png',
+        kind: 'texture',
+        fileSize: 512000,
+        source: { type: 'upload', filename: 'brick_diffuse.png' },
+      });
+    });
   });
 
-  it('ASSET_DELETED: calls removeAssetFromRegistry', () => {
-    const payload = { assetId: 'a1' };
-    const result = handleAudioEvent('ASSET_DELETED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('ASSET_DELETED', () => {
+    it('calls removeAssetFromRegistry with assetId', () => {
+      const payload = { assetId: 'asset-789' };
 
-    expect(result).toBe(true);
-    expect(actions.removeAssetFromRegistry).toHaveBeenCalledWith('a1');
+      const result = handleAudioEvent(
+        'ASSET_DELETED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.removeAssetFromRegistry).toHaveBeenCalledWith('asset-789');
+    });
   });
 
-  it('ASSET_LIST: calls setAssetRegistry', () => {
-    const assets = { a1: { id: 'a1', name: 'tex.png', kind: 'texture' } };
-    const payload = { assets };
-    const result = handleAudioEvent('ASSET_LIST', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('ASSET_LIST', () => {
+    it('calls setAssetRegistry with assets record', () => {
+      const assets = {
+        'asset-1': { id: 'asset-1', name: 'model.glb', kind: 'gltf_model', fileSize: 500, source: { type: 'upload', filename: 'model.glb' } },
+        'asset-2': { id: 'asset-2', name: 'tex.png', kind: 'texture', fileSize: 200, source: { type: 'upload', filename: 'tex.png' } },
+      };
+      const payload = { assets };
 
-    expect(result).toBe(true);
-    expect(actions.setAssetRegistry).toHaveBeenCalledWith(assets);
+      const result = handleAudioEvent(
+        'ASSET_LIST',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setAssetRegistry).toHaveBeenCalledWith(assets);
+    });
   });
 });

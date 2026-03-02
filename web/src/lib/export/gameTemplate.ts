@@ -98,7 +98,7 @@ export function generateGameHTML(options: GameTemplateOptions): string {
               window.__forgeTransforms[payload.entityId] = payload;
             } else if (eventType === 'AUDIO_PLAYBACK') {
               if (!window.__forgeAudioState) window.__forgeAudioState = {};
-              window.__forgeAudioState[payload.entityId] = (payload.action === 'play');
+              window.__forgeAudioState[payload.entityId] = (payload.action === 'play' || payload.action === 'resume');
             }
           } catch(e) {}
         });

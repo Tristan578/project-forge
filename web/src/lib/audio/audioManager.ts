@@ -296,6 +296,14 @@ class AudioManager {
     instance.isPaused = false;
     instance.startTime = ctx.currentTime - offset;
 
+    // Detect when non-looping sounds finish naturally
+    if (!source.loop) {
+      source.onended = () => {
+        instance.isPlaying = false;
+        instance.pauseOffset = 0;
+      };
+    }
+
     this.checkDuckingOnPlay(busName);
   }
 
@@ -1313,11 +1321,11 @@ class AudioManager {
     const bus = this.buses.get(busName) ?? this.buses.get('sfx');
     if (!bus) return;
 
-    // Disconnect existing chain from gain onward
+    // Disconnect existing chain from gain onward (including occlusion filter)
     instance.gainNode.disconnect();
     instance.pannerNode?.disconnect();
-
     const occlusionFilter = this.occlusionFilters.get(entityId);
+    try { occlusionFilter?.disconnect(); } catch { /* may not be connected */ }
 
     // Rebuild: gain → [panner] → [occlusionFilter] → busGainNode
     if (instance.pannerNode) {

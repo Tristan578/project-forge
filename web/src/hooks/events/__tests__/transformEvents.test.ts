@@ -1,6 +1,8 @@
+// @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createMockSetGet, createMockActions } from './eventTestUtils';
 
+// Mock the editor store module
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
     getState: vi.fn(),
@@ -17,129 +19,469 @@ describe('handleTransformEvent', () => {
   let mockSetGet: ReturnType<typeof createMockSetGet>;
 
   beforeEach(() => {
+    vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore.getState).mockReturnValue(actions as any);
-    vi.mocked(useEditorStore.setState).mockClear();
   });
 
   it('returns false for unknown event types', () => {
-    expect(handleTransformEvent('UNKNOWN', {}, mockSetGet.set, mockSetGet.get)).toBe(false);
+    const result = handleTransformEvent(
+      'UNKNOWN_EVENT',
+      {},
+      mockSetGet.set,
+      mockSetGet.get
+    );
+    expect(result).toBe(false);
   });
 
-  it('SELECTION_CHANGED: calls setSelection with ids and primary', () => {
-    const payload = { selectedIds: ['a', 'b'], primaryId: 'a', primaryName: 'EntityA' };
-    const result = handleTransformEvent('SELECTION_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('SELECTION_CHANGED', () => {
+    it('calls setSelection with selectedIds, primaryId, and primaryName', () => {
+      const payload = {
+        selectedIds: ['entity-1', 'entity-2'],
+        primaryId: 'entity-1',
+        primaryName: 'MyCube',
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setSelection).toHaveBeenCalledWith(['a', 'b'], 'a', 'EntityA');
+      const result = handleTransformEvent(
+        'SELECTION_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setSelection).toHaveBeenCalledWith(
+        ['entity-1', 'entity-2'],
+        'entity-1',
+        'MyCube'
+      );
+    });
+
+    it('handles empty selection', () => {
+      const payload = {
+        selectedIds: [],
+        primaryId: null,
+        primaryName: null,
+      };
+
+      const result = handleTransformEvent(
+        'SELECTION_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setSelection).toHaveBeenCalledWith([], null, null);
+    });
   });
 
-  it('SCENE_GRAPH_UPDATE: calls updateSceneGraph and marks modified', () => {
-    const graph = { nodes: {}, rootIds: [] };
-    const result = handleTransformEvent('SCENE_GRAPH_UPDATE', graph as never, mockSetGet.set, mockSetGet.get);
+  describe('SCENE_GRAPH_UPDATE', () => {
+    it('calls updateSceneGraph with payload and marks scene as modified', () => {
+      const sceneGraph = {
+        entities: [
+          { id: 'entity-1', name: 'Cube', entityType: 'cube', parentId: null },
+        ],
+      };
 
-    expect(result).toBe(true);
-    expect(actions.updateSceneGraph).toHaveBeenCalledWith(graph);
-    expect(useEditorStore.setState).toHaveBeenCalledWith({ sceneModified: true });
+      const result = handleTransformEvent(
+        'SCENE_GRAPH_UPDATE',
+        sceneGraph,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.updateSceneGraph).toHaveBeenCalledWith(sceneGraph);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ sceneModified: true });
+    });
   });
 
-  it('TRANSFORM_CHANGED: calls setPrimaryTransform', () => {
-    const transform = { entityId: 'ent-1', position: [0, 1, 2], rotation: [0, 0, 0], scale: [1, 1, 1] };
-    const result = handleTransformEvent('TRANSFORM_CHANGED', transform as never, mockSetGet.set, mockSetGet.get);
+  describe('TRANSFORM_CHANGED', () => {
+    it('calls setPrimaryTransform with the transform data', () => {
+      const transformData = {
+        position: { x: 1, y: 2, z: 3 },
+        rotation: { x: 0, y: 45, z: 0 },
+        scale: { x: 1, y: 1, z: 1 },
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setPrimaryTransform).toHaveBeenCalledWith(transform);
+      const result = handleTransformEvent(
+        'TRANSFORM_CHANGED',
+        transformData,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setPrimaryTransform).toHaveBeenCalledWith(transformData);
+    });
   });
 
-  it('HISTORY_CHANGED: calls setHistoryState', () => {
-    const payload = { canUndo: true, canRedo: false, undoDescription: 'Move', redoDescription: null };
-    const result = handleTransformEvent('HISTORY_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('HISTORY_CHANGED', () => {
+    it('calls setHistoryState with canUndo, canRedo, and descriptions', () => {
+      const payload = {
+        canUndo: true,
+        canRedo: false,
+        undoDescription: 'Move Cube',
+        redoDescription: null,
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setHistoryState).toHaveBeenCalledWith(true, false, 'Move', null);
+      const result = handleTransformEvent(
+        'HISTORY_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setHistoryState).toHaveBeenCalledWith(
+        true,
+        false,
+        'Move Cube',
+        null
+      );
+    });
+
+    it('handles both undo and redo available', () => {
+      const payload = {
+        canUndo: true,
+        canRedo: true,
+        undoDescription: 'Rename Entity',
+        redoDescription: 'Scale Sphere',
+      };
+
+      const result = handleTransformEvent(
+        'HISTORY_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setHistoryState).toHaveBeenCalledWith(
+        true,
+        true,
+        'Rename Entity',
+        'Scale Sphere'
+      );
+    });
   });
 
-  it('SNAP_SETTINGS_CHANGED: calls setSnapSettings', () => {
-    const snap = { gridSize: 0.5, rotationStep: 15, snapEnabled: true };
-    const result = handleTransformEvent('SNAP_SETTINGS_CHANGED', snap as never, mockSetGet.set, mockSetGet.get);
+  describe('SNAP_SETTINGS_CHANGED', () => {
+    it('calls setSnapSettings with the snap settings payload', () => {
+      const snapSettings = {
+        positionSnap: true,
+        rotationSnap: true,
+        scaleSnap: false,
+        positionStep: 0.5,
+        rotationStep: 15,
+        scaleStep: 0.1,
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setSnapSettings).toHaveBeenCalledWith(snap);
+      const result = handleTransformEvent(
+        'SNAP_SETTINGS_CHANGED',
+        snapSettings,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setSnapSettings).toHaveBeenCalledWith(snapSettings);
+    });
   });
 
-  it('VIEW_PRESET_CHANGED: calls setCurrentCameraPreset', () => {
-    const payload = { preset: 'top', displayName: 'Top View' };
-    const result = handleTransformEvent('VIEW_PRESET_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('VIEW_PRESET_CHANGED', () => {
+    it('calls setCurrentCameraPreset with the preset', () => {
+      const payload = { preset: 'top', displayName: 'Top' };
 
-    expect(result).toBe(true);
-    expect(actions.setCurrentCameraPreset).toHaveBeenCalledWith('top');
+      const result = handleTransformEvent(
+        'VIEW_PRESET_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setCurrentCameraPreset).toHaveBeenCalledWith('top');
+    });
+
+    it('handles null displayName', () => {
+      const payload = { preset: 'perspective', displayName: null };
+
+      const result = handleTransformEvent(
+        'VIEW_PRESET_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setCurrentCameraPreset).toHaveBeenCalledWith('perspective');
+    });
   });
 
-  it('COORDINATE_MODE_CHANGED: sets coordinateMode via setState', () => {
-    const payload = { mode: 'local', displayName: 'Local' };
-    const result = handleTransformEvent('COORDINATE_MODE_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('COORDINATE_MODE_CHANGED', () => {
+    it('sets coordinateMode to world via setState', () => {
+      const payload = { mode: 'world', displayName: 'World' };
 
-    expect(result).toBe(true);
-    expect(useEditorStore.setState).toHaveBeenCalledWith({ coordinateMode: 'local' });
+      const result = handleTransformEvent(
+        'COORDINATE_MODE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ coordinateMode: 'world' });
+    });
+
+    it('sets coordinateMode to local via setState', () => {
+      const payload = { mode: 'local', displayName: 'Local' };
+
+      const result = handleTransformEvent(
+        'COORDINATE_MODE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ coordinateMode: 'local' });
+    });
   });
 
-  it('REPARENT_RESULT: logs error on failure', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const payload = { success: false, entityId: 'ent-1', error: 'Circular dependency' };
-    const result = handleTransformEvent('REPARENT_RESULT', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('REPARENT_RESULT', () => {
+    it('returns true on successful reparent', () => {
+      const payload = { success: true, entityId: 'entity-1' };
 
-    expect(result).toBe(true);
-    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Circular dependency'));
-    errorSpy.mockRestore();
+      const result = handleTransformEvent(
+        'REPARENT_RESULT',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+    });
+
+    it('logs error on failed reparent', () => {
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      const payload = {
+        success: false,
+        entityId: 'entity-1',
+        error: 'Circular dependency detected',
+      };
+
+      const result = handleTransformEvent(
+        'REPARENT_RESULT',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Failed to reparent entity entity-1: Circular dependency detected'
+      );
+
+      consoleErrorSpy.mockRestore();
+    });
   });
 
-  it('REPARENT_RESULT: success does not log error', () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const payload = { success: true, entityId: 'ent-1' };
-    handleTransformEvent('REPARENT_RESULT', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('ENGINE_MODE_CHANGED', () => {
+    it('sets engineMode to play via setState', () => {
+      const payload = { mode: 'play' };
 
-    expect(errorSpy).not.toHaveBeenCalled();
-    errorSpy.mockRestore();
+      const result = handleTransformEvent(
+        'ENGINE_MODE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ engineMode: 'play' });
+    });
+
+    it('sets engineMode to edit via setState', () => {
+      const payload = { mode: 'edit' };
+
+      const result = handleTransformEvent(
+        'ENGINE_MODE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ engineMode: 'edit' });
+    });
+
+    it('sets engineMode to paused via setState', () => {
+      const payload = { mode: 'paused' };
+
+      const result = handleTransformEvent(
+        'ENGINE_MODE_CHANGED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ engineMode: 'paused' });
+    });
   });
 
-  it('ENGINE_MODE_CHANGED: sets engineMode via setState', () => {
-    const payload = { mode: 'play' };
-    const result = handleTransformEvent('ENGINE_MODE_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('SCENE_EXPORTED', () => {
+    it('dispatches forge:scene-exported DOM event', () => {
+      const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as any);
 
-    expect(result).toBe(true);
-    expect(useEditorStore.setState).toHaveBeenCalledWith({ engineMode: 'play' });
+      const payload = { json: '{"entities":[]}', name: 'MyScene' };
+
+      const result = handleTransformEvent(
+        'SCENE_EXPORTED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(dispatchSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'forge:scene-exported',
+          detail: { json: '{"entities":[]}', name: 'MyScene' },
+        })
+      );
+
+      dispatchSpy.mockRestore();
+    });
+
+    it('saves to localStorage when autoSaveEnabled is true', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as any);
+      const mockSetItem = vi.fn();
+      const origLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: { ...origLocalStorage, setItem: mockSetItem, getItem: vi.fn(), removeItem: vi.fn() },
+        writable: true,
+        configurable: true,
+      });
+
+      const payload = { json: '{"entities":[]}', name: 'TestScene' };
+
+      const result = handleTransformEvent(
+        'SCENE_EXPORTED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(mockSetItem).toHaveBeenCalledWith('forge:autosave', '{"entities":[]}');
+      expect(mockSetItem).toHaveBeenCalledWith('forge:autosave:name', 'TestScene');
+      expect(mockSetItem).toHaveBeenCalledWith('forge:autosave:time', expect.any(String));
+
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: origLocalStorage,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    it('handles localStorage quota exceeded gracefully', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as any);
+      const origLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: {
+          ...origLocalStorage,
+          setItem: () => { throw new Error('QuotaExceededError'); },
+          getItem: vi.fn(),
+          removeItem: vi.fn(),
+        },
+        writable: true,
+        configurable: true,
+      });
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const payload = { json: '{"entities":[]}', name: 'BigScene' };
+
+      const result = handleTransformEvent(
+        'SCENE_EXPORTED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[AutoSave] localStorage write failed (quota exceeded?)'
+      );
+
+      warnSpy.mockRestore();
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: origLocalStorage,
+        writable: true,
+        configurable: true,
+      });
+    });
+
+    it('does not save to localStorage when autoSaveEnabled is false', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as any);
+      const mockSetItem = vi.fn();
+      const origLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: { ...origLocalStorage, setItem: mockSetItem, getItem: vi.fn(), removeItem: vi.fn() },
+        writable: true,
+        configurable: true,
+      });
+
+      const payload = { json: '{"entities":[]}', name: 'TestScene' };
+
+      handleTransformEvent(
+        'SCENE_EXPORTED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(mockSetItem).not.toHaveBeenCalled();
+
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: origLocalStorage,
+        writable: true,
+        configurable: true,
+      });
+    });
   });
 
-  it('SCENE_EXPORTED: dispatches DOM event', () => {
-    // Provide a minimal window mock for the dispatchEvent call
-    const mockDispatchEvent = vi.fn();
-    vi.stubGlobal('window', { dispatchEvent: mockDispatchEvent, CustomEvent });
-    vi.stubGlobal('CustomEvent', class MockCustomEvent { type: string; detail: unknown; constructor(type: string, opts?: { detail?: unknown }) { this.type = type; this.detail = opts?.detail; } });
+  describe('SCENE_LOADED', () => {
+    it('resets scene state via setState', () => {
+      const payload = { name: 'LoadedScene' };
 
-    const payload = { json: '{"scene":true}', name: 'TestScene' };
-    const result = handleTransformEvent('SCENE_EXPORTED', payload as never, mockSetGet.set, mockSetGet.get);
+      const result = handleTransformEvent(
+        'SCENE_LOADED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
 
-    expect(result).toBe(true);
-    expect(mockDispatchEvent).toHaveBeenCalled();
-    const event = mockDispatchEvent.mock.calls[0][0];
-    expect(event.type).toBe('forge:scene-exported');
-    expect(event.detail).toEqual({ json: '{"scene":true}', name: 'TestScene' });
-
-    vi.unstubAllGlobals();
-  });
-
-  it('SCENE_LOADED: resets state', () => {
-    const payload = { name: 'MyScene' };
-    const result = handleTransformEvent('SCENE_LOADED', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    expect(useEditorStore.setState).toHaveBeenCalledWith(expect.objectContaining({
-      sceneName: 'MyScene',
-      sceneModified: false,
-      primaryMaterial: null,
-      primaryLight: null,
-    }));
+      expect(result).toBe(true);
+      expect(useEditorStore.setState).toHaveBeenCalledWith({
+        sceneName: 'LoadedScene',
+        sceneModified: false,
+        primaryMaterial: null,
+        primaryLight: null,
+        primaryPhysics: null,
+        physicsEnabled: false,
+        primaryAnimation: null,
+      });
+    });
   });
 });

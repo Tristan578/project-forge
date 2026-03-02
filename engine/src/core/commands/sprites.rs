@@ -496,7 +496,7 @@ fn handle_create_ik_chain2d(payload: serde_json::Value) -> super::CommandResult 
         .ok_or("Missing targetBone")?
         .to_string();
 
-    let _chain_length = payload.get("chainLength")
+    let chain_length = payload.get("chainLength")
         .and_then(|v| v.as_u64())
         .ok_or("Missing chainLength")? as usize;
 
@@ -504,10 +504,15 @@ fn handle_create_ik_chain2d(payload: serde_json::Value) -> super::CommandResult 
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    // For now, create a placeholder constraint
+    // Build bone chain by repeating target_bone name for the requested length.
+    // The bridge system will resolve actual parent traversal using skeleton data.
+    let bone_chain: Vec<String> = (0..chain_length.max(1))
+        .map(|_| target_bone.clone())
+        .collect();
+
     let constraint = crate::core::skeleton2d::IkConstraint2d {
         name: chain_name,
-        bone_chain: vec![target_bone],
+        bone_chain,
         target_entity_id: String::new(), // Placeholder
         bend_direction: if bend_positive { 1.0 } else { -1.0 },
         mix: 1.0,
