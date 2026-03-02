@@ -118,6 +118,15 @@ describe('handlePhysicsEvent', () => {
         false
       );
     });
+
+    it('should strip entityId from physics data', () => {
+      const payload = { entityId: 'entity-1', enabled: false, bodyType: 'static' };
+      handlePhysicsEvent('PHYSICS_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      const calledData = actions.setPrimaryPhysics.mock.calls[0][0];
+      expect(calledData).not.toHaveProperty('entityId');
+      expect(calledData).not.toHaveProperty('enabled');
+    });
   });
 
   describe('JOINT_CHANGED', () => {
@@ -141,7 +150,6 @@ describe('handlePhysicsEvent', () => {
     });
 
     it('handles null joint data (joint removed)', () => {
-      // When the engine sends null joint data
       const result = handlePhysicsEvent(
         'JOINT_CHANGED',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

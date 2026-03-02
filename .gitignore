@@ -24,6 +24,10 @@ secrets.json
 !.claude/settings.json
 !.claude/taskboard.db
 !.claude/TASKBOARD_SETUP.md
+# Always ignore local settings and WAL files
+.claude/settings.local.json
+.claude/taskboard.db-wal
+.claude/taskboard.db-shm
 specs/
 ARCHITECTURE.md
 TESTING.md

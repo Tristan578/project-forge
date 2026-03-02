@@ -216,7 +216,7 @@ jobs:
           retention-days: 14
 
   security:
-    name: Security Audit
+    name: Rust Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
