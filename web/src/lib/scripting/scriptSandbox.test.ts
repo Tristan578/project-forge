@@ -367,7 +367,7 @@ describe('Script Sandbox Security', () => {
       const mapW = 10, mapH = 10;
       const origin = 'TopLeft';
 
-      const isCenter = origin === 'Center';
+      const isCenter = (origin as 'TopLeft' | 'Center') === 'Center';
       const offsetX = isCenter ? (mapW * tileW) / 2 : 0;
       const offsetY = isCenter ? (mapH * tileH) / 2 : 0;
 

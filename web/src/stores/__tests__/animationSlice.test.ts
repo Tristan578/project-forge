@@ -8,17 +8,17 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAnimationSlice, setAnimationDispatcher, type AnimationSlice } from '../slices/animationSlice';
 
 function createTestStore() {
-  let state: AnimationSlice;
+  const store = { state: null as unknown as AnimationSlice };
   const set = (partial: Partial<AnimationSlice> | ((s: AnimationSlice) => Partial<AnimationSlice>)) => {
     if (typeof partial === 'function') {
-      Object.assign(state, partial(state));
+      Object.assign(store.state, partial(store.state));
     } else {
-      Object.assign(state, partial);
+      Object.assign(store.state, partial);
     }
   };
-  const get = () => state;
-  state = createAnimationSlice(set as never, get as never, {} as never);
-  return { getState: () => state };
+  const get = () => store.state;
+  store.state = createAnimationSlice(set as never, get as never, {} as never);
+  return { getState: () => store.state };
 }
 
 describe('animationSlice', () => {
@@ -27,7 +27,7 @@ describe('animationSlice', () => {
 
   beforeEach(() => {
     mockDispatch = vi.fn();
-    setAnimationDispatcher(mockDispatch);
+    setAnimationDispatcher(mockDispatch as (command: string, payload: unknown) => void);
     store = createTestStore();
   });
 
@@ -112,12 +112,20 @@ describe('animationSlice', () => {
 
   describe('Primary animation state', () => {
     const sampleState = {
-      clips: ['idle', 'walk', 'run'],
-      activeClip: 'idle',
-      frameIndex: 0,
-      playing: true,
-      paused: false,
-      finished: false,
+      entityId: 'ent-1',
+      availableClips: [
+        { name: 'idle', nodeIndex: 0, durationSecs: 1.0 },
+        { name: 'walk', nodeIndex: 1, durationSecs: 0.8 },
+        { name: 'run', nodeIndex: 2, durationSecs: 0.6 },
+      ],
+      activeClipName: 'idle',
+      activeNodeIndex: 0,
+      isPlaying: true,
+      isPaused: false,
+      elapsedSecs: 0,
+      speed: 1.0,
+      isLooping: true,
+      isFinished: false,
     };
 
     it('setPrimaryAnimation sets state only', () => {

@@ -9,17 +9,17 @@ import { createSpriteSlice, setSpriteDispatcher, type SpriteSlice } from '../sli
 import type { SpriteData, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData } from '../slices/types';
 
 function createTestStore() {
-  let state: SpriteSlice;
+  const store = { state: null as unknown as SpriteSlice };
   const set = (partial: Partial<SpriteSlice> | ((s: SpriteSlice) => Partial<SpriteSlice>)) => {
     if (typeof partial === 'function') {
-      Object.assign(state, partial(state));
+      Object.assign(store.state, partial(store.state));
     } else {
-      Object.assign(state, partial);
+      Object.assign(store.state, partial);
     }
   };
-  const get = () => state;
-  state = createSpriteSlice(set as never, get as never, {} as never);
-  return { getState: () => state };
+  const get = () => store.state;
+  store.state = createSpriteSlice(set as never, get as never, {} as never);
+  return { getState: () => store.state };
 }
 
 const sampleSprite: SpriteData = {
@@ -63,20 +63,18 @@ const sampleStateMachine: AnimationStateMachineData = {
 const sampleTileset: TilesetData = {
   name: 'ground',
   assetId: 'tileset-001',
-  tileWidth: 16,
-  tileHeight: 16,
-  columns: 10,
-  rows: 10,
+  tileSize: [16, 16],
+  gridSize: [10, 10],
   spacing: 0,
   margin: 0,
-  tiles: {},
+  tiles: [],
 };
 
 const sampleTilemap: TilemapData = {
   tilesetAssetId: 'tileset-001',
   tileSize: [16, 16],
   mapSize: [20, 15],
-  layers: [{ name: 'ground', tiles: [], visible: true, opacity: 1 }],
+  layers: [{ name: 'ground', tiles: [], visible: true, opacity: 1, isCollision: false }],
   origin: 'TopLeft',
 };
 
@@ -86,7 +84,7 @@ describe('spriteSlice', () => {
 
   beforeEach(() => {
     mockDispatch = vi.fn();
-    setSpriteDispatcher(mockDispatch);
+    setSpriteDispatcher(mockDispatch as (command: string, payload: unknown) => void);
     store = createTestStore();
   });
 

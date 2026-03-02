@@ -130,6 +130,6 @@ export async function invokeHandler(
   storeOverrides: Record<string, unknown> = {}
 ): Promise<{ result: ExecutionResult; store: ToolCallContext['store'] }> {
   const store = createMockStore(storeOverrides);
-  const result = await handlers[name](args, { store });
+  const result = await handlers[name](args, { store, dispatchCommand: vi.fn() });
   return { result, store };
 }

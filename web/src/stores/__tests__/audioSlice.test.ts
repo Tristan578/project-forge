@@ -8,14 +8,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAudioSlice, setAudioDispatcher, type AudioSlice } from '../slices/audioSlice';
 
 function createTestStore() {
-  let state: AudioSlice;
+  const store = { state: null as unknown as AudioSlice };
   const set = (partial: Partial<AudioSlice> | ((s: AudioSlice) => Partial<AudioSlice>)) => {
-    if (typeof partial === 'function') Object.assign(state, partial(state));
-    else Object.assign(state, partial);
+    if (typeof partial === 'function') Object.assign(store.state, partial(store.state));
+    else Object.assign(store.state, partial);
   };
-  const get = () => state;
-  state = createAudioSlice(set as never, get as never, {} as never);
-  return { getState: () => state };
+  const get = () => store.state;
+  store.state = createAudioSlice(set as never, get as never, {} as never);
+  return { getState: () => store.state };
 }
 
 describe('audioSlice', () => {
@@ -24,7 +24,7 @@ describe('audioSlice', () => {
 
   beforeEach(() => {
     mockDispatch = vi.fn();
-    setAudioDispatcher(mockDispatch);
+    setAudioDispatcher(mockDispatch as (command: string, payload: unknown) => void);
     store = createTestStore();
   });
 
@@ -56,9 +56,9 @@ describe('audioSlice', () => {
 
   describe('Audio CRUD', () => {
     it('setAudio dispatches set_audio command', () => {
-      store.getState().setAudio('ent-1', { volume: 0.8, pitch: 1.0, loop: false });
+      store.getState().setAudio('ent-1', { volume: 0.8, pitch: 1.0, loopAudio: false });
       expect(mockDispatch).toHaveBeenCalledWith('set_audio', {
-        entityId: 'ent-1', volume: 0.8, pitch: 1.0, loop: false,
+        entityId: 'ent-1', volume: 0.8, pitch: 1.0, loopAudio: false,
       });
     });
 
@@ -83,7 +83,7 @@ describe('audioSlice', () => {
     });
 
     it('setEntityAudio sets primary audio state', () => {
-      const audio = { assetId: 'sfx-01', volume: 0.8, pitch: 1.0, loop: false, spatial: false, bus: 'sfx' };
+      const audio = { assetId: 'sfx-01', volume: 0.8, pitch: 1.0, loopAudio: false, spatial: false, maxDistance: 50, refDistance: 1, rolloffFactor: 1, autoplay: false, bus: 'sfx' };
       store.getState().setEntityAudio('ent-1', audio);
       expect(store.getState().primaryAudio).toEqual(audio);
       expect(mockDispatch).not.toHaveBeenCalled();
@@ -130,7 +130,7 @@ describe('audioSlice', () => {
     });
 
     it('setBusEffects sets effects for a bus', () => {
-      const effects = [{ type: 'reverb' as const, wet: 0.3, dry: 0.7 }];
+      const effects = [{ effectType: 'reverb', params: { wet: 0.3, dry: 0.7 }, enabled: true }];
       store.getState().setBusEffects('sfx', effects);
       const sfx = store.getState().audioBuses.find(b => b.name === 'sfx');
       expect(sfx?.effects).toEqual(effects);
@@ -149,10 +149,13 @@ describe('audioSlice', () => {
 
   describe('Reverb zones', () => {
     const sampleReverb = {
+      shape: { type: 'sphere' as const, radius: 10 },
       preset: 'large_hall',
-      dryLevel: 0.8,
-      wetLevel: 0.3,
-      radius: 10,
+      wetMix: 0.3,
+      decayTime: 2.0,
+      preDelay: 20,
+      blendRadius: 1.0,
+      priority: 0,
     };
 
     it('setReverbZone stores and dispatches', () => {
@@ -174,7 +177,7 @@ describe('audioSlice', () => {
 
     it('updateReverbZone updates data and dispatches', () => {
       store.getState().setReverbZone('ent-1', sampleReverb, true);
-      const updated = { ...sampleReverb, wetLevel: 0.8 };
+      const updated = { ...sampleReverb, wetMix: 0.8 };
       store.getState().updateReverbZone('ent-1', updated);
       expect(store.getState().reverbZones['ent-1']).toEqual(updated);
       expect(mockDispatch).toHaveBeenCalledWith('update_reverb_zone', {

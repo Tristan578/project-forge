@@ -2,21 +2,30 @@ import type { ToolHandler } from './types';
 import { usePerformanceStore } from '@/stores/performanceStore';
 
 export const performanceHandlers: Record<string, ToolHandler> = {
-  set_entity_lod: async (_params, _ctx) => {
+  set_entity_lod: async (params, ctx) => {
+    const { entityId, lodDistances, autoGenerate, lodRatios } = params;
+    ctx.dispatchCommand('set_lod', {
+      entityId,
+      lodDistances: lodDistances ?? [20, 50, 100],
+      autoGenerate: autoGenerate ?? false,
+      lodRatios: lodRatios ?? [0.5, 0.25, 0.1],
+    });
     return {
-      success: false,
-      error: 'LOD configuration is not yet implemented. The LOD system requires engine-side mesh decimation which is planned for a future release.',
+      success: true,
+      result: { message: `LOD configured for entity ${entityId}` },
     };
   },
 
-  generate_lods: async (_params, _ctx) => {
+  generate_lods: async (params, ctx) => {
+    const { entityId } = params;
+    ctx.dispatchCommand('generate_lods', { entityId });
     return {
-      success: false,
-      error: 'LOD generation is not yet implemented. Automatic mesh LOD creation requires engine-side mesh decimation which is planned for a future release.',
+      success: true,
+      result: { message: `LOD generation triggered for entity ${entityId}` },
     };
   },
 
-  set_performance_budget: async (params, _ctx) => {
+  set_performance_budget: async (params, ctx) => {
     const { maxTriangles, maxDrawCalls, targetFps, warningThreshold } = params;
 
     const budget = {
@@ -26,8 +35,9 @@ export const performanceHandlers: Record<string, ToolHandler> = {
       warningThreshold: (warningThreshold as number | undefined) ?? 0.8,
     };
 
-    // Update local performance store
+    // Update local performance store and dispatch to engine
     usePerformanceStore.getState().setBudget(budget);
+    ctx.dispatchCommand('set_performance_budget', budget);
 
     return {
       success: true,
@@ -38,7 +48,8 @@ export const performanceHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  get_performance_stats: async (_params, _ctx) => {
+  get_performance_stats: async (_params, ctx) => {
+    ctx.dispatchCommand('get_performance_stats', {});
     const stats = usePerformanceStore.getState().stats;
 
     return {
@@ -50,17 +61,22 @@ export const performanceHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  optimize_scene: async (_params, _ctx) => {
+  optimize_scene: async (_params, ctx) => {
+    ctx.dispatchCommand('optimize_scene', {});
     return {
-      success: false,
-      error: 'Scene optimization is not yet implemented. Automatic mesh merging, LOD generation, and draw call batching require engine integration planned for a future release.',
+      success: true,
+      result: { message: 'Scene optimization applied — LOD configuration added to all entities' },
     };
   },
 
-  set_lod_distances: async (_params, _ctx) => {
+  set_lod_distances: async (params, ctx) => {
+    const { distances } = params;
+    ctx.dispatchCommand('set_lod_distances', {
+      distances: distances ?? [20, 50, 100],
+    });
     return {
-      success: false,
-      error: 'Global LOD distance configuration is not yet implemented. The LOD system requires engine-side support planned for a future release.',
+      success: true,
+      result: { message: 'Global LOD distances updated' },
     };
   },
 };

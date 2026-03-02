@@ -8,14 +8,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createGameSlice, setGameDispatcher, type GameSlice } from '../slices/gameSlice';
 
 function createTestStore() {
-  let state: GameSlice;
+  const store = { state: null as unknown as GameSlice };
   const set = (partial: Partial<GameSlice> | ((s: GameSlice) => Partial<GameSlice>)) => {
-    if (typeof partial === 'function') Object.assign(state, partial(state));
-    else Object.assign(state, partial);
+    if (typeof partial === 'function') Object.assign(store.state, partial(store.state));
+    else Object.assign(store.state, partial);
   };
-  const get = () => state;
-  state = createGameSlice(set as never, get as never, {} as never);
-  return { getState: () => state };
+  const get = () => store.state;
+  store.state = createGameSlice(set as never, get as never, {} as never);
+  return { getState: () => store.state };
 }
 
 describe('gameSlice', () => {
@@ -24,7 +24,7 @@ describe('gameSlice', () => {
 
   beforeEach(() => {
     mockDispatch = vi.fn();
-    setGameDispatcher(mockDispatch);
+    setGameDispatcher(mockDispatch as (command: string, payload: unknown) => void);
     store = createTestStore();
   });
 
@@ -56,16 +56,13 @@ describe('gameSlice', () => {
 
   describe('Game components', () => {
     const healthComponent = {
-      type: 'health',
-      maxHealth: 100,
-      currentHealth: 100,
-      regeneration: 0,
+      type: 'health' as const,
+      health: { maxHp: 100, currentHp: 100, invincibilitySecs: 0, respawnOnDeath: false, respawnPoint: [0, 0, 0] as [number, number, number] },
     };
 
     const collectibleComponent = {
-      type: 'collectible',
-      value: 10,
-      effect: 'score',
+      type: 'collectible' as const,
+      collectible: { value: 10, destroyOnCollect: true, pickupSoundAsset: null, rotateSpeed: 1.0 },
     };
 
     it('addGameComponent adds to entity array', () => {
@@ -85,9 +82,10 @@ describe('gameSlice', () => {
 
     it('updateGameComponent replaces matching type', () => {
       store.getState().addGameComponent('ent-1', healthComponent);
-      const updated = { ...healthComponent, currentHealth: 50 };
+      const updated = { ...healthComponent, health: { ...healthComponent.health, currentHp: 50 } };
       store.getState().updateGameComponent('ent-1', updated);
-      expect(store.getState().allGameComponents['ent-1'][0].currentHealth).toBe(50);
+      const stored = store.getState().allGameComponents['ent-1'][0];
+      expect(stored.type === 'health' && stored.health.currentHp).toBe(50);
     });
 
     it('removeGameComponent filters by type', () => {
@@ -101,10 +99,11 @@ describe('gameSlice', () => {
 
   describe('Game cameras', () => {
     const cameraData = {
-      mode: 'thirdPerson' as const,
+      mode: 'thirdPersonFollow' as const,
+      targetEntity: null,
       followDistance: 5,
       followHeight: 2,
-      followSmoothness: 0.1,
+      followSmoothing: 0.1,
     };
 
     it('setGameCamera stores and dispatches', () => {
@@ -190,7 +189,7 @@ describe('gameSlice', () => {
     });
 
     it('setLoadingScreenConfig stores config', () => {
-      const config = { type: 'progress-bar' as const, backgroundColor: '#000', progressColor: '#fff', logoUrl: null, tipTexts: [] };
+      const config = { backgroundColor: '#000', progressBarColor: '#fff', progressStyle: 'bar' as const };
       store.getState().setLoadingScreenConfig(config);
       expect(store.getState().loadingScreenConfig).toEqual(config);
     });

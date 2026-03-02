@@ -12,22 +12,22 @@ import { createPhysicsSlice, setPhysicsDispatcher, type PhysicsSlice } from '../
 
 // Minimal Zustand-like test harness
 function createTestStore() {
-  let state: PhysicsSlice;
+  const store = { state: null as unknown as PhysicsSlice };
   const listeners: (() => void)[] = [];
 
   const set = (partial: Partial<PhysicsSlice> | ((s: PhysicsSlice) => Partial<PhysicsSlice>)) => {
     if (typeof partial === 'function') {
-      Object.assign(state, partial(state));
+      Object.assign(store.state, partial(store.state));
     } else {
-      Object.assign(state, partial);
+      Object.assign(store.state, partial);
     }
     listeners.forEach(l => l());
   };
 
-  const get = () => state;
+  const get = () => store.state;
 
-  state = createPhysicsSlice(set as never, get as never, {} as never);
-  return { getState: () => state, setState: set };
+  store.state = createPhysicsSlice(set as never, get as never, {} as never);
+  return { getState: () => store.state, setState: set };
 }
 
 describe('physicsSlice', () => {
@@ -36,7 +36,7 @@ describe('physicsSlice', () => {
 
   beforeEach(() => {
     mockDispatch = vi.fn();
-    setPhysicsDispatcher(mockDispatch);
+    setPhysicsDispatcher(mockDispatch as (command: string, payload: unknown) => void);
     store = createTestStore();
   });
 
@@ -68,11 +68,17 @@ describe('physicsSlice', () => {
     const samplePhysics = {
       bodyType: 'dynamic' as const,
       colliderShape: 'cuboid' as const,
-      mass: 1.0,
       restitution: 0.5,
       friction: 0.3,
+      density: 1.0,
       gravityScale: 1.0,
-      lockRotation: false,
+      lockTranslationX: false,
+      lockTranslationY: false,
+      lockTranslationZ: false,
+      lockRotationX: false,
+      lockRotationY: false,
+      lockRotationZ: false,
+      isSensor: false,
     };
 
     it('setPrimaryPhysics sets data and enabled flag', () => {
@@ -124,6 +130,9 @@ describe('physicsSlice', () => {
       connectedEntityId: 'entity-2',
       anchorSelf: [0, 0, 0] as [number, number, number],
       anchorOther: [0, 0, 0] as [number, number, number],
+      axis: [0, 1, 0] as [number, number, number],
+      limits: null,
+      motor: null,
     };
 
     it('setPrimaryJoint sets joint data', () => {
@@ -158,12 +167,19 @@ describe('physicsSlice', () => {
   describe('2D Physics', () => {
     const samplePhysics2d = {
       bodyType: 'dynamic' as const,
-      colliderShape: 'rectangle' as const,
+      colliderShape: 'box' as const,
+      size: [1.0, 1.0] as [number, number],
+      radius: 0.5,
+      vertices: [] as [number, number][],
       mass: 1.0,
       restitution: 0.3,
       friction: 0.5,
       gravityScale: 1.0,
+      isSensor: false,
       lockRotation: false,
+      continuousDetection: false,
+      oneWayPlatform: false,
+      surfaceVelocity: [0, 0] as [number, number],
     };
 
     it('setPhysics2d adds entity to maps', () => {
@@ -222,10 +238,10 @@ describe('physicsSlice', () => {
 
   describe('2D Joints', () => {
     const sampleJoint2d = {
+      targetEntityId: 2,
       jointType: 'revolute' as const,
-      connectedEntityId: 'entity-2',
-      anchorSelf: [0, 0] as [number, number],
-      anchorOther: [0, 0] as [number, number],
+      localAnchor1: [0, 0] as [number, number],
+      localAnchor2: [0, 0] as [number, number],
     };
 
     it('setJoint2d adds joint to map', () => {
