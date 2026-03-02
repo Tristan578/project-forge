@@ -67,7 +67,7 @@ features = ["js"]
 version = "0.8"
 
 [dependencies.bevy_panorbit_camera]
-version = "0.28"
+version = "0.34"
 default-features = false
 
 [dependencies.bevy_rapier3d]
