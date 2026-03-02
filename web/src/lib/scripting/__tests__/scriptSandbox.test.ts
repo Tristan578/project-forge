@@ -428,24 +428,24 @@ describe('Script Sandbox Security', () => {
     });
   });
 
-  describe('nested Function constructor prevention', () => {
-    it('should still have Function available but shadowed globals persist', () => {
-      // Even if a script tries new Function(), the shadowed globals in the
-      // outer scope are still undefined, limiting what the inner function can do
+  describe('nested Function constructor limitation', () => {
+    it('should compile scripts that attempt Function constructor without crashing', () => {
+      // KNOWN LIMITATION: The Function constructor creates functions in the
+      // global scope, bypassing our parameter-shadowing sandbox. The actual
+      // security boundary is the Web Worker isolation (no DOM access) plus
+      // the command whitelist in the message handler. This test only verifies
+      // that scripts using the Function constructor compile and run without
+      // throwing at the sandbox level.
       const result = compileSandboxed(`
-        let innerFetchType;
         function onStart() {
-          // Attempt to escape sandbox via nested Function
           try {
-            const inner = new Function('return typeof fetch')();
-            innerFetchType = inner;
-          } catch (e) {
-            innerFetchType = 'error';
+            // Script authors might try this; CSP may block it in production
+            (0, eval)('1 + 1');
+          } catch (_e) {
+            // Expected: CSP blocks eval in production environments
           }
         }
       `);
-      // This test verifies the script compiles and runs without crashing
-      // In a real Worker, Function is available but fetch is still shadowed at the scope level
       expect(result.onStart).toBeTypeOf('function');
     });
   });
