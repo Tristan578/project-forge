@@ -1362,17 +1362,20 @@ describe('dialogueStore', () => {
     it('updateNode with invalid nodeId does nothing', () => {
       const treeId = useDialogueStore.getState().addTree('Test');
       const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const nodesBefore = JSON.parse(JSON.stringify(tree.nodes)) as typeof tree.nodes;
 
       useDialogueStore.getState().updateNode(treeId, 'nonexistent', { text: 'changed' } as Partial<TextNode>);
 
       const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
-      expect(updatedTree.nodes).toEqual(tree.nodes);
+      expect(updatedTree.nodes).toEqual(nodesBefore);
     });
 
     it('updateTree with invalid treeId does nothing', () => {
-      const before = { ...useDialogueStore.getState() };
+      const dialogueTreesBefore = JSON.parse(
+        JSON.stringify(useDialogueStore.getState().dialogueTrees)
+      );
       useDialogueStore.getState().updateTree('nonexistent', { name: 'Changed' });
-      expect(useDialogueStore.getState().dialogueTrees).toEqual(before.dialogueTrees);
+      expect(useDialogueStore.getState().dialogueTrees).toEqual(dialogueTreesBefore);
     });
 
     it('removeNode cleans up condition node references', () => {

@@ -477,12 +477,12 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should not allow overwriting forge namespace properties', () => {
-      let _called = false;
-      const mockForge = {
-        transform: {
-          setPosition: () => { _called = true; },
-        },
-      };
+      let called = false;
+      const mockForge = Object.freeze({
+        transform: Object.freeze({
+          setPosition: () => { called = true; },
+        }),
+      });
 
       const result = compileSandboxed(`
         function onStart() {
@@ -496,9 +496,9 @@ describe('Script Sandbox Security', () => {
       `, mockForge);
       result.onStart();
 
-      // Original function should still be referenced if forge is frozen,
-      // or the overwrite happened (non-frozen) but the test verifies the pattern
-      expect(result.onStart).toBeTypeOf('function');
+      // forge is frozen so the overwrite silently fails (or throws — caught above),
+      // meaning the original setPosition is still called and `called` must be true
+      expect(called).toBe(true);
     });
 
     it('should handle accessing non-existent forge sub-APIs gracefully', () => {
@@ -563,15 +563,17 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should isolate onStart errors from onUpdate execution', () => {
-      const updateCalled = false;
+      const forgeState = { updateCalled: false };
       const result = compileSandboxed(`
         function onStart() { throw new Error('init crash'); }
-        function onUpdate(_dt) { updateCalled = true; }
-      `, { updateCalled });
+        function onUpdate(_dt) { forge.updateCalled = true; }
+      `, forgeState);
 
       // onStart throws but onUpdate should still be a callable function
       expect(() => result.onStart()).toThrow('init crash');
       expect(result.onUpdate).toBeTypeOf('function');
+      result.onUpdate(0);
+      expect(forgeState.updateCalled).toBe(true);
     });
 
     it('should isolate onUpdate errors from onDestroy execution', () => {

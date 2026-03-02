@@ -802,9 +802,8 @@ describe('audioManager - Advanced', () => {
 
       // Verify clamping happened by checking internal gain node
       const oneshot = getInternal().oneShotInstances.get(id) as { gainNode: MockGainNode } | undefined;
-      if (oneshot) {
-        expect(oneshot.gainNode.gain.value).toBeLessThanOrEqual(1);
-      }
+      expect(oneshot).toBeDefined();
+      expect(oneshot!.gainNode.gain.value).toBeLessThanOrEqual(1);
     });
 
     it('playOneShot clamps pitch to 0.25-4.0', () => {

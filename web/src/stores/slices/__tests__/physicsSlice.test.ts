@@ -236,11 +236,12 @@ describe('physicsSlice', () => {
     });
 
     it('should not modify local state', () => {
-      const stateBefore = { ...store.getState() };
+      const physics2dBefore = JSON.parse(JSON.stringify(store.getState().physics2d));
+      const physics2dEnabledBefore = JSON.parse(JSON.stringify(store.getState().physics2dEnabled));
       store.getState().setGravity2d(5, -10);
 
-      expect(store.getState().physics2d).toEqual(stateBefore.physics2d);
-      expect(store.getState().physics2dEnabled).toEqual(stateBefore.physics2dEnabled);
+      expect(store.getState().physics2d).toEqual(physics2dBefore);
+      expect(store.getState().physics2dEnabled).toEqual(physics2dEnabledBefore);
     });
   });
 
