@@ -60,7 +60,7 @@ version = "0.3"
 features = ["wasm_js"]
 
 [dependencies.uuid]
-version = "1.20"
+version = "1.21"
 features = ["js"]
 
 [dependencies.transform-gizmo-bevy]
