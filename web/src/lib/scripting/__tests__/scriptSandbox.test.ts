@@ -477,10 +477,10 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should not allow overwriting forge namespace properties', () => {
-      let called = false;
+      let _called = false;
       const mockForge = {
         transform: {
-          setPosition: () => { called = true; },
+          setPosition: () => { _called = true; },
         },
       };
 
@@ -563,7 +563,7 @@ describe('Script Sandbox Security', () => {
     });
 
     it('should isolate onStart errors from onUpdate execution', () => {
-      let updateCalled = false;
+      const updateCalled = false;
       const result = compileSandboxed(`
         function onStart() { throw new Error('init crash'); }
         function onUpdate(_dt) { updateCalled = true; }
