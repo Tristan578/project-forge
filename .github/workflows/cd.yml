@@ -17,7 +17,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -35,7 +35,7 @@ jobs:
     name: TypeScript
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -53,7 +53,7 @@ jobs:
     name: Web Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -71,7 +71,7 @@ jobs:
     name: MCP Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -89,7 +89,7 @@ jobs:
     name: WASM Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -151,7 +151,7 @@ jobs:
     needs: [build-wasm]
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -219,7 +219,7 @@ jobs:
     name: Rust Security Audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
@@ -259,7 +259,7 @@ jobs:
       name: production
       url: ${{ steps.deploy.outputs.url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-node@v6
         with:
