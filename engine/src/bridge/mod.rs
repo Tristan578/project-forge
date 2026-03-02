@@ -388,11 +388,12 @@ impl Plugin for SelectionPlugin {
                 scene_graph::detect_parent_changed,
                 scene_graph::build_scene_graph,
             ).chain())
-            // Skeletal 2D runtime systems (animation playback + IK solving)
+            // Skeletal 2D runtime systems (animation playback + IK solving + vertex skinning)
             .add_systems(Update, (
                 skeleton2d::advance_skeleton_animation,
                 skeleton2d::solve_ik_constraints_2d,
-            ))
+                skeleton2d::apply_vertex_skinning_2d,
+            ).chain())
             // LOD runtime: distance-based LOD level switching
             .add_systems(Update, performance::update_lod_levels);
 
@@ -464,6 +465,7 @@ impl Plugin for SelectionPlugin {
                 ))
                 .add_systems(Update, (
                     physics::apply_create_joint2d_requests,
+                    physics::apply_update_joint2d_requests,
                     physics::apply_remove_joint2d_requests,
                     physics::apply_gravity2d_updates,
                     physics::apply_debug_physics2d_toggle,

@@ -396,16 +396,27 @@ function buildForgeApi(scriptEntityId: string) {
         const tilemap = tilemapStates[tilemapId];
         const tileW = tilemap?.tileSize[0] ?? 32;
         const tileH = tilemap?.tileSize[1] ?? 32;
-        const tileX = Math.floor(worldX / tileW);
-        const tileY = Math.floor(-worldY / tileH);
+        const mapW = tilemap?.mapSize[0] ?? 0;
+        const mapH = tilemap?.mapSize[1] ?? 0;
+        // Center-origin tilemaps offset by half the map size
+        const isCenter = tilemap?.origin === 'Center';
+        const offsetX = isCenter ? (mapW * tileW) / 2 : 0;
+        const offsetY = isCenter ? (mapH * tileH) / 2 : 0;
+        const tileX = Math.floor((worldX + offsetX) / tileW);
+        const tileY = Math.floor((-worldY + offsetY) / tileH);
         return [tileX, tileY];
       },
       tileToWorld: (tilemapId: string, tileX: number, tileY: number): [number, number] => {
         const tilemap = tilemapStates[tilemapId];
         const tileW = tilemap?.tileSize[0] ?? 32;
         const tileH = tilemap?.tileSize[1] ?? 32;
-        const worldX = tileX * tileW;
-        const worldY = -tileY * tileH;
+        const mapW = tilemap?.mapSize[0] ?? 0;
+        const mapH = tilemap?.mapSize[1] ?? 0;
+        const isCenter = tilemap?.origin === 'Center';
+        const offsetX = isCenter ? (mapW * tileW) / 2 : 0;
+        const offsetY = isCenter ? (mapH * tileH) / 2 : 0;
+        const worldX = tileX * tileW - offsetX;
+        const worldY = -(tileY * tileH - offsetY);
         return [worldX, worldY];
       },
       getMapSize: (tilemapId: string): [number, number] => {
@@ -733,9 +744,11 @@ function buildForgeApi(scriptEntityId: string) {
         if (!skeleton?.bones) return null;
         return skeleton.bones.map(b => ({
           name: b.name,
+          parentBone: b.parentBone,
           x: b.localPosition[0],
           y: b.localPosition[1],
           rotation: b.localRotation,
+          scale: b.localScale,
           length: b.length,
         }));
       },
@@ -879,7 +892,10 @@ self.onmessage = (e: MessageEvent) => {
           }
         }
         // Use engine-provided velocities if available, otherwise use estimated
-        physics2dVelocities = msg.physics2dVelocities || newVelocities;
+        // Check for undefined specifically since an empty {} is truthy but contains no data
+        physics2dVelocities = msg.physics2dVelocities !== undefined && Object.keys(msg.physics2dVelocities).length > 0
+          ? msg.physics2dVelocities
+          : newVelocities;
       }
       prevEntityStates = { ...newEntities };
 
@@ -890,7 +906,9 @@ self.onmessage = (e: MessageEvent) => {
       if (msg.skeletonStates) skeletonStates = msg.skeletonStates;
 
       // Sync audio playing state from main thread (authoritative source)
+      // Clear stale entries first so destroyed instances don't persist as "playing"
       if (msg.audioPlayingStates) {
+        audioPlayingState.clear();
         for (const [eid, playing] of Object.entries(msg.audioPlayingStates)) {
           audioPlayingState.set(eid, playing as boolean);
         }

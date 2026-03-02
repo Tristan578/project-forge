@@ -262,7 +262,8 @@ function emitFunctionCall(
 
 function emitTextureSample(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
-  const uv = inputs.uv || 'in.uv';
+  // Use mesh UVs when the UV input is unconnected (synthetic default is vec2<f32>(0.0, 0.0))
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
   // Sample from the material's base color texture using Bevy's PBR bindings
   ctx.statements.push(`let ${varName} = textureSample(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, ${uv});`);
   ctx.varMap.set(`${node.id}:color`, varName);
@@ -279,7 +280,7 @@ function emitVoronoiTexture(node: ShaderNode, inputs: Record<string, string>, ct
   const distVar = `var_${ctx.varCounter++}`;
   const colorVar = `var_${ctx.varCounter++}`;
   const cellVar = `vor_cell_${ctx.varCounter}`;
-  const uv = inputs.uv || 'in.uv';
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
   const scale = inputs.scale || '5.0';
 
   // Voronoi cellular noise: find nearest cell center using hash-based random offsets
@@ -292,8 +293,8 @@ function emitVoronoiTexture(node: ShaderNode, inputs: Record<string, string>, ct
       let vor_fp = fract(vor_p);
       var min_dist = 1.0;
       var ${cellVar} = vec2<f32>(0.0);
-      for (var j = -1; j <= 1; j++) {
-        for (var i = -1; i <= 1; i++) {
+      for (var j: i32 = -1; j <= 1; j = j + 1) {
+        for (var i: i32 = -1; i <= 1; i = i + 1) {
           let neighbor = vec2<f32>(f32(i), f32(j));
           let cell_id = vor_ip + neighbor;
           let cell_hash = fract(sin(dot(cell_id, vec2<f32>(127.1, 311.7))) * 43758.5453);
@@ -377,12 +378,13 @@ function emitFresnel(node: ShaderNode, inputs: Record<string, string>, ctx: Comp
 
 function emitNormalMap(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
-  const uv = inputs.uv || 'in.uv';
+  // Use mesh UVs when the UV input is unconnected (synthetic default is vec2<f32>(0.0, 0.0))
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
   const strength = inputs.strength || '1.0';
 
   // Sample normal map texture and transform from tangent space to world space
   ctx.statements.push(`
-    let ${varName}_raw = textureSample(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, ${uv}).xyz;
+    let ${varName}_raw = textureSample(pbr_bindings::normal_map_texture, pbr_bindings::normal_map_sampler, ${uv}).xyz;
     let ${varName}_tangent = ${varName}_raw * 2.0 - 1.0;
     let ${varName}_scaled = vec3<f32>(${varName}_tangent.xy * ${strength}, ${varName}_tangent.z);
     let ${varName} = normalize(

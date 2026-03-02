@@ -6,6 +6,7 @@ import type { EditorState } from '@/stores/editorStore';
 
 export interface ToolCallContext {
   store: EditorState;
+  dispatchCommand: (command: string, payload: unknown) => void;
 }
 
 export type ToolHandler = (

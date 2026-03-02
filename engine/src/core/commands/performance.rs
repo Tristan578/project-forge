@@ -2,6 +2,7 @@
 
 use serde::Deserialize;
 use serde_json::Value;
+#[allow(unused_imports)]
 use crate::core::pending::{
     SetLodRequest, GenerateLodsRequest, SetPerformanceBudgetRequest,
     GetPerformanceStatsRequest, OptimizeSceneRequest, SetLodDistancesRequest,

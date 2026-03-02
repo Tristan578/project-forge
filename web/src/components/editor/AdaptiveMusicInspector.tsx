@@ -66,24 +66,37 @@ export default function AdaptiveMusicInspector() {
       alert('Please enter a snapshot name');
       return;
     }
-    const newSnapshot: AudioSnapshot = { name: snapshotName.trim(), timestamp: Date.now(), buses: [] };
+    // Capture current bus state from the editor store
+    const currentBuses = useEditorStore.getState().audioBuses.map(b => ({
+      name: b.name,
+      volume: b.volume,
+      muted: b.muted,
+    }));
+    const newSnapshot: AudioSnapshot = { name: snapshotName.trim(), timestamp: Date.now(), buses: currentBuses };
     const updated = [...snapshots, newSnapshot];
     setSnapshots(updated);
     try { localStorage.setItem('audioSnapshots', JSON.stringify(updated)); } catch { /* ignore */ }
     setSnapshotName('');
   }, [snapshotName, snapshots]);
 
-  const handleApplySnapshot = useCallback((_name: string) => {
-    // Snapshot application will be wired when engine-side adaptive music is implemented
-  }, []);
+  const handleApplySnapshot = useCallback((name: string) => {
+    const snapshot = snapshots.find(s => s.name === name);
+    if (!snapshot) return;
+    // Restore bus volumes/mute state from saved snapshot
+    for (const bus of snapshot.buses) {
+      useEditorStore.getState().updateAudioBus(bus.name, { volume: bus.volume, muted: bus.muted });
+    }
+  }, [snapshots]);
 
   const handleStemChange = useCallback((stemName: keyof StemConfig, value: string | number) => {
     setStems(prev => ({ ...prev, [stemName]: value }));
   }, []);
 
   const handleConfigureStems = useCallback(() => {
-    // Stem configuration will be dispatched when engine-side adaptive music is implemented
-    void stems;
+    // Store stem config in localStorage for persistence
+    try {
+      localStorage.setItem('adaptiveMusicStems', JSON.stringify(stems));
+    } catch { /* ignore */ }
   }, [stems]);
 
   return (

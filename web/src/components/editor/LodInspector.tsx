@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 
 interface LodData {
   lodDistances: [number, number, number];
@@ -12,9 +12,6 @@ export function LodInspector() {
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const sceneGraph = useEditorStore((state) => state.sceneGraph);
 
-  // Local state — LOD configuration is stored locally until engine-side mesh
-  // decimation is implemented. Distance/ratio values are preserved for when
-  // the engine integration is added.
   const [lodData, setLodData] = useState<LodData>({
     lodDistances: [20, 50, 100],
     autoGenerate: false,
@@ -25,6 +22,11 @@ export function LodInspector() {
 
   const primaryId = Array.from(selectedIds)[0];
   const entity = primaryId ? sceneGraph.nodes[primaryId] : null;
+
+  const dispatchToEngine = useCallback((command: string, payload: unknown) => {
+    const dispatch = getCommandDispatcher();
+    if (dispatch) dispatch(command, payload);
+  }, []);
 
   const handleDistanceChange = useCallback(
     (index: number, value: number) => {
@@ -47,11 +49,28 @@ export function LodInspector() {
   const handleAutoGenerateToggle = useCallback(() => {
     const newValue = !lodData.autoGenerate;
     setLodData((prev) => ({ ...prev, autoGenerate: newValue }));
-  }, [lodData.autoGenerate]);
+    if (primaryId) {
+      dispatchToEngine('set_lod', {
+        entityId: primaryId,
+        lodDistances: lodData.lodDistances,
+        autoGenerate: newValue,
+        lodRatios: lodData.lodRatios,
+      });
+    }
+  }, [lodData, primaryId, dispatchToEngine]);
 
   const handleGenerateLods = useCallback(() => {
-    setGenerateStatus('LOD mesh generation requires engine-side mesh decimation which is not yet implemented. Distance and ratio settings are saved for when this feature is available.');
-  }, []);
+    if (primaryId) {
+      dispatchToEngine('set_lod', {
+        entityId: primaryId,
+        lodDistances: lodData.lodDistances,
+        autoGenerate: lodData.autoGenerate,
+        lodRatios: lodData.lodRatios,
+      });
+      dispatchToEngine('generate_lods', { entityId: primaryId });
+      setGenerateStatus('LOD configuration applied. Distance-based LOD switching is now active.');
+    }
+  }, [primaryId, lodData, dispatchToEngine]);
 
   if (!entity) {
     return null;

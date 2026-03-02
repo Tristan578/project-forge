@@ -81,6 +81,12 @@ pub struct CreateJoint2dRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct UpdateJoint2dRequest {
+    pub entity_id: String,
+    pub joint_data: PhysicsJoint2d,
+}
+
+#[derive(Debug, Clone)]
 pub struct RemoveJoint2dRequest {
     pub entity_id: String,
 }
@@ -166,6 +172,10 @@ impl PendingCommands {
         self.create_joint2d_requests.push(request);
     }
 
+    pub fn queue_update_joint2d(&mut self, request: UpdateJoint2dRequest) {
+        self.update_joint2d_requests.push(request);
+    }
+
     pub fn queue_remove_joint2d(&mut self, request: RemoveJoint2dRequest) {
         self.remove_joint2d_requests.push(request);
     }
@@ -235,6 +245,10 @@ pub fn queue_physics2d_toggle_from_bridge(toggle: Physics2dToggle) -> bool {
 
 pub fn queue_create_joint2d_from_bridge(request: CreateJoint2dRequest) -> bool {
     super::with_pending(|pc| pc.queue_create_joint2d(request)).is_some()
+}
+
+pub fn queue_update_joint2d_from_bridge(request: UpdateJoint2dRequest) -> bool {
+    super::with_pending(|pc| pc.queue_update_joint2d(request)).is_some()
 }
 
 pub fn queue_remove_joint2d_from_bridge(request: RemoveJoint2dRequest) -> bool {

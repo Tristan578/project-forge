@@ -127,6 +127,11 @@ export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
   setEditModeDispatcher(dispatcher);
 }
 
+/** Get the raw command dispatcher for direct engine communication. */
+export function getCommandDispatcher(): ((command: string, payload: unknown) => void) | null {
+  return _dispatchCommand;
+}
+
 // Play tick callback for script runner
 type PlayTickCallback = (data: unknown) => void;
 let _playTickCallback: PlayTickCallback | null = null;

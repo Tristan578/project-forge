@@ -194,7 +194,81 @@ fn perform_extrude(mesh: &mut Mesh, indices: &[u32], distance: f32, direction: [
     }
 }
 
-fn perform_subdivide(mesh: &mut Mesh, _level: u32) {
+fn perform_subdivide(mesh: &mut Mesh, level: u32) {
+    use std::collections::HashMap;
+
+    for _ in 0..level {
+        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(pos)) => pos.clone(),
+            _ => return,
+        };
+
+        let uvs = match mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
+            Some(VertexAttributeValues::Float32x2(uv)) => Some(uv.clone()),
+            _ => None,
+        };
+
+        let indices: Vec<usize> = match mesh.indices() {
+            Some(Indices::U32(idx)) => idx.iter().map(|&i| i as usize).collect(),
+            Some(Indices::U16(idx)) => idx.iter().map(|&i| i as usize).collect(),
+            None => return,
+        };
+
+        let mut new_positions = positions.clone();
+        let mut new_uvs = uvs.clone();
+        let mut new_indices: Vec<u32> = Vec::new();
+        // Map from sorted edge (min_idx, max_idx) -> midpoint vertex index
+        let mut edge_midpoints: HashMap<(usize, usize), usize> = HashMap::new();
+
+        let mut get_or_create_midpoint =
+            |a: usize, b: usize, positions: &mut Vec<[f32; 3]>, uvs: &mut Option<Vec<[f32; 2]>>| -> usize {
+                let key = if a < b { (a, b) } else { (b, a) };
+                if let Some(&idx) = edge_midpoints.get(&key) {
+                    return idx;
+                }
+                let pa = positions[a];
+                let pb = positions[b];
+                let mid = [
+                    (pa[0] + pb[0]) * 0.5,
+                    (pa[1] + pb[1]) * 0.5,
+                    (pa[2] + pb[2]) * 0.5,
+                ];
+                let idx = positions.len();
+                positions.push(mid);
+                if let Some(ref mut uv_vec) = uvs {
+                    let ua = uv_vec[a];
+                    let ub = uv_vec[b];
+                    uv_vec.push([(ua[0] + ub[0]) * 0.5, (ua[1] + ub[1]) * 0.5]);
+                }
+                edge_midpoints.insert(key, idx);
+                idx
+            };
+
+        // Split each triangle into 4 sub-triangles
+        for face in indices.chunks(3) {
+            if face.len() != 3 {
+                continue;
+            }
+            let (i0, i1, i2) = (face[0], face[1], face[2]);
+
+            let m01 = get_or_create_midpoint(i0, i1, &mut new_positions, &mut new_uvs);
+            let m12 = get_or_create_midpoint(i1, i2, &mut new_positions, &mut new_uvs);
+            let m20 = get_or_create_midpoint(i2, i0, &mut new_positions, &mut new_uvs);
+
+            // 4 sub-triangles
+            new_indices.extend_from_slice(&[i0 as u32, m01 as u32, m20 as u32]);
+            new_indices.extend_from_slice(&[i1 as u32, m12 as u32, m01 as u32]);
+            new_indices.extend_from_slice(&[i2 as u32, m20 as u32, m12 as u32]);
+            new_indices.extend_from_slice(&[m01 as u32, m12 as u32, m20 as u32]);
+        }
+
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, new_positions);
+        if let Some(uv_vec) = new_uvs {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv_vec);
+        }
+        mesh.insert_indices(Indices::U32(new_indices));
+    }
+
     recalculate_smooth_normals(mesh);
 }
 
