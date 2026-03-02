@@ -76,7 +76,7 @@ default-features = false
 features = ["dim3", "async-collider", "debug-render-3d"]
 
 [dependencies.bevy_rapier2d]
-version = "0.30"
+version = "0.33"
 default-features = false
 features = ["dim2", "debug-render-2d"]
 
