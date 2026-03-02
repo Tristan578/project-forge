@@ -196,12 +196,6 @@ test.describe('Demo Regression Walkthrough @ui', () => {
   });
 
   test('store exposes selection slice with initial empty state', async ({ page }) => {
-    // Check if editor store is available (may not be in CI if module loading order differs)
-    const storeAvailable = await page.evaluate(() =>
-      !!(window as unknown as Record<string, unknown>).__EDITOR_STORE
-    );
-    test.skip(!storeAvailable, 'Editor store not exposed on window in this environment');
-
     const selectionState = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
@@ -217,11 +211,6 @@ test.describe('Demo Regression Walkthrough @ui', () => {
   });
 
   test('store-driven entity selection shows entity in scene hierarchy', async ({ page }) => {
-    // Check if editor store is available (may not be in CI if module loading order differs)
-    const storeAvailable = await page.evaluate(() =>
-      !!(window as unknown as Record<string, unknown>).__EDITOR_STORE
-    );
-    test.skip(!storeAvailable, 'Editor store not exposed on window in this environment');
     // Inject a mock entity into the scene graph and select it
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

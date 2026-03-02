@@ -291,10 +291,18 @@ export function EditorLayout() {
     return () => document.removeEventListener('keydown', handleGlobalKeyDown);
   }, [handleGlobalKeyDown]);
 
-  // Signal that React has hydrated and event handlers are attached (used by E2E tests)
+  // Signal that React has hydrated and event handlers are attached (used by E2E tests).
+  // Also expose the Zustand store on window for E2E tests to read/manipulate state.
+  // This MUST happen here (not as a module-level side effect in editorStore.ts) because
+  // Next.js evaluates modules during SSR where `typeof window === 'undefined'`, and
+  // client-side module evaluation timing is unreliable relative to React hydration.
   useEffect(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).__REACT_HYDRATED = true;
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__EDITOR_STORE = useEditorStore;
+    }
   }, []);
 
   // --- Compact layout (mobile/tablet) --- unchanged
