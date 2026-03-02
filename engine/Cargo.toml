@@ -81,7 +81,7 @@ default-features = false
 features = ["dim2", "debug-render-2d"]
 
 [dependencies.bevy_hanabi]
-version = "0.16"
+version = "0.18"
 optional = true
 default-features = false
 features = ["3d"]
