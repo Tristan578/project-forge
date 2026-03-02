@@ -115,13 +115,22 @@ export class SpriteClient {
 
   async generateSpriteSheet(params: SpriteSheetParams): Promise<GenerationResult> {
     const frameW = parseInt(params.size.split('x')[0], 10);
-    const sheetWidth = frameW * params.frameCount;
+    const maxDim = 1024;
+    const maxFrames = Math.floor(maxDim / frameW);
+    const effectiveFrameCount = Math.min(params.frameCount, maxFrames);
+    if (effectiveFrameCount < params.frameCount) {
+      console.warn(
+        `Sprite sheet frame count reduced from ${params.frameCount} to ${effectiveFrameCount} ` +
+        `(SDXL max dimension: ${maxDim}px, frame width: ${frameW}px)`
+      );
+    }
+    const sheetWidth = frameW * effectiveFrameCount;
     const sheetHeight = frameW;
 
     const enhancedPrompt = this.enhanceSpriteSheetPrompt(
       params.prompt,
       params.style,
-      params.frameCount,
+      effectiveFrameCount,
     );
 
     const response = await fetch(this.baseUrlReplicate, {
@@ -134,8 +143,8 @@ export class SpriteClient {
         version: 'stability-ai/sdxl:latest',
         input: {
           prompt: enhancedPrompt,
-          width: Math.min(sheetWidth, 1024),
-          height: Math.min(sheetHeight, 1024),
+          width: sheetWidth,
+          height: Math.min(sheetHeight, maxDim),
           num_inference_steps: 40,
           guidance_scale: 8,
         },
