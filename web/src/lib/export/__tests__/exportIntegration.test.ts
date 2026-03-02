@@ -9,7 +9,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import { extractAssets } from '../assetExtractor';
 import { bundleScripts } from '../scriptBundler';
 import { generateGameHTML, type EmbeddedWasmData } from '../gameTemplate';
@@ -17,9 +17,11 @@ import type { ScriptData } from '@/stores/editorStore';
 
 // FNV-1a hash — deterministic, sufficient for asset dedup testing.
 function fnv1aDigest(data: BufferSource): ArrayBuffer {
-  const bytes = new Uint8Array(
-    data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer
-  );
+  // Normalise ArrayBufferView correctly, honouring byteOffset and byteLength.
+  const bytes =
+    data instanceof ArrayBuffer
+      ? new Uint8Array(data)
+      : new Uint8Array((data as ArrayBufferView).buffer, (data as ArrayBufferView).byteOffset, (data as ArrayBufferView).byteLength);
   let h = 0x811c9dc5;
   for (let i = 0; i < bytes.length; i++) {
     h ^= bytes[i];
@@ -36,6 +38,8 @@ function fnv1aDigest(data: BufferSource): ArrayBuffer {
 // Polyfill Blob.arrayBuffer and crypto.subtle.digest for jsdom/CI compat.
 // jsdom's Blob.arrayBuffer may return a type SubtleCrypto.digest rejects.
 // vi.stubGlobal bypasses property descriptor restrictions.
+const originalBlobArrayBuffer = Blob.prototype.arrayBuffer;
+
 beforeAll(() => {
   Blob.prototype.arrayBuffer = function () {
     return new Promise((resolve, reject) => {
@@ -51,6 +55,11 @@ beforeAll(() => {
     subtle: { digest: async (_algo: any, data: any) => fnv1aDigest(data) },
     getRandomValues: (arr: Uint8Array) => arr,
   });
+});
+
+afterAll(() => {
+  Blob.prototype.arrayBuffer = originalBlobArrayBuffer;
+  vi.unstubAllGlobals();
 });
 
 // ---------- helpers ----------
@@ -373,13 +382,15 @@ describe('Export Pipeline Integration', () => {
     it('should escape special characters in title', () => {
       const html = generateGameHTML(
         makeBaseOptions({
-          title: 'Game <with> "quotes" & more',
+          title: "Game <with> \"quotes\" & hero's more",
         })
       );
 
       expect(html).toContain('&lt;with&gt;');
       expect(html).toContain('&quot;quotes&quot;');
-      expect(html).toContain('&amp; more');
+      expect(html).toContain('&amp;');
+      // Apostrophe must also be escaped to keep the HTML attribute value safe
+      expect(html).toContain('&#39;');
     });
   });
 
@@ -477,7 +488,7 @@ describe('Export Pipeline Integration', () => {
       ).toBe('test');
     });
 
-    it('should handle circular-safe scene (no actual circular refs)', async () => {
+    it('should handle cross-referenced entity data without data-URL extraction', async () => {
       const scene = {
         a: { ref: 'b' },
         b: { ref: 'a' },

@@ -196,6 +196,11 @@ test.describe('Demo Regression Walkthrough @ui', () => {
   });
 
   test('store exposes selection slice with initial empty state', async ({ page }) => {
+    // Wait until the store is mounted on window before reading state
+    await page.waitForFunction(
+      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
+      { timeout: 5000 }
+    );
     const selectionState = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
@@ -212,7 +217,12 @@ test.describe('Demo Regression Walkthrough @ui', () => {
     expect(selectionState!.selectedCount).toBe(0);
   });
 
-  test('store-driven entity selection updates inspector heading', async ({ page }) => {
+  test('store-driven entity selection shows entity in scene hierarchy', async ({ page }) => {
+    // Wait until the store is mounted before injecting state
+    await page.waitForFunction(
+      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
+      { timeout: 5000 }
+    );
     // Inject a mock entity into the scene graph and select it
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -237,7 +247,6 @@ test.describe('Demo Regression Walkthrough @ui', () => {
         primaryId: entityId,
       });
     });
-    await page.waitForTimeout(300);
 
     // Hierarchy should show the entity
     const hierarchyItem = page.getByText('Test Cube');
@@ -251,19 +260,18 @@ test.describe('Demo Regression Walkthrough @ui', () => {
     const settingsHeading = page.getByText(/Settings/i).first();
     await expect(settingsHeading).toBeVisible({ timeout: 5000 });
 
-    // Close with Escape
+    // Close with Escape and assert the dialog is gone
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 3000 });
   });
 
   test('sidebar contains tool groups', async ({ page }) => {
     // The sidebar should have tool buttons (transform tools, entity add, etc.)
     const sidebar = page.locator('[data-testid="sidebar"], aside, [class*="sidebar"]').first();
-    if (await sidebar.isVisible({ timeout: 3000 }).catch(() => false)) {
-      const buttons = sidebar.locator('button');
-      const count = await buttons.count();
-      expect(count).toBeGreaterThan(0);
-    }
+    await expect(sidebar).toBeVisible({ timeout: 5000 });
+    const buttons = sidebar.locator('button');
+    const count = await buttons.count();
+    expect(count).toBeGreaterThan(0);
   });
 
   test('canvas element has correct dimensions', async ({ page }) => {

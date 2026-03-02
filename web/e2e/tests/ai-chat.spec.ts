@@ -94,26 +94,28 @@ test.describe('AI Chat @ui', () => {
 
     // Open chat, type something, close
     await editor.pressShortcut('Control+k');
-    const chatInput = page.locator('.fixed.z-50 textarea').first();
+    const chatInput = page.getByRole('textbox', { name: 'Chat message' });
     await expect(chatInput).toBeVisible({ timeout: 5000 });
     await chatInput.fill('Test message one');
     await page.keyboard.press('Escape');
 
-    // Re-open and check input is empty or has previous text (depending on implementation)
+    // Re-open and check input is cleared
     await editor.pressShortcut('Control+k');
-    const chatInput2 = page.locator('.fixed.z-50 textarea').first();
+    const chatInput2 = page.getByRole('textbox', { name: 'Chat message' });
     await expect(chatInput2).toBeVisible({ timeout: 5000 });
     const value = await chatInput2.inputValue();
-    // Input should either be empty or preserved — just verify it's accessible
-    expect(typeof value).toBe('string');
+    expect(value).toBe('');
   });
 
   test('chat overlay covers correct area of screen', async ({ page, editor }) => {
     await editor.loadPage();
 
     await editor.pressShortcut('Control+k');
-    const overlay = page.locator('.fixed.z-50').first();
-    await expect(overlay).toBeVisible({ timeout: 5000 });
+    // Anchor to the chat panel via the "AI Chat" header it always contains
+    const chatHeader = page.locator('span').filter({ hasText: /AI Chat/i }).first();
+    await expect(chatHeader).toBeVisible({ timeout: 5000 });
+    // Walk up to the outermost chat panel container (rounded-lg card)
+    const overlay = page.locator('span').filter({ hasText: /AI Chat/i }).locator('xpath=ancestor::div[@class and contains(@class,"rounded-lg")]').first();
 
     const box = await overlay.boundingBox();
     expect(box).not.toBeNull();

@@ -223,35 +223,25 @@ test.describe('Responsive Layout @ui', () => {
     await page.setViewportSize({ width: 768, height: 600 });
     await editor.loadPage();
 
-    // MobileToolbar is fixed at bottom with h-12
+    // MobileToolbar is fixed at bottom with h-12 — always present in compact mode
     const mobileToolbar = page.locator('.fixed.bottom-0').first();
-    const toolbarVisible = await mobileToolbar.isVisible().catch(() => false);
-
-    if (toolbarVisible) {
-      const box = await mobileToolbar.boundingBox();
-      expect(box).not.toBeNull();
-      // Should span the full width
-      expect(box!.width).toBeGreaterThan(700);
-      // Should be at the bottom of the viewport
-      expect(box!.y + box!.height).toBeGreaterThanOrEqual(590);
-    }
+    await expect(mobileToolbar).toBeVisible({ timeout: 5000 });
+    const box = await mobileToolbar.boundingBox();
+    expect(box).not.toBeNull();
+    // Should span the full width
+    expect(box!.width).toBeGreaterThan(700);
+    // Should be at the bottom of the viewport
+    expect(box!.y + box!.height).toBeGreaterThanOrEqual(590);
   });
 
   test('gizmo tool buttons exist in mobile toolbar', async ({ page, editor }) => {
     await page.setViewportSize({ width: 768, height: 600 });
     await editor.loadPage();
 
-    // Look for gizmo mode buttons (Move, Rotate, Scale)
-    const moveBtn = page.locator('button[title="Move"]');
-    const rotateBtn = page.locator('button[title="Rotate"]');
-    const scaleBtn = page.locator('button[title="Scale"]');
-
-    const moveVisible = await moveBtn.isVisible().catch(() => false);
-    if (moveVisible) {
-      await expect(moveBtn).toBeVisible();
-      await expect(rotateBtn).toBeVisible();
-      await expect(scaleBtn).toBeVisible();
-    }
+    // Gizmo mode buttons (Move, Rotate, Scale) are always present in compact mode
+    await expect(page.locator('button[title="Move"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('button[title="Rotate"]')).toBeVisible();
+    await expect(page.locator('button[title="Scale"]')).toBeVisible();
   });
 
   test('full mode shows all panels at wide viewport', async ({ page, editor }) => {
@@ -296,6 +286,12 @@ test.describe('Responsive Layout @ui', () => {
   test('touch config exists in store with default values', async ({ page, editor }) => {
     await editor.loadPage();
 
+    // Wait until the store is mounted before reading state
+    await page.waitForFunction(
+      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
+      { timeout: 5000 }
+    );
+
     const touchConfig = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
@@ -304,32 +300,28 @@ test.describe('Responsive Layout @ui', () => {
       return state.mobileTouchConfig ?? null;
     });
 
-    // Mobile touch config should exist with default values
-    if (touchConfig) {
-      expect(typeof touchConfig.enabled).toBe('boolean');
-    }
+    // Mobile touch config must exist with a boolean enabled flag
+    expect(touchConfig).not.toBeNull();
+    expect(typeof touchConfig!.enabled).toBe('boolean');
   });
 
   test('scene hierarchy and inspector toggle buttons work in mobile toolbar', async ({ page, editor }) => {
     await page.setViewportSize({ width: 768, height: 600 });
     await editor.loadPage();
 
-    // Look for panel toggle buttons
+    // Panel toggle buttons are always present in compact mode (< 1024px)
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
     const inspectorToggle = page.locator('button[title="Inspector"]');
+    await expect(hierarchyToggle).toBeVisible({ timeout: 5000 });
+    await expect(inspectorToggle).toBeVisible();
 
-    const hasHierarchyToggle = await hierarchyToggle.isVisible().catch(() => false);
-    if (hasHierarchyToggle) {
-      await expect(hierarchyToggle).toBeVisible();
-      await expect(inspectorToggle).toBeVisible();
+    // Click hierarchy toggle — the scene hierarchy drawer should open
+    await hierarchyToggle.click();
+    // The drawer has aria-label="Scene hierarchy panel" and is in the DOM; confirm it gains focus / translate-x-0
+    await expect(page.locator('[aria-label="Scene hierarchy panel"]')).toBeInViewport({ timeout: 3000 });
 
-      // Click hierarchy toggle — should show some panel content
-      await hierarchyToggle.click();
-      await page.waitForTimeout(300);
-
-      // Click again to close
-      await hierarchyToggle.click();
-      await page.waitForTimeout(300);
-    }
+    // Click again to close — drawer should slide off-screen
+    await hierarchyToggle.click();
+    await expect(page.locator('[aria-label="Scene hierarchy panel"]')).not.toBeInViewport({ timeout: 3000 });
   });
 });

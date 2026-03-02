@@ -260,19 +260,14 @@ test.describe('Settings Panel @ui', () => {
     const dialog = page.locator('[role="dialog"]');
     const billingTab = dialog.getByRole('tab', { name: /billing/i });
 
-    if (!(await billingTab.isVisible().catch(() => false))) return;
-
+    await expect(billingTab).toBeVisible({ timeout: 5000 });
     await billingTab.click();
-    await page.waitForTimeout(500);
 
-    // Should show "Current Plan" heading (or loading state)
-    const planHeading = dialog.getByText('Current Plan', { exact: false });
-    const loadingText = dialog.getByText('Loading billing', { exact: false });
-
-    // Either the plan heading or loading state should be visible
-    const planVisible = await planHeading.first().isVisible().catch(() => false);
-    const loadingVisible = await loadingText.first().isVisible().catch(() => false);
-    expect(planVisible || loadingVisible).toBe(true);
+    // "Current Plan" heading renders once the loading state resolves.
+    // The loading text "Loading billing information..." also satisfies the pattern.
+    await expect(
+      dialog.getByText(/Current Plan|Loading billing/i).first()
+    ).toBeVisible({ timeout: 5000 });
   });
 
   test('tokens tab shows content when active', async ({ page }) => {

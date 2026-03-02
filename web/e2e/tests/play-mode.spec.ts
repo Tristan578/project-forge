@@ -204,7 +204,6 @@ test.describe('Play Mode UI @ui', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
     });
-    await page.waitForTimeout(200);
 
     await expect(page.locator('button[aria-label="Play"]')).toBeDisabled();
     await expect(page.locator('button[aria-label="Pause"]')).toBeEnabled();
@@ -216,7 +215,6 @@ test.describe('Play Mode UI @ui', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'paused' });
     });
-    await page.waitForTimeout(200);
 
     const resumeBtn = page.locator('button[aria-label="Resume"]');
     await expect(resumeBtn).toBeVisible({ timeout: 3000 });
