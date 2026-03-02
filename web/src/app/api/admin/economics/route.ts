@@ -1,15 +1,15 @@
 import { NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
-import { assertAdmin } from '@/lib/auth/api-auth';
 
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const authResult = await authenticateRequest();
+  if (!authResult.ok) return authResult.response;
+  const { clerkId } = authResult.ctx;
 
-  const adminError = assertAdmin(userId);
+  const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
   const db = getDb();

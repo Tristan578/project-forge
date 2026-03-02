@@ -47,6 +47,15 @@ describe('physicsSlice', () => {
       expect(store.getState().physicsEnabled).toBe(true);
       expect(mockDispatch).not.toHaveBeenCalled();
     });
+
+    it('should clear primaryPhysics when passed null', () => {
+      const data: PhysicsData = { bodyType: 'dynamic' } as unknown as PhysicsData;
+      store.getState().setPrimaryPhysics(data, true);
+      store.getState().setPrimaryPhysics(null, false);
+
+      expect(store.getState().primaryPhysics).toBeNull();
+      expect(store.getState().physicsEnabled).toBe(false);
+    });
   });
 
   describe('updatePhysics', () => {
@@ -98,6 +107,14 @@ describe('physicsSlice', () => {
       expect(store.getState().primaryJoint).toEqual(data);
       expect(mockDispatch).not.toHaveBeenCalled();
     });
+
+    it('should clear primaryJoint when passed null', () => {
+      const data: JointData = { jointType: 'fixed' } as JointData;
+      store.getState().setPrimaryJoint(data);
+      store.getState().setPrimaryJoint(null);
+
+      expect(store.getState().primaryJoint).toBeNull();
+    });
   });
 
   describe('createJoint', () => {
@@ -146,6 +163,26 @@ describe('physicsSlice', () => {
         enabled: true,
         ...data,
       });
+    });
+
+    it('should store physics data for multiple entities independently', () => {
+      const data1: Physics2dData = { bodyType: 'dynamic' } as Physics2dData;
+      const data2: Physics2dData = { bodyType: 'static' } as Physics2dData;
+      store.getState().setPhysics2d('entity1', data1, true);
+      store.getState().setPhysics2d('entity2', data2, false);
+
+      expect(store.getState().physics2d.entity1).toEqual(data1);
+      expect(store.getState().physics2d.entity2).toEqual(data2);
+      expect(store.getState().physics2dEnabled.entity1).toBe(true);
+      expect(store.getState().physics2dEnabled.entity2).toBe(false);
+    });
+
+    it('should set enabled to false when specified', () => {
+      const data: Physics2dData = { bodyType: 'kinematic' } as Physics2dData;
+      store.getState().setPhysics2d('entity1', data, false);
+
+      expect(store.getState().physics2dEnabled.entity1).toBe(false);
+      expect(mockDispatch).toHaveBeenCalledWith('set_physics_2d', expect.objectContaining({ enabled: false }));
     });
   });
 
@@ -200,6 +237,16 @@ describe('physicsSlice', () => {
         ...data,
       });
     });
+
+    it('should store joints for multiple entities independently', () => {
+      const data1: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
+      const data2: Joint2dData = { jointType: 'prismatic' } as unknown as Joint2dData;
+      store.getState().setJoint2d('entity1', data1);
+      store.getState().setJoint2d('entity2', data2);
+
+      expect(store.getState().joints2d.entity1).toEqual(data1);
+      expect(store.getState().joints2d.entity2).toEqual(data2);
+    });
   });
 
   describe('removeJoint2d', () => {
@@ -213,6 +260,17 @@ describe('physicsSlice', () => {
       expect(mockDispatch).toHaveBeenCalledWith('remove_joint_2d', {
         entityId: 'entity1',
       });
+    });
+
+    it('should not affect other joints when removing one', () => {
+      const data1: Joint2dData = { jointType: 'revolute' } as unknown as Joint2dData;
+      const data2: Joint2dData = { jointType: 'rope' } as unknown as Joint2dData;
+      store.getState().setJoint2d('entity1', data1);
+      store.getState().setJoint2d('entity2', data2);
+
+      store.getState().removeJoint2d('entity1');
+
+      expect(store.getState().joints2d.entity2).toEqual(data2);
     });
   });
 

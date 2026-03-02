@@ -169,6 +169,16 @@ describe('animationSlice', () => {
       });
     });
 
+    it('createAnimationClip should dispatch with undefined optional params', () => {
+      store.getState().createAnimationClip('entity1');
+
+      expect(mockDispatch).toHaveBeenCalledWith('create_animation_clip', {
+        entityId: 'entity1',
+        duration: undefined,
+        playMode: undefined,
+      });
+    });
+
     it('addClipKeyframe should dispatch', () => {
       store.getState().addClipKeyframe('entity1', 'position.x', 1.0, 5.0, 'linear');
 
@@ -247,7 +257,23 @@ describe('animationSlice', () => {
 
   describe('2D skeleton operations', () => {
     it('setSkeleton2d should update state and dispatch', () => {
-      const data = { bones: [{ name: 'root' }] } as unknown as SkeletonData2d;
+      const data: SkeletonData2d = {
+        bones: [
+          {
+            name: 'root',
+            parentBone: null,
+            localPosition: [0, 0],
+            localRotation: 0,
+            localScale: [1, 1],
+            length: 50,
+            color: [1, 1, 1, 1],
+          },
+        ],
+        slots: [],
+        skins: {},
+        activeSkin: 'default',
+        ikConstraints: [],
+      };
       store.getState().setSkeleton2d('entity1', data);
 
       expect(store.getState().skeletons2d.entity1).toEqual(data);
@@ -265,6 +291,15 @@ describe('animationSlice', () => {
 
       expect(store.getState().skeletons2d.entity1).toEqual(data1);
       expect(store.getState().skeletons2d.entity2).toEqual(data2);
+    });
+
+    it('setSkeleton2d should overwrite existing skeleton for same entity', () => {
+      const data1 = { bones: [{ name: 'root' }] } as unknown as SkeletonData2d;
+      const data2 = { bones: [{ name: 'root' }, { name: 'spine' }] } as unknown as SkeletonData2d;
+      store.getState().setSkeleton2d('entity1', data1);
+      store.getState().setSkeleton2d('entity1', data2);
+
+      expect(store.getState().skeletons2d.entity1).toEqual(data2);
     });
 
     it('removeSkeleton2d should remove from map and dispatch', () => {
@@ -312,6 +347,22 @@ describe('animationSlice', () => {
 
       expect(store.getState().skeletalAnimations2d.entity1).toEqual(anims1);
       expect(store.getState().skeletalAnimations2d.entity2).toEqual(anims2);
+    });
+
+    it('setSkeletalAnimations2d should overwrite existing animations for an entity', () => {
+      const anims1 = [{ name: 'walk' }] as unknown as SkeletalAnimation2d[];
+      const anims2 = [{ name: 'walk' }, { name: 'run' }] as unknown as SkeletalAnimation2d[];
+      store.getState().setSkeletalAnimations2d('entity1', anims1);
+      store.getState().setSkeletalAnimations2d('entity1', anims2);
+
+      expect(store.getState().skeletalAnimations2d.entity1).toEqual(anims2);
+      expect(store.getState().skeletalAnimations2d.entity1).toHaveLength(2);
+    });
+
+    it('setSkeletalAnimations2d should accept an empty array', () => {
+      store.getState().setSkeletalAnimations2d('entity1', []);
+
+      expect(store.getState().skeletalAnimations2d.entity1).toEqual([]);
     });
   });
 

@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
-import { publishedGames, users, projects, gameTags } from '@/lib/db/schema';
+import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 
 export async function POST(request: NextRequest) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const authResult = await authenticateRequest();
+  if (!authResult.ok) return authResult.response;
+  const { user, clerkId } = authResult.ctx;
 
   // Rate limit: 10 publish requests per minute per user
   const rl = rateLimit(`publish:${clerkId}`, 10, 60_000);
@@ -45,10 +46,6 @@ export async function POST(request: NextRequest) {
   }
 
   const db = getDb();
-
-  // Get user
-  const [user] = await db.select().from(users).where(eq(users.clerkId, clerkId)).limit(1);
-  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   // Check tier publish limits
   const tierLimits: Record<string, number> = { starter: 1, hobbyist: 3, creator: 10, pro: 100 };

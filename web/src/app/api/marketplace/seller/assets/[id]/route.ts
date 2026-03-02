@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
-import { users, marketplaceAssets } from '@/lib/db/schema';
+import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 export async function PATCH(
@@ -11,16 +11,11 @@ export async function PATCH(
   const { id: assetId } = await context.params;
 
   try {
-    const db = getDb();
-    const { userId: clerkId } = await auth();
-    if (!clerkId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const authResult = await authenticateRequest();
+    if (!authResult.ok) return authResult.response;
+    const { user } = authResult.ctx;
 
-    const [user] = await db.select().from(users).where(eq(users.clerkId, clerkId)).limit(1);
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
+    const db = getDb();
 
     // Check ownership
     const [asset] = await db

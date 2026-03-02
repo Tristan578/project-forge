@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
-import { users, assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema';
+import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
@@ -12,11 +12,11 @@ export async function POST(
   const { id: assetId } = await context.params;
 
   try {
+    const authResult = await authenticateRequest();
+    if (!authResult.ok) return authResult.response;
+    const { user, clerkId } = authResult.ctx;
+
     const db = getDb();
-    const { userId: clerkId } = await auth();
-    if (!clerkId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
     // Rate limit: 20 review submissions per minute per user
     const rl = rateLimit(`review:${clerkId}`, 20, 60_000);
@@ -32,12 +32,6 @@ export async function POST(
 
     if (!rating || rating < 1 || rating > 5) {
       return NextResponse.json({ error: 'Rating must be between 1 and 5' }, { status: 400 });
-    }
-
-    // Get user
-    const [user] = await db.select().from(users).where(eq(users.clerkId, clerkId)).limit(1);
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
     // Check if user purchased the asset

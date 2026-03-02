@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
@@ -12,21 +12,15 @@ export async function POST(
   const { id: assetId } = await context.params;
 
   try {
+    const authResult = await authenticateRequest();
+    if (!authResult.ok) return authResult.response;
+    const { user, clerkId } = authResult.ctx;
+
     const db = getDb();
-    const { userId: clerkId } = await auth();
-    if (!clerkId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
 
     // Rate limit: 10 purchase requests per minute per user
     const rl = rateLimit(`purchase:${clerkId}`, 10, 60_000);
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-    // Get user
-    const [user] = await db.select().from(users).where(eq(users.clerkId, clerkId)).limit(1);
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
 
     // Get asset
     const [asset] = await db

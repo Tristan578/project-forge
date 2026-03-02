@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
-import { feedback, users } from '@/lib/db/schema';
-import { eq } from 'drizzle-orm';
+import { feedback } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 const VALID_TYPES = ['bug', 'feature', 'general'] as const;
 
 export async function POST(req: NextRequest) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const authResult = await authenticateRequest();
+  if (!authResult.ok) return authResult.response;
+  const { user, clerkId } = authResult.ctx;
 
   // Rate limit: 10 submissions per minute per user
   const rl = rateLimit(`feedback:${clerkId}`, 10, 60_000);
@@ -52,17 +50,10 @@ export async function POST(req: NextRequest) {
   try {
     const db = getDb();
 
-    // Look up database user
-    const [user] = await db
-      .select()
-      .from(users)
-      .where(eq(users.clerkId, clerkId))
-      .limit(1);
-
     const [record] = await db
       .insert(feedback)
       .values({
-        userId: user?.id ?? null,
+        userId: user.id,
         type,
         description: description.trim(),
         metadata: metadata ?? null,

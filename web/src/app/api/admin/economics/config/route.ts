@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
-import { assertAdmin } from '@/lib/auth/api-auth';
 
 export async function PUT(request: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const authResult = await authenticateRequest();
+  if (!authResult.ok) return authResult.response;
+  const { clerkId } = authResult.ctx;
 
-  const adminError = assertAdmin(userId);
+  const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
   const body = await request.json();

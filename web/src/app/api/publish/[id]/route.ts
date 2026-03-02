@@ -1,20 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@clerk/nextjs/server';
+import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
-import { publishedGames, users } from '@/lib/db/schema';
+import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const authResult = await authenticateRequest();
+  if (!authResult.ok) return authResult.response;
+  const { user } = authResult.ctx;
 
   const { id } = await params;
   const db = getDb();
-  const [user] = await db.select().from(users).where(eq(users.clerkId, clerkId)).limit(1);
-  if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   await db.update(publishedGames)
     .set({ status: 'unpublished', updatedAt: new Date() })
