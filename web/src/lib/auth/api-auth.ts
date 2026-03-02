@@ -9,12 +9,30 @@ export interface AuthContext {
 }
 
 /**
+ * Returns true when valid Clerk keys are present (matching the condition in proxy.ts).
+ * When false, Clerk middleware is inactive (CI/E2E passthrough mode) and calling
+ * auth() would throw an error, so we skip it entirely.
+ */
+function isClerkConfigured(): boolean {
+  const secretKey = process.env.CLERK_SECRET_KEY;
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  return !!secretKey?.startsWith('sk_') && !!publishableKey?.startsWith('pk_');
+}
+
+/**
  * Authenticate an API request using Clerk session.
  * Returns the user or a 401 error response.
  */
 export async function authenticateRequest(): Promise<
   { ok: true; ctx: AuthContext } | { ok: false; response: NextResponse }
 > {
+  if (!isClerkConfigured()) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
+
   const { userId: clerkId } = await auth();
 
   if (!clerkId) {

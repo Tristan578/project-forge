@@ -17,7 +17,7 @@ vi.mock('./user-service', () => ({
   getUserByClerkId: vi.fn(),
 }));
 
-import { assertAdmin, assertTier } from './api-auth';
+import { authenticateRequest, assertAdmin, assertTier } from './api-auth';
 import type { User } from '../db/schema';
 
 function makeUser(overrides: Partial<User> = {}): User {
@@ -39,6 +39,97 @@ function makeUser(overrides: Partial<User> = {}): User {
     ...overrides,
   } as User;
 }
+
+type AuthResult = Awaited<ReturnType<typeof authenticateRequest>>;
+
+function expectUnauthorized(result: AuthResult): void {
+  expect(result.ok).toBe(false);
+  expect((result as { ok: false; response: { status: number } }).response.status).toBe(401);
+}
+
+describe('authenticateRequest', () => {
+  const originalSecretKey = process.env.CLERK_SECRET_KEY;
+  const originalPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  afterEach(() => {
+    // Restore env vars
+    if (originalSecretKey === undefined) {
+      delete process.env.CLERK_SECRET_KEY;
+    } else {
+      process.env.CLERK_SECRET_KEY = originalSecretKey;
+    }
+    if (originalPublishableKey === undefined) {
+      delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+    } else {
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = originalPublishableKey;
+    }
+    vi.resetAllMocks();
+  });
+
+  it('returns 401 without calling auth() when Clerk keys are absent (CI/E2E passthrough mode)', async () => {
+    delete process.env.CLERK_SECRET_KEY;
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+    const { auth } = await import('@clerk/nextjs/server');
+    const result = await authenticateRequest();
+
+    expectUnauthorized(result);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 without calling auth() when secret key has invalid prefix', async () => {
+    process.env.CLERK_SECRET_KEY = 'invalid_key';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+
+    const { auth } = await import('@clerk/nextjs/server');
+    const result = await authenticateRequest();
+
+    expectUnauthorized(result);
+    expect(auth).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when Clerk keys are valid but auth() returns no userId', async () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_valid';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+
+    const { auth } = await import('@clerk/nextjs/server');
+    vi.mocked(auth).mockResolvedValue({ userId: null } as never);
+
+    expectUnauthorized(await authenticateRequest());
+  });
+
+  it('returns 401 when Clerk keys are valid, userId exists, but user not found in DB', async () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_valid';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+
+    const { auth } = await import('@clerk/nextjs/server');
+    vi.mocked(auth).mockResolvedValue({ userId: 'clerk_user_123' } as never);
+
+    const { getUserByClerkId } = await import('./user-service');
+    vi.mocked(getUserByClerkId).mockResolvedValue(null);
+
+    expectUnauthorized(await authenticateRequest());
+  });
+
+  it('returns ok context when Clerk keys are valid and user is found', async () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_valid';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+
+    const { auth } = await import('@clerk/nextjs/server');
+    vi.mocked(auth).mockResolvedValue({ userId: 'clerk_user_123' } as never);
+
+    const { getUserByClerkId } = await import('./user-service');
+    const fakeUser = makeUser({ clerkId: 'clerk_user_123' });
+    vi.mocked(getUserByClerkId).mockResolvedValue(fakeUser);
+
+    const result = await authenticateRequest();
+
+    expect(result.ok).toBe(true);
+    const ctx = (result as { ok: true; ctx: { clerkId: string; user: User } }).ctx;
+    expect(ctx.clerkId).toBe('clerk_user_123');
+    expect(ctx.user).toEqual(fakeUser);
+  });
+});
 
 describe('assertAdmin', () => {
   const originalEnv = process.env.ADMIN_USER_IDS;
