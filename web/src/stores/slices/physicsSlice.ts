@@ -29,6 +29,8 @@ export interface PhysicsSlice {
   togglePhysics2d: (entityId: string, enabled: boolean) => void;
   setJoint2d: (entityId: string, data: Joint2dData) => void;
   removeJoint2d: (entityId: string) => void;
+  setGravity2d: (gravityX: number, gravityY: number) => void;
+  setDebugPhysics2d: (enabled: boolean) => void;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -101,5 +103,11 @@ export const createPhysicsSlice: StateCreator<PhysicsSlice, [], [], PhysicsSlice
       return { joints2d: rest };
     });
     if (dispatchCommand) dispatchCommand('remove_joint_2d', { entityId });
+  },
+  setGravity2d: (gravityX, gravityY) => {
+    if (dispatchCommand) dispatchCommand('set_gravity2d', { gravityX, gravityY });
+  },
+  setDebugPhysics2d: (enabled) => {
+    if (dispatchCommand) dispatchCommand('set_debug_physics2d', { enabled });
   },
 });
