@@ -32,8 +32,8 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(
       z.object({
         entityId: zEntityId,
-        bodyType: z.enum(['dynamic', 'kinematic', 'static']).optional(),
-        colliderShape: z.enum(['auto', 'box', 'ball', 'capsule', 'cylinder', 'cone', 'trimesh']).optional(),
+        bodyType: z.enum(['dynamic', 'fixed', 'kinematic_position', 'kinematic_velocity']).optional(),
+        colliderShape: z.enum(['cuboid', 'ball', 'cylinder', 'capsule', 'auto']).optional(),
         restitution: z.number().finite().optional(),
         friction: z.number().finite().optional(),
         density: z.number().finite().optional(),

@@ -441,11 +441,11 @@ describe('physicsJointHandlers', () => {
       const { result, store } = await invokeHandler(physicsJointHandlers, 'update_physics', {
         entityId: 'ent3',
         unknownField: 'ignored',
-        bodyType: 'static',
+        bodyType: 'fixed',
       });
       expect(result.success).toBe(true);
       const calledWith = (store.updatePhysics as ReturnType<typeof vi.fn>).mock.calls[0][1];
-      expect(calledWith.bodyType).toBe('static');
+      expect(calledWith.bodyType).toBe('fixed');
       expect(calledWith).not.toHaveProperty('unknownField');
     });
   });

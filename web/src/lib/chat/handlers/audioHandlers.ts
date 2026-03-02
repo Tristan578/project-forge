@@ -55,7 +55,7 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
       return {
         success: true,
-        result: `Set music intensity to ${p.data.intensity.toFixed(2)} for track "${id}"${p.data.rampMs ? ` (${p.data.rampMs}ms ramp)` : ''}`,
+        result: `Set music intensity to ${clamped.toFixed(2)} for track "${id}"${p.data.rampMs ? ` (${p.data.rampMs}ms ramp)` : ''}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set music intensity' };
