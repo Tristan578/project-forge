@@ -4,7 +4,11 @@
 
 import { useEditorStore, type PhysicsData, type JointData } from '@/stores/editorStore';
 import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
+import { audioManager } from '@/lib/audio/audioManager';
 import type { SetFn, GetFn } from './types';
+
+/** Prefix used to identify audio occlusion raycast requests. */
+const OCCLUSION_RAYCAST_PREFIX = 'audio_occlusion:';
 
 export function handlePhysicsEvent(
   type: string,
@@ -63,6 +67,15 @@ export function handlePhysicsEvent(
 
     case 'RAYCAST_RESULT': {
       const payload = data as unknown as { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number };
+      // Handle audio occlusion raycasts
+      if (payload.requestId.startsWith(OCCLUSION_RAYCAST_PREFIX)) {
+        const entityId = payload.requestId.slice(OCCLUSION_RAYCAST_PREFIX.length);
+        // If hitEntity is not the audio source entity, something is blocking the line
+        const occluded = payload.hitEntity !== null && payload.hitEntity !== entityId;
+        audioManager.updateOcclusionState(entityId, occluded);
+        return true;
+      }
+      // Forward to script raycast callback
       const raycastCb = (window as unknown as { __scriptRaycastCallback?: (event: { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number }) => void }).__scriptRaycastCallback;
       if (raycastCb) {
         raycastCb(payload);
