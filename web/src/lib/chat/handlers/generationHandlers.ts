@@ -3,7 +3,9 @@
  * Wires AI asset generation commands to API routes and the generation store.
  */
 
+import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
+import { parseArgs } from './types';
 import { useGenerationStore } from '@/stores/generationStore';
 import type { GenerationType } from '@/stores/generationStore';
 import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } from '@/lib/generate/promptEnricher';
@@ -106,11 +108,19 @@ async function queryStatus(
 
 export const generationHandlers: Record<string, ToolHandler> = {
   generate_3d_model: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      quality: z.string().optional(),
+      artStyle: z.string().optional(),
+      negativePrompt: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/model', {
-      prompt: enrichPrompt(args.prompt as string, 'model', ctx.store),
-      quality: args.quality ?? 'standard',
-      artStyle: args.artStyle ?? 'realistic',
-      negativePrompt: args.negativePrompt,
+      prompt: enrichPrompt(p.data.prompt, 'model', ctx.store),
+      quality: p.data.quality ?? 'standard',
+      artStyle: p.data.artStyle ?? 'realistic',
+      negativePrompt: p.data.negativePrompt,
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -120,7 +130,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'model',
-      prompt: args.prompt as string,
+      prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'meshy',
       usageId: data.usageId as string | undefined,
     });
@@ -135,11 +145,17 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_3d_from_image: async (args, ctx): Promise<ExecutionResult> => {
-    const enrichedPrompt = args.prompt
-      ? enrichPrompt(args.prompt as string, 'model', ctx.store)
+    const p = parseArgs(z.object({
+      imageBase64: z.string().min(1),
+      prompt: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+
+    const enrichedPrompt = p.data.prompt
+      ? enrichPrompt(p.data.prompt, 'model', ctx.store)
       : undefined;
     const result = await generateFetch('/api/generate/model', {
-      imageBase64: args.imageBase64,
+      imageBase64: p.data.imageBase64,
       prompt: enrichedPrompt,
     });
     if (!result.ok) return { success: false, error: result.error };
@@ -150,7 +166,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'model',
-      prompt: (args.prompt as string) ?? 'image-to-3d',
+      prompt: p.data.prompt ?? 'image-to-3d',
       provider: (data.provider as string) ?? 'meshy',
       usageId: data.usageId as string | undefined,
     });
@@ -165,12 +181,21 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_texture: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      entityId: z.string().optional(),
+      resolution: z.string().optional(),
+      style: z.string().optional(),
+      tiling: z.boolean().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/texture', {
-      prompt: enrichPrompt(args.prompt as string, 'texture', ctx.store),
-      entityId: args.entityId,
-      resolution: args.resolution ?? '1024',
-      style: args.style ?? 'realistic',
-      tiling: args.tiling ?? false,
+      prompt: enrichPrompt(p.data.prompt, 'texture', ctx.store),
+      entityId: p.data.entityId,
+      resolution: p.data.resolution ?? '1024',
+      style: p.data.style ?? 'realistic',
+      tiling: p.data.tiling ?? false,
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -180,9 +205,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'texture',
-      prompt: args.prompt as string,
+      prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'meshy',
-      entityId: args.entityId as string | undefined,
+      entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
     });
 
@@ -196,10 +221,17 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_pbr_maps: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      entityId: z.string().optional(),
+      maps: z.unknown().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/texture', {
-      prompt: enrichPrompt(args.prompt as string, 'texture', ctx.store),
-      entityId: args.entityId,
-      maps: args.maps,
+      prompt: enrichPrompt(p.data.prompt, 'texture', ctx.store),
+      entityId: p.data.entityId,
+      maps: p.data.maps,
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -209,9 +241,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'texture',
-      prompt: args.prompt as string,
+      prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'meshy',
-      entityId: args.entityId as string | undefined,
+      entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
     });
 
@@ -225,21 +257,27 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_sfx: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      entityId: z.string().optional(),
+      durationSeconds: z.number().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     // Find entity name for SFX context enrichment
-    const entityId = args.entityId as string | undefined;
-    const entityName = entityId ? ctx.store.sceneGraph.nodes[entityId]?.name : undefined;
+    const entityName = p.data.entityId ? ctx.store.sceneGraph.nodes[p.data.entityId]?.name : undefined;
     const result = await generateFetch('/api/generate/sfx', {
-      prompt: enrichSfxPrompt(args.prompt as string, entityName, ctx.store),
-      durationSeconds: args.durationSeconds ?? 5,
+      prompt: enrichSfxPrompt(p.data.prompt, entityName, ctx.store),
+      durationSeconds: p.data.durationSeconds ?? 5,
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
-    const assetName = `sfx-${(args.prompt as string).slice(0, 20)}`;
+    const assetName = `sfx-${p.data.prompt.slice(0, 20)}`;
     ctx.store.importAudio(data.audioBase64 as string, assetName);
-    if (args.entityId) {
-      const spatial = getSpatialDefaults(inferSfxCategory(args.prompt as string));
-      ctx.store.setAudio(args.entityId as string, {
+    if (p.data.entityId) {
+      const spatial = getSpatialDefaults(inferSfxCategory(p.data.prompt));
+      ctx.store.setAudio(p.data.entityId, {
         assetId: assetName,
         volume: spatial.volume,
         pitch: 1.0,
@@ -260,20 +298,27 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_voice: async (args, ctx): Promise<ExecutionResult> => {
-    const speaker = args.speaker as string | undefined;
-    const baseStyle = (args.voiceStyle as string) ?? 'neutral';
+    const p = parseArgs(z.object({
+      text: z.string().min(1),
+      entityId: z.string().optional(),
+      speaker: z.string().optional(),
+      voiceStyle: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+
+    const baseStyle = p.data.voiceStyle ?? 'neutral';
     const result = await generateFetch('/api/generate/voice', {
-      text: args.text,
-      voiceStyle: enrichVoiceStyle(speaker, baseStyle),
+      text: p.data.text,
+      voiceStyle: enrichVoiceStyle(p.data.speaker, baseStyle),
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
-    const assetName = `voice-${(args.text as string).slice(0, 20)}`;
+    const assetName = `voice-${p.data.text.slice(0, 20)}`;
     ctx.store.importAudio(data.audioBase64 as string, assetName);
-    if (args.entityId) {
+    if (p.data.entityId) {
       const spatial = getSpatialDefaults('voice');
-      ctx.store.setAudio(args.entityId as string, {
+      ctx.store.setAudio(p.data.entityId, {
         assetId: assetName,
         volume: spatial.volume,
         pitch: 1.0,
@@ -294,9 +339,15 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_skybox: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      style: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/skybox', {
-      prompt: enrichPrompt(args.prompt as string, 'skybox', ctx.store),
-      style: args.style ?? 'realistic',
+      prompt: enrichPrompt(p.data.prompt, 'skybox', ctx.store),
+      style: p.data.style ?? 'realistic',
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -306,7 +357,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'skybox',
-      prompt: args.prompt as string,
+      prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'meshy',
       usageId: data.usageId as string | undefined,
     });
@@ -321,20 +372,28 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_music: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      entityId: z.string().optional(),
+      durationSeconds: z.number().optional(),
+      instrumental: z.boolean().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/music', {
-      prompt: enrichMusicPrompt(args.prompt as string, ctx.store),
-      durationSeconds: args.durationSeconds ?? 30,
-      instrumental: args.instrumental ?? true,
+      prompt: enrichMusicPrompt(p.data.prompt, ctx.store),
+      durationSeconds: p.data.durationSeconds ?? 30,
+      instrumental: p.data.instrumental ?? true,
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
     // Music API may return audioBase64 (sync) or jobId (async)
     if (data.audioBase64) {
-      const assetName = `music-${(args.prompt as string).slice(0, 20)}`;
+      const assetName = `music-${p.data.prompt.slice(0, 20)}`;
       ctx.store.importAudio(data.audioBase64 as string, assetName);
-      if (args.entityId) {
-        ctx.store.setAudio(args.entityId as string, {
+      if (p.data.entityId) {
+        ctx.store.setAudio(p.data.entityId, {
           assetId: assetName,
           volume: 0.7,
           pitch: 1.0,
@@ -359,9 +418,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'music',
-      prompt: args.prompt as string,
+      prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'suno',
-      entityId: args.entityId as string | undefined,
+      entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
     });
 
@@ -375,11 +434,19 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_sprite: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      style: z.string().optional(),
+      size: z.string().optional(),
+      removeBackground: z.boolean().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/sprite', {
-      prompt: enrichPrompt(args.prompt as string, 'sprite', ctx.store),
-      style: args.style,
-      size: args.size ?? '64x64',
-      removeBackground: args.removeBackground ?? true,
+      prompt: enrichPrompt(p.data.prompt, 'sprite', ctx.store),
+      style: p.data.style,
+      size: p.data.size ?? '64x64',
+      removeBackground: p.data.removeBackground ?? true,
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -389,7 +456,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'sprite',
-      prompt: args.prompt as string,
+      prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
     });
@@ -404,11 +471,19 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_sprite_sheet: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      sourceAssetId: z.string().min(1),
+      frameCount: z.number().optional(),
+      style: z.string().optional(),
+      size: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/sprite-sheet', {
-      sourceAssetId: args.sourceAssetId,
-      frameCount: args.frameCount ?? 4,
-      style: args.style,
-      size: args.size ?? '64x64',
+      sourceAssetId: p.data.sourceAssetId,
+      frameCount: p.data.frameCount ?? 4,
+      style: p.data.style,
+      size: p.data.size ?? '64x64',
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -418,7 +493,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'sprite_sheet',
-      prompt: `sprite-sheet from ${args.sourceAssetId}`,
+      prompt: `sprite-sheet from ${p.data.sourceAssetId}`,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
     });
@@ -433,20 +508,23 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   generate_character: async (args, ctx): Promise<ExecutionResult> => {
-    const poses = args.poses as string[] | undefined;
-    if (!poses || poses.length === 0) {
-      return { success: false, error: 'No poses specified' };
-    }
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      poses: z.array(z.string()).min(1),
+      style: z.string().optional(),
+      size: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
 
     // Generate each pose as a separate sprite generation job
     const jobIds: string[] = [];
-    for (const pose of poses) {
-      const basePrompt = enrichPrompt(args.prompt as string, 'sprite', ctx.store);
+    for (const pose of p.data.poses) {
+      const basePrompt = enrichPrompt(p.data.prompt, 'sprite', ctx.store);
       const prompt = `${basePrompt} - ${pose} pose`;
       const result = await generateFetch('/api/generate/sprite', {
         prompt,
-        style: args.style ?? 'cartoon',
-        size: args.size ?? '128x128',
+        style: p.data.style ?? 'cartoon',
+        size: p.data.size ?? '128x128',
         removeBackground: true,
       });
       if (result.ok) {
@@ -470,17 +548,24 @@ export const generationHandlers: Record<string, ToolHandler> = {
     return {
       success: true,
       result: {
-        message: `Character generation started for ${jobIds.length}/${poses.length} poses.`,
+        message: `Character generation started for ${jobIds.length}/${p.data.poses.length} poses.`,
         jobIds,
       },
     };
   },
 
   generate_tileset: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      prompt: z.string().min(1),
+      tileSize: z.number().optional(),
+      gridSize: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+
     const result = await generateFetch('/api/generate/tileset-gen', {
-      prompt: enrichPrompt(args.prompt as string, 'tileset', ctx.store),
-      tileSize: args.tileSize ?? 32,
-      gridSize: args.gridSize ?? '8x8',
+      prompt: enrichPrompt(p.data.prompt, 'tileset', ctx.store),
+      tileSize: p.data.tileSize ?? 32,
+      gridSize: p.data.gridSize ?? '8x8',
     });
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
@@ -490,7 +575,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       jobId: localId,
       providerJobId: data.jobId as string,
       type: 'tileset',
-      prompt: args.prompt as string,
+      prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
     });
@@ -507,15 +592,17 @@ export const generationHandlers: Record<string, ToolHandler> = {
   // --- Status / Utility commands ---
 
   get_sprite_generation_status: async (args, _ctx): Promise<ExecutionResult> => {
-    const jobId = args.jobId as string;
-    if (!jobId) return { success: false, error: 'Missing jobId' };
-    return queryStatus('/api/generate/sprite/status', jobId);
+    const p = parseArgs(z.object({ jobId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    return queryStatus('/api/generate/sprite/status', p.data.jobId);
   },
 
   get_generation_status: async (args, _ctx): Promise<ExecutionResult> => {
-    const jobId = args.jobId as string;
-    const type = args.type as string;
-    if (!jobId) return { success: false, error: 'Missing jobId' };
+    const p = parseArgs(z.object({
+      jobId: z.string().min(1),
+      type: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
 
     // Route to the correct status endpoint based on generation type
     const statusRoutes: Record<string, string> = {
@@ -527,34 +614,34 @@ export const generationHandlers: Record<string, ToolHandler> = {
     };
 
     // If type is specified, use it directly
-    if (type && statusRoutes[type]) {
-      return queryStatus(statusRoutes[type], jobId);
+    if (p.data.type && statusRoutes[p.data.type]) {
+      return queryStatus(statusRoutes[p.data.type], p.data.jobId);
     }
 
     // Try to find the job in the generation store to determine type
     const genStore = useGenerationStore.getState();
-    const storeJob = Object.values(genStore.jobs).find((j) => j.jobId === jobId);
+    const storeJob = Object.values(genStore.jobs).find((j) => j.jobId === p.data.jobId);
     if (storeJob && statusRoutes[storeJob.type]) {
-      return queryStatus(statusRoutes[storeJob.type], jobId);
+      return queryStatus(statusRoutes[storeJob.type], p.data.jobId);
     }
 
     // Try all status endpoints
     for (const route of Object.values(statusRoutes)) {
-      const result = await queryStatus(route, jobId);
+      const result = await queryStatus(route, p.data.jobId);
       if (result.success) return result;
     }
 
-    return { success: false, error: `Could not find generation job: ${jobId}` };
+    return { success: false, error: `Could not find generation job: ${p.data.jobId}` };
   },
 
   remove_background: async (args, _ctx): Promise<ExecutionResult> => {
-    const assetId = args.assetId as string;
-    if (!assetId) return { success: false, error: 'Missing assetId' };
+    const p = parseArgs(z.object({ assetId: z.string().min(1) }), args);
+    if (p.error) return p.error;
 
     // Generate a new version with background removed via sprite endpoint
     const result = await generateFetch('/api/generate/sprite', {
       prompt: `Remove background from existing asset`,
-      sourceAssetId: assetId,
+      sourceAssetId: p.data.assetId,
       removeBackground: true,
     });
     if (!result.ok) {
@@ -576,34 +663,34 @@ export const generationHandlers: Record<string, ToolHandler> = {
   },
 
   apply_style_transfer: async (args, _ctx): Promise<ExecutionResult> => {
-    const assetId = args.assetId as string;
-    const targetStyle = args.targetStyle as string;
-    if (!assetId || !targetStyle) {
-      return { success: false, error: 'Missing assetId or targetStyle' };
-    }
+    const p = parseArgs(z.object({
+      assetId: z.string().min(1),
+      targetStyle: z.string().min(1),
+    }), args);
+    if (p.error) return p.error;
 
     // Style transfer is not a standalone API. Suggest regeneration with style.
     return {
       success: true,
       result: {
-        message: `Style transfer is not available as a standalone operation. Re-generate the asset with the desired style using generate_texture or generate_sprite with style: "${targetStyle}".`,
+        message: `Style transfer is not available as a standalone operation. Re-generate the asset with the desired style using generate_texture or generate_sprite with style: "${p.data.targetStyle}".`,
         suggestion: {
           command: 'generate_texture',
-          params: { prompt: `${targetStyle} style`, entityId: assetId },
+          params: { prompt: `${p.data.targetStyle} style`, entityId: p.data.assetId },
         },
       },
     };
   },
 
   set_project_style: async (args, _ctx): Promise<ExecutionResult> => {
-    const preset = args.preset as string;
-    if (!preset) return { success: false, error: 'Missing preset' };
+    const p = parseArgs(z.object({ preset: z.string().min(1) }), args);
+    if (p.error) return p.error;
 
     return {
       success: true,
       result: {
-        message: `Project style set to: ${preset}. New generations will use this style as default.`,
-        style: preset,
+        message: `Project style set to: ${p.data.preset}. New generations will use this style as default.`,
+        style: p.data.preset,
       },
     };
   },

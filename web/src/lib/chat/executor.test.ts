@@ -386,21 +386,21 @@ describe('executor: scene commands', () => {
   it('update_transform calls updateTransform for position', async () => {
     const result = await executeToolCall('update_transform', {
       entityId: 'e1',
-      position: [1, 2, 3],
+      position: { x: 1, y: 2, z: 3 },
     }, store);
     expect(result.success).toBe(true);
-    expect(store.updateTransform).toHaveBeenCalledWith('e1', 'position', [1, 2, 3]);
+    expect(store.updateTransform).toHaveBeenCalledWith('e1', 'position', { x: 1, y: 2, z: 3 });
   });
 
   it('update_transform calls updateTransform for rotation and scale', async () => {
     const result = await executeToolCall('update_transform', {
       entityId: 'e1',
-      rotation: [0, 1.5, 0],
-      scale: [2, 2, 2],
+      rotation: { x: 0, y: 1.5, z: 0 },
+      scale: { x: 2, y: 2, z: 2 },
     }, store);
     expect(result.success).toBe(true);
-    expect(store.updateTransform).toHaveBeenCalledWith('e1', 'rotation', [0, 1.5, 0]);
-    expect(store.updateTransform).toHaveBeenCalledWith('e1', 'scale', [2, 2, 2]);
+    expect(store.updateTransform).toHaveBeenCalledWith('e1', 'rotation', { x: 0, y: 1.5, z: 0 });
+    expect(store.updateTransform).toHaveBeenCalledWith('e1', 'scale', { x: 2, y: 2, z: 2 });
   });
 
   it('rename_entity calls store.renameEntity', async () => {
@@ -722,10 +722,9 @@ describe('executor: error handling', () => {
 
   it('missing required param returns error', async () => {
     const result = await executeToolCall('spawn_entity', { name: 'Test' }, store);
-    // spawn_entity without entityType should still call with undefined type
-    // The executor doesn't validate required params - it passes through
-    // So this test verifies that the function doesn't crash
-    expect(result.success).toBe(true);
+    // Zod validation catches missing entityType
+    expect(result.success).toBe(false);
+    expect(result.error).toBeDefined();
   });
 
   it('executor catches thrown exceptions gracefully', async () => {

@@ -3,20 +3,17 @@
  * Covers: sprites, sprite animation, tilemaps, 2D physics, and 2D skeletal animation.
  */
 
+import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
+import { zEntityId, zVec2, zVec4, parseArgs } from './types';
 import type {
   SpriteData,
-  SpriteAnchor,
   Camera2dData,
   SortingLayerData,
-  Grid2dSettings,
   SpriteSheetData,
-  SliceMode,
-  FrameRect,
   SpriteAnimClip,
   SpriteAnimatorData,
   AnimationStateMachineData,
-  StateTransitionData,
   AnimParamData,
   TilesetData,
   TilemapData,
@@ -27,6 +24,10 @@ import type {
   IkConstraint2d,
   SkeletalAnimation2d,
   BoneKeyframe2d,
+  StateTransitionData,
+  FrameRect,
+  SliceMode,
+  Grid2dSettings,
 } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
@@ -65,27 +66,106 @@ function defaultSpriteData(): SpriteData {
 }
 
 // ---------------------------------------------------------------------------
+// Shared schemas
+// ---------------------------------------------------------------------------
+
+const zSpriteAnchor = z.enum([
+  'center', 'top_left', 'top_center', 'top_right',
+  'middle_left', 'middle_right',
+  'bottom_left', 'bottom_center', 'bottom_right',
+]);
+
+const zCameraBounds = z.object({
+  minX: z.number(),
+  maxX: z.number(),
+  minY: z.number(),
+  maxY: z.number(),
+});
+
+const zSortingLayerData = z.object({
+  name: z.string(),
+  order: z.number(),
+  visible: z.boolean(),
+});
+
+const zTransitionCondition = z.union([
+  z.object({ type: z.literal('always') }),
+  z.object({ type: z.literal('paramBool'), name: z.string(), value: z.boolean() }),
+  z.object({
+    type: z.literal('paramFloat'),
+    name: z.string(),
+    op: z.enum(['greater', 'less', 'equal']),
+    threshold: z.number(),
+  }),
+  z.object({ type: z.literal('paramTrigger'), name: z.string() }),
+]);
+
+const zStateTransition = z.object({
+  fromState: z.string(),
+  toState: z.string(),
+  condition: zTransitionCondition,
+  duration: z.number(),
+});
+
+const zAnimParamData = z.union([
+  z.object({ type: z.literal('bool'), value: z.boolean() }),
+  z.object({ type: z.literal('float'), value: z.number() }),
+  z.object({ type: z.literal('trigger'), value: z.boolean() }),
+]);
+
+const zPhysics2dBodyType = z.enum(['dynamic', 'static', 'kinematic']);
+const zPhysics2dColliderShape = z.enum(['box', 'circle', 'capsule', 'convex_polygon', 'edge', 'auto']);
+
+const zPhysics2dData = z.object({
+  bodyType: zPhysics2dBodyType.optional(),
+  colliderShape: zPhysics2dColliderShape.optional(),
+  size: zVec2.optional(),
+  radius: z.number().optional(),
+  vertices: z.array(zVec2).optional(),
+  mass: z.number().optional(),
+  friction: z.number().optional(),
+  restitution: z.number().optional(),
+  gravityScale: z.number().optional(),
+  isSensor: z.boolean().optional(),
+  lockRotation: z.boolean().optional(),
+  continuousDetection: z.boolean().optional(),
+  oneWayPlatform: z.boolean().optional(),
+  surfaceVelocity: zVec2.optional(),
+});
+
+const zBone2dDef = z.object({
+  name: z.string(),
+  parentBone: z.string().nullable(),
+  localPosition: zVec2,
+  localRotation: z.number(),
+  localScale: zVec2,
+  length: z.number(),
+  color: zVec4,
+});
+
+// ---------------------------------------------------------------------------
 // Sprite Commands
 // ---------------------------------------------------------------------------
+
+const ENTITY_TYPES_2D = ['plane', 'cube', 'sphere', 'cylinder', 'capsule', 'empty'] as const;
 
 const spriteHandlers: Record<string, ToolHandler> = {
   create_sprite: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const {
-        entityType = 'plane',
-        name,
-        position,
-        textureAssetId,
-        sortingLayer,
-        sortingOrder,
-      } = args as {
-        entityType?: string;
-        name?: string;
-        position?: [number, number, number];
-        textureAssetId?: string;
-        sortingLayer?: string;
-        sortingOrder?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityType: z.enum(ENTITY_TYPES_2D).optional(),
+          name: z.string().optional(),
+          position: z.tuple([z.number(), z.number(), z.number()]).optional(),
+          textureAssetId: z.string().optional(),
+          sortingLayer: z.string().optional(),
+          sortingOrder: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityType = 'plane', name, position, textureAssetId, sortingLayer, sortingOrder } = p.data;
 
       ctx.store.spawnEntity(entityType as Parameters<typeof ctx.store.spawnEntity>[0], name);
 
@@ -95,7 +175,7 @@ const spriteHandlers: Record<string, ToolHandler> = {
       }
 
       if (position) {
-        ctx.store.updateTransform(entityId, 'position', position);
+        ctx.store.updateTransform(entityId, 'position', { x: position[0], y: position[1], z: position[2] });
       }
 
       const spriteData: SpriteData = {
@@ -114,7 +194,9 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
   set_sprite_texture: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, textureAssetId } = args as { entityId: string; textureAssetId: string };
+      const p = parseArgs(z.object({ entityId: zEntityId, textureAssetId: z.string() }), args);
+      if (p.error) return p.error;
+      const { entityId, textureAssetId } = p.data;
       const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, { ...existing, textureAssetId });
       return { success: true, result: { message: `Set texture on entity ${entityId}` } };
@@ -125,7 +207,9 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
   set_sprite_tint: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, color } = args as { entityId: string; color: string };
+      const p = parseArgs(z.object({ entityId: zEntityId, color: z.string() }), args);
+      if (p.error) return p.error;
+      const { entityId, color } = p.data;
       const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
       const colorTint = hexToRgba(color);
       ctx.store.setSpriteData(entityId, { ...existing, colorTint });
@@ -137,7 +221,12 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
   set_sprite_flip: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, flipX, flipY } = args as { entityId: string; flipX?: boolean; flipY?: boolean };
+      const p = parseArgs(
+        z.object({ entityId: zEntityId, flipX: z.boolean().optional(), flipY: z.boolean().optional() }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, flipX, flipY } = p.data;
       const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, {
         ...existing,
@@ -152,11 +241,16 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
   set_sprite_sorting: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, sortingLayer, sortingOrder } = args as {
-        entityId: string;
-        sortingLayer?: string;
-        sortingOrder?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          sortingLayer: z.string().optional(),
+          sortingOrder: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, sortingLayer, sortingOrder } = p.data;
       const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, {
         ...existing,
@@ -171,7 +265,9 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
   set_sprite_anchor: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, anchor } = args as { entityId: string; anchor: SpriteAnchor };
+      const p = parseArgs(z.object({ entityId: zEntityId, anchor: zSpriteAnchor }), args);
+      if (p.error) return p.error;
+      const { entityId, anchor } = p.data;
       const existing = ctx.store.sprites[entityId] ?? defaultSpriteData();
       ctx.store.setSpriteData(entityId, { ...existing, anchor });
       return { success: true, result: { message: `Set anchor on entity ${entityId}` } };
@@ -182,7 +278,9 @@ const spriteHandlers: Record<string, ToolHandler> = {
 
   get_sprite: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string };
+      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      if (p.error) return p.error;
+      const { entityId } = p.data;
       const data = ctx.store.sprites[entityId];
       if (!data) {
         return { success: false, error: `No sprite data for entity ${entityId}` };
@@ -201,9 +299,10 @@ const spriteHandlers: Record<string, ToolHandler> = {
 const project2dHandlers: Record<string, ToolHandler> = {
   set_project_type: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { type } = args as { type: '2d' | '3d' };
-      ctx.store.setProjectType(type);
-      return { success: true, result: { message: `Project type set to ${type}` } };
+      const p = parseArgs(z.object({ type: z.enum(['2d', '3d']) }), args);
+      if (p.error) return p.error;
+      ctx.store.setProjectType(p.data.type);
+      return { success: true, result: { message: `Project type set to ${p.data.type}` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set project type' };
     }
@@ -211,8 +310,17 @@ const project2dHandlers: Record<string, ToolHandler> = {
 
   set_camera_2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { zoom, pixelPerfect, bounds } = args as Partial<Camera2dData>;
-      const existing = ctx.store.camera2dData ?? { zoom: 1, pixelPerfect: false, bounds: null };
+      const p = parseArgs(
+        z.object({
+          zoom: z.number().optional(),
+          pixelPerfect: z.boolean().optional(),
+          bounds: zCameraBounds.nullable().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { zoom, pixelPerfect, bounds } = p.data;
+      const existing: Camera2dData = ctx.store.camera2dData ?? { zoom: 1, pixelPerfect: false, bounds: null };
       ctx.store.setCamera2dData({
         zoom: zoom ?? existing.zoom,
         pixelPerfect: pixelPerfect ?? existing.pixelPerfect,
@@ -226,7 +334,9 @@ const project2dHandlers: Record<string, ToolHandler> = {
 
   set_sorting_layers: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { layers } = args as { layers: SortingLayerData[] };
+      const p = parseArgs(z.object({ layers: z.array(zSortingLayerData) }), args);
+      if (p.error) return p.error;
+      const layers: SortingLayerData[] = p.data.layers;
       ctx.store.setSortingLayers(layers);
       return { success: true, result: { message: `Set ${layers.length} sorting layers` } };
     } catch (err) {
@@ -236,8 +346,17 @@ const project2dHandlers: Record<string, ToolHandler> = {
 
   set_grid_2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { enabled, size, snapToGrid } = args as Partial<Grid2dSettings>;
-      ctx.store.setGrid2d({ enabled, size, snapToGrid });
+      const p = parseArgs(
+        z.object({
+          enabled: z.boolean().optional(),
+          size: z.number().optional(),
+          snapToGrid: z.boolean().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+      const settings: Partial<Grid2dSettings> = p.data;
+      ctx.store.setGrid2d(settings);
       return { success: true, result: { message: 'Grid 2D settings updated' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set 2D grid' };
@@ -267,20 +386,37 @@ function buildGridFrames(columns: number, rows: number, tileSize: [number, numbe
   return frames;
 }
 
+const zGridSliceMode = z.object({
+  type: z.literal('grid'),
+  columns: z.number().int().positive().optional(),
+  rows: z.number().int().positive().optional(),
+  tileSize: zVec2.optional(),
+});
+
+const zManualSliceMode = z.object({ type: z.literal('manual') });
+
+const zClipInput = z.object({
+  name: z.string(),
+  frames: z.array(z.number().int().nonnegative()),
+  fps: z.number().optional(),
+  looping: z.boolean().optional(),
+});
+
 const spriteAnimHandlers: Record<string, ToolHandler> = {
   slice_sprite_sheet: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, assetId, sliceMode: sliceModeArg, clips: clipsArg } = args as {
-        entityId: string;
-        assetId: string;
-        sliceMode?: {
-          type: 'grid';
-          columns?: number;
-          rows?: number;
-          tileSize?: [number, number];
-        } | { type: 'manual' };
-        clips?: Array<{ name: string; frames: number[]; fps?: number; looping?: boolean }>;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          assetId: z.string(),
+          sliceMode: z.union([zGridSliceMode, zManualSliceMode]).optional(),
+          clips: z.array(zClipInput).optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, assetId, sliceMode: sliceModeArg, clips: clipsArg } = p.data;
 
       let sliceMode: SliceMode;
       let frames: FrameRect[];
@@ -321,13 +457,19 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
 
   create_sprite_anim_clip: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, clipName, frames, fps = 12, looping = true } = args as {
-        entityId: string;
-        clipName: string;
-        frames: number[];
-        fps?: number;
-        looping?: boolean;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          clipName: z.string(),
+          frames: z.array(z.number().int().nonnegative()),
+          fps: z.number().optional(),
+          looping: z.boolean().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, clipName, frames, fps = 12, looping = true } = p.data;
 
       const existing = ctx.store.spriteSheets[entityId];
       if (!existing) {
@@ -355,13 +497,19 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
 
   set_sprite_animator: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, spriteSheetId, currentClip, playing = false, speed = 1 } = args as {
-        entityId: string;
-        spriteSheetId: string;
-        currentClip?: string;
-        playing?: boolean;
-        speed?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          spriteSheetId: z.string(),
+          currentClip: z.string().optional(),
+          playing: z.boolean().optional(),
+          speed: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, spriteSheetId, currentClip, playing = false, speed = 1 } = p.data;
 
       const data: SpriteAnimatorData = {
         spriteSheetId,
@@ -380,7 +528,9 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
 
   play_sprite_animation: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, clipName } = args as { entityId: string; clipName: string };
+      const p = parseArgs(z.object({ entityId: zEntityId, clipName: z.string() }), args);
+      if (p.error) return p.error;
+      const { entityId, clipName } = p.data;
       const existing = ctx.store.spriteAnimators[entityId];
       if (!existing) {
         return { success: false, error: `No sprite animator for entity ${entityId}` };
@@ -401,15 +551,25 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
 
   set_anim_state_machine: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, states, transitions, currentState, parameters } = args as {
-        entityId: string;
-        states: Record<string, string>;
-        transitions: StateTransitionData[];
-        currentState: string;
-        parameters: Record<string, AnimParamData>;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          states: z.record(z.string(), z.string()),
+          transitions: z.array(zStateTransition),
+          currentState: z.string(),
+          parameters: z.record(z.string(), zAnimParamData),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
 
-      const data: AnimationStateMachineData = { states, transitions, currentState, parameters };
+      const { entityId, states, transitions, currentState, parameters } = p.data;
+      const data: AnimationStateMachineData = {
+        states,
+        transitions: transitions as StateTransitionData[],
+        currentState,
+        parameters: parameters as Record<string, AnimParamData>,
+      };
       ctx.store.setAnimationStateMachine(entityId, data);
 
       return { success: true, result: { message: `Set animation state machine on entity ${entityId}` } };
@@ -420,7 +580,12 @@ const spriteAnimHandlers: Record<string, ToolHandler> = {
 
   set_anim_param: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, paramName, value } = args as { entityId: string; paramName: string; value: unknown };
+      const p = parseArgs(
+        z.object({ entityId: zEntityId, paramName: z.string(), value: z.unknown() }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, paramName, value } = p.data;
       const existing = ctx.store.animationStateMachines[entityId];
       if (!existing) {
         return { success: false, error: `No animation state machine for entity ${entityId}` };
@@ -478,13 +643,19 @@ function makeTilemapLayer(name: string, mapSize: [number, number], visible = tru
 const tilemapHandlers: Record<string, ToolHandler> = {
   create_tilemap: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { name, tilesetAssetId, tileSize, mapSize, origin = 'TopLeft' } = args as {
-        name?: string;
-        tilesetAssetId: string;
-        tileSize?: [number, number];
-        mapSize?: [number, number];
-        origin?: 'TopLeft' | 'Center';
-      };
+      const p = parseArgs(
+        z.object({
+          name: z.string().optional(),
+          tilesetAssetId: z.string(),
+          tileSize: zVec2.optional(),
+          mapSize: zVec2.optional(),
+          origin: z.enum(['TopLeft', 'Center']).optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { name, tilesetAssetId, tileSize, mapSize, origin = 'TopLeft' } = p.data;
 
       ctx.store.spawnEntity('plane', name ?? 'Tilemap');
       const entityId = ctx.store.primaryId;
@@ -512,14 +683,20 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   import_tileset: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { assetId, name, tileSize, gridSize, spacing = 0, margin = 0 } = args as {
-        assetId: string;
-        name?: string;
-        tileSize: [number, number];
-        gridSize: [number, number];
-        spacing?: number;
-        margin?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          assetId: z.string(),
+          name: z.string().optional(),
+          tileSize: zVec2,
+          gridSize: zVec2,
+          spacing: z.number().optional(),
+          margin: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { assetId, name, tileSize, gridSize, spacing = 0, margin = 0 } = p.data;
 
       const data: TilesetData = {
         assetId,
@@ -540,13 +717,19 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   set_tile: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, layerIndex, x, y, tileIndex } = args as {
-        entityId: string;
-        layerIndex: number;
-        x: number;
-        y: number;
-        tileIndex: number | null;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          layerIndex: z.number().int().nonnegative(),
+          x: z.number().int().nonnegative(),
+          y: z.number().int().nonnegative(),
+          tileIndex: z.number().int().nonnegative().nullable(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, layerIndex, x, y, tileIndex } = p.data;
 
       const tilemap = ctx.store.tilemaps[entityId];
       if (!tilemap) {
@@ -570,15 +753,21 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   fill_tiles: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, layerIndex, fromX, fromY, toX, toY, tileIndex } = args as {
-        entityId: string;
-        layerIndex: number;
-        fromX: number;
-        fromY: number;
-        toX: number;
-        toY: number;
-        tileIndex: number | null;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          layerIndex: z.number().int().nonnegative(),
+          fromX: z.number().int().nonnegative(),
+          fromY: z.number().int().nonnegative(),
+          toX: z.number().int().nonnegative(),
+          toY: z.number().int().nonnegative(),
+          tileIndex: z.number().int().nonnegative().nullable(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, layerIndex, fromX, fromY, toX, toY, tileIndex } = p.data;
 
       const tilemap = ctx.store.tilemaps[entityId];
       if (!tilemap) {
@@ -607,14 +796,20 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   clear_tiles: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, layerIndex, fromX, fromY, toX, toY } = args as {
-        entityId: string;
-        layerIndex: number;
-        fromX?: number;
-        fromY?: number;
-        toX?: number;
-        toY?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          layerIndex: z.number().int().nonnegative(),
+          fromX: z.number().int().nonnegative().optional(),
+          fromY: z.number().int().nonnegative().optional(),
+          toX: z.number().int().nonnegative().optional(),
+          toY: z.number().int().nonnegative().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, layerIndex, fromX, fromY, toX, toY } = p.data;
 
       const tilemap = ctx.store.tilemaps[entityId];
       if (!tilemap) {
@@ -647,7 +842,12 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   add_tilemap_layer: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, name, visible = true } = args as { entityId: string; name: string; visible?: boolean };
+      const p = parseArgs(
+        z.object({ entityId: zEntityId, name: z.string(), visible: z.boolean().optional() }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, name, visible = true } = p.data;
       const tilemap = ctx.store.tilemaps[entityId];
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
@@ -663,7 +863,9 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   remove_tilemap_layer: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, layerIndex } = args as { entityId: string; layerIndex: number };
+      const p = parseArgs(z.object({ entityId: zEntityId, layerIndex: z.number().int().nonnegative() }), args);
+      if (p.error) return p.error;
+      const { entityId, layerIndex } = p.data;
       const tilemap = ctx.store.tilemaps[entityId];
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
@@ -682,13 +884,19 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   set_tilemap_layer: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, layerIndex, name, visible, opacity } = args as {
-        entityId: string;
-        layerIndex: number;
-        name?: string;
-        visible?: boolean;
-        opacity?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          layerIndex: z.number().int().nonnegative(),
+          name: z.string().optional(),
+          visible: z.boolean().optional(),
+          opacity: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, layerIndex, name, visible, opacity } = p.data;
 
       const tilemap = ctx.store.tilemaps[entityId];
       if (!tilemap) {
@@ -714,7 +922,17 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   resize_tilemap: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, width, height } = args as { entityId: string; width: number; height: number };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          width: z.number().int().positive(),
+          height: z.number().int().positive(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, width, height } = p.data;
       const tilemap = ctx.store.tilemaps[entityId];
       if (!tilemap) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
@@ -742,7 +960,9 @@ const tilemapHandlers: Record<string, ToolHandler> = {
 
   get_tilemap: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string };
+      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      if (p.error) return p.error;
+      const { entityId } = p.data;
       const data = ctx.store.tilemaps[entityId];
       if (!data) {
         return { success: false, error: `No tilemap for entity ${entityId}` };
@@ -780,7 +1000,12 @@ function defaultPhysics2d(): Physics2dData {
 const physics2dHandlers: Record<string, ToolHandler> = {
   set_physics2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, ...physicsArgs } = args as { entityId: string } & Partial<Physics2dData>;
+      const p = parseArgs(
+        z.object({ entityId: zEntityId }).merge(zPhysics2dData),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, ...physicsArgs } = p.data;
       const existing = ctx.store.physics2d[entityId] ?? defaultPhysics2d();
       const data: Physics2dData = { ...existing, ...physicsArgs };
       ctx.store.setPhysics2d(entityId, data, true);
@@ -792,9 +1017,10 @@ const physics2dHandlers: Record<string, ToolHandler> = {
 
   remove_physics2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string };
-      ctx.store.removePhysics2d(entityId);
-      return { success: true, result: { message: `Removed 2D physics from entity ${entityId}` } };
+      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      if (p.error) return p.error;
+      ctx.store.removePhysics2d(p.data.entityId);
+      return { success: true, result: { message: `Removed 2D physics from entity ${p.data.entityId}` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to remove 2D physics' };
     }
@@ -802,7 +1028,9 @@ const physics2dHandlers: Record<string, ToolHandler> = {
 
   get_physics2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string };
+      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      if (p.error) return p.error;
+      const { entityId } = p.data;
       const data = ctx.store.physics2d[entityId];
       if (!data) {
         return { success: false, error: `No 2D physics data for entity ${entityId}` };
@@ -815,7 +1043,12 @@ const physics2dHandlers: Record<string, ToolHandler> = {
 
   set_gravity2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { x = 0, y = -9.81 } = args as { x?: number; y?: number };
+      const p = parseArgs(
+        z.object({ x: z.number().optional(), y: z.number().optional() }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { x = 0, y = -9.81 } = p.data;
       ctx.store.setGravity2d(x, y);
       return { success: true, result: { message: `2D gravity set to (${x}, ${y})` } };
     } catch (err) {
@@ -825,7 +1058,9 @@ const physics2dHandlers: Record<string, ToolHandler> = {
 
   set_debug_physics2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { enabled } = args as { enabled: boolean };
+      const p = parseArgs(z.object({ enabled: z.boolean() }), args);
+      if (p.error) return p.error;
+      const { enabled } = p.data;
       ctx.store.setDebugPhysics2d(enabled);
       return { success: true, result: { message: `2D physics debug ${enabled ? 'enabled' : 'disabled'}` } };
     } catch (err) {
@@ -835,8 +1070,16 @@ const physics2dHandlers: Record<string, ToolHandler> = {
 
   apply_force2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string; force: [number, number]; point?: [number, number] };
-      ctx.store.togglePhysics2d(entityId, true);
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          force: zVec2,
+          point: zVec2.optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+      ctx.store.togglePhysics2d(p.data.entityId, true);
       return { success: true, result: { message: 'Force application queued (only takes effect during Play mode via scripts)' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to apply 2D force' };
@@ -845,8 +1088,16 @@ const physics2dHandlers: Record<string, ToolHandler> = {
 
   apply_impulse2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string; impulse: [number, number]; point?: [number, number] };
-      ctx.store.togglePhysics2d(entityId, true);
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          impulse: zVec2,
+          point: zVec2.optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+      ctx.store.togglePhysics2d(p.data.entityId, true);
       return { success: true, result: { message: 'Impulse application queued (only takes effect during Play mode via scripts)' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to apply 2D impulse' };
@@ -875,10 +1126,15 @@ function defaultSkeleton2d(): SkeletonData2d {
 const skeleton2dHandlers: Record<string, ToolHandler> = {
   create_skeleton2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, rootBone } = args as { entityId: string; rootBone?: Bone2dDef };
+      const p = parseArgs(
+        z.object({ entityId: zEntityId, rootBone: zBone2dDef.optional() }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, rootBone } = p.data;
       const data: SkeletonData2d = defaultSkeleton2d();
       if (rootBone) {
-        data.bones.push(rootBone);
+        data.bones.push(rootBone as Bone2dDef);
       }
       ctx.store.setSkeleton2d(entityId, data);
       return { success: true, result: { message: `Created skeleton on entity ${entityId}` } };
@@ -889,14 +1145,20 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   add_bone2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, boneName, parentBone, position, rotation = 0, length = 1 } = args as {
-        entityId: string;
-        boneName: string;
-        parentBone?: string;
-        position?: [number, number];
-        rotation?: number;
-        length?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          boneName: z.string(),
+          parentBone: z.string().optional(),
+          position: zVec2.optional(),
+          rotation: z.number().optional(),
+          length: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, boneName, parentBone, position, rotation = 0, length = 1 } = p.data;
 
       const existing = ctx.store.skeletons2d[entityId] ?? defaultSkeleton2d();
       const bone: Bone2dDef = {
@@ -918,7 +1180,9 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   remove_bone2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, boneName } = args as { entityId: string; boneName: string };
+      const p = parseArgs(z.object({ entityId: zEntityId, boneName: z.string() }), args);
+      if (p.error) return p.error;
+      const { entityId, boneName } = p.data;
       const existing = ctx.store.skeletons2d[entityId];
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };
@@ -936,13 +1200,19 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   update_bone2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, boneName, position, rotation, length } = args as {
-        entityId: string;
-        boneName: string;
-        position?: [number, number];
-        rotation?: number;
-        length?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          boneName: z.string(),
+          position: zVec2.optional(),
+          rotation: z.number().optional(),
+          length: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, boneName, position, rotation, length } = p.data;
 
       const existing = ctx.store.skeletons2d[entityId];
       if (!existing) {
@@ -968,11 +1238,17 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   create_skeletal_animation2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, animName, looping = true } = args as {
-        entityId: string;
-        animName: string;
-        looping?: boolean;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          animName: z.string(),
+          looping: z.boolean().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, animName, looping = true } = p.data;
 
       const existing = ctx.store.skeletalAnimations2d[entityId] ?? [];
       const anim: SkeletalAnimation2d = {
@@ -991,14 +1267,20 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   add_keyframe2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, animName, boneName, frame, position, rotation } = args as {
-        entityId: string;
-        animName: string;
-        boneName: string;
-        frame: number;
-        position?: [number, number];
-        rotation?: number;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          animName: z.string(),
+          boneName: z.string(),
+          frame: z.number().int().nonnegative(),
+          position: zVec2.optional(),
+          rotation: z.number().optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, animName, boneName, frame, position, rotation } = p.data;
 
       const existing = ctx.store.skeletalAnimations2d[entityId];
       if (!existing) {
@@ -1030,7 +1312,9 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   play_skeletal_animation2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, animName } = args as { entityId: string; animName: string };
+      const p = parseArgs(z.object({ entityId: zEntityId, animName: z.string() }), args);
+      if (p.error) return p.error;
+      const { entityId, animName } = p.data;
       ctx.store.playAnimation(entityId, animName);
       return { success: true, result: { message: `Playing skeletal animation "${animName}"` } };
     } catch (err) {
@@ -1040,11 +1324,16 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   set_skeleton2d_skin: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, skinName, attachments } = args as {
-        entityId: string;
-        skinName: string;
-        attachments?: Record<string, unknown>;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          skinName: z.string(),
+          attachments: z.record(z.string(), z.unknown()).optional(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, skinName, attachments } = p.data;
 
       const existing = ctx.store.skeletons2d[entityId] ?? defaultSkeleton2d();
       const skin = { name: skinName, attachments: (attachments ?? {}) as SkeletonData2d['skins'][string]['attachments'] };
@@ -1062,12 +1351,18 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   create_ik_chain2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, chainName, startBone, endBone } = args as {
-        entityId: string;
-        chainName: string;
-        startBone: string;
-        endBone: string;
-      };
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          chainName: z.string(),
+          startBone: z.string(),
+          endBone: z.string(),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+
+      const { entityId, chainName, startBone, endBone } = p.data;
 
       const existing = ctx.store.skeletons2d[entityId] ?? defaultSkeleton2d();
 
@@ -1102,7 +1397,9 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   get_skeleton2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string };
+      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      if (p.error) return p.error;
+      const { entityId } = p.data;
       const data = ctx.store.skeletons2d[entityId];
       if (!data) {
         return { success: false, error: `No skeleton data for entity ${entityId}` };
@@ -1115,7 +1412,9 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   import_skeleton_json: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, json } = args as { entityId: string; json: string };
+      const p = parseArgs(z.object({ entityId: zEntityId, json: z.string() }), args);
+      if (p.error) return p.error;
+      const { entityId, json } = p.data;
       const parsed = JSON.parse(json) as SkeletonData2d;
       ctx.store.setSkeleton2d(entityId, parsed);
       return { success: true, result: { message: `Imported skeleton from JSON for entity ${entityId}` } };
@@ -1126,7 +1425,9 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
 
   auto_weight_skeleton2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId } = args as { entityId: string };
+      const p = parseArgs(z.object({ entityId: zEntityId }), args);
+      if (p.error) return p.error;
+      const { entityId } = p.data;
       const existing = ctx.store.skeletons2d[entityId];
       if (!existing) {
         return { success: false, error: `No skeleton for entity ${entityId}` };

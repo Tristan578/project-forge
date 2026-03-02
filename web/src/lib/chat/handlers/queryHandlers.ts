@@ -2,10 +2,12 @@
  * Query handlers - read-only operations that return scene/state data.
  */
 
+import { z } from 'zod';
 import type { ToolHandler } from './types';
+import { zEntityId, parseArgs } from './types';
 
 export const queryHandlers: Record<string, ToolHandler> = {
-  get_scene_graph: async (args, { store }) => {
+  get_scene_graph: async (_args, { store }) => {
     const { sceneGraph } = store;
     const summary = Object.values(sceneGraph.nodes).map((n) => ({
       id: n.entityId,
@@ -18,24 +20,26 @@ export const queryHandlers: Record<string, ToolHandler> = {
   },
 
   get_entity_details: async (args, { store }) => {
-    const node = store.sceneGraph.nodes[args.entityId as string];
-    if (!node) return { success: false, error: `Entity not found: ${args.entityId}` };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const node = store.sceneGraph.nodes[p.data.entityId];
+    if (!node) return { success: false, error: `Entity not found: ${p.data.entityId}` };
     return { success: true, result: { name: node.name, components: node.components, visible: node.visible, children: node.children } };
   },
 
-  get_selection: async (args, { store }) => {
+  get_selection: async (_args, { store }) => {
     return { success: true, result: { selectedIds: [...store.selectedIds], primaryId: store.primaryId } };
   },
 
-  get_camera_state: async (args, { store }) => {
+  get_camera_state: async (_args, { store }) => {
     return { success: true, result: { preset: store.currentCameraPreset } };
   },
 
-  get_mode: async (args, { store }) => {
+  get_mode: async (_args, { store }) => {
     return { success: true, result: { mode: store.engineMode } };
   },
 
-  get_physics: async (args, { store }) => {
+  get_physics: async (_args, { store }) => {
     return {
       success: true,
       result: {
@@ -46,35 +50,35 @@ export const queryHandlers: Record<string, ToolHandler> = {
   },
 
   get_script: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    const script = store.allScripts[entityId];
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const script = store.allScripts[p.data.entityId];
     if (!script) return { success: true, result: { hasScript: false } };
     return { success: true, result: { hasScript: true, source: script.source, enabled: script.enabled, template: script.template } };
   },
 
   get_audio: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
     const audio = store.primaryAudio;
     if (!audio) return { success: true, result: { hasAudio: false } };
     return { success: true, result: { hasAudio: true, ...audio } };
   },
 
-  get_audio_buses: async (args, { store }) => {
+  get_audio_buses: async (_args, { store }) => {
     return {
       success: true,
       result: { buses: store.audioBuses, count: store.audioBuses.length },
     };
   },
 
-  get_animation_state: async (args, { store }) => {
+  get_animation_state: async (_args, { store }) => {
     const anim = store.primaryAnimation;
     if (!anim) return { success: true, result: { hasAnimation: false } };
     return { success: true, result: { hasAnimation: true, ...anim } };
   },
 
-  list_animations: async (args, { store }) => {
+  list_animations: async (_args, { store }) => {
     const anim = store.primaryAnimation;
     if (!anim || anim.availableClips.length === 0) {
       return { success: true, result: { clips: [], count: 0 } };
@@ -91,17 +95,16 @@ export const queryHandlers: Record<string, ToolHandler> = {
   },
 
   get_animation_graph: async (args) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    // Query will be handled via QUERY_ANIMATION_GRAPH event
-    return { success: true, result: { message: `Querying animation graph for ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    return { success: true, result: { message: `Querying animation graph for ${p.data.entityId}` } };
   },
 
-  get_scene_name: async (args, { store }) => {
+  get_scene_name: async (_args, { store }) => {
     return { success: true, result: { sceneName: store.sceneName, modified: store.sceneModified } };
   },
 
-  get_input_bindings: async (args, { store }) => {
+  get_input_bindings: async (_args, { store }) => {
     return {
       success: true,
       result: {
@@ -112,27 +115,26 @@ export const queryHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  get_input_state: async (args, { store }) => {
-    // Input state is transient and only meaningful during Play mode
+  get_input_state: async (_args, { store }) => {
     return {
       success: true,
       result: { message: 'Input state is only available during Play mode', mode: store.engineMode },
     };
   },
 
-  get_joint: async (args, { store }) => {
+  get_joint: async (_args, { store }) => {
     return { success: true, result: { joint: store.primaryJoint } };
   },
 
   get_terrain: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    const terrainData = store.terrainData[entityId];
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const terrainData = store.terrainData[p.data.entityId];
     if (!terrainData) return { success: false, error: 'Entity is not a terrain' };
     return { success: true, result: { terrainData } };
   },
 
-  list_assets: async (args, { store }) => {
+  list_assets: async (_args, { store }) => {
     const assets = Object.values(store.assetRegistry);
     return {
       success: true,
@@ -143,31 +145,32 @@ export const queryHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  get_particle: async (args, { store }) => {
+  get_particle: async (_args, { store }) => {
     const particle = store.primaryParticle;
     const enabled = store.particleEnabled;
     return { success: true, result: { particle, enabled } };
   },
 
-  get_export_status: async (args, { store }) => {
+  get_export_status: async (_args, { store }) => {
     return {
       success: true,
       result: { isExporting: store.isExporting, engineMode: store.engineMode },
     };
   },
 
-  get_quality_settings: async (args, { store }) => {
+  get_quality_settings: async (_args, { store }) => {
     return { success: true, result: { preset: store.qualityPreset } };
   },
 
-  get_animation_clip: async (args, { store }) => {
+  get_animation_clip: async (_args, { store }) => {
     const clipState = store.primaryAnimationClip;
     return { success: true, result: clipState || { message: 'No animation clip on selected entity' } };
   },
 
   get_sprite: async (args, { store }) => {
-    const entityId = args.entity_id as string;
-    const spriteData = store.sprites[entityId];
+    const p = parseArgs(z.object({ entity_id: zEntityId }), args);
+    if (p.error) return p.error;
+    const spriteData = store.sprites[p.data.entity_id];
     if (!spriteData) {
       return { success: false, error: 'No sprite data for this entity' };
     }
@@ -175,32 +178,37 @@ export const queryHandlers: Record<string, ToolHandler> = {
   },
 
   get_physics2d: async (args, { store }) => {
-    const data = store.physics2d[args.entityId as string];
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const data = store.physics2d[p.data.entityId];
     if (!data) return { success: false, error: 'No 2D physics data' };
     return { success: true, result: { data } };
   },
 
   get_tilemap: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const tilemapData = store.tilemaps[entityId];
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const tilemapData = store.tilemaps[p.data.entityId];
     if (!tilemapData) {
-      return { success: false, error: `No tilemap data for entity ${entityId}` };
+      return { success: false, error: `No tilemap data for entity ${p.data.entityId}` };
     }
     return { success: true, result: tilemapData };
   },
 
   get_skeleton2d: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const skeleton = store.skeletons2d[entityId];
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const skeleton = store.skeletons2d[p.data.entityId];
     if (!skeleton) {
-      return { success: false, error: `No skeleton data for entity ${entityId}` };
+      return { success: false, error: `No skeleton data for entity ${p.data.entityId}` };
     }
     return { success: true, result: skeleton };
   },
 
   get_game_components: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const components = store.allGameComponents[entityId] ?? [];
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const components = store.allGameComponents[p.data.entityId] ?? [];
     return { success: true, result: { components, count: components.length } };
   },
 
@@ -227,9 +235,10 @@ export const queryHandlers: Record<string, ToolHandler> = {
   },
 
   get_game_camera: async (args, { store }) => {
-    const { entityId } = args as { entityId: string };
-    const camera = store.allGameCameras[entityId];
-    const isActive = store.activeGameCameraId === entityId;
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const camera = store.allGameCameras[p.data.entityId];
+    const isActive = store.activeGameCameraId === p.data.entityId;
     return { success: true, result: { camera: camera || null, isActive } };
   },
 
@@ -244,7 +253,6 @@ export const queryHandlers: Record<string, ToolHandler> = {
   },
 
   get_token_balance: async (_args, _ctx) => {
-    // Client-side: return what we have in the user store
     const { useUserStore } = await import('@/stores/userStore');
     const balance = useUserStore.getState().tokenBalance;
     return { success: true, result: balance ?? { message: 'Balance not loaded' } };
@@ -256,15 +264,15 @@ export const queryHandlers: Record<string, ToolHandler> = {
   },
 
   get_sprite_generation_status: async (args, _ctx) => {
-    const jobId = args.jobId as string;
-    if (!jobId) return { success: false, error: 'Missing jobId' };
+    const p = parseArgs(z.object({ jobId: z.string().min(1) }), args);
+    if (p.error) return p.error;
 
     const { useGenerationStore } = await import('@/stores/generationStore');
     const jobs = useGenerationStore.getState().jobs;
-    const job = Object.values(jobs).find((j) => j.jobId === jobId);
+    const job = Object.values(jobs).find((j) => j.jobId === p.data.jobId);
 
     if (!job) {
-      return { success: false, error: `No generation job found with ID: ${jobId}` };
+      return { success: false, error: `No generation job found with ID: ${p.data.jobId}` };
     }
 
     return {

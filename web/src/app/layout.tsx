@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 
 // Prevent static prerendering — all pages require auth (ClerkProvider)
@@ -38,6 +39,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         {children}
+        <SpeedInsights />
       </body>
     </html>
   );

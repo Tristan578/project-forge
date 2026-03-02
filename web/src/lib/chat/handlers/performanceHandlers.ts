@@ -1,41 +1,55 @@
+import { z } from 'zod';
 import type { ToolHandler } from './types';
+import { zEntityId, parseArgs } from './types';
 import { usePerformanceStore } from '@/stores/performanceStore';
 
 export const performanceHandlers: Record<string, ToolHandler> = {
-  set_entity_lod: async (params, ctx) => {
-    const { entityId, lodDistances, autoGenerate, lodRatios } = params;
+  set_entity_lod: async (args, ctx) => {
+    const p = parseArgs(z.object({
+      entityId: zEntityId,
+      lodDistances: z.array(z.number()).optional(),
+      autoGenerate: z.boolean().optional(),
+      lodRatios: z.array(z.number()).optional(),
+    }), args);
+    if (p.error) return p.error;
     ctx.dispatchCommand('set_lod', {
-      entityId,
-      lodDistances: lodDistances ?? [20, 50, 100],
-      autoGenerate: autoGenerate ?? false,
-      lodRatios: lodRatios ?? [0.5, 0.25, 0.1],
+      entityId: p.data.entityId,
+      lodDistances: p.data.lodDistances ?? [20, 50, 100],
+      autoGenerate: p.data.autoGenerate ?? false,
+      lodRatios: p.data.lodRatios ?? [0.5, 0.25, 0.1],
     });
     return {
       success: true,
-      result: { message: `LOD configured for entity ${entityId}` },
+      result: { message: `LOD configured for entity ${p.data.entityId}` },
     };
   },
 
-  generate_lods: async (params, ctx) => {
-    const { entityId } = params;
-    ctx.dispatchCommand('generate_lods', { entityId });
+  generate_lods: async (args, ctx) => {
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    ctx.dispatchCommand('generate_lods', { entityId: p.data.entityId });
     return {
       success: true,
-      result: { message: `LOD generation triggered for entity ${entityId}` },
+      result: { message: `LOD generation triggered for entity ${p.data.entityId}` },
     };
   },
 
-  set_performance_budget: async (params, ctx) => {
-    const { maxTriangles, maxDrawCalls, targetFps, warningThreshold } = params;
+  set_performance_budget: async (args, ctx) => {
+    const p = parseArgs(z.object({
+      maxTriangles: z.number().optional(),
+      maxDrawCalls: z.number().optional(),
+      targetFps: z.number().optional(),
+      warningThreshold: z.number().optional(),
+    }), args);
+    if (p.error) return p.error;
 
     const budget = {
-      maxTriangles: (maxTriangles as number | undefined) ?? 500_000,
-      maxDrawCalls: (maxDrawCalls as number | undefined) ?? 200,
-      targetFps: (targetFps as number | undefined) ?? 60,
-      warningThreshold: (warningThreshold as number | undefined) ?? 0.8,
+      maxTriangles: p.data.maxTriangles ?? 500_000,
+      maxDrawCalls: p.data.maxDrawCalls ?? 200,
+      targetFps: p.data.targetFps ?? 60,
+      warningThreshold: p.data.warningThreshold ?? 0.8,
     };
 
-    // Update local performance store and dispatch to engine
     usePerformanceStore.getState().setBudget(budget);
     ctx.dispatchCommand('set_performance_budget', budget);
 
@@ -48,7 +62,7 @@ export const performanceHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  get_performance_stats: async (_params, ctx) => {
+  get_performance_stats: async (_args, ctx) => {
     ctx.dispatchCommand('get_performance_stats', {});
     const stats = usePerformanceStore.getState().stats;
 
@@ -61,7 +75,7 @@ export const performanceHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  optimize_scene: async (_params, ctx) => {
+  optimize_scene: async (_args, ctx) => {
     ctx.dispatchCommand('optimize_scene', {});
     return {
       success: true,
@@ -69,10 +83,13 @@ export const performanceHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  set_lod_distances: async (params, ctx) => {
-    const { distances } = params;
+  set_lod_distances: async (args, ctx) => {
+    const p = parseArgs(z.object({
+      distances: z.array(z.number()).optional(),
+    }), args);
+    if (p.error) return p.error;
     ctx.dispatchCommand('set_lod_distances', {
-      distances: distances ?? [20, 50, 100],
+      distances: p.data.distances ?? [20, 50, 100],
     });
     return {
       success: true,

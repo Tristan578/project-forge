@@ -3,7 +3,9 @@
  * scene transitions, templates, quality presets, and documentation tools.
  */
 
+import { z } from 'zod';
 import type { ToolHandler, ExecutionResult, InputBinding } from './types';
+import { parseArgs } from './types';
 
 export const sceneManagementHandlers: Record<string, ToolHandler> = {
   export_scene: async (_args, ctx): Promise<ExecutionResult> => {
@@ -12,9 +14,9 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   load_scene: async (args, ctx): Promise<ExecutionResult> => {
-    const json = args.json as string;
-    if (!json) return { success: false, error: 'Missing json parameter' };
-    ctx.store.loadScene(json);
+    const p = parseArgs(z.object({ json: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    ctx.store.loadScene(p.data.json);
     return { success: true, result: { message: 'Scene load triggered' } };
   },
 
@@ -31,26 +33,41 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   set_input_binding: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({
+      actionName: z.string().min(1),
+      actionType: z.enum(['digital', 'axis']).optional(),
+      sources: z.array(z.string()).optional(),
+      positiveKeys: z.array(z.string()).optional(),
+      negativeKeys: z.array(z.string()).optional(),
+      deadZone: z.number().optional(),
+    }), args);
+    if (p.error) return p.error;
     const binding: InputBinding = {
-      actionName: args.actionName as string,
-      actionType: (args.actionType as 'digital' | 'axis') ?? 'digital',
-      sources: (args.sources as string[]) ?? [],
-      positiveKeys: args.positiveKeys as string[] | undefined,
-      negativeKeys: args.negativeKeys as string[] | undefined,
-      deadZone: args.deadZone as number | undefined,
+      actionName: p.data.actionName,
+      actionType: p.data.actionType ?? 'digital',
+      sources: p.data.sources ?? [],
+      positiveKeys: p.data.positiveKeys,
+      negativeKeys: p.data.negativeKeys,
+      deadZone: p.data.deadZone,
     };
     ctx.store.setInputBinding(binding);
     return { success: true, result: { message: `Set binding: ${binding.actionName}` } };
   },
 
   remove_input_binding: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.removeInputBinding(args.actionName as string);
-    return { success: true, result: { message: `Removed binding: ${args.actionName}` } };
+    const p = parseArgs(z.object({ actionName: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    ctx.store.removeInputBinding(p.data.actionName);
+    return { success: true, result: { message: `Removed binding: ${p.data.actionName}` } };
   },
 
   set_input_preset: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.setInputPreset(args.preset as 'fps' | 'platformer' | 'topdown' | 'racing');
-    return { success: true, result: { message: `Applied input preset: ${args.preset}` } };
+    const p = parseArgs(z.object({
+      preset: z.enum(['fps', 'platformer', 'topdown', 'racing']),
+    }), args);
+    if (p.error) return p.error;
+    ctx.store.setInputPreset(p.data.preset);
+    return { success: true, result: { message: `Applied input preset: ${p.data.preset}` } };
   },
 
   get_input_bindings: async (_args, ctx): Promise<ExecutionResult> => {
@@ -65,7 +82,6 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   get_input_state: async (_args, ctx): Promise<ExecutionResult> => {
-    // Input state is transient and only meaningful during Play mode
     return {
       success: true,
       result: {
@@ -76,24 +92,26 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   create_scene: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ name: z.string().min(1) }), args);
+    if (p.error) return p.error;
     const { createScene, loadProjectScenes, saveProjectScenes } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes();
-    const result = createScene(project, args.name as string);
+    const result = createScene(project, p.data.name);
     saveProjectScenes(result.project);
     ctx.store.setScenes(
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
     );
-    return { success: true, result: { sceneId: result.sceneId, message: `Created scene "${args.name}"` } };
+    return { success: true, result: { sceneId: result.sceneId, message: `Created scene "${p.data.name}"` } };
   },
 
   switch_scene: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
+    if (p.error) return p.error;
     const { switchScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes();
-    const sceneIdInput = args.sceneId as string;
-    // Try by ID first, then by name
-    let targetId = sceneIdInput;
-    const byName = getSceneByName(project, sceneIdInput);
+    let targetId = p.data.sceneId;
+    const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
     const result = switchScene(project, targetId);
@@ -104,7 +122,6 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
       result.project.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       result.project.activeSceneId
     );
-    // Load the scene data into the engine
     if (result.sceneToLoad) {
       ctx.store.loadScene(JSON.stringify(result.sceneToLoad));
     } else {
@@ -114,14 +131,15 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   duplicate_scene: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ sceneId: z.string().min(1), name: z.string().optional() }), args);
+    if (p.error) return p.error;
     const { duplicateScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes();
-    const sceneIdInput = args.sceneId as string;
-    let targetId = sceneIdInput;
-    const byName = getSceneByName(project, sceneIdInput);
+    let targetId = p.data.sceneId;
+    const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
-    const result = duplicateScene(project, targetId, args.name as string | undefined);
+    const result = duplicateScene(project, targetId, p.data.name);
     if ('error' in result) return { success: false, error: result.error };
 
     saveProjectScenes(result.project);
@@ -133,11 +151,12 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   delete_scene: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
+    if (p.error) return p.error;
     const { deleteScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes();
-    const sceneIdInput = args.sceneId as string;
-    let targetId = sceneIdInput;
-    const byName = getSceneByName(project, sceneIdInput);
+    let targetId = p.data.sceneId;
+    const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
     const result = deleteScene(project, targetId);
@@ -152,28 +171,30 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   rename_scene: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ sceneId: z.string().min(1), name: z.string().min(1) }), args);
+    if (p.error) return p.error;
     const { renameScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes();
-    const sceneIdInput = args.sceneId as string;
-    let targetId = sceneIdInput;
-    const byName = getSceneByName(project, sceneIdInput);
+    let targetId = p.data.sceneId;
+    const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
-    const updated = renameScene(project, targetId, args.name as string);
+    const updated = renameScene(project, targetId, p.data.name);
     saveProjectScenes(updated);
     ctx.store.setScenes(
       updated.scenes.map((s) => ({ id: s.id, name: s.name, isStartScene: s.isStartScene })),
       updated.activeSceneId
     );
-    return { success: true, result: { message: `Renamed scene to "${args.name}"` } };
+    return { success: true, result: { message: `Renamed scene to "${p.data.name}"` } };
   },
 
   set_start_scene: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ sceneId: z.string().min(1) }), args);
+    if (p.error) return p.error;
     const { setStartScene, loadProjectScenes, saveProjectScenes, getSceneByName } = await import('@/lib/scenes/sceneManager');
     const project = loadProjectScenes();
-    const sceneIdInput = args.sceneId as string;
-    let targetId = sceneIdInput;
-    const byName = getSceneByName(project, sceneIdInput);
+    let targetId = p.data.sceneId;
+    const byName = getSceneByName(project, p.data.sceneId);
     if (byName) targetId = byName.id;
 
     const updated = setStartScene(project, targetId);
@@ -203,51 +224,54 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   load_scene_with_transition: async (args, ctx): Promise<ExecutionResult> => {
-    const { sceneName, transitionType, duration, color, direction } = args as {
-      sceneName: string;
-      transitionType?: string;
-      duration?: number;
-      color?: string;
-      direction?: string;
-    };
-    await ctx.store.startSceneTransition(sceneName, {
-      type: (transitionType as 'fade' | 'wipe' | 'instant') || 'fade',
-      duration: duration || 500,
-      color: color || '#000000',
-      direction: (direction as 'left' | 'right' | 'up' | 'down') || 'left',
+    const p = parseArgs(z.object({
+      sceneName: z.string().min(1),
+      transitionType: z.enum(['fade', 'wipe', 'instant']).optional(),
+      duration: z.number().optional(),
+      color: z.string().optional(),
+      direction: z.enum(['left', 'right', 'up', 'down']).optional(),
+    }), args);
+    if (p.error) return p.error;
+    await ctx.store.startSceneTransition(p.data.sceneName, {
+      type: p.data.transitionType || 'fade',
+      duration: p.data.duration || 500,
+      color: p.data.color || '#000000',
+      direction: p.data.direction || 'left',
     });
     return {
       success: true,
-      result: { message: `Loaded scene "${sceneName}" with ${transitionType || 'fade'} transition` },
+      result: { message: `Loaded scene "${p.data.sceneName}" with ${p.data.transitionType || 'fade'} transition` },
     };
   },
 
   set_default_transition: async (args, ctx): Promise<ExecutionResult> => {
-    const { transitionType, duration, color, direction, easing } = args as {
-      transitionType?: string;
-      duration?: number;
-      color?: string;
-      direction?: string;
-      easing?: string;
-    };
+    const p = parseArgs(z.object({
+      transitionType: z.enum(['fade', 'wipe', 'instant']).optional(),
+      duration: z.number().optional(),
+      color: z.string().optional(),
+      direction: z.enum(['left', 'right', 'up', 'down']).optional(),
+      easing: z.enum(['linear', 'ease-in', 'ease-out', 'ease-in-out']).optional(),
+    }), args);
+    if (p.error) return p.error;
     ctx.store.setDefaultTransition({
-      ...(transitionType ? { type: transitionType as 'fade' | 'wipe' | 'instant' } : {}),
-      ...(duration !== undefined ? { duration } : {}),
-      ...(color ? { color } : {}),
-      ...(direction ? { direction: direction as 'left' | 'right' | 'up' | 'down' } : {}),
-      ...(easing ? { easing: easing as 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out' } : {}),
+      ...(p.data.transitionType ? { type: p.data.transitionType } : {}),
+      ...(p.data.duration !== undefined ? { duration: p.data.duration } : {}),
+      ...(p.data.color ? { color: p.data.color } : {}),
+      ...(p.data.direction ? { direction: p.data.direction } : {}),
+      ...(p.data.easing ? { easing: p.data.easing } : {}),
     });
     return {
       success: true,
-      result: { message: `Default transition set to ${transitionType || 'updated'}` },
+      result: { message: `Default transition set to ${p.data.transitionType || 'updated'}` },
     };
   },
 
   list_templates: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ category: z.string().optional() }), args);
+    if (p.error) return p.error;
     const { TEMPLATE_REGISTRY } = await import('@/data/templates');
-    const category = args.category as string | undefined;
-    const templates = category
-      ? TEMPLATE_REGISTRY.filter((t) => t.category === category)
+    const templates = p.data.category
+      ? TEMPLATE_REGISTRY.filter((t) => t.category === p.data.category)
       : TEMPLATE_REGISTRY;
     return {
       success: true,
@@ -264,24 +288,26 @@ export const sceneManagementHandlers: Record<string, ToolHandler> = {
   },
 
   load_template: async (args, ctx): Promise<ExecutionResult> => {
-    const templateId = args.templateId as string;
-    if (!templateId) return { success: false, error: 'Missing templateId' };
-    await ctx.store.loadTemplate(templateId);
-    return { success: true, result: { message: `Loaded template: ${templateId}` } };
+    const p = parseArgs(z.object({ templateId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    await ctx.store.loadTemplate(p.data.templateId);
+    return { success: true, result: { message: `Loaded template: ${p.data.templateId}` } };
   },
 
   get_template_info: async (args, _ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ templateId: z.string().min(1) }), args);
+    if (p.error) return p.error;
     const { getTemplateInfo } = await import('@/data/templates');
-    const info = getTemplateInfo(args.templateId as string);
-    if (!info) return { success: false, error: `Template not found: ${args.templateId}` };
+    const info = getTemplateInfo(p.data.templateId);
+    if (!info) return { success: false, error: `Template not found: ${p.data.templateId}` };
     return { success: true, result: info };
   },
 
   set_quality_preset: async (args, ctx): Promise<ExecutionResult> => {
-    const preset = args.preset as string;
-    if (!preset) return { success: false, error: 'preset is required' };
-    ctx.store.setQualityPreset(preset as import('@/stores/editorStore').QualityPreset);
-    return { success: true, result: `Quality preset set to ${preset}` };
+    const p = parseArgs(z.object({ preset: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    ctx.store.setQualityPreset(p.data.preset as import('@/stores/editorStore').QualityPreset);
+    return { success: true, result: `Quality preset set to ${p.data.preset}` };
   },
 
   get_quality_settings: async (_args, ctx): Promise<ExecutionResult> => {

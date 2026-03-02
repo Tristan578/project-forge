@@ -3,30 +3,36 @@
  * Includes adaptive music, audio snapshots, occlusion, and horizontal re-sequencing.
  */
 
+import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
+import { zEntityId, parseArgs } from './types';
 import { audioManager } from '@/lib/audio/audioManager';
+
+const zStem = z.object({
+  name: z.string(),
+  assetId: z.string(),
+  baseVolume: z.number().optional(),
+  intensityRange: z.tuple([z.number(), z.number()]).optional(),
+});
 
 export const audioHandlers: Record<string, ToolHandler> = {
   set_adaptive_music: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { trackId, stems, bus, initialIntensity } = args as {
-        trackId?: string;
-        stems: Array<{ name: string; assetId: string; baseVolume?: number; intensityRange?: [number, number] }>;
-        bus?: string;
-        initialIntensity?: number;
-      };
+      const p = parseArgs(z.object({
+        trackId: z.string().optional(),
+        stems: z.array(zStem).min(1),
+        bus: z.string().optional(),
+        initialIntensity: z.number().optional(),
+      }), args);
+      if (p.error) return p.error;
 
-      if (!stems || !Array.isArray(stems) || stems.length === 0) {
-        return { success: false, error: 'Missing required parameter: stems (array of { name, assetId })' };
-      }
-
-      const id = trackId ?? 'default';
-      audioManager.setAdaptiveMusic(id, stems, { bus, initialIntensity });
-      ctx.store.setAdaptiveMusicIntensity(initialIntensity ?? 0);
+      const id = p.data.trackId ?? 'default';
+      audioManager.setAdaptiveMusic(id, p.data.stems, { bus: p.data.bus, initialIntensity: p.data.initialIntensity });
+      ctx.store.setAdaptiveMusicIntensity(p.data.initialIntensity ?? 0);
 
       return {
         success: true,
-        result: `Set up adaptive music track "${id}" with ${stems.length} stems: ${stems.map(s => s.name).join(', ')}`,
+        result: `Set up adaptive music track "${id}" with ${p.data.stems.length} stems: ${p.data.stems.map(s => s.name).join(', ')}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set adaptive music' };
@@ -35,24 +41,21 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
   set_music_intensity: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { trackId, intensity, rampMs } = args as {
-        trackId?: string;
-        intensity: number;
-        rampMs?: number;
-      };
+      const p = parseArgs(z.object({
+        trackId: z.string().optional(),
+        intensity: z.number(),
+        rampMs: z.number().positive().optional(),
+      }), args);
+      if (p.error) return p.error;
 
-      if (intensity === undefined || intensity === null) {
-        return { success: false, error: 'Missing required parameter: intensity (0.0 to 1.0)' };
-      }
-
-      const id = trackId ?? 'default';
-      const clamped = Math.max(0, Math.min(1, intensity));
-      audioManager.setMusicIntensity(id, clamped, rampMs);
+      const id = p.data.trackId ?? 'default';
+      const clamped = Math.max(0, Math.min(1, p.data.intensity));
+      audioManager.setMusicIntensity(id, clamped, p.data.rampMs);
       ctx.store.setAdaptiveMusicIntensity(clamped);
 
       return {
         success: true,
-        result: `Set music intensity to ${clamped.toFixed(2)} for track "${id}"${rampMs ? ` (${rampMs}ms ramp)` : ''}`,
+        result: `Set music intensity to ${clamped.toFixed(2)} for track "${id}"${p.data.rampMs ? ` (${p.data.rampMs}ms ramp)` : ''}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set music intensity' };
@@ -61,20 +64,17 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
   transition_music_segment: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { segment, crossfadeDurationMs } = args as {
-        segment: string;
-        crossfadeDurationMs?: number;
-      };
+      const p = parseArgs(z.object({
+        segment: z.string().min(1),
+        crossfadeDurationMs: z.number().positive().optional(),
+      }), args);
+      if (p.error) return p.error;
 
-      if (!segment) {
-        return { success: false, error: 'Missing required parameter: segment' };
-      }
-
-      ctx.store.setCurrentMusicSegment(segment);
+      ctx.store.setCurrentMusicSegment(p.data.segment);
 
       return {
         success: true,
-        result: `Transitioned to music segment: ${segment}${crossfadeDurationMs ? ` (${crossfadeDurationMs}ms crossfade)` : ''}`,
+        result: `Transitioned to music segment: ${p.data.segment}${p.data.crossfadeDurationMs ? ` (${p.data.crossfadeDurationMs}ms crossfade)` : ''}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to transition music segment' };
@@ -83,11 +83,12 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
   create_audio_snapshot: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { name } = args as { name: string };
+      const p = parseArgs(z.object({ name: z.string().min(1) }), args);
+      if (p.error) return p.error;
 
       // Capture current audio state
       const snapshot = {
-        name,
+        name: p.data.name,
         buses: ctx.store.audioBuses.map(bus => ({
           name: bus.name,
           volume: audioManager.getBusVolume(bus.name),
@@ -104,7 +105,7 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
       return {
         success: true,
-        result: `Created audio snapshot: ${name}`,
+        result: `Created audio snapshot: ${p.data.name}`,
       };
     } catch (err) {
       return {
@@ -116,20 +117,24 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
   apply_audio_snapshot: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { name, crossfadeDurationMs } = args as { name: string; crossfadeDurationMs?: number };
+      const p = parseArgs(z.object({
+        name: z.string().min(1),
+        crossfadeDurationMs: z.number().positive().optional(),
+      }), args);
+      if (p.error) return p.error;
 
       // Load snapshot
       const snapshots = JSON.parse(localStorage.getItem('audioSnapshots') || '[]');
-      const snapshot = snapshots.find((s: { name: string }) => s.name === name);
+      const snapshot = snapshots.find((s: { name: string }) => s.name === p.data.name);
 
       if (!snapshot) {
         return {
           success: false,
-          error: `Audio snapshot not found: ${name}`,
+          error: `Audio snapshot not found: ${p.data.name}`,
         };
       }
 
-      const duration = crossfadeDurationMs ?? 1000;
+      const duration = p.data.crossfadeDurationMs ?? 1000;
       const durationSec = duration / 1000;
 
       // Apply bus volumes with crossfade
@@ -149,7 +154,7 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
       return {
         success: true,
-        result: `Applied audio snapshot: ${name} (${duration}ms crossfade)`,
+        result: `Applied audio snapshot: ${p.data.name} (${duration}ms crossfade)`,
       };
     } catch (err) {
       return {
@@ -161,17 +166,18 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
   set_audio_occlusion: async (args, _ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, enabled } = args as { entityId: string; enabled: boolean };
+      const p = parseArgs(z.object({
+        entityId: zEntityId,
+        enabled: z.boolean().optional(),
+      }), args);
+      if (p.error) return p.error;
 
-      if (!entityId) {
-        return { success: false, error: 'Missing required parameter: entityId' };
-      }
-
-      audioManager.setOcclusion(entityId, enabled ?? true);
+      const enabled = p.data.enabled ?? true;
+      audioManager.setOcclusion(p.data.entityId, enabled);
 
       return {
         success: true,
-        result: `Audio occlusion ${enabled ? 'enabled' : 'disabled'} for entity ${entityId}`,
+        result: `Audio occlusion ${enabled ? 'enabled' : 'disabled'} for entity ${p.data.entityId}`,
       };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set audio occlusion' };

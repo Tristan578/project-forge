@@ -2,7 +2,9 @@
  * Helper functions shared across tool call handlers.
  */
 
+import { z } from 'zod';
 import type { MaterialData, LightData, PhysicsData, SceneNode } from './types';
+import { zVec2, zVec3, zVec4 } from './types';
 
 // ===== Compound Action Types =====
 
@@ -21,6 +23,143 @@ export interface GameplayAnalysis {
   issues: string[];
   suggestions: string[];
 }
+
+// ===== Zod Schemas for Builder Functions =====
+
+const zPartialMaterial = z.object({
+  baseColor: zVec4.optional(),
+  metallic: z.number().optional(),
+  perceptualRoughness: z.number().optional(),
+  reflectance: z.number().optional(),
+  emissive: zVec4.optional(),
+  emissiveExposureWeight: z.number().optional(),
+  alphaMode: z.enum(['opaque', 'blend', 'mask']).optional(),
+  alphaCutoff: z.number().optional(),
+  doubleSided: z.boolean().optional(),
+  unlit: z.boolean().optional(),
+  uvOffset: zVec2.optional(),
+  uvScale: zVec2.optional(),
+  uvRotation: z.number().optional(),
+  parallaxDepthScale: z.number().optional(),
+  parallaxMappingMethod: z.enum(['occlusion', 'relief']).optional(),
+  maxParallaxLayerCount: z.number().optional(),
+  parallaxReliefMaxSteps: z.number().optional(),
+  clearcoat: z.number().optional(),
+  clearcoatPerceptualRoughness: z.number().optional(),
+  specularTransmission: z.number().optional(),
+  diffuseTransmission: z.number().optional(),
+  ior: z.number().optional(),
+  thickness: z.number().optional(),
+  attenuationDistance: z.number().nullable().optional(),
+  attenuationColor: zVec3.optional(),
+}).passthrough();
+
+const zPartialLight = z.object({
+  lightType: z.enum(['point', 'directional', 'spot']).optional(),
+  color: zVec3.optional(),
+  intensity: z.number().optional(),
+  shadowsEnabled: z.boolean().optional(),
+  shadowDepthBias: z.number().optional(),
+  shadowNormalBias: z.number().optional(),
+  range: z.number().optional(),
+  radius: z.number().optional(),
+  innerAngle: z.number().optional(),
+  outerAngle: z.number().optional(),
+}).passthrough();
+
+const zPartialPhysics = z.object({
+  bodyType: z.enum(['dynamic', 'fixed', 'kinematic_position', 'kinematic_velocity']).optional(),
+  colliderShape: z.enum(['cuboid', 'ball', 'cylinder', 'capsule', 'auto']).optional(),
+  restitution: z.number().optional(),
+  friction: z.number().optional(),
+  density: z.number().optional(),
+  gravityScale: z.number().optional(),
+  lockTranslationX: z.boolean().optional(),
+  lockTranslationY: z.boolean().optional(),
+  lockTranslationZ: z.boolean().optional(),
+  lockRotationX: z.boolean().optional(),
+  lockRotationY: z.boolean().optional(),
+  lockRotationZ: z.boolean().optional(),
+  isSensor: z.boolean().optional(),
+}).passthrough();
+
+// Per-case game component prop schemas
+const zCharacterControllerProps = z.object({
+  speed: z.number().optional(),
+  jumpHeight: z.number().optional(),
+  gravityScale: z.number().optional(),
+  canDoubleJump: z.boolean().optional(),
+}).passthrough();
+
+const zHealthProps = z.object({
+  maxHp: z.number().optional(),
+  currentHp: z.number().optional(),
+  invincibilitySecs: z.number().optional(),
+  respawnOnDeath: z.boolean().optional(),
+  respawnPoint: zVec3.optional(),
+}).passthrough();
+
+const zCollectibleProps = z.object({
+  value: z.number().optional(),
+  destroyOnCollect: z.boolean().optional(),
+  pickupSoundAsset: z.string().nullable().optional(),
+  rotateSpeed: z.number().optional(),
+}).passthrough();
+
+const zDamageZoneProps = z.object({
+  damagePerSecond: z.number().optional(),
+  oneShot: z.boolean().optional(),
+}).passthrough();
+
+const zCheckpointProps = z.object({
+  autoSave: z.boolean().optional(),
+}).passthrough();
+
+const zTeleporterProps = z.object({
+  targetPosition: zVec3.optional(),
+  cooldownSecs: z.number().optional(),
+}).passthrough();
+
+const zMovingPlatformProps = z.object({
+  speed: z.number().optional(),
+  waypoints: z.array(zVec3).optional(),
+  pauseDuration: z.number().optional(),
+  loopMode: z.enum(['pingPong', 'loop', 'once']).optional(),
+}).passthrough();
+
+const zTriggerZoneProps = z.object({
+  eventName: z.string().optional(),
+  oneShot: z.boolean().optional(),
+}).passthrough();
+
+const zSpawnerProps = z.object({
+  entityType: z.string().optional(),
+  intervalSecs: z.number().optional(),
+  maxCount: z.number().optional(),
+  spawnOffset: zVec3.optional(),
+  onTrigger: z.string().nullable().optional(),
+}).passthrough();
+
+const zFollowerProps = z.object({
+  targetEntityId: z.string().nullable().optional(),
+  speed: z.number().optional(),
+  stopDistance: z.number().optional(),
+  lookAtTarget: z.boolean().optional(),
+}).passthrough();
+
+const zProjectileProps = z.object({
+  speed: z.number().optional(),
+  damage: z.number().optional(),
+  lifetimeSecs: z.number().optional(),
+  gravity: z.boolean().optional(),
+  destroyOnHit: z.boolean().optional(),
+}).passthrough();
+
+const zWinConditionProps = z.object({
+  conditionType: z.string().optional(),
+  targetScore: z.number().nullable().optional(),
+  targetEntityId: z.string().nullable().optional(),
+}).passthrough();
 
 // ===== Builder Functions =====
 
@@ -54,32 +193,33 @@ export function buildCompoundResult(
  * Build full MaterialData from partial input with defaults.
  */
 export function buildMaterialFromPartial(partialMat: Record<string, unknown>): MaterialData {
+  const mat = zPartialMaterial.parse(partialMat);
   return {
-    baseColor: (partialMat.baseColor as [number, number, number, number]) ?? [1, 1, 1, 1],
-    metallic: (partialMat.metallic as number) ?? 0,
-    perceptualRoughness: (partialMat.perceptualRoughness as number) ?? 0.5,
-    reflectance: (partialMat.reflectance as number) ?? 0.5,
-    emissive: (partialMat.emissive as [number, number, number, number]) ?? [0, 0, 0, 1],
-    emissiveExposureWeight: (partialMat.emissiveExposureWeight as number) ?? 1,
-    alphaMode: (partialMat.alphaMode as 'opaque' | 'blend' | 'mask') ?? 'opaque',
-    alphaCutoff: (partialMat.alphaCutoff as number) ?? 0.5,
-    doubleSided: (partialMat.doubleSided as boolean) ?? false,
-    unlit: (partialMat.unlit as boolean) ?? false,
-    uvOffset: (partialMat.uvOffset as [number, number]) ?? [0, 0],
-    uvScale: (partialMat.uvScale as [number, number]) ?? [1, 1],
-    uvRotation: (partialMat.uvRotation as number) ?? 0,
-    parallaxDepthScale: (partialMat.parallaxDepthScale as number) ?? 0.1,
-    parallaxMappingMethod: (partialMat.parallaxMappingMethod as 'occlusion' | 'relief') ?? 'occlusion',
-    maxParallaxLayerCount: (partialMat.maxParallaxLayerCount as number) ?? 16,
-    parallaxReliefMaxSteps: (partialMat.parallaxReliefMaxSteps as number) ?? 5,
-    clearcoat: (partialMat.clearcoat as number) ?? 0,
-    clearcoatPerceptualRoughness: (partialMat.clearcoatPerceptualRoughness as number) ?? 0.5,
-    specularTransmission: (partialMat.specularTransmission as number) ?? 0,
-    diffuseTransmission: (partialMat.diffuseTransmission as number) ?? 0,
-    ior: (partialMat.ior as number) ?? 1.5,
-    thickness: (partialMat.thickness as number) ?? 0,
-    attenuationDistance: (partialMat.attenuationDistance as number | null) ?? null,
-    attenuationColor: (partialMat.attenuationColor as [number, number, number]) ?? [1, 1, 1],
+    baseColor: mat.baseColor ?? [1, 1, 1, 1],
+    metallic: mat.metallic ?? 0,
+    perceptualRoughness: mat.perceptualRoughness ?? 0.5,
+    reflectance: mat.reflectance ?? 0.5,
+    emissive: mat.emissive ?? [0, 0, 0, 1],
+    emissiveExposureWeight: mat.emissiveExposureWeight ?? 1,
+    alphaMode: mat.alphaMode ?? 'opaque',
+    alphaCutoff: mat.alphaCutoff ?? 0.5,
+    doubleSided: mat.doubleSided ?? false,
+    unlit: mat.unlit ?? false,
+    uvOffset: mat.uvOffset ?? [0, 0],
+    uvScale: mat.uvScale ?? [1, 1],
+    uvRotation: mat.uvRotation ?? 0,
+    parallaxDepthScale: mat.parallaxDepthScale ?? 0.1,
+    parallaxMappingMethod: mat.parallaxMappingMethod ?? 'occlusion',
+    maxParallaxLayerCount: mat.maxParallaxLayerCount ?? 16,
+    parallaxReliefMaxSteps: mat.parallaxReliefMaxSteps ?? 5,
+    clearcoat: mat.clearcoat ?? 0,
+    clearcoatPerceptualRoughness: mat.clearcoatPerceptualRoughness ?? 0.5,
+    specularTransmission: mat.specularTransmission ?? 0,
+    diffuseTransmission: mat.diffuseTransmission ?? 0,
+    ior: mat.ior ?? 1.5,
+    thickness: mat.thickness ?? 0,
+    attenuationDistance: mat.attenuationDistance ?? null,
+    attenuationColor: mat.attenuationColor ?? [1, 1, 1],
   };
 }
 
@@ -87,17 +227,18 @@ export function buildMaterialFromPartial(partialMat: Record<string, unknown>): M
  * Build full LightData from partial input with defaults.
  */
 export function buildLightFromPartial(partialLight: Record<string, unknown>): LightData {
+  const light = zPartialLight.parse(partialLight);
   return {
-    lightType: (partialLight.lightType as 'point' | 'directional' | 'spot') ?? 'point',
-    color: (partialLight.color as [number, number, number]) ?? [1, 1, 1],
-    intensity: (partialLight.intensity as number) ?? 800,
-    shadowsEnabled: (partialLight.shadowsEnabled as boolean) ?? false,
-    shadowDepthBias: (partialLight.shadowDepthBias as number) ?? 0.02,
-    shadowNormalBias: (partialLight.shadowNormalBias as number) ?? 1.8,
-    range: (partialLight.range as number) ?? 20,
-    radius: (partialLight.radius as number) ?? 0,
-    innerAngle: (partialLight.innerAngle as number) ?? 0.4,
-    outerAngle: (partialLight.outerAngle as number) ?? 0.8,
+    lightType: light.lightType ?? 'point',
+    color: light.color ?? [1, 1, 1],
+    intensity: light.intensity ?? 800,
+    shadowsEnabled: light.shadowsEnabled ?? false,
+    shadowDepthBias: light.shadowDepthBias ?? 0.02,
+    shadowNormalBias: light.shadowNormalBias ?? 1.8,
+    range: light.range ?? 20,
+    radius: light.radius ?? 0,
+    innerAngle: light.innerAngle ?? 0.4,
+    outerAngle: light.outerAngle ?? 0.8,
   };
 }
 
@@ -105,20 +246,21 @@ export function buildLightFromPartial(partialLight: Record<string, unknown>): Li
  * Build full PhysicsData from partial input with defaults.
  */
 export function buildPhysicsFromPartial(partialPhysics: Record<string, unknown>): PhysicsData {
+  const phys = zPartialPhysics.parse(partialPhysics);
   return {
-    bodyType: (partialPhysics.bodyType as 'dynamic' | 'fixed' | 'kinematic_position' | 'kinematic_velocity') ?? 'dynamic',
-    colliderShape: (partialPhysics.colliderShape as 'cuboid' | 'ball' | 'cylinder' | 'capsule' | 'auto') ?? 'auto',
-    restitution: (partialPhysics.restitution as number) ?? 0.3,
-    friction: (partialPhysics.friction as number) ?? 0.5,
-    density: (partialPhysics.density as number) ?? 1.0,
-    gravityScale: (partialPhysics.gravityScale as number) ?? 1.0,
-    lockTranslationX: (partialPhysics.lockTranslationX as boolean) ?? false,
-    lockTranslationY: (partialPhysics.lockTranslationY as boolean) ?? false,
-    lockTranslationZ: (partialPhysics.lockTranslationZ as boolean) ?? false,
-    lockRotationX: (partialPhysics.lockRotationX as boolean) ?? false,
-    lockRotationY: (partialPhysics.lockRotationY as boolean) ?? false,
-    lockRotationZ: (partialPhysics.lockRotationZ as boolean) ?? false,
-    isSensor: (partialPhysics.isSensor as boolean) ?? false,
+    bodyType: phys.bodyType ?? 'dynamic',
+    colliderShape: phys.colliderShape ?? 'auto',
+    restitution: phys.restitution ?? 0.3,
+    friction: phys.friction ?? 0.5,
+    density: phys.density ?? 1.0,
+    gravityScale: phys.gravityScale ?? 1.0,
+    lockTranslationX: phys.lockTranslationX ?? false,
+    lockTranslationY: phys.lockTranslationY ?? false,
+    lockTranslationZ: phys.lockTranslationZ ?? false,
+    lockRotationX: phys.lockRotationX ?? false,
+    lockRotationY: phys.lockRotationY ?? false,
+    lockRotationZ: phys.lockRotationZ ?? false,
+    isSensor: phys.isSensor ?? false,
   };
 }
 
@@ -130,119 +272,143 @@ export function buildGameComponentFromInput(
   props: Record<string, unknown>
 ): import('@/stores/editorStore').GameComponentData | null {
   switch (type) {
-    case 'character_controller':
+    case 'character_controller': {
+      const p = zCharacterControllerProps.parse(props);
       return {
         type: 'characterController',
         characterController: {
-          speed: (props.speed as number) ?? 5,
-          jumpHeight: (props.jumpHeight as number) ?? 8,
-          gravityScale: (props.gravityScale as number) ?? 1,
-          canDoubleJump: (props.canDoubleJump as boolean) ?? false,
+          speed: p.speed ?? 5,
+          jumpHeight: p.jumpHeight ?? 8,
+          gravityScale: p.gravityScale ?? 1,
+          canDoubleJump: p.canDoubleJump ?? false,
         },
       };
-    case 'health':
+    }
+    case 'health': {
+      const p = zHealthProps.parse(props);
       return {
         type: 'health',
         health: {
-          maxHp: (props.maxHp as number) ?? 100,
-          currentHp: (props.currentHp as number) ?? (props.maxHp as number) ?? 100,
-          invincibilitySecs: (props.invincibilitySecs as number) ?? 0.5,
-          respawnOnDeath: (props.respawnOnDeath as boolean) ?? true,
-          respawnPoint: (props.respawnPoint as [number, number, number]) ?? [0, 1, 0],
+          maxHp: p.maxHp ?? 100,
+          currentHp: p.currentHp ?? p.maxHp ?? 100,
+          invincibilitySecs: p.invincibilitySecs ?? 0.5,
+          respawnOnDeath: p.respawnOnDeath ?? true,
+          respawnPoint: p.respawnPoint ?? [0, 1, 0],
         },
       };
-    case 'collectible':
+    }
+    case 'collectible': {
+      const p = zCollectibleProps.parse(props);
       return {
         type: 'collectible',
         collectible: {
-          value: (props.value as number) ?? 1,
-          destroyOnCollect: (props.destroyOnCollect as boolean) ?? true,
-          pickupSoundAsset: (props.pickupSoundAsset as string | null) ?? null,
-          rotateSpeed: (props.rotateSpeed as number) ?? 90,
+          value: p.value ?? 1,
+          destroyOnCollect: p.destroyOnCollect ?? true,
+          pickupSoundAsset: p.pickupSoundAsset ?? null,
+          rotateSpeed: p.rotateSpeed ?? 90,
         },
       };
-    case 'damage_zone':
+    }
+    case 'damage_zone': {
+      const p = zDamageZoneProps.parse(props);
       return {
         type: 'damageZone',
         damageZone: {
-          damagePerSecond: (props.damagePerSecond as number) ?? 25,
-          oneShot: (props.oneShot as boolean) ?? false,
+          damagePerSecond: p.damagePerSecond ?? 25,
+          oneShot: p.oneShot ?? false,
         },
       };
-    case 'checkpoint':
+    }
+    case 'checkpoint': {
+      const p = zCheckpointProps.parse(props);
       return {
         type: 'checkpoint',
         checkpoint: {
-          autoSave: (props.autoSave as boolean) ?? true,
+          autoSave: p.autoSave ?? true,
         },
       };
-    case 'teleporter':
+    }
+    case 'teleporter': {
+      const p = zTeleporterProps.parse(props);
       return {
         type: 'teleporter',
         teleporter: {
-          targetPosition: (props.targetPosition as [number, number, number]) ?? [0, 1, 0],
-          cooldownSecs: (props.cooldownSecs as number) ?? 1,
+          targetPosition: p.targetPosition ?? [0, 1, 0],
+          cooldownSecs: p.cooldownSecs ?? 1,
         },
       };
-    case 'moving_platform':
+    }
+    case 'moving_platform': {
+      const p = zMovingPlatformProps.parse(props);
       return {
         type: 'movingPlatform',
         movingPlatform: {
-          speed: (props.speed as number) ?? 2,
-          waypoints: (props.waypoints as [number, number, number][]) ?? [[0, 0, 0], [0, 3, 0]],
-          pauseDuration: (props.pauseDuration as number) ?? 0.5,
-          loopMode: (props.loopMode as import('@/stores/editorStore').PlatformLoopMode) ?? 'pingPong',
+          speed: p.speed ?? 2,
+          waypoints: p.waypoints ?? [[0, 0, 0], [0, 3, 0]],
+          pauseDuration: p.pauseDuration ?? 0.5,
+          loopMode: p.loopMode ?? 'pingPong',
         },
       };
-    case 'trigger_zone':
+    }
+    case 'trigger_zone': {
+      const p = zTriggerZoneProps.parse(props);
       return {
         type: 'triggerZone',
         triggerZone: {
-          eventName: (props.eventName as string) ?? 'trigger',
-          oneShot: (props.oneShot as boolean) ?? false,
+          eventName: p.eventName ?? 'trigger',
+          oneShot: p.oneShot ?? false,
         },
       };
-    case 'spawner':
+    }
+    case 'spawner': {
+      const p = zSpawnerProps.parse(props);
       return {
         type: 'spawner',
         spawner: {
-          entityType: (props.entityType as string) ?? 'cube',
-          intervalSecs: (props.intervalSecs as number) ?? 3,
-          maxCount: (props.maxCount as number) ?? 5,
-          spawnOffset: (props.spawnOffset as [number, number, number]) ?? [0, 1, 0],
-          onTrigger: (props.onTrigger as string | null) ?? null,
+          entityType: p.entityType ?? 'cube',
+          intervalSecs: p.intervalSecs ?? 3,
+          maxCount: p.maxCount ?? 5,
+          spawnOffset: p.spawnOffset ?? [0, 1, 0],
+          onTrigger: p.onTrigger ?? null,
         },
       };
-    case 'follower':
+    }
+    case 'follower': {
+      const p = zFollowerProps.parse(props);
       return {
         type: 'follower',
         follower: {
-          targetEntityId: (props.targetEntityId as string | null) ?? null,
-          speed: (props.speed as number) ?? 3,
-          stopDistance: (props.stopDistance as number) ?? 1.5,
-          lookAtTarget: (props.lookAtTarget as boolean) ?? true,
+          targetEntityId: p.targetEntityId ?? null,
+          speed: p.speed ?? 3,
+          stopDistance: p.stopDistance ?? 1.5,
+          lookAtTarget: p.lookAtTarget ?? true,
         },
       };
-    case 'projectile':
+    }
+    case 'projectile': {
+      const p = zProjectileProps.parse(props);
       return {
         type: 'projectile',
         projectile: {
-          speed: (props.speed as number) ?? 15,
-          damage: (props.damage as number) ?? 10,
-          lifetimeSecs: (props.lifetimeSecs as number) ?? 5,
-          gravity: (props.gravity as boolean) ?? false,
-          destroyOnHit: (props.destroyOnHit as boolean) ?? true,
+          speed: p.speed ?? 15,
+          damage: p.damage ?? 10,
+          lifetimeSecs: p.lifetimeSecs ?? 5,
+          gravity: p.gravity ?? false,
+          destroyOnHit: p.destroyOnHit ?? true,
         },
       };
-    case 'win_condition':
+    }
+    case 'win_condition': {
+      const p = zWinConditionProps.parse(props);
       return {
         type: 'winCondition',
         winCondition: {
-          conditionType: (props.conditionType as import('@/stores/editorStore').WinConditionType) ?? 'score',
-          targetScore: (props.targetScore as number | null) ?? 10,
-          targetEntityId: (props.targetEntityId as string | null) ?? null,
+          conditionType: (p.conditionType ?? 'score') as 'score' | 'collectAll' | 'reachGoal',
+          targetScore: p.targetScore ?? 10,
+          targetEntityId: p.targetEntityId ?? null,
         },
       };
+    }
 
     default:
       return null;

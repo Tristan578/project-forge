@@ -19,7 +19,7 @@ export interface TransformSlice {
   updateTransform: (
     entityId: string,
     field: 'position' | 'rotation' | 'scale',
-    value: [number, number, number]
+    value: [number, number, number] | { x: number; y: number; z: number }
   ) => void;
   setSnapSettings: (settings: Partial<SnapSettings>) => void;
   toggleGrid: () => void;
@@ -74,12 +74,17 @@ export const createTransformSlice: StateCreator<
   updateTransform: (entityId, field, value) => {
     const state = get();
 
+    // Normalize {x,y,z} objects to [x,y,z] tuples for TransformData compatibility
+    const normalized: [number, number, number] = Array.isArray(value)
+      ? value
+      : [value.x, value.y, value.z];
+
     // Optimistically update local state
     if (state.primaryTransform && state.primaryTransform.entityId === entityId) {
       set({
         primaryTransform: {
           ...state.primaryTransform,
-          [field]: value,
+          [field]: normalized,
         },
       });
     }
@@ -88,7 +93,7 @@ export const createTransformSlice: StateCreator<
     if (dispatchCommand) {
       dispatchCommand('update_transform', {
         entityId,
-        [field]: value,
+        [field]: normalized,
       });
     }
   },

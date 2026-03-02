@@ -3,12 +3,14 @@
  * reverb zones, and ducking rules. Migrated from executor.legacy.ts.
  */
 
+import { z } from 'zod';
 import type { ToolHandler } from './types';
+import { zEntityId, parseArgs } from './types';
 
 export const audioLegacyHandlers: Record<string, ToolHandler> = {
   set_audio: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
     const audioData: Record<string, unknown> = {};
     if (args.assetId !== undefined) audioData.assetId = args.assetId;
     if (args.volume !== undefined) audioData.volume = args.volume;
@@ -19,70 +21,72 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
     if (args.refDistance !== undefined) audioData.refDistance = args.refDistance;
     if (args.rolloffFactor !== undefined) audioData.rolloffFactor = args.rolloffFactor;
     if (args.autoplay !== undefined) audioData.autoplay = args.autoplay;
-    store.setAudio(entityId, audioData);
-    return { success: true, result: { message: `Audio set on ${entityId}` } };
+    store.setAudio(p.data.entityId, audioData);
+    return { success: true, result: { message: `Audio set on ${p.data.entityId}` } };
   },
 
   remove_audio: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    store.removeAudio(entityId);
-    return { success: true, result: { message: `Audio removed from ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.removeAudio(p.data.entityId);
+    return { success: true, result: { message: `Audio removed from ${p.data.entityId}` } };
   },
 
   play_audio: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    store.playAudio(entityId);
-    return { success: true, result: { message: `Playing audio on ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.playAudio(p.data.entityId);
+    return { success: true, result: { message: `Playing audio on ${p.data.entityId}` } };
   },
 
   stop_audio: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    store.stopAudio(entityId);
-    return { success: true, result: { message: `Stopped audio on ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.stopAudio(p.data.entityId);
+    return { success: true, result: { message: `Stopped audio on ${p.data.entityId}` } };
   },
 
   pause_audio: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    store.pauseAudio(entityId);
-    return { success: true, result: { message: `Paused audio on ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.pauseAudio(p.data.entityId);
+    return { success: true, result: { message: `Paused audio on ${p.data.entityId}` } };
   },
 
   get_audio: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
     const audio = store.primaryAudio;
     if (!audio) return { success: true, result: { hasAudio: false } };
     return { success: true, result: { hasAudio: true, ...audio } };
   },
 
   update_audio_bus: async (args, { store }) => {
-    const busName = args.busName as string;
-    if (!busName) return { success: false, error: 'Missing busName' };
+    const p = parseArgs(z.object({ busName: z.string().min(1) }), args);
+    if (p.error) return p.error;
     const update: Record<string, unknown> = {};
     if (args.volume !== undefined) update.volume = args.volume;
     if (args.muted !== undefined) update.muted = args.muted;
     if (args.soloed !== undefined) update.soloed = args.soloed;
-    store.updateAudioBus(busName, update);
-    return { success: true, result: { message: `Updated bus: ${busName}` } };
+    store.updateAudioBus(p.data.busName, update);
+    return { success: true, result: { message: `Updated bus: ${p.data.busName}` } };
   },
 
   create_audio_bus: async (args, { store }) => {
-    const name = args.name as string;
-    if (!name) return { success: false, error: 'Missing name' };
-    const volume = (args.volume as number) ?? 1.0;
-    store.createAudioBus(name, volume);
-    return { success: true, result: { message: `Created bus: ${name}` } };
+    const p = parseArgs(
+      z.object({ name: z.string().min(1), volume: z.number().optional() }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.createAudioBus(p.data.name, p.data.volume ?? 1.0);
+    return { success: true, result: { message: `Created bus: ${p.data.name}` } };
   },
 
   delete_audio_bus: async (args, { store }) => {
-    const busName = args.busName as string;
-    if (!busName) return { success: false, error: 'Missing busName' };
-    store.deleteAudioBus(busName);
-    return { success: true, result: { message: `Deleted bus: ${busName}` } };
+    const p = parseArgs(z.object({ busName: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    store.deleteAudioBus(p.data.busName);
+    return { success: true, result: { message: `Deleted bus: ${p.data.busName}` } };
   },
 
   get_audio_buses: async (_args, { store }) => {
@@ -93,94 +97,150 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
   },
 
   set_bus_effects: async (args, { store }) => {
-    const busName = args.busName as string;
-    const effects = args.effects as Array<{ effectType: string; params: Record<string, number>; enabled: boolean }>;
-    if (!busName || !effects) return { success: false, error: 'Missing busName or effects' };
-    store.setBusEffects(busName, effects);
-    return { success: true, result: { message: `Set effects on bus: ${busName}`, effectCount: effects.length } };
+    const p = parseArgs(
+      z.object({
+        busName: z.string().min(1),
+        effects: z.array(
+          z.object({
+            effectType: z.string(),
+            params: z.record(z.string(), z.number()),
+            enabled: z.boolean(),
+          }),
+        ),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.setBusEffects(p.data.busName, p.data.effects);
+    return {
+      success: true,
+      result: { message: `Set effects on bus: ${p.data.busName}`, effectCount: p.data.effects.length },
+    };
   },
 
   audio_crossfade: async (args, { store }) => {
-    const fromEntityId = args.fromEntityId as string;
-    const toEntityId = args.toEntityId as string;
-    const durationMs = args.durationMs as number;
-    if (!fromEntityId || !toEntityId) return { success: false, error: 'Missing fromEntityId or toEntityId' };
-    store.crossfadeAudio(fromEntityId, toEntityId, durationMs ?? 1000);
-    return { success: true, result: { message: `Crossfading from ${fromEntityId} to ${toEntityId}` } };
+    const p = parseArgs(
+      z.object({
+        fromEntityId: zEntityId,
+        toEntityId: zEntityId,
+        durationMs: z.number().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.crossfadeAudio(p.data.fromEntityId, p.data.toEntityId, p.data.durationMs ?? 1000);
+    return {
+      success: true,
+      result: { message: `Crossfading from ${p.data.fromEntityId} to ${p.data.toEntityId}` },
+    };
   },
 
   audio_fade_in: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const durationMs = args.durationMs as number;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    store.fadeInAudio(entityId, durationMs ?? 1000);
-    return { success: true, result: { message: `Fading in audio on ${entityId}` } };
+    const p = parseArgs(
+      z.object({ entityId: zEntityId, durationMs: z.number().optional() }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.fadeInAudio(p.data.entityId, p.data.durationMs ?? 1000);
+    return { success: true, result: { message: `Fading in audio on ${p.data.entityId}` } };
   },
 
   audio_fade_out: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const durationMs = args.durationMs as number;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    store.fadeOutAudio(entityId, durationMs ?? 1000);
-    return { success: true, result: { message: `Fading out audio on ${entityId}` } };
+    const p = parseArgs(
+      z.object({ entityId: zEntityId, durationMs: z.number().optional() }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.fadeOutAudio(p.data.entityId, p.data.durationMs ?? 1000);
+    return { success: true, result: { message: `Fading out audio on ${p.data.entityId}` } };
   },
 
   audio_play_one_shot: async (args, { store }) => {
-    const assetId = args.assetId as string;
-    if (!assetId) return { success: false, error: 'Missing assetId' };
-    store.playOneShotAudio(assetId, {
-      position: args.position as [number, number, number] | undefined,
-      bus: args.bus as string | undefined,
-      volume: args.volume as number | undefined,
-      pitch: args.pitch as number | undefined,
+    const p = parseArgs(
+      z.object({
+        assetId: z.string().min(1),
+        position: z.tuple([z.number(), z.number(), z.number()]).optional(),
+        bus: z.string().optional(),
+        volume: z.number().optional(),
+        pitch: z.number().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.playOneShotAudio(p.data.assetId, {
+      position: p.data.position,
+      bus: p.data.bus,
+      volume: p.data.volume,
+      pitch: p.data.pitch,
     });
-    return { success: true, result: { message: `Playing one-shot: ${assetId}` } };
+    return { success: true, result: { message: `Playing one-shot: ${p.data.assetId}` } };
   },
 
   audio_add_layer: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const slotName = args.slotName as string;
-    const assetId = args.assetId as string;
-    const missingParams: string[] = [];
-    if (!entityId) missingParams.push('entityId');
-    if (!slotName) missingParams.push('slotName');
-    if (!assetId) missingParams.push('assetId');
-    if (missingParams.length > 0) {
-      return { success: false, error: `Missing required params: ${missingParams.join(', ')}` };
-    }
-    store.addAudioLayer(entityId, slotName, assetId, {
-      volume: args.volume as number | undefined,
-      loop: args.loop as boolean | undefined,
-      bus: args.bus as string | undefined,
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        slotName: z.string().min(1),
+        assetId: z.string().min(1),
+        volume: z.number().optional(),
+        loop: z.boolean().optional(),
+        bus: z.string().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.addAudioLayer(p.data.entityId, p.data.slotName, p.data.assetId, {
+      volume: p.data.volume,
+      loop: p.data.loop,
+      bus: p.data.bus,
     });
-    return { success: true, result: { message: `Added audio layer "${slotName}" to ${entityId}` } };
+    return {
+      success: true,
+      result: { message: `Added audio layer "${p.data.slotName}" to ${p.data.entityId}` },
+    };
   },
 
   audio_remove_layer: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const slotName = args.slotName as string;
-    if (!entityId || !slotName) return { success: false, error: 'Missing entityId or slotName' };
-    store.removeAudioLayer(entityId, slotName);
-    return { success: true, result: { message: `Removed audio layer "${slotName}" from ${entityId}` } };
+    const p = parseArgs(
+      z.object({ entityId: zEntityId, slotName: z.string().min(1) }),
+      args,
+    );
+    if (p.error) return p.error;
+    store.removeAudioLayer(p.data.entityId, p.data.slotName);
+    return {
+      success: true,
+      result: { message: `Removed audio layer "${p.data.slotName}" from ${p.data.entityId}` },
+    };
   },
 
   set_ducking_rule: async (args, { store }) => {
-    const triggerBus = args.triggerBus as string;
-    const targetBus = args.targetBus as string;
-    if (!triggerBus || !targetBus) return { success: false, error: 'Missing triggerBus or targetBus' };
+    const p = parseArgs(
+      z.object({
+        triggerBus: z.string().min(1),
+        targetBus: z.string().min(1),
+        duckLevel: z.number().optional(),
+        attackMs: z.number().optional(),
+        releaseMs: z.number().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
     store.setDuckingRule({
-      triggerBus,
-      targetBus,
-      duckLevel: args.duckLevel as number | undefined,
-      attackMs: args.attackMs as number | undefined,
-      releaseMs: args.releaseMs as number | undefined,
+      triggerBus: p.data.triggerBus,
+      targetBus: p.data.targetBus,
+      duckLevel: p.data.duckLevel,
+      attackMs: p.data.attackMs,
+      releaseMs: p.data.releaseMs,
     });
-    return { success: true, result: { message: `Ducking rule set: ${triggerBus} -> ${targetBus}` } };
+    return {
+      success: true,
+      result: { message: `Ducking rule set: ${p.data.triggerBus} -> ${p.data.targetBus}` },
+    };
   },
 
   set_reverb_zone: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
 
     const shape = args.shape as string | undefined;
     const sizeX = args.sizeX as number | undefined;
@@ -193,12 +253,12 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
     const preDelay = args.preDelay as number | undefined;
     const priority = args.priority as number | undefined;
 
-    const current = store.reverbZones[entityId];
+    const current = store.reverbZones[p.data.entityId];
     const shapeData = shape === 'sphere'
       ? { type: 'sphere' as const, radius: radius ?? 5 }
       : { type: 'box' as const, size: [sizeX ?? 10, sizeY ?? 5, sizeZ ?? 10] as [number, number, number] };
 
-    store.updateReverbZone(entityId, {
+    store.updateReverbZone(p.data.entityId, {
       shape: shapeData,
       preset: reverbType ?? current?.preset ?? 'hall',
       wetMix: wetMix ?? current?.wetMix ?? 0.5,
@@ -207,32 +267,39 @@ export const audioLegacyHandlers: Record<string, ToolHandler> = {
       blendRadius: current?.blendRadius ?? 2.0,
       priority: priority ?? current?.priority ?? 0,
     });
-    return { success: true, result: { message: `Reverb zone set on ${entityId}` } };
+    return { success: true, result: { message: `Reverb zone set on ${p.data.entityId}` } };
   },
 
   remove_reverb_zone: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    store.removeReverbZone(entityId);
-    return { success: true, result: { message: `Reverb zone removed from ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.removeReverbZone(p.data.entityId);
+    return { success: true, result: { message: `Reverb zone removed from ${p.data.entityId}` } };
   },
 
   set_music_stems: async (args, _ctx) => {
     try {
-      const { trackId, stems } = args as {
-        trackId?: string;
-        stems: Array<{ name: string; assetId: string; baseVolume?: number; intensityRange?: [number, number] }>;
-      };
-
-      if (!stems || !Array.isArray(stems) || stems.length === 0) {
-        return { success: false, error: 'Missing required parameter: stems' };
-      }
+      const p = parseArgs(
+        z.object({
+          trackId: z.string().optional(),
+          stems: z.array(
+            z.object({
+              name: z.string(),
+              assetId: z.string(),
+              baseVolume: z.number().optional(),
+              intensityRange: z.tuple([z.number(), z.number()]).optional(),
+            }),
+          ).min(1),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
 
       const { audioManager } = await import('@/lib/audio/audioManager');
-      const id = trackId ?? 'default';
-      audioManager.setAdaptiveMusic(id, stems);
+      const id = p.data.trackId ?? 'default';
+      audioManager.setAdaptiveMusic(id, p.data.stems);
 
-      return { success: true, result: { message: `Set ${stems.length} music stems for track "${id}"` } };
+      return { success: true, result: { message: `Set ${p.data.stems.length} music stems for track "${id}"` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set music stems' };
     }
