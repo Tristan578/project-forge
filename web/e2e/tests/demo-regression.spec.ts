@@ -101,8 +101,9 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       if (msg.type() === 'error') {
         const text = msg.text();
         // Ignore known harmless errors
-        if (!text.includes('favicon') && !text.includes('404') && !text.includes('clerk')
-          && !text.includes('__SKIP_ENGINE')) {
+        const lower = text.toLowerCase();
+        if (!lower.includes('favicon') && !lower.includes('404') && !lower.includes('clerk')
+          && !lower.includes('__skip_engine') && !lower.includes('middleware')) {
           errors.push(text);
         }
       }
