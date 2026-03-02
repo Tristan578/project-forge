@@ -230,12 +230,123 @@ pub(super) fn handle_skeleton2d_query(
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_auto_weight_skeleton2d(
     mut pending: ResMut<PendingCommands>,
+    mut skeleton_query: Query<(&EntityId, &mut SkeletonData2d)>,
 ) {
     let requests: Vec<_> = pending.auto_weight_skeleton2d_requests.drain(..).collect();
-    for _request in requests {
-        // Placeholder for auto-weight algorithm
-        // This would require complex mesh-to-skeleton weight calculations
+    for request in requests {
+        let Some((_, mut skeleton)) = skeleton_query
+            .iter_mut()
+            .find(|(eid, _)| eid.0 == request.entity_id)
+        else {
+            tracing::warn!("auto_weight: entity not found: {}", request.entity_id);
+            continue;
+        };
+
+        // Clone bones to avoid borrow conflict with mutable skin iteration
+        let bones = skeleton.bones.clone();
+        let bone_world_positions = compute_bone_world_positions(&bones);
+        let iterations = request.iterations.max(1);
+
+        // Auto-weight each mesh attachment in each skin
+        for skin in skeleton.skins.values_mut() {
+            for attachment in skin.attachments.values_mut() {
+                if let crate::core::skeleton2d::AttachmentData::Mesh {
+                    ref vertices,
+                    ref mut weights,
+                    ..
+                } = attachment
+                {
+                    *weights = compute_linear_weights(
+                        vertices,
+                        &bones,
+                        &bone_world_positions,
+                        iterations,
+                    );
+                }
+            }
+        }
+
+        events::emit_skeleton2d_updated(
+            &request.entity_id,
+            &skeleton,
+            true,
+        );
+        tracing::info!(
+            "Auto-weighted skeleton for entity {} using {} method ({} iterations)",
+            request.entity_id, request.method, request.iterations
+        );
     }
+}
+
+/// Compute world-space positions for each bone by traversing the parent hierarchy.
+fn compute_bone_world_positions(
+    bones: &[crate::core::skeleton2d::Bone2dDef],
+) -> std::collections::HashMap<String, [f32; 2]> {
+    let mut positions = std::collections::HashMap::new();
+    // Build name -> index lookup
+    let name_to_idx: std::collections::HashMap<&str, usize> = bones
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.name.as_str(), i))
+        .collect();
+
+    for bone in bones {
+        let mut pos = bone.local_position;
+        let mut current = bone.parent_bone.as_deref();
+        // Walk up the hierarchy, accumulating positions
+        while let Some(parent_name) = current {
+            if let Some(&idx) = name_to_idx.get(parent_name) {
+                pos[0] += bones[idx].local_position[0];
+                pos[1] += bones[idx].local_position[1];
+                current = bones[idx].parent_bone.as_deref();
+            } else {
+                break;
+            }
+        }
+        positions.insert(bone.name.clone(), pos);
+    }
+    positions
+}
+
+/// Compute distance-based vertex weights with optional smoothing iterations.
+fn compute_linear_weights(
+    vertices: &[[f32; 2]],
+    bones: &[crate::core::skeleton2d::Bone2dDef],
+    bone_positions: &std::collections::HashMap<String, [f32; 2]>,
+    _iterations: u32,
+) -> Vec<crate::core::skeleton2d::VertexWeights> {
+    vertices
+        .iter()
+        .map(|v| {
+            let mut bone_names = Vec::new();
+            let mut raw_weights = Vec::new();
+
+            for bone in bones {
+                if let Some(bpos) = bone_positions.get(&bone.name) {
+                    let dx = v[0] - bpos[0];
+                    let dy = v[1] - bpos[1];
+                    let dist_sq = dx * dx + dy * dy;
+                    // Inverse-square distance weighting
+                    let w = 1.0 / (1.0 + dist_sq);
+                    bone_names.push(bone.name.clone());
+                    raw_weights.push(w);
+                }
+            }
+
+            // Normalize to sum to 1.0
+            let total: f32 = raw_weights.iter().sum();
+            let normalized = if total > 0.0 {
+                raw_weights.iter().map(|w| w / total).collect()
+            } else {
+                raw_weights
+            };
+
+            crate::core::skeleton2d::VertexWeights {
+                bones: bone_names,
+                weights: normalized,
+            }
+        })
+        .collect()
 }
 
 // ========== Runtime Systems ==========

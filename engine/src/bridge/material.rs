@@ -93,6 +93,7 @@ pub(super) fn apply_set_skybox_requests(
     mut settings: ResMut<EnvironmentSettings>,
     mut skybox_handles: ResMut<SkyboxHandles>,
     mut images: ResMut<Assets<Image>>,
+    texture_handles: Res<crate::core::asset_manager::TextureHandleMap>,
     camera_query: Query<Entity, With<camera::EditorCamera>>,
     mut commands: Commands,
 ) {
@@ -136,8 +137,20 @@ pub(super) fn apply_set_skybox_requests(
         } else if let Some(asset_id) = request.asset_id {
             settings.skybox_asset_id = Some(asset_id.clone());
             settings.skybox_preset = None;
-            // TODO: Handle custom cubemap assets when asset pipeline is ready
-            tracing::warn!("Custom skybox assets not yet supported: {}", asset_id);
+
+            // Look up the asset handle from the global texture registry
+            if let Some(handle) = texture_handles.0.get(&asset_id) {
+                if let Ok(camera_entity) = camera_query.single() {
+                    commands.entity(camera_entity).insert(bevy::core_pipeline::Skybox {
+                        image: handle.clone(),
+                        brightness: settings.skybox_brightness,
+                        ..Default::default()
+                    });
+                }
+                tracing::info!("Applied custom skybox asset: {}", asset_id);
+            } else {
+                tracing::warn!("Custom skybox asset not found in texture registry: {}", asset_id);
+            }
         }
 
         // Emit event
