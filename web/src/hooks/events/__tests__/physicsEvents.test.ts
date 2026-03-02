@@ -227,6 +227,48 @@ describe('handlePhysicsEvent', () => {
         true
       );
     });
+
+    it('handles disabled physics2d', () => {
+      const payload = {
+        entityId: 'sprite-2',
+        enabled: false,
+        bodyType: 'static',
+        mass: 0,
+        friction: 0.3,
+        colliderType: 'circle',
+      };
+
+      const result = handlePhysicsEvent(
+        'PHYSICS2D_UPDATED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setPhysics2d).toHaveBeenCalledWith(
+        'sprite-2',
+        expect.objectContaining({ bodyType: 'static' }),
+        false
+      );
+    });
+
+    it('strips entityId and enabled from physics data passed to store', () => {
+      const payload = {
+        entityId: 'sprite-3',
+        enabled: true,
+        bodyType: 'dynamic',
+        mass: 2.0,
+      };
+
+      handlePhysicsEvent('PHYSICS2D_UPDATED', payload, mockSetGet.set, mockSetGet.get);
+
+      const calledData = actions.setPhysics2d.mock.calls[0][1];
+      expect(calledData).not.toHaveProperty('entityId');
+      expect(calledData).not.toHaveProperty('enabled');
+      expect(calledData).toHaveProperty('bodyType');
+      expect(calledData).toHaveProperty('mass');
+    });
   });
 
   describe('JOINT2D_UPDATED', () => {
@@ -252,6 +294,53 @@ describe('handlePhysicsEvent', () => {
           jointType: 'revolute',
           targetEntity: 'sprite-1',
           anchor: [0, 0],
+        }
+      );
+    });
+
+    it('strips entityId from joint data passed to store', () => {
+      const payload = {
+        entityId: 'sprite-4',
+        jointType: 'fixed',
+        targetEntity: 'sprite-5',
+      };
+
+      handlePhysicsEvent('JOINT2D_UPDATED', payload, mockSetGet.set, mockSetGet.get);
+
+      const calledData = actions.setJoint2d.mock.calls[0][1];
+      expect(calledData).not.toHaveProperty('entityId');
+      expect(calledData).toHaveProperty('jointType');
+      expect(calledData).toHaveProperty('targetEntity');
+    });
+
+    it('handles joint with additional properties', () => {
+      const payload = {
+        entityId: 'sprite-6',
+        jointType: 'prismatic',
+        targetEntity: 'sprite-7',
+        anchor: [1, 2],
+        axis: [0, 1],
+        motorSpeed: 5.0,
+        motorEnabled: true,
+      };
+
+      const result = handlePhysicsEvent(
+        'JOINT2D_UPDATED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(actions.setJoint2d).toHaveBeenCalledWith(
+        'sprite-6',
+        {
+          jointType: 'prismatic',
+          targetEntity: 'sprite-7',
+          anchor: [1, 2],
+          axis: [0, 1],
+          motorSpeed: 5.0,
+          motorEnabled: true,
         }
       );
     });
@@ -312,6 +401,28 @@ describe('handlePhysicsEvent', () => {
       );
 
       expect(result).toBe(true);
+    });
+
+    it('invokes callback for collision end events', () => {
+      const mockCallback = vi.fn();
+      vi.mocked(getScriptCollisionCallback).mockReturnValue(mockCallback);
+
+      const payload = {
+        entityA: 'entity-3',
+        entityB: 'entity-4',
+        started: false,
+      };
+
+      const result = handlePhysicsEvent(
+        'COLLISION_EVENT',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+      expect(mockCallback).toHaveBeenCalledWith(payload);
+      expect(mockCallback.mock.calls[0][0].started).toBe(false);
     });
   });
 
@@ -436,6 +547,42 @@ describe('handlePhysicsEvent', () => {
       const result = handlePhysicsEvent(
         'RAYCAST2D_RESULT',
         {},
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+    });
+
+    it('returns true with raycast payload data', () => {
+      const payload = {
+        requestId: 'ray2d-1',
+        hitEntity: 'sprite-10',
+        point: [5.0, 3.0],
+        distance: 7.5,
+      };
+
+      const result = handlePhysicsEvent(
+        'RAYCAST2D_RESULT',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(result).toBe(true);
+    });
+
+    it('returns true with null hit (miss)', () => {
+      const payload = {
+        requestId: 'ray2d-2',
+        hitEntity: null,
+        point: [0, 0],
+        distance: 0,
+      };
+
+      const result = handlePhysicsEvent(
+        'RAYCAST2D_RESULT',
+        payload,
         mockSetGet.set,
         mockSetGet.get
       );

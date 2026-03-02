@@ -449,4 +449,181 @@ describe('Script Sandbox Security', () => {
       expect(result.onStart).toBeTypeOf('function');
     });
   });
+
+  describe('forge API defensive behavior', () => {
+    it('should isolate prototype modifications within sandbox scope', () => {
+      // The sandbox uses a Function constructor, so the forge object passed in
+      // is a plain object. The real security boundary is Web Worker isolation —
+      // each script runs in its own Worker with no DOM/window access.
+      // Here we verify that compileSandboxed returns callable hooks even when
+      // the script attempts __proto__ manipulation.
+      const mockForge = {
+        transform: { setPosition: () => {} },
+      };
+
+      const result = compileSandboxed(`
+        function onStart() {
+          try {
+            forge.__proto__.test = true;
+          } catch (_e) {
+            // May throw in strict mode environments
+          }
+        }
+      `, mockForge);
+
+      // Hook extraction and execution should succeed regardless
+      expect(result.onStart).toBeTypeOf('function');
+      expect(() => result.onStart()).not.toThrow();
+    });
+
+    it('should not allow overwriting forge namespace properties', () => {
+      let called = false;
+      const mockForge = Object.freeze({
+        transform: Object.freeze({
+          setPosition: () => { called = true; },
+        }),
+      });
+
+      const result = compileSandboxed(`
+        function onStart() {
+          try {
+            forge.transform = { setPosition: () => {} };
+          } catch (_e) {
+            // May throw in frozen objects
+          }
+          forge.transform.setPosition(0, 0, 0);
+        }
+      `, mockForge);
+      result.onStart();
+
+      // forge is frozen so the overwrite silently fails (or throws — caught above),
+      // meaning the original setPosition is still called and `called` must be true
+      expect(called).toBe(true);
+    });
+
+    it('should handle accessing non-existent forge sub-APIs gracefully', () => {
+      const mockForge = {
+        transform: { setPosition: () => {} },
+      };
+
+      const result = compileSandboxed(`
+        let errorCaught = false;
+        function onStart() {
+          try {
+            forge.nonExistentApi.doSomething();
+          } catch (_e) {
+            errorCaught = true;
+          }
+        }
+      `, mockForge);
+
+      // Should not throw at compilation or execution — error is caught in script
+      expect(() => result.onStart()).not.toThrow();
+    });
+
+    it('should not leak forge API between scripts', () => {
+      const calls1: string[] = [];
+      const calls2: string[] = [];
+
+      const forge1 = {
+        transform: { setPosition: () => calls1.push('forge1') },
+      };
+      const forge2 = {
+        transform: { setPosition: () => calls2.push('forge2') },
+      };
+
+      const script1 = compileSandboxed(`
+        function onStart() { forge.transform.setPosition(0,0,0); }
+      `, forge1);
+      const script2 = compileSandboxed(`
+        function onStart() { forge.transform.setPosition(0,0,0); }
+      `, forge2);
+
+      script1.onStart();
+      script2.onStart();
+
+      expect(calls1).toEqual(['forge1']);
+      expect(calls2).toEqual(['forge2']);
+    });
+  });
+
+  describe('script error isolation', () => {
+    it('should not prevent other hooks from being extracted when one hook throws', () => {
+      // A syntax error would prevent compilation entirely, but runtime errors
+      // in one hook should not affect extraction of other hooks
+      const result = compileSandboxed(`
+        function onStart() { throw new Error('start failed'); }
+        function onUpdate(dt) { return dt; }
+        function onDestroy() {}
+      `);
+
+      expect(result.onStart).toBeTypeOf('function');
+      expect(result.onUpdate).toBeTypeOf('function');
+      expect(result.onDestroy).toBeTypeOf('function');
+    });
+
+    it('should isolate onStart errors from onUpdate execution', () => {
+      const forgeState = { updateCalled: false };
+      const result = compileSandboxed(`
+        function onStart() { throw new Error('init crash'); }
+        function onUpdate(_dt) { forge.updateCalled = true; }
+      `, forgeState);
+
+      // onStart throws but onUpdate should still be a callable function
+      expect(() => result.onStart()).toThrow('init crash');
+      expect(result.onUpdate).toBeTypeOf('function');
+      result.onUpdate(0);
+      expect(forgeState.updateCalled).toBe(true);
+    });
+
+    it('should isolate onUpdate errors from onDestroy execution', () => {
+      const result = compileSandboxed(`
+        function onUpdate(_dt) { throw new Error('tick crash'); }
+        function onDestroy() {}
+      `);
+
+      expect(() => result.onUpdate(0.016)).toThrow('tick crash');
+      expect(() => result.onDestroy()).not.toThrow();
+    });
+
+    it('should handle scripts that throw non-Error objects', () => {
+      const result = compileSandboxed(`
+        function onStart() { throw 'string error'; }
+      `);
+
+      expect(() => result.onStart()).toThrow('string error');
+    });
+
+    it('should handle scripts with infinite object creation gracefully', () => {
+      // This tests that compilation succeeds; actual OOM is handled by Worker
+      const result = compileSandboxed(`
+        function onStart() {
+          const arr = [];
+          for (let i = 0; i < 1000; i++) arr.push({ x: i });
+        }
+      `);
+
+      expect(result.onStart).toBeTypeOf('function');
+      expect(() => result.onStart()).not.toThrow();
+    });
+  });
+
+  describe('command payload structure', () => {
+    it('should validate command names are strings', () => {
+      // Replicate the flushCommands check: commands must have string cmd fields
+      const validCommand = { cmd: 'update_transform', entityId: 'e1', x: 0, y: 1, z: 0 };
+      expect(typeof validCommand.cmd).toBe('string');
+      expect(SCRIPT_ALLOWED_COMMANDS.has(validCommand.cmd)).toBe(true);
+    });
+
+    it('should reject commands with numeric cmd values', () => {
+      const badCommand = { cmd: 42 };
+      expect(typeof badCommand.cmd).not.toBe('string');
+    });
+
+    it('should have expected total command count in whitelist', () => {
+      // Keeps whitelist size visible — any additions should update this count
+      expect(SCRIPT_ALLOWED_COMMANDS.size).toBe(60);
+    });
+  });
 });

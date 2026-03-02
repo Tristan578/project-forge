@@ -647,4 +647,356 @@ describe('graphCompiler - Edge Cases', () => {
       expect(result.code).toContain('(10 + 20)');
     });
   });
+
+  // ==================================================================
+  // Additional edge cases (PF-158)
+  // ==================================================================
+
+  describe('Data Node Compilation', () => {
+    it('compiles MakeVec3 data node fed into SetPosition', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'MakeVec3', { x: 5, y: 10, z: 15 }),
+          node('3', 'SetPosition', { entity: 'player' }),
+        ],
+        edges: [
+          execEdge('e1', '1', '3'),
+          dataEdge('e2', '2', 'vec3', '3', 'position'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('[5, 10, 15]');
+      expect(result.code).toContain('forge.setPosition');
+    });
+
+    it('compiles Distance data node', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'GetPosition', { entity: 'player' }),
+          node('3', 'GetPosition', { entity: 'enemy' }),
+          node('4', 'Distance', {}),
+          node('5', 'SetVariable', { key: 'dist' }),
+        ],
+        edges: [
+          execEdge('e1', '1', '5'),
+          dataEdge('e2', '2', 'position', '4', 'a'),
+          dataEdge('e3', '3', 'position', '4', 'b'),
+          dataEdge('e4', '4', 'result', '5', 'value'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('Math.sqrt');
+      expect(result.code).toContain('Math.pow');
+      expect(result.code).toContain('forge.getTransform');
+    });
+
+    it('compiles GetAxis data node', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnUpdate'),
+          node('2', 'GetAxis', { action: 'horizontal' }),
+          node('3', 'Translate', { entity: 'player', dy: 0, dz: 0 }),
+        ],
+        edges: [
+          execEdge('e1', '1', '3'),
+          dataEdge('e2', '2', 'value', '3', 'dx'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('forge.input.getAxis("horizontal")');
+      expect(result.code).toContain('forge.translate');
+    });
+
+    it('compiles IsPressed data node', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnUpdate'),
+          node('2', 'IsPressed', { action: 'fire' }),
+          node('3', 'Branch', {}),
+          node('4', 'PlaySound', { entity: 'weapon' }),
+        ],
+        edges: [
+          execEdge('e1', '1', '3'),
+          dataEdge('e2', '2', 'pressed', '3', 'condition'),
+          execEdge('e3', '3', '4', 'exec_true'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('forge.input.isPressed("fire")');
+      expect(result.code).toContain('forge.audio.play');
+    });
+
+    it('compiles GetPosition data node with fallback', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'GetPosition', { entity: 'camera' }),
+          node('3', 'SetVariable', { key: 'camPos' }),
+        ],
+        edges: [
+          execEdge('e1', '1', '3'),
+          dataEdge('e2', '2', 'position', '3', 'value'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('forge.getTransform("camera")?.position || [0, 0, 0]');
+    });
+  });
+
+  describe('ShowText Exec Node', () => {
+    it('compiles ShowText with all parameters', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'ShowText', { id: 'msg-1', text: 'Hello!', x: 50, y: 30 }),
+        ],
+        edges: [execEdge('e1', '1', '2')],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('forge.ui.showText("msg-1", "Hello!", 50, 30)');
+    });
+
+    it('compiles ShowText with missing values using fallback 0', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'ShowText', { id: 'msg-1', text: 'Hello' }), // Missing x, y
+        ],
+        edges: [execEdge('e1', '1', '2')],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('forge.ui.showText("msg-1", "Hello", 0, 0)');
+    });
+  });
+
+  describe('Unimplemented Exec Node Types', () => {
+    it('warns for WhileLoop (not compiled)', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'WhileLoop', { condition: true }),
+        ],
+        edges: [execEdge('e1', '1', '2')],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.warnings.some(w => w.message.includes('Unknown exec node type: WhileLoop'))).toBe(true);
+    });
+
+    it('warns for Sequence (not compiled)', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'Sequence', {}),
+        ],
+        edges: [execEdge('e1', '1', '2')],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.warnings.some(w => w.message.includes('Unknown exec node type: Sequence'))).toBe(true);
+    });
+
+    it('warns for Delay (not compiled)', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'Delay', { seconds: 2 }),
+        ],
+        edges: [execEdge('e1', '1', '2')],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.warnings.some(w => w.message.includes('Unknown exec node type: Delay'))).toBe(true);
+    });
+
+    it('warns for DoOnce (not compiled)', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnUpdate'),
+          node('2', 'DoOnce', {}),
+        ],
+        edges: [execEdge('e1', '1', '2')],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.warnings.some(w => w.message.includes('Unknown exec node type: DoOnce'))).toBe(true);
+    });
+  });
+
+  describe('Multiple Event Handlers with Exec Chains', () => {
+    it('compiles OnStart and OnUpdate each with their own exec chains', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'SetVariable', { key: 'initialized', value: true }),
+          node('3', 'OnUpdate'),
+          node('4', 'Translate', { entity: 'player', dx: 1, dy: 0, dz: 0 }),
+        ],
+        edges: [
+          execEdge('e1', '1', '2'),
+          execEdge('e2', '3', '4'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('function onStart()');
+      expect(result.code).toContain('forge.state.set("initialized", true)');
+      expect(result.code).toContain('function onUpdate(dt: number)');
+      expect(result.code).toContain('forge.translate("player"');
+    });
+  });
+
+  describe('Deeply Nested Structures', () => {
+    it('compiles nested Branch inside ForLoop', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'ForLoop', { start: 0, end: 5 }),
+          node('3', 'Branch', { condition: true }),
+          node('4', 'SpawnEntity', { type: 'cube', name: 'box', x: 0, y: 0, z: 0 }),
+        ],
+        edges: [
+          execEdge('e1', '1', '2'),
+          execEdge('e2', '2', '3', 'exec_body'),
+          execEdge('e3', '3', '4', 'exec_true'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('for (let i = 0; i < 5; i++)');
+      expect(result.code).toContain('if (true)');
+      expect(result.code).toContain('forge.spawn');
+    });
+
+    it('compiles ForLoop inside Branch', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'Branch', { condition: true }),
+          node('3', 'ForLoop', { start: 0, end: 3 }),
+          node('4', 'SetVariable', { key: 'count', value: 1 }),
+        ],
+        edges: [
+          execEdge('e1', '1', '2'),
+          execEdge('e2', '2', '3', 'exec_true'),
+          execEdge('e3', '3', '4', 'exec_body'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('if (true)');
+      expect(result.code).toContain('for (let i = 0; i < 3; i++)');
+      expect(result.code).toContain('forge.state.set("count", 1)');
+    });
+  });
+
+  describe('Data Node Chaining Edge Cases', () => {
+    it('compiles deeply chained math: ((a + b) * c) / d', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'Add', { a: 2, b: 3 }),
+          node('3', 'Multiply', { b: 4 }),
+          node('4', 'Divide', { b: 2 }),
+          node('5', 'SetVariable', { key: 'result' }),
+        ],
+        edges: [
+          execEdge('e1', '1', '5'),
+          dataEdge('e2', '2', 'result', '3', 'a'),
+          dataEdge('e3', '3', 'result', '4', 'a'),
+          dataEdge('e4', '4', 'result', '5', 'value'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('(((2 + 3) * 4) / 2)');
+    });
+
+    it('compiles data node used by multiple exec nodes', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'Add', { a: 10, b: 5 }),
+          node('3', 'SetVariable', { key: 'x' }),
+          node('4', 'SetVariable', { key: 'y' }),
+        ],
+        edges: [
+          execEdge('e1', '1', '3'),
+          execEdge('e2', '3', '4'),
+          dataEdge('e3', '2', 'result', '3', 'value'),
+          dataEdge('e4', '2', 'result', '4', 'value'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      // Both SetVariable nodes should use the same Add expression
+      const matches = result.code.match(/\(10 \+ 5\)/g);
+      expect(matches?.length).toBe(2);
+    });
+  });
+
+  describe('ApplyImpulse Node', () => {
+    it('compiles ApplyImpulse with all parameters', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'ApplyImpulse', { entity: 'ball', fx: 0, fy: 50, fz: -10 }),
+        ],
+        edges: [execEdge('e1', '1', '2')],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('forge.physics.applyImpulse("ball", 0, 50, -10)');
+    });
+
+    it('compiles ApplyImpulse with data node input', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnUpdate'),
+          node('2', 'Multiply', { a: 10, b: 5 }),
+          node('3', 'ApplyImpulse', { entity: 'rocket', fx: 0, fz: 0 }),
+        ],
+        edges: [
+          execEdge('e1', '1', '3'),
+          dataEdge('e2', '2', 'result', '3', 'fy'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.code).toContain('(10 * 5)');
+      expect(result.code).toContain('forge.physics.applyImpulse');
+    });
+  });
+
+  describe('Timer State Variables', () => {
+    it('generates state variables only for timer nodes', () => {
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'OnUpdate'),
+          node('timer1', 'OnTimer', { interval: 3 }),
+          node('3', 'SetVariable', { key: 'x', value: 0 }),
+        ],
+        edges: [
+          execEdge('e1', '1', '3'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      // Only the timer node should have state
+      expect(result.code).toContain('let _timer_timer1_elapsed = 0');
+      // Should not contain state for other node types
+      expect(result.code).not.toContain('_timer_1_');
+      expect(result.code).not.toContain('_timer_2_');
+    });
+  });
 });

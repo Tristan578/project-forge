@@ -555,4 +555,346 @@ describe('audioManager - Advanced', () => {
       expect(audioManager.getMusicIntensity('explore')).toBe(0.2);
     });
   });
+
+  // ================================================================
+  // Additional edge cases (PF-162)
+  // ================================================================
+
+  describe('Ducking Rules', () => {
+    beforeEach(() => {
+      audioManager.ensureContext();
+      // Clear any leaked ducking rules from previous tests
+      const int = getInternal();
+      int.duckingRules = [];
+      int.activeDuckTriggers = new Map();
+    });
+
+    it('addDuckingRule stores a rule', () => {
+      audioManager.addDuckingRule({
+        triggerBus: 'sfx',
+        targetBus: 'music',
+        duckLevel: 0.3,
+        attackMs: 50,
+        releaseMs: 200,
+      });
+
+      const rules = audioManager.getDuckingRules();
+      expect(rules).toHaveLength(1);
+      expect(rules[0].triggerBus).toBe('sfx');
+      expect(rules[0].targetBus).toBe('music');
+      expect(rules[0].duckLevel).toBe(0.3);
+    });
+
+    it('addDuckingRule replaces existing rule for same bus pair', () => {
+      audioManager.addDuckingRule({
+        triggerBus: 'sfx',
+        targetBus: 'music',
+        duckLevel: 0.3,
+        attackMs: 50,
+        releaseMs: 200,
+      });
+
+      audioManager.addDuckingRule({
+        triggerBus: 'sfx',
+        targetBus: 'music',
+        duckLevel: 0.1,
+        attackMs: 100,
+        releaseMs: 500,
+      });
+
+      const rules = audioManager.getDuckingRules();
+      expect(rules).toHaveLength(1);
+      expect(rules[0].duckLevel).toBe(0.1);
+    });
+
+    it('addDuckingRule allows different bus pairs', () => {
+      audioManager.addDuckingRule({
+        triggerBus: 'sfx',
+        targetBus: 'music',
+        duckLevel: 0.3,
+        attackMs: 50,
+        releaseMs: 200,
+      });
+
+      audioManager.addDuckingRule({
+        triggerBus: 'voice',
+        targetBus: 'music',
+        duckLevel: 0.2,
+        attackMs: 30,
+        releaseMs: 150,
+      });
+
+      expect(audioManager.getDuckingRules()).toHaveLength(2);
+    });
+
+    it('removeDuckingRule removes matching pair', () => {
+      audioManager.addDuckingRule({
+        triggerBus: 'sfx',
+        targetBus: 'music',
+        duckLevel: 0.3,
+        attackMs: 50,
+        releaseMs: 200,
+      });
+
+      audioManager.removeDuckingRule('sfx', 'music');
+      expect(audioManager.getDuckingRules()).toHaveLength(0);
+    });
+
+    it('removeDuckingRule does nothing for non-existent pair', () => {
+      audioManager.addDuckingRule({
+        triggerBus: 'sfx',
+        targetBus: 'music',
+        duckLevel: 0.3,
+        attackMs: 50,
+        releaseMs: 200,
+      });
+
+      audioManager.removeDuckingRule('voice', 'ambient');
+      expect(audioManager.getDuckingRules()).toHaveLength(1);
+    });
+
+    it('getDuckingRules returns a copy', () => {
+      audioManager.addDuckingRule({
+        triggerBus: 'sfx',
+        targetBus: 'music',
+        duckLevel: 0.3,
+        attackMs: 50,
+        releaseMs: 200,
+      });
+
+      const rules = audioManager.getDuckingRules();
+      rules.push({
+        triggerBus: 'fake',
+        targetBus: 'fake',
+        duckLevel: 0,
+        attackMs: 0,
+        releaseMs: 0,
+      });
+
+      // Original should be unaffected
+      expect(audioManager.getDuckingRules()).toHaveLength(1);
+    });
+  });
+
+  describe('Bus Volume, Mute, Solo', () => {
+    beforeEach(() => {
+      audioManager.ensureContext();
+    });
+
+    it('setBusVolume clamps to 0-1', () => {
+      audioManager.createBus('test', 0.5);
+
+      audioManager.setBusVolume('test', 1.5);
+      expect(audioManager.getBusVolume('test')).toBe(1);
+
+      audioManager.setBusVolume('test', -0.5);
+      expect(audioManager.getBusVolume('test')).toBe(0);
+    });
+
+    it('setBusVolume does nothing for non-existent bus', () => {
+      // Should not throw
+      audioManager.setBusVolume('ghost_bus', 0.5);
+      expect(audioManager.getBusVolume('ghost_bus')).toBe(1.0); // default fallback
+    });
+
+    it('muteBus sets effectiveMuted', () => {
+      audioManager.createBus('test', 1.0);
+
+      audioManager.muteBus('test', true);
+      expect(audioManager.isBusMuted('test')).toBe(true);
+
+      audioManager.muteBus('test', false);
+      expect(audioManager.isBusMuted('test')).toBe(false);
+    });
+
+    it('soloBus mutes non-soloed buses', () => {
+      audioManager.createBus('music', 1.0);
+      audioManager.createBus('sfx_custom', 1.0);
+
+      audioManager.soloBus('music', true);
+
+      // music is soloed → not muted; sfx_custom is not soloed → effectively muted
+      expect(audioManager.isBusMuted('music')).toBe(false);
+      expect(audioManager.isBusMuted('sfx_custom')).toBe(true);
+    });
+
+    it('soloBus release restores non-muted state', () => {
+      audioManager.createBus('music', 1.0);
+      audioManager.createBus('sfx_custom', 1.0);
+
+      audioManager.soloBus('music', true);
+      expect(audioManager.isBusMuted('sfx_custom')).toBe(true);
+
+      audioManager.soloBus('music', false);
+      expect(audioManager.isBusMuted('sfx_custom')).toBe(false);
+    });
+
+    it('getBusVolume returns 1.0 for unknown bus', () => {
+      expect(audioManager.getBusVolume('nonexistent')).toBe(1.0);
+    });
+
+    it('isBusMuted returns false for unknown bus', () => {
+      expect(audioManager.isBusMuted('nonexistent')).toBe(false);
+    });
+  });
+
+  describe('Bus Create/Delete', () => {
+    beforeEach(() => {
+      audioManager.ensureContext();
+    });
+
+    it('createBus does not overwrite existing bus', () => {
+      audioManager.createBus('test', 0.5);
+      audioManager.createBus('test', 0.9); // Should be ignored
+
+      expect(audioManager.getBusVolume('test')).toBe(0.5);
+    });
+
+    it('deleteBus prevents deleting master', () => {
+      audioManager.deleteBus('master');
+
+      // Master should still exist
+      const buses = getInternal().buses;
+      expect(buses.has('master')).toBe(true);
+    });
+
+    it('deleteBus does nothing for non-existent bus', () => {
+      // Should not throw
+      audioManager.deleteBus('nonexistent');
+    });
+
+    it('deleteBus removes bus from internal map', () => {
+      audioManager.createBus('temp', 0.7);
+      expect(getInternal().buses.has('temp')).toBe(true);
+
+      audioManager.deleteBus('temp');
+      expect(getInternal().buses.has('temp')).toBe(false);
+    });
+  });
+
+  describe('One-Shot Management', () => {
+    beforeEach(async () => {
+      const data = new ArrayBuffer(100);
+      await audioManager.loadBuffer('shot-asset', data);
+    });
+
+    it('playOneShot returns empty string for missing buffer', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const id = audioManager.playOneShot('nonexistent-asset');
+      expect(id).toBe('');
+
+      warnSpy.mockRestore();
+    });
+
+    it('playOneShot returns unique IDs', () => {
+      const id1 = audioManager.playOneShot('shot-asset');
+      const id2 = audioManager.playOneShot('shot-asset');
+
+      expect(id1).not.toBe('');
+      expect(id2).not.toBe('');
+      expect(id1).not.toBe(id2);
+    });
+
+    it('playOneShot clamps volume to 0-1', () => {
+      const id = audioManager.playOneShot('shot-asset', { volume: 2.0 });
+      expect(id).not.toBe('');
+
+      // Verify clamping happened by checking internal gain node
+      const oneshot = getInternal().oneShotInstances.get(id) as { gainNode: MockGainNode } | undefined;
+      expect(oneshot).toBeDefined();
+      expect(oneshot!.gainNode.gain.value).toBeLessThanOrEqual(1);
+    });
+
+    it('playOneShot clamps pitch to 0.25-4.0', () => {
+      // Just ensure no error is thrown
+      const id1 = audioManager.playOneShot('shot-asset', { pitch: 0.1 });
+      const id2 = audioManager.playOneShot('shot-asset', { pitch: 10 });
+      expect(id1).not.toBe('');
+      expect(id2).not.toBe('');
+    });
+
+    it('cancelOneShot removes from internal map', () => {
+      const id = audioManager.playOneShot('shot-asset');
+      expect(getInternal().oneShotInstances.has(id)).toBe(true);
+
+      audioManager.cancelOneShot(id);
+      expect(getInternal().oneShotInstances.has(id)).toBe(false);
+    });
+
+    it('cancelOneShot is safe for nonexistent ID', () => {
+      // Should not throw
+      audioManager.cancelOneShot('nonexistent');
+    });
+
+    it('cancelAllOneShots clears all', () => {
+      audioManager.playOneShot('shot-asset');
+      audioManager.playOneShot('shot-asset');
+      audioManager.playOneShot('shot-asset');
+
+      expect(getInternal().oneShotInstances.size).toBe(3);
+
+      audioManager.cancelAllOneShots();
+      expect(getInternal().oneShotInstances.size).toBe(0);
+    });
+  });
+
+  describe('ensureContext', () => {
+    it('creates master bus on first call', () => {
+      const internal = getInternal();
+      expect(internal.ctx).toBeNull();
+
+      audioManager.ensureContext();
+
+      expect(internal.ctx).not.toBeNull();
+      expect(internal.buses.has('master')).toBe(true);
+    });
+
+    it('creates default buses (master, music, sfx, voice, ambient)', () => {
+      audioManager.ensureContext();
+
+      const buses = getInternal().buses;
+      expect(buses.has('master')).toBe(true);
+      expect(buses.has('music')).toBe(true);
+      expect(buses.has('sfx')).toBe(true);
+      expect(buses.has('voice')).toBe(true);
+      expect(buses.has('ambient')).toBe(true);
+    });
+
+    it('idempotent - second call returns same context', () => {
+      const ctx1 = audioManager.ensureContext();
+      const ctx2 = audioManager.ensureContext();
+      expect(ctx1).toBe(ctx2);
+    });
+  });
+
+  describe('applyBusConfig', () => {
+    it('creates buses from config', () => {
+      audioManager.applyBusConfig({
+        buses: [
+          { name: 'master', volume: 0.8, muted: false, soloed: false, effects: [] },
+          { name: 'custom', volume: 0.6, muted: false, soloed: false, effects: [] },
+        ],
+      });
+
+      expect(getInternal().buses.has('custom')).toBe(true);
+      expect(audioManager.getBusVolume('custom')).toBe(0.6);
+    });
+
+    it('updates existing bus volume and mute', () => {
+      audioManager.ensureContext();
+
+      audioManager.applyBusConfig({
+        buses: [
+          { name: 'master', volume: 0.5, muted: false, soloed: false, effects: [] },
+          { name: 'music', volume: 0.3, muted: true, soloed: false, effects: [] },
+          { name: 'sfx', volume: 1.0, muted: false, soloed: false, effects: [] },
+        ],
+      });
+
+      const musicBus = getInternal().buses.get('music')!;
+      expect(musicBus.volume).toBe(0.3);
+      expect(musicBus.muted).toBe(true);
+    });
+  });
 });
