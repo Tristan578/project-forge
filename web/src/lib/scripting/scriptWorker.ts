@@ -667,7 +667,15 @@ function buildForgeApi(scriptEntityId: string) {
       },
       getBones: (eid: string) => {
         const skeleton = skeletonStates[eid];
-        return skeleton?.bones ?? null;
+        if (!skeleton?.bones) return null;
+        return skeleton.bones.map(b => ({
+          name: b.name,
+          parentBone: b.parentBone,
+          position: b.localPosition,
+          rotation: b.localRotation,
+          scale: b.localScale,
+          length: b.length,
+        }));
       },
       playAnimation: (eid: string, animName: string, options?: { loop?: boolean; speed?: number; crossfade?: number }) => {
         pendingCommands.push({
@@ -722,7 +730,14 @@ function buildForgeApi(scriptEntityId: string) {
       },
       getBones: (eid: string) => {
         const skeleton = skeletonStates[eid];
-        return skeleton?.bones ?? null;
+        if (!skeleton?.bones) return null;
+        return skeleton.bones.map(b => ({
+          name: b.name,
+          x: b.localPosition[0],
+          y: b.localPosition[1],
+          rotation: b.localRotation,
+          length: b.length,
+        }));
       },
     },
 
