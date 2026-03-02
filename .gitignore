@@ -13,7 +13,17 @@ credentials.json
 secrets.json
 
 # ----- Claude / AI Tooling -----
-.claude/
+# Ignore .claude contents by default, then whitelist essentials
+.claude/*
+# Track project config, taskboard, skills, hooks, rules, agents
+!.claude/CLAUDE.md
+!.claude/rules/
+!.claude/skills/
+!.claude/agents/
+!.claude/hooks/
+!.claude/settings.json
+!.claude/taskboard.db
+!.claude/TASKBOARD_SETUP.md
 specs/
 ARCHITECTURE.md
 TESTING.md

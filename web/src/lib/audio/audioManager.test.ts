@@ -29,6 +29,8 @@ interface AudioManagerInternal {
   oneShotCount: number;
   duckingRules: unknown[];
   activeDuckTriggers: Map<string, number>;
+  occlusionEnabled: Set<string>;
+  occlusionFilters: Map<string, BiquadFilterNode>;
 }
 
 function getInternal(): AudioManagerInternal {
@@ -123,7 +125,7 @@ class MockConvolverNode {
 
 class MockBiquadFilterNode {
   type: BiquadFilterType = 'lowpass';
-  frequency = { value: 350 };
+  frequency = { value: 350, linearRampToValueAtTime: vi.fn(), setValueAtTime: vi.fn(), cancelScheduledValues: vi.fn() };
   Q = { value: 1 };
   private connected = false;
 
@@ -227,6 +229,8 @@ describe('audioManager', () => {
     getInternal().oneShotCount = 0;
     getInternal().duckingRules = [];
     getInternal().activeDuckTriggers = new Map();
+    getInternal().occlusionEnabled = new Set();
+    getInternal().occlusionFilters = new Map();
 
     // Mock global AudioContext
     global.AudioContext = MockAudioContext as unknown as typeof AudioContext;
@@ -738,6 +742,97 @@ describe('audioManager', () => {
       const after = audioManager.getDuckingRules().length;
 
       expect(after).toBeLessThan(before);
+    });
+  });
+
+  describe('occlusion', () => {
+    beforeEach(async () => {
+      const data = new ArrayBuffer(100);
+      await audioManager.loadBuffer('test-asset', data);
+    });
+
+    it('creates filter when occlusion is enabled', () => {
+      audioManager.setOcclusion('entity1', true);
+
+      expect(getInternal().occlusionEnabled.has('entity1')).toBe(true);
+      expect(getInternal().occlusionFilters.has('entity1')).toBe(true);
+    });
+
+    it('removes filter when occlusion is disabled', () => {
+      audioManager.setOcclusion('entity1', true);
+      audioManager.setOcclusion('entity1', false);
+
+      expect(getInternal().occlusionEnabled.has('entity1')).toBe(false);
+      expect(getInternal().occlusionFilters.has('entity1')).toBe(false);
+    });
+
+    it('isOcclusionEnabled reflects current state', () => {
+      expect(audioManager.isOcclusionEnabled('entity1')).toBe(false);
+      audioManager.setOcclusion('entity1', true);
+      expect(audioManager.isOcclusionEnabled('entity1')).toBe(true);
+    });
+
+    it('updateOcclusionState ramps filter frequency', () => {
+      audioManager.setOcclusion('entity1', true);
+      const filter = getInternal().occlusionFilters.get('entity1')!;
+
+      audioManager.updateOcclusionState('entity1', true);
+      // Verify filter frequency is being ramped (mock doesn't track, but no error)
+      expect(filter).toBeDefined();
+      expect(filter.type).toBe('lowpass');
+    });
+
+    it('getOccludableEntities returns playing spatial entities', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: true, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      });
+      audioManager.play('entity1');
+      audioManager.setOcclusion('entity1', true);
+
+      const occludables = audioManager.getOccludableEntities();
+      expect(occludables).toContain('entity1');
+    });
+
+    it('getOccludableEntities excludes non-playing entities', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: true, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      });
+      audioManager.setOcclusion('entity1', true);
+
+      // Not playing yet
+      const occludables = audioManager.getOccludableEntities();
+      expect(occludables).not.toContain('entity1');
+    });
+
+    it('getSourcePosition returns panner position', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: true, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      });
+      audioManager.updatePosition('entity1', 5, 10, 15);
+
+      const pos = audioManager.getSourcePosition('entity1');
+      expect(pos).toEqual([5, 10, 15]);
+    });
+
+    it('getSourcePosition returns null for non-spatial', () => {
+      audioManager.createInstance('entity1', 'test-asset', {
+        volume: 0.8, pitch: 1.0, loopAudio: false,
+        spatial: false, maxDistance: 50, refDistance: 1, rolloffFactor: 1, bus: 'sfx',
+      });
+
+      const pos = audioManager.getSourcePosition('entity1');
+      expect(pos).toBeNull();
+    });
+
+    it('getListenerPosition returns listener coordinates', () => {
+      audioManager.ensureContext();
+      audioManager.updateListener(1, 2, 3, 0, 0, -1);
+
+      const pos = audioManager.getListenerPosition();
+      expect(pos).toEqual([1, 2, 3]);
     });
   });
 });

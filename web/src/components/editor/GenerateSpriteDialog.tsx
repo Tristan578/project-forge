@@ -54,7 +54,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
       } else if (activeTab === 'sheet') {
         endpoint = '/api/generate/sprite-sheet';
         body = {
-          sourceAssetId: 'temp_asset_id', // TODO: Get from asset selector
+          prompt: prompt.trim(),
           frameCount,
           style,
           size: size.split('x')[0] + 'x' + size.split('x')[0], // Force square

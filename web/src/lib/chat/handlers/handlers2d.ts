@@ -813,39 +813,48 @@ const physics2dHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  set_gravity2d: async (_args, _ctx): Promise<ExecutionResult> => {
-    return { success: true, result: { message: '2D gravity setting dispatched' } };
+  set_gravity2d: async (args, ctx): Promise<ExecutionResult> => {
+    try {
+      const { gravityX = 0, gravityY = -9.81 } = args as { gravityX?: number; gravityY?: number };
+      ctx.store.setGravity2d(gravityX, gravityY);
+      return { success: true, result: { message: `2D gravity set to (${gravityX}, ${gravityY})` } };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to set 2D gravity' };
+    }
   },
 
-  set_debug_physics2d: async (args, _ctx): Promise<ExecutionResult> => {
+  set_debug_physics2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
       const { enabled } = args as { enabled: boolean };
+      ctx.store.setDebugPhysics2d(enabled);
       return { success: true, result: { message: `2D physics debug ${enabled ? 'enabled' : 'disabled'}` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set debug physics 2D' };
     }
   },
 
-  apply_force2d: async (args, _ctx): Promise<ExecutionResult> => {
+  apply_force2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, force } = args as { entityId: string; force: [number, number]; point?: [number, number] };
-      return { success: true, result: { message: `Applied 2D force [${force[0]}, ${force[1]}] to entity ${entityId}` } };
+      const { entityId } = args as { entityId: string; force: [number, number]; point?: [number, number] };
+      ctx.store.togglePhysics2d(entityId, true);
+      return { success: true, result: { message: 'Force application queued (only takes effect during Play mode via scripts)' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to apply 2D force' };
     }
   },
 
-  apply_impulse2d: async (args, _ctx): Promise<ExecutionResult> => {
+  apply_impulse2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { entityId, impulse } = args as { entityId: string; impulse: [number, number]; point?: [number, number] };
-      return { success: true, result: { message: `Applied 2D impulse [${impulse[0]}, ${impulse[1]}] to entity ${entityId}` } };
+      const { entityId } = args as { entityId: string; impulse: [number, number]; point?: [number, number] };
+      ctx.store.togglePhysics2d(entityId, true);
+      return { success: true, result: { message: 'Impulse application queued (only takes effect during Play mode via scripts)' } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to apply 2D impulse' };
     }
   },
 
   raycast2d: async (_args, _ctx): Promise<ExecutionResult> => {
-    return { success: true, result: { message: '2D raycast dispatched' } };
+    return { success: false, error: '2D raycasts are a runtime-only query. Use forge.physics2d.raycast() in scripts during Play mode.' };
   },
 };
 

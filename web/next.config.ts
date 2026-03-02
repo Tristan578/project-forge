@@ -1,12 +1,11 @@
 import type { NextConfig } from "next";
 
-const isDev = process.env.NODE_ENV === 'development';
-
 const cspDirectives = [
   "default-src 'self'",
-  // Dev mode needs 'unsafe-inline' for Next.js HMR/hydration inline scripts.
-  // Production builds use external script files and don't need it.
-  `script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com${isDev ? " 'unsafe-inline'" : ""}`,
+  // 'unsafe-inline' is required for Clerk's sign-in/sign-up inline scripts in production.
+  // TODO: Scope to auth routes or adopt nonce-based CSP to avoid global unsafe-inline.
+  // The /play/:path* route keeps a strict CSP without unsafe-eval or unsafe-inline.
+  `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://img.clerk.com",
   "font-src 'self' data:",

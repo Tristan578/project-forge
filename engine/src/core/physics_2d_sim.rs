@@ -10,7 +10,8 @@ use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 
 use super::engine_mode::EngineMode;
-use super::physics_2d::{BodyType2d, ColliderShape2d, Physics2dData, Physics2dEnabled};
+use super::entity_id::EntityId;
+use super::physics_2d::{BodyType2d, ColliderShape2d, JointType2d, Physics2dData, Physics2dEnabled, PhysicsJoint2d};
 
 // ---------------------------------------------------------------------------
 // Resource: 2D Gravity (configurable from bridge)
@@ -168,7 +169,8 @@ fn manage_physics2d_lifecycle(
                 .remove::<Ccd>()
                 .remove::<ExternalForce>()
                 .remove::<ExternalImpulse>()
-                .remove::<ActiveEvents>();
+                .remove::<ActiveEvents>()
+                .remove::<ImpulseJoint>();
         }
         tracing::info!("Physics2D detached");
     }
@@ -199,6 +201,110 @@ fn sync_gravity2d(
 }
 
 // ---------------------------------------------------------------------------
+// Joint lifecycle
+// ---------------------------------------------------------------------------
+
+/// Unified system managing the 2D joint lifecycle.
+/// Handles Edit→Play (attach ImpulseJoint), Play→Edit (detach).
+/// Mirrors `manage_joint_lifecycle` from `physics.rs` (3D).
+fn manage_joint2d_lifecycle(
+    engine_mode: Res<EngineMode>,
+    mut commands: Commands,
+    to_attach: Query<(Entity, &PhysicsJoint2d), Without<ImpulseJoint>>,
+    to_detach: Query<Entity, (With<ImpulseJoint>, With<PhysicsJoint2d>)>,
+    entity_id_query: Query<(Entity, &EntityId)>,
+    mut prev_mode: Local<Option<EngineMode>>,
+) {
+    let current = *engine_mode;
+    let prev = *prev_mode;
+    *prev_mode = Some(current);
+
+    // Transition: Edit → Play — attach Rapier2D joints
+    let entering_play = current == EngineMode::Play
+        && prev.map_or(true, |p| p == EngineMode::Edit);
+    if entering_play {
+        for (entity, joint_data) in to_attach.iter() {
+            // Resolve target entity ID (u32) to Bevy Entity
+            let target_id_str = joint_data.target_entity_id.to_string();
+            let connected_entity = entity_id_query
+                .iter()
+                .find(|(_, eid)| eid.0 == target_id_str)
+                .map(|(e, _)| e);
+
+            let Some(connected_entity) = connected_entity else {
+                tracing::warn!(
+                    "2D Joint connected entity not found: {}",
+                    joint_data.target_entity_id
+                );
+                continue;
+            };
+
+            let anchor1 = Vec2::new(joint_data.local_anchor1[0], joint_data.local_anchor1[1]);
+            let anchor2 = Vec2::new(joint_data.local_anchor2[0], joint_data.local_anchor2[1]);
+
+            let joint: TypedJoint = match &joint_data.joint_type {
+                JointType2d::Revolute { limits, motor_velocity, motor_max_force } => {
+                    let mut builder = RevoluteJointBuilder::new()
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2);
+                    if let Some((min, max)) = limits {
+                        builder = builder.limits([*min, *max]);
+                    }
+                    if *motor_max_force > 0.0 {
+                        builder = builder
+                            .motor_velocity(*motor_velocity, 0.5)
+                            .motor_max_force(*motor_max_force);
+                    }
+                    builder.build().into()
+                }
+                JointType2d::Prismatic { axis, limits, motor_velocity, motor_max_force } => {
+                    let axis_vec = Vec2::new(axis[0], axis[1]);
+                    let mut builder = PrismaticJointBuilder::new(axis_vec)
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2);
+                    if let Some((min, max)) = limits {
+                        builder = builder.limits([*min, *max]);
+                    }
+                    if *motor_max_force > 0.0 {
+                        builder = builder
+                            .motor_velocity(*motor_velocity, 0.5)
+                            .motor_max_force(*motor_max_force);
+                    }
+                    builder.build().into()
+                }
+                JointType2d::Rope { max_distance } => {
+                    RopeJointBuilder::new(*max_distance)
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2)
+                        .build()
+                        .into()
+                }
+                JointType2d::Spring { rest_length, stiffness, damping } => {
+                    SpringJointBuilder::new(*rest_length, *stiffness, *damping)
+                        .local_anchor1(anchor1)
+                        .local_anchor2(anchor2)
+                        .build()
+                        .into()
+                }
+            };
+
+            commands.entity(entity).insert(ImpulseJoint::new(connected_entity, joint));
+        }
+        tracing::info!("2D joints attached: {} joints", to_attach.iter().count());
+    }
+
+    // Transition: Play/Paused → Edit (Stop) — remove all ImpulseJoint components
+    let entering_edit = current == EngineMode::Edit
+        && prev.map_or(false, |p| p != EngineMode::Edit);
+    if entering_edit {
+        for entity in to_detach.iter() {
+            commands.entity(entity).remove::<ImpulseJoint>();
+        }
+        tracing::info!("2D joints detached");
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------
 
@@ -207,6 +313,8 @@ pub struct Physics2dPlugin;
 
 impl Plugin for Physics2dPlugin {
     fn build(&self, app: &mut App) {
+        use super::engine_mode::PlaySystemSet;
+
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
             .add_plugins(RapierDebugRenderPlugin::default())
             .init_resource::<Gravity2d>()
@@ -215,6 +323,7 @@ impl Plugin for Physics2dPlugin {
                 manage_physics2d_lifecycle,
                 sync_debug_physics2d,
                 sync_gravity2d,
-            ));
+            ))
+            .add_systems(Update, manage_joint2d_lifecycle.in_set(PlaySystemSet));
     }
 }
