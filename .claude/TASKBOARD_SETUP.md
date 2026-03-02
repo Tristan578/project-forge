@@ -6,8 +6,8 @@ Portable project management via [tcarac/taskboard](https://github.com/tcarac/tas
 
 ```bash
 # 1. Get the taskboard binary (or build from source)
-#    Binary location: D:/repos/into-rust/taskboard/taskboard.exe
-#    Or: go install github.com/tcarac/taskboard@latest
+#    go install github.com/tcarac/taskboard@latest
+#    Or download a release binary from GitHub
 
 # 2. Start the server pointing at the DB in this repo
 taskboard start --db .claude/taskboard.db

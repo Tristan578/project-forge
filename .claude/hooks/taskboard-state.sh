@@ -223,7 +223,8 @@ for t in tickets:
         ticket_issues.append('no subtasks')
 
     if ticket_issues:
-        issues.append(f'PF-{num}: {', '.join(ticket_issues)}')
+        detail = ', '.join(ticket_issues)
+        issues.append(f'PF-{num}: {detail}')
 
 if issues:
     print('CONSISTENCY_ISSUES_FOUND')

@@ -143,7 +143,7 @@ Labels: [bug/feature/refactor/test/docs]
 | `list_tickets` | Filter tickets by status/project |
 
 ### Web UI
-Taskboard web UI: `http://localhost:3010` (start with: `D:/repos/into-rust/taskboard/taskboard.exe start --db D:/repos/into-rust/project-forge/.claude/taskboard.db`)
+Taskboard web UI: `http://localhost:3010` (start with: `taskboard start --db .claude/taskboard.db`)
 
 ### Rules for Claude
 - **Before starting work:** Check the board (`get_board`), pick a ticket, move to `in_progress`
