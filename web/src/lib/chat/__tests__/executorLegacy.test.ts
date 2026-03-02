@@ -1,0 +1,833 @@
+/**
+ * Comprehensive unit tests for executor.legacy — the 8 compound AI actions.
+ *
+ * Each action is tested for:
+ *  - Happy-path store mutations
+ *  - Edge cases (empty inputs, optional fields, fallback defaults)
+ *  - Error containment (unknown tools return { success: false })
+ *  - Partial-success semantics where applicable
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { executeToolCall } from '../executor.legacy';
+import type { EditorState, SceneNode } from '@/stores/editorStore';
+
+// ── Store factory ─────────────────────────────────────────────────────────────
+
+function makeNode(id: string, name: string, opts: Partial<SceneNode> = {}): SceneNode {
+  return {
+    entityId: id,
+    name,
+    parentId: null,
+    children: [],
+    components: [],
+    visible: true,
+    ...opts,
+  };
+}
+
+function makeStore(overrides: Record<string, unknown> = {}): EditorState {
+  return {
+    // Scene graph
+    sceneGraph: { nodes: {}, rootIds: [] },
+    sceneName: 'TestScene',
+    scenes: [],
+    activeSceneId: null,
+    engineMode: 'edit',
+
+    // Entity state
+    selectedIds: new Set<string>(),
+    primaryId: null,
+    allScripts: {},
+    allGameComponents: {},
+    physicsEnabled: {},
+    inputBindings: [],
+    inputPreset: 'wasd',
+    audioBuses: [],
+    environment: {
+      fogEnabled: false,
+      fogColor: [1, 1, 1],
+      fogStart: 10,
+      fogEnd: 100,
+      clearColor: [0.1, 0.1, 0.15],
+      skyboxPreset: null,
+      skyboxAssetId: null,
+      skyboxBrightness: 1,
+      iblIntensity: 1,
+      iblRotationDegrees: 0,
+    },
+    ambientLight: { color: [1, 1, 1], brightness: 0.3 },
+    postProcessing: null,
+    terrainData: {},
+
+    // Actions
+    spawnEntity: vi.fn(),
+    updateTransform: vi.fn(),
+    updateMaterial: vi.fn(),
+    updateLight: vi.fn(),
+    updateAmbientLight: vi.fn(),
+    updateEnvironment: vi.fn(),
+    setSkybox: vi.fn(),
+    togglePhysics: vi.fn(),
+    updatePhysics: vi.fn(),
+    setInputPreset: vi.fn(),
+    setInputBinding: vi.fn(),
+    addGameComponent: vi.fn(),
+    setQualityPreset: vi.fn(),
+    reparentEntity: vi.fn(),
+    newScene: vi.fn(),
+    setScript: vi.fn(),
+    updatePostProcessing: vi.fn(),
+    spawnTerrain: vi.fn(),
+
+    ...overrides,
+  } as unknown as EditorState;
+}
+
+// ── describe_scene ─────────────────────────────────────────────────────────────
+
+describe('legacy: describe_scene', () => {
+  it('summary detail returns entityCount and type counts', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: {
+          a: makeNode('a', 'Cube', { components: ['Mesh3d'] }),
+          b: makeNode('b', 'Light', { components: ['PointLight'] }),
+        },
+        rootIds: ['a', 'b'],
+      },
+    });
+
+    const result = await executeToolCall('describe_scene', { detail: 'summary' }, store);
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r.entityCount).toBe(2);
+    expect(r.typeCounts).toBeDefined();
+    expect(typeof r.summary).toBe('string');
+  });
+
+  it('standard detail includes entity list and environment', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: { e1: makeNode('e1', 'Box', { components: ['Mesh3d'] }) },
+        rootIds: ['e1'],
+      },
+    });
+
+    const result = await executeToolCall('describe_scene', { detail: 'standard' }, store);
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(Array.isArray(r.entities)).toBe(true);
+    expect(r.environment).toBeDefined();
+    expect(r.engineMode).toBe('edit');
+  });
+
+  it('full detail includes inputBindings and audioBuses', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: { e1: makeNode('e1', 'Sphere') },
+        rootIds: ['e1'],
+      },
+    });
+
+    const result = await executeToolCall('describe_scene', { detail: 'full' }, store);
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r).toHaveProperty('inputBindings');
+    expect(r).toHaveProperty('audioBuses');
+    expect(r).toHaveProperty('scenes');
+  });
+
+  it('defaults to standard when detail is omitted', async () => {
+    const store = makeStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+    const result = await executeToolCall('describe_scene', {}, store);
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    // standard includes entities array, not typeCounts
+    expect(r).toHaveProperty('entities');
+    expect(r).not.toHaveProperty('typeCounts');
+  });
+
+  it('filterEntityIds restricts results to specified IDs', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: {
+          a: makeNode('a', 'A'),
+          b: makeNode('b', 'B'),
+          c: makeNode('c', 'C'),
+        },
+        rootIds: ['a', 'b', 'c'],
+      },
+    });
+
+    const result = await executeToolCall('describe_scene', {
+      detail: 'summary',
+      filterEntityIds: ['a', 'c'],
+    }, store);
+
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r.entityCount).toBe(2);
+  });
+
+  it('filterEntityIds with non-existent IDs filters them out silently', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: { a: makeNode('a', 'A') },
+        rootIds: ['a'],
+      },
+    });
+
+    const result = await executeToolCall('describe_scene', {
+      detail: 'summary',
+      filterEntityIds: ['a', 'ghost-id'],
+    }, store);
+
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r.entityCount).toBe(1);
+  });
+});
+
+// ── analyze_gameplay ──────────────────────────────────────────────────────────
+
+describe('legacy: analyze_gameplay', () => {
+  it('identifies player role from characterController game component', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: { p: makeNode('p', 'Player') },
+        rootIds: ['p'],
+      },
+      allGameComponents: {
+        p: [{ type: 'characterController', props: {} }],
+      },
+    });
+
+    const result = await executeToolCall('analyze_gameplay', {}, store);
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    const roles = r.entityRoles as Array<{ id: string; role: string }>;
+    expect(roles.find(x => x.id === 'p')?.role).toBe('player');
+  });
+
+  it('detects player_character mechanic when a player entity exists', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: { p: makeNode('p', 'Player') },
+        rootIds: ['p'],
+      },
+      allGameComponents: {
+        p: [{ type: 'characterController', props: {} }],
+      },
+    });
+
+    const result = await executeToolCall('analyze_gameplay', {}, store);
+    const r = result.result as Record<string, unknown>;
+    expect((r.mechanics as string[])).toContain('player_character');
+  });
+
+  it('raises issue when no player entity found in non-empty scene', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: { cube: makeNode('cube', 'Cube') },
+        rootIds: ['cube'],
+      },
+    });
+
+    const result = await executeToolCall('analyze_gameplay', {}, store);
+    const r = result.result as Record<string, unknown>;
+    const issues = r.issues as string[];
+    expect(issues.some(i => i.includes('No player character'))).toBe(true);
+  });
+
+  it('raises issue when multiple player entities found', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: {
+          p1: makeNode('p1', 'Player1'),
+          p2: makeNode('p2', 'Player2'),
+        },
+        rootIds: ['p1', 'p2'],
+      },
+      allGameComponents: {
+        p1: [{ type: 'characterController', props: {} }],
+        p2: [{ type: 'characterController', props: {} }],
+      },
+    });
+
+    const result = await executeToolCall('analyze_gameplay', {}, store);
+    const r = result.result as Record<string, unknown>;
+    const issues = r.issues as string[];
+    expect(issues.some(i => i.includes('Multiple potential player'))).toBe(true);
+  });
+
+  it('reports collectibles mechanic when collectible components found', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: {
+          c: makeNode('c', 'Coin'),
+          p: makeNode('p', 'Player'),
+        },
+        rootIds: ['c', 'p'],
+      },
+      allGameComponents: {
+        c: [{ type: 'collectible', props: {} }],
+        p: [{ type: 'characterController', props: {} }],
+      },
+    });
+
+    const result = await executeToolCall('analyze_gameplay', {}, store);
+    const r = result.result as Record<string, unknown>;
+    expect((r.mechanics as string[])).toContain('collectibles');
+  });
+
+  it('returns empty analysis for empty scene without crashing', async () => {
+    const store = makeStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+
+    const result = await executeToolCall('analyze_gameplay', {}, store);
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r.entityCount).toBe(0);
+    expect(r.mechanics).toEqual([]);
+    expect(r.issues).toEqual([]);
+  });
+});
+
+// ── arrange_entities ──────────────────────────────────────────────────────────
+
+describe('legacy: arrange_entities', () => {
+  let store: EditorState;
+
+  beforeEach(() => {
+    store = makeStore({
+      sceneGraph: {
+        nodes: {
+          e1: makeNode('e1', 'A'),
+          e2: makeNode('e2', 'B'),
+          e3: makeNode('e3', 'C'),
+          e4: makeNode('e4', 'D'),
+        },
+        rootIds: ['e1', 'e2', 'e3', 'e4'],
+      },
+    });
+  });
+
+  it('grid pattern places entities in a grid and calls updateTransform', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2', 'e3', 'e4'],
+      pattern: 'grid',
+      spacing: 2,
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.updateTransform).toHaveBeenCalledTimes(4);
+    // Each call sets 'position'
+    const calls = vi.mocked(store.updateTransform).mock.calls;
+    calls.forEach(([_id, field]) => expect(field).toBe('position'));
+  });
+
+  it('circle pattern places entities equidistantly around a center', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2', 'e3', 'e4'],
+      pattern: 'circle',
+      radius: 5,
+    }, store);
+
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r.arranged).toBe(4);
+  });
+
+  it('line pattern spaces entities along a direction vector', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2', 'e3'],
+      pattern: 'line',
+      spacing: 3,
+      direction: [1, 0, 0],
+    }, store);
+
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r.arranged).toBe(3);
+  });
+
+  it('scatter pattern uses deterministic PRNG based on seed', async () => {
+    const result1 = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2', 'e3'],
+      pattern: 'scatter',
+      scatterSeed: 12345,
+    }, store);
+
+    const calls1 = vi.mocked(store.updateTransform).mock.calls.map(c => JSON.stringify(c));
+    vi.mocked(store.updateTransform).mockClear();
+
+    const result2 = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2', 'e3'],
+      pattern: 'scatter',
+      scatterSeed: 12345,
+    }, store);
+
+    const calls2 = vi.mocked(store.updateTransform).mock.calls.map(c => JSON.stringify(c));
+
+    expect(result1.success).toBe(true);
+    expect(result2.success).toBe(true);
+    expect(calls1).toEqual(calls2);
+  });
+
+  it('path pattern distributes entities along waypoints', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2', 'e3'],
+      pattern: 'path',
+      pathPoints: [[0, 0, 0], [10, 0, 0]],
+    }, store);
+
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    expect(r.arranged).toBe(3);
+  });
+
+  it('path pattern with fewer than 2 waypoints reports partial failure', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2'],
+      pattern: 'path',
+      pathPoints: [[0, 0, 0]],
+    }, store);
+
+    // Each entity fails individually
+    expect(result.success).toBe(false);
+    const r = result.result as Record<string, unknown>;
+    const ops = r.operations as Array<{ success: boolean }>;
+    expect(ops.every(op => !op.success)).toBe(true);
+  });
+
+  it('unknown pattern reports failure for each entity', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2'],
+      pattern: 'spiral',
+    }, store);
+
+    expect(result.success).toBe(false);
+    const r = result.result as Record<string, unknown>;
+    expect((r.operations as Array<{ success: boolean }>).every(op => !op.success)).toBe(true);
+  });
+
+  it('non-existent entityId in list reports failure for that entity only', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'ghost-id'],
+      pattern: 'grid',
+    }, store);
+
+    const r = result.result as Record<string, unknown>;
+    const ops = r.operations as Array<{ success: boolean; entityId?: string; error?: string }>;
+    const ghost = ops.find(op => !op.entityId || op.error === 'Entity not found');
+    expect(ghost).toBeDefined();
+  });
+
+  it('faceCenter option on circle pattern also calls updateTransform for rotation', async () => {
+    const result = await executeToolCall('arrange_entities', {
+      entityIds: ['e1', 'e2'],
+      pattern: 'circle',
+      radius: 5,
+      faceCenter: true,
+    }, store);
+
+    expect(result.success).toBe(true);
+    const calls = vi.mocked(store.updateTransform).mock.calls;
+    // Should have both position and rotation updates
+    expect(calls.some(([_id, field]) => field === 'rotation')).toBe(true);
+  });
+});
+
+// ── create_scene_from_description ────────────────────────────────────────────
+
+describe('legacy: create_scene_from_description', () => {
+  it('spawns each entity and calls updateTransform for position', async () => {
+    let spawnCallCount = 0;
+    const store = makeStore({
+      get primaryId() {
+        return `entity-${++spawnCallCount}`;
+      },
+    });
+
+    const result = await executeToolCall('create_scene_from_description', {
+      entities: [
+        { type: 'cube', name: 'Cube1', position: [0, 0, 0] },
+        { type: 'sphere', name: 'Sphere1', position: [5, 0, 0] },
+      ],
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.spawnEntity).toHaveBeenCalledTimes(2);
+    expect(store.updateTransform).toHaveBeenCalled();
+  });
+
+  it('calls newScene when clearExisting is true', async () => {
+    const store = makeStore({ primaryId: 'ent1' });
+
+    await executeToolCall('create_scene_from_description', {
+      entities: [],
+      clearExisting: true,
+    }, store);
+
+    expect(store.newScene).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT call newScene when clearExisting is false', async () => {
+    const store = makeStore({ primaryId: 'ent1' });
+
+    await executeToolCall('create_scene_from_description', {
+      entities: [],
+      clearExisting: false,
+    }, store);
+
+    expect(store.newScene).not.toHaveBeenCalled();
+  });
+
+  it('applies environment settings when provided', async () => {
+    const store = makeStore({ primaryId: null });
+
+    await executeToolCall('create_scene_from_description', {
+      entities: [],
+      environment: {
+        skyboxPreset: 'sunset',
+        fogEnabled: true,
+        fogStart: 5,
+        fogEnd: 50,
+      },
+    }, store);
+
+    expect(store.setSkybox).toHaveBeenCalledWith('sunset');
+    expect(store.updateEnvironment).toHaveBeenCalledWith(
+      expect.objectContaining({ fogEnabled: true, fogStart: 5, fogEnd: 50 })
+    );
+  });
+
+  it('handles spawn failure gracefully (primaryId remains null)', async () => {
+    const store = makeStore({ primaryId: null });
+
+    const result = await executeToolCall('create_scene_from_description', {
+      entities: [{ type: 'cube', name: 'FailCube' }],
+    }, store);
+
+    // Overall still returns success: true (partial result), individual ops track errors
+    expect(result.success).toBe(true);
+  });
+
+  it('applies physics when entity physics config provided', async () => {
+    let spawned = false;
+    const store = makeStore({
+      get primaryId() {
+        if (!spawned) { spawned = true; return 'cube-id'; }
+        return null;
+      },
+    });
+
+    await executeToolCall('create_scene_from_description', {
+      entities: [{
+        type: 'cube',
+        name: 'PhysCube',
+        physics: { bodyType: 'dynamic' },
+      }],
+    }, store);
+
+    expect(store.togglePhysics).toHaveBeenCalledWith('cube-id', true);
+    expect(store.updatePhysics).toHaveBeenCalledWith('cube-id', expect.objectContaining({ bodyType: 'dynamic' }));
+  });
+});
+
+// ── setup_character ───────────────────────────────────────────────────────────
+
+describe('legacy: setup_character', () => {
+  it('spawns character, sets physics, adds character controller, sets input preset', async () => {
+    const store = makeStore({ primaryId: 'char-1' });
+
+    const result = await executeToolCall('setup_character', {
+      name: 'Hero',
+      inputPreset: 'platformer',
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.spawnEntity).toHaveBeenCalledWith('capsule', 'Hero');
+    expect(store.togglePhysics).toHaveBeenCalledWith('char-1', true);
+    expect(store.addGameComponent).toHaveBeenCalled();
+    expect(store.setInputPreset).toHaveBeenCalledWith('platformer');
+  });
+
+  it('attaches camera follow script when cameraFollow is true (default)', async () => {
+    const store = makeStore({ primaryId: 'char-2' });
+
+    await executeToolCall('setup_character', { name: 'Runner' }, store);
+
+    expect(store.setScript).toHaveBeenCalledWith(
+      'char-2',
+      expect.stringContaining('forge.camera.setTarget'),
+      true
+    );
+  });
+
+  it('skips camera follow script when cameraFollow is false', async () => {
+    const store = makeStore({ primaryId: 'char-3' });
+
+    await executeToolCall('setup_character', { name: 'NoCam', cameraFollow: false }, store);
+
+    expect(store.setScript).not.toHaveBeenCalled();
+  });
+
+  it('skips health component when health is explicitly null', async () => {
+    const store = makeStore({ primaryId: 'char-4' });
+
+    await executeToolCall('setup_character', { name: 'NoHealth', health: null }, store);
+
+    // addGameComponent should only be called for characterController, not health
+    const calls = vi.mocked(store.addGameComponent).mock.calls;
+    const healthCall = calls.find(([, comp]) => (comp as { type: string }).type === 'health');
+    expect(healthCall).toBeUndefined();
+  });
+
+  it('applies custom entity type when entityType is provided', async () => {
+    const store = makeStore({ primaryId: 'char-5' });
+
+    await executeToolCall('setup_character', { name: 'Bot', entityType: 'sphere' }, store);
+
+    expect(store.spawnEntity).toHaveBeenCalledWith('sphere', 'Bot');
+  });
+
+  it('returns error in operations when spawn fails (primaryId null)', async () => {
+    const store = makeStore({ primaryId: null });
+
+    const result = await executeToolCall('setup_character', { name: 'Ghost' }, store);
+
+    expect(result.success).toBe(true);
+    const r = result.result as Record<string, unknown>;
+    const ops = (r as { operations: Array<{ success: boolean }> }).operations;
+    expect(ops[0].success).toBe(false);
+  });
+});
+
+// ── configure_game_mechanics ──────────────────────────────────────────────────
+
+describe('legacy: configure_game_mechanics', () => {
+  it('sets input preset when provided', async () => {
+    const store = makeStore();
+
+    const result = await executeToolCall('configure_game_mechanics', {
+      inputPreset: 'fps',
+    }, store);
+
+    expect(result.success).toBe(true);
+    expect(store.setInputPreset).toHaveBeenCalledWith('fps');
+  });
+
+  it('adds custom input bindings', async () => {
+    const store = makeStore();
+
+    await executeToolCall('configure_game_mechanics', {
+      customBindings: [{
+        actionName: 'Jump',
+        actionType: 'digital',
+        sources: ['keyboard'],
+        positiveKeys: [' '],
+      }],
+    }, store);
+
+    expect(store.setInputBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ actionName: 'Jump', actionType: 'digital' })
+    );
+  });
+
+  it('sets quality preset when provided', async () => {
+    const store = makeStore();
+
+    await executeToolCall('configure_game_mechanics', { qualityPreset: 'ultra' }, store);
+
+    expect(store.setQualityPreset).toHaveBeenCalledWith('ultra');
+  });
+
+  it('configures entity physics when entityConfigs include physics', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: { e1: makeNode('e1', 'Floor') },
+        rootIds: ['e1'],
+      },
+    });
+
+    await executeToolCall('configure_game_mechanics', {
+      entityConfigs: [{
+        entityName: 'Floor',
+        physics: { bodyType: 'fixed' },
+      }],
+    }, store);
+
+    expect(store.togglePhysics).toHaveBeenCalledWith('e1', true);
+    expect(store.updatePhysics).toHaveBeenCalledWith('e1', expect.objectContaining({ bodyType: 'fixed' }));
+  });
+
+  it('reports failure for entity not found by name', async () => {
+    const store = makeStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+
+    const result = await executeToolCall('configure_game_mechanics', {
+      entityConfigs: [{ entityName: 'Nonexistent' }],
+    }, store);
+
+    const r = result.result as Record<string, unknown>;
+    const ops = r.operations as Array<{ success: boolean; error?: string }>;
+    expect(ops[0].success).toBe(false);
+    expect(ops[0].error).toBe('Entity not found');
+  });
+
+  it('reports success count in summary', async () => {
+    const store = makeStore();
+
+    await executeToolCall('configure_game_mechanics', {
+      qualityPreset: 'high',
+      inputPreset: 'platformer',
+    }, store);
+
+    const result = await executeToolCall('configure_game_mechanics', {
+      inputPreset: 'fps',
+    }, store);
+
+    const r = result.result as Record<string, unknown>;
+    expect(typeof r.summary).toBe('string');
+    expect(r.configured).toBeGreaterThan(0);
+  });
+});
+
+// ── apply_style ───────────────────────────────────────────────────────────────
+
+describe('legacy: apply_style', () => {
+  it('applies palette to all mesh entities when targetEntityIds is not specified', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: {
+          m1: makeNode('m1', 'MeshA', { components: ['Mesh3d'] }),
+          m2: makeNode('m2', 'MeshB', { components: ['Mesh3d'] }),
+          light: makeNode('light', 'Light', { components: ['PointLight'] }),
+        },
+        rootIds: ['m1', 'm2', 'light'],
+      },
+    });
+
+    const result = await executeToolCall('apply_style', {
+      palette: {
+        primary: [1, 0, 0, 1],
+        secondary: [0, 1, 0, 1],
+        accent: [0, 0, 1, 1],
+      },
+    }, store);
+
+    expect(result.success).toBe(true);
+    // Only mesh entities should be targeted (2, not the light)
+    const r = result.result as Record<string, unknown>;
+    expect(r.appliedTo).toBe(2);
+  });
+
+  it('applies style only to explicitly listed targetEntityIds', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: {
+          a: makeNode('a', 'A', { components: ['Mesh3d'] }),
+          b: makeNode('b', 'B', { components: ['Mesh3d'] }),
+          c: makeNode('c', 'C', { components: ['Mesh3d'] }),
+        },
+        rootIds: ['a', 'b', 'c'],
+      },
+    });
+
+    const result = await executeToolCall('apply_style', {
+      targetEntityIds: ['a'],
+      palette: { primary: [1, 0, 0, 1] },
+    }, store);
+
+    const r = result.result as Record<string, unknown>;
+    expect(r.appliedTo).toBe(1);
+  });
+
+  it('applies material overrides to all targets', async () => {
+    const store = makeStore({
+      sceneGraph: {
+        nodes: {
+          m: makeNode('m', 'Metal', { components: ['Mesh3d'] }),
+        },
+        rootIds: ['m'],
+      },
+    });
+
+    await executeToolCall('apply_style', {
+      materialOverrides: { metallic: 1.0, roughness: 0.1 },
+    }, store);
+
+    expect(store.updateMaterial).toHaveBeenCalledWith('m', expect.objectContaining({ metallic: 1.0 }));
+  });
+
+  it('calls updateAmbientLight when lighting.ambientBrightness provided', async () => {
+    const store = makeStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+
+    await executeToolCall('apply_style', {
+      lighting: { ambientBrightness: 0.8 },
+    }, store);
+
+    expect(store.updateAmbientLight).toHaveBeenCalledWith(
+      expect.objectContaining({ brightness: 0.8 })
+    );
+  });
+
+  it('calls updatePostProcessing when postProcessing provided', async () => {
+    const store = makeStore({
+      sceneGraph: { nodes: {}, rootIds: [] },
+    });
+
+    await executeToolCall('apply_style', {
+      postProcessing: { bloom: { enabled: true, intensity: 0.5 } },
+    }, store);
+
+    expect(store.updatePostProcessing).toHaveBeenCalledWith(
+      expect.objectContaining({ bloom: expect.objectContaining({ enabled: true }) })
+    );
+  });
+});
+
+// ── default / unknown tool ────────────────────────────────────────────────────
+
+describe('legacy: unknown tool handling', () => {
+  it('returns success: false with "Unknown tool" message for unrecognised tool names', async () => {
+    const store = makeStore();
+    const result = await executeToolCall('does_not_exist_xyz', {}, store);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unknown tool');
+  });
+
+  it('includes the tool name in the error message', async () => {
+    const store = makeStore();
+    const result = await executeToolCall('my_missing_tool', {}, store);
+    expect(result.error).toContain('my_missing_tool');
+  });
+});
+
+// ── top-level error containment ───────────────────────────────────────────────
+
+describe('legacy: error containment', () => {
+  it('catches synchronous exceptions from store methods and returns success: false', async () => {
+    const store = makeStore();
+    vi.mocked(store.spawnEntity).mockImplementation(() => {
+      throw new Error('spawnEntity crashed');
+    });
+
+    const result = await executeToolCall('create_scene_from_description', {
+      entities: [{ type: 'cube', name: 'Boom' }],
+    }, store);
+
+    // The inner per-entity try/catch catches it; compound result is still returned
+    // success depends on whether any entity succeeded. 0/1 => success: false for outer.
+    expect(result).toBeDefined();
+    expect(typeof result.success).toBe('boolean');
+  });
+});

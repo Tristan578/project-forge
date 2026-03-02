@@ -18,6 +18,7 @@ export type ToolHandler = (
 export interface ExecutionResult {
   success: boolean;
   result?: unknown;
+  message?: string;
   error?: string;
 }
 
