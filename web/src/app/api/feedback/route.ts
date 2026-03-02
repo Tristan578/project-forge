@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { authenticateClerkSession } from '@/lib/auth/api-auth';
+import { getUserByClerkId } from '@/lib/auth/user-service';
 import { getDb } from '@/lib/db/client';
 import { feedback } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
@@ -7,9 +8,11 @@ import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 const VALID_TYPES = ['bug', 'feature', 'general'] as const;
 
 export async function POST(req: NextRequest) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { user, clerkId } = authResult.ctx;
+  const session = await authenticateClerkSession();
+  if (!session.ok) return session.response;
+  const clerkId = session.clerkId;
+
+  const user = await getUserByClerkId(clerkId);
 
   // Rate limit: 10 submissions per minute per user
   const rl = rateLimit(`feedback:${clerkId}`, 10, 60_000);
@@ -53,7 +56,7 @@ export async function POST(req: NextRequest) {
     const [record] = await db
       .insert(feedback)
       .values({
-        userId: user.id,
+        userId: user?.id ?? null,
         type,
         description: description.trim(),
         metadata: metadata ?? null,

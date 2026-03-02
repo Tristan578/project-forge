@@ -46,9 +46,8 @@ describe('encryption module', () => {
     } else {
       delete process.env.ENCRYPTION_MASTER_KEY;
     }
-    // Bust the module cache so each test group starts clean.
-    // (vitest caches modules between tests in the same file, which is fine
-    //  because we restore the env var in afterEach.)
+    // Env var is restored above; module cache is shared across tests in the
+    // same file, which is fine because all tests in this suite use the same key.
   });
 
   // ================================================================

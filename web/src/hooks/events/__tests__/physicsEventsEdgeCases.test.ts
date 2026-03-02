@@ -3,7 +3,7 @@
  * Edge case and supplementary tests for physicsEvents handler.
  *
  * Covers: collision event edge cases, raycast result edge cases,
- * rapid event sequences, malformed payload resilience.
+ * rapid event sequences, idempotent state transitions.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createMockSetGet, createMockActions } from './eventTestUtils';

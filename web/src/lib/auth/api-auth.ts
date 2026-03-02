@@ -46,11 +46,41 @@ export async function authenticateRequest(): Promise<
   if (!user) {
     return {
       ok: false,
-      response: NextResponse.json({ error: 'User not found in database' }, { status: 401 }),
+      response: NextResponse.json(
+        { error: 'USER_NOT_FOUND', message: 'Authenticated but user record not yet synced' },
+        { status: 404 },
+      ),
     };
   }
 
   return { ok: true, ctx: { user, clerkId } };
+}
+
+/**
+ * Validate Clerk session only (no DB user lookup).
+ * Use for routes that can degrade gracefully when the DB user
+ * hasn't been synced yet (e.g. return empty list instead of 401).
+ */
+export async function authenticateClerkSession(): Promise<
+  { ok: true; clerkId: string } | { ok: false; response: NextResponse }
+> {
+  if (!isClerkConfigured()) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
+
+  const { userId: clerkId } = await auth();
+
+  if (!clerkId) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    };
+  }
+
+  return { ok: true, clerkId };
 }
 
 /**
