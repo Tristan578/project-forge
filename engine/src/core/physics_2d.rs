@@ -84,7 +84,7 @@ pub struct Physics2dEnabled;
 /// 2D Joint connecting two entities
 #[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct PhysicsJoint2d {
-    pub target_entity_id: u32,
+    pub target_entity_id: String,
     pub joint_type: JointType2d,
     pub local_anchor1: [f32; 2],
     pub local_anchor2: [f32; 2],
@@ -117,7 +117,7 @@ pub enum JointType2d {
 impl Default for PhysicsJoint2d {
     fn default() -> Self {
         Self {
-            target_entity_id: 0,
+            target_entity_id: String::new(),
             joint_type: JointType2d::Revolute {
                 limits: None,
                 motor_velocity: 0.0,

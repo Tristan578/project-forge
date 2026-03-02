@@ -53,7 +53,13 @@ export function bundleScripts(
       pause: function(id) { pendingCommands.push({cmd: 'pause_audio', entityId: id}); _audioPlaying[id] = false; },
       setVolume: function(id, v) { pendingCommands.push({cmd: 'set_audio', entityId: id, volume: v}); },
       setPitch: function(id, p) { pendingCommands.push({cmd: 'set_audio', entityId: id, pitch: p}); },
-      isPlaying: function(id) { return !!_audioPlaying[id]; },
+      isPlaying: function(id) {
+        // Check authoritative audio state from runtime, then local tracking
+        if (window.__forgeAudioState && id in window.__forgeAudioState) {
+          return !!window.__forgeAudioState[id];
+        }
+        return !!_audioPlaying[id];
+      },
     },
     physics: {
       applyForce: function(id, x, y, z) { pendingCommands.push({cmd: 'apply_force', entityId: id, force: [x,y,z]}); },

@@ -95,7 +95,7 @@ pub struct VertexWeights {
 pub struct IkConstraint2d {
     pub name: String,
     pub bone_chain: Vec<String>, // 2 bones (e.g., ["upper_arm", "forearm"])
-    pub target_entity_id: u32,   // EntityId of target
+    pub target_entity_id: String, // EntityId of target (UUID string)
     pub bend_direction: f32,     // +1.0 or -1.0
     pub mix: f32,                // 0.0 = FK, 1.0 = IK
 }

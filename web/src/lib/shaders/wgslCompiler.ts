@@ -262,8 +262,9 @@ function emitFunctionCall(
 
 function emitTextureSample(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
-  // TODO: Add texture binding support in future
-  ctx.statements.push(`let ${varName} = vec4<f32>(1.0, 0.0, 1.0, 1.0); // Texture sample placeholder`);
+  const uv = inputs.uv || 'in.uv';
+  // Sample from the material's base color texture using Bevy's PBR bindings
+  ctx.statements.push(`let ${varName} = textureSample(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, ${uv});`);
   ctx.varMap.set(`${node.id}:color`, varName);
 }
 
@@ -277,9 +278,41 @@ function emitNoiseTexture(node: ShaderNode, inputs: Record<string, string>, ctx:
 function emitVoronoiTexture(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const distVar = `var_${ctx.varCounter++}`;
   const colorVar = `var_${ctx.varCounter++}`;
-  // Placeholder Voronoi (can be expanded with proper implementation)
-  ctx.statements.push(`let ${distVar} = 0.5; // Voronoi distance placeholder`);
-  ctx.statements.push(`let ${colorVar} = vec3<f32>(0.5, 0.5, 0.5); // Voronoi color placeholder`);
+  const cellVar = `vor_cell_${ctx.varCounter}`;
+  const uv = inputs.uv || 'in.uv';
+  const scale = inputs.scale || '5.0';
+
+  // Voronoi cellular noise: find nearest cell center using hash-based random offsets
+  ctx.statements.push(`
+    var ${distVar} = 1.0;
+    var ${colorVar} = vec3<f32>(0.0);
+    {
+      let vor_p = ${uv} * ${scale};
+      let vor_ip = floor(vor_p);
+      let vor_fp = fract(vor_p);
+      var min_dist = 1.0;
+      var ${cellVar} = vec2<f32>(0.0);
+      for (var j = -1; j <= 1; j++) {
+        for (var i = -1; i <= 1; i++) {
+          let neighbor = vec2<f32>(f32(i), f32(j));
+          let cell_id = vor_ip + neighbor;
+          let cell_hash = fract(sin(dot(cell_id, vec2<f32>(127.1, 311.7))) * 43758.5453);
+          let cell_hash2 = fract(sin(dot(cell_id, vec2<f32>(269.5, 183.3))) * 43758.5453);
+          let cell_offset = vec2<f32>(cell_hash, cell_hash2);
+          let diff = neighbor + cell_offset - vor_fp;
+          let d = dot(diff, diff);
+          if (d < min_dist) {
+            min_dist = d;
+            ${cellVar} = cell_id;
+          }
+        }
+      }
+      ${distVar} = sqrt(min_dist);
+      let ch = fract(sin(dot(${cellVar}, vec2<f32>(127.1, 311.7))) * 43758.5453);
+      let ch2 = fract(sin(dot(${cellVar}, vec2<f32>(269.5, 183.3))) * 43758.5453);
+      let ch3 = fract(sin(dot(${cellVar}, vec2<f32>(419.2, 371.9))) * 43758.5453);
+      ${colorVar} = vec3<f32>(ch, ch2, ch3);
+    }`);
   ctx.varMap.set(`${node.id}:distance`, distVar);
   ctx.varMap.set(`${node.id}:color`, colorVar);
 }
@@ -344,8 +377,19 @@ function emitFresnel(node: ShaderNode, inputs: Record<string, string>, ctx: Comp
 
 function emitNormalMap(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
-  // Placeholder normal map (expand with texture support)
-  ctx.statements.push(`let ${varName} = vec3<f32>(0.0, 0.0, 1.0); // Normal map placeholder`);
+  const uv = inputs.uv || 'in.uv';
+  const strength = inputs.strength || '1.0';
+
+  // Sample normal map texture and transform from tangent space to world space
+  ctx.statements.push(`
+    let ${varName}_raw = textureSample(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, ${uv}).xyz;
+    let ${varName}_tangent = ${varName}_raw * 2.0 - 1.0;
+    let ${varName}_scaled = vec3<f32>(${varName}_tangent.xy * ${strength}, ${varName}_tangent.z);
+    let ${varName} = normalize(
+      ${varName}_scaled.x * normalize(in.world_tangent.xyz) +
+      ${varName}_scaled.y * normalize(cross(in.world_normal, in.world_tangent.xyz) * in.world_tangent.w) +
+      ${varName}_scaled.z * in.world_normal
+    );`);
   ctx.varMap.set(`${node.id}:normal`, varName);
 }
 
