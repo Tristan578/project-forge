@@ -72,5 +72,18 @@ export function createMockActions() {
     // Particle events
     setPrimaryParticle: vi.fn(),
     setParticleEnabled: vi.fn(),
+    // Animation events
+    setEntityAnimation: vi.fn(),
+    // Sprite events
+    setSpriteSheet: vi.fn(),
+    setSpriteAnimator: vi.fn(),
+    setAnimationStateMachine: vi.fn(),
+    setProjectType: vi.fn(),
+    setCamera2dData: vi.fn(),
+    removeTilemapData: vi.fn(),
+    setTileset: vi.fn(),
+    // State properties used by animation tests
+    primaryId: null as string | null,
+    skeletons2d: {} as Record<string, unknown>,
   };
 }

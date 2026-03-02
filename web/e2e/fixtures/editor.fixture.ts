@@ -9,6 +9,31 @@ export class EditorPage {
 
   /** Navigate to /dev and wait for WASM engine to initialize */
   async load() {
+    // Suppress onboarding overlays and init overlay so they don't block interactions.
+    // The InitOverlay stays visible until the Rust renderer fully initializes, which
+    // requires GPU — in headless Chrome with --disable-gpu it never completes.
+    await this.page.addInitScript(() => {
+      localStorage.setItem('forge-welcomed', '1');
+      localStorage.setItem('forge-mobile-dismissed', '1');
+      localStorage.setItem('forge-checklist-dismissed', '1');
+
+      // Inject CSS to hide blocking overlays
+      const style = document.createElement('style');
+      style.setAttribute('data-e2e', 'suppress-overlays');
+      style.textContent = [
+        // Hide InitOverlay (absolute full-screen z-50 with bg-zinc-950/95)
+        '[class*="absolute"][class*="inset-0"][class*="z-50"][class*="bg-zinc-950"] { display: none !important; }',
+        // Hide Next.js dev overlay which intercepts pointer events in CI
+        'nextjs-portal { display: none !important; pointer-events: none !important; }',
+      ].join('\n');
+      if (document.head) {
+        document.head.appendChild(style);
+      } else {
+        document.addEventListener('DOMContentLoaded', () =>
+          document.head.appendChild(style)
+        );
+      }
+    });
     await this.page.goto('/dev');
     // Wait for the WASM engine to report ready (longer timeout for CI runners)
     await this.page.waitForFunction(
