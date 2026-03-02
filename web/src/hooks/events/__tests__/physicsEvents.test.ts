@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet } from './eventTestUtils';
 
+// Mock the editor store module
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
     getState: vi.fn(),
@@ -9,6 +10,7 @@ vi.mock('@/stores/editorStore', () => ({
   },
 }));
 
+// Mock the script runner collision callback
 vi.mock('@/lib/scripting/useScriptRunner', () => ({
   getScriptCollisionCallback: vi.fn(),
 }));
@@ -18,113 +20,242 @@ import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 import { handlePhysicsEvent } from '../physicsEvents';
 
 describe('handlePhysicsEvent', () => {
-  let actions: ReturnType<typeof createMockActions>;
   let mockSetGet: ReturnType<typeof createMockSetGet>;
+  const mockActions = {
+    setPrimaryPhysics: vi.fn(),
+    setPrimaryJoint: vi.fn(),
+    setDebugPhysics: vi.fn(),
+    setPhysics2d: vi.fn(),
+    setJoint2d: vi.fn(),
+    removePhysics2d: vi.fn(),
+  };
 
   beforeEach(() => {
-    actions = createMockActions();
+    vi.clearAllMocks();
     mockSetGet = createMockSetGet();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore.getState).mockReturnValue(actions as any);
-    vi.mocked(getScriptCollisionCallback).mockReturnValue(null);
+    vi.mocked(useEditorStore.getState).mockReturnValue(mockActions as any);
   });
 
   it('returns false for unknown event types', () => {
-    expect(handlePhysicsEvent('UNKNOWN', {}, mockSetGet.set, mockSetGet.get)).toBe(false);
+    const result = handlePhysicsEvent('UNKNOWN_EVENT', {}, mockSetGet.set, mockSetGet.get);
+    expect(result).toBe(false);
   });
 
-  it('PHYSICS_CHANGED: calls setPrimaryPhysics', () => {
-    const payload = { entityId: 'ent-1', enabled: true, bodyType: 'dynamic', mass: 10 };
-    const result = handlePhysicsEvent('PHYSICS_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('PHYSICS_CHANGED', () => {
+    it('should call setPrimaryPhysics with data and enabled flag', () => {
+      const payload = {
+        entityId: 'entity-1',
+        enabled: true,
+        bodyType: 'dynamic',
+        mass: 2.0,
+        restitution: 0.5,
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setPrimaryPhysics).toHaveBeenCalledWith(
-      { bodyType: 'dynamic', mass: 10 },
-      true
-    );
+      const result = handlePhysicsEvent('PHYSICS_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockActions.setPrimaryPhysics).toHaveBeenCalledWith(
+        { bodyType: 'dynamic', mass: 2.0, restitution: 0.5 },
+        true
+      );
+    });
+
+    it('should strip entityId from physics data', () => {
+      const payload = { entityId: 'entity-1', enabled: false, bodyType: 'static' };
+      handlePhysicsEvent('PHYSICS_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      const calledData = mockActions.setPrimaryPhysics.mock.calls[0][0];
+      expect(calledData).not.toHaveProperty('entityId');
+      expect(calledData).not.toHaveProperty('enabled');
+    });
   });
 
-  it('JOINT_CHANGED: calls setPrimaryJoint', () => {
-    const jointData = { type: 'revolute', connectedEntity: 'ent-2' };
-    const result = handlePhysicsEvent('JOINT_CHANGED', jointData as never, mockSetGet.set, mockSetGet.get);
+  describe('JOINT_CHANGED', () => {
+    it('should call setPrimaryJoint with joint data', () => {
+      const payload = { jointType: 'fixed', connectedEntity: 'entity-2' };
 
-    expect(result).toBe(true);
-    expect(actions.setPrimaryJoint).toHaveBeenCalledWith(jointData);
+      const result = handlePhysicsEvent('JOINT_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockActions.setPrimaryJoint).toHaveBeenCalledWith(payload);
+    });
+
+    it('should handle null joint data', () => {
+      handlePhysicsEvent('JOINT_CHANGED', null as unknown as Record<string, unknown>, mockSetGet.set, mockSetGet.get);
+
+      expect(mockActions.setPrimaryJoint).toHaveBeenCalledWith(null);
+    });
   });
 
-  it('JOINT_CHANGED with null: calls setPrimaryJoint(null)', () => {
-    handlePhysicsEvent('JOINT_CHANGED', null as never, mockSetGet.set, mockSetGet.get);
-    expect(actions.setPrimaryJoint).toHaveBeenCalledWith(null);
+  describe('DEBUG_PHYSICS_CHANGED', () => {
+    it('should call setDebugPhysics with enabled flag', () => {
+      const payload = { enabled: true };
+
+      const result = handlePhysicsEvent('DEBUG_PHYSICS_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockActions.setDebugPhysics).toHaveBeenCalledWith(true);
+    });
+
+    it('should handle disabled state', () => {
+      handlePhysicsEvent('DEBUG_PHYSICS_CHANGED', { enabled: false }, mockSetGet.set, mockSetGet.get);
+
+      expect(mockActions.setDebugPhysics).toHaveBeenCalledWith(false);
+    });
   });
 
-  it('DEBUG_PHYSICS_CHANGED: calls setDebugPhysics', () => {
-    const payload = { enabled: true };
-    const result = handlePhysicsEvent('DEBUG_PHYSICS_CHANGED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('PHYSICS2D_UPDATED', () => {
+    it('should call setPhysics2d with entityId, data, and enabled', () => {
+      const payload = {
+        entityId: 'sprite-1',
+        enabled: true,
+        bodyType: 'dynamic',
+        mass: 1.0,
+        gravityScale: 1.0,
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setDebugPhysics).toHaveBeenCalledWith(true);
+      const result = handlePhysicsEvent('PHYSICS2D_UPDATED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockActions.setPhysics2d).toHaveBeenCalledWith(
+        'sprite-1',
+        { bodyType: 'dynamic', mass: 1.0, gravityScale: 1.0 },
+        true
+      );
+    });
   });
 
-  it('PHYSICS2D_UPDATED: calls setPhysics2d', () => {
-    const payload = { entityId: 'ent-1', enabled: true, bodyType: 'kinematic', friction: 0.5 };
-    const result = handlePhysicsEvent('PHYSICS2D_UPDATED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('JOINT2D_UPDATED', () => {
+    it('should call setJoint2d with entityId and joint data', () => {
+      const payload = {
+        entityId: 'entity-1',
+        jointType: 'revolute',
+        targetEntityId: 42,
+      };
 
-    expect(result).toBe(true);
-    expect(actions.setPhysics2d).toHaveBeenCalledWith('ent-1', { bodyType: 'kinematic', friction: 0.5 }, true);
+      const result = handlePhysicsEvent('JOINT2D_UPDATED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockActions.setJoint2d).toHaveBeenCalledWith(
+        'entity-1',
+        { jointType: 'revolute', targetEntityId: 42 }
+      );
+    });
   });
 
-  it('JOINT2D_UPDATED: calls setJoint2d', () => {
-    const payload = { entityId: 'ent-1', jointType: 'distance', target: 'ent-2' };
-    const result = handlePhysicsEvent('JOINT2D_UPDATED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('PHYSICS2D_REMOVED', () => {
+    it('should call removePhysics2d with entityId', () => {
+      const payload = { entityId: 'sprite-1' };
 
-    expect(result).toBe(true);
-    expect(actions.setJoint2d).toHaveBeenCalledWith('ent-1', { jointType: 'distance', target: 'ent-2' });
+      const result = handlePhysicsEvent('PHYSICS2D_REMOVED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockActions.removePhysics2d).toHaveBeenCalledWith('sprite-1');
+    });
   });
 
-  it('PHYSICS2D_REMOVED: calls removePhysics2d', () => {
-    const payload = { entityId: 'ent-1' };
-    const result = handlePhysicsEvent('PHYSICS2D_REMOVED', payload as never, mockSetGet.set, mockSetGet.get);
+  describe('COLLISION_EVENT', () => {
+    it('should invoke collision callback with payload', () => {
+      const mockCallback = vi.fn();
+      vi.mocked(getScriptCollisionCallback).mockReturnValue(mockCallback);
 
-    expect(result).toBe(true);
-    expect(actions.removePhysics2d).toHaveBeenCalledWith('ent-1');
+      const payload = { entityA: 'player', entityB: 'enemy', started: true };
+
+      const result = handlePhysicsEvent('COLLISION_EVENT', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockCallback).toHaveBeenCalledWith({
+        entityA: 'player',
+        entityB: 'enemy',
+        started: true,
+      });
+    });
+
+    it('should handle collision exit (started=false)', () => {
+      const mockCallback = vi.fn();
+      vi.mocked(getScriptCollisionCallback).mockReturnValue(mockCallback);
+
+      const payload = { entityA: 'player', entityB: 'wall', started: false };
+      handlePhysicsEvent('COLLISION_EVENT', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(mockCallback).toHaveBeenCalledWith(
+        expect.objectContaining({ started: false })
+      );
+    });
+
+    it('should gracefully handle null callback', () => {
+      vi.mocked(getScriptCollisionCallback).mockReturnValue(null);
+
+      const payload = { entityA: 'a', entityB: 'b', started: true };
+      const result = handlePhysicsEvent('COLLISION_EVENT', payload, mockSetGet.set, mockSetGet.get);
+
+      // Should still return true (event was handled), just no callback invoked
+      expect(result).toBe(true);
+    });
   });
 
-  it('COLLISION_EVENT: invokes script collision callback', () => {
-    const mockCb = vi.fn();
-    vi.mocked(getScriptCollisionCallback).mockReturnValue(mockCb);
+  describe('RAYCAST_RESULT', () => {
+    it('should invoke window raycast callback with result', () => {
+      const mockCallback = vi.fn();
+      vi.stubGlobal('window', { __scriptRaycastCallback: mockCallback });
 
-    const payload = { entityA: 'a', entityB: 'b', started: true };
-    const result = handlePhysicsEvent('COLLISION_EVENT', payload as never, mockSetGet.set, mockSetGet.get);
+      const payload = {
+        requestId: 'ray-001',
+        hitEntity: 'wall-entity',
+        point: [5.0, 1.0, 3.0] as [number, number, number],
+        distance: 7.5,
+      };
 
-    expect(result).toBe(true);
-    expect(mockCb).toHaveBeenCalledWith(payload);
+      const result = handlePhysicsEvent('RAYCAST_RESULT', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(mockCallback).toHaveBeenCalledWith({
+        requestId: 'ray-001',
+        hitEntity: 'wall-entity',
+        point: [5.0, 1.0, 3.0],
+        distance: 7.5,
+      });
+
+      vi.unstubAllGlobals();
+    });
+
+    it('should handle raycast miss (hitEntity=null)', () => {
+      const mockCallback = vi.fn();
+      vi.stubGlobal('window', { __scriptRaycastCallback: mockCallback });
+
+      const payload = {
+        requestId: 'ray-002',
+        hitEntity: null,
+        point: [0, 0, 0],
+        distance: 0,
+      };
+      handlePhysicsEvent('RAYCAST_RESULT', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(mockCallback).toHaveBeenCalledWith(
+        expect.objectContaining({ hitEntity: null })
+      );
+
+      vi.unstubAllGlobals();
+    });
+
+    it('should gracefully handle missing raycast callback', () => {
+      vi.stubGlobal('window', {});
+
+      const payload = { requestId: 'ray-003', hitEntity: null, point: [0, 0, 0], distance: 0 };
+      const result = handlePhysicsEvent('RAYCAST_RESULT', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      // No error thrown
+
+      vi.unstubAllGlobals();
+    });
   });
 
-  it('COLLISION_EVENT: no-op without callback', () => {
-    vi.mocked(getScriptCollisionCallback).mockReturnValue(null);
-    const payload = { entityA: 'a', entityB: 'b', started: false };
-    const result = handlePhysicsEvent('COLLISION_EVENT', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    // No error thrown
-  });
-
-  it('RAYCAST_RESULT: invokes window callback', () => {
-    const mockCb = vi.fn();
-    // Provide a minimal window mock with the raycast callback
-    vi.stubGlobal('window', { __scriptRaycastCallback: mockCb });
-
-    const payload = { requestId: 'r1', hitEntity: 'ent-1', point: [1, 2, 3], distance: 5 };
-    const result = handlePhysicsEvent('RAYCAST_RESULT', payload as never, mockSetGet.set, mockSetGet.get);
-
-    expect(result).toBe(true);
-    expect(mockCb).toHaveBeenCalledWith(payload);
-
-    vi.unstubAllGlobals();
-  });
-
-  it('RAYCAST2D_RESULT: returns true (placeholder)', () => {
-    const result = handlePhysicsEvent('RAYCAST2D_RESULT', {}, mockSetGet.set, mockSetGet.get);
-    expect(result).toBe(true);
+  describe('RAYCAST2D_RESULT', () => {
+    it('should return true (placeholder handled)', () => {
+      const result = handlePhysicsEvent('RAYCAST2D_RESULT', {}, mockSetGet.set, mockSetGet.get);
+      expect(result).toBe(true);
+    });
   });
 });

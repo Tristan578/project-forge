@@ -1,41 +1,42 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createSpriteSlice, setSpriteDispatcher, type SpriteSlice } from '../spriteSlice';
+import type { SpriteData, Camera2dData, SortingLayerData, SpriteSheetData, SpriteAnimatorData, AnimationStateMachineData, TilesetData, TilemapData } from '../types';
+
+let store: ReturnType<typeof createSliceStore<SpriteSlice>>;
+let mockDispatch: ReturnType<typeof createMockDispatch>;
+
+beforeEach(() => {
+  store = createSliceStore(createSpriteSlice);
+  mockDispatch = createMockDispatch();
+  setSpriteDispatcher(mockDispatch);
+});
+
+afterEach(() => {
+  setSpriteDispatcher(null as unknown as (command: string, payload: unknown) => void);
+});
 
 describe('spriteSlice', () => {
-  let store: ReturnType<typeof createSliceStore<SpriteSlice>>;
-  let mockDispatch: ReturnType<typeof createMockDispatch>;
-
-  beforeEach(() => {
-    mockDispatch = createMockDispatch();
-    setSpriteDispatcher(mockDispatch);
-    store = createSliceStore(createSpriteSlice);
-  });
-
-  afterEach(() => {
-    setSpriteDispatcher(null as unknown as (command: string, payload: unknown) => void);
-  });
-
-  describe('Initial state', () => {
-    it('should start with 3D project type and empty collections', () => {
+  describe('initial state', () => {
+    it('should have projectType "3d"', () => {
       expect(store.getState().projectType).toBe('3d');
-      expect(store.getState().sprites).toEqual({});
-      expect(store.getState().camera2dData).toBeNull();
-      expect(store.getState().spriteSheets).toEqual({});
-      expect(store.getState().spriteAnimators).toEqual({});
-      expect(store.getState().animationStateMachines).toEqual({});
-      expect(store.getState().tilesets).toEqual({});
-      expect(store.getState().tilemaps).toEqual({});
-      expect(store.getState().activeTilesetId).toBeNull();
-      expect(store.getState().tilemapActiveTool).toBeNull();
-      expect(store.getState().tilemapActiveLayerIndex).toBeNull();
     });
 
-    it('should have 4 default sorting layers', () => {
-      const layers = store.getState().sortingLayers;
-      expect(layers).toHaveLength(4);
-      expect(layers.map(l => l.name)).toEqual(['Background', 'Default', 'Foreground', 'UI']);
-      expect(layers.every(l => l.visible)).toBe(true);
+    it('should have empty sprites', () => {
+      expect(store.getState().sprites).toEqual({});
+    });
+
+    it('should have null camera2dData', () => {
+      expect(store.getState().camera2dData).toBeNull();
+    });
+
+    it('should have default sorting layers', () => {
+      expect(store.getState().sortingLayers).toEqual([
+        { name: 'Background', order: 0, visible: true },
+        { name: 'Default', order: 1, visible: true },
+        { name: 'Foreground', order: 2, visible: true },
+        { name: 'UI', order: 3, visible: true },
+      ]);
     });
 
     it('should have default grid2d settings', () => {
@@ -47,221 +48,397 @@ describe('spriteSlice', () => {
         snapToGrid: false,
       });
     });
+
+    it('should have empty spriteSheets', () => {
+      expect(store.getState().spriteSheets).toEqual({});
+    });
+
+    it('should have empty spriteAnimators', () => {
+      expect(store.getState().spriteAnimators).toEqual({});
+    });
+
+    it('should have empty animationStateMachines', () => {
+      expect(store.getState().animationStateMachines).toEqual({});
+    });
+
+    it('should have empty tilesets', () => {
+      expect(store.getState().tilesets).toEqual({});
+    });
+
+    it('should have empty tilemaps', () => {
+      expect(store.getState().tilemaps).toEqual({});
+    });
+
+    it('should have null activeTilesetId', () => {
+      expect(store.getState().activeTilesetId).toBeNull();
+    });
+
+    it('should have null tilemapActiveTool', () => {
+      expect(store.getState().tilemapActiveTool).toBeNull();
+    });
+
+    it('should have null tilemapActiveLayerIndex', () => {
+      expect(store.getState().tilemapActiveLayerIndex).toBeNull();
+    });
   });
 
   describe('setProjectType', () => {
-    it('should change project type', () => {
-      store.getState().setProjectType('2d');
-      expect(store.getState().projectType).toBe('2d');
-    });
+    it('should update projectType and dispatch', () => {
+      store.getState().setProjectType('2d' as unknown as SpriteSlice['projectType']);
 
-    it('should dispatch set_project_type', () => {
-      store.getState().setProjectType('2d');
+      expect(store.getState().projectType).toBe('2d');
       expect(mockDispatch).toHaveBeenCalledWith('set_project_type', { projectType: '2d' });
     });
   });
 
-  describe('sprite data CRUD', () => {
-    it('should set sprite data', () => {
-      const data = { atlas: 'player', frame: 0 };
-      store.getState().setSpriteData('ent-1', data as never);
-      expect(store.getState().sprites['ent-1']).toEqual(data);
+  describe('setSpriteData', () => {
+    it('should add sprite data and dispatch', () => {
+      const data: SpriteData = { texture: 'hero.png', width: 64, height: 64 } as unknown as SpriteData;
+      store.getState().setSpriteData('entity1', data);
+
+      expect(store.getState().sprites.entity1).toEqual(data);
+      expect(mockDispatch).toHaveBeenCalledWith('set_sprite_data', {
+        entityId: 'entity1',
+        ...data,
+      });
     });
 
-    it('should dispatch set_sprite_data', () => {
-      store.getState().setSpriteData('ent-1', { atlas: 'player' } as never);
-      expect(mockDispatch).toHaveBeenCalledWith('set_sprite_data', expect.objectContaining({ entityId: 'ent-1' }));
-    });
+    it('should overwrite existing sprite data', () => {
+      const data1: SpriteData = { texture: 'hero.png' } as unknown as SpriteData;
+      const data2: SpriteData = { texture: 'enemy.png' } as unknown as SpriteData;
+      store.getState().setSpriteData('entity1', data1);
+      store.getState().setSpriteData('entity1', data2);
 
-    it('should remove sprite data', () => {
-      store.getState().setSpriteData('ent-1', { atlas: 'x' } as never);
-      store.getState().removeSpriteData('ent-1');
-      expect(store.getState().sprites['ent-1']).toBeUndefined();
-    });
-
-    it('should not affect other sprites on remove', () => {
-      store.getState().setSpriteData('ent-1', { atlas: 'a' } as never);
-      store.getState().setSpriteData('ent-2', { atlas: 'b' } as never);
-      store.getState().removeSpriteData('ent-1');
-      expect(store.getState().sprites['ent-2']).toBeDefined();
-    });
-
-    it('should dispatch remove_sprite_data', () => {
-      store.getState().removeSpriteData('ent-1');
-      expect(mockDispatch).toHaveBeenCalledWith('remove_sprite_data', { entityId: 'ent-1' });
+      expect(store.getState().sprites.entity1).toEqual(data2);
     });
   });
 
-  describe('camera2d', () => {
-    it('should set camera 2D data', () => {
-      const cam = { zoom: 2.0, position: [0, 0] };
-      store.getState().setCamera2dData(cam as never);
-      expect(store.getState().camera2dData).toEqual(cam);
-    });
+  describe('removeSpriteData', () => {
+    it('should remove sprite data and dispatch', () => {
+      const data: SpriteData = { texture: 'hero.png' } as unknown as SpriteData;
+      store.getState().setSpriteData('entity1', data);
 
-    it('should dispatch set_camera_2d_data', () => {
-      store.getState().setCamera2dData({ zoom: 1 } as never);
-      expect(mockDispatch).toHaveBeenCalledWith('set_camera_2d_data', { zoom: 1 });
-    });
-  });
+      store.getState().removeSpriteData('entity1');
 
-  describe('sorting layers', () => {
-    it('should set sorting layers', () => {
-      const layers = [{ name: 'Custom', order: 0, visible: true }];
-      store.getState().setSortingLayers(layers);
-      expect(store.getState().sortingLayers).toEqual(layers);
-    });
-
-    it('should add a sorting layer with next order', () => {
-      store.getState().addSortingLayer('Particles');
-      const layers = store.getState().sortingLayers;
-      expect(layers).toHaveLength(5);
-      expect(layers[4].name).toBe('Particles');
-      expect(layers[4].order).toBe(4); // max existing is 3 (UI)
-      expect(layers[4].visible).toBe(true);
-    });
-
-    it('should remove a sorting layer by name', () => {
-      store.getState().removeSortingLayer('Foreground');
-      const names = store.getState().sortingLayers.map(l => l.name);
-      expect(names).not.toContain('Foreground');
-      expect(names).toHaveLength(3);
-    });
-
-    it('should toggle layer visibility', () => {
-      store.getState().toggleLayerVisibility('Default');
-      const layer = store.getState().sortingLayers.find(l => l.name === 'Default');
-      expect(layer?.visible).toBe(false);
-    });
-
-    it('should toggle visibility back on', () => {
-      store.getState().toggleLayerVisibility('Default');
-      store.getState().toggleLayerVisibility('Default');
-      const layer = store.getState().sortingLayers.find(l => l.name === 'Default');
-      expect(layer?.visible).toBe(true);
+      expect(store.getState().sprites.entity1).toBeUndefined();
+      expect(mockDispatch).toHaveBeenCalledWith('remove_sprite_data', {
+        entityId: 'entity1',
+      });
     });
   });
 
-  describe('grid2d', () => {
-    it('should merge grid settings', () => {
-      store.getState().setGrid2d({ enabled: true, snapToGrid: true });
-      expect(store.getState().grid2d.enabled).toBe(true);
+  describe('setCamera2dData', () => {
+    it('should set camera data and dispatch', () => {
+      const data: Camera2dData = { zoom: 1.5, x: 100, y: 200 } as unknown as Camera2dData;
+      store.getState().setCamera2dData(data);
+
+      expect(store.getState().camera2dData).toEqual(data);
+      expect(mockDispatch).toHaveBeenCalledWith('set_camera_2d_data', data);
+    });
+  });
+
+  describe('sorting layer operations', () => {
+    describe('setSortingLayers', () => {
+      it('should replace all sorting layers (state only)', () => {
+        const layers: SortingLayerData[] = [
+          { name: 'Custom', order: 0, visible: true },
+        ] as unknown as SortingLayerData[];
+        store.getState().setSortingLayers(layers);
+
+        expect(store.getState().sortingLayers).toEqual(layers);
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('addSortingLayer', () => {
+      it('should add a layer with order = max + 1', () => {
+        store.getState().addSortingLayer('Effects');
+
+        const layers = store.getState().sortingLayers;
+        expect(layers).toHaveLength(5);
+        const added = layers[4];
+        expect(added.name).toBe('Effects');
+        expect(added.order).toBe(4);
+        expect(added.visible).toBe(true);
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+
+      it('should compute order correctly after layers are replaced', () => {
+        store.getState().setSortingLayers([
+          { name: 'A', order: 10, visible: true } as unknown as SortingLayerData,
+        ]);
+        store.getState().addSortingLayer('B');
+
+        const layers = store.getState().sortingLayers;
+        expect(layers).toHaveLength(2);
+        expect(layers[1].order).toBe(11);
+      });
+    });
+
+    describe('removeSortingLayer', () => {
+      it('should remove a layer by name', () => {
+        store.getState().removeSortingLayer('Default');
+
+        const layers = store.getState().sortingLayers;
+        expect(layers).toHaveLength(3);
+        expect(layers.find(l => l.name === 'Default')).toBeUndefined();
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('toggleLayerVisibility', () => {
+      it('should toggle visible from true to false', () => {
+        store.getState().toggleLayerVisibility('Background');
+
+        const layer = store.getState().sortingLayers.find(l => l.name === 'Background');
+        expect(layer?.visible).toBe(false);
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+
+      it('should toggle visible from false back to true', () => {
+        store.getState().toggleLayerVisibility('Background');
+        store.getState().toggleLayerVisibility('Background');
+
+        const layer = store.getState().sortingLayers.find(l => l.name === 'Background');
+        expect(layer?.visible).toBe(true);
+      });
+
+      it('should only toggle the specified layer', () => {
+        store.getState().toggleLayerVisibility('UI');
+
+        const layers = store.getState().sortingLayers;
+        expect(layers.find(l => l.name === 'Background')?.visible).toBe(true);
+        expect(layers.find(l => l.name === 'Default')?.visible).toBe(true);
+        expect(layers.find(l => l.name === 'Foreground')?.visible).toBe(true);
+        expect(layers.find(l => l.name === 'UI')?.visible).toBe(false);
+      });
+    });
+  });
+
+  describe('setGrid2d', () => {
+    it('should merge partial settings into existing grid2d', () => {
+      store.getState().setGrid2d({ enabled: true, size: 64 });
+
+      expect(store.getState().grid2d).toEqual({
+        enabled: true,
+        size: 64,
+        color: '#ffffff',
+        opacity: 0.2,
+        snapToGrid: false,
+      });
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+
+    it('should allow updating a single property', () => {
+      store.getState().setGrid2d({ snapToGrid: true });
+
       expect(store.getState().grid2d.snapToGrid).toBe(true);
-      expect(store.getState().grid2d.size).toBe(32); // unchanged
+      expect(store.getState().grid2d.enabled).toBe(false);
     });
   });
 
-  describe('sprite sheets', () => {
-    it('should set sprite sheet data', () => {
-      const data = { columns: 4, rows: 4, frameCount: 16 };
-      store.getState().setSpriteSheet('ent-1', data as never);
-      expect(store.getState().spriteSheets['ent-1']).toEqual(data);
+  describe('sprite sheet CRUD', () => {
+    describe('setSpriteSheet', () => {
+      it('should set sprite sheet and dispatch', () => {
+        const data: SpriteSheetData = { frameWidth: 32, frameHeight: 32 } as unknown as SpriteSheetData;
+        store.getState().setSpriteSheet('entity1', data);
+
+        expect(store.getState().spriteSheets.entity1).toEqual(data);
+        expect(mockDispatch).toHaveBeenCalledWith('set_sprite_sheet', {
+          entityId: 'entity1',
+          ...data,
+        });
+      });
     });
 
-    it('should dispatch set_sprite_sheet', () => {
-      store.getState().setSpriteSheet('ent-1', { columns: 4 } as never);
-      expect(mockDispatch).toHaveBeenCalledWith('set_sprite_sheet', expect.objectContaining({ entityId: 'ent-1' }));
-    });
+    describe('removeSpriteSheet', () => {
+      it('should remove sprite sheet and dispatch', () => {
+        const data: SpriteSheetData = { frameWidth: 32, frameHeight: 32 } as unknown as SpriteSheetData;
+        store.getState().setSpriteSheet('entity1', data);
 
-    it('should remove sprite sheet', () => {
-      store.getState().setSpriteSheet('ent-1', { columns: 4 } as never);
-      store.getState().removeSpriteSheet('ent-1');
-      expect(store.getState().spriteSheets['ent-1']).toBeUndefined();
-    });
-  });
+        store.getState().removeSpriteSheet('entity1');
 
-  describe('sprite animators', () => {
-    it('should set sprite animator', () => {
-      const data = { clips: ['walk', 'run'] };
-      store.getState().setSpriteAnimator('ent-1', data as never);
-      expect(store.getState().spriteAnimators['ent-1']).toEqual(data);
-    });
-
-    it('should remove sprite animator', () => {
-      store.getState().setSpriteAnimator('ent-1', {} as never);
-      store.getState().removeSpriteAnimator('ent-1');
-      expect(store.getState().spriteAnimators['ent-1']).toBeUndefined();
+        expect(store.getState().spriteSheets.entity1).toBeUndefined();
+        expect(mockDispatch).toHaveBeenCalledWith('remove_sprite_sheet', {
+          entityId: 'entity1',
+        });
+      });
     });
   });
 
-  describe('animation state machines', () => {
-    it('should set animation state machine', () => {
-      const data = { states: ['idle', 'walk'], transitions: [] };
-      store.getState().setAnimationStateMachine('ent-1', data as never);
-      expect(store.getState().animationStateMachines['ent-1']).toEqual(data);
+  describe('sprite animator CRUD', () => {
+    describe('setSpriteAnimator', () => {
+      it('should set sprite animator and dispatch', () => {
+        const data: SpriteAnimatorData = { clips: [], currentClip: 0 } as unknown as SpriteAnimatorData;
+        store.getState().setSpriteAnimator('entity1', data);
+
+        expect(store.getState().spriteAnimators.entity1).toEqual(data);
+        expect(mockDispatch).toHaveBeenCalledWith('set_sprite_animator', {
+          entityId: 'entity1',
+          ...data,
+        });
+      });
     });
 
-    it('should remove animation state machine', () => {
-      store.getState().setAnimationStateMachine('ent-1', {} as never);
-      store.getState().removeAnimationStateMachine('ent-1');
-      expect(store.getState().animationStateMachines['ent-1']).toBeUndefined();
-    });
-  });
+    describe('removeSpriteAnimator', () => {
+      it('should remove sprite animator and dispatch', () => {
+        const data: SpriteAnimatorData = { clips: [] } as unknown as SpriteAnimatorData;
+        store.getState().setSpriteAnimator('entity1', data);
 
-  describe('tilesets', () => {
-    it('should set tileset data', () => {
-      const data = { tileSize: 16, columns: 10 };
-      store.getState().setTileset('asset-1', data as never);
-      expect(store.getState().tilesets['asset-1']).toEqual(data);
-    });
+        store.getState().removeSpriteAnimator('entity1');
 
-    it('should dispatch set_tileset', () => {
-      store.getState().setTileset('asset-1', { tileSize: 16 } as never);
-      expect(mockDispatch).toHaveBeenCalledWith('set_tileset', expect.objectContaining({ assetId: 'asset-1' }));
-    });
-
-    it('should remove tileset', () => {
-      store.getState().setTileset('asset-1', {} as never);
-      store.getState().removeTileset('asset-1');
-      expect(store.getState().tilesets['asset-1']).toBeUndefined();
+        expect(store.getState().spriteAnimators.entity1).toBeUndefined();
+        expect(mockDispatch).toHaveBeenCalledWith('remove_sprite_animator', {
+          entityId: 'entity1',
+        });
+      });
     });
   });
 
-  describe('tilemaps', () => {
-    it('should set tilemap data', () => {
-      const data = { width: 100, height: 100 };
-      store.getState().setTilemapData('ent-1', data as never);
-      expect(store.getState().tilemaps['ent-1']).toEqual(data);
+  describe('animation state machine CRUD', () => {
+    describe('setAnimationStateMachine', () => {
+      it('should set animation state machine and dispatch', () => {
+        const data: AnimationStateMachineData = { states: [], transitions: [] } as unknown as AnimationStateMachineData;
+        store.getState().setAnimationStateMachine('entity1', data);
+
+        expect(store.getState().animationStateMachines.entity1).toEqual(data);
+        expect(mockDispatch).toHaveBeenCalledWith('set_animation_state_machine', {
+          entityId: 'entity1',
+          ...data,
+        });
+      });
     });
 
-    it('should remove tilemap data', () => {
-      store.getState().setTilemapData('ent-1', {} as never);
-      store.getState().removeTilemapData('ent-1');
-      expect(store.getState().tilemaps['ent-1']).toBeUndefined();
-    });
+    describe('removeAnimationStateMachine', () => {
+      it('should remove animation state machine and dispatch', () => {
+        const data: AnimationStateMachineData = { states: [] } as unknown as AnimationStateMachineData;
+        store.getState().setAnimationStateMachine('entity1', data);
 
-    it('should dispatch set_tilemap_data', () => {
-      store.getState().setTilemapData('ent-1', { width: 50 } as never);
-      expect(mockDispatch).toHaveBeenCalledWith('set_tilemap_data', expect.objectContaining({ entityId: 'ent-1' }));
+        store.getState().removeAnimationStateMachine('entity1');
+
+        expect(store.getState().animationStateMachines.entity1).toBeUndefined();
+        expect(mockDispatch).toHaveBeenCalledWith('remove_animation_state_machine', {
+          entityId: 'entity1',
+        });
+      });
     });
   });
 
-  describe('tilemap editing state', () => {
-    it('should set active tileset', () => {
-      store.getState().setActiveTileset('asset-1');
-      expect(store.getState().activeTilesetId).toBe('asset-1');
+  describe('tileset CRUD', () => {
+    describe('setTileset', () => {
+      it('should set tileset and dispatch with assetId in payload', () => {
+        const data: TilesetData = { tileWidth: 16, tileHeight: 16 } as unknown as TilesetData;
+        store.getState().setTileset('asset1', data);
+
+        expect(store.getState().tilesets.asset1).toEqual(data);
+        expect(mockDispatch).toHaveBeenCalledWith('set_tileset', {
+          ...data,
+          assetId: 'asset1',
+        });
+      });
     });
 
-    it('should clear active tileset', () => {
-      store.getState().setActiveTileset('asset-1');
-      store.getState().setActiveTileset(null);
-      expect(store.getState().activeTilesetId).toBeNull();
+    describe('removeTileset', () => {
+      it('should remove tileset and dispatch', () => {
+        const data: TilesetData = { tileWidth: 16, tileHeight: 16 } as unknown as TilesetData;
+        store.getState().setTileset('asset1', data);
+
+        store.getState().removeTileset('asset1');
+
+        expect(store.getState().tilesets.asset1).toBeUndefined();
+        expect(mockDispatch).toHaveBeenCalledWith('remove_tileset', {
+          assetId: 'asset1',
+        });
+      });
+    });
+  });
+
+  describe('tilemap CRUD', () => {
+    describe('setTilemapData', () => {
+      it('should set tilemap data and dispatch', () => {
+        const data: TilemapData = { width: 100, height: 100, layers: [] } as unknown as TilemapData;
+        store.getState().setTilemapData('entity1', data);
+
+        expect(store.getState().tilemaps.entity1).toEqual(data);
+        expect(mockDispatch).toHaveBeenCalledWith('set_tilemap_data', {
+          entityId: 'entity1',
+          ...data,
+        });
+      });
     });
 
-    it('should set tilemap active tool', () => {
-      store.getState().setTilemapActiveTool('paint');
-      expect(store.getState().tilemapActiveTool).toBe('paint');
+    describe('removeTilemapData', () => {
+      it('should remove tilemap data and dispatch', () => {
+        const data: TilemapData = { width: 100, height: 100 } as unknown as TilemapData;
+        store.getState().setTilemapData('entity1', data);
+
+        store.getState().removeTilemapData('entity1');
+
+        expect(store.getState().tilemaps.entity1).toBeUndefined();
+        expect(mockDispatch).toHaveBeenCalledWith('remove_tilemap_data', {
+          entityId: 'entity1',
+        });
+      });
+    });
+  });
+
+  describe('tilemap UI state', () => {
+    describe('setActiveTileset', () => {
+      it('should set activeTilesetId (state only)', () => {
+        store.getState().setActiveTileset('asset1');
+
+        expect(store.getState().activeTilesetId).toBe('asset1');
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+
+      it('should allow setting to null', () => {
+        store.getState().setActiveTileset('asset1');
+        store.getState().setActiveTileset(null);
+
+        expect(store.getState().activeTilesetId).toBeNull();
+      });
     });
 
-    it('should set tilemap active layer index', () => {
-      store.getState().setTilemapActiveLayerIndex(2);
-      expect(store.getState().tilemapActiveLayerIndex).toBe(2);
+    describe('setTilemapActiveTool', () => {
+      it('should set tilemapActiveTool (state only)', () => {
+        store.getState().setTilemapActiveTool('paint');
+
+        expect(store.getState().tilemapActiveTool).toBe('paint');
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+
+      it('should support all tool types', () => {
+        const tools: Array<'paint' | 'erase' | 'fill' | 'rectangle' | 'picker'> = [
+          'paint', 'erase', 'fill', 'rectangle', 'picker',
+        ];
+        for (const tool of tools) {
+          store.getState().setTilemapActiveTool(tool);
+          expect(store.getState().tilemapActiveTool).toBe(tool);
+        }
+      });
+
+      it('should allow setting to null', () => {
+        store.getState().setTilemapActiveTool('paint');
+        store.getState().setTilemapActiveTool(null);
+
+        expect(store.getState().tilemapActiveTool).toBeNull();
+      });
     });
 
-    it('should clear tilemap active layer index', () => {
-      store.getState().setTilemapActiveLayerIndex(2);
-      store.getState().setTilemapActiveLayerIndex(null);
-      expect(store.getState().tilemapActiveLayerIndex).toBeNull();
+    describe('setTilemapActiveLayerIndex', () => {
+      it('should set tilemapActiveLayerIndex (state only)', () => {
+        store.getState().setTilemapActiveLayerIndex(2);
+
+        expect(store.getState().tilemapActiveLayerIndex).toBe(2);
+        expect(mockDispatch).not.toHaveBeenCalled();
+      });
+
+      it('should allow setting to null', () => {
+        store.getState().setTilemapActiveLayerIndex(2);
+        store.getState().setTilemapActiveLayerIndex(null);
+
+        expect(store.getState().tilemapActiveLayerIndex).toBeNull();
+      });
     });
   });
 });
