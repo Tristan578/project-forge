@@ -508,7 +508,7 @@ fn handle_create_ik_chain2d(payload: serde_json::Value) -> super::CommandResult 
     let constraint = crate::core::skeleton2d::IkConstraint2d {
         name: chain_name,
         bone_chain: vec![target_bone],
-        target_entity_id: 0, // Placeholder
+        target_entity_id: String::new(), // Placeholder
         bend_direction: if bend_positive { 1.0 } else { -1.0 },
         mix: 1.0,
     };

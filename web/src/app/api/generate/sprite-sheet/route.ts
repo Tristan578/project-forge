@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
 
   // 2. Parse request
   let body: {
-    sourceAssetId: string;
+    prompt: string;
     frameCount?: number;
     style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
     size?: '32x32' | '64x64' | '128x128' | '256x256';
@@ -29,16 +29,16 @@ export async function POST(request: NextRequest) {
   }
 
   const {
-    sourceAssetId,
+    prompt,
     frameCount = 4,
     style,
     size = '64x64',
   } = body;
 
   // Validate
-  if (!sourceAssetId) {
+  if (!prompt || prompt.trim().length < 3) {
     return NextResponse.json(
-      { error: 'sourceAssetId is required' },
+      { error: 'prompt is required (min 3 characters)' },
       { status: 422 }
     );
   }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       'replicate',
       tokenCost,
       'sprite_sheet_generation',
-      { sourceAssetId, frameCount, style, size }
+      { prompt: prompt.trim(), frameCount, style, size }
     );
     apiKey = resolved.key;
   } catch (err) {
@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateSpriteSheet({
-      sourceAssetId,
+      prompt: prompt.trim(),
       frameCount,
       style,
       size,
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/sprite-sheet', sourceAssetId });
+    captureException(err, { route: '/api/generate/sprite-sheet', prompt: prompt.trim() });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

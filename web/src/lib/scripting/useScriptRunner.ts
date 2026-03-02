@@ -43,6 +43,7 @@ const SCRIPT_ALLOWED_COMMANDS = new Set([
 ]);
 
 const WATCHDOG_TIMEOUT_MS = 5000;
+const OCCLUSION_RAYCAST_INTERVAL_MS = 250; // Check occlusion 4x per second
 
 // Module-level collision callback (replaces window.__scriptCollisionCallback)
 let _scriptCollisionCallback: ((event: { entityA: string; entityB: string; started: boolean }) => void) | null = null;
@@ -116,6 +117,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const addScriptLog = useEditorStore((s) => s.addScriptLog);
   const elapsedRef = useRef(0);
   const lastTickRef = useRef(0);
+  const lastOcclusionCheckRef = useRef(0);
   const collisionEventCallbackRef = useRef<((event: { entityA: string; entityB: string; started: boolean }) => void) | null>(null);
 
   const dispatchCommand = useCallback(
@@ -306,12 +308,41 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         };
       }
 
+      // Build synced 2D state for the worker
+      const tilemapStates: Record<string, { tileSize: [number, number]; mapSize: [number, number]; layers: { tiles: (number | null)[] }[]; origin: string }> = {};
+      for (const [eid, tm] of Object.entries(store.tilemaps)) {
+        tilemapStates[eid] = {
+          tileSize: tm.tileSize,
+          mapSize: tm.mapSize,
+          layers: tm.layers.map(l => ({ tiles: l.tiles })),
+          origin: tm.origin,
+        };
+      }
+
+      const skeletonStates: Record<string, { bones: { name: string; parentBone: string | null; localPosition: [number, number]; localRotation: number; localScale: [number, number]; length: number }[]; activeSkin: string }> = {};
+      for (const [eid, sk] of Object.entries(store.skeletons2d)) {
+        skeletonStates[eid] = {
+          bones: sk.bones.map(b => ({
+            name: b.name,
+            parentBone: b.parentBone,
+            localPosition: b.localPosition,
+            localRotation: b.localRotation,
+            localScale: b.localScale,
+            length: b.length,
+          })),
+          activeSkin: sk.activeSkin,
+        };
+      }
+
       worker.postMessage({
         type: 'init',
         scripts,
         entities: {},
         entityInfos,
         inputState: { pressed: {}, justPressed: {}, justReleased: {}, axes: {} },
+        tilemapStates,
+        skeletonStates,
+        physics2dVelocities: {},
       });
 
       // Send scene info to worker
@@ -358,6 +389,18 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           }, WATCHDOG_TIMEOUT_MS);
         }
 
+        // Gather 2D state for the worker (tilemap data can change during play via setTile)
+        const currentStore = useEditorStore.getState();
+        const tickTilemapStates: Record<string, { tileSize: [number, number]; mapSize: [number, number]; layers: { tiles: (number | null)[] }[]; origin: string }> = {};
+        for (const [eid, tm] of Object.entries(currentStore.tilemaps)) {
+          tickTilemapStates[eid] = {
+            tileSize: tm.tileSize,
+            mapSize: tm.mapSize,
+            layers: tm.layers.map(l => ({ tiles: l.tiles })),
+            origin: tm.origin,
+          };
+        }
+
         worker.postMessage({
           type: 'tick',
           dt,
@@ -365,7 +408,38 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           entities: tickData.entities,
           entityInfos: tickData.entityInfos,
           inputState: tickData.inputState,
+          tilemapStates: tickTilemapStates,
         });
+
+        // Dispatch audio occlusion raycasts (throttled)
+        const tickNow = performance.now();
+        if (tickNow - lastOcclusionCheckRef.current >= OCCLUSION_RAYCAST_INTERVAL_MS) {
+          lastOcclusionCheckRef.current = tickNow;
+          const occludables = audioManager.getOccludableEntities();
+          const listenerPos = audioManager.getListenerPosition();
+          if (listenerPos && occludables.length > 0 && wasmModule?.handle_command) {
+            for (const eid of occludables) {
+              const srcPos = audioManager.getSourcePosition(eid);
+              if (!srcPos) continue;
+              // Raycast from listener toward source
+              const dx = srcPos[0] - listenerPos[0];
+              const dy = srcPos[1] - listenerPos[1];
+              const dz = srcPos[2] - listenerPos[2];
+              const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+              if (dist < 0.01) continue; // Too close, skip
+              try {
+                wasmModule.handle_command('raycast_query', {
+                  requestId: `audio_occlusion:${eid}`,
+                  origin: listenerPos,
+                  direction: [dx / dist, dy / dist, dz / dist],
+                  maxDistance: dist,
+                });
+              } catch {
+                // Ignore raycast dispatch errors
+              }
+            }
+          }
+        }
       });
 
       // Set up collision event callback
