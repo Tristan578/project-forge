@@ -177,7 +177,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
@@ -271,7 +271,7 @@ jobs:
         run: npm i -g vercel@latest
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
