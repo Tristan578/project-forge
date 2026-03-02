@@ -889,6 +889,13 @@ self.onmessage = (e: MessageEvent) => {
       if (msg.tilemapStates) tilemapStates = msg.tilemapStates;
       if (msg.skeletonStates) skeletonStates = msg.skeletonStates;
 
+      // Sync audio playing state from main thread (authoritative source)
+      if (msg.audioPlayingStates) {
+        for (const [eid, playing] of Object.entries(msg.audioPlayingStates)) {
+          audioPlayingState.set(eid, playing as boolean);
+        }
+      }
+
       pendingCommands = [];
       for (const script of scripts) {
         if (script.onUpdate) {

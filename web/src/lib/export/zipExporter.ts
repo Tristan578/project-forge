@@ -300,6 +300,9 @@ function generateZipIndexHtml(options: {
             } else if (eventType === 'TRANSFORM_CHANGED') {
               if (!window.__forgeTransforms) window.__forgeTransforms = {};
               window.__forgeTransforms[payload.entityId] = payload;
+            } else if (eventType === 'AUDIO_PLAYBACK') {
+              if (!window.__forgeAudioState) window.__forgeAudioState = {};
+              window.__forgeAudioState[payload.entityId] = (payload.action === 'play');
             }
           } catch(e) {}
         });

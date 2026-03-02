@@ -464,6 +464,21 @@ class AudioManager {
     return instance?.isPlaying ?? false;
   }
 
+  /**
+   * Get a map of entity IDs to their playing state.
+   * Used to sync audio state to the script worker each tick.
+   */
+  getPlayingStates(): Record<string, boolean> {
+    const states: Record<string, boolean> = {};
+    for (const [key, instance] of this.instances) {
+      // Only include primary instances (no slot separator)
+      if (!key.includes(':')) {
+        states[key] = instance.isPlaying;
+      }
+    }
+    return states;
+  }
+
   // --- Audio Layers ---
   addLayer(entityId: string, slotName: string, assetId: string, options?: {
     volume?: number; pitch?: number; loop?: boolean; spatial?: boolean; bus?: string;
