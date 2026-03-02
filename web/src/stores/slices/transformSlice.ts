@@ -19,7 +19,7 @@ export interface TransformSlice {
   updateTransform: (
     entityId: string,
     field: 'position' | 'rotation' | 'scale',
-    value: [number, number, number]
+    value: [number, number, number] | { x: number; y: number; z: number }
   ) => void;
   setSnapSettings: (settings: Partial<SnapSettings>) => void;
   toggleGrid: () => void;

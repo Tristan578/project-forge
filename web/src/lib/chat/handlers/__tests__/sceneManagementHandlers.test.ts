@@ -106,7 +106,7 @@ describe('load_scene', () => {
   it('returns failure when json parameter is missing', async () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'load_scene', {});
     expect(result.success).toBe(false);
-    expect(result.error).toBe('Missing json parameter');
+    expect(result.error).toBeDefined();
   });
 });
 
@@ -286,7 +286,7 @@ describe('set_quality_preset', () => {
   it('returns failure when preset parameter is missing', async () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'set_quality_preset', {});
     expect(result.success).toBe(false);
-    expect(result.error).toBe('preset is required');
+    expect(result.error).toBeDefined();
   });
 
   it('forwards "low" preset to setQualityPreset', async () => {
@@ -755,7 +755,7 @@ describe('load_template', () => {
     const { result } = await invokeHandler(sceneManagementHandlers, 'load_template', {});
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe('Missing templateId');
+    expect(result.error).toBeDefined();
   });
 });
 

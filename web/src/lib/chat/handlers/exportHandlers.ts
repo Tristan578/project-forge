@@ -3,20 +3,25 @@
  * Handles export-related MCP commands
  */
 
+import { z } from 'zod';
 import type { ToolHandler } from './types';
+import { parseArgs } from './types';
 import { useEditorStore } from '@/stores/editorStore';
 import { exportGame, downloadBlob } from '@/lib/export/exportEngine';
 import { getPreset, EXPORT_PRESETS } from '@/lib/export/presets';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
 
 export const exportHandlers: Record<string, ToolHandler> = {
-  export_project_zip: async (params) => {
-    const { title, preset } = params as { title?: string; preset?: string };
+  export_project_zip: async (args) => {
+    const p = parseArgs(z.object({
+      title: z.string().optional(),
+      preset: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
 
     const store = useEditorStore.getState();
-    const gameTitle = title || store.sceneName || 'Game';
-
-    const presetConfig = preset ? getPreset(preset) : undefined;
+    const gameTitle = p.data.title || store.sceneName || 'Game';
+    const presetConfig = p.data.preset ? getPreset(p.data.preset) : undefined;
 
     try {
       const blob = await exportGame({
@@ -43,13 +48,16 @@ export const exportHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  export_project_pwa: async (params) => {
-    const { title, preset } = params as { title?: string; preset?: string };
+  export_project_pwa: async (args) => {
+    const p = parseArgs(z.object({
+      title: z.string().optional(),
+      preset: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
 
     const store = useEditorStore.getState();
-    const gameTitle = title || store.sceneName || 'Game';
-
-    const presetConfig = preset ? getPreset(preset) : getPreset('pwa-mobile');
+    const gameTitle = p.data.title || store.sceneName || 'Game';
+    const presetConfig = p.data.preset ? getPreset(p.data.preset) : getPreset('pwa-mobile');
 
     try {
       const blob = await exportGame({
@@ -76,49 +84,43 @@ export const exportHandlers: Record<string, ToolHandler> = {
     }
   },
 
-  set_loading_screen: async (params) => {
-    const {
-      backgroundColor = '#18181b',
-      progressBarColor = '#6366f1',
-      progressStyle = 'bar',
-      title,
-      subtitle,
-      logoDataUrl,
-    } = params as Partial<LoadingScreenConfig>;
-
-    const validStyles = ['bar', 'spinner', 'dots', 'none'] as const;
-    if (!validStyles.includes(progressStyle as typeof validStyles[number])) {
-      return {
-        success: false,
-        error: `Invalid progressStyle: ${progressStyle}. Must be one of: ${validStyles.join(', ')}`,
-      };
-    }
+  set_loading_screen: async (args) => {
+    const p = parseArgs(z.object({
+      backgroundColor: z.string().optional(),
+      progressBarColor: z.string().optional(),
+      progressStyle: z.enum(['bar', 'spinner', 'dots', 'none']).optional(),
+      title: z.string().optional(),
+      subtitle: z.string().optional(),
+      logoDataUrl: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
 
     const config: LoadingScreenConfig = {
-      backgroundColor,
-      progressBarColor,
-      progressStyle: progressStyle as LoadingScreenConfig['progressStyle'],
-      title,
-      subtitle,
-      logoDataUrl,
+      backgroundColor: p.data.backgroundColor ?? '#18181b',
+      progressBarColor: p.data.progressBarColor ?? '#6366f1',
+      progressStyle: p.data.progressStyle ?? 'bar',
+      title: p.data.title,
+      subtitle: p.data.subtitle,
+      logoDataUrl: p.data.logoDataUrl,
     };
 
     useEditorStore.getState().setLoadingScreenConfig(config);
 
     return {
       success: true,
-      message: `Loading screen configured: ${progressStyle} style, bg=${backgroundColor}`,
+      message: `Loading screen configured: ${config.progressStyle} style, bg=${config.backgroundColor}`,
     };
   },
 
-  set_export_preset: async (params) => {
-    const { preset: presetName } = params as { preset: string };
+  set_export_preset: async (args) => {
+    const p = parseArgs(z.object({ preset: z.string().min(1) }), args);
+    if (p.error) return p.error;
 
-    const preset = getPreset(presetName);
+    const preset = getPreset(p.data.preset);
     if (!preset) {
       return {
         success: false,
-        error: `Unknown preset: ${presetName}. Available: ${Object.keys(EXPORT_PRESETS).join(', ')}`,
+        error: `Unknown preset: ${p.data.preset}. Available: ${Object.keys(EXPORT_PRESETS).join(', ')}`,
       };
     }
 

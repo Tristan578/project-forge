@@ -2,14 +2,15 @@
  * Material, lighting, shader, and environment handlers.
  */
 
+import { z } from 'zod';
 import type { ToolHandler, MaterialData, LightData } from './types';
-// Import helpers (currently unused as defaults are inlined, but available if needed)
-// import { buildMaterialFromPartial, buildLightFromPartial } from './helpers';
+import { zEntityId, zVec3, parseArgs } from './types';
 import { getPresetById } from '@/lib/materialPresets';
 
 export const materialHandlers: Record<string, ToolHandler> = {
   update_material: async (args, { store }) => {
-    const entityId = args.entityId as string;
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
     // Build a partial material, merge with current if available
     const matInput = { ...args } as Record<string, unknown>;
     delete matInput.entityId;
@@ -48,31 +49,35 @@ export const materialHandlers: Record<string, ToolHandler> = {
       (merged as unknown as Record<string, unknown>)[key] = value;
     }
 
-    store.updateMaterial(entityId, merged);
+    store.updateMaterial(p.data.entityId, merged);
     return { success: true };
   },
 
   apply_material_preset: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    const presetId = args.presetId as string;
-    const preset = getPresetById(presetId);
+    const p = parseArgs(z.object({ entityId: zEntityId, presetId: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    const preset = getPresetById(p.data.presetId);
     if (!preset) {
-      return { success: false, error: `Unknown material preset: ${presetId}` };
+      return { success: false, error: `Unknown material preset: ${p.data.presetId}` };
     }
-    store.updateMaterial(entityId, preset.data);
+    store.updateMaterial(p.data.entityId, preset.data);
     return { success: true };
   },
 
   set_custom_shader: async (args, { store }) => {
-    const { entityId, shaderType, ...params } = args;
-    store.updateShaderEffect(entityId as string, { shaderType: shaderType as string, ...params as Record<string, unknown> } as Parameters<typeof store.updateShaderEffect>[1]);
-    return { success: true, result: { message: `Applied ${shaderType} shader to ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId, shaderType: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    const params = { ...args } as Record<string, unknown>;
+    delete params.entityId;
+    store.updateShaderEffect(p.data.entityId, { shaderType: p.data.shaderType, ...params } as Parameters<typeof store.updateShaderEffect>[1]);
+    return { success: true, result: { message: `Applied ${p.data.shaderType} shader to ${p.data.entityId}` } };
   },
 
   remove_custom_shader: async (args, { store }) => {
-    const { entityId } = args;
-    store.removeShaderEffect(entityId as string);
-    return { success: true, result: { message: `Removed custom shader from ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.removeShaderEffect(p.data.entityId);
+    return { success: true, result: { message: `Removed custom shader from ${p.data.entityId}` } };
   },
 
   list_shaders: async (_args, _ctx) => {
@@ -88,7 +93,8 @@ export const materialHandlers: Record<string, ToolHandler> = {
   },
 
   update_light: async (args, { store }) => {
-    const entityId = args.entityId as string;
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
     const lightInput = { ...args } as Record<string, unknown>;
     delete lightInput.entityId;
 
@@ -112,14 +118,16 @@ export const materialHandlers: Record<string, ToolHandler> = {
       }
     }
 
-    store.updateLight(entityId, merged);
+    store.updateLight(p.data.entityId, merged);
     return { success: true };
   },
 
   update_ambient_light: async (args, { store }) => {
+    const p = parseArgs(z.object({ color: zVec3.optional(), brightness: z.number().optional() }), args);
+    if (p.error) return p.error;
     const partial: Record<string, unknown> = {};
-    if (args.color !== undefined) partial.color = args.color;
-    if (args.brightness !== undefined) partial.brightness = args.brightness;
+    if (p.data.color !== undefined) partial.color = p.data.color;
+    if (p.data.brightness !== undefined) partial.brightness = p.data.brightness;
     store.updateAmbientLight(partial);
     return { success: true };
   },
@@ -130,29 +138,30 @@ export const materialHandlers: Record<string, ToolHandler> = {
   },
 
   set_skybox: async (args, { store }) => {
-    if (args.preset) {
-      store.setSkybox(args.preset as string);
+    const p = parseArgs(z.object({ preset: z.string().min(1).optional() }), args);
+    if (p.error) return p.error;
+    if (p.data.preset) {
+      store.setSkybox(p.data.preset);
     }
     return { success: true };
   },
 
-  remove_skybox: async (args, { store }) => {
+  remove_skybox: async (_args, { store }) => {
     store.removeSkybox();
     return { success: true };
   },
 
   update_skybox: async (args, { store }) => {
-    store.updateSkybox(args as { brightness?: number; iblIntensity?: number; rotation?: number });
+    const p = parseArgs(z.object({ brightness: z.number().optional(), iblIntensity: z.number().optional(), rotation: z.number().optional() }), args);
+    if (p.error) return p.error;
+    store.updateSkybox(p.data);
     return { success: true };
   },
 
   set_custom_skybox: async (args, { store }) => {
-    const assetId = args.assetId as string;
-    const dataBase64 = args.dataBase64 as string;
-    if (!assetId || !dataBase64) {
-      return { success: false, error: 'assetId and dataBase64 are required' };
-    }
-    store.setCustomSkybox(assetId, dataBase64);
+    const p = parseArgs(z.object({ assetId: z.string().min(1), dataBase64: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    store.setCustomSkybox(p.data.assetId, p.data.dataBase64);
     return { success: true };
   },
 
@@ -161,7 +170,7 @@ export const materialHandlers: Record<string, ToolHandler> = {
     return { success: true };
   },
 
-  get_post_processing: async (args, { store }) => {
+  get_post_processing: async (_args, { store }) => {
     return { success: true, result: store.postProcessing };
   },
 };

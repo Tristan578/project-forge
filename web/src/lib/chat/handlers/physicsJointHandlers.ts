@@ -2,14 +2,55 @@
  * Physics, joint, CSG, terrain, and procedural mesh handlers for MCP commands.
  */
 
+import { z } from 'zod';
+import { zEntityId, zVec3, zVec2, parseArgs } from './types';
 import type { ToolHandler } from './types';
 import type { PhysicsData, JointData } from '@/stores/editorStore';
 
+// ===== Shared Schemas =====
+
+const zJointType = z.enum(['fixed', 'revolute', 'spherical', 'prismatic', 'rope', 'spring']);
+
+const zNoiseType = z.enum(['perlin', 'simplex', 'value']);
+
+const zExtrudeShape = z.enum(['circle', 'square', 'hexagon', 'star']);
+
+const zArrayPattern = z.enum(['grid', 'circle']);
+
+const zCsgPair = z.object({
+  entityIdA: zEntityId,
+  entityIdB: zEntityId,
+  deleteSources: z.boolean().optional(),
+});
+
+const zLatheProfile = z.array(zVec2).min(2);
+
+// ===== Handlers =====
+
 export const physicsJointHandlers: Record<string, ToolHandler> = {
   update_physics: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    const physInput = { ...args } as Record<string, unknown>;
-    delete physInput.entityId;
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        bodyType: z.enum(['dynamic', 'kinematic', 'static']).optional(),
+        colliderShape: z.enum(['auto', 'box', 'ball', 'capsule', 'cylinder', 'cone', 'trimesh']).optional(),
+        restitution: z.number().finite().optional(),
+        friction: z.number().finite().optional(),
+        density: z.number().finite().optional(),
+        gravityScale: z.number().finite().optional(),
+        lockTranslationX: z.boolean().optional(),
+        lockTranslationY: z.boolean().optional(),
+        lockTranslationZ: z.boolean().optional(),
+        lockRotationX: z.boolean().optional(),
+        lockRotationY: z.boolean().optional(),
+        lockRotationZ: z.boolean().optional(),
+        isSensor: z.boolean().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    const { entityId, ...physInput } = p.data;
 
     const basePhysics: PhysicsData = ctx.store.primaryPhysics ?? {
       bodyType: 'dynamic',
@@ -29,7 +70,7 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
 
     const merged: PhysicsData = { ...basePhysics };
     for (const [key, value] of Object.entries(physInput)) {
-      if (key in merged) {
+      if (value !== undefined && key in merged) {
         (merged as unknown as Record<string, unknown>)[key] = value;
       }
     }
@@ -39,8 +80,13 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
   },
 
   toggle_physics: async (args, ctx) => {
-    ctx.store.togglePhysics(args.entityId as string, args.enabled as boolean);
-    return { success: true, result: { message: `Physics ${args.enabled ? 'enabled' : 'disabled'}` } };
+    const p = parseArgs(
+      z.object({ entityId: zEntityId, enabled: z.boolean() }),
+      args,
+    );
+    if (p.error) return p.error;
+    ctx.store.togglePhysics(p.data.entityId, p.data.enabled);
+    return { success: true, result: { message: `Physics ${p.data.enabled ? 'enabled' : 'disabled'}` } };
   },
 
   toggle_debug_physics: async (_args, ctx) => {
@@ -59,46 +105,77 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
   },
 
   apply_force: async (args, ctx) => {
-    ctx.store.togglePhysics(args.entityId as string, true);
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    ctx.store.togglePhysics(p.data.entityId, true);
     return { success: true, result: { message: 'Force application queued (only takes effect during Play)' } };
   },
 
   create_joint: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        jointType: zJointType.optional(),
+        connectedEntityId: z.string().optional(),
+        anchorSelf: zVec3.optional(),
+        anchorOther: zVec3.optional(),
+        axis: zVec3.optional(),
+        limits: z.object({ min: z.number().finite(), max: z.number().finite() }).nullable().optional(),
+        motor: z.object({ targetVelocity: z.number().finite(), maxForce: z.number().finite() }).nullable().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    const { entityId, jointType, connectedEntityId, anchorSelf, anchorOther, axis, limits, motor } = p.data;
     const jointData: JointData = {
-      jointType: (args.jointType as JointData['jointType']) ?? 'revolute',
-      connectedEntityId: (args.connectedEntityId as string) ?? '',
-      anchorSelf: (args.anchorSelf as [number, number, number]) ?? [0, 0, 0],
-      anchorOther: (args.anchorOther as [number, number, number]) ?? [0, 0, 0],
-      axis: (args.axis as [number, number, number]) ?? [0, 1, 0],
-      limits: (args.limits as { min: number; max: number } | null) ?? null,
-      motor: (args.motor as { targetVelocity: number; maxForce: number } | null) ?? null,
+      jointType: jointType ?? 'revolute',
+      connectedEntityId: connectedEntityId ?? '',
+      anchorSelf: anchorSelf ?? [0, 0, 0],
+      anchorOther: anchorOther ?? [0, 0, 0],
+      axis: axis ?? [0, 1, 0],
+      limits: limits ?? null,
+      motor: motor ?? null,
     };
     ctx.store.createJoint(entityId, jointData);
     return { success: true, result: { message: `Created ${jointData.jointType} joint on ${entityId}` } };
   },
 
   update_joint: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    const updates: Record<string, unknown> = {};
-    if (args.jointType !== undefined) updates.jointType = args.jointType;
-    if (args.connectedEntityId !== undefined) updates.connectedEntityId = args.connectedEntityId;
-    if (args.anchorSelf !== undefined) updates.anchorSelf = args.anchorSelf;
-    if (args.anchorOther !== undefined) updates.anchorOther = args.anchorOther;
-    if (args.axis !== undefined) updates.axis = args.axis;
-    if (args.limits !== undefined) updates.limits = args.limits;
-    if (args.motor !== undefined) updates.motor = args.motor;
-    ctx.store.updateJoint(entityId, updates as Partial<JointData>);
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        jointType: zJointType.optional(),
+        connectedEntityId: z.string().optional(),
+        anchorSelf: zVec3.optional(),
+        anchorOther: zVec3.optional(),
+        axis: zVec3.optional(),
+        limits: z.object({ min: z.number().finite(), max: z.number().finite() }).nullable().optional(),
+        motor: z.object({ targetVelocity: z.number().finite(), maxForce: z.number().finite() }).nullable().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    const { entityId, ...rest } = p.data;
+    const updates: Partial<JointData> = {};
+    if (rest.jointType !== undefined) updates.jointType = rest.jointType;
+    if (rest.connectedEntityId !== undefined) updates.connectedEntityId = rest.connectedEntityId;
+    if (rest.anchorSelf !== undefined) updates.anchorSelf = rest.anchorSelf;
+    if (rest.anchorOther !== undefined) updates.anchorOther = rest.anchorOther;
+    if (rest.axis !== undefined) updates.axis = rest.axis;
+    if (rest.limits !== undefined) updates.limits = rest.limits;
+    if (rest.motor !== undefined) updates.motor = rest.motor;
+
+    ctx.store.updateJoint(entityId, updates);
     return { success: true, result: { message: `Updated joint on ${entityId}` } };
   },
 
   remove_joint: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    ctx.store.removeJoint(entityId);
-    return { success: true, result: { message: `Removed joint from ${entityId}` } };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    ctx.store.removeJoint(p.data.entityId);
+    return { success: true, result: { message: `Removed joint from ${p.data.entityId}` } };
   },
 
   get_joint: async (_args, ctx) => {
@@ -106,61 +183,75 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
   },
 
   csg_union: async (args, ctx) => {
-    const entityIdA = args.entityIdA as string;
-    const entityIdB = args.entityIdB as string;
-    if (!entityIdA || !entityIdB) return { success: false, error: 'Missing entityIdA or entityIdB' };
-    const deleteSources = (args.deleteSources as boolean) ?? true;
-    ctx.store.csgUnion(entityIdA, entityIdB, deleteSources);
+    const p = parseArgs(zCsgPair, args);
+    if (p.error) return p.error;
+    ctx.store.csgUnion(p.data.entityIdA, p.data.entityIdB, p.data.deleteSources ?? true);
     return { success: true, result: { message: 'CSG union queued' } };
   },
 
   csg_subtract: async (args, ctx) => {
-    const entityIdA = args.entityIdA as string;
-    const entityIdB = args.entityIdB as string;
-    if (!entityIdA || !entityIdB) return { success: false, error: 'Missing entityIdA or entityIdB' };
-    const deleteSources = (args.deleteSources as boolean) ?? true;
-    ctx.store.csgSubtract(entityIdA, entityIdB, deleteSources);
+    const p = parseArgs(zCsgPair, args);
+    if (p.error) return p.error;
+    ctx.store.csgSubtract(p.data.entityIdA, p.data.entityIdB, p.data.deleteSources ?? true);
     return { success: true, result: { message: 'CSG subtract queued' } };
   },
 
   csg_intersect: async (args, ctx) => {
-    const entityIdA = args.entityIdA as string;
-    const entityIdB = args.entityIdB as string;
-    if (!entityIdA || !entityIdB) return { success: false, error: 'Missing entityIdA or entityIdB' };
-    const deleteSources = (args.deleteSources as boolean) ?? true;
-    ctx.store.csgIntersect(entityIdA, entityIdB, deleteSources);
+    const p = parseArgs(zCsgPair, args);
+    if (p.error) return p.error;
+    ctx.store.csgIntersect(p.data.entityIdA, p.data.entityIdB, p.data.deleteSources ?? true);
     return { success: true, result: { message: 'CSG intersect queued' } };
   },
 
   spawn_terrain: async (args, ctx) => {
-    ctx.store.spawnTerrain({
-      noiseType: args.noiseType as 'perlin' | 'simplex' | 'value' | undefined,
-      octaves: args.octaves as number | undefined,
-      frequency: args.frequency as number | undefined,
-      amplitude: args.amplitude as number | undefined,
-      heightScale: args.heightScale as number | undefined,
-      seed: args.seed as number | undefined,
-      resolution: args.resolution as number | undefined,
-      size: args.size as number | undefined,
-    });
+    const p = parseArgs(
+      z.object({
+        noiseType: zNoiseType.optional(),
+        octaves: z.number().int().positive().optional(),
+        frequency: z.number().finite().optional(),
+        amplitude: z.number().finite().optional(),
+        heightScale: z.number().finite().optional(),
+        seed: z.number().int().optional(),
+        resolution: z.number().int().positive().optional(),
+        size: z.number().finite().positive().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    ctx.store.spawnTerrain(p.data);
     return { success: true, result: { message: 'Terrain spawned' } };
   },
 
   update_terrain: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        noiseType: zNoiseType.optional(),
+        octaves: z.number().int().positive().optional(),
+        frequency: z.number().finite().optional(),
+        amplitude: z.number().finite().optional(),
+        heightScale: z.number().finite().optional(),
+        seed: z.number().int().optional(),
+        resolution: z.number().int().positive().optional(),
+        size: z.number().finite().positive().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    const { entityId, ...fields } = p.data;
     const terrainData = ctx.store.terrainData[entityId];
     if (!terrainData) return { success: false, error: 'Entity is not a terrain' };
 
     const updated = {
-      noiseType: (args.noiseType as 'perlin' | 'simplex' | 'value' | undefined) ?? terrainData.noiseType,
-      octaves: (args.octaves as number | undefined) ?? terrainData.octaves,
-      frequency: (args.frequency as number | undefined) ?? terrainData.frequency,
-      amplitude: (args.amplitude as number | undefined) ?? terrainData.amplitude,
-      heightScale: (args.heightScale as number | undefined) ?? terrainData.heightScale,
-      seed: (args.seed as number | undefined) ?? terrainData.seed,
-      resolution: (args.resolution as number | undefined) ?? terrainData.resolution,
-      size: (args.size as number | undefined) ?? terrainData.size,
+      noiseType: fields.noiseType ?? terrainData.noiseType,
+      octaves: fields.octaves ?? terrainData.octaves,
+      frequency: fields.frequency ?? terrainData.frequency,
+      amplitude: fields.amplitude ?? terrainData.amplitude,
+      heightScale: fields.heightScale ?? terrainData.heightScale,
+      seed: fields.seed ?? terrainData.seed,
+      resolution: fields.resolution ?? terrainData.resolution,
+      size: fields.size ?? terrainData.size,
     };
 
     ctx.store.updateTerrain(entityId, updated);
@@ -168,92 +259,102 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
   },
 
   sculpt_terrain: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    const position = args.position as [number, number] | undefined;
-    const radius = args.radius as number | undefined;
-    const strength = args.strength as number | undefined;
-    if (!entityId || !position || radius === undefined || strength === undefined) {
-      return { success: false, error: 'Missing required parameters' };
-    }
-    ctx.store.sculptTerrain(entityId, position, radius, strength);
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        position: zVec2,
+        radius: z.number().finite(),
+        strength: z.number().finite(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    ctx.store.sculptTerrain(p.data.entityId, p.data.position, p.data.radius, p.data.strength);
     return { success: true, result: { message: 'Terrain sculpted' } };
   },
 
   get_terrain: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    const terrainData = ctx.store.terrainData[entityId];
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const terrainData = ctx.store.terrainData[p.data.entityId];
     if (!terrainData) return { success: false, error: 'Entity is not a terrain' };
     return { success: true, result: { terrainData } };
   },
 
   extrude_shape: async (args, ctx) => {
-    const shape = args.shape as string;
-    if (!shape) return { success: false, error: 'Missing shape parameter' };
-    if (!['circle', 'square', 'hexagon', 'star'].includes(shape)) {
-      return { success: false, error: 'Invalid shape. Must be one of: circle, square, hexagon, star' };
-    }
+    const p = parseArgs(
+      z.object({
+        shape: zExtrudeShape,
+        radius: z.number().finite().positive().optional(),
+        length: z.number().finite().positive().optional(),
+        segments: z.number().int().positive().optional(),
+        innerRadius: z.number().finite().positive().optional(),
+        starPoints: z.number().int().min(3).optional(),
+        size: z.number().finite().positive().optional(),
+        name: z.string().optional(),
+        position: zVec3.optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
 
-    ctx.store.extrudeShape(shape, {
-      radius: args.radius as number | undefined,
-      length: args.length as number | undefined,
-      segments: args.segments as number | undefined,
-      innerRadius: args.innerRadius as number | undefined,
-      starPoints: args.starPoints as number | undefined,
-      size: args.size as number | undefined,
-      name: args.name as string | undefined,
-      position: args.position as [number, number, number] | undefined,
-    });
+    const { shape, ...opts } = p.data;
+    ctx.store.extrudeShape(shape, opts);
     return { success: true, result: { message: `Extruding ${shape} shape` } };
   },
 
   lathe_shape: async (args, ctx) => {
-    const profile = args.profile as [number, number][];
-    if (!profile || !Array.isArray(profile) || profile.length < 2) {
-      return { success: false, error: 'Invalid profile. Must be an array of [radius, height] points (minimum 2 points)' };
-    }
+    const p = parseArgs(
+      z.object({
+        profile: zLatheProfile,
+        segments: z.number().int().positive().optional(),
+        name: z.string().optional(),
+        position: zVec3.optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
 
-    ctx.store.latheShape(profile, {
-      segments: args.segments as number | undefined,
-      name: args.name as string | undefined,
-      position: args.position as [number, number, number] | undefined,
-    });
+    const { profile, ...opts } = p.data;
+    ctx.store.latheShape(profile, opts);
     return { success: true, result: { message: 'Lathing profile' } };
   },
 
   array_entity: async (args, ctx) => {
-    const entityId = args.entityId as string;
-    const pattern = args.pattern as string;
-    if (!entityId) return { success: false, error: 'Missing entityId' };
-    if (!pattern || !['grid', 'circle'].includes(pattern)) {
-      return { success: false, error: 'Invalid pattern. Must be: grid or circle' };
-    }
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        pattern: zArrayPattern,
+        countX: z.number().int().positive().optional(),
+        countY: z.number().int().positive().optional(),
+        countZ: z.number().int().positive().optional(),
+        spacingX: z.number().finite().optional(),
+        spacingY: z.number().finite().optional(),
+        spacingZ: z.number().finite().optional(),
+        circleCount: z.number().int().positive().optional(),
+        circleRadius: z.number().finite().positive().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
 
-    ctx.store.arrayEntity(entityId, {
-      pattern: pattern as 'grid' | 'circle',
-      countX: args.countX as number | undefined,
-      countY: args.countY as number | undefined,
-      countZ: args.countZ as number | undefined,
-      spacingX: args.spacingX as number | undefined,
-      spacingY: args.spacingY as number | undefined,
-      spacingZ: args.spacingZ as number | undefined,
-      circleCount: args.circleCount as number | undefined,
-      circleRadius: args.circleRadius as number | undefined,
-    });
+    const { entityId, pattern, ...opts } = p.data;
+    ctx.store.arrayEntity(entityId, { pattern, ...opts });
     return { success: true, result: { message: `Creating ${pattern} array` } };
   },
 
   combine_meshes: async (args, ctx) => {
-    const entityIds = args.entityIds as string[];
-    if (!entityIds || !Array.isArray(entityIds) || entityIds.length < 2) {
-      return { success: false, error: 'Must provide at least 2 entity IDs to combine' };
-    }
-
-    ctx.store.combineMeshes(
-      entityIds,
-      args.deleteSources as boolean | undefined,
-      args.name as string | undefined
+    const p = parseArgs(
+      z.object({
+        entityIds: z.array(zEntityId).min(2),
+        deleteSources: z.boolean().optional(),
+        name: z.string().optional(),
+      }),
+      args,
     );
-    return { success: true, result: { message: `Combining ${entityIds.length} meshes` } };
+    if (p.error) return p.error;
+
+    ctx.store.combineMeshes(p.data.entityIds, p.data.deleteSources, p.data.name);
+    return { success: true, result: { message: `Combining ${p.data.entityIds.length} meshes` } };
   },
 };

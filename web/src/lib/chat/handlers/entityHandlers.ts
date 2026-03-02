@@ -3,21 +3,27 @@
  * editor controls, history, query, and runtime mode commands.
  */
 
-import type { ToolHandler, ExecutionResult, EntityType } from './types';
+import { z } from 'zod';
+import type { ToolHandler, ExecutionResult } from './types';
+import { zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
+
+const ENTITY_TYPES = [
+  'cube', 'sphere', 'cylinder', 'capsule', 'torus', 'plane', 'cone', 'icosphere',
+  'point_light', 'directional_light', 'spot_light', 'gltf_model', 'empty',
+] as const;
 
 export const entityHandlers: Record<string, ToolHandler> = {
   spawn_entity: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.spawnEntity(
-      args.entityType as EntityType,
-      args.name as string | undefined
-    );
-    return { success: true, result: { message: `Spawned ${args.entityType}` } };
+    const p = parseArgs(z.object({ entityType: z.enum(ENTITY_TYPES), name: z.string().optional() }), args);
+    if (p.error) return p.error;
+    ctx.store.spawnEntity(p.data.entityType, p.data.name);
+    return { success: true, result: { message: `Spawned ${p.data.entityType}` } };
   },
 
   despawn_entity: async (args, ctx): Promise<ExecutionResult> => {
-    const ids =
-      (args.entityIds as string[] | undefined) ??
-      (args.entityId ? [args.entityId as string] : []);
+    const p = parseArgs(z.object({ entityIds: z.array(zEntityId).optional(), entityId: zEntityId.optional() }), args);
+    if (p.error) return p.error;
+    const ids = p.data.entityIds ?? (p.data.entityId ? [p.data.entityId] : []);
     if (ids.length > 0) {
       ctx.store.setSelection(ids, ids[0], null);
       ctx.store.deleteSelectedEntities();
@@ -26,9 +32,9 @@ export const entityHandlers: Record<string, ToolHandler> = {
   },
 
   delete_entities: async (args, ctx): Promise<ExecutionResult> => {
-    const ids =
-      (args.entityIds as string[] | undefined) ??
-      (args.entityId ? [args.entityId as string] : []);
+    const p = parseArgs(z.object({ entityIds: z.array(zEntityId).optional(), entityId: zEntityId.optional() }), args);
+    if (p.error) return p.error;
+    const ids = p.data.entityIds ?? (p.data.entityId ? [p.data.entityId] : []);
     if (ids.length > 0) {
       ctx.store.setSelection(ids, ids[0], null);
       ctx.store.deleteSelectedEntities();
@@ -37,64 +43,75 @@ export const entityHandlers: Record<string, ToolHandler> = {
   },
 
   duplicate_entity: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.selectEntity(args.entityId as string, 'replace');
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    ctx.store.selectEntity(p.data.entityId, 'replace');
     ctx.store.duplicateSelectedEntity();
     return { success: true, result: { message: `Duplicated entity` } };
   },
 
   update_transform: async (args, ctx): Promise<ExecutionResult> => {
-    const entityId = args.entityId as string;
-    if (args.position) ctx.store.updateTransform(entityId, 'position', args.position as [number, number, number]);
-    if (args.rotation) ctx.store.updateTransform(entityId, 'rotation', args.rotation as [number, number, number]);
-    if (args.scale) ctx.store.updateTransform(entityId, 'scale', args.scale as [number, number, number]);
+    const p = parseArgs(z.object({ entityId: zEntityId, position: zXYZ.optional(), rotation: zXYZ.optional(), scale: zXYZ.optional() }), args);
+    if (p.error) return p.error;
+    if (p.data.position) ctx.store.updateTransform(p.data.entityId, 'position', p.data.position);
+    if (p.data.rotation) ctx.store.updateTransform(p.data.entityId, 'rotation', p.data.rotation);
+    if (p.data.scale) ctx.store.updateTransform(p.data.entityId, 'scale', p.data.scale);
     return { success: true };
   },
 
   rename_entity: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.renameEntity(args.entityId as string, args.name as string);
+    const p = parseArgs(z.object({ entityId: zEntityId, name: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    ctx.store.renameEntity(p.data.entityId, p.data.name);
     return { success: true };
   },
 
   reparent_entity: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.reparentEntity(
-      args.entityId as string,
-      args.newParentId as string | null,
-      args.insertIndex as number | undefined
-    );
+    const p = parseArgs(z.object({ entityId: zEntityId, newParentId: z.string().nullable(), insertIndex: z.number().int().nonnegative().optional() }), args);
+    if (p.error) return p.error;
+    ctx.store.reparentEntity(p.data.entityId, p.data.newParentId, p.data.insertIndex);
     return { success: true };
   },
 
   set_visibility: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.toggleVisibility(args.entityId as string);
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    ctx.store.toggleVisibility(p.data.entityId);
     return { success: true };
   },
 
   select_entity: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.selectEntity(
-      args.entityId as string,
-      (args.mode as 'replace' | 'add' | 'toggle') ?? 'replace'
-    );
+    const p = parseArgs(z.object({ entityId: zEntityId, mode: zSelectionMode.optional() }), args);
+    if (p.error) return p.error;
+    ctx.store.selectEntity(p.data.entityId, p.data.mode ?? 'replace');
     return { success: true };
   },
 
   select_entities: async (args, ctx): Promise<ExecutionResult> => {
-    const ids = args.entityIds as string[];
-    if (ids.length > 0) ctx.store.setSelection(ids, ids[0], null);
+    const p = parseArgs(z.object({ entityIds: z.array(zEntityId) }), args);
+    if (p.error) return p.error;
+    if (p.data.entityIds.length > 0) {
+      ctx.store.setSelection(p.data.entityIds, p.data.entityIds[0], null);
+    }
     return { success: true };
   },
 
-  clear_selection: async (args, ctx): Promise<ExecutionResult> => {
+  clear_selection: async (_args, ctx): Promise<ExecutionResult> => {
     ctx.store.clearSelection();
     return { success: true };
   },
 
   set_gizmo_mode: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.setGizmoMode(args.mode as 'translate' | 'rotate' | 'scale');
+    const p = parseArgs(z.object({ mode: zGizmoMode }), args);
+    if (p.error) return p.error;
+    ctx.store.setGizmoMode(p.data.mode);
     return { success: true };
   },
 
   set_coordinate_mode: async (args, ctx): Promise<ExecutionResult> => {
-    if (ctx.store.coordinateMode !== args.mode) ctx.store.toggleCoordinateMode();
+    const p = parseArgs(z.object({ mode: z.enum(['local', 'world']) }), args);
+    if (p.error) return p.error;
+    if (ctx.store.coordinateMode !== p.data.mode) ctx.store.toggleCoordinateMode();
     return { success: true };
   },
 
@@ -104,18 +121,21 @@ export const entityHandlers: Record<string, ToolHandler> = {
   },
 
   set_snap_settings: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.setSnapSettings(args as Record<string, unknown>);
+    ctx.store.setSnapSettings(args);
     return { success: true };
   },
 
   set_camera_preset: async (args, ctx): Promise<ExecutionResult> => {
-    ctx.store.setCameraPreset(args.preset as 'top' | 'front' | 'right' | 'perspective');
+    const p = parseArgs(z.object({ preset: zCameraPreset }), args);
+    if (p.error) return p.error;
+    ctx.store.setCameraPreset(p.data.preset);
     return { success: true };
   },
 
   focus_camera: async (args, ctx): Promise<ExecutionResult> => {
-    // focusCamera is not on the store — select the entity so the user can press F
-    ctx.store.selectEntity(args.entityId as string, 'replace');
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    ctx.store.selectEntity(p.data.entityId, 'replace');
     return { success: true, result: { message: 'Entity selected. User can press F to focus camera.' } };
   },
 
@@ -142,8 +162,10 @@ export const entityHandlers: Record<string, ToolHandler> = {
   },
 
   get_entity_details: async (args, ctx): Promise<ExecutionResult> => {
-    const node = ctx.store.sceneGraph.nodes[args.entityId as string];
-    if (!node) return { success: false, error: `Entity not found: ${args.entityId}` };
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    const node = ctx.store.sceneGraph.nodes[p.data.entityId];
+    if (!node) return { success: false, error: `Entity not found: ${p.data.entityId}` };
     return {
       success: true,
       result: {

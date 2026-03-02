@@ -2,19 +2,27 @@
  * Transform, selection, and scene manipulation handlers.
  */
 
-import type { ToolHandler, EntityType } from './types';
+import { z } from 'zod';
+import type { ToolHandler } from './types';
+import { zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
+
+const ENTITY_TYPES = [
+  'cube', 'sphere', 'cylinder', 'capsule', 'torus', 'plane', 'cone', 'icosphere',
+  'point_light', 'directional_light', 'spot_light', 'gltf_model', 'empty',
+] as const;
 
 export const transformHandlers: Record<string, ToolHandler> = {
   spawn_entity: async (args, { store }) => {
-    store.spawnEntity(
-      args.entityType as EntityType,
-      args.name as string | undefined
-    );
-    return { success: true, result: { message: `Spawned ${args.entityType}` } };
+    const p = parseArgs(z.object({ entityType: z.enum(ENTITY_TYPES), name: z.string().optional() }), args);
+    if (p.error) return p.error;
+    store.spawnEntity(p.data.entityType, p.data.name);
+    return { success: true, result: { message: `Spawned ${p.data.entityType}` } };
   },
 
   despawn_entity: async (args, { store }) => {
-    const ids = args.entityIds as string[] | undefined ?? (args.entityId ? [args.entityId as string] : []);
+    const p = parseArgs(z.object({ entityIds: z.array(zEntityId).optional(), entityId: zEntityId.optional() }), args);
+    if (p.error) return p.error;
+    const ids = p.data.entityIds ?? (p.data.entityId ? [p.data.entityId] : []);
     if (ids.length > 0) {
       store.setSelection(ids, ids[0], null);
       store.deleteSelectedEntities();
@@ -23,7 +31,9 @@ export const transformHandlers: Record<string, ToolHandler> = {
   },
 
   delete_entities: async (args, { store }) => {
-    const ids = args.entityIds as string[] | undefined ?? (args.entityId ? [args.entityId as string] : []);
+    const p = parseArgs(z.object({ entityIds: z.array(zEntityId).optional(), entityId: zEntityId.optional() }), args);
+    if (p.error) return p.error;
+    const ids = p.data.entityIds ?? (p.data.entityId ? [p.data.entityId] : []);
     if (ids.length > 0) {
       store.setSelection(ids, ids[0], null);
       store.deleteSelectedEntities();
@@ -32,87 +42,106 @@ export const transformHandlers: Record<string, ToolHandler> = {
   },
 
   duplicate_entity: async (args, { store }) => {
-    store.selectEntity(args.entityId as string, 'replace');
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.selectEntity(p.data.entityId, 'replace');
     store.duplicateSelectedEntity();
     return { success: true, result: { message: `Duplicated entity` } };
   },
 
   update_transform: async (args, { store }) => {
-    const entityId = args.entityId as string;
-    if (args.position) store.updateTransform(entityId, 'position', args.position as [number, number, number]);
-    if (args.rotation) store.updateTransform(entityId, 'rotation', args.rotation as [number, number, number]);
-    if (args.scale) store.updateTransform(entityId, 'scale', args.scale as [number, number, number]);
+    const p = parseArgs(z.object({ entityId: zEntityId, position: zXYZ.optional(), rotation: zXYZ.optional(), scale: zXYZ.optional() }), args);
+    if (p.error) return p.error;
+    if (p.data.position) store.updateTransform(p.data.entityId, 'position', p.data.position);
+    if (p.data.rotation) store.updateTransform(p.data.entityId, 'rotation', p.data.rotation);
+    if (p.data.scale) store.updateTransform(p.data.entityId, 'scale', p.data.scale);
     return { success: true };
   },
 
   rename_entity: async (args, { store }) => {
-    store.renameEntity(args.entityId as string, args.name as string);
+    const p = parseArgs(z.object({ entityId: zEntityId, name: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    store.renameEntity(p.data.entityId, p.data.name);
     return { success: true };
   },
 
   reparent_entity: async (args, { store }) => {
-    store.reparentEntity(args.entityId as string, args.newParentId as string | null, args.insertIndex as number | undefined);
+    const p = parseArgs(z.object({ entityId: zEntityId, newParentId: z.string().nullable(), insertIndex: z.number().int().nonnegative().optional() }), args);
+    if (p.error) return p.error;
+    store.reparentEntity(p.data.entityId, p.data.newParentId, p.data.insertIndex);
     return { success: true };
   },
 
   set_visibility: async (args, { store }) => {
-    store.toggleVisibility(args.entityId as string);
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.toggleVisibility(p.data.entityId);
     return { success: true };
   },
 
   select_entity: async (args, { store }) => {
-    store.selectEntity(args.entityId as string, (args.mode as 'replace' | 'add' | 'toggle') ?? 'replace');
+    const p = parseArgs(z.object({ entityId: zEntityId, mode: zSelectionMode.optional() }), args);
+    if (p.error) return p.error;
+    store.selectEntity(p.data.entityId, p.data.mode ?? 'replace');
     return { success: true };
   },
 
   select_entities: async (args, { store }) => {
-    const ids = args.entityIds as string[];
-    if (ids.length > 0) store.setSelection(ids, ids[0], null);
+    const p = parseArgs(z.object({ entityIds: z.array(zEntityId).min(1) }), args);
+    if (p.error) return p.error;
+    store.setSelection(p.data.entityIds, p.data.entityIds[0], null);
     return { success: true };
   },
 
-  clear_selection: async (args, { store }) => {
+  clear_selection: async (_args, { store }) => {
     store.clearSelection();
     return { success: true };
   },
 
   set_gizmo_mode: async (args, { store }) => {
-    store.setGizmoMode(args.mode as 'translate' | 'rotate' | 'scale');
+    const p = parseArgs(z.object({ mode: zGizmoMode }), args);
+    if (p.error) return p.error;
+    store.setGizmoMode(p.data.mode);
     return { success: true };
   },
 
   set_coordinate_mode: async (args, { store }) => {
-    if (store.coordinateMode !== args.mode) store.toggleCoordinateMode();
+    const p = parseArgs(z.object({ mode: z.enum(['local', 'world']) }), args);
+    if (p.error) return p.error;
+    if (store.coordinateMode !== p.data.mode) store.toggleCoordinateMode();
     return { success: true };
   },
 
-  toggle_grid: async (args, { store }) => {
+  toggle_grid: async (_args, { store }) => {
     store.toggleGrid();
     return { success: true };
   },
 
   set_snap_settings: async (args, { store }) => {
-    store.setSnapSettings(args as Record<string, unknown>);
+    store.setSnapSettings(args);
     return { success: true };
   },
 
   set_camera_preset: async (args, { store }) => {
-    store.setCameraPreset(args.preset as 'top' | 'front' | 'right' | 'perspective');
+    const p = parseArgs(z.object({ preset: zCameraPreset }), args);
+    if (p.error) return p.error;
+    store.setCameraPreset(p.data.preset);
     return { success: true };
   },
 
   focus_camera: async (args, { store }) => {
-    // focusCamera is not on the store — select the entity so the user can press F
-    store.selectEntity(args.entityId as string, 'replace');
+    const p = parseArgs(z.object({ entityId: zEntityId }), args);
+    if (p.error) return p.error;
+    store.selectEntity(p.data.entityId, 'replace');
     return { success: true, result: { message: 'Entity selected. User can press F to focus camera.' } };
   },
 
-  undo: async (args, { store }) => {
+  undo: async (_args, { store }) => {
     store.undo();
     return { success: true };
   },
 
-  redo: async (args, { store }) => {
+  redo: async (_args, { store }) => {
     store.redo();
     return { success: true };
   },
