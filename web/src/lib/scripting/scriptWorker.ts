@@ -44,6 +44,24 @@ interface UIElement {
   visible: boolean;
 }
 
+// Synced 2D state (populated from main thread on init/tick)
+interface TilemapState {
+  tileSize: [number, number];
+  mapSize: [number, number];
+  layers: { tiles: (number | null)[] }[];
+  origin: 'TopLeft' | 'Center';
+}
+
+interface SkeletonState {
+  bones: { name: string; parentBone: string | null; localPosition: [number, number]; localRotation: number; localScale: [number, number]; length: number }[];
+  activeSkin: string;
+}
+
+interface Physics2dVelocityState {
+  velocity: [number, number];
+  angularVelocity: number;
+}
+
 // Accumulated commands from forge.* calls
 let pendingCommands: EngineCommand[] = [];
 let entityStates: Record<string, EntityState> = {};
@@ -56,6 +74,14 @@ let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;
 const uiElements: Map<string, UIElement> = new Map();
 let uiDirty = false;
+
+// Synced domain state (from main thread)
+let tilemapStates: Record<string, TilemapState> = {};
+let skeletonStates: Record<string, SkeletonState> = {};
+let physics2dVelocities: Record<string, Physics2dVelocityState> = {};
+
+// Previous frame positions for velocity estimation
+let prevEntityStates: Record<string, EntityState> = {};
 
 // UI Builder screen visibility (synced from main thread)
 const screenVisibility: Record<string, boolean> = {};
@@ -258,16 +284,17 @@ function buildForgeApi(scriptEntityId: string) {
       setVelocity: (eid: string, vx: number, vy: number) => {
         pendingCommands.push({ cmd: 'set_velocity2d', entityId: eid, velocityX: vx, velocityY: vy });
       },
-      getVelocity: (_eid: string) => {
-        // Would need state tracking from engine
-        return null;
+      getVelocity: (eid: string): { x: number; y: number } | null => {
+        const state = physics2dVelocities[eid];
+        if (!state) return null;
+        return { x: state.velocity[0], y: state.velocity[1] };
       },
       setAngularVelocity: (eid: string, omega: number) => {
         pendingCommands.push({ cmd: 'set_angular_velocity2d', entityId: eid, omega });
       },
-      getAngularVelocity: (_eid: string) => {
-        // Would need state tracking from engine
-        return null;
+      getAngularVelocity: (eid: string): number | null => {
+        const state = physics2dVelocities[eid];
+        return state?.angularVelocity ?? null;
       },
       raycast: async (_originX: number, _originY: number, _dirX: number, _dirY: number, _maxDistance?: number) => {
         // TODO: Implement raycast2d with request/response pattern when engine supports it
@@ -346,11 +373,15 @@ function buildForgeApi(scriptEntityId: string) {
       },
     },
     tilemap: {
-      getTile: (_tilemapId: string, _x: number, _y: number, _layer = 0) => {
-        // Read from entity cache/store (would need tilemap state synced)
-        // For now, return null until tilemap state is synced to worker
-        // TODO: Sync tilemap data to worker and use parameters
-        return null;
+      getTile: (tilemapId: string, x: number, y: number, layer = 0) => {
+        const tilemap = tilemapStates[tilemapId];
+        if (!tilemap) return null;
+        const layerData = tilemap.layers[layer];
+        if (!layerData) return null;
+        const [mapW] = tilemap.mapSize;
+        if (x < 0 || y < 0 || x >= mapW || y >= tilemap.mapSize[1]) return null;
+        const idx = y * mapW + x;
+        return layerData.tiles[idx] ?? null;
       },
       setTile: (tilemapId: string, x: number, y: number, tileId: number | null, layer = 0) => {
         pendingCommands.push({ cmd: 'set_tile', tilemapId, x, y, tileId, layer });
@@ -361,25 +392,25 @@ function buildForgeApi(scriptEntityId: string) {
       clearTile: (tilemapId: string, x: number, y: number, layer = 0) => {
         pendingCommands.push({ cmd: 'clear_tiles', tilemapId, x, y, width: 1, height: 1, layer });
       },
-      worldToTile: (_tilemapId: string, worldX: number, worldY: number): [number, number] => {
-        // Pure math conversion (would need tilemap data for tile size and origin)
-        // For now, assume 32x32 tiles and top-left origin
-        // TODO: Use actual tilemap tile size from synced data
-        const tileX = Math.floor(worldX / 32);
-        const tileY = Math.floor(-worldY / 32);
+      worldToTile: (tilemapId: string, worldX: number, worldY: number): [number, number] => {
+        const tilemap = tilemapStates[tilemapId];
+        const tileW = tilemap?.tileSize[0] ?? 32;
+        const tileH = tilemap?.tileSize[1] ?? 32;
+        const tileX = Math.floor(worldX / tileW);
+        const tileY = Math.floor(-worldY / tileH);
         return [tileX, tileY];
       },
-      tileToWorld: (_tilemapId: string, tileX: number, tileY: number): [number, number] => {
-        // Pure math conversion
-        // TODO: Use actual tilemap tile size from synced data
-        const worldX = tileX * 32;
-        const worldY = -tileY * 32;
+      tileToWorld: (tilemapId: string, tileX: number, tileY: number): [number, number] => {
+        const tilemap = tilemapStates[tilemapId];
+        const tileW = tilemap?.tileSize[0] ?? 32;
+        const tileH = tilemap?.tileSize[1] ?? 32;
+        const worldX = tileX * tileW;
+        const worldY = -tileY * tileH;
         return [worldX, worldY];
       },
-      getMapSize: (_tilemapId: string): [number, number] => {
-        // Would need tilemap data synced to worker
-        // TODO: Sync tilemap data to worker
-        return [0, 0];
+      getMapSize: (tilemapId: string): [number, number] => {
+        const tilemap = tilemapStates[tilemapId];
+        return tilemap?.mapSize ?? [0, 0];
       },
       resize: (tilemapId: string, width: number, height: number, anchor = 'top-left') => {
         pendingCommands.push({ cmd: 'resize_tilemap', tilemapId, width, height, anchor });
@@ -634,9 +665,17 @@ function buildForgeApi(scriptEntityId: string) {
           ...updates,
         });
       },
-      getBones: (_eid: string) => {
-        // Would need to be populated from engine state
-        return null;
+      getBones: (eid: string) => {
+        const skeleton = skeletonStates[eid];
+        if (!skeleton?.bones) return null;
+        return skeleton.bones.map(b => ({
+          name: b.name,
+          parentBone: b.parentBone,
+          position: b.localPosition,
+          rotation: b.localRotation,
+          scale: b.localScale,
+          length: b.length,
+        }));
       },
       playAnimation: (eid: string, animName: string, options?: { loop?: boolean; speed?: number; crossfade?: number }) => {
         pendingCommands.push({
@@ -654,9 +693,9 @@ function buildForgeApi(scriptEntityId: string) {
       setSkin: (eid: string, skinName: string) => {
         pendingCommands.push({ cmd: 'set_skeleton2d_skin', entityId: eid, skin_name: skinName });
       },
-      getSkin: (_eid: string) => {
-        // Would need to be populated from engine state
-        return null;
+      getSkin: (eid: string) => {
+        const skeleton = skeletonStates[eid];
+        return skeleton?.activeSkin ?? null;
       },
       setIkTarget: (eid: string, constraintName: string, targetX: number, targetY: number) => {
         pendingCommands.push({
@@ -689,9 +728,16 @@ function buildForgeApi(scriptEntityId: string) {
       playAnimation: (eid: string, animationName: string) => {
         pendingCommands.push({ cmd: 'play_skeletal_animation2d', entityId: eid, animationName });
       },
-      getBones: (_eid: string) => {
-        // TODO: sync skeleton state to worker
-        return null;
+      getBones: (eid: string) => {
+        const skeleton = skeletonStates[eid];
+        if (!skeleton?.bones) return null;
+        return skeleton.bones.map(b => ({
+          name: b.name,
+          x: b.localPosition[0],
+          y: b.localPosition[1],
+          rotation: b.localRotation,
+          length: b.length,
+        }));
       },
     },
 
@@ -781,6 +827,10 @@ self.onmessage = (e: MessageEvent) => {
       entityStates = msg.entities || {};
       entityInfos = msg.entityInfos || {};
       currentInput = msg.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
+      tilemapStates = msg.tilemapStates || {};
+      skeletonStates = msg.skeletonStates || {};
+      physics2dVelocities = msg.physics2dVelocities || {};
+      prevEntityStates = {};
       uiElements.clear();
       uiDirty = false;
 
@@ -810,9 +860,34 @@ self.onmessage = (e: MessageEvent) => {
     case 'tick': {
       timeData.delta = msg.dt || 0;
       timeData.elapsed = msg.elapsed || 0;
-      entityStates = msg.entities || {};
+      const newEntities = msg.entities || {};
+
+      // Estimate 2D velocities from position deltas when engine doesn't provide them
+      if (timeData.delta > 0) {
+        const newVelocities: Record<string, Physics2dVelocityState> = {};
+        const invDt = 1 / timeData.delta;
+        for (const [eid, state] of Object.entries(newEntities) as [string, EntityState][]) {
+          const prev = prevEntityStates[eid];
+          if (prev) {
+            newVelocities[eid] = {
+              velocity: [
+                (state.position[0] - prev.position[0]) * invDt,
+                (state.position[1] - prev.position[1]) * invDt,
+              ],
+              angularVelocity: (state.rotation[2] - prev.rotation[2]) * invDt,
+            };
+          }
+        }
+        // Use engine-provided velocities if available, otherwise use estimated
+        physics2dVelocities = msg.physics2dVelocities || newVelocities;
+      }
+      prevEntityStates = { ...newEntities };
+
+      entityStates = newEntities;
       entityInfos = msg.entityInfos || entityInfos;
       currentInput = msg.inputState || currentInput;
+      if (msg.tilemapStates) tilemapStates = msg.tilemapStates;
+      if (msg.skeletonStates) skeletonStates = msg.skeletonStates;
 
       // Sync audio playing state from main thread (authoritative source)
       if (msg.audioPlayingStates) {

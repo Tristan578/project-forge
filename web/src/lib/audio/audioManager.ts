@@ -270,11 +270,22 @@ class AudioManager {
     const busName = instance.bus ?? 'sfx';
     const bus = this.buses.get(busName) ?? this.buses.get('sfx')!;
 
-    // Connect: source → gain → panner (if spatial) → busGainNode
+    // Connect: source → gain → panner (if spatial) → [occlusionFilter] → busGainNode
+    const occlusionFilter = this.occlusionFilters.get(instance.entityId);
     if (instance.pannerNode) {
-      source.connect(instance.gainNode).connect(instance.pannerNode).connect(bus.gainNode);
+      const lastNode = source.connect(instance.gainNode).connect(instance.pannerNode);
+      if (occlusionFilter && this.occlusionEnabled.has(instance.entityId)) {
+        lastNode.connect(occlusionFilter).connect(bus.gainNode);
+      } else {
+        lastNode.connect(bus.gainNode);
+      }
     } else {
-      source.connect(instance.gainNode).connect(bus.gainNode);
+      const lastNode = source.connect(instance.gainNode);
+      if (occlusionFilter && this.occlusionEnabled.has(instance.entityId)) {
+        lastNode.connect(occlusionFilter).connect(bus.gainNode);
+      } else {
+        lastNode.connect(bus.gainNode);
+      }
     }
 
     // Start from offset (for resume support)
@@ -1272,10 +1283,12 @@ class AudioManager {
         const ctx = this.ensureContext();
         const filter = ctx.createBiquadFilter();
         filter.type = 'lowpass';
-        filter.frequency.value = 5000; // Default occluded frequency
+        filter.frequency.value = 5000; // Start unoccluded
         filter.Q.value = 1.0;
         this.occlusionFilters.set(entityId, filter);
       }
+      // Reconnect active instance to insert filter into signal chain
+      this.reconnectInstance(entityId);
     } else {
       this.occlusionEnabled.delete(entityId);
       const filter = this.occlusionFilters.get(entityId);
@@ -1283,12 +1296,49 @@ class AudioManager {
         filter.disconnect();
         this.occlusionFilters.delete(entityId);
       }
+      // Reconnect active instance to remove filter from signal chain
+      this.reconnectInstance(entityId);
+    }
+  }
+
+  /**
+   * Reconnect an active instance's audio graph (used when occlusion filter is added/removed).
+   */
+  private reconnectInstance(entityId: string): void {
+    const key = this.instanceKey(entityId);
+    const instance = this.instances.get(key);
+    if (!instance || !instance.isPlaying || !instance.source) return;
+
+    const busName = instance.bus ?? 'sfx';
+    const bus = this.buses.get(busName) ?? this.buses.get('sfx');
+    if (!bus) return;
+
+    // Disconnect existing chain from gain onward
+    instance.gainNode.disconnect();
+    instance.pannerNode?.disconnect();
+
+    const occlusionFilter = this.occlusionFilters.get(entityId);
+
+    // Rebuild: gain → [panner] → [occlusionFilter] → busGainNode
+    if (instance.pannerNode) {
+      const lastNode = instance.gainNode.connect(instance.pannerNode);
+      if (occlusionFilter && this.occlusionEnabled.has(entityId)) {
+        lastNode.connect(occlusionFilter).connect(bus.gainNode);
+      } else {
+        lastNode.connect(bus.gainNode);
+      }
+    } else {
+      if (occlusionFilter && this.occlusionEnabled.has(entityId)) {
+        instance.gainNode.connect(occlusionFilter).connect(bus.gainNode);
+      } else {
+        instance.gainNode.connect(bus.gainNode);
+      }
     }
   }
 
   /**
    * Update occlusion state based on raycasting result.
-   * In production, this would be called from the physics raycasting system.
+   * Called from the physics event handler when a raycast result is received.
    */
   updateOcclusionState(entityId: string, occluded: boolean): void {
     if (!this.occlusionEnabled.has(entityId)) return;
@@ -1298,7 +1348,50 @@ class AudioManager {
 
     const now = this.ctx.currentTime;
     const targetFreq = occluded ? 500 : 5000; // Muffled vs clear
+    filter.frequency.cancelScheduledValues(now);
+    filter.frequency.setValueAtTime(filter.frequency.value, now);
     filter.frequency.linearRampToValueAtTime(targetFreq, now + 0.1);
+  }
+
+  /**
+   * Get all entity IDs that have occlusion enabled and are currently playing.
+   * Used by the play-tick system to issue raycasts for occlusion checks.
+   */
+  getOccludableEntities(): string[] {
+    const result: string[] = [];
+    for (const entityId of this.occlusionEnabled) {
+      const instance = this.instances.get(entityId);
+      if (instance?.isPlaying && instance.pannerNode) {
+        result.push(entityId);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Get the spatial position of an audio source (for raycasting origin/target).
+   */
+  getSourcePosition(entityId: string): [number, number, number] | null {
+    const instance = this.instances.get(entityId);
+    if (!instance?.pannerNode) return null;
+    return [
+      instance.pannerNode.positionX.value,
+      instance.pannerNode.positionY.value,
+      instance.pannerNode.positionZ.value,
+    ];
+  }
+
+  /**
+   * Get the listener (camera) position for raycasting.
+   */
+  getListenerPosition(): [number, number, number] | null {
+    const ctx = this.ctx;
+    if (!ctx) return null;
+    const listener = ctx.listener;
+    if (listener.positionX) {
+      return [listener.positionX.value, listener.positionY.value, listener.positionZ.value];
+    }
+    return null;
   }
 
   /**
