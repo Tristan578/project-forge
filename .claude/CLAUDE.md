@@ -231,8 +231,8 @@ Key rules:
 | 2D-3 | Tilemap System | UI ONLY — no engine integration | TilesetData/TilemapData ECS, multi-layer tiles, TilesetPanel, TilemapInspector, TilemapToolbar, TilemapLayerPanel, tilemap editor tools, forge.tilemap script API, 10 MCP commands |
 | 2D-5 | Skeletal 2D Animation | UI ONLY — no engine integration | SkeletonData2d/SkeletalAnimation2d/BlendTree2d ECS, bone hierarchy, skins, IK constraints, SkeletonInspector, forge.skeleton2d script API, 11 MCP commands |
 | 20 | Advanced Audio | PARTIAL — basic audio done, adaptive/occlusion stubs | Spatial audio, bus mixer, reverb zones work; adaptive music snapshots, occlusion, horizontal re-sequencing are console-log stubs, 6 MCP commands |
-| 24 | Editor Collaboration | UI ONLY — no networking backend | Sync manager (local state), user avatars, activity feed, entity locking UI; no WebSocket server, no real-time sync. MCP commands removed (PF-50) |
-| 25 | Multiplayer Networking | UI ONLY — no networking backend | Network client stub, forge.net script API, spawn point config; no actual networking — all state is local simulation. MCP commands removed (PF-50) |
+| 24 | Editor Collaboration | REMOVED (PF-142) | Stubs removed — no networking backend existed. Will rebuild from scratch when real-time sync is prioritized |
+| 25 | Multiplayer Networking | REMOVED (PF-141) | Stubs removed — no networking backend existed. Will rebuild from scratch when multiplayer is prioritized |
 | 31 | LOD & Performance | PARTIAL — UI + metrics stubs | LodData ECS component, LOD inspector, performance budget UI; bridge drains queues but does not generate mesh LODs or collect real perf stats, 6 MCP commands |
 
 ## New Component / Command Checklist

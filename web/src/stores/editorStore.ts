@@ -101,7 +101,9 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createEditModeSlice(...args),
 }));
 
-// Expose store for E2E tests (dev/test only)
+// Best-effort store exposure for E2E tests (dev/test only).
+// The primary exposure happens in EditorLayout's useEffect (guaranteed client-side).
+// This module-level fallback may not fire reliably due to Next.js SSR evaluation.
 if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
   (window as unknown as Record<string, unknown>).__EDITOR_STORE = useEditorStore;
 }

@@ -176,3 +176,97 @@ test.describe('Play Mode @engine', () => {
     }
   });
 });
+
+/**
+ * UI-only play mode tests (no WASM engine).
+ * These verify store-driven UI behavior by injecting state directly.
+ */
+test.describe('Play Mode UI @ui', () => {
+  test.beforeEach(async ({ editor }) => {
+    await editor.loadPage();
+  });
+
+  test('play controls render in initial edit state', async ({ page }) => {
+    const playBtn = page.locator('button[aria-label="Play"]');
+    const pauseBtn = page.locator('button[aria-label="Pause"]');
+    const stopBtn = page.locator('button[aria-label="Stop"]');
+
+    await expect(playBtn).toBeVisible({ timeout: 5000 });
+    await expect(playBtn).toBeEnabled();
+    await expect(pauseBtn).toBeVisible();
+    await expect(pauseBtn).toBeDisabled();
+    await expect(stopBtn).toBeVisible();
+    await expect(stopBtn).toBeDisabled();
+  });
+
+  test('store mode change to play disables play button and enables pause/stop', async ({ page }) => {
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
+    });
+
+    await expect(page.locator('button[aria-label="Play"]')).toBeDisabled();
+    await expect(page.locator('button[aria-label="Pause"]')).toBeEnabled();
+    await expect(page.locator('button[aria-label="Stop"]')).toBeEnabled();
+  });
+
+  test('store mode change to paused shows resume button', async ({ page }) => {
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__EDITOR_STORE?.setState({ engineMode: 'paused' });
+    });
+
+    const resumeBtn = page.locator('button[aria-label="Resume"]');
+    await expect(resumeBtn).toBeVisible({ timeout: 3000 });
+    await expect(resumeBtn).toBeEnabled();
+  });
+
+  test('rapid mode toggling does not leave UI in inconsistent state', async ({ page }) => {
+    // Rapidly toggle between modes
+    const modes = ['play', 'paused', 'edit', 'play', 'edit'] as const;
+    for (const mode of modes) {
+      await page.evaluate((m) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__EDITOR_STORE?.setState({ engineMode: m });
+      }, mode);
+      await page.waitForTimeout(50);
+    }
+
+    // Should end in edit mode with correct button states
+    await page.waitForTimeout(200);
+    const playBtn = page.locator('button[aria-label="Play"]');
+    await expect(playBtn).toBeEnabled();
+    await expect(page.locator('button[aria-label="Pause"]')).toBeDisabled();
+    await expect(page.locator('button[aria-label="Stop"]')).toBeDisabled();
+  });
+
+  test('mode indicator text updates correctly for each state', async ({ page }) => {
+    // Play mode
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
+    });
+    await page.waitForTimeout(200);
+    await expect(page.getByText('Playing').first()).toBeVisible();
+
+    // Paused mode
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__EDITOR_STORE?.setState({ engineMode: 'paused' });
+    });
+    await page.waitForTimeout(200);
+    await expect(page.getByText('Paused').first()).toBeVisible();
+
+    // Back to edit — indicator should not show Playing or Paused
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__EDITOR_STORE?.setState({ engineMode: 'edit' });
+    });
+    await page.waitForTimeout(200);
+    // No mode indicator visible in edit mode
+    const playingText = page.getByText('Playing', { exact: true });
+    const pausedText = page.getByText('Paused', { exact: true });
+    await expect(playingText).not.toBeVisible();
+    await expect(pausedText).not.toBeVisible();
+  });
+});

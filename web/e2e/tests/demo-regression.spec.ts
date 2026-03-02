@@ -194,4 +194,121 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       await expect(exportBtn).toBeVisible();
     }
   });
+
+  test('store exposes selection slice with initial empty state', async ({ page }) => {
+    const selectionState = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      const state = store.getState();
+      // selectedIds is a Set<string> in the Zustand store
+      return {
+        hasSelectedIds: state.selectedIds instanceof Set,
+        selectedCount: state.selectedIds?.size ?? -1,
+        hasPrimaryId: 'primaryId' in state,
+      };
+    });
+    expect(selectionState!.hasSelectedIds).toBe(true);
+    expect(selectionState!.selectedCount).toBe(0);
+  });
+
+  test('store-driven entity selection shows entity in scene hierarchy', async ({ page }) => {
+    // Inject a mock entity into the scene graph and select it
+    await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      if (!store) return;
+      const entityId = 'test-cube-123';
+      store.setState({
+        sceneGraph: {
+          nodes: {
+            [entityId]: {
+              entityId,
+              name: 'Test Cube',
+              parentId: null,
+              children: [],
+              components: ['Cube'],
+              visible: true,
+            },
+          },
+          rootIds: [entityId],
+        },
+        selectedIds: new Set([entityId]),
+        primaryId: entityId,
+      });
+    });
+
+    // Hierarchy should show the entity (allow extra time for React re-render in CI)
+    const hierarchyItem = page.getByText('Test Cube');
+    await expect(hierarchyItem.first()).toBeVisible({ timeout: 10000 });
+  });
+
+  test('settings modal opens and closes', async ({ page, editor }) => {
+    await editor.openSettings();
+
+    // Settings modal should appear
+    const settingsHeading = page.getByText(/Settings/i).first();
+    await expect(settingsHeading).toBeVisible({ timeout: 5000 });
+
+    // Close with Escape and assert the dialog is gone
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 3000 });
+  });
+
+  test('sidebar contains tool groups', async ({ page }) => {
+    // The sidebar should have tool buttons (transform tools, entity add, etc.)
+    const sidebar = page.locator('[data-testid="sidebar"], aside, [class*="sidebar"]').first();
+    await expect(sidebar).toBeVisible({ timeout: 5000 });
+    const buttons = sidebar.locator('button');
+    const count = await buttons.count();
+    expect(count).toBeGreaterThan(0);
+  });
+
+  test('canvas element has correct dimensions', async ({ page }) => {
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible({ timeout: 5000 });
+
+    const box = await canvas.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(100);
+    expect(box!.height).toBeGreaterThan(100);
+  });
+
+  test('multiple mode transitions do not corrupt store state', async ({ page }) => {
+    // Rapidly cycle through modes
+    for (let i = 0; i < 3; i++) {
+      await page.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
+      });
+      await page.waitForTimeout(100);
+
+      await page.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__EDITOR_STORE?.setState({ engineMode: 'paused' });
+      });
+      await page.waitForTimeout(100);
+
+      await page.evaluate(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (window as any).__EDITOR_STORE?.setState({ engineMode: 'edit' });
+      });
+      await page.waitForTimeout(100);
+    }
+
+    // Verify store is in clean edit state
+    const storeState = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      if (!store) return null;
+      const state = store.getState();
+      return {
+        mode: state.engineMode,
+        hasSceneGraph: !!state.sceneGraph,
+        hasNodes: !!state.sceneGraph?.nodes,
+      };
+    });
+    expect(storeState).not.toBeNull();
+    expect(storeState!.mode).toBe('edit');
+    expect(storeState!.hasSceneGraph).toBe(true);
+  });
 });

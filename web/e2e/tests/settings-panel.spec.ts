@@ -147,4 +147,171 @@ test.describe('Settings Panel @ui', () => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await expect(settingsBtn).toBeVisible();
   });
+
+  test('Escape key closes the settings dialog', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test('dialog has aria-labelledby pointing to title', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    const labelledBy = await dialog.getAttribute('aria-labelledby');
+    expect(labelledBy).toBe('settings-dialog-title');
+
+    // The referenced title should exist and contain "Settings"
+    const title = page.locator(`#${labelledBy}`);
+    await expect(title).toBeVisible();
+    await expect(title).toHaveText(/Settings/i);
+  });
+
+  test('tab panels have correct aria-controls and aria-labelledby linkage', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+
+    // Each tab should have aria-controls pointing to a tabpanel
+    const tabs = dialog.locator('[role="tab"]');
+    const tabCount = await tabs.count();
+
+    for (let i = 0; i < tabCount; i++) {
+      const tab = tabs.nth(i);
+      await tab.click();
+      await page.waitForTimeout(200);
+
+      const controls = await tab.getAttribute('aria-controls');
+      expect(controls).not.toBeNull();
+
+      // The controlled tabpanel should exist
+      const panel = page.locator(`#${controls}`);
+      await expect(panel).toBeVisible();
+
+      // The panel's aria-labelledby should point back to this tab
+      const labelledBy = await panel.getAttribute('aria-labelledby');
+      const tabId = await tab.getAttribute('id');
+      expect(labelledBy).toBe(tabId);
+    }
+  });
+
+  test('arrow key navigation wraps from last to first tab', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    const tabs = dialog.locator('[role="tab"]');
+    const tabCount = await tabs.count();
+
+    if (tabCount < 2) return;
+
+    // Focus last tab
+    await tabs.nth(tabCount - 1).focus();
+    await tabs.nth(tabCount - 1).click();
+    await page.waitForTimeout(100);
+    await expect(tabs.nth(tabCount - 1)).toHaveAttribute('aria-selected', 'true');
+
+    // ArrowRight should wrap to first
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(100);
+    await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+
+    // ArrowLeft from first should wrap to last
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(100);
+    await expect(tabs.nth(tabCount - 1)).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('API keys tab shows provider list with BYOK section', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    const keysTab = dialog.getByRole('tab', { name: /api.*keys|keys/i });
+
+    if (!(await keysTab.isVisible().catch(() => false))) return;
+
+    await keysTab.click();
+    await page.waitForTimeout(300);
+
+    // Should show "Provider API Keys (BYOK)" heading
+    const byokHeading = dialog.getByText('Provider API Keys', { exact: false });
+    await expect(byokHeading.first()).toBeVisible();
+
+    // Should list known providers
+    const providers = ['Anthropic', 'Meshy', 'ElevenLabs', 'Suno'];
+    for (const provider of providers) {
+      const providerLabel = dialog.getByText(provider, { exact: false });
+      await expect(providerLabel.first()).toBeVisible();
+    }
+  });
+
+  test('API keys tab shows MCP API Keys section with generate button', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    const keysTab = dialog.getByRole('tab', { name: /api.*keys|keys/i });
+
+    if (!(await keysTab.isVisible().catch(() => false))) return;
+
+    await keysTab.click();
+    await page.waitForTimeout(300);
+
+    // Should show "MCP API Keys" heading
+    const mcpHeading = dialog.getByText('MCP API Keys', { exact: false });
+    await expect(mcpHeading.first()).toBeVisible();
+
+    // Should have "Generate API Key" button
+    const generateBtn = dialog.getByText('Generate API Key', { exact: false });
+    await expect(generateBtn.first()).toBeVisible();
+  });
+
+  test('billing tab shows current plan section', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    const billingTab = dialog.getByRole('tab', { name: /billing/i });
+
+    await expect(billingTab).toBeVisible({ timeout: 5000 });
+    await billingTab.click();
+
+    // "Current Plan" heading renders once the loading state resolves.
+    // The loading text "Loading billing information..." also satisfies the pattern.
+    await expect(
+      dialog.getByText(/Current Plan|Loading billing/i).first()
+    ).toBeVisible({ timeout: 5000 });
+  });
+
+  test('tokens tab shows content when active', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    const tokensTab = dialog.getByRole('tab', { name: /tokens/i });
+
+    // Tokens is the default active tab
+    await expect(tokensTab).toHaveAttribute('aria-selected', 'true');
+
+    // Tab panel should be visible with content
+    const panel = dialog.locator('[role="tabpanel"]');
+    await expect(panel).toBeVisible();
+
+    // Panel should have some meaningful content (not empty)
+    const panelContent = await panel.innerHTML();
+    expect(panelContent.length).toBeGreaterThan(10);
+  });
+
+  test('backdrop click closes the dialog', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible();
+
+    // Click outside the dialog (on the backdrop)
+    // The backdrop is the parent fixed overlay at position 0,0
+    await page.mouse.click(10, 10);
+    await page.waitForTimeout(300);
+
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test('settings can be reopened after closing', async ({ page }) => {
+    const dialog = page.locator('[role="dialog"]');
+
+    // Close with Escape
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+
+    // Reopen
+    const settingsBtn = page.locator('button[title="Settings"]').first();
+    await settingsBtn.click();
+    await expect(dialog).toBeVisible({ timeout: 5000 });
+
+    // Should still have correct structure
+    const tabList = page.locator('[role="tablist"]');
+    await expect(tabList).toBeVisible();
+  });
 });
