@@ -1,0 +1,611 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// ---------- Mocks ----------
+
+const mockSelect = vi.fn();
+const mockFrom = vi.fn();
+const mockWhere = vi.fn();
+const mockLimit = vi.fn();
+const mockInsert = vi.fn();
+const mockValues = vi.fn();
+const mockReturning = vi.fn();
+const mockUpdate = vi.fn();
+const mockSet = vi.fn();
+const mockOrderBy = vi.fn();
+
+/** Standard chainable where result (for select chains with .limit/.returning/.orderBy) */
+function chainableWhere() {
+  return { limit: mockLimit, returning: mockReturning, orderBy: mockOrderBy };
+}
+
+function resetChain() {
+  mockSelect.mockReturnValue({ from: mockFrom });
+  mockFrom.mockReturnValue({ where: mockWhere });
+  mockWhere.mockReturnValue(chainableWhere());
+  mockLimit.mockResolvedValue([]);
+  mockInsert.mockReturnValue({ values: mockValues });
+  mockValues.mockReturnValue({ returning: mockReturning });
+  mockReturning.mockResolvedValue([]);
+  mockUpdate.mockReturnValue({ set: mockSet });
+  mockSet.mockReturnValue({ where: mockWhere });
+  mockOrderBy.mockResolvedValue([]);
+}
+
+vi.mock('@/lib/db/client', () => ({
+  getDb: vi.fn(() => ({
+    select: mockSelect,
+    insert: mockInsert,
+    update: mockUpdate,
+  })),
+}));
+
+vi.mock('@/lib/db/schema', () => ({
+  users: {
+    id: 'id',
+    monthlyTokens: 'monthly_tokens',
+    monthlyTokensUsed: 'monthly_tokens_used',
+    addonTokens: 'addon_tokens',
+    billingCycleStart: 'billing_cycle_start',
+    updatedAt: 'updated_at',
+    tier: 'tier',
+  },
+  tokenUsage: {
+    id: 'id',
+    userId: 'user_id',
+    operation: 'operation',
+    tokens: 'tokens',
+    source: 'source',
+    provider: 'provider',
+    metadata: 'metadata',
+    createdAt: 'created_at',
+  },
+  tokenPurchases: {
+    userId: 'user_id',
+    stripePaymentIntent: 'stripe_payment_intent',
+    package: 'package',
+    tokens: 'tokens',
+    amountCents: 'amount_cents',
+  },
+}));
+
+vi.mock('drizzle-orm', () => ({
+  eq: vi.fn((_a: unknown, _b: unknown) => 'eq-condition'),
+  sql: vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]) => 'sql-expression'),
+  and: vi.fn((..._args: unknown[]) => 'and-condition'),
+  gte: vi.fn((_a: unknown, _b: unknown) => 'gte-condition'),
+}));
+
+// ---------- Tests ----------
+
+describe('getTokenBalance', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetChain();
+  });
+
+  it('returns correct balance for a user with monthly and addon tokens', async () => {
+    const { getTokenBalance } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 30,
+      addonTokens: 200,
+      billingCycleStart: new Date('2026-01-15'),
+    }]);
+
+    const balance = await getTokenBalance('user-1');
+
+    expect(balance.monthlyRemaining).toBe(70);
+    expect(balance.monthlyTotal).toBe(100);
+    expect(balance.addon).toBe(200);
+    expect(balance.total).toBe(270);
+    expect(balance.nextRefillDate).toContain('2026-02-14');
+  });
+
+  it('clamps monthlyRemaining to 0 when overused', async () => {
+    const { getTokenBalance } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 80,
+      addonTokens: 10,
+      billingCycleStart: new Date('2026-01-01'),
+    }]);
+
+    const balance = await getTokenBalance('user-1');
+
+    expect(balance.monthlyRemaining).toBe(0);
+    expect(balance.total).toBe(10);
+  });
+
+  it('returns null nextRefillDate when billingCycleStart is null', async () => {
+    const { getTokenBalance } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 0,
+      addonTokens: 0,
+      billingCycleStart: null,
+    }]);
+
+    const balance = await getTokenBalance('user-1');
+
+    expect(balance.nextRefillDate).toBeNull();
+  });
+
+  it('throws for user not found', async () => {
+    const { getTokenBalance } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([]);
+
+    await expect(getTokenBalance('nonexistent')).rejects.toThrow('User not found: nonexistent');
+  });
+
+  it('returns zero total when no tokens available', async () => {
+    const { getTokenBalance } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 0,
+      monthlyTokensUsed: 0,
+      addonTokens: 0,
+      billingCycleStart: null,
+    }]);
+
+    const balance = await getTokenBalance('user-1');
+
+    expect(balance.monthlyRemaining).toBe(0);
+    expect(balance.addon).toBe(0);
+    expect(balance.total).toBe(0);
+  });
+});
+
+describe('deductTokens', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetChain();
+  });
+
+  it('returns success with usageId "free" for zero-cost operations', async () => {
+    const { deductTokens } = await import('../service');
+
+    // getTokenBalance call inside deductTokens
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 0,
+      addonTokens: 0,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'scene_edit', 0);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.usageId).toBe('free');
+    }
+  });
+
+  it('returns INSUFFICIENT_TOKENS when balance is too low', async () => {
+    const { deductTokens } = await import('../service');
+
+    // First call: deductTokens reads user
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 10,
+      monthlyTokensUsed: 5,
+      addonTokens: 0,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'texture_generation', 30);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe('INSUFFICIENT_TOKENS');
+      expect(result.cost).toBe(30);
+      expect(result.balance.total).toBe(5);
+    }
+  });
+
+  it('deducts from monthly tokens when sufficient', async () => {
+    const { deductTokens } = await import('../service');
+
+    // Read user
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 10,
+      addonTokens: 50,
+      billingCycleStart: null,
+    }]);
+
+    // Atomic update succeeds
+    mockReturning.mockResolvedValueOnce([{ id: 'user-1' }]);
+
+    // Insert usage log
+    mockReturning.mockResolvedValueOnce([{ id: 'usage-123' }]);
+
+    // getTokenBalance call after deduction
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 40,
+      addonTokens: 50,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'texture_generation', 30);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.usageId).toBe('usage-123');
+    }
+  });
+
+  it('deducts from addon tokens when monthly depleted', async () => {
+    const { deductTokens } = await import('../service');
+
+    // Read user: monthly fully used
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 50,
+      addonTokens: 100,
+      billingCycleStart: null,
+    }]);
+
+    // Atomic update succeeds
+    mockReturning.mockResolvedValueOnce([{ id: 'user-1' }]);
+
+    // Insert usage log
+    mockReturning.mockResolvedValueOnce([{ id: 'usage-456' }]);
+
+    // getTokenBalance after
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 50,
+      addonTokens: 70,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'texture_generation', 30);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.usageId).toBe('usage-456');
+    }
+  });
+
+  it('uses mixed source when partial monthly tokens remain', async () => {
+    const { deductTokens } = await import('../service');
+
+    // Read user: 10 monthly remaining, need 30
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 40,
+      addonTokens: 100,
+      billingCycleStart: null,
+    }]);
+
+    // Atomic update succeeds
+    mockReturning.mockResolvedValueOnce([{ id: 'user-1' }]);
+
+    // Insert usage log
+    mockReturning.mockResolvedValueOnce([{ id: 'usage-789' }]);
+
+    // getTokenBalance after
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 50,
+      addonTokens: 80,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'texture_generation', 30);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.usageId).toBe('usage-789');
+    }
+  });
+
+  it('throws for user not found', async () => {
+    const { deductTokens } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([]);
+
+    await expect(deductTokens('ghost', 'op', 10)).rejects.toThrow('User not found: ghost');
+  });
+
+  it('retries on race condition (empty update result) and fails after 3 retries', async () => {
+    const { deductTokens } = await import('../service');
+
+    // Each retry reads the user (4 total: initial + 3 retries)
+    for (let i = 0; i < 4; i++) {
+      mockLimit.mockResolvedValueOnce([{
+        monthlyTokens: 100,
+        monthlyTokensUsed: 0,
+        addonTokens: 0,
+        billingCycleStart: null,
+      }]);
+      // Atomic update returns empty (race condition)
+      mockReturning.mockResolvedValueOnce([]);
+    }
+
+    // Final getTokenBalance after exhausting retries
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 100,
+      monthlyTokensUsed: 0,
+      addonTokens: 0,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'op', 10);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBe('INSUFFICIENT_TOKENS');
+    }
+  });
+
+  it('handles negative tokenCost as free operation', async () => {
+    const { deductTokens } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([{
+      monthlyTokens: 50,
+      monthlyTokensUsed: 0,
+      addonTokens: 0,
+      billingCycleStart: null,
+    }]);
+
+    const result = await deductTokens('user-1', 'refund', -5);
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.usageId).toBe('free');
+    }
+  });
+});
+
+describe('refundTokens', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetChain();
+  });
+
+  it('does nothing for free usageId', async () => {
+    const { refundTokens } = await import('../service');
+
+    await refundTokens('user-1', 'free');
+
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when usage record not found', async () => {
+    const { refundTokens } = await import('../service');
+
+    mockLimit.mockResolvedValueOnce([]);
+
+    await refundTokens('user-1', 'missing-id');
+
+    // select was called but update was not
+    expect(mockSelect).toHaveBeenCalled();
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('refunds monthly tokens for monthly source', async () => {
+    const { refundTokens } = await import('../service');
+
+    // 1st where: select().from(tokenUsage).where() -> chainable (needs .limit)
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-1',
+      userId: 'user-1',
+      tokens: 30,
+      source: 'monthly',
+      provider: 'anthropic',
+    }]);
+
+    // 2nd where: update().set().where() -> awaitable directly
+    mockWhere.mockResolvedValueOnce([]);
+
+    // insert refund log: insert().values() -> no returning
+    mockValues.mockReturnValueOnce(Promise.resolve());
+
+    await refundTokens('user-1', 'usage-1');
+
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockInsert).toHaveBeenCalled();
+  });
+
+  it('refunds addon tokens for addon source', async () => {
+    const { refundTokens } = await import('../service');
+
+    // 1st where: select chain
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-2',
+      userId: 'user-1',
+      tokens: 50,
+      source: 'addon',
+      provider: null,
+    }]);
+
+    // 2nd where: update chain
+    mockWhere.mockResolvedValueOnce([]);
+
+    // insert refund log
+    mockValues.mockReturnValueOnce(Promise.resolve());
+
+    await refundTokens('user-1', 'usage-2');
+
+    expect(mockUpdate).toHaveBeenCalled();
+  });
+
+  it('refunds to addon for mixed source', async () => {
+    const { refundTokens } = await import('../service');
+
+    // 1st where: select chain
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-3',
+      userId: 'user-1',
+      tokens: 40,
+      source: 'mixed',
+      provider: 'meshy',
+    }]);
+
+    // 2nd where: update chain
+    mockWhere.mockResolvedValueOnce([]);
+
+    // insert refund log
+    mockValues.mockReturnValueOnce(Promise.resolve());
+
+    await refundTokens('user-1', 'usage-3');
+
+    expect(mockUpdate).toHaveBeenCalled();
+  });
+});
+
+describe('creditAddonTokens', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetChain();
+  });
+
+  it('credits spark package tokens and logs purchase', async () => {
+    const { creditAddonTokens } = await import('../service');
+
+    mockWhere.mockResolvedValueOnce([]);
+    mockValues.mockReturnValueOnce(Promise.resolve());
+
+    await creditAddonTokens('user-1', 'spark', 'pi_stripe_123');
+
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockInsert).toHaveBeenCalled();
+  });
+
+  it('credits blaze package tokens', async () => {
+    const { creditAddonTokens } = await import('../service');
+
+    mockWhere.mockResolvedValueOnce([]);
+    mockValues.mockReturnValueOnce(Promise.resolve());
+
+    await creditAddonTokens('user-1', 'blaze', 'pi_stripe_456');
+
+    expect(mockUpdate).toHaveBeenCalled();
+  });
+
+  it('credits inferno package tokens', async () => {
+    const { creditAddonTokens } = await import('../service');
+
+    mockWhere.mockResolvedValueOnce([]);
+    mockValues.mockReturnValueOnce(Promise.resolve());
+
+    await creditAddonTokens('user-1', 'inferno', 'pi_stripe_789');
+
+    expect(mockUpdate).toHaveBeenCalled();
+  });
+});
+
+describe('resetMonthlyTokens', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetChain();
+  });
+
+  it('resets to starter allocation', async () => {
+    const { resetMonthlyTokens } = await import('../service');
+
+    mockWhere.mockResolvedValueOnce([]);
+
+    await resetMonthlyTokens('user-1', 'starter');
+
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockSet).toHaveBeenCalled();
+  });
+
+  it('resets to pro allocation', async () => {
+    const { resetMonthlyTokens } = await import('../service');
+
+    mockWhere.mockResolvedValueOnce([]);
+
+    await resetMonthlyTokens('user-1', 'pro');
+
+    expect(mockUpdate).toHaveBeenCalled();
+  });
+
+  it('resets to hobbyist allocation', async () => {
+    const { resetMonthlyTokens } = await import('../service');
+
+    mockWhere.mockResolvedValueOnce([]);
+
+    await resetMonthlyTokens('user-1', 'hobbyist');
+
+    expect(mockUpdate).toHaveBeenCalled();
+  });
+
+  it('resets to creator allocation', async () => {
+    const { resetMonthlyTokens } = await import('../service');
+
+    mockWhere.mockResolvedValueOnce([]);
+
+    await resetMonthlyTokens('user-1', 'creator');
+
+    expect(mockUpdate).toHaveBeenCalled();
+  });
+});
+
+describe('getUsageHistory', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+    resetChain();
+  });
+
+  it('returns usage records ordered by date', async () => {
+    const { getUsageHistory } = await import('../service');
+
+    const mockRecords = [
+      { operation: 'texture_generation', tokens: 30, provider: 'meshy', createdAt: new Date('2026-02-01') },
+      { operation: 'chat_short', tokens: 5, provider: 'anthropic', createdAt: new Date('2026-02-15') },
+    ];
+    mockOrderBy.mockResolvedValueOnce(mockRecords);
+
+    const result = await getUsageHistory('user-1');
+
+    expect(result).toHaveLength(2);
+    expect(result[0].operation).toBe('texture_generation');
+    expect(result[1].tokens).toBe(5);
+  });
+
+  it('returns empty array when no usage', async () => {
+    const { getUsageHistory } = await import('../service');
+
+    mockOrderBy.mockResolvedValueOnce([]);
+
+    const result = await getUsageHistory('user-1');
+
+    expect(result).toEqual([]);
+  });
+
+  it('accepts custom days parameter', async () => {
+    const { getUsageHistory } = await import('../service');
+
+    mockOrderBy.mockResolvedValueOnce([]);
+
+    const result = await getUsageHistory('user-1', 7);
+
+    expect(result).toEqual([]);
+    expect(mockSelect).toHaveBeenCalled();
+  });
+
+  it('defaults to 30 days', async () => {
+    const { getUsageHistory } = await import('../service');
+
+    mockOrderBy.mockResolvedValueOnce([]);
+
+    await getUsageHistory('user-1');
+
+    expect(mockSelect).toHaveBeenCalled();
+  });
+});

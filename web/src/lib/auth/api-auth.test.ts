@@ -98,7 +98,7 @@ describe('authenticateRequest', () => {
     expectUnauthorized(await authenticateRequest());
   });
 
-  it('returns 401 when Clerk keys are valid, userId exists, but user not found in DB', async () => {
+  it('returns 404 when Clerk keys are valid, userId exists, but user not found in DB', async () => {
     process.env.CLERK_SECRET_KEY = 'sk_test_valid';
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
 
@@ -108,7 +108,9 @@ describe('authenticateRequest', () => {
     const { getUserByClerkId } = await import('./user-service');
     vi.mocked(getUserByClerkId).mockResolvedValue(null);
 
-    expectUnauthorized(await authenticateRequest());
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; response: { status: number } }).response.status).toBe(404);
   });
 
   it('returns ok context when Clerk keys are valid and user is found', async () => {
