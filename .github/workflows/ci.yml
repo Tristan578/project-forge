@@ -205,7 +205,7 @@ jobs:
         run: npx playwright test --grep @ui --project=chromium
 
   security:
-    name: Security Audit
+    name: Rust Security Audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
