@@ -34,8 +34,8 @@ function fnv1aDigest(data: BufferSource): ArrayBuffer {
 }
 
 // Polyfill Blob.arrayBuffer and crypto.subtle.digest for jsdom/CI compat.
-// jsdom's Blob.arrayBuffer may return a type SubtleCrypto.digest rejects,
-// and crypto.subtle may be non-configurable. Replace both unconditionally.
+// jsdom's Blob.arrayBuffer may return a type SubtleCrypto.digest rejects.
+// vi.stubGlobal bypasses property descriptor restrictions.
 beforeAll(() => {
   Blob.prototype.arrayBuffer = function () {
     return new Promise((resolve, reject) => {
@@ -46,29 +46,11 @@ beforeAll(() => {
     });
   };
 
-  // Replace crypto.subtle entirely with a mock that always works.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mockSubtle = { digest: async (_algo: any, data: any) => fnv1aDigest(data) };
-  try {
-    Object.defineProperty(globalThis, 'crypto', {
-      value: { subtle: mockSubtle, getRandomValues: (arr: Uint8Array) => arr },
-      configurable: true,
-      writable: true,
-    });
-  } catch {
-    // If crypto is non-configurable, overwrite subtle directly
-    try {
-      Object.defineProperty(globalThis.crypto, 'subtle', {
-        value: mockSubtle,
-        configurable: true,
-        writable: true,
-      });
-    } catch {
-      // Last resort: monkey-patch digest
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (globalThis.crypto.subtle as any).digest = async (_algo: any, data: any) => fnv1aDigest(data);
-    }
-  }
+  vi.stubGlobal('crypto', {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    subtle: { digest: async (_algo: any, data: any) => fnv1aDigest(data) },
+    getRandomValues: (arr: Uint8Array) => arr,
+  });
 });
 
 // ---------- helpers ----------
