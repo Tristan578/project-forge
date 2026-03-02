@@ -6,6 +6,8 @@
  * API docs: https://docs.meshy.ai
  */
 
+import { validateResourceId } from '@/lib/validation/resourceId';
+
 export interface MeshyConfig {
   apiKey: string;
 }
@@ -105,6 +107,7 @@ export class MeshyClient {
   }
 
   async getTaskStatus(taskId: string): Promise<TaskStatus> {
+    validateResourceId(taskId);
     const response = await fetch(`${this.baseUrl}/text-to-3d/${taskId}`, {
       method: 'GET',
       headers: {
@@ -154,6 +157,7 @@ export class MeshyClient {
   }
 
   async getTextureStatus(taskId: string): Promise<TextureStatus> {
+    validateResourceId(taskId);
     const response = await fetch(`${this.baseUrl}/text-to-texture/${taskId}`, {
       method: 'GET',
       headers: {

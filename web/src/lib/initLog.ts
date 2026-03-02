@@ -29,9 +29,15 @@ export interface StoredLog {
 const STORAGE_KEY = 'forge_init_log';
 const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
-// Generate a simple session ID
+// Generate a cryptographically random session ID
 function generateSessionId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const arr = new Uint32Array(2);
+    crypto.getRandomValues(arr);
+    return `${Date.now().toString(36)}-${arr[0].toString(36)}${arr[1].toString(36)}`;
+  }
+  // Fallback for environments without Web Crypto (non-security-critical logging only)
+  return `${Date.now().toString(36)}-${(Date.now() ^ (Date.now() >>> 16)).toString(36)}`;
 }
 
 // Get or create session ID
