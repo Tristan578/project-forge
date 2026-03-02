@@ -778,8 +778,8 @@ const SHADOWED_GLOBALS = [
   'self', 'globalThis',
 ] as const;
 
-// Maximum allowed user script size (bytes) to prevent resource exhaustion
-const MAX_SCRIPT_SOURCE_BYTES = 512 * 1024; // 512 KB
+// Maximum allowed user script size (512 KB) to prevent resource exhaustion
+const MAX_SCRIPT_SOURCE_BYTES = 512 * 1024;
 
 function compileScript(entityId_: string, source: string): ScriptInstance {
   const forge = buildForgeApi(entityId_);
@@ -789,7 +789,8 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
     (self as unknown as Worker).postMessage({ type: 'error', entityId: entityId_, line: 0, message: `Compilation error: script source must be a string` });
     return instance;
   }
-  if (source.length > MAX_SCRIPT_SOURCE_BYTES) {
+  const sourceByteLength = new TextEncoder().encode(source).length;
+  if (sourceByteLength > MAX_SCRIPT_SOURCE_BYTES) {
     (self as unknown as Worker).postMessage({ type: 'error', entityId: entityId_, line: 0, message: `Compilation error: script source exceeds maximum allowed size` });
     return instance;
   }
