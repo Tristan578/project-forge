@@ -15,17 +15,65 @@ import { bundleScripts } from '../scriptBundler';
 import { generateGameHTML, type EmbeddedWasmData } from '../gameTemplate';
 import type { ScriptData } from '@/stores/editorStore';
 
-// Polyfill Blob.arrayBuffer for jsdom (not available in all jsdom versions)
+// Polyfill Blob.arrayBuffer for jsdom — always override because the native
+// jsdom implementation may return a type that SubtleCrypto.digest rejects in CI.
 beforeAll(() => {
-  if (!Blob.prototype.arrayBuffer) {
-    Blob.prototype.arrayBuffer = function () {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as ArrayBuffer);
-        reader.onerror = reject;
-        reader.readAsArrayBuffer(this);
-      });
+  Blob.prototype.arrayBuffer = function () {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(this);
+    });
+  };
+
+  // Mock crypto.subtle.digest for environments where it rejects jsdom ArrayBuffers.
+  // Uses a simple FNV-1a hash — sufficient for dedup testing.
+  if (!globalThis.crypto?.subtle?.digest) {
+    const subtle = {
+      digest: async (_algo: string, data: ArrayBuffer) => {
+        const bytes = new Uint8Array(data);
+        let h = 0x811c9dc5;
+        for (let i = 0; i < bytes.length; i++) {
+          h ^= bytes[i];
+          h = Math.imul(h, 0x01000193);
+        }
+        const out = new Uint8Array(32);
+        for (let i = 0; i < 32; i++) {
+          out[i] = (h >>> ((i % 4) * 8)) & 0xff;
+          h = Math.imul(h, 0x01000193) ^ i;
+        }
+        return out.buffer;
+      },
     };
+    Object.defineProperty(globalThis, 'crypto', {
+      value: { subtle, getRandomValues: (arr: Uint8Array) => arr },
+      writable: true,
+    });
+  } else {
+    // crypto.subtle exists but digest may reject jsdom buffers — wrap it
+    const originalDigest = globalThis.crypto.subtle.digest.bind(globalThis.crypto.subtle);
+    vi.spyOn(globalThis.crypto.subtle, 'digest').mockImplementation(
+      async (algo: AlgorithmIdentifier, data: BufferSource) => {
+        try {
+          return await originalDigest(algo, data);
+        } catch {
+          // Fallback: FNV-1a hash when native rejects the buffer type
+          const bytes = new Uint8Array(data instanceof ArrayBuffer ? data : (data as Uint8Array).buffer);
+          let h = 0x811c9dc5;
+          for (let i = 0; i < bytes.length; i++) {
+            h ^= bytes[i];
+            h = Math.imul(h, 0x01000193);
+          }
+          const out = new Uint8Array(32);
+          for (let i = 0; i < 32; i++) {
+            out[i] = (h >>> ((i % 4) * 8)) & 0xff;
+            h = Math.imul(h, 0x01000193) ^ i;
+          }
+          return out.buffer;
+        }
+      }
+    );
   }
 });
 
