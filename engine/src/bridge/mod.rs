@@ -464,6 +464,7 @@ impl Plugin for SelectionPlugin {
                 ))
                 .add_systems(Update, (
                     physics::apply_create_joint2d_requests,
+                    physics::apply_update_joint2d_requests,
                     physics::apply_remove_joint2d_requests,
                     physics::apply_gravity2d_updates,
                     physics::apply_debug_physics2d_toggle,

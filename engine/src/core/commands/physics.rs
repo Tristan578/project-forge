@@ -34,6 +34,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_2d_collider_shape" => Some(handle_set_2d_collider_shape(payload.clone())),
         "set_2d_body_type" => Some(handle_set_2d_body_type(payload.clone())),
         "create_2d_joint" => Some(handle_create_2d_joint(payload.clone())),
+        "update_2d_joint" => Some(handle_update_2d_joint(payload.clone())),
         "remove_2d_joint" => Some(handle_remove_2d_joint(payload.clone())),
         "apply_force2d" => Some(handle_apply_force2d(payload.clone())),
         "apply_impulse2d" => Some(handle_apply_impulse2d(payload.clone())),
@@ -554,6 +555,25 @@ fn handle_create_2d_joint(payload: serde_json::Value) -> super::CommandResult {
 
     if queue_create_joint2d_from_bridge(request) {
         tracing::info!("Queued 2D joint creation for entity: {}", data.entity_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle update_2d_joint command.
+/// Payload: { entityId, jointData: PhysicsJoint2d }
+fn handle_update_2d_joint(payload: serde_json::Value) -> super::CommandResult {
+    let data: Create2dJointPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid update_2d_joint payload: {}", e))?;
+
+    let request = UpdateJoint2dRequest {
+        entity_id: data.entity_id.clone(),
+        joint_data: data.joint_data,
+    };
+
+    if queue_update_joint2d_from_bridge(request) {
+        tracing::info!("Queued 2D joint update for entity: {}", data.entity_id);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

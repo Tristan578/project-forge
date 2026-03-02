@@ -347,6 +347,33 @@ pub(super) fn apply_create_joint2d_requests(
     }
 }
 
+/// System that applies 2D joint update requests (editor-only, metadata-only).
+pub(super) fn apply_update_joint2d_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut PhysicsJoint2d)>,
+    mut history: ResMut<HistoryStack>,
+) {
+    for update in pending.update_joint2d_requests.drain(..) {
+        for (entity_id, mut current_joint) in query.iter_mut() {
+            if entity_id.0 == update.entity_id {
+                let old_joint = current_joint.clone();
+                *current_joint = update.joint_data.clone();
+
+                // Record for undo
+                history.push(crate::core::history::UndoableAction::Joint2dChange {
+                    entity_id: update.entity_id.clone(),
+                    old_joint: Some(old_joint),
+                    new_joint: Some(update.joint_data.clone()),
+                });
+
+                // Emit change event
+                events::emit_joint2d_changed(&update.entity_id, &update.joint_data);
+                break;
+            }
+        }
+    }
+}
+
 /// System that applies 2D joint removal requests (editor-only, metadata-only).
 pub(super) fn apply_remove_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
