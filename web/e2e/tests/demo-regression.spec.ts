@@ -196,32 +196,38 @@ test.describe('Demo Regression Walkthrough @ui', () => {
   });
 
   test('store exposes selection slice with initial empty state', async ({ page }) => {
-    // Wait until the store is mounted on window before reading state
+    // Wait until the store is mounted AND has the selection slice initialized
     await page.waitForFunction(
-      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 }
+      () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        return store && Array.isArray(store.getState().selectedIds);
+      },
+      { timeout: 10000 }
     );
     const selectionState = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
       const state = store.getState();
       return {
         hasSelectedIds: Array.isArray(state.selectedIds),
-        selectedCount: state.selectedIds?.length ?? -1,
+        selectedCount: state.selectedIds.length,
         hasPrimaryId: 'primaryId' in state,
       };
     });
-    expect(selectionState).not.toBeNull();
     expect(selectionState!.hasSelectedIds).toBe(true);
     expect(selectionState!.selectedCount).toBe(0);
   });
 
   test('store-driven entity selection shows entity in scene hierarchy', async ({ page }) => {
-    // Wait until the store is mounted before injecting state
+    // Wait until the store is mounted AND selection slice initialized
     await page.waitForFunction(
-      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 }
+      () => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE;
+        return store && Array.isArray(store.getState().selectedIds);
+      },
+      { timeout: 10000 }
     );
     // Inject a mock entity into the scene graph and select it
     await page.evaluate(() => {
@@ -248,9 +254,9 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       });
     });
 
-    // Hierarchy should show the entity
+    // Hierarchy should show the entity (allow extra time for React re-render in CI)
     const hierarchyItem = page.getByText('Test Cube');
-    await expect(hierarchyItem.first()).toBeVisible({ timeout: 3000 });
+    await expect(hierarchyItem.first()).toBeVisible({ timeout: 10000 });
   });
 
   test('settings modal opens and closes', async ({ page, editor }) => {

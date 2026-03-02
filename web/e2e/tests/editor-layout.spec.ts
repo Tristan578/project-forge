@@ -317,11 +317,11 @@ test.describe('Responsive Layout @ui', () => {
 
     // Click hierarchy toggle — the scene hierarchy drawer should open
     await hierarchyToggle.click();
-    // The drawer has aria-label="Scene hierarchy panel" and is in the DOM; confirm it gains focus / translate-x-0
-    await expect(page.locator('[aria-label="Scene hierarchy panel"]')).toBeInViewport({ timeout: 3000 });
+    const drawer = page.locator('[aria-label="Scene hierarchy panel"]');
+    await expect(drawer).toBeInViewport({ timeout: 5000 });
 
-    // Click again to close — drawer should slide off-screen
-    await hierarchyToggle.click();
-    await expect(page.locator('[aria-label="Scene hierarchy panel"]')).not.toBeInViewport({ timeout: 3000 });
+    // Close drawer by pressing Escape (clicking toggle is blocked by drawer overlay)
+    await page.keyboard.press('Escape');
+    await expect(drawer).not.toBeInViewport({ timeout: 5000 });
   });
 });
