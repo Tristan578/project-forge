@@ -215,4 +215,56 @@ describe('physicsSlice', () => {
       });
     });
   });
+
+  describe('setGravity2d', () => {
+    it('should dispatch with gravity values', () => {
+      store.getState().setGravity2d(0, -9.81);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_gravity2d', {
+        gravityX: 0,
+        gravityY: -9.81,
+      });
+    });
+
+    it('should dispatch with zero gravity', () => {
+      store.getState().setGravity2d(0, 0);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_gravity2d', {
+        gravityX: 0,
+        gravityY: 0,
+      });
+    });
+
+    it('should not modify local state', () => {
+      const stateBefore = { ...store.getState() };
+      store.getState().setGravity2d(5, -10);
+
+      expect(store.getState().physics2d).toEqual(stateBefore.physics2d);
+      expect(store.getState().physics2dEnabled).toEqual(stateBefore.physics2dEnabled);
+    });
+  });
+
+  describe('setDebugPhysics2d', () => {
+    it('should dispatch with enabled=true', () => {
+      store.getState().setDebugPhysics2d(true);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_debug_physics2d', {
+        enabled: true,
+      });
+    });
+
+    it('should dispatch with enabled=false', () => {
+      store.getState().setDebugPhysics2d(false);
+
+      expect(mockDispatch).toHaveBeenCalledWith('set_debug_physics2d', {
+        enabled: false,
+      });
+    });
+
+    it('should not modify local state', () => {
+      store.getState().setDebugPhysics2d(true);
+
+      expect(store.getState().debugPhysics).toBe(false);
+    });
+  });
 });

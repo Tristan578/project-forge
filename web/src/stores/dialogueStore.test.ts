@@ -917,4 +917,599 @@ describe('dialogueStore', () => {
       expect(useDialogueStore.getState().runtime.history[1].text).toBe('Second line');
     });
   });
+
+  // ====================================================================
+  // Edge case tests (PF-157)
+  // ====================================================================
+
+  describe('condition edge cases', () => {
+    it('greater condition returns false for non-number variable', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: { count: 'not_a_number' } });
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'greater', variable: 'count', value: 5 },
+        onTrue: 'node_true',
+        onFalse: 'node_false',
+      };
+
+      const falseNode: TextNode = {
+        id: 'node_false',
+        type: 'text',
+        speaker: 'System',
+        text: 'Not greater',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, falseNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('node_false');
+    });
+
+    it('less condition returns false for non-number variable', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: { val: undefined } });
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'less', variable: 'val', value: 10 },
+        onTrue: 'node_true',
+        onFalse: 'node_false',
+      };
+
+      const falseNode: TextNode = {
+        id: 'node_false',
+        type: 'text',
+        speaker: 'System',
+        text: 'Not less',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, falseNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('node_false');
+    });
+
+    it('greater returns false for undefined variable', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'greater', variable: 'nonexistent', value: 0 },
+        onTrue: 'node_true',
+        onFalse: 'node_false',
+      };
+
+      const falseNode: TextNode = {
+        id: 'node_false',
+        type: 'text',
+        speaker: 'System',
+        text: 'Undefined var',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, falseNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('node_false');
+    });
+
+    it('empty and condition returns true (vacuous truth)', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'and', conditions: [] },
+        onTrue: 'node_true',
+        onFalse: 'node_false',
+      };
+
+      const trueNode: TextNode = {
+        id: 'node_true',
+        type: 'text',
+        speaker: 'System',
+        text: 'Empty and is true',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, trueNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('node_true');
+    });
+
+    it('empty or condition returns false', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'or', conditions: [] },
+        onTrue: 'node_true',
+        onFalse: 'node_false',
+      };
+
+      const falseNode: TextNode = {
+        id: 'node_false',
+        type: 'text',
+        speaker: 'System',
+        text: 'Empty or is false',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, falseNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('node_false');
+    });
+
+    it('has_item returns false when items variable is not an array', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: { items: 'not_an_array' } });
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'has_item', itemId: 'sword' },
+        onTrue: 'node_true',
+        onFalse: 'node_false',
+      };
+
+      const falseNode: TextNode = {
+        id: 'node_false',
+        type: 'text',
+        speaker: 'System',
+        text: 'No items array',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, falseNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('node_false');
+    });
+
+    it('condition with null onTrue and null onFalse ends dialogue', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: { flag: true } });
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'equals', variable: 'flag', value: true },
+        onTrue: null,
+        onFalse: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+    });
+  });
+
+  describe('action edge cases', () => {
+    it('action node with no next ends dialogue', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const actionNode: ActionNode = {
+        id: 'action',
+        type: 'action',
+        actions: [{ type: 'set_state', key: 'completed', value: true }],
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, actionNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'action' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+      const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
+      expect(updatedTree.variables.completed).toBe(true);
+    });
+
+    it('add_item does not duplicate existing item', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: { items: ['sword'] } });
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const actionNode: ActionNode = {
+        id: 'action',
+        type: 'action',
+        actions: [{ type: 'add_item', itemId: 'sword' }],
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, actionNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'action' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
+      expect(updatedTree.variables.items).toEqual(['sword']);
+    });
+
+    it('remove_item from non-array items does nothing', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: {} });
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const actionNode: ActionNode = {
+        id: 'action',
+        type: 'action',
+        actions: [{ type: 'remove_item', itemId: 'ghost' }],
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, actionNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'action' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      // Should not throw, dialogue just ends
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+    });
+
+    it('multiple trigger_event actions accumulate', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const actionNode: ActionNode = {
+        id: 'action',
+        type: 'action',
+        actions: [
+          { type: 'trigger_event', eventName: 'event_a' },
+          { type: 'trigger_event', eventName: 'event_b' },
+          { type: 'trigger_event', eventName: 'event_c' },
+        ],
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, actionNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'action' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
+      expect(updatedTree.variables._triggeredEvents).toEqual(['event_a', 'event_b', 'event_c']);
+    });
+  });
+
+  describe('runtime edge cases', () => {
+    it('advanceDialogue does nothing when no dialogue is active', () => {
+      useDialogueStore.getState().advanceDialogue();
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+    });
+
+    it('selectChoice does nothing on non-choice node', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().startDialogue(treeId);
+
+      // Current node is a text node, not a choice node
+      useDialogueStore.getState().selectChoice('nonexistent_choice');
+      // Should not change the current node
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe(tree.startNodeId);
+    });
+
+    it('selectChoice with nonexistent choice ID does nothing', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const choiceNode: ChoiceNode = {
+        id: 'choice',
+        type: 'choice',
+        choices: [
+          { id: 'c1', text: 'Option A', nextNodeId: null },
+        ],
+      };
+
+      useDialogueStore.getState().addNode(treeId, choiceNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'choice' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      useDialogueStore.getState().selectChoice('nonexistent');
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('choice');
+    });
+
+    it('selectChoice with null nextNodeId does nothing', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const choiceNode: ChoiceNode = {
+        id: 'choice',
+        type: 'choice',
+        choices: [
+          { id: 'c1', text: 'Dead end', nextNodeId: null },
+        ],
+      };
+
+      useDialogueStore.getState().addNode(treeId, choiceNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'choice' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      useDialogueStore.getState().selectChoice('c1');
+      // Should remain on the choice node since nextNodeId is null
+      expect(useDialogueStore.getState().runtime.currentNodeId).toBe('choice');
+    });
+
+    it('skipTypewriter does nothing when not on text node', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const endNode: EndNode = { id: 'end', type: 'end' };
+      useDialogueStore.getState().addNode(treeId, endNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'end' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      // Now at end node — skipTypewriter should not crash
+      // (dialogue ends when we advance to end node, so this tests the inactive path)
+      useDialogueStore.getState().skipTypewriter();
+      expect(useDialogueStore.getState().runtime.isActive).toBe(false);
+    });
+
+    it('choice filtering removes all choices when none pass condition', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      useDialogueStore.getState().updateTree(treeId, { variables: { level: 1 } });
+
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const choiceNode: ChoiceNode = {
+        id: 'choice',
+        type: 'choice',
+        text: 'Locked choices',
+        choices: [
+          {
+            id: 'c1',
+            text: 'Level 5+ only',
+            nextNodeId: 'somewhere',
+            condition: { type: 'greater', variable: 'level', value: 4 },
+          },
+          {
+            id: 'c2',
+            text: 'Level 10+ only',
+            nextNodeId: 'somewhere_else',
+            condition: { type: 'greater', variable: 'level', value: 9 },
+          },
+        ],
+      };
+
+      useDialogueStore.getState().addNode(treeId, choiceNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'choice' });
+
+      useDialogueStore.getState().startDialogue(treeId);
+      useDialogueStore.getState().advanceDialogue();
+
+      expect(useDialogueStore.getState().runtime.currentChoices).toHaveLength(0);
+    });
+  });
+
+  describe('node CRUD edge cases', () => {
+    it('updateNode with invalid nodeId does nothing', () => {
+      const treeId = useDialogueStore.getState().addTree('Test');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+
+      useDialogueStore.getState().updateNode(treeId, 'nonexistent', { text: 'changed' } as Partial<TextNode>);
+
+      const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
+      expect(updatedTree.nodes).toEqual(tree.nodes);
+    });
+
+    it('updateTree with invalid treeId does nothing', () => {
+      const before = { ...useDialogueStore.getState() };
+      useDialogueStore.getState().updateTree('nonexistent', { name: 'Changed' });
+      expect(useDialogueStore.getState().dialogueTrees).toEqual(before.dialogueTrees);
+    });
+
+    it('removeNode cleans up condition node references', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'equals', variable: 'x', value: 1 },
+        onTrue: 'target_node',
+        onFalse: 'target_node',
+      };
+
+      const targetNode: TextNode = {
+        id: 'target_node',
+        type: 'text',
+        speaker: 'A',
+        text: 'Target',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, targetNode);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      // Remove the target node — condition refs should be cleaned
+      useDialogueStore.getState().removeNode(treeId, 'target_node');
+
+      const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
+      const cond = updatedTree.nodes.find(n => n.id === 'cond') as ConditionNode;
+      expect(cond.onTrue).toBeNull();
+      expect(cond.onFalse).toBeNull();
+    });
+
+    it('removeNode cleans up choice node references', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+
+      const choiceNode: ChoiceNode = {
+        id: 'choice',
+        type: 'choice',
+        choices: [
+          { id: 'c1', text: 'Go to target', nextNodeId: 'target_node' },
+          { id: 'c2', text: 'Stay', nextNodeId: null },
+        ],
+      };
+
+      const targetNode: TextNode = {
+        id: 'target_node',
+        type: 'text',
+        speaker: 'A',
+        text: 'Target',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, choiceNode);
+      useDialogueStore.getState().addNode(treeId, targetNode);
+
+      useDialogueStore.getState().removeNode(treeId, 'target_node');
+
+      const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
+      const choice = updatedTree.nodes.find(n => n.id === 'choice') as ChoiceNode;
+      expect(choice.choices[0].nextNodeId).toBeNull();
+      expect(choice.choices[1].nextNodeId).toBeNull();
+    });
+
+    it('removeNode cleans up action node references', () => {
+      const treeId = useDialogueStore.getState().addTree('Test', 'Start');
+
+      const actionNode: ActionNode = {
+        id: 'action',
+        type: 'action',
+        actions: [],
+        next: 'target_node',
+      };
+
+      const targetNode: TextNode = {
+        id: 'target_node',
+        type: 'text',
+        speaker: 'A',
+        text: 'Target',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, actionNode);
+      useDialogueStore.getState().addNode(treeId, targetNode);
+
+      useDialogueStore.getState().removeNode(treeId, 'target_node');
+
+      const updatedTree = useDialogueStore.getState().dialogueTrees[treeId];
+      const action = updatedTree.nodes.find(n => n.id === 'action') as ActionNode;
+      expect(action.next).toBeNull();
+    });
+  });
+
+  describe('duplicate tree edge cases', () => {
+    it('duplicateTree remaps all node types correctly', () => {
+      const treeId = useDialogueStore.getState().addTree('Complex Tree', 'Start text');
+      const tree = useDialogueStore.getState().dialogueTrees[treeId];
+      const startNodeId = tree.startNodeId;
+
+      const condNode: ConditionNode = {
+        id: 'cond',
+        type: 'condition',
+        condition: { type: 'equals', variable: 'x', value: 1 },
+        onTrue: 'text2',
+        onFalse: null,
+      };
+
+      const text2: TextNode = {
+        id: 'text2',
+        type: 'text',
+        speaker: 'B',
+        text: 'Reached',
+        next: null,
+      };
+
+      useDialogueStore.getState().addNode(treeId, condNode);
+      useDialogueStore.getState().addNode(treeId, text2);
+      useDialogueStore.getState().updateNode(treeId, startNodeId, { next: 'cond' });
+
+      const newTreeId = useDialogueStore.getState().duplicateTree(treeId)!;
+      const newTree = useDialogueStore.getState().dialogueTrees[newTreeId];
+
+      // All node IDs should be new
+      const originalIds = new Set(tree.nodes.map(n => n.id));
+      for (const node of newTree.nodes) {
+        expect(originalIds.has(node.id)).toBe(false);
+      }
+
+      // References should be remapped, not point to original IDs
+      const newCond = newTree.nodes.find(n => n.type === 'condition') as ConditionNode;
+      expect(newCond.onTrue).not.toBe('text2');
+      expect(newCond.onTrue).not.toBeNull();
+      // The remapped ID should exist in the new tree
+      expect(newTree.nodes.some(n => n.id === newCond.onTrue)).toBe(true);
+    });
+  });
 });
