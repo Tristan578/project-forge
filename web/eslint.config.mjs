@@ -25,6 +25,8 @@ const eslintConfig = defineConfig([
     "public/engine-pkg/**",
     "public/engine-pkg-webgl2/**",
     "public/engine-pkg-webgpu/**",
+    // Test coverage output
+    "coverage/**",
   ]),
 ]);
 
