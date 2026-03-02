@@ -364,7 +364,13 @@ describe('handleTransformEvent', () => {
     it('saves to localStorage when autoSaveEnabled is true', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as any);
-      const setItemSpy = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {});
+      const mockSetItem = vi.fn();
+      const origLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: { ...origLocalStorage, setItem: mockSetItem, getItem: vi.fn(), removeItem: vi.fn() },
+        writable: true,
+        configurable: true,
+      });
 
       const payload = { json: '{"entities":[]}', name: 'TestScene' };
 
@@ -376,18 +382,30 @@ describe('handleTransformEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(setItemSpy).toHaveBeenCalledWith('forge:autosave', '{"entities":[]}');
-      expect(setItemSpy).toHaveBeenCalledWith('forge:autosave:name', 'TestScene');
-      expect(setItemSpy).toHaveBeenCalledWith('forge:autosave:time', expect.any(String));
+      expect(mockSetItem).toHaveBeenCalledWith('forge:autosave', '{"entities":[]}');
+      expect(mockSetItem).toHaveBeenCalledWith('forge:autosave:name', 'TestScene');
+      expect(mockSetItem).toHaveBeenCalledWith('forge:autosave:time', expect.any(String));
 
-      setItemSpy.mockRestore();
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: origLocalStorage,
+        writable: true,
+        configurable: true,
+      });
     });
 
     it('handles localStorage quota exceeded gracefully', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as any);
-      vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {
-        throw new Error('QuotaExceededError');
+      const origLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: {
+          ...origLocalStorage,
+          setItem: () => { throw new Error('QuotaExceededError'); },
+          getItem: vi.fn(),
+          removeItem: vi.fn(),
+        },
+        writable: true,
+        configurable: true,
       });
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -406,12 +424,23 @@ describe('handleTransformEvent', () => {
       );
 
       warnSpy.mockRestore();
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: origLocalStorage,
+        writable: true,
+        configurable: true,
+      });
     });
 
     it('does not save to localStorage when autoSaveEnabled is false', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as any);
-      const setItemSpy = vi.spyOn(globalThis.localStorage, 'setItem').mockImplementation(() => {});
+      const mockSetItem = vi.fn();
+      const origLocalStorage = globalThis.localStorage;
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: { ...origLocalStorage, setItem: mockSetItem, getItem: vi.fn(), removeItem: vi.fn() },
+        writable: true,
+        configurable: true,
+      });
 
       const payload = { json: '{"entities":[]}', name: 'TestScene' };
 
@@ -422,9 +451,13 @@ describe('handleTransformEvent', () => {
         mockSetGet.get
       );
 
-      expect(setItemSpy).not.toHaveBeenCalled();
+      expect(mockSetItem).not.toHaveBeenCalled();
 
-      setItemSpy.mockRestore();
+      Object.defineProperty(globalThis, 'localStorage', {
+        value: origLocalStorage,
+        writable: true,
+        configurable: true,
+      });
     });
   });
 
