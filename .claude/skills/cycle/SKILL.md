@@ -9,7 +9,7 @@ description: Runs the standard Plan -> Build -> Verify loop. usage: /cycle [task
 
 2. **Build:** Once approved, invoke the `builder` skill to implement it.
 
-3. **Verify:** Run the `arch-validator` skill to ensure safety.
+3. **Verify:** Run the `validate-arch` skill (defined below) to ensure safety.
 
 4. **Update Context:** After verification passes, update project context files:
    - If new pitfalls/API quirks were discovered during build, add them to the relevant `.claude/rules/*.md` file

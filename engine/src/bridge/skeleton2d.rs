@@ -649,7 +649,7 @@ pub(super) fn solve_ik_constraints_2d(
             // Find target position
             let target_pos = target_query
                 .iter()
-                .find(|(eid, _)| eid.0 == constraint.target_entity_id.to_string())
+                .find(|(eid, _)| eid.0 == constraint.target_entity_id)
                 .map(|(_, t)| t.translation.truncate());
 
             let Some(target) = target_pos else {

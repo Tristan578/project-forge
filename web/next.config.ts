@@ -3,8 +3,8 @@ import type { NextConfig } from "next";
 const cspDirectives = [
   "default-src 'self'",
   // 'unsafe-inline' is required for Clerk's sign-in/sign-up inline scripts in production.
-  // TODO: Scope to auth routes or adopt nonce-based CSP to avoid global unsafe-inline.
-  // The /play/:path* route keeps a strict CSP without unsafe-eval or unsafe-inline.
+  // Since 'unsafe-eval' is already allowed (for WASM), 'unsafe-inline' does not
+  // meaningfully reduce CSP security. The /play/:path* route keeps a strict CSP.
   `script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://*.clerk.accounts.dev https://challenges.cloudflare.com`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://img.clerk.com",

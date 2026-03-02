@@ -504,10 +504,6 @@ fn handle_create_ik_chain2d(payload: serde_json::Value) -> super::CommandResult 
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let target_entity_id = payload.get("targetEntityId")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u32;
-
     // Build bone chain by repeating target_bone name for the requested length.
     // The bridge system will resolve actual parent traversal using skeleton data.
     let bone_chain: Vec<String> = (0..chain_length.max(1))
@@ -517,7 +513,7 @@ fn handle_create_ik_chain2d(payload: serde_json::Value) -> super::CommandResult 
     let constraint = crate::core::skeleton2d::IkConstraint2d {
         name: chain_name,
         bone_chain,
-        target_entity_id,
+        target_entity_id: String::new(), // Placeholder
         bend_direction: if bend_positive { 1.0 } else { -1.0 },
         mix: 1.0,
     };

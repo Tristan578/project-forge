@@ -7,11 +7,10 @@
 #
 # Requires: curl, jq (or python for JSON parsing)
 
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-TB_DB="$REPO_ROOT/.claude/taskboard.db"
-TB_EXE="${TASKBOARD_EXE:-taskboard}"
+TB_DB="D:/repos/into-rust/project-forge/.claude/taskboard.db"
+TB_EXE="D:/repos/into-rust/taskboard/taskboard.exe"
 TB_API="http://localhost:3010/api"
-TB_STATE_FILE="$SCRIPT_DIR/.taskboard-active-ticket"
+TB_STATE_FILE="D:/repos/into-rust/project-forge/.claude/hooks/.taskboard-active-ticket"
 PROJECT_ID="01KJEE8R1XXFF0CZT1WCSTGRDP"
 
 # Check if taskboard API is reachable
@@ -224,7 +223,8 @@ for t in tickets:
         ticket_issues.append('no subtasks')
 
     if ticket_issues:
-        issues.append(f\"PF-{num}: {', '.join(ticket_issues)}\")
+        detail = ', '.join(ticket_issues)
+        issues.append(f'PF-{num}: {detail}')
 
 if issues:
     print('CONSISTENCY_ISSUES_FOUND')

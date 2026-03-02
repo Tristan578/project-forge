@@ -11,9 +11,6 @@ source "$SCRIPT_DIR/taskboard-state.sh"
 # Read the user's prompt from stdin
 INPUT=$(cat)
 
-# Always echo the original input back so it isn't dropped
-echo "$INPUT"
-
 # If taskboard API isn't available, just pass through
 if ! tb_api_available; then
     exit 0

@@ -745,7 +745,8 @@ function buildForgeApi(scriptEntityId: string) {
         return skeleton.bones.map(b => ({
           name: b.name,
           parentBone: b.parentBone,
-          position: b.localPosition,
+          x: b.localPosition[0],
+          y: b.localPosition[1],
           rotation: b.localRotation,
           scale: b.localScale,
           length: b.length,

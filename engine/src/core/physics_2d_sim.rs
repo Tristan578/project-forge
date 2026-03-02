@@ -224,11 +224,10 @@ fn manage_joint2d_lifecycle(
         && prev.map_or(true, |p| p == EngineMode::Edit);
     if entering_play {
         for (entity, joint_data) in to_attach.iter() {
-            // Resolve target entity ID (u32) to Bevy Entity
-            let target_id_str = joint_data.target_entity_id.to_string();
+            // Resolve target entity ID to Bevy Entity
             let connected_entity = entity_id_query
                 .iter()
-                .find(|(_, eid)| eid.0 == target_id_str)
+                .find(|(_, eid)| eid.0 == joint_data.target_entity_id)
                 .map(|(e, _)| e);
 
             let Some(connected_entity) = connected_entity else {
@@ -323,7 +322,7 @@ impl Plugin for Physics2dPlugin {
                 manage_physics2d_lifecycle,
                 sync_debug_physics2d,
                 sync_gravity2d,
-            ))
-            .add_systems(Update, manage_joint2d_lifecycle.in_set(PlaySystemSet));
+                manage_joint2d_lifecycle,
+            ));
     }
 }

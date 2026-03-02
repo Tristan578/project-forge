@@ -815,9 +815,9 @@ const physics2dHandlers: Record<string, ToolHandler> = {
 
   set_gravity2d: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const { gravityX = 0, gravityY = -9.81 } = args as { gravityX?: number; gravityY?: number };
-      ctx.store.setGravity2d(gravityX, gravityY);
-      return { success: true, result: { message: `2D gravity set to (${gravityX}, ${gravityY})` } };
+      const { x = 0, y = -9.81 } = args as { x?: number; y?: number };
+      ctx.store.setGravity2d(x, y);
+      return { success: true, result: { message: `2D gravity set to (${x}, ${y})` } };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to set 2D gravity' };
     }

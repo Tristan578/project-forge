@@ -330,7 +330,7 @@ declare namespace forge {
     /** Update bone properties */
     function updateBone(entityId: string, boneName: string, updates: Partial<{ position: [number, number]; rotation: number; scale: [number, number]; length: number }>): void;
     /** Get all bones in the skeleton */
-    function getBones(entityId: string): Array<{ name: string; position: [number, number]; rotation: number; scale: [number, number] }> | null;
+    function getBones(entityId: string): Array<{ name: string; parentBone: string | null; position: [number, number]; rotation: number; scale: [number, number]; length: number }> | null;
     /** Play a skeletal animation */
     function playAnimation(entityId: string, animName: string, options?: { loop?: boolean; speed?: number; crossfade?: number }): void;
     /** Stop the current skeletal animation */

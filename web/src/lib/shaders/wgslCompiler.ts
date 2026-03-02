@@ -378,6 +378,7 @@ function emitFresnel(node: ShaderNode, inputs: Record<string, string>, ctx: Comp
 
 function emitNormalMap(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
+  // Use mesh UVs when the UV input is unconnected (synthetic default is vec2<f32>(0.0, 0.0))
   const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
   const strength = inputs.strength || '1.0';
 
