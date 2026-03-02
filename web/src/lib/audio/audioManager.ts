@@ -1333,6 +1333,8 @@ class AudioManager {
 
     const now = this.ctx.currentTime;
     const targetFreq = occluded ? 500 : 5000; // Muffled vs clear
+    filter.frequency.cancelScheduledValues(now);
+    filter.frequency.setValueAtTime(filter.frequency.value, now);
     filter.frequency.linearRampToValueAtTime(targetFreq, now + 0.1);
   }
 
