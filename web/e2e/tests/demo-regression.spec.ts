@@ -222,11 +222,11 @@ test.describe('Demo Regression Walkthrough @ui', () => {
         sceneGraph: {
           nodes: {
             [entityId]: {
-              id: entityId,
+              entityId,
               name: 'Test Cube',
-              entityType: 'Cube',
               parentId: null,
-              childIds: [],
+              children: [],
+              components: ['Cube'],
               visible: true,
             },
           },
