@@ -6,6 +6,8 @@
  * API docs: https://elevenlabs.io/docs
  */
 
+import { validateResourceId } from '@/lib/validation/resourceId';
+
 export interface ElevenLabsConfig {
   apiKey: string;
 }
@@ -63,6 +65,7 @@ export class ElevenLabsClient {
 
   async generateVoice(params: GenerateVoiceParams): Promise<AudioResult> {
     const voiceId = params.voiceId || 'JBFqnCBsd6RMkjVDRZzb'; // Default: George
+    validateResourceId(voiceId);
 
     const response = await fetch(`${this.baseUrl}/text-to-speech/${voiceId}`, {
       method: 'POST',

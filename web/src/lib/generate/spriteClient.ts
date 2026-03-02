@@ -4,6 +4,8 @@
  * Server-side only. Do NOT import in client components.
  */
 
+import { validateResourceId } from '@/lib/validation/resourceId';
+
 export interface SpriteGenerateParams {
   prompt: string;
   style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
@@ -272,6 +274,7 @@ export class SpriteClient {
   }
 
   async getReplicateStatus(predictionId: string): Promise<{ status: string; output?: string[] }> {
+    validateResourceId(predictionId);
     const response = await fetch(`${this.baseUrlReplicate}/${predictionId}`, {
       method: 'GET',
       headers: {

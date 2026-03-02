@@ -48,6 +48,12 @@ export async function POST(request: NextRequest) {
     // Build the upstream envelope URL
     // https://<host>/api/<project-id>/envelope/
     const projectId = dsnUrl.pathname.replace(/\//g, '');
+
+    // Validate projectId is a numeric string (Sentry project IDs are always numeric)
+    if (!/^\d+$/.test(projectId)) {
+      return NextResponse.json({ error: 'Invalid project ID in DSN' }, { status: 400 });
+    }
+
     const upstreamUrl = `https://${host}/api/${projectId}/envelope/`;
 
     // Forward the envelope

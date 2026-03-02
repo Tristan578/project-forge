@@ -31,10 +31,10 @@ const BLOCK_PATTERNS: RegExp[] = [
 
 // Words that trigger auto-flagging for admin review
 const FLAG_PATTERNS: RegExp[] = [
-  /\bf+u+c+k+/i,
-  /\bs+h+[i1!]+t+/i,
+  /\bfu{1,4}c{1,4}k/i,
+  /\bsh[i1!]t/i,
   /\bb[i1!]tch/i,
-  /\ba+s+s+h+o+l+e+/i,
+  /\basshole/i,
   /\bd[i1!]ck(?:head|wad|face)?s?\b/i,
   /\bcunt/i,
   /\bwh[o0]re/i,

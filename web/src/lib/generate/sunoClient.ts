@@ -6,6 +6,8 @@
  * Note: Suno API is invite-only. This is a hypothetical implementation.
  */
 
+import { validateResourceId } from '@/lib/validation/resourceId';
+
 export interface SunoConfig {
   apiKey: string;
 }
@@ -53,6 +55,7 @@ export class SunoClient {
   }
 
   async getStatus(taskId: string): Promise<MusicStatus> {
+    validateResourceId(taskId);
     const response = await fetch(`${this.baseUrl}/generation/${taskId}`, {
       method: 'GET',
       headers: {

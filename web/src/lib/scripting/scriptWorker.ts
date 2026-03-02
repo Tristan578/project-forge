@@ -778,12 +778,26 @@ const SHADOWED_GLOBALS = [
   'self', 'globalThis',
 ] as const;
 
+// Maximum allowed user script size (bytes) to prevent resource exhaustion
+const MAX_SCRIPT_SOURCE_BYTES = 512 * 1024; // 512 KB
+
 function compileScript(entityId_: string, source: string): ScriptInstance {
   const forge = buildForgeApi(entityId_);
   const instance: ScriptInstance = { entityId: entityId_ };
 
+  if (typeof source !== 'string') {
+    (self as unknown as Worker).postMessage({ type: 'error', entityId: entityId_, line: 0, message: `Compilation error: script source must be a string` });
+    return instance;
+  }
+  if (source.length > MAX_SCRIPT_SOURCE_BYTES) {
+    (self as unknown as Worker).postMessage({ type: 'error', entityId: entityId_, line: 0, message: `Compilation error: script source exceeds maximum allowed size` });
+    return instance;
+  }
+
   try {
-    // Shadow dangerous globals to prevent network access from user scripts
+    // Shadow dangerous globals to prevent network access from user scripts.
+    // This runs inside a Web Worker (no DOM access) with additional globals
+    // explicitly overridden to undefined to sandbox user-provided code.
     const fn = new Function(
       'forge', 'entityId',
       ...SHADOWED_GLOBALS,

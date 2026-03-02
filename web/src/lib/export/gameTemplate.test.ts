@@ -50,7 +50,7 @@ describe('gameTemplate', () => {
         scriptBundle: '',
       });
       // Should not have extra script tags beyond the scene data and module
-      const scriptCount = (html.match(/<script>/g) || []).length;
+      const scriptCount = html.split('<script>').length - 1;
       expect(scriptCount).toBe(1); // Only the scene data script
     });
 

@@ -79,9 +79,9 @@ export async function POST(
       return NextResponse.json({ error: 'Content is required' }, { status: 400 });
     }
 
-    // Sanitize content (strip HTML, limit length)
+    // Sanitize content (remove angle brackets to prevent tag injection, limit length)
     const sanitized = content
-      .replace(/<[^>]*>/g, '') // Strip HTML tags
+      .replace(/[<>]/g, '')
       .trim()
       .slice(0, 1000); // Max 1000 chars
 
