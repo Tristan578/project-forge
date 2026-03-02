@@ -68,10 +68,21 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     // Physics
     primaryPhysics: null,
     physicsEnabled: false,
+    updatePhysics: vi.fn(),
+    togglePhysics: vi.fn(),
+    toggleDebugPhysics: vi.fn(),
+    primaryJoint: null,
+    createJoint: vi.fn(),
+    updateJoint: vi.fn(),
+    removeJoint: vi.fn(),
 
     // Audio
     primaryAudio: null,
     audioBuses: [],
+    setAdaptiveMusicIntensity: vi.fn(),
+    setCurrentMusicSegment: vi.fn(),
+    updateAudioBus: vi.fn(),
+    setBusEffects: vi.fn(),
 
     // Animation
     primaryAnimation: null,
@@ -79,11 +90,18 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
 
     // Scripts
     allScripts: {},
+    primaryScript: null,
 
     // Game
     allGameComponents: {},
     allGameCameras: {},
     activeGameCameraId: null,
+    addGameComponent: vi.fn(),
+    updateGameComponent: vi.fn(),
+    removeGameComponent: vi.fn(),
+    setGameCamera: vi.fn(),
+    setActiveGameCamera: vi.fn(),
+    cameraShake: vi.fn(),
 
     // Sprites
     sprites: {},
@@ -94,20 +112,80 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     // Scene
     sceneName: 'Untitled',
     sceneModified: false,
+    scenes: [],
+    activeSceneId: null,
+    saveScene: vi.fn(),
+    loadScene: vi.fn(),
+    newScene: vi.fn(),
+    setScenes: vi.fn(),
+    startSceneTransition: vi.fn().mockResolvedValue(undefined),
+    setDefaultTransition: vi.fn(),
+    loadTemplate: vi.fn().mockResolvedValue(undefined),
 
     // Input
     inputBindings: [],
     inputPreset: 'wasd',
+    setInputBinding: vi.fn(),
+    removeInputBinding: vi.fn(),
+    setInputPreset: vi.fn(),
 
     // Quality
     qualityPreset: 'medium',
+    setQualityPreset: vi.fn(),
 
     // Terrain
     terrainData: {},
+    spawnTerrain: vi.fn(),
+    updateTerrain: vi.fn(),
+    sculptTerrain: vi.fn(),
+
+    // CSG / Procedural
+    csgUnion: vi.fn(),
+    csgSubtract: vi.fn(),
+    csgIntersect: vi.fn(),
+    extrudeShape: vi.fn(),
+    latheShape: vi.fn(),
+    arrayEntity: vi.fn(),
+    combineMeshes: vi.fn(),
 
     // Particle
     primaryParticle: null,
     particleEnabled: false,
+    setParticle: vi.fn(),
+    removeParticle: vi.fn(),
+    toggleParticle: vi.fn(),
+    setParticlePreset: vi.fn(),
+    playParticle: vi.fn(),
+    stopParticle: vi.fn(),
+    burstParticle: vi.fn(),
+
+    // Animation actions
+    playAnimation: vi.fn(),
+    pauseAnimation: vi.fn(),
+    resumeAnimation: vi.fn(),
+    stopAnimation: vi.fn(),
+    seekAnimation: vi.fn(),
+    setAnimationSpeed: vi.fn(),
+    setAnimationLoop: vi.fn(),
+    setAnimationBlendWeight: vi.fn(),
+    setClipSpeed: vi.fn(),
+    createAnimationClip: vi.fn(),
+    addClipKeyframe: vi.fn(),
+    removeClipKeyframe: vi.fn(),
+    updateClipKeyframe: vi.fn(),
+    setClipProperty: vi.fn(),
+    previewClip: vi.fn(),
+    removeAnimationClip: vi.fn(),
+
+    // Edit mode
+    enterEditMode: vi.fn(),
+    exitEditMode: vi.fn(),
+    setSelectionMode: vi.fn(),
+    performMeshOperation: vi.fn(),
+    recalcNormals: vi.fn(),
+
+    // Transform (primary)
+    primaryTransform: null,
 
     // Asset
     assetRegistry: {},
@@ -115,6 +193,16 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     // Export
     isExporting: false,
     engineMode: 'edit',
+    setExporting: vi.fn(),
+
+    // Runtime mode
+    play: vi.fn(),
+    stop: vi.fn(),
+    pause: vi.fn(),
+    resume: vi.fn(),
+
+    // Custom skybox
+    setCustomSkybox: vi.fn(),
 
     ...overrides,
   } as unknown as ToolCallContext['store'];
