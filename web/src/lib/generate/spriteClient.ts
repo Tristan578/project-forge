@@ -13,7 +13,7 @@ export interface SpriteGenerateParams {
 }
 
 export interface SpriteSheetParams {
-  sourceAssetId: string;
+  prompt: string;
   frameCount: number;
   style?: 'pixel-art' | 'hand-drawn' | 'vector' | 'realistic';
   size: '32x32' | '64x64' | '128x128' | '256x256';
@@ -113,12 +113,54 @@ export class SpriteClient {
     };
   }
 
-  async generateSpriteSheet(_params: SpriteSheetParams): Promise<GenerationResult> {
-    // For now, return a placeholder indicating sprite sheet generation
-    // Full ControlNet implementation would go here
+  async generateSpriteSheet(params: SpriteSheetParams): Promise<GenerationResult> {
+    const frameW = parseInt(params.size.split('x')[0], 10);
+    const maxDim = 1024;
+    const maxFrames = Math.floor(maxDim / frameW);
+    const effectiveFrameCount = Math.min(params.frameCount, maxFrames);
+    if (effectiveFrameCount < params.frameCount) {
+      console.warn(
+        `Sprite sheet frame count reduced from ${params.frameCount} to ${effectiveFrameCount} ` +
+        `(SDXL max dimension: ${maxDim}px, frame width: ${frameW}px)`
+      );
+    }
+    const sheetWidth = frameW * effectiveFrameCount;
+    const sheetHeight = frameW;
+
+    const enhancedPrompt = this.enhanceSpriteSheetPrompt(
+      params.prompt,
+      params.style,
+      effectiveFrameCount,
+    );
+
+    const response = await fetch(this.baseUrlReplicate, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        version: 'stability-ai/sdxl:latest',
+        input: {
+          prompt: enhancedPrompt,
+          width: sheetWidth,
+          height: Math.min(sheetHeight, maxDim),
+          num_inference_steps: 40,
+          guidance_scale: 8,
+        },
+      }),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!response.ok) {
+      const error = await response.text().catch(() => 'Unknown error');
+      throw new Error(`Replicate API error (${response.status}): ${error}`);
+    }
+
+    const data = await response.json();
     return {
-      taskId: `spritesheet_${Date.now()}`,
-      status: 'pending',
+      taskId: data.id,
+      status: data.status,
     };
   }
 
@@ -178,6 +220,16 @@ export class SpriteClient {
     // Convert to data URL
     const base64 = await this.blobToBase64(blob);
     return { resultUrl: base64 };
+  }
+
+  private enhanceSpriteSheetPrompt(prompt: string, style: string | undefined, frameCount: number): string {
+    const styleTag = style === 'pixel-art' ? 'pixel art, 8-bit style, sharp pixels'
+      : style === 'hand-drawn' ? 'hand-drawn style, clean linework'
+      : style === 'vector' ? 'vector art, flat colors'
+      : style === 'realistic' ? 'realistic style, detailed'
+      : '';
+
+    return `sprite sheet, ${frameCount} frames side by side in a single horizontal row, ${prompt}, ${styleTag}, game animation sprite sheet, consistent character across all frames, white background, evenly spaced frames`.trim();
   }
 
   private enhancePrompt(prompt: string, style?: string): string {
