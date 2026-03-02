@@ -14,7 +14,7 @@ SpawnForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot mon
 - **Command-driven design**: Every engine operation is a JSON command. The UI, MCP server, and external agents all use the same `handle_command()` code path. Never create a UI-only shortcut that bypasses the command system.
 - **Layered boundaries**: Engine core → Bridge → WebSocket → Editor UI. Do not add `web-sys` imports outside `engine/src/bridge/`. Do not add direct WASM calls outside `web/src/hooks/useEngine`.
 - **ECS pattern (Bevy)**: Use `Query<>`, `ResMut<>`, `EventReader<>` for system parameters. Do not store mutable state outside Bevy's World. Prefer small, focused systems over large multi-query systems.
-- **Store slices (Zustand)**: Each concern gets its own slice (editor, chat, user, collaboration, publish, etc.). Use selectors to prevent unnecessary re-renders. Do not prop-drill — consume stores directly.
+- **Store slices (Zustand)**: Each concern gets its own slice (editor, chat, user, publish, etc.). Use selectors to prevent unnecessary re-renders. Do not prop-drill — consume stores directly.
 
 ## Coding Standards
 

@@ -27,7 +27,6 @@ import { TilemapInspector } from './TilemapInspector';
 import { ReverbZoneInspector } from './ReverbZoneInspector';
 import { EditModeInspector } from './EditModeInspector';
 import AdaptiveMusicInspector from './AdaptiveMusicInspector';
-import { NetworkSettingsInspector } from './NetworkSettingsInspector';
 import { LodInspector } from './LodInspector';
 import { InspectorErrorBoundary } from './InspectorErrorBoundary';
 import { CollapsibleSection } from './CollapsibleSection';
@@ -501,12 +500,6 @@ export const InspectorPanel = memo(function InspectorPanel() {
         </div>
       )}
 
-      {/* Network settings section */}
-      <InspectorErrorBoundary section="Network Settings">
-        <CollapsibleSection id="network-settings" title="Network Settings">
-          <NetworkSettingsInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
 
       {/* Input bindings section */}
       <InspectorErrorBoundary section="Input Bindings">
