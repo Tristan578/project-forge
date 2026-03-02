@@ -15,10 +15,19 @@ export function generatePostMessageBridge(): string {
   var isEmbedded = window.self !== window.top;
   if (!isEmbedded) return;
 
+  // Derive the parent origin from the referrer for secure postMessage targeting.
+  // Falls back to '*' only when no referrer is available (e.g. sandbox or direct nav).
+  var parentOrigin = '*';
+  try {
+    if (document.referrer) {
+      parentOrigin = new URL(document.referrer).origin;
+    }
+  } catch(e) {}
+
   // Notify parent that game frame is ready
   function sendToParent(type, data) {
     try {
-      window.parent.postMessage({ source: 'forge-game', type: type, data: data || {} }, '*');
+      window.parent.postMessage({ source: 'forge-game', type: type, data: data || {} }, parentOrigin);
     } catch(e) {}
   }
 
@@ -41,8 +50,9 @@ export function generatePostMessageBridge(): string {
     });
   });
 
-  // Listen for commands from parent
+  // Listen for commands from parent (validate origin when known)
   window.addEventListener('message', function(event) {
+    if (parentOrigin !== '*' && event.origin !== parentOrigin) return;
     if (!event.data || event.data.source !== 'forge-host') return;
     var msg = event.data;
 
