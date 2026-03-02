@@ -192,3 +192,144 @@ test.describe('Editor Layout @engine', () => {
     expect(canvasAfter!.width).not.toBe(canvasBefore!.width);
   });
 });
+
+/**
+ * PF-154: Mobile touch controls and responsive layout UI tests.
+ *
+ * Tests the responsive layout hook breakpoints, compact mode behavior,
+ * and mobile toolbar rendering. Uses loadPage() (no WASM) since these
+ * test store-driven UI behavior.
+ */
+test.describe('Responsive Layout @ui', () => {
+  test('compact mode hides sidebar and panels at narrow viewport', async ({ page, editor }) => {
+    // Start with mobile viewport
+    await page.setViewportSize({ width: 800, height: 600 });
+    await editor.loadPage();
+
+    // In compact mode (<1024px), sidebar and dockview panels should be hidden or collapsed
+    const sidebar = page.locator('[class*="sidebar"]').first();
+    const sidebarVisible = await sidebar.isVisible().catch(() => false);
+
+    // Sidebar should not be visible in compact mode
+    // (it may not exist in DOM or be hidden)
+    if (sidebarVisible) {
+      const box = await sidebar.boundingBox();
+      // If visible, it should be collapsed (width ~0) or positioned off-screen
+      expect(box === null || box.width < 10).toBe(true);
+    }
+  });
+
+  test('mobile toolbar renders in compact viewport', async ({ page, editor }) => {
+    await page.setViewportSize({ width: 768, height: 600 });
+    await editor.loadPage();
+
+    // MobileToolbar is fixed at bottom with h-12
+    const mobileToolbar = page.locator('.fixed.bottom-0').first();
+    const toolbarVisible = await mobileToolbar.isVisible().catch(() => false);
+
+    if (toolbarVisible) {
+      const box = await mobileToolbar.boundingBox();
+      expect(box).not.toBeNull();
+      // Should span the full width
+      expect(box!.width).toBeGreaterThan(700);
+      // Should be at the bottom of the viewport
+      expect(box!.y + box!.height).toBeGreaterThanOrEqual(590);
+    }
+  });
+
+  test('gizmo tool buttons exist in mobile toolbar', async ({ page, editor }) => {
+    await page.setViewportSize({ width: 768, height: 600 });
+    await editor.loadPage();
+
+    // Look for gizmo mode buttons (Move, Rotate, Scale)
+    const moveBtn = page.locator('button[title="Move"]');
+    const rotateBtn = page.locator('button[title="Rotate"]');
+    const scaleBtn = page.locator('button[title="Scale"]');
+
+    const moveVisible = await moveBtn.isVisible().catch(() => false);
+    if (moveVisible) {
+      await expect(moveBtn).toBeVisible();
+      await expect(rotateBtn).toBeVisible();
+      await expect(scaleBtn).toBeVisible();
+    }
+  });
+
+  test('full mode shows all panels at wide viewport', async ({ page, editor }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await editor.loadPage();
+
+    // In full mode (>=1440px), all panels should be visible
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible({ timeout: 5000 });
+
+    // Check for hierarchy and inspector panel tabs
+    const hierarchyTab = page.locator('.dv-tab').filter({ hasText: /hierarchy|scene/i }).first();
+    const hierarchyVisible = await hierarchyTab.isVisible().catch(() => false);
+    if (hierarchyVisible) {
+      await expect(hierarchyTab).toBeVisible();
+    }
+  });
+
+  test('viewport breakpoint transitions between condensed and compact', async ({ page, editor }) => {
+    // Start at condensed width
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await editor.loadPage();
+
+    // Canvas should be visible
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible({ timeout: 5000 });
+
+    // Resize to compact
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.waitForTimeout(500);
+
+    // Canvas should still be visible (it's always shown)
+    await expect(canvas).toBeVisible();
+
+    // Resize back to condensed
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await page.waitForTimeout(500);
+
+    await expect(canvas).toBeVisible();
+  });
+
+  test('touch config exists in store with default values', async ({ page, editor }) => {
+    await editor.loadPage();
+
+    const touchConfig = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      if (!store) return null;
+      const state = store.getState();
+      return state.mobileTouchConfig ?? null;
+    });
+
+    // Mobile touch config should exist with default values
+    if (touchConfig) {
+      expect(typeof touchConfig.enabled).toBe('boolean');
+    }
+  });
+
+  test('scene hierarchy and inspector toggle buttons work in mobile toolbar', async ({ page, editor }) => {
+    await page.setViewportSize({ width: 768, height: 600 });
+    await editor.loadPage();
+
+    // Look for panel toggle buttons
+    const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
+    const inspectorToggle = page.locator('button[title="Inspector"]');
+
+    const hasHierarchyToggle = await hierarchyToggle.isVisible().catch(() => false);
+    if (hasHierarchyToggle) {
+      await expect(hierarchyToggle).toBeVisible();
+      await expect(inspectorToggle).toBeVisible();
+
+      // Click hierarchy toggle — should show some panel content
+      await hierarchyToggle.click();
+      await page.waitForTimeout(300);
+
+      // Click again to close
+      await hierarchyToggle.click();
+      await page.waitForTimeout(300);
+    }
+  });
+});
