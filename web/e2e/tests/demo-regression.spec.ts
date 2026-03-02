@@ -200,9 +200,10 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
       const state = store.getState();
+      // selectedIds is a Set<string> in the Zustand store
       return {
-        hasSelectedIds: Array.isArray(state.selectedIds),
-        selectedCount: state.selectedIds?.length ?? -1,
+        hasSelectedIds: state.selectedIds instanceof Set,
+        selectedCount: state.selectedIds?.size ?? -1,
         hasPrimaryId: 'primaryId' in state,
       };
     });
@@ -231,7 +232,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
           },
           rootIds: [entityId],
         },
-        selectedIds: [entityId],
+        selectedIds: new Set([entityId]),
         primaryId: entityId,
       });
     });
