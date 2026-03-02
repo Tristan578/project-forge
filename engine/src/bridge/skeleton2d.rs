@@ -1,9 +1,10 @@
 use bevy::prelude::*;
+use bevy::render::mesh::VertexAttributeValues;
 use crate::core::{
     entity_id::EntityId,
     entity_factory,
     pending_commands::{PendingCommands, QueryRequest},
-    skeleton2d::{SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d},
+    skeleton2d::{SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d, AttachmentData},
     skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
     history::UndoableAction,
 };
@@ -511,6 +512,95 @@ fn compute_bone_world_transforms(bones: &[Bone2dDef]) -> HashMap<String, (Vec2, 
     }
 
     world_transforms
+}
+
+/// CPU vertex skinning: deform mesh vertices based on skeleton bone transforms.
+/// Runs every frame after animation + IK, transforming mesh positions using
+/// weighted bone world transforms from the active skin's mesh attachments.
+pub(super) fn apply_vertex_skinning_2d(
+    skeleton_query: Query<(&SkeletonData2d, &SkeletonEnabled2d, &Mesh2d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    for (skeleton, _, mesh_handle) in skeleton_query.iter() {
+        let world_transforms = compute_bone_world_transforms(&skeleton.bones);
+
+        // Get the active skin's mesh attachments
+        let Some(skin) = skeleton.skins.get(&skeleton.active_skin) else {
+            continue;
+        };
+
+        // Find the first mesh attachment with vertex weights
+        for attachment in skin.attachments.values() {
+            if let AttachmentData::Mesh {
+                ref vertices,
+                ref weights,
+                ..
+            } = attachment
+            {
+                if weights.is_empty() || vertices.is_empty() || weights.len() != vertices.len() {
+                    continue;
+                }
+
+                // Deform vertices using weighted bone transforms
+                let deformed = skin_vertices(vertices, weights, &world_transforms);
+
+                // Apply deformed positions to the Bevy mesh
+                if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+                    if let Some(VertexAttributeValues::Float32x3(ref mut positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+                        for (i, pos) in deformed.iter().enumerate() {
+                            if i < positions.len() {
+                                positions[i] = [pos[0], pos[1], 0.0];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Skin vertices by blending bone transforms weighted per-vertex.
+fn skin_vertices(
+    bind_pose: &[[f32; 2]],
+    weights: &[crate::core::skeleton2d::VertexWeights],
+    bone_transforms: &HashMap<String, (Vec2, f32, Vec2)>,
+) -> Vec<[f32; 2]> {
+    bind_pose
+        .iter()
+        .zip(weights.iter())
+        .map(|(vertex, vw)| {
+            let mut result = Vec2::ZERO;
+            let mut total_weight = 0.0f32;
+
+            for (bone_name, &weight) in vw.bones.iter().zip(vw.weights.iter()) {
+                if weight < 1e-6 {
+                    continue;
+                }
+                if let Some(&(bone_pos, bone_rot, bone_scale)) = bone_transforms.get(bone_name) {
+                    let rad = bone_rot.to_radians();
+                    let cos_r = rad.cos();
+                    let sin_r = rad.sin();
+
+                    // Transform vertex: scale -> rotate -> translate
+                    let scaled = Vec2::new(vertex[0] * bone_scale.x, vertex[1] * bone_scale.y);
+                    let rotated = Vec2::new(
+                        scaled.x * cos_r - scaled.y * sin_r,
+                        scaled.x * sin_r + scaled.y * cos_r,
+                    );
+                    let transformed = rotated + bone_pos;
+
+                    result += transformed * weight;
+                    total_weight += weight;
+                }
+            }
+
+            if total_weight > 0.0 {
+                [result.x / total_weight, result.y / total_weight]
+            } else {
+                *vertex
+            }
+        })
+        .collect()
 }
 
 /// Render skeleton bones as gizmo lines in the editor (edit mode only).
