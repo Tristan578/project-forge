@@ -8,7 +8,7 @@ argument-hint: "[suite: all|lint|tsc|vitest|playwright|mcp|quick]"
 
 # Test Suite Runner
 
-Run tests for the SpawnForge project. All commands run from the project root `D:/repos/into-rust/project-forge`.
+Run tests for the SpawnForge project. All commands run from the project root.
 
 ## Available Suites
 
@@ -27,7 +27,7 @@ Run tests for the SpawnForge project. All commands run from the project root `D:
 ### Default (when $ARGUMENTS is empty): run "quick" suite
 
 ```bash
-cd D:/repos/into-rust/project-forge/web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
+cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
 ```
 
 ### Specific suite
@@ -38,19 +38,19 @@ Run the suite matching $ARGUMENTS from the table above.
 
 ```bash
 # 1. Lint
-cd D:/repos/into-rust/project-forge/web && npx eslint --max-warnings 0 .
+cd web && npx eslint --max-warnings 0 .
 
 # 2. TypeScript
-cd D:/repos/into-rust/project-forge/web && npx tsc --noEmit
+cd web && npx tsc --noEmit
 
 # 3. Unit tests
-cd D:/repos/into-rust/project-forge/web && npx vitest run
+cd web && npx vitest run
 
 # 4. MCP tests
-cd D:/repos/into-rust/project-forge/mcp-server && npx vitest run
+cd mcp-server && npx vitest run
 
 # 5. E2E (requires WASM build + dev server)
-cd D:/repos/into-rust/project-forge/web && npx playwright test
+cd web && npx playwright test
 ```
 
 ## E2E Test Prerequisites
@@ -65,7 +65,7 @@ Playwright E2E tests require:
 To run vitest with coverage:
 
 ```bash
-cd D:/repos/into-rust/project-forge/web && npx vitest run --coverage
+cd web && npx vitest run --coverage
 ```
 
 Coverage report outputs to `web/coverage/`.

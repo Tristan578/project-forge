@@ -8,7 +8,7 @@ SpawnForge is an AI-native 2D/3D game engine for the browser. Architecture: Reac
 
 ### WASM Engine (required for E2E tests and dev server)
 ```bash
-cd D:/repos/into-rust/project-forge
+# From project root:
 powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 ```
 - Produces 4 variants in `web/public/engine-pkg-*`

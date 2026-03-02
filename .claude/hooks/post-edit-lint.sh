@@ -15,7 +15,11 @@ if [[ "$FILE_PATH" == *".test."* ]] || [[ "$FILE_PATH" == *"/coverage/"* ]] || [
   exit 0
 fi
 
-PROJECT_DIR="D:/repos/into-rust/project-forge"
+# Use git to find project root (works cross-platform)
+PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [ -z "$PROJECT_DIR" ]; then
+  exit 0
+fi
 cd "$PROJECT_DIR/web" || exit 0
 
 # Run lint only on the changed file (fast)

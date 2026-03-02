@@ -28,7 +28,7 @@ Verify these are available before building:
 Run the PowerShell build script from the project root:
 
 ```bash
-cd D:/repos/into-rust/project-forge
+# From project root:
 powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 ```
 
@@ -44,10 +44,7 @@ This handles:
 If $ARGUMENTS is "webgl2" or "webgpu", build only that variant:
 
 ```bash
-cd D:/repos/into-rust/project-forge/engine
-# Set LIB for Windows SDK
-export LIB="C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/ucrt/x64;C:/Program Files (x86)/Windows Kits/10/Lib/10.0.22621.0/um/x64;C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/14.44.35207/lib/x64"
-
+cd engine
 cargo build --target wasm32-unknown-unknown --release --features $ARGUMENTS
 wasm-bindgen --target web --out-dir pkg-$ARGUMENTS target/wasm32-unknown-unknown/release/forge_engine.wasm
 ```
@@ -57,8 +54,8 @@ wasm-bindgen --target web --out-dir pkg-$ARGUMENTS target/wasm32-unknown-unknown
 After building, verify the output exists:
 
 ```bash
-ls -la D:/repos/into-rust/project-forge/web/public/engine-pkg-webgl2/forge_engine_bg.wasm
-ls -la D:/repos/into-rust/project-forge/web/public/engine-pkg-webgpu/forge_engine_bg.wasm
+ls -la web/public/engine-pkg-webgl2/forge_engine_bg.wasm
+ls -la web/public/engine-pkg-webgpu/forge_engine_bg.wasm
 ```
 
 ## Common Issues

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash D:/repos/into-rust/project-forge/.claude/hooks/post-edit-lint.sh"
+            "command": "bash .claude/hooks/post-edit-lint.sh"
           }
         ]
       }
