@@ -7,10 +7,13 @@
 #
 # Requires: curl, jq (or python for JSON parsing)
 
-TB_DB="D:/repos/into-rust/project-forge/.claude/taskboard.db"
-TB_EXE="D:/repos/into-rust/taskboard/taskboard.exe"
+# Derive paths from this script's location (works on macOS/Linux/WSL)
+_TB_HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
+
+TB_DB="$_TB_PROJECT_ROOT/.claude/taskboard.db"
 TB_API="http://localhost:3010/api"
-TB_STATE_FILE="D:/repos/into-rust/project-forge/.claude/hooks/.taskboard-active-ticket"
+TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
 PROJECT_ID="01KJEE8R1XXFF0CZT1WCSTGRDP"
 
 # Check if taskboard API is reachable

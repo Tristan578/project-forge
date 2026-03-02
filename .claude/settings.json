@@ -39,7 +39,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/post-edit-lint.sh"
+            "command": "bash .claude/hooks/post-edit-lint.sh",
+            "timeout": 15000
           }
         ]
       }

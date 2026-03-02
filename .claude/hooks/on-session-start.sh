@@ -13,7 +13,7 @@ source "$SCRIPT_DIR/taskboard-state.sh"
 if ! tb_api_available; then
     cat <<'EOF'
 [TASKBOARD] Server not running. Start it with:
-  D:/repos/into-rust/taskboard/taskboard.exe start --port 3010 --db D:/repos/into-rust/project-forge/.claude/taskboard.db
+  taskboard start --port 3010 --db .claude/taskboard.db
 All work MUST be tracked on the taskboard. See CLAUDE.md "Taskboard Rules".
 EOF
     exit 0
