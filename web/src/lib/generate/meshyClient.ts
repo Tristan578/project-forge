@@ -47,6 +47,7 @@ export interface TextureStatus {
 
 export class MeshyClient {
   private baseUrl = 'https://api.meshy.ai/openapi/v2';
+  private readonly baseOrigin = 'https://api.meshy.ai';
 
   constructor(private config: MeshyConfig) {}
 
@@ -108,7 +109,7 @@ export class MeshyClient {
 
   async getTaskStatus(taskId: string): Promise<TaskStatus> {
     validateResourceId(taskId);
-    const url = new URL(`/openapi/v2/text-to-3d/${taskId}`, 'https://api.meshy.ai');
+    const url = new URL(`/openapi/v2/text-to-3d/${taskId}`, this.baseOrigin);
     const response = await fetch(url, {
       method: 'GET',
       headers: {
@@ -159,7 +160,7 @@ export class MeshyClient {
 
   async getTextureStatus(taskId: string): Promise<TextureStatus> {
     validateResourceId(taskId);
-    const url = new URL(`/openapi/v2/text-to-texture/${taskId}`, 'https://api.meshy.ai');
+    const url = new URL(`/openapi/v2/text-to-texture/${taskId}`, this.baseOrigin);
     const response = await fetch(url, {
       method: 'GET',
       headers: {
