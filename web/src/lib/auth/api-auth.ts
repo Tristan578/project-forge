@@ -47,8 +47,7 @@ export async function authenticateRequest(): Promise<
     // Auto-sync: user is authenticated with Clerk but missing from our DB.
     // This handles webhook failures, new deployments, or DB resets.
     try {
-      const client = await clerkClient();
-      const clerkUser = await client.users.getUser(clerkId);
+      const clerkUser = await clerkClient.users.getUser(clerkId);
       const syncedUser = await syncUserFromClerk({
         id: clerkId,
         email_addresses: clerkUser.emailAddresses.map(
