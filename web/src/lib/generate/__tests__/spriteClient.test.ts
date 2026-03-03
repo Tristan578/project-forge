@@ -113,6 +113,9 @@ describe('SpriteClient', () => {
     
     expect(result.status).toBe('succeeded');
     expect(result.output).toContain('https://result.url');
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('task_123'), expect.anything());
+    expect(fetch).toHaveBeenCalledWith(
+      expect.objectContaining({ href: expect.stringContaining('task_123') }),
+      expect.anything()
+    );
   });
 });

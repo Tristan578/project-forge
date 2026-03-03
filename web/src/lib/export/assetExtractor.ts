@@ -148,17 +148,21 @@ function textToBlob(text: string, mimeType: string): Blob {
 async function hashBlob(blob: Blob): Promise<string> {
   const arrayBuffer = await blob.arrayBuffer();
 
-  // Use crypto.subtle when available (browsers, Node 20+ with secure context)
+  // Use crypto.subtle when available (browsers + Node 20 with Web Crypto)
   if (typeof globalThis.crypto?.subtle?.digest === 'function') {
     const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', arrayBuffer);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
   }
 
-  // Fallback: use Node.js crypto module
-  const { createHash } = await import('node:crypto');
-  const hash = createHash('sha256').update(Buffer.from(arrayBuffer)).digest('hex');
-  return hash.slice(0, 12);
+  // Fallback: simple FNV-1a-inspired hash from raw bytes (no Node.js imports)
+  const bytes = new Uint8Array(arrayBuffer);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i];
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(16).padStart(8, '0') + bytes.length.toString(16).padStart(4, '0');
 }
 
 /**
