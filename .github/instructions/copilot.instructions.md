@@ -1,4 +1,7 @@
-Copilot instructions · MD
+---
+applyTo: "**"
+---
+
 # SpawnForge — Copilot Instructions
 
 ## Project Overview
