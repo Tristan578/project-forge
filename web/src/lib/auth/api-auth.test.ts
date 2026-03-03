@@ -7,14 +7,17 @@ vi.mock('next/server', () => ({
   },
 }));
 
-// Mock clerk auth
+// Mock clerk auth + clerkClient
+const mockClerkGetUser = vi.fn();
 vi.mock('@clerk/nextjs/server', () => ({
   auth: vi.fn(),
+  clerkClient: vi.fn(async () => ({ users: { getUser: mockClerkGetUser } })),
 }));
 
 // Mock user-service
 vi.mock('./user-service', () => ({
   getUserByClerkId: vi.fn(),
+  syncUserFromClerk: vi.fn(),
 }));
 
 import { authenticateRequest, assertAdmin, assertTier } from './api-auth';
@@ -98,7 +101,40 @@ describe('authenticateRequest', () => {
     expectUnauthorized(await authenticateRequest());
   });
 
-  it('returns 404 when Clerk keys are valid, userId exists, but user not found in DB', async () => {
+  it('auto-syncs user from Clerk when authenticated but not found in DB', async () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_valid';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+
+    const { auth } = await import('@clerk/nextjs/server');
+    vi.mocked(auth).mockResolvedValue({ userId: 'clerk_user_123' } as never);
+
+    const { getUserByClerkId, syncUserFromClerk } = await import('./user-service');
+    vi.mocked(getUserByClerkId).mockResolvedValue(null);
+
+    const syncedUser = makeUser({ clerkId: 'clerk_user_123' });
+    vi.mocked(syncUserFromClerk).mockResolvedValue(syncedUser);
+
+    mockClerkGetUser.mockResolvedValue({
+      emailAddresses: [{ emailAddress: 'test@example.com' }],
+      firstName: 'Test',
+      lastName: 'User',
+    });
+
+    const result = await authenticateRequest();
+
+    expect(result.ok).toBe(true);
+    const ctx = (result as { ok: true; ctx: { user: User; clerkId: string } }).ctx;
+    expect(ctx.user).toEqual(syncedUser);
+    expect(ctx.clerkId).toBe('clerk_user_123');
+    expect(syncUserFromClerk).toHaveBeenCalledWith({
+      id: 'clerk_user_123',
+      email_addresses: [{ email_address: 'test@example.com' }],
+      first_name: 'Test',
+      last_name: 'User',
+    });
+  });
+
+  it('returns 404 when auto-sync from Clerk also fails', async () => {
     process.env.CLERK_SECRET_KEY = 'sk_test_valid';
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
 
@@ -107,6 +143,8 @@ describe('authenticateRequest', () => {
 
     const { getUserByClerkId } = await import('./user-service');
     vi.mocked(getUserByClerkId).mockResolvedValue(null);
+
+    mockClerkGetUser.mockRejectedValue(new Error('Clerk API unreachable'));
 
     const result = await authenticateRequest();
     expect(result.ok).toBe(false);
