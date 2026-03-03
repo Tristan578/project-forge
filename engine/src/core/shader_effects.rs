@@ -199,7 +199,7 @@ impl Plugin for ShaderEffectsPlugin {
     fn build(&self, app: &mut App) {
         // Register shader directly via include_str! to avoid the embedded_asset! macro
         // panicking on Windows due to backslash path separators in file!() output.
-        let _ = app.world_mut()
+        if let Err(err) = app.world_mut()
             .resource_mut::<Assets<Shader>>()
             .insert(
                 FORGE_EFFECTS_SHADER_HANDLE.id(),
@@ -207,7 +207,10 @@ impl Plugin for ShaderEffectsPlugin {
                     include_str!("../shaders/forge_effects.wgsl"),
                     "shaders/forge_effects.wgsl",
                 ),
-            );
+            )
+        {
+            tracing::warn!("Failed to register forge effects shader: {err}");
+        }
 
         // Register the ExtendedMaterial type
         app.add_plugins(

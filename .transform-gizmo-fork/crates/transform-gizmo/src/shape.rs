@@ -46,7 +46,7 @@ impl ShapeBuilder {
     fn arc_points(&self, radius: f64, start_angle: f64, end_angle: f64) -> Vec<Pos2> {
         let angle = f64::clamp(end_angle - start_angle, -TAU, TAU);
 
-        let step_count = steps(angle);
+        let step_count = steps(angle).max(2);
         let mut points = Vec::with_capacity(step_count);
 
         let step_size = angle / (step_count - 1) as f64;
