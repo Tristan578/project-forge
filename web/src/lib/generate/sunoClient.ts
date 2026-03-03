@@ -56,7 +56,8 @@ export class SunoClient {
 
   async getStatus(taskId: string): Promise<MusicStatus> {
     validateResourceId(taskId);
-    const response = await fetch(`${this.baseUrl}/generation/${taskId}`, {
+    const url = new URL(`/v1/generation/${taskId}`, 'https://api.suno.ai');
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,
