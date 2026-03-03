@@ -26,12 +26,12 @@ export interface MusicStatus {
 }
 
 export class SunoClient {
-  private baseUrl = 'https://api.suno.ai/v1';
+  private readonly baseUrl = 'https://api.suno.ai';
 
   constructor(private config: SunoConfig) {}
 
   async createMusic(params: CreateMusicParams): Promise<{ taskId: string }> {
-    const response = await fetch(`${this.baseUrl}/generation`, {
+    const response = await fetch(new URL('/v1/generation', this.baseUrl), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -56,7 +56,8 @@ export class SunoClient {
 
   async getStatus(taskId: string): Promise<MusicStatus> {
     validateResourceId(taskId);
-    const response = await fetch(`${this.baseUrl}/generation/${taskId}`, {
+    const url = new URL(`/v1/generation/${taskId}`, this.baseUrl);
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,

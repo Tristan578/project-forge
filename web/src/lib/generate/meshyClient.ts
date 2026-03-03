@@ -46,12 +46,13 @@ export interface TextureStatus {
 }
 
 export class MeshyClient {
-  private baseUrl = 'https://api.meshy.ai/openapi/v2';
+  private readonly baseUrl = 'https://api.meshy.ai';
+  private readonly apiPath = '/openapi/v2';
 
   constructor(private config: MeshyConfig) {}
 
   async createTextTo3D(params: TextTo3DParams): Promise<{ taskId: string }> {
-    const response = await fetch(`${this.baseUrl}/text-to-3d`, {
+    const response = await fetch(new URL(`${this.apiPath}/text-to-3d`, this.baseUrl), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -80,7 +81,7 @@ export class MeshyClient {
   }
 
   async createImageTo3D(params: ImageTo3DParams): Promise<{ taskId: string }> {
-    const response = await fetch(`${this.baseUrl}/image-to-3d`, {
+    const response = await fetch(new URL(`${this.apiPath}/image-to-3d`, this.baseUrl), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -108,7 +109,8 @@ export class MeshyClient {
 
   async getTaskStatus(taskId: string): Promise<TaskStatus> {
     validateResourceId(taskId);
-    const response = await fetch(`${this.baseUrl}/text-to-3d/${taskId}`, {
+    const url = new URL(`${this.apiPath}/text-to-3d/${taskId}`, this.baseUrl);
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,
@@ -131,7 +133,7 @@ export class MeshyClient {
   }
 
   async createTextToTexture(params: TextToTextureParams): Promise<{ taskId: string }> {
-    const response = await fetch(`${this.baseUrl}/text-to-texture`, {
+    const response = await fetch(new URL(`${this.apiPath}/text-to-texture`, this.baseUrl), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -158,7 +160,8 @@ export class MeshyClient {
 
   async getTextureStatus(taskId: string): Promise<TextureStatus> {
     validateResourceId(taskId);
-    const response = await fetch(`${this.baseUrl}/text-to-texture/${taskId}`, {
+    const url = new URL(`${this.apiPath}/text-to-texture/${taskId}`, this.baseUrl);
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,

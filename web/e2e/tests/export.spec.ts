@@ -7,7 +7,7 @@ test.describe('Export @engine', () => {
     // Look for export button (Download icon or "Export" text)
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Export dialog should be visible
     const exportDialog = page.locator('[class*="fixed"]').filter({ hasText: /export.*game|export/i }).first();
@@ -20,7 +20,7 @@ test.describe('Export @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Look for format selection (single-html, zip, etc.)
     const formatOption = page.locator('input[type="radio"], select').first();
@@ -34,7 +34,7 @@ test.describe('Export @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Look for title input
     const titleInput = page.locator('input[type="text"]').filter({ hasText: '' }).first();
@@ -47,7 +47,7 @@ test.describe('Export @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Look for download/export button in dialog
     const downloadBtn = page.locator('button').filter({ hasText: /export|download/i }).last();
@@ -60,7 +60,7 @@ test.describe('Export @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Look for resolution dropdown/radio buttons
     const resolutionControl = page.locator('text=/resolution|1920x1080|1280x720|responsive/i').first();
@@ -74,12 +74,12 @@ test.describe('Export @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Click close button
     const closeBtn = page.locator('button').filter({ hasText: /×|close/i }).first();
     await closeBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Dialog should be gone
     const exportDialog = page.locator('[class*="fixed"]').filter({ hasText: /export.*game|export/i }).first();
@@ -93,7 +93,7 @@ test.describe('Export @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Look for color input or background color control
     const colorInput = page.locator('input[type="color"], input[type="text"][value*="#"]').first();
@@ -110,7 +110,7 @@ test.describe('Export @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Look for debug checkbox or toggle
     const debugControl = page.locator('input[type="checkbox"]').filter({ hasText: '' }).first();

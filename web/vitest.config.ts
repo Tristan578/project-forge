@@ -3,8 +3,10 @@ import path from 'path';
 
 export default defineConfig({
   test: {
-    environment: 'node',
-    include: ['src/**/*.test.ts'],
+    environment: 'jsdom',
+    testTimeout: 10000,
+    hookTimeout: 10000,
+    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
       provider: 'v8',
@@ -18,10 +20,10 @@ export default defineConfig({
         'src/app/**/page.tsx',
       ],
       thresholds: {
-        statements: 20,
-        branches: 15,
-        functions: 15,
-        lines: 20,
+        statements: 55,
+        branches: 45,
+        functions: 50,
+        lines: 55,
       },
     },
   },

@@ -17,7 +17,7 @@ test.describe('Visual Scripting @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await _editor.waitForEntityCount(2);
     await _editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Look for script section in inspector
     const scriptSection = page.getByText(/script/i, { exact: false });
@@ -30,7 +30,7 @@ test.describe('Visual Scripting @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await _editor.waitForEntityCount(2);
     await _editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Look for Code/Graph toggle or tabs
     const codeTabs = page.locator('button, [role="tab"]').filter({ hasText: /code|graph|visual/i });
@@ -48,7 +48,7 @@ test.describe('Visual Scripting @engine', () => {
   test('editor supports keyboard shortcuts for common actions', async ({ page, editor: _editor }) => {
     // Verify Ctrl+Z (undo) and Ctrl+D (duplicate) don't crash
     await page.keyboard.press('Control+z');
-    await page.waitForTimeout(200);
+
     // No crash = pass
     expect(true).toBe(true);
   });

@@ -15,7 +15,7 @@ import {
   makeMaterialData,
   makeLightData,
   makePhysicsData,
-} from '@/test/fixtures';
+  } from '@/test/utils/fixtures';
 
 describe('editorStore', () => {
   let mockDispatch: ReturnType<typeof createMockDispatch>;

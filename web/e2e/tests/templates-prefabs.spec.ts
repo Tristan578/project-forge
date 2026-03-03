@@ -49,7 +49,7 @@ test.describe('Templates & Prefabs @engine', () => {
     for (const type of types) {
       await page.getByRole('button', { name: 'Add Entity' }).click();
       await page.getByText(type, { exact: true }).click();
-      await page.waitForTimeout(300);
+
     }
     await editor.waitForEntityCount(3); // camera + 2 entities
 

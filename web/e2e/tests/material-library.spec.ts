@@ -10,7 +10,7 @@ test.describe('Material Library @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     const materialSection = page.getByText(/material/i, { exact: false });
     await expect(materialSection.first()).toBeVisible();
@@ -21,7 +21,7 @@ test.describe('Material Library @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Look for color input or color-related controls
     const colorInput = page.locator('input[type="color"]');
@@ -35,7 +35,7 @@ test.describe('Material Library @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Look for preset/library button in material section
     const presetBtn = page.locator('button').filter({ hasText: /preset|library|browse/i });
@@ -48,7 +48,7 @@ test.describe('Material Library @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     const metallic = page.getByText(/metallic/i, { exact: false });
     const roughness = page.getByText(/roughness/i, { exact: false });
@@ -62,13 +62,13 @@ test.describe('Material Library @engine', () => {
     await page.getByRole('button', { name: 'Add Entity' }).click();
     const lightOption = page.getByText(/point.*light|light/i, { exact: false }).first();
     await lightOption.click();
-    await page.waitForTimeout(500);
+
     await editor.waitForEntityCount(2);
 
     // Select the light
     const lightEntity = page.getByText(/Light/, { exact: false }).first();
     await lightEntity.click();
-    await page.waitForTimeout(300);
+
 
     // Should show light-specific properties
     const lightSection = page.getByText(/light|intensity|color/i, { exact: false });

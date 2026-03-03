@@ -12,7 +12,7 @@ test.describe('Export Pipeline @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Title input should have scene name as default
     const titleInput = page.locator('input[type="text"]').first();
@@ -23,7 +23,7 @@ test.describe('Export Pipeline @engine', () => {
   test('export preset buttons are visible', async ({ page }) => {
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Should see preset options (web-optimized, itch-io, etc.)
     const presetButtons = page.locator('button').filter({ hasText: /web|itch|self-contained|debug/i });
@@ -34,7 +34,7 @@ test.describe('Export Pipeline @engine', () => {
   test('resolution options are available', async ({ page }) => {
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Check for resolution options text
     const resolutionText = page.locator('text=/responsive|1920.*1080|1280.*720/i');
@@ -45,7 +45,7 @@ test.describe('Export Pipeline @engine', () => {
   test('can change export title', async ({ page }) => {
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     const titleInput = page.locator('input[type="text"]').first();
     await titleInput.fill('My Test Game');
@@ -56,7 +56,7 @@ test.describe('Export Pipeline @engine', () => {
   test('export button triggers download', async ({ page }) => {
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Set a title
     const titleInput = page.locator('input[type="text"]').first();
@@ -90,7 +90,7 @@ test.describe('Export Pipeline @engine', () => {
     // Open export dialog
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Set title
     const titleInput = page.locator('input[type="text"]').first();
@@ -112,7 +112,7 @@ test.describe('Export Pipeline @engine', () => {
   test('export dialog disables inputs while exporting', async ({ page }) => {
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Set title
     const titleInput = page.locator('input[type="text"]').first();
@@ -130,7 +130,7 @@ test.describe('Export Pipeline @engine', () => {
   test('empty title disables export button', async ({ page }) => {
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Clear the title
     const titleInput = page.locator('input[type="text"]').first();
@@ -145,11 +145,11 @@ test.describe('Export Pipeline @engine', () => {
   test('export dialog closes on escape', async ({ page }) => {
     const exportBtn = page.getByRole('button', { name: /export|download/i }).first();
     await exportBtn.click();
-    await page.waitForTimeout(300);
+
 
     // Press Escape
     await page.keyboard.press('Escape');
-    await page.waitForTimeout(300);
+
 
     // Dialog should be closed
     const dialog = page.locator('[class*="fixed"]').filter({ hasText: /export.*game/i });
