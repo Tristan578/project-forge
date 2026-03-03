@@ -10,7 +10,7 @@ vi.hoisted(() => {
 
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimit } from '@/lib/rateLimit';
 import { makeUser } from '@/test/utils/apiTestUtils';
 import { getDb } from '@/lib/db/client';
 
@@ -37,15 +37,13 @@ vi.mock('stripe', () => {
 });
 
 describe('POST /api/billing/checkout', () => {
-  const env = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
-    process.env.STRIPE_PRICE_STARTER = 'price_starter_mock';
-    process.env.STRIPE_PRICE_CREATOR = 'price_creator_mock';
-    process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
-    process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    vi.stubEnv('STRIPE_PRICE_CREATOR', 'price_creator_mock');
+    vi.stubEnv('STRIPE_PRICE_STUDIO', 'price_studio_mock');
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost:3000');
     
     vi.mocked(rateLimit).mockReturnValue({
       allowed: true,
@@ -54,11 +52,11 @@ describe('POST /api/billing/checkout', () => {
     });
 
     const mockDb = { update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), where: vi.fn().mockResolvedValue(true) };
-    vi.mocked(getDb).mockReturnValue(mockDb as any);
+    vi.mocked(getDb).mockReturnValue(mockDb as ReturnType<typeof getDb>);
   });
 
   afterEach(() => {
-    process.env = env;
+    vi.unstubAllEnvs();
   });
 
   it('returns 401 if unauthenticated', async () => {

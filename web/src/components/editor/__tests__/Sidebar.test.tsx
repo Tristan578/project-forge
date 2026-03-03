@@ -26,6 +26,7 @@ describe('Sidebar', () => {
   const mockSetGizmoMode = vi.fn();
   const mockToggleCoordinateMode = vi.fn();
   const mockTogglePlayMode = vi.fn();
+  const mockToggleGrid = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -45,7 +46,7 @@ describe('Sidebar', () => {
         snapSettings: { gridVisible: true },
         undo: vi.fn(),
         redo: vi.fn(),
-        toggleGrid: vi.fn(),
+        toggleGrid: mockToggleGrid,
         setCameraPreset: vi.fn(),
         spawnEntity: vi.fn(),
         deleteSelectedEntities: vi.fn(),
@@ -90,10 +91,9 @@ describe('Sidebar', () => {
   });
 
   it('allows toggling grid', () => {
-    // Add toggleGrid mock to our implementation in beforeEach first or just check if it exists
     render(<Sidebar />);
     const gridBtn = screen.getByRole('button', { name: /grid/i });
     fireEvent.click(gridBtn);
-    // The mock state in beforeEach had toggleGrid: vi.fn()
+    expect(mockToggleGrid).toHaveBeenCalled();
   });
 });

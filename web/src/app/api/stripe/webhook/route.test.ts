@@ -26,21 +26,19 @@ vi.mock('stripe', () => {
 });
 
 describe('POST /api/stripe/webhook', () => {
-  const env = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
-    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_mock';
-    process.env.STRIPE_PRICE_STARTER = 'price_starter_mock';
-    process.env.STRIPE_PRICE_CREATOR = 'price_creator_mock';
-    process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    vi.stubEnv('STRIPE_PRICE_CREATOR', 'price_creator_mock');
+    vi.stubEnv('STRIPE_PRICE_STUDIO', 'price_studio_mock');
     
     vi.mocked(lifecycle.isEventProcessed).mockReturnValue(false);
   });
 
   afterEach(() => {
-    process.env = env;
+    vi.unstubAllEnvs();
   });
 
   it('returns 500 if WEBHOOK_SECRET is missing', async () => {

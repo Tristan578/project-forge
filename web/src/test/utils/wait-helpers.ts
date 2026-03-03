@@ -3,8 +3,9 @@ import { vi } from 'vitest';
 /**
  * Polls a condition function until it returns true or times out.
  * Useful for waiting for state changes in Zustand stores or DOM updates.
+ * Named `waitForCondition` to avoid conflict with `@testing-library/react`'s `waitFor`.
  */
-export async function waitFor(
+export async function waitForCondition(
   condition: () => boolean | Promise<boolean>,
   { interval = 10, timeout = 1000, message = 'Condition not met in time' } = {}
 ): Promise<void> {
