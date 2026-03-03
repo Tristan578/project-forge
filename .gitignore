@@ -28,6 +28,12 @@ secrets.json
 .claude/settings.local.json
 .claude/taskboard.db-wal
 .claude/taskboard.db-shm
+
+# ----- Windsurf / AI Tooling -----
+# Track Windsurf rules and workflows
+!.windsurf/
+!.windsurf/rules/
+!.windsurf/workflows/
 specs/
 ARCHITECTURE.md
 TESTING.md
