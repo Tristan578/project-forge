@@ -36,8 +36,13 @@ export function NewProjectDialog({ isOpen, onClose, onCreate }: NewProjectDialog
       setError('Failed to create project. Please try again.');
     } finally {
       setCreating(false);
+    } else {
+      setCreating(false);
+      setName('My Game');
+      setError(null);
+      onClose();
     }
-  }, [name, creating, onCreate]);
+  }, [name, creating, onCreate, onClose]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
