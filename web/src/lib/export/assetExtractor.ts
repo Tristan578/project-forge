@@ -147,10 +147,18 @@ function textToBlob(text: string, mimeType: string): Blob {
  */
 async function hashBlob(blob: Blob): Promise<string> {
   const arrayBuffer = await blob.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-  return hashHex.slice(0, 12); // Use first 12 chars for shorter filenames
+
+  // Use crypto.subtle when available (browsers, Node 20+ with secure context)
+  if (typeof globalThis.crypto?.subtle?.digest === 'function') {
+    const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', arrayBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+  }
+
+  // Fallback: use Node.js crypto module
+  const { createHash } = await import('node:crypto');
+  const hash = createHash('sha256').update(Buffer.from(arrayBuffer)).digest('hex');
+  return hash.slice(0, 12);
 }
 
 /**
