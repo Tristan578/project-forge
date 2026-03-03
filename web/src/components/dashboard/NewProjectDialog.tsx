@@ -25,9 +25,16 @@ export function NewProjectDialog({ isOpen, onClose, onCreate }: NewProjectDialog
     if (!name.trim() || creating) return;
     setCreating(true);
     setError(null);
-    const err = await onCreate(name.trim());
-    if (err) {
-      setError(err);
+    try {
+      const err = await onCreate(name.trim());
+      if (err) {
+        setError(err);
+      }
+    } catch (e) {
+      // Log error for debugging purposes and show a user-friendly message
+      console.error('Failed to create project:', e);
+      setError('Failed to create project. Please try again.');
+    } finally {
       setCreating(false);
     }
   }, [name, creating, onCreate]);
