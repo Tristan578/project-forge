@@ -10,11 +10,9 @@ SpawnForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot mon
 
 ## Build & Test Commands
 
-Always run `npm ci` (not `npm install`) in CI contexts. Use `npm install` only for local development.
-
 ```bash
-# Web — lint, typecheck, unit tests (run from web/)
-cd web && npm install
+# Web — install deps, lint, typecheck, unit tests (run from web/)
+cd web && npm install  # use npm ci in CI environments
 npx eslint --max-warnings 0 .
 npx tsc --noEmit
 npx vitest run
