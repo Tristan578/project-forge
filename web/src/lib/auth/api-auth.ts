@@ -1,6 +1,6 @@
-import { auth } from '@clerk/nextjs/server';
+import { auth, clerkClient } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-import { getUserByClerkId } from './user-service';
+import { getUserByClerkId, syncUserFromClerk } from './user-service';
 import type { User } from '../db/schema';
 
 export interface AuthContext {
@@ -44,13 +44,29 @@ export async function authenticateRequest(): Promise<
 
   const user = await getUserByClerkId(clerkId);
   if (!user) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: 'USER_NOT_FOUND', message: 'Authenticated but user record not yet synced' },
-        { status: 404 },
-      ),
-    };
+    // Auto-sync: user is authenticated with Clerk but missing from our DB.
+    // This handles webhook failures, new deployments, or DB resets.
+    try {
+      const client = await clerkClient();
+      const clerkUser = await client.users.getUser(clerkId);
+      const syncedUser = await syncUserFromClerk({
+        id: clerkId,
+        email_addresses: clerkUser.emailAddresses.map(
+          (e: { emailAddress: string }) => ({ email_address: e.emailAddress })
+        ),
+        first_name: clerkUser.firstName,
+        last_name: clerkUser.lastName,
+      });
+      return { ok: true, ctx: { user: syncedUser, clerkId } };
+    } catch {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          { error: 'USER_NOT_FOUND', message: 'Authenticated but user record not yet synced' },
+          { status: 404 },
+        ),
+      };
+    }
   }
 
   return { ok: true, ctx: { user, clerkId } };

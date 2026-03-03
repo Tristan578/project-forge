@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { UserButton } from '@clerk/nextjs';
 import { Settings, Plus } from 'lucide-react';
@@ -19,28 +19,36 @@ export function DashboardLayout() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [showNewDialog, setShowNewDialog] = useState(false);
   // Settings page is at /settings (full page, not modal)
 
-  useEffect(() => {
-    fetchProjects();
-  }, []);
-
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     try {
       const res = await fetch('/api/projects');
       if (res.ok) {
         const data = await res.json();
         setProjects(data);
+        setFetchError(null);
+      } else if (res.status === 401) {
+        router.push('/sign-in');
+        return;
+      } else {
+        setFetchError('Failed to load projects. Please try refreshing the page.');
       }
     } catch (err) {
       console.error('Failed to fetch projects:', err);
+      setFetchError('Unable to connect. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
-  const handleCreate = async (name: string) => {
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  const handleCreate = async (name: string): Promise<string | null> => {
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -68,9 +76,20 @@ export function DashboardLayout() {
       if (res.ok) {
         const { id } = await res.json();
         router.push(`/editor/${id}`);
+        return null;
       }
+      const body = await res.json().catch(() => null);
+      if (res.status === 401) {
+        router.push('/sign-in');
+        return 'Session expired. Redirecting to sign in...';
+      }
+      if (res.status === 403 && body?.error === 'PROJECT_LIMIT') {
+        return body.message ?? 'Project limit reached. Upgrade your plan to create more.';
+      }
+      return body?.message ?? 'Failed to create project. Please try again.';
     } catch (err) {
       console.error('Failed to create project:', err);
+      return 'Unable to connect. Please check your connection and try again.';
     }
   };
 
@@ -149,8 +168,23 @@ export function DashboardLayout() {
             </div>
           )}
 
+          {/* Fetch error state */}
+          {!loading && fetchError && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <p className="mb-4 text-lg text-red-400">
+                {fetchError}
+              </p>
+              <button
+                onClick={() => { setLoading(true); setFetchError(null); fetchProjects(); }}
+                className="rounded-lg bg-zinc-800 px-6 py-3 text-base font-medium text-white hover:bg-zinc-700"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
           {/* Empty state */}
-          {!loading && projects.length === 0 && (
+          {!loading && !fetchError && projects.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20">
               <p className="mb-4 text-lg text-zinc-400">
                 No projects yet. Create your first game!
@@ -165,7 +199,7 @@ export function DashboardLayout() {
           )}
 
           {/* Project grid */}
-          {!loading && projects.length > 0 && (
+          {!loading && !fetchError && projects.length > 0 && (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {projects.map((project) => (
                 <ProjectCard
