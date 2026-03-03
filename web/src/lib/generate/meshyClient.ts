@@ -108,7 +108,9 @@ export class MeshyClient {
 
   async getTaskStatus(taskId: string): Promise<TaskStatus> {
     validateResourceId(taskId);
-    const response = await fetch(`${this.baseUrl}/text-to-3d/${taskId}`, {
+    const safeTaskId = encodeURIComponent(taskId);
+    const url = new URL(`/openapi/v2/text-to-3d/${safeTaskId}`, 'https://api.meshy.ai');
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,
@@ -158,7 +160,9 @@ export class MeshyClient {
 
   async getTextureStatus(taskId: string): Promise<TextureStatus> {
     validateResourceId(taskId);
-    const response = await fetch(`${this.baseUrl}/text-to-texture/${taskId}`, {
+    const safeTaskId = encodeURIComponent(taskId);
+    const url = new URL(`/openapi/v2/text-to-texture/${safeTaskId}`, 'https://api.meshy.ai');
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${this.config.apiKey}`,

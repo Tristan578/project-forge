@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid project ID in DSN' }, { status: 400 });
     }
 
-    const upstreamUrl = `https://${host}/api/${projectId}/envelope/`;
+    const upstreamUrl = new URL(`https://${host}/api/${projectId}/envelope/`);
 
     // Forward the envelope
     const upstreamResponse = await fetch(upstreamUrl, {
