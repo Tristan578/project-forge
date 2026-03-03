@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { POST } from './route';
 import { syncUserFromClerk } from '@/lib/auth/user-service';
+import * as nextHeaders from 'next/headers';
 
 vi.mock('@/lib/auth/user-service');
 
@@ -12,7 +13,7 @@ vi.mock('svix', () => ({
 }));
 
 vi.mock('next/headers', () => ({
-  headers: vi.fn().mockResolvedValue(new Map([
+  headers: vi.fn().mockResolvedValue(new Headers([
     ['svix-id', 'svix_id_mock'],
     ['svix-timestamp', 'svix_timestamp_mock'],
     ['svix-signature', 'svix_signature_mock'],
@@ -20,18 +21,17 @@ vi.mock('next/headers', () => ({
 }));
 
 describe('POST /api/auth/webhook', () => {
-  const env = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.CLERK_WEBHOOK_SECRET = 'whsec_mock';
+    vi.stubEnv('CLERK_WEBHOOK_SECRET', 'whsec_mock');
   });
 
   afterEach(() => {
-    process.env = env;
+    vi.unstubAllEnvs();
   });
 
   it('returns 500 if WEBHOOK_SECRET is missing', async () => {
+    vi.unstubAllEnvs(); // removes 'whsec_mock' stub, restores original (undefined)
     delete process.env.CLERK_WEBHOOK_SECRET;
     const req = new Request('http://localhost/api/auth/webhook', { method: 'POST' });
     const res = await POST(req);
@@ -39,7 +39,7 @@ describe('POST /api/auth/webhook', () => {
   });
 
   it('returns 400 if svix headers are missing', async () => {
-    vi.mocked(await import('next/headers')).headers.mockResolvedValueOnce(new Headers());
+    vi.mocked(nextHeaders.headers).mockResolvedValueOnce(new Headers());
     const req = new Request('http://localhost/api/auth/webhook', { method: 'POST' });
     const res = await POST(req);
     expect(res.status).toBe(400);

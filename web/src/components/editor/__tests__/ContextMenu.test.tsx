@@ -1,12 +1,8 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { ContextMenu } from '../ContextMenu';
 
 describe('ContextMenu', () => {
-  afterEach(() => {
-    cleanup();
-  });
-
   const defaultProps = {
     isOpen: true,
     position: { x: 100, y: 200 },
@@ -16,6 +12,14 @@ describe('ContextMenu', () => {
     onDuplicate: vi.fn(),
     onDelete: vi.fn(),
   };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
 
   it('renders at specified coordinates', () => {
     render(<ContextMenu {...defaultProps} />);

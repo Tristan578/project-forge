@@ -12,8 +12,8 @@ test.describe('Editor Smoke Tests @engine', () => {
 
     await editor.load();
 
-    // Allow a brief moment for any async errors to surface
-
+    // Wait for the dockview container to be visible before checking for errors
+    await editor.canvas.waitFor({ timeout: 5000 }).catch(() => {});
 
     expect(consoleErrors).toHaveLength(0);
   });

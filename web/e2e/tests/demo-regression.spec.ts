@@ -113,8 +113,8 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       }
     });
 
-    // Wait a bit for any delayed errors
-
+    // Wait for the editor to settle before checking for errors
+    await page.locator('.dv-dockview, canvas, [data-testid="editor"]').first().waitFor({ timeout: 5000 }).catch(() => {});
 
     // There should be no unexpected JS errors
     expect(errors).toEqual([]);

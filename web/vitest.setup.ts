@@ -10,6 +10,8 @@
  * This setup replaces it with a spec-compliant in-memory mock.
  */
 
+import '@testing-library/jest-dom/vitest';
+
 const store: Record<string, string> = {};
 
 const storageMock: Storage = {

@@ -9,6 +9,7 @@ describe('userStore', () => {
       email: null,
       createdAt: null,
       tokenBalance: null,
+      billingStatus: null,
       isLoading: false,
       error: null,
     });
@@ -38,6 +39,9 @@ describe('userStore', () => {
     expect(useUserStore.getState().canUseMCP()).toBe(false);
     
     useUserStore.getState().setTier('creator');
+    expect(useUserStore.getState().canUseMCP()).toBe(true);
+
+    useUserStore.getState().setTier('pro');
     expect(useUserStore.getState().canUseMCP()).toBe(true);
   });
 });

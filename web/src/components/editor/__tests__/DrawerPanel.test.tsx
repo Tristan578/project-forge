@@ -1,18 +1,22 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { DrawerPanel } from '../DrawerPanel';
 
 describe('DrawerPanel', () => {
-  afterEach(() => {
-    cleanup();
-  });
-
   const defaultProps = {
     side: 'right' as const,
     open: true,
     onClose: vi.fn(),
     children: <div data-testid="drawer-content">Content</div>,
   };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
 
   it('renders children and backdrop when open', () => {
     const { container } = render(<DrawerPanel {...defaultProps} />);
