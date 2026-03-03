@@ -1,7 +1,7 @@
 //! Array, combine, and prefab instantiation systems.
 
 use bevy::prelude::*;
-use bevy::render::mesh::Mesh;
+use bevy::mesh::Mesh;
 use crate::core::{
     self,
     entity_factory,
@@ -205,7 +205,7 @@ pub(super) fn apply_combine_requests(
         Option<&MaterialData>,
     )>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
@@ -225,7 +225,7 @@ pub(super) fn apply_combine_requests(
             if let Some((entity, eid, ename, transform, mesh_handle, mat_data)) = query.iter().find(|(_, eid, ..)| &eid.0 == entity_id) {
                 if let Some(mh) = mesh_handle {
                     if let Some(mesh) = meshes.get(&mh.0) {
-                        use bevy::render::mesh::VertexAttributeValues;
+                        use bevy::mesh::VertexAttributeValues;
                         let positions: Vec<[f32; 3]> = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
                             Some(VertexAttributeValues::Float32x3(v)) => v.clone(),
                             _ => vec![],
@@ -235,8 +235,8 @@ pub(super) fn apply_combine_requests(
                             _ => vec![],
                         };
                         let indices: Vec<u32> = match mesh.indices() {
-                            Some(bevy::render::mesh::Indices::U32(v)) => v.clone(),
-                            Some(bevy::render::mesh::Indices::U16(v)) => v.iter().map(|i| *i as u32).collect(),
+                            Some(bevy::mesh::Indices::U32(v)) => v.clone(),
+                            Some(bevy::mesh::Indices::U16(v)) => v.iter().map(|i| *i as u32).collect(),
                             None => vec![],
                         };
                         mesh_list.push((positions, normals, indices, *transform));

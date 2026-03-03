@@ -4,14 +4,15 @@
 //! the standard PBR pipeline using Bevy's `ExtendedMaterial` pattern.
 
 use bevy::prelude::*;
-use bevy::asset::weak_handle;
+use bevy::asset::uuid_handle;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
-use bevy::render::render_resource::{AsBindGroup, Shader, ShaderRef};
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::{Shader, ShaderRef};
 use serde::{Deserialize, Serialize};
 
 /// Stable handle for the forge effects shader, registered manually to avoid
 /// `embedded_asset!` panicking on Windows due to backslash path separators.
-const FORGE_EFFECTS_SHADER_HANDLE: Handle<Shader> = weak_handle!("f09eeffc-e750-4001-a000-000000000001");
+const FORGE_EFFECTS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("f09eeffc-e750-4001-a000-000000000001");
 
 // --- Default helper functions for serde ---
 fn default_custom_color() -> [f32; 4] { [0.0, 1.0, 1.0, 1.0] } // Cyan
@@ -198,7 +199,7 @@ impl Plugin for ShaderEffectsPlugin {
     fn build(&self, app: &mut App) {
         // Register shader directly via include_str! to avoid the embedded_asset! macro
         // panicking on Windows due to backslash path separators in file!() output.
-        app.world_mut()
+        let _ = app.world_mut()
             .resource_mut::<Assets<Shader>>()
             .insert(
                 FORGE_EFFECTS_SHADER_HANDLE.id(),

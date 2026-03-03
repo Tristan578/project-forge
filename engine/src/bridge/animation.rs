@@ -377,7 +377,7 @@ pub(super) fn emit_animation_on_selection(
     animation_registry: Res<AnimationRegistry>,
     player_query: Query<&AnimationPlayer>,
     entity_id_query: Query<&EntityId>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     for _event in selection_events.read() {
         if let Some(primary) = selection.primary {

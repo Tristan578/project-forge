@@ -707,7 +707,7 @@ fn system_collectible(
 /// Collision tracking system: reads Rapier CollisionEvents and updates the runtime's
 /// active_collisions set. Must run before all game component systems that need overlap info.
 fn system_track_collisions(
-    mut collision_events: EventReader<CollisionEvent>,
+    mut collision_events: MessageReader<CollisionEvent>,
     entity_id_query: Query<&EntityId>,
     runtime: Option<ResMut<GameComponentRuntime>>,
 ) {

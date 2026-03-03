@@ -92,8 +92,8 @@ impl Selection {
     }
 }
 
-/// Event fired when selection changes, used to trigger bridge events.
-#[derive(Event)]
+/// Message fired when selection changes, used to trigger bridge events.
+#[derive(Message)]
 pub struct SelectionChangedEvent {
     pub selected_ids: Vec<String>,
     pub primary_id: Option<String>,

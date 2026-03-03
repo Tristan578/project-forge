@@ -242,7 +242,7 @@ pub(super) fn process_game_camera_queries(
 pub(super) fn emit_game_camera_on_selection(
     selection: Res<Selection>,
     camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     for _event in selection_events.read() {
         if let Some(primary) = selection.primary {

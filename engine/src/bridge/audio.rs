@@ -179,7 +179,7 @@ pub(super) fn emit_audio_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &AudioData), Changed<AudioData>>,
     selection_query: Query<(&EntityId, Option<&AudioData>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {
@@ -275,7 +275,7 @@ pub(super) fn emit_reverb_zone_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &ReverbZoneData), Changed<ReverbZoneData>>,
     selection_query: Query<(&EntityId, Option<&ReverbZoneData>, Option<&ReverbZoneEnabled>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {

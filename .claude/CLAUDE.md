@@ -16,7 +16,7 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 
 ## Rendering Strategy
 
-- **Primary: WebGPU** (Bevy 0.16, wgpu 24) — auto-detected via `navigator.gpu`
+- **Primary: WebGPU** (Bevy 0.18, wgpu 27) — auto-detected via `navigator.gpu`
 - **Fallback: WebGL2** — for browsers without WebGPU
 - **Two editor binaries** + **two runtime binaries** (via `runtime` feature) in `web/public/`
 - **JS auto-selects** at runtime (`useEngine.ts`)
@@ -26,11 +26,12 @@ Game Runtime + TypeScript Scripting           <- Playing user-created games
 
 | Library | Version | Notes |
 |---------|---------|-------|
-| Bevy | 0.16 | wgpu 24, WebGPU primary |
-| bevy_rapier3d | 0.30 | `default-features=false`, features: `dim3`, `async-collider`, `debug-render-3d` |
-| bevy_hanabi | 0.16 | GPU particles, WebGPU only (`webgpu` feature) |
-| transform-gizmo-bevy | 0.8 | Needs default features |
-| bevy_panorbit_camera | 0.28 | `yaw`/`pitch`/`radius` |
+| Bevy | 0.18 | wgpu 27, WebGPU primary |
+| bevy_rapier3d | 0.33 | `default-features=false`, features: `dim3`, `async-collider`, `debug-render-3d` |
+| bevy_rapier2d | 0.33 | `default-features=false`, features: `dim2`, `debug-render-2d` |
+| bevy_hanabi | 0.18 | GPU particles, WebGPU only (`webgpu` feature) |
+| transform-gizmo-bevy | 0.9 (local fork) | Path dep at `.transform-gizmo-fork/`, patched for Bevy 0.18 |
+| bevy_panorbit_camera | 0.34 | `yaw`/`pitch`/`radius` |
 | csgrs | 0.20 | CSG booleans via BSP |
 | noise | 0.9 | Procedural noise for terrain |
 | Zustand | 5.x | React state |

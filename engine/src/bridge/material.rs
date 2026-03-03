@@ -21,7 +21,7 @@ pub(super) fn emit_material_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &MaterialData), Changed<MaterialData>>,
     selection_query: Query<(&EntityId, &MaterialData)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {
@@ -46,7 +46,7 @@ pub(super) fn emit_light_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &LightData), Changed<LightData>>,
     selection_query: Query<(&EntityId, &LightData)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {
@@ -224,7 +224,7 @@ pub(super) fn apply_custom_skybox_requests(
 ) {
     use base64::Engine as _;
     use bevy::image::{ImageType, CompressedImageFormats, ImageSampler};
-    use bevy::render::render_asset::RenderAssetUsages;
+    use bevy::asset::RenderAssetUsages;
 
     for request in pending.custom_skybox_requests.drain(..) {
         // Parse data URL: "data:image/png;base64,AAAA..."
@@ -442,7 +442,7 @@ pub(super) fn emit_shader_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &ShaderEffectData), Changed<ShaderEffectData>>,
     selection_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {

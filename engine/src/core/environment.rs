@@ -112,11 +112,11 @@ pub fn generate_preset_cubemap(preset: &str) -> Image {
         TextureDimension::D2,
         data,
         TextureFormat::Rgba8UnormSrgb,
-        bevy::render::render_asset::RenderAssetUsages::RENDER_WORLD,
+        bevy::asset::RenderAssetUsages::RENDER_WORLD,
     );
 
     // Mark as cubemap
-    image.reinterpret_stacked_2d_as_array(6);
+    let _ = image.reinterpret_stacked_2d_as_array(6);
     image.texture_view_descriptor = Some(bevy::render::render_resource::TextureViewDescriptor {
         dimension: Some(bevy::render::render_resource::TextureViewDimension::Cube),
         ..default()

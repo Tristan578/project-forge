@@ -4,8 +4,7 @@
 //! Uses the `csgrs` library for BSP-based boolean operations.
 
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, VertexAttributeValues};
-use bevy::render::render_resource::PrimitiveTopology;
+use bevy::mesh::{Indices, VertexAttributeValues, PrimitiveTopology};
 use serde::{Deserialize, Serialize};
 
 use csgrs::mesh::Mesh as CsgMesh;
@@ -67,7 +66,7 @@ pub fn bevy_mesh_to_csg(
     };
 
     // 4. Transform positions and normals to world space
-    let world_matrix = transform.compute_matrix();
+    let world_matrix = transform.to_matrix();
     let normal_matrix = world_matrix.inverse().transpose();
 
     let world_positions: Vec<[f32; 3]> = positions.iter().map(|p| {
@@ -186,7 +185,7 @@ pub fn csg_to_bevy_mesh(csg_mesh: &CsgMesh<()>) -> Result<(Mesh, CsgMeshData), S
     // Build Bevy Mesh
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
-        bevy::render::render_asset::RenderAssetUsages::default(),
+        bevy::asset::RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals.clone());
@@ -205,7 +204,7 @@ pub fn csg_to_bevy_mesh(csg_mesh: &CsgMesh<()>) -> Result<(Mesh, CsgMeshData), S
 pub fn rebuild_mesh_from_data(data: &CsgMeshData) -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
-        bevy::render::render_asset::RenderAssetUsages::default(),
+        bevy::asset::RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.positions.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals.clone());

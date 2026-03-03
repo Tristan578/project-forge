@@ -35,14 +35,19 @@ project_board.json
 
 # ----- Rust / Cargo -----
 engine/target/
+.transform-gizmo-fork/target/
 engine/pkg/
 engine/pkg-webgl2/
 engine/pkg-webgpu/
+engine/pkg-webgl2-runtime/
+engine/pkg-webgpu-runtime/
 
 # ----- WASM Build Artifacts -----
 web/public/engine-pkg/
 web/public/engine-pkg-webgl2/
 web/public/engine-pkg-webgpu/
+web/public/engine-pkg-webgl2-runtime/
+web/public/engine-pkg-webgpu-runtime/
 
 # ----- Node / npm -----
 node_modules/
