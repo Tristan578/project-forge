@@ -29,6 +29,10 @@ export function NewProjectDialog({ isOpen, onClose, onCreate }: NewProjectDialog
       const err = await onCreate(name.trim());
       if (err) {
         setError(err);
+      } else {
+        setName('My Game');
+        setError(null);
+        onClose();
       }
     } catch (e) {
       // Log error for debugging purposes and show a user-friendly message
@@ -36,11 +40,6 @@ export function NewProjectDialog({ isOpen, onClose, onCreate }: NewProjectDialog
       setError('Failed to create project. Please try again.');
     } finally {
       setCreating(false);
-    } else {
-      setCreating(false);
-      setName('My Game');
-      setError(null);
-      onClose();
     }
   }, [name, creating, onCreate, onClose]);
 
