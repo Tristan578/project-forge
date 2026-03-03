@@ -275,7 +275,8 @@ export class SpriteClient {
 
   async getReplicateStatus(predictionId: string): Promise<{ status: string; output?: string[] }> {
     validateResourceId(predictionId);
-    const url = new URL(`/v1/predictions/${predictionId}`, 'https://api.replicate.com');
+    const safePredictionId = encodeURIComponent(predictionId);
+    const url = new URL(`/v1/predictions/${safePredictionId}`, 'https://api.replicate.com');
     const response = await fetch(url, {
       method: 'GET',
       headers: {

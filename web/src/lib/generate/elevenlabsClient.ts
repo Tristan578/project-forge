@@ -67,7 +67,8 @@ export class ElevenLabsClient {
     const voiceId = params.voiceId || 'JBFqnCBsd6RMkjVDRZzb'; // Default: George
     validateResourceId(voiceId);
 
-    const url = new URL(`/v1/text-to-speech/${voiceId}`, 'https://api.elevenlabs.io');
+    const safeVoiceId = encodeURIComponent(voiceId);
+    const url = new URL(`/v1/text-to-speech/${safeVoiceId}`, 'https://api.elevenlabs.io');
     const response = await fetch(url, {
       method: 'POST',
       headers: {
