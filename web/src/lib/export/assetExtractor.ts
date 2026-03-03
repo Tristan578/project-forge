@@ -91,16 +91,16 @@ async function extractDataUrl(
     const isBase64 = !!match[2];
     const data = match[3];
 
-    // Convert to blob
-    const blob = isBase64 ? await base64ToBlob(data, mimeType) : textToBlob(data, mimeType);
-
-    // Generate hash for deduplication
-    const hash = await hashBlob(blob);
+    // Generate hash for deduplication from the raw data string (avoids Blob/crypto issues in Node)
+    const hash = fnvHash(data);
     if (seenHashes.has(hash)) {
       // Already extracted this exact asset
       return null;
     }
     seenHashes.add(hash);
+
+    // Convert to blob
+    const blob = isBase64 ? await base64ToBlob(data, mimeType) : textToBlob(data, mimeType);
 
     // Determine file extension from MIME type
     const ext = getExtensionForMime(mimeType);
@@ -143,26 +143,15 @@ function textToBlob(text: string, mimeType: string): Blob {
 }
 
 /**
- * Generate hash of blob contents for deduplication
+ * FNV-1a string hash for deduplication (pure JS, no crypto dependencies)
  */
-async function hashBlob(blob: Blob): Promise<string> {
-  const arrayBuffer = await blob.arrayBuffer();
-
-  // Use crypto.subtle when available (browsers + Node 20 with Web Crypto)
-  if (typeof globalThis.crypto?.subtle?.digest === 'function') {
-    const hashBuffer = await globalThis.crypto.subtle.digest('SHA-256', arrayBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
-  }
-
-  // Fallback: simple FNV-1a-inspired hash from raw bytes (no Node.js imports)
-  const bytes = new Uint8Array(arrayBuffer);
+function fnvHash(str: string): string {
   let h = 0x811c9dc5;
-  for (let i = 0; i < bytes.length; i++) {
-    h ^= bytes[i];
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return (h >>> 0).toString(16).padStart(8, '0') + bytes.length.toString(16).padStart(4, '0');
+  return (h >>> 0).toString(16).padStart(8, '0') + str.length.toString(16).padStart(4, '0');
 }
 
 /**
