@@ -806,7 +806,7 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
     //      shadowed to undefined via SHADOWED_GLOBALS parameter list.
     //   3. Source size is capped at MAX_SCRIPT_SOURCE_BYTES before this point.
     //   4. Any thrown exception is caught and reported; it cannot escape the worker.
-    // codeql[js/code-injection]
+    // codeql[js/code-injection]: dynamic user script evaluated only inside sandboxed worker with dangerous globals shadowed
     const fn = new Function(
       'forge', 'entityId',
       ...SHADOWED_GLOBALS,
