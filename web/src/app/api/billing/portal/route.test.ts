@@ -2,8 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
-import { makeUser } from '@/test/utils/apiTestUtils';
-import Stripe from 'stripe';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
@@ -50,10 +49,10 @@ describe('POST /api/billing/portal', () => {
   it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: false,
-      response: new Response('Unauthorized', { status: 401 }),
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const req = new Request('http://localhost/api/billing/portal', { method: 'POST' });
+    const _req = new Request('http://localhost/api/billing/portal', { method: 'POST' });
     const res = await POST();
 
     expect(res.status).toBe(401);

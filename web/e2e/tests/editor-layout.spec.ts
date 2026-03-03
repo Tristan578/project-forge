@@ -5,7 +5,7 @@ test.describe('Editor Layout @engine', () => {
     await editor.load();
   });
 
-  test('default layout shows viewport, hierarchy, inspector panels', async ({ page, editor }) => {
+  test('default layout shows viewport, hierarchy, inspector panels', async ({ editor }) => {
     // Wait for layout to render
 
 
@@ -110,7 +110,7 @@ test.describe('Editor Layout @engine', () => {
     expect(sidebarBox!.x).toBeLessThan(100);
   });
 
-  test('viewport takes central position', async ({ page, editor }) => {
+  test('viewport takes central position', async ({ editor }) => {
 
 
     const canvas = editor.canvas;

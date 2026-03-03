@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET } from './route';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { listConfiguredProviders } from '@/lib/keys/resolver';
-import { makeUser } from '@/test/utils/apiTestUtils';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver');
@@ -15,7 +15,7 @@ describe('GET /api/keys', () => {
   it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: false,
-      response: new Response('Unauthorized', { status: 401 }),
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
     const res = await GET();
@@ -25,7 +25,7 @@ describe('GET /api/keys', () => {
   it('returns 403 if tier is starter', async () => {
     const user = makeUser({ tier: 'starter' });
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(assertTier).mockReturnValue(new Response('Upgrade required', { status: 403 }));
+    vi.mocked(assertTier).mockReturnValue(mockNextResponse({ error: 'Upgrade required' }, { status: 403 }));
 
     const res = await GET();
     expect(res.status).toBe(403);
@@ -39,7 +39,7 @@ describe('GET /api/keys', () => {
     const mockProviders = [
       { provider: 'openai', createdAt: new Date('2026-01-01T00:00:00Z') },
     ];
-    vi.mocked(listConfiguredProviders).mockResolvedValue(mockProviders as any);
+    vi.mocked(listConfiguredProviders).mockResolvedValue(mockProviders as Awaited<ReturnType<typeof listConfiguredProviders>>);
 
     const res = await GET();
     const data = await res.json();

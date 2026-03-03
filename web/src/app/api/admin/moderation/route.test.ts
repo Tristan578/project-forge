@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET, POST } from './route';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
-import { makeUser } from '@/test/utils/apiTestUtils';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
@@ -17,7 +17,7 @@ describe('/api/admin/moderation', () => {
     it('returns 401 if unauthenticated', async () => {
       vi.mocked(authenticateRequest).mockResolvedValue({
         ok: false,
-        response: new Response('Unauthorized', { status: 401 }),
+        response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
       });
 
       const req = new NextRequest('http://localhost/api/admin/moderation');
@@ -28,7 +28,7 @@ describe('/api/admin/moderation', () => {
     it('returns 403 if not admin', async () => {
       const user = makeUser();
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-      vi.mocked(assertAdmin).mockReturnValue(new Response('Forbidden', { status: 403 }));
+      vi.mocked(assertAdmin).mockReturnValue(mockNextResponse({ error: 'Forbidden' }, { status: 403 }));
 
       const req = new NextRequest('http://localhost/api/admin/moderation');
       const res = await GET(req);
@@ -60,7 +60,7 @@ describe('/api/admin/moderation', () => {
         offset: vi.fn().mockResolvedValue(mockComments),
       };
 
-      vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(chainMock) } as any);
+      vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(chainMock) } as unknown as ReturnType<typeof getDb>);
 
       const req = new NextRequest('http://localhost/api/admin/moderation?limit=10&offset=0');
       const res = await GET(req);
@@ -77,7 +77,7 @@ describe('/api/admin/moderation', () => {
     it('returns 403 if not admin', async () => {
       const user = makeUser();
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-      vi.mocked(assertAdmin).mockReturnValue(new Response('Forbidden', { status: 403 }));
+      vi.mocked(assertAdmin).mockReturnValue(mockNextResponse({ error: 'Forbidden' }, { status: 403 }));
 
       const req = new NextRequest('http://localhost/api/admin/moderation', {
         method: 'POST',
@@ -106,7 +106,7 @@ describe('/api/admin/moderation', () => {
       vi.mocked(assertAdmin).mockReturnValue(null);
 
       const mockUpdateChain = { set: vi.fn().mockReturnThis(), where: vi.fn().mockResolvedValue(true) };
-      vi.mocked(getDb).mockReturnValue({ update: vi.fn().mockReturnValue(mockUpdateChain) } as any);
+      vi.mocked(getDb).mockReturnValue({ update: vi.fn().mockReturnValue(mockUpdateChain) } as unknown as ReturnType<typeof getDb>);
 
       const req = new NextRequest('http://localhost/api/admin/moderation', {
         method: 'POST',
@@ -126,7 +126,7 @@ describe('/api/admin/moderation', () => {
       vi.mocked(assertAdmin).mockReturnValue(null);
 
       const mockDeleteChain = { where: vi.fn().mockResolvedValue(true) };
-      vi.mocked(getDb).mockReturnValue({ delete: vi.fn().mockReturnValue(mockDeleteChain) } as any);
+      vi.mocked(getDb).mockReturnValue({ delete: vi.fn().mockReturnValue(mockDeleteChain) } as unknown as ReturnType<typeof getDb>);
 
       const req = new NextRequest('http://localhost/api/admin/moderation', {
         method: 'POST',

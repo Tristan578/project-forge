@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { makeUser } from '@/test/utils/apiTestUtils';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/auth/api-auth', () => ({
   authenticateRequest: vi.fn(),
@@ -15,11 +15,10 @@ describe('GET /api/billing/status', () => {
   it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: false,
-      response: new Response('Unauthorized', { status: 401 }),
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const req = new Request('http://localhost/api/billing/status');
-    const res = await GET(req);
+    const res = await GET();
 
     expect(res.status).toBe(401);
   });
@@ -38,8 +37,7 @@ describe('GET /api/billing/status', () => {
       ctx: { clerkId: 'clerk_123', user },
     });
 
-    const req = new Request('http://localhost/api/billing/status');
-    const res = await GET(req);
+    const res = await GET();
     const data = await res.json();
 
     expect(res.status).toBe(200);
@@ -67,8 +65,7 @@ describe('GET /api/billing/status', () => {
       ctx: { clerkId: 'clerk_123', user },
     });
 
-    const req = new Request('http://localhost/api/billing/status');
-    const res = await GET(req);
+    const res = await GET();
     const data = await res.json();
 
     expect(res.status).toBe(200);

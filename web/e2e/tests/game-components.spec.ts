@@ -23,8 +23,8 @@ test.describe('Game Components @engine', () => {
     await _editor.selectEntity('Cube');
 
     // Look for add component button or game component section
-    const sectionHeader = page.getByText(/game.*component|component/i, { exact: false }).first();
-    const addBtn = page.locator('button').filter({ hasText: /add.*component|game.*component/i }).first();
+    const _sectionHeader = page.getByText(/game.*component|component/i, { exact: false }).first();
+    const _addBtn = page.locator('button').filter({ hasText: /add.*component|game.*component/i }).first();
     
     // Graceful check — components may be hidden until needed, wait for either or neither?
     // Let's just assume the inspector is ready once Transform is visible

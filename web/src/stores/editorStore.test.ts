@@ -11,6 +11,7 @@ import { useEditorStore, setCommandDispatcher } from './editorStore';
 import {
   createMockDispatch,
   makeSceneGraph,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for future test cases
   makeEntity,
   makeTransform,
   makeMaterialData,

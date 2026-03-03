@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET } from './route';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
-import { makeUser } from '@/test/utils/apiTestUtils';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
@@ -15,7 +15,7 @@ describe('GET /api/admin/economics', () => {
   it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: false,
-      response: new Response('Unauthorized', { status: 401 }),
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
     const res = await GET();
@@ -25,7 +25,7 @@ describe('GET /api/admin/economics', () => {
   it('returns 403 if not admin', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(assertAdmin).mockReturnValue(new Response('Forbidden', { status: 403 }));
+    vi.mocked(assertAdmin).mockReturnValue(mockNextResponse({ error: 'Forbidden' }, { status: 403 }));
 
     const res = await GET();
     expect(res.status).toBe(403);
@@ -36,30 +36,18 @@ describe('GET /api/admin/economics', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_123', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const mockDb = {
-      select: vi.fn().mockReturnThis(),
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      groupBy: vi.fn().mockReturnThis(),
-      orderBy: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([
-        { actionType: 'chat', provider: 'openai', totalCost: 100, totalTokens: 1000, count: 5 }
-      ]),
-    };
-    
-    // First select is userStats, which doesn't chain further than .from() normally, but we chained limit() above. 
-    // Let's make a more resilient chain mock.
+    // Make a resilient chain mock for each select call
     const chainMock = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       groupBy: vi.fn().mockReturnThis(),
       orderBy: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue([]),
-      then: function(resolve: any) { resolve([]); },
+      then: function(resolve: (v: unknown) => void) { resolve([]); },
     };
     
     // For userStats we need to return an array with one element
-    const userStatsChain = { ...chainMock, then: function(resolve: any) { resolve([{ totalUsers: 10 }]); } };
+    const userStatsChain = { ...chainMock, then: function(resolve: (v: unknown) => void) { resolve([{ totalUsers: 10 }]); } };
     
     vi.mocked(getDb).mockReturnValue({
       select: vi.fn()
@@ -68,7 +56,7 @@ describe('GET /api/admin/economics', () => {
         .mockReturnValueOnce(chainMock)      // recentTransactions
         .mockReturnValueOnce(chainMock)      // tokenConfigs
         .mockReturnValueOnce(chainMock)      // tierConfigs
-    } as any);
+    } as unknown as ReturnType<typeof getDb>);
 
     const res = await GET();
     const data = await res.json();

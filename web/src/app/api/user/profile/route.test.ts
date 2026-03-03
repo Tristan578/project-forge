@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { GET, PUT } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { updateDisplayName } from '@/lib/auth/user-service';
-import { makeUser } from '@/test/utils/apiTestUtils';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
@@ -17,7 +17,7 @@ describe('/api/user/profile', () => {
     it('returns 401 if unauthenticated', async () => {
       vi.mocked(authenticateRequest).mockResolvedValue({
         ok: false,
-        response: new Response('Unauthorized', { status: 401 }),
+        response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
       });
 
       const res = await GET();
@@ -47,7 +47,7 @@ describe('/api/user/profile', () => {
     it('returns 401 if unauthenticated', async () => {
       vi.mocked(authenticateRequest).mockResolvedValue({
         ok: false,
-        response: new Response('Unauthorized', { status: 401 }),
+        response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
       });
 
       const req = new NextRequest('http://localhost/api/user/profile', { 
@@ -87,7 +87,7 @@ describe('/api/user/profile', () => {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
       
       const updatedUser = { ...user, displayName: 'Updated Name' };
-      vi.mocked(updateDisplayName).mockResolvedValue(updatedUser as any);
+      vi.mocked(updateDisplayName).mockResolvedValue(updatedUser as Awaited<ReturnType<typeof updateDisplayName>>);
 
       const req = new NextRequest('http://localhost/api/user/profile', { 
         method: 'PUT',

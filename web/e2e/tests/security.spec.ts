@@ -24,7 +24,7 @@ test.describe('Security & Auth Flow', () => {
 
   test('redirects unauthenticated users from protected routes to login', async ({ page }) => {
     // Attempt to access a protected route directly
-    const response = await page.goto('/dashboard');
+    const _response = await page.goto('/dashboard');
     
     // Wait for the redirect to happen (Clerk handles this client-side or middleware)
     await page.waitForURL((url) => url.toString().includes('sign-in') || url.toString().includes('login'), { timeout: 10000 });

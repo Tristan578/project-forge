@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import { NextResponse } from 'next/server';
 import type { User } from '@/lib/db/schema';
 
 /**
@@ -41,4 +42,16 @@ export function mockFetchResponse(data: unknown, status = 200) {
  */
 export function mockFetchError(message = 'Network Error') {
   return vi.fn().mockRejectedValue(new Error(message));
+}
+
+/**
+ * Creates a properly-typed NextResponse for use in mock return values.
+ * NextResponse.json() returns Response at the type level, so we construct
+ * a real NextResponse to satisfy TypeScript's strict checks.
+ */
+export function mockNextResponse(body: unknown, init?: { status?: number }): NextResponse {
+  return new NextResponse(JSON.stringify(body), {
+    status: init?.status ?? 200,
+    headers: { 'content-type': 'application/json' },
+  });
 }

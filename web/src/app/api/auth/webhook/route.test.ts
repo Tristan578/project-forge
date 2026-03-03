@@ -12,11 +12,11 @@ vi.mock('svix', () => ({
 }));
 
 vi.mock('next/headers', () => ({
-  headers: vi.fn().mockResolvedValue(new Map([
-    ['svix-id', 'svix_id_mock'],
-    ['svix-timestamp', 'svix_timestamp_mock'],
-    ['svix-signature', 'svix_signature_mock'],
-  ])),
+  headers: vi.fn().mockResolvedValue(new Headers({
+    'svix-id': 'svix_id_mock',
+    'svix-timestamp': 'svix_timestamp_mock',
+    'svix-signature': 'svix_signature_mock',
+  })),
 }));
 
 describe('POST /api/auth/webhook', () => {
@@ -39,7 +39,7 @@ describe('POST /api/auth/webhook', () => {
   });
 
   it('returns 400 if svix headers are missing', async () => {
-    vi.mocked(await import('next/headers')).headers.mockResolvedValueOnce(new Map());
+    vi.mocked(await import('next/headers')).headers.mockResolvedValueOnce(new Headers());
     const req = new Request('http://localhost/api/auth/webhook', { method: 'POST' });
     const res = await POST(req);
     expect(res.status).toBe(400);

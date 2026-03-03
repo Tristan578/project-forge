@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { deleteUserAccount } from '@/lib/auth/user-service';
-import { makeUser } from '@/test/utils/apiTestUtils';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/auth/user-service');
@@ -15,7 +15,7 @@ describe('POST /api/user/delete', () => {
   it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: false,
-      response: new Response('Unauthorized', { status: 401 }),
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
     const res = await POST();

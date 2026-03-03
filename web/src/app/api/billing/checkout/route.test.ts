@@ -10,8 +10,8 @@ vi.hoisted(() => {
 
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { makeUser } from '@/test/utils/apiTestUtils';
+import { rateLimit } from '@/lib/rateLimit';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 import { getDb } from '@/lib/db/client';
 
 vi.mock('@/lib/auth/api-auth');
@@ -54,7 +54,7 @@ describe('POST /api/billing/checkout', () => {
     });
 
     const mockDb = { update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), where: vi.fn().mockResolvedValue(true) };
-    vi.mocked(getDb).mockReturnValue(mockDb as any);
+    vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
   });
 
   afterEach(() => {
@@ -64,7 +64,7 @@ describe('POST /api/billing/checkout', () => {
   it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: false,
-      response: new Response('Unauthorized', { status: 401 }),
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
     const req = new Request('http://localhost/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier: 'creator' }) });
