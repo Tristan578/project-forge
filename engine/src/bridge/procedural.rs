@@ -1,7 +1,7 @@
 //! Procedural mesh generation and CSG operations.
 
 use bevy::prelude::*;
-use bevy::render::mesh::Mesh;
+use bevy::mesh::Mesh;
 use crate::core::{
     self,
     entity_id::{EntityId, EntityName, EntityVisible},
@@ -55,7 +55,7 @@ pub(super) fn apply_csg_requests(
     csg_data_query: Query<(&EntityId, Option<&core::csg::CsgMeshData>)>,
     mut history: ResMut<HistoryStack>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
     for request in pending.csg_requests.drain(..) {
         let operation_name = request.operation;
@@ -288,7 +288,7 @@ pub(super) fn apply_extrude_requests(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
 ) {
     use crate::core::history::UndoableAction;
@@ -323,7 +323,7 @@ pub(super) fn apply_extrude_requests(
 
         // Extract mesh data for snapshot
         let (positions, normals, uvs, indices) = {
-            use bevy::render::mesh::VertexAttributeValues;
+            use bevy::mesh::VertexAttributeValues;
             let Some(pos_attr) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
                 tracing::warn!("Extrude mesh missing POSITION attribute");
                 continue;
@@ -354,8 +354,8 @@ pub(super) fn apply_extrude_requests(
                 _ => vec![],
             };
             let indices: Vec<u32> = match indices {
-                bevy::render::mesh::Indices::U32(v) => v.clone(),
-                bevy::render::mesh::Indices::U16(v) => v.iter().map(|i| *i as u32).collect(),
+                bevy::mesh::Indices::U32(v) => v.clone(),
+                bevy::mesh::Indices::U16(v) => v.iter().map(|i| *i as u32).collect(),
             };
             (positions, normals, uvs, indices)
         };
@@ -436,7 +436,7 @@ pub(super) fn apply_lathe_requests(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
 ) {
     use crate::core::history::UndoableAction;
@@ -448,7 +448,7 @@ pub(super) fn apply_lathe_requests(
 
         // Extract mesh data for snapshot
         let (positions, normals, uvs, indices) = {
-            use bevy::render::mesh::VertexAttributeValues;
+            use bevy::mesh::VertexAttributeValues;
             let Some(pos_attr) = mesh.attribute(Mesh::ATTRIBUTE_POSITION) else {
                 tracing::warn!("Lathe mesh missing POSITION attribute");
                 continue;
@@ -479,8 +479,8 @@ pub(super) fn apply_lathe_requests(
                 _ => vec![],
             };
             let indices: Vec<u32> = match indices {
-                bevy::render::mesh::Indices::U32(v) => v.clone(),
-                bevy::render::mesh::Indices::U16(v) => v.iter().map(|i| *i as u32).collect(),
+                bevy::mesh::Indices::U32(v) => v.clone(),
+                bevy::mesh::Indices::U16(v) => v.iter().map(|i| *i as u32).collect(),
             };
             (positions, normals, uvs, indices)
         };

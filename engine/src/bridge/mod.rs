@@ -138,8 +138,7 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
     // This allows loading glTF assets from decoded in-memory bytes via "memory://path.glb".
     app.register_asset_source(
         "memory",
-        bevy::asset::io::AssetSourceBuilder::default()
-            .with_reader(move || {
+        bevy::asset::io::AssetSourceBuilder::new(move || {
                 Box::new(bevy::asset::io::memory::MemoryAssetReader {
                     root: reader_dir.clone(),
                 })
@@ -274,7 +273,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<QualitySettings>()
             .init_resource::<SkyboxHandles>()
             .init_resource::<core::project_type::ProjectType>()
-            .add_event::<SelectionChangedEvent>();
+            .add_message::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
         app.init_resource::<PickBuffer>();

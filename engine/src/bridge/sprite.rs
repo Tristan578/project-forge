@@ -14,7 +14,7 @@
 
 use bevy::prelude::*;
 use bevy::image::{Image, TextureAtlasLayout};
-use bevy::render::camera::{ClearColorConfig, Projection};
+// ClearColorConfig and Projection are in bevy::prelude::*
 use bevy::sprite::Anchor;
 
 use crate::core::{
@@ -50,18 +50,19 @@ pub struct TilemapRenderState {
 #[derive(Component)]
 pub struct AtlasLayoutHandle(pub Handle<TextureAtlasLayout>);
 
-/// Convert our SpriteAnchor enum to Bevy's Anchor enum.
+/// Convert our SpriteAnchor enum to Bevy's Anchor constant.
+/// In Bevy 0.17+, Anchor variants are UPPER_CASE associated constants.
 fn to_bevy_anchor(anchor: &SpriteAnchor) -> Anchor {
     match anchor {
-        SpriteAnchor::Center => Anchor::Center,
-        SpriteAnchor::TopLeft => Anchor::TopLeft,
-        SpriteAnchor::TopCenter => Anchor::TopCenter,
-        SpriteAnchor::TopRight => Anchor::TopRight,
-        SpriteAnchor::MiddleLeft => Anchor::CenterLeft,
-        SpriteAnchor::MiddleRight => Anchor::CenterRight,
-        SpriteAnchor::BottomLeft => Anchor::BottomLeft,
-        SpriteAnchor::BottomCenter => Anchor::BottomCenter,
-        SpriteAnchor::BottomRight => Anchor::BottomRight,
+        SpriteAnchor::Center => Anchor::CENTER,
+        SpriteAnchor::TopLeft => Anchor::TOP_LEFT,
+        SpriteAnchor::TopCenter => Anchor::TOP_CENTER,
+        SpriteAnchor::TopRight => Anchor::TOP_RIGHT,
+        SpriteAnchor::MiddleLeft => Anchor::CENTER_LEFT,
+        SpriteAnchor::MiddleRight => Anchor::CENTER_RIGHT,
+        SpriteAnchor::BottomLeft => Anchor::BOTTOM_LEFT,
+        SpriteAnchor::BottomCenter => Anchor::BOTTOM_CENTER,
+        SpriteAnchor::BottomRight => Anchor::BOTTOM_RIGHT,
     }
 }
 
@@ -177,6 +178,7 @@ pub(super) fn sync_sprite_rendering(
             .and_then(|s| s.texture_atlas.clone());
 
         // Build and insert/update the Bevy Sprite component
+        // In Bevy 0.17+, Anchor is a separate required component on Sprite.
         let bevy_sprite = Sprite {
             image: image_handle,
             color: Color::linear_rgba(
@@ -188,12 +190,12 @@ pub(super) fn sync_sprite_rendering(
             flip_x: sprite_data.flip_x,
             flip_y: sprite_data.flip_y,
             custom_size: sprite_data.custom_size.map(|s| Vec2::new(s[0], s[1])),
-            anchor: to_bevy_anchor(&sprite_data.anchor),
             texture_atlas: existing_atlas,
             ..default()
         };
 
-        commands.entity(entity).insert(bevy_sprite);
+        let anchor = to_bevy_anchor(&sprite_data.anchor);
+        commands.entity(entity).insert((bevy_sprite, anchor));
 
         // Update Z position based on sorting layer and order
         let target_z = z_from_sorting(sprite_data);
@@ -209,7 +211,7 @@ pub(super) fn emit_sprite_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &SpriteData), Changed<SpriteData>>,
     selection_query: Query<(&EntityId, Option<&SpriteData>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {
@@ -931,7 +933,7 @@ pub(super) fn emit_tilemap_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &TilemapData), Changed<TilemapData>>,
     selection_query: Query<(&EntityId, Option<&TilemapData>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {

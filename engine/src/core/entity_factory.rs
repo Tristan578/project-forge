@@ -134,7 +134,7 @@ pub fn apply_delete_requests(
     game_anim_query: Query<(&EntityId, Option<&super::game_components::GameComponents>, Option<&AnimationClipData>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
 ) {
     let mut deleted_any = false;
@@ -1329,7 +1329,7 @@ pub fn apply_light_updates(
 /// System that applies pending ambient light updates from the bridge.
 pub fn apply_ambient_light_updates(
     mut pending: ResMut<PendingCommands>,
-    mut ambient: ResMut<AmbientLight>,
+    mut ambient: ResMut<GlobalAmbientLight>,
 ) {
     for update in pending.ambient_light_updates.drain(..) {
         if let Some(color) = update.color {

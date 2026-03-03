@@ -1,7 +1,7 @@
 //! Bridge systems for edit mode (polygon modeling).
 
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, VertexAttributeValues};
+use bevy::mesh::{Indices, VertexAttributeValues};
 use crate::core::entity_id::EntityId;
 use crate::core::edit_mode::{EditModeData, SelectionMode};
 use crate::core::pending_commands::PendingCommands;

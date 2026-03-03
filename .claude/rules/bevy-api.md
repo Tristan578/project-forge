@@ -1,26 +1,60 @@
-# Bevy 0.16 API & ECS Patterns
+# Bevy 0.18 API & ECS Patterns
 
-## Migration from 0.14
+## Migration from 0.16 to 0.18
+
+### Bevy 0.17 changes (render crate split + event rename)
+- **Events renamed**: `EventWriter<T>` → `MessageWriter<T>`, `EventReader<T>` → `MessageReader<T>`
+- **Event registration**: `.add_event::<T>()` → `.add_message::<T>()`
+- **Event derive**: `#[derive(Event)]` → `#[derive(Message)]` (for buffered events)
+- **Observer signatures**: `Trigger<T>` → `On<T>` in observer function params
+- **Picking events**: `Pointer<Pressed>` → `Pointer<Press>`, `trigger.target()` → `trigger.event_target()`
+- **Macro rename**: `weak_handle!` → `uuid_handle!`
+- **Sprite Anchor split**: `anchor` removed from `Sprite` struct; `Anchor` is now a separate required component. Use `(Sprite { .. }, Anchor::CENTER)` tuple. Anchor variants are UPPER_CASE constants: `Anchor::CENTER`, `Anchor::TOP_LEFT`, etc.
+- **Render crate split**: `bevy_render` split into `bevy_mesh`, `bevy_camera`, `bevy_shader`, `bevy_image`, `bevy_light`
+
+### Bevy 0.18 changes
+- **AmbientLight**: `AmbientLight` → `GlobalAmbientLight`
+- **Feature renames**: `bevy_mesh_picking_backend` → `mesh_picking`, `animation` → `gltf_animation`, `zstd` → `zstd_rust`
+- **Post-processing split**: `bevy_core_pipeline` split into `bevy_post_process`, `bevy_anti_alias`
+- **AssetSourceBuilder**: No more `::default()`. Use `AssetSourceBuilder::new(reader_fn)` or `::platform_default()`
+- **set_index_buffer**: Dropped offset parameter. `pass.set_index_buffer(slice, format)` (2 args, not 3)
+- **reinterpret_stacked_2d_as_array**: Now returns `Result`, must handle or discard with `let _ =`
+- **Assets::insert**: Now returns `Result`, must handle or discard with `let _ =`
+
+### Import Path Changes (0.16 → 0.18)
+
+| Old Path | New Path |
+|----------|----------|
+| `bevy::render::mesh::{Mesh, Indices, VertexAttributeValues}` | `bevy::mesh::{Mesh, Indices, VertexAttributeValues}` |
+| `bevy::render::render_resource::PrimitiveTopology` | `bevy::mesh::PrimitiveTopology` |
+| `bevy::render::render_asset::RenderAssetUsages` | `bevy::asset::RenderAssetUsages` |
+| `bevy::render::render_resource::{Shader, ShaderRef}` | `bevy::shader::{Shader, ShaderRef}` |
+| `bevy::render::render_resource::AsBindGroup` | `bevy::render::render_resource::AsBindGroup` (unchanged) |
+| `bevy::render::camera::{ClearColorConfig, Projection, ScalingMode}` | `bevy::prelude::*` (in prelude) |
+| `bevy::core_pipeline::bloom::*` | `bevy::post_process::bloom::*` (needs `bevy_post_process` feature) |
+| `bevy::core_pipeline::contrast_adaptive_sharpening::*` | `bevy::anti_alias::contrast_adaptive_sharpening::*` (needs `bevy_anti_alias` feature) |
+| `bevy::core_pipeline::post_process::ChromaticAberration` | `bevy::post_process::effect_stack::ChromaticAberration` |
+| `bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection}` | `bevy::render::view::*` (unchanged) |
+| `bevy::pbr::ScreenSpaceAmbientOcclusion` | `bevy::pbr::ScreenSpaceAmbientOcclusion` (unchanged) |
+
+### Required Bevy Features (for default-features = false)
+
+Must enable these features for import paths to work through `bevy::`:
+- `bevy_post_process` — for `bevy::post_process::bloom::*`, ChromaticAberration
+- `bevy_anti_alias` — for `bevy::anti_alias::contrast_adaptive_sharpening::*`
+- `bevy_core_pipeline`, `bevy_render`, `bevy_pbr`, `bevy_sprite`, `bevy_asset`, `bevy_gizmos`, `bevy_log`, `bevy_picking`, `bevy_gltf`, `bevy_scene`, `bevy_winit`
+
+## Retained from 0.14→0.16 Migration
 
 - **Required components** replace bundles: `Mesh3d(handle)` + `MeshMaterial3d(handle)` + `Transform` instead of `PbrBundle`
 - **Picking is built-in**: `bevy_picking` feature enables it; meshes are pickable by default (no `PickableBundle`)
 - **Hierarchy**: `ChildOf` replaces `Parent`; use `child_of.parent()` instead of `parent.get()`
-- **Events**: `EventWriter::write()` replaces `send()`
 - **Despawn**: `entity.despawn()` is recursive by default (no `despawn_recursive()`)
 - **Queries**: `query.single()` / `query.single_mut()` replace `get_single()` / `get_single_mut()`
 - **Fog**: `DistanceFog` replaces `FogSettings`
 - **MSAA**: Component on camera entity, not a global resource
 - **Children iteration**: Yields `Entity` directly (no dereference needed)
-- **Picking events**: Use `Pointer<Pressed>` NOT `Pointer<Click>`. `Down`->`Pressed`, `Up`->`Released`
-
-## Feature Names
-
-- Use `bevy_picking` (not `mesh_picking`)
-- Use `bevy_mesh_picking_backend` for `MeshPickingPlugin` (explicit `app.add_plugins(MeshPickingPlugin)`)
-- Use `bevy_log` when Bevy has `default-features = false`
-- Use `"animation"` (NOT `"bevy_animation"`) in Cargo.toml — only `"animation"` propagates to `bevy_gltf` via `bevy_internal`, enabling `Gltf::named_animations`
 - `Handle<T>` no longer implements `Component` — create wrapper newtypes (e.g. `GltfSourceHandle(pub Handle<Gltf>)`)
-- `AnimationTransitions` — import via `bevy::animation::transition::AnimationTransitions` (private from `bevy::animation`)
 
 ## ECS System Limits
 
@@ -36,24 +70,26 @@
 - **Bloom:** Always use `..Default::default()` when constructing (has `scale` field)
 - **AudioData `bus` field:** Added in Phase A. All construction sites must include `bus`
 - **Feature-gated particles:** `bevy_hanabi` only under `webgpu` feature. Use `#[cfg(feature = "webgpu")]` for GPU rendering. Data types always compiled
-- **StandardMaterial clearcoat:** Scalar `clearcoat` and `clearcoat_perceptual_roughness` exist. Texture fields (`clearcoat_texture`, etc.) do NOT exist in Bevy 0.16
+- **StandardMaterial clearcoat:** Scalar `clearcoat` and `clearcoat_perceptual_roughness` exist
 
 ## Library-Specific
 
-### bevy_rapier3d v0.30
+### bevy_rapier3d v0.33
 - `RapierConfiguration` is a **Component** (not Resource) — use `Query<&mut RapierConfiguration>`
 - `DebugRenderContext` is a **Resource** (not Component) — use `Option<ResMut<DebugRenderContext>>`
 - Never enable `parallel` feature (rayon panics on WASM)
 - Skip `picking-backend` (conflicts with bevy_picking)
 
-### bevy_panorbit_camera v0.28
+### bevy_panorbit_camera v0.34
 - Uses `yaw`/`pitch`/`target_yaw`/`target_pitch` — NO `alpha`/`beta` fields
 - Smoothness range is 0.0-1.0 (NOT unbounded)
 
-### transform-gizmo-bevy v0.8
+### transform-gizmo-bevy v0.9 (local fork)
+- Local fork at `.transform-gizmo-fork/` patched for Bevy 0.18
+- Path dependency: `path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"`
 - Needs default features (`gizmo_picking_backend` + `mouse_interaction`). Don't set `default-features = false`
 
-### bevy_hanabi 0.16 (GPU Particles)
+### bevy_hanabi 0.18 (GPU Particles)
 - `EffectAsset::new(capacity, spawner, module)` + `.init()/.update()/.render()` builder
 - `ExprWriter::new()` -> `writer.lit(val).uniform(other).expr()`. Call `finish()` AFTER all expressions
 - `SpawnerSettings::rate(f32.into())` / `::once()` / `::burst()`

@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::render::mesh::VertexAttributeValues;
+use bevy::mesh::VertexAttributeValues;
 use crate::core::{
     entity_id::EntityId,
     entity_factory,
@@ -711,7 +711,7 @@ pub(super) fn emit_skeleton2d_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &SkeletonData2d, Option<&SkeletonEnabled2d>), Changed<SkeletonData2d>>,
     selection_query: Query<(&EntityId, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {

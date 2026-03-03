@@ -5,8 +5,7 @@
 //! Brownian motion (Fbm). Height-based vertex coloring provides visual feedback.
 
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, Mesh};
-use bevy::render::render_resource::PrimitiveTopology;
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use noise::{Fbm, MultiFractal, NoiseFn, Perlin, SuperSimplex, Value};
 use serde::{Deserialize, Serialize};
 
@@ -222,7 +221,7 @@ pub fn build_terrain_mesh(heights: &[f32], resolution: u32, size: f32) -> Mesh {
 
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
-        bevy::render::render_asset::RenderAssetUsages::default(),
+        bevy::asset::RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);

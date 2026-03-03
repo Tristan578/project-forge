@@ -312,8 +312,6 @@ pub struct Physics2dPlugin;
 
 impl Plugin for Physics2dPlugin {
     fn build(&self, app: &mut App) {
-        use super::engine_mode::PlaySystemSet;
-
         app.add_plugins(RapierPhysicsPlugin::<NoUserData>::default())
             .add_plugins(RapierDebugRenderPlugin::default())
             .init_resource::<Gravity2d>()

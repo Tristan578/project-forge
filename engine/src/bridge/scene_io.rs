@@ -33,7 +33,7 @@ pub(super) fn apply_scene_export(
     mut pending: ResMut<PendingCommands>,
     scene_name: Res<SceneName>,
     env: Res<EnvironmentSettings>,
-    ambient: Res<AmbientLight>,
+    ambient: Res<GlobalAmbientLight>,
     input_map: Res<InputMap>,
     asset_registry: Res<AssetRegistry>,
     post_processing_settings: Res<PostProcessingSettings>,
@@ -169,7 +169,7 @@ pub(super) fn apply_scene_load(
     mut commands: Commands,
     mut scene_name: ResMut<SceneName>,
     mut env: ResMut<EnvironmentSettings>,
-    mut ambient: ResMut<AmbientLight>,
+    mut ambient: ResMut<GlobalAmbientLight>,
     mut input_map: ResMut<InputMap>,
     mut history: ResMut<HistoryStack>,
     mut asset_registry: ResMut<AssetRegistry>,
@@ -179,7 +179,7 @@ pub(super) fn apply_scene_load(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
     let requests: Vec<_> = pending.scene_load_requests.drain(..).collect();
 
@@ -302,7 +302,7 @@ pub(super) fn apply_new_scene(
     mut commands: Commands,
     mut scene_name: ResMut<SceneName>,
     mut env: ResMut<EnvironmentSettings>,
-    mut ambient: ResMut<AmbientLight>,
+    mut ambient: ResMut<GlobalAmbientLight>,
     mut input_map: ResMut<InputMap>,
     mut history: ResMut<HistoryStack>,
     mut asset_registry: ResMut<AssetRegistry>,
@@ -310,7 +310,7 @@ pub(super) fn apply_new_scene(
     mut bus_config: ResMut<AudioBusConfig>,
     existing_entities: Query<Entity, (With<EntityId>, Without<entity_factory::Undeletable>)>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
     if pending.new_scene_requests.is_empty() {
         return;
@@ -539,7 +539,7 @@ pub(super) fn apply_texture_load(
     use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource};
     use base64::Engine as _;
     use bevy::image::{ImageType, CompressedImageFormats, ImageSampler};
-    use bevy::render::render_asset::RenderAssetUsages;
+    use bevy::asset::RenderAssetUsages;
 
     for request in pending.texture_load_requests.drain(..) {
         let asset_id = uuid::Uuid::new_v4().to_string();

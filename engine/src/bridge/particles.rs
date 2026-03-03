@@ -157,7 +157,7 @@ pub(super) fn emit_particle_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &ParticleData, Option<&ParticleEnabled>), Changed<ParticleData>>,
     selection_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {

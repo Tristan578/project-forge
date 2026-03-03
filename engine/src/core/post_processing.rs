@@ -5,9 +5,9 @@
 //! ContrastAdaptiveSharpening) via a system in bridge/mod.rs.
 
 use bevy::prelude::*;
-use bevy::core_pipeline::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
-use bevy::core_pipeline::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
-use bevy::core_pipeline::post_process::ChromaticAberration;
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
+use bevy::anti_alias::contrast_adaptive_sharpening::ContrastAdaptiveSharpening;
+use bevy::post_process::effect_stack::ChromaticAberration;
 use bevy::render::view::{ColorGrading, ColorGradingGlobal, ColorGradingSection};
 use serde::{Serialize, Deserialize};
 

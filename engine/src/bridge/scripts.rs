@@ -150,7 +150,7 @@ pub(super) fn emit_script_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &ScriptData), Changed<ScriptData>>,
     selection_query: Query<(&EntityId, Option<&ScriptData>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {

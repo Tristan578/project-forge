@@ -64,7 +64,7 @@ pub fn setup_scene(
     ));
 
     // Ambient light for base illumination (important for WebGL2 PBR)
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 300.0,
         affects_lightmapped_meshes: true,

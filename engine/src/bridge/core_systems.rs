@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy::input::ButtonInput;
 use bevy::input::keyboard::KeyCode;
 use bevy::picking::pointer::PointerButton;
-use bevy::picking::events::Pressed;
+use bevy::picking::events::Press;
 use bevy::ecs::system::ParamSet;
 
 use crate::core::entity_id::{EntityId, EntityName, EntityVisible};
@@ -94,7 +94,7 @@ pub(super) fn apply_mode_change_requests(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
     let requests: Vec<ModeChangeRequest> = pending.mode_change_requests.drain(..).collect();
     for request in requests {
@@ -181,7 +181,7 @@ pub(super) fn apply_selection_requests(
     mut pending: ResMut<PendingCommands>,
     query: Query<(Entity, &EntityId, Option<&EntityName>)>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
     for request in pending.selection_requests.drain(..) {
         // Find the entity by ID
@@ -249,7 +249,7 @@ pub(super) fn emit_transform_on_selection(
 /// press+release on the same entity, which is unreliable in WASM.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn handle_picking_pressed(
-    trigger: Trigger<Pointer<Pressed>>,
+    trigger: On<Pointer<Press>>,
     query: Query<(&EntityId, Option<&EntityName>)>,
     mut pick_buffer: ResMut<PickBuffer>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -261,7 +261,7 @@ pub(super) fn handle_picking_pressed(
         return;
     }
 
-    let entity = trigger.target();
+    let entity = trigger.event_target();
 
     if let Ok((entity_id, entity_name)) = query.get(entity) {
         pick_buffer.hits.push(PickHit {
@@ -280,7 +280,7 @@ pub(super) fn handle_picking_pressed(
 pub(super) fn process_pick_buffer(
     mut pick_buffer: ResMut<PickBuffer>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
     if pick_buffer.hits.is_empty() {
         return;
@@ -312,7 +312,7 @@ pub(super) fn process_pick_buffer(
 /// System that emits selection events to JavaScript when selection changes.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn emit_selection_events(
-    mut events: EventReader<SelectionChangedEvent>,
+    mut events: MessageReader<SelectionChangedEvent>,
 ) {
     for event in events.read() {
         events::emit_selection_changed(
@@ -468,7 +468,7 @@ pub(super) fn apply_pending_visibility(
 pub(super) fn apply_pending_clear_selection(
     mut pending: ResMut<PendingCommands>,
     mut selection: ResMut<Selection>,
-    mut selection_events: EventWriter<SelectionChangedEvent>,
+    mut selection_events: MessageWriter<SelectionChangedEvent>,
 ) {
     for _ in pending.clear_selection_requests.drain(..) {
         selection.clear();

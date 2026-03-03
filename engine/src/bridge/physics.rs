@@ -562,7 +562,7 @@ pub(super) fn handle_physics2d_query(
 /// System that reads collision events from Rapier and emits them to JS.
 /// Runs always (mode-gated internally by checking if physics is active).
 pub(super) fn read_collision_events(
-    mut collision_events: EventReader<bevy_rapier3d::prelude::CollisionEvent>,
+    mut collision_events: MessageReader<bevy_rapier3d::prelude::CollisionEvent>,
     entity_id_query: Query<&EntityId>,
     engine_mode: Res<EngineMode>,
 ) {
@@ -586,7 +586,7 @@ pub(super) fn read_collision_events(
 /// System that reads 2D collision events from Rapier 2D and emits them to JS.
 /// Runs always (mode-gated internally by checking if physics is active).
 pub(super) fn read_collision_events_2d(
-    mut collision_events: EventReader<bevy_rapier2d::prelude::CollisionEvent>,
+    mut collision_events: MessageReader<bevy_rapier2d::prelude::CollisionEvent>,
     entity_id_query: Query<&EntityId>,
     engine_mode: Res<EngineMode>,
 ) {
@@ -657,7 +657,7 @@ pub(super) fn emit_physics_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &PhysicsData, Option<&PhysicsEnabled>), Changed<PhysicsData>>,
     selection_query: Query<(&EntityId, Option<&PhysicsData>, Option<&PhysicsEnabled>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {
@@ -684,7 +684,7 @@ pub(super) fn emit_joint_on_selection(
     selection: Res<Selection>,
     query: Query<(&EntityId, &crate::core::physics::JointData), Changed<crate::core::physics::JointData>>,
     selection_query: Query<(&EntityId, Option<&crate::core::physics::JointData>)>,
-    mut selection_events: EventReader<SelectionChangedEvent>,
+    mut selection_events: MessageReader<SelectionChangedEvent>,
 ) {
     // Emit on selection change
     for _event in selection_events.read() {

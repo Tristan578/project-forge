@@ -88,7 +88,7 @@ impl Default for SceneName {
 pub fn build_scene_file(
     scene_name: &str,
     env: &EnvironmentSettings,
-    ambient: &AmbientLight,
+    ambient: &GlobalAmbientLight,
     input_map: &InputMap,
     assets: HashMap<String, AssetMetadata>,
     post_processing: &PostProcessingSettings,

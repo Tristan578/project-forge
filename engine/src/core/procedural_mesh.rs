@@ -6,8 +6,7 @@
 //! - Combine: Merge multiple meshes into a single mesh
 
 use bevy::prelude::*;
-use bevy::render::mesh::{Indices, Mesh};
-use bevy::render::render_resource::PrimitiveTopology;
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
 use serde::{Deserialize, Serialize};
 
 /// Serializable mesh data for procedural results (stored in snapshots for undo/redo).
@@ -139,7 +138,7 @@ pub fn generate_extrude_mesh(shape: &ExtrudeShape, length: f32, _segments: u32) 
 
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
-        bevy::render::render_asset::RenderAssetUsages::default(),
+        bevy::asset::RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
@@ -215,7 +214,7 @@ pub fn generate_lathe_mesh(profile: &[[f32; 2]], segments: u32) -> Mesh {
         // Degenerate case: return an empty mesh
         return Mesh::new(
             PrimitiveTopology::TriangleList,
-            bevy::render::render_asset::RenderAssetUsages::default(),
+            bevy::asset::RenderAssetUsages::default(),
         );
     }
 
@@ -300,7 +299,7 @@ pub fn generate_lathe_mesh(profile: &[[f32; 2]], segments: u32) -> Mesh {
 
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
-        bevy::render::render_asset::RenderAssetUsages::default(),
+        bevy::asset::RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
@@ -321,7 +320,7 @@ pub fn combine_meshes_data(
 
     for (positions, normals, indices, transform) in meshes {
         let base_idx = combined_positions.len() as u32;
-        let world_matrix = transform.compute_matrix();
+        let world_matrix = transform.to_matrix();
         let normal_matrix = world_matrix.inverse().transpose();
 
         // Transform positions to world space
@@ -349,7 +348,7 @@ pub fn combine_meshes_data(
 pub fn rebuild_procedural_mesh(data: &ProceduralMeshData) -> Mesh {
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
-        bevy::render::render_asset::RenderAssetUsages::default(),
+        bevy::asset::RenderAssetUsages::default(),
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, data.positions.clone());
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, data.normals.clone());
