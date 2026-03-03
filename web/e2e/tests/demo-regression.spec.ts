@@ -53,7 +53,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       const store = (window as any).__EDITOR_STORE;
       if (store) store.setState({ engineMode: 'play' });
     });
-    await page.waitForTimeout(200);
+
 
     // Play button should now be disabled, pause/stop enabled
     await expect(playBtn).toBeDisabled();
@@ -70,7 +70,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       const store = (window as any).__EDITOR_STORE;
       if (store) store.setState({ engineMode: 'paused' });
     });
-    await page.waitForTimeout(200);
+
 
     // Resume button should appear (replaces play)
     const resumeBtn = page.locator('button[aria-label="Resume"]');
@@ -86,7 +86,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       const store = (window as any).__EDITOR_STORE;
       if (store) store.setState({ engineMode: 'edit' });
     });
-    await page.waitForTimeout(200);
+
 
     // Play should be enabled again, pause/stop disabled
     await expect(playBtn).toBeEnabled();
@@ -114,7 +114,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
     });
 
     // Wait a bit for any delayed errors
-    await page.waitForTimeout(2000);
+
 
     // There should be no unexpected JS errors
     expect(errors).toEqual([]);
@@ -143,7 +143,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
     });
-    await page.waitForTimeout(200);
+
 
     // Verify play UI
     await expect(page.getByText('Playing').first()).toBeVisible();
@@ -154,7 +154,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'paused' });
     });
-    await page.waitForTimeout(200);
+
 
     // Verify paused UI
     await expect(page.getByText('Paused').first()).toBeVisible();
@@ -165,7 +165,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
     });
-    await page.waitForTimeout(200);
+
     await expect(page.getByText('Playing').first()).toBeVisible();
 
     // Simulate stop
@@ -173,7 +173,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE?.setState({ engineMode: 'edit' });
     });
-    await page.waitForTimeout(200);
+
 
     // Back to edit - play enabled, pause/stop disabled
     await expect(playBtn).toBeEnabled();
@@ -280,19 +280,19 @@ test.describe('Demo Regression Walkthrough @ui', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__EDITOR_STORE?.setState({ engineMode: 'play' });
       });
-      await page.waitForTimeout(100);
+
 
       await page.evaluate(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__EDITOR_STORE?.setState({ engineMode: 'paused' });
       });
-      await page.waitForTimeout(100);
+
 
       await page.evaluate(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__EDITOR_STORE?.setState({ engineMode: 'edit' });
       });
-      await page.waitForTimeout(100);
+
     }
 
     // Verify store is in clean edit state

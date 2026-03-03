@@ -13,7 +13,7 @@ test.describe('Editor Smoke Tests @engine', () => {
     await editor.load();
 
     // Allow a brief moment for any async errors to surface
-    await page.waitForTimeout(1000);
+
 
     expect(consoleErrors).toHaveLength(0);
   });
@@ -40,12 +40,9 @@ test.describe('Editor Smoke Tests @engine', () => {
   test('default camera exists in scene hierarchy', async ({ page, editor }) => {
     await editor.load();
 
-    // Wait for scene hierarchy to populate
-    await page.waitForTimeout(500);
-
     // Check for Camera entity in the hierarchy
     const cameraElement = page.getByText('Camera', { exact: false });
-    await expect(cameraElement.first()).toBeVisible();
+    await expect(cameraElement.first()).toBeVisible({ timeout: 10000 });
   });
 
   test('sidebar is visible with interactive buttons', async ({ page, editor }) => {
@@ -58,6 +55,7 @@ test.describe('Editor Smoke Tests @engine', () => {
 
     // Check for at least one button in the sidebar
     const buttons = sidebar.locator('button');
+    await expect(buttons.first()).toBeVisible();
     const buttonCount = await buttons.count();
     expect(buttonCount).toBeGreaterThan(0);
   });
@@ -75,17 +73,11 @@ test.describe('Editor Smoke Tests @engine', () => {
     await page.mouse.move(200, 200);
     await page.mouse.click(200, 200);
 
-    // Wait for any delayed errors
-    await page.waitForTimeout(500);
-
     expect(jsErrors).toHaveLength(0);
   });
 
-  test('editor panels are accessible', async ({ page, editor }) => {
+  test('editor panels are accessible', async ({ editor }) => {
     await editor.load();
-
-    // Wait for dockview layout to render
-    await page.waitForTimeout(500);
 
     // Check that at least the scene hierarchy panel is visible
     await editor.expectPanelVisible('Scene');

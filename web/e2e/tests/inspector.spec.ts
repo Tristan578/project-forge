@@ -13,11 +13,10 @@ test.describe('Inspector Panel @engine', () => {
 
     // Select cube
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
     // Check Transform section is visible
     const transformHeading = page.getByText('Transform', { exact: false });
-    await expect(transformHeading.first()).toBeVisible();
+    await expect(transformHeading.first()).toBeVisible({ timeout: 5000 });
 
     // Check for X, Y, Z input labels
     const xLabel = page.getByText('X', { exact: true });
@@ -35,12 +34,12 @@ test.describe('Inspector Panel @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
     // Find position X input (first numeric input in Transform section)
-    const transformSection = page.locator('text=Transform').locator('..');
+    const transformSection = page.locator('text=Transform').locator('..').first();
     const inputs = transformSection.locator('input[type="text"]');
     const firstInput = inputs.first();
+    await expect(firstInput).toBeVisible({ timeout: 5000 });
 
     // Clear and type new value
     await firstInput.click();
@@ -48,7 +47,6 @@ test.describe('Inspector Panel @engine', () => {
 
     // Blur to trigger update
     await firstInput.blur();
-    await page.waitForTimeout(200);
 
     // Check that the value is retained
     await expect(firstInput).toHaveValue('5.5');
@@ -60,11 +58,10 @@ test.describe('Inspector Panel @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
     // Check for Material section
     const materialHeading = page.getByText('Material', { exact: false });
-    await expect(materialHeading.first()).toBeVisible();
+    await expect(materialHeading.first()).toBeVisible({ timeout: 5000 });
 
     // Check for common material properties (color, metallic, roughness, etc.)
     // At least one should be visible
@@ -79,7 +76,7 @@ test.describe('Inspector Panel @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Look for Physics section or toggle
     const physicsSection = page.locator('text=/Physics/i');
@@ -94,7 +91,7 @@ test.describe('Inspector Panel @engine', () => {
 
     // Toggle it
     await physicsToggle.click();
-    await page.waitForTimeout(200);
+
 
     // Verify state changed
     const nowChecked = await physicsToggle.isChecked();
@@ -107,7 +104,7 @@ test.describe('Inspector Panel @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(500);
+
 
     // Find inspector panel container
     const inspectorPanel = page.locator('[data-testid*="inspector"], .dv-panel').filter({ hasText: /Inspector|Transform/i }).first();
@@ -139,7 +136,7 @@ test.describe('Inspector Panel @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Look for info icons (usually svg or button with title/tooltip attribute)
     const infoIcons = page.locator('svg[class*="info"], button[title], [data-tooltip]');
@@ -150,7 +147,7 @@ test.describe('Inspector Panel @engine', () => {
 
       // Hover over it
       await firstIcon.hover();
-      await page.waitForTimeout(500);
+
 
       // Check for tooltip (could be title attribute or a tooltip element)
       const title = await firstIcon.getAttribute('title');
@@ -175,7 +172,7 @@ test.describe('Inspector Panel @engine', () => {
 
     // Select light
     await editor.selectEntity('Light');
-    await page.waitForTimeout(300);
+
 
     // Check for Light-specific properties (Intensity, Color, Range, etc.)
     const intensityControl = page.locator('text=/Intensity/i');
@@ -184,11 +181,11 @@ test.describe('Inspector Panel @engine', () => {
 
   test('no entity selected shows empty inspector', async ({ page, editor }) => {
     // Don't select anything, just load
-    await page.waitForTimeout(500);
+
 
     // Click empty space in viewport to deselect
     await editor.clickViewport(50, 50);
-    await page.waitForTimeout(300);
+
 
     // Inspector should either show placeholder text or be empty
     const inspectorPanel = page.locator('[data-testid*="inspector"], .dv-panel').filter({ hasText: /Inspector/i }).first();

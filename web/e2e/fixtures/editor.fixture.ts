@@ -41,8 +41,8 @@ export class EditorPage {
       () => (window as any).__FORGE_ENGINE_READY === true,
       { timeout: 45_000 }
     );
-    // Give dockview a moment to finish layout
-    await this.page.waitForTimeout(500);
+    // Wait for the editor layout container to be visible (canonical way to know hydration + layout is stable)
+    await this.page.locator('.dv-dockview-container').first().waitFor({ state: 'visible', timeout: 5000 });
   }
 
   /** Navigate to /dev without waiting for WASM (for @ui tests in CI) */

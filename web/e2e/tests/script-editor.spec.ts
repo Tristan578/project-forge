@@ -12,7 +12,7 @@ test.describe('Script Editor @engine', () => {
     await editor.load();
 
     // Wait for Monaco to initialize
-    await page.waitForTimeout(1500);
+
 
     // Look for Monaco editor container
     const monacoEditor = page.locator('.monaco-editor').first();
@@ -59,7 +59,7 @@ test.describe('Script Editor @engine', () => {
 
     // Select an entity (camera)
     await editor.selectEntity('Camera');
-    await page.waitForTimeout(500);
+
 
     // Look for "Add Script" button
     const addScriptBtn = page.locator('button').filter({ hasText: /add.*script|new.*script/i }).first();
@@ -86,7 +86,7 @@ test.describe('Script Editor @engine', () => {
     const codeTab = page.getByRole('button', { name: /^code$/i });
     if (await codeTab.isVisible()) {
       await codeTab.click();
-      await page.waitForTimeout(300);
+
 
       // Monaco should be visible
       const monacoVisible = await page.locator('.monaco-editor').isVisible().catch(() => false);
@@ -96,7 +96,7 @@ test.describe('Script Editor @engine', () => {
       const graphTab = page.getByRole('button', { name: /graph|visual/i });
       if (await graphTab.isVisible()) {
         await graphTab.click();
-        await page.waitForTimeout(500);
+
 
         // Graph editor should load
         const graphEditor = page.locator('[class*="react-flow"], [class*="graph"]').first();

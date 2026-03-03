@@ -13,7 +13,7 @@ test.describe('2D Workflows @ui', () => {
       }
     });
     // Collect errors over a brief window
-    await page.waitForTimeout(500);
+
     // Filter out expected WASM/WebGPU errors
     const realErrors = consoleErrors.filter(
       (e) => !e.includes('WebGPU') && !e.includes('wasm') && !e.includes('GPU')

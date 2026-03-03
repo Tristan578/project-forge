@@ -7,7 +7,7 @@ test.describe('Editor Layout @engine', () => {
 
   test('default layout shows viewport, hierarchy, inspector panels', async ({ page, editor }) => {
     // Wait for layout to render
-    await page.waitForTimeout(500);
+
 
     // Check that viewport canvas is visible
     const canvas = editor.canvas;
@@ -34,7 +34,7 @@ test.describe('Editor Layout @engine', () => {
 
     if (buttonCount > 0) {
       await layoutButton.first().click();
-      await page.waitForTimeout(300);
+
 
       // Check that a menu or dialog appeared
       const menu = page.locator('[role="menu"], [role="dialog"], .menu, .dropdown').first();
@@ -42,7 +42,7 @@ test.describe('Editor Layout @engine', () => {
     } else {
       // If no dedicated button, layout presets might be in Settings
       await _editor.openSettings();
-      await page.waitForTimeout(300);
+
 
       // Check for Layout/Workspace section
       const layoutSection = page.getByText(/layout|workspace/i);
@@ -51,7 +51,7 @@ test.describe('Editor Layout @engine', () => {
   });
 
   test('panel tabs can be clicked to switch active panel', async ({ page, editor: _editor }) => {
-    await page.waitForTimeout(500);
+
 
     // Find dockview tabs (multiple tabs in the same panel group)
     const tabs = page.locator('.dv-tab, [role="tab"]');
@@ -61,7 +61,7 @@ test.describe('Editor Layout @engine', () => {
       // Click the second tab
       const secondTab = tabs.nth(1);
       await secondTab.click();
-      await page.waitForTimeout(300);
+
 
       // Check that tab is now active (usually has aria-selected or active class)
       const isActive = await secondTab.evaluate((el) => {
@@ -77,7 +77,7 @@ test.describe('Editor Layout @engine', () => {
   });
 
   test('layout persistence - saved layout key exists in localStorage', async ({ page, editor: _editor }) => {
-    await page.waitForTimeout(1000);
+
 
     // Check localStorage for layout-related keys
     const layoutKeys = await page.evaluate(() => {
@@ -96,7 +96,7 @@ test.describe('Editor Layout @engine', () => {
   });
 
   test('sidebar is docked on the left', async ({ page, editor: _editor }) => {
-    await page.waitForTimeout(500);
+
 
     // Find sidebar element
     const sidebar = page.locator('[class*="sidebar"]').first();
@@ -111,7 +111,7 @@ test.describe('Editor Layout @engine', () => {
   });
 
   test('viewport takes central position', async ({ page, editor }) => {
-    await page.waitForTimeout(500);
+
 
     const canvas = editor.canvas;
     const canvasBox = await canvas.boundingBox();
@@ -123,7 +123,7 @@ test.describe('Editor Layout @engine', () => {
   });
 
   test('panels can be resized', async ({ page, editor: _editor }) => {
-    await page.waitForTimeout(500);
+
 
     // Find a resize handle (dockview uses .dv-resize-handle)
     const resizeHandle = page.locator('.dv-resize-handle, .resize-handle').first();
@@ -137,7 +137,7 @@ test.describe('Editor Layout @engine', () => {
         await page.mouse.down();
         await page.mouse.move(handleBox.x + 50, handleBox.y + handleBox.height / 2);
         await page.mouse.up();
-        await page.waitForTimeout(300);
+
 
         // If we reach here without error, resize worked
         expect(true).toBe(true);
@@ -146,7 +146,7 @@ test.describe('Editor Layout @engine', () => {
   });
 
   test('chat overlay can be toggled', async ({ page, editor: _editor }) => {
-    await page.waitForTimeout(500);
+
 
     // Look for chat toggle button
     const chatButton = page.getByRole('button', { name: /chat|message/i });
@@ -155,7 +155,7 @@ test.describe('Editor Layout @engine', () => {
     if (buttonCount > 0) {
       // Click to open chat
       await chatButton.first().click();
-      await page.waitForTimeout(300);
+
 
       // Check that chat panel or overlay is visible
       const chatPanel = page.locator('[class*="chat"], [data-testid*="chat"]').first();
@@ -164,7 +164,7 @@ test.describe('Editor Layout @engine', () => {
       if (chatVisible) {
         // Click again to close
         await chatButton.first().click();
-        await page.waitForTimeout(300);
+
 
         // Chat should be hidden
         const chatHidden = !(await chatPanel.isVisible().catch(() => true));
@@ -174,7 +174,7 @@ test.describe('Editor Layout @engine', () => {
   });
 
   test('responsive layout adjusts on window resize', async ({ editor }) => {
-    await editor.page.waitForTimeout(500);
+
 
     // Get initial layout
     const canvasBefore = await editor.canvas.boundingBox();
@@ -182,7 +182,7 @@ test.describe('Editor Layout @engine', () => {
 
     // Resize window to smaller width
     await editor.page.setViewportSize({ width: 1024, height: 768 });
-    await editor.page.waitForTimeout(500);
+
 
     // Get new layout
     const canvasAfter = await editor.canvas.boundingBox();
@@ -271,14 +271,14 @@ test.describe('Responsive Layout @ui', () => {
 
     // Resize to compact
     await page.setViewportSize({ width: 900, height: 800 });
-    await page.waitForTimeout(500);
+
 
     // Canvas should still be visible (it's always shown)
     await expect(canvas).toBeVisible();
 
     // Resize back to condensed
     await page.setViewportSize({ width: 1200, height: 800 });
-    await page.waitForTimeout(500);
+
 
     await expect(canvas).toBeVisible();
   });

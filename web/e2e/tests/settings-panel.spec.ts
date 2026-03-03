@@ -39,7 +39,7 @@ test.describe('Settings Panel @ui', () => {
     for (let i = 0; i < tabCount; i++) {
       const tab = tabs.nth(i);
       await tab.click();
-      await page.waitForTimeout(200);
+
 
       // Active tab should have aria-selected="true"
       await expect(tab).toHaveAttribute('aria-selected', 'true');
@@ -66,12 +66,12 @@ test.describe('Settings Panel @ui', () => {
 
     // Press ArrowRight to move to next tab
     await page.keyboard.press('ArrowRight');
-    await page.waitForTimeout(100);
+
     await expect(tabs.nth(1)).toHaveAttribute('aria-selected', 'true');
 
     // Press ArrowLeft to go back
     await page.keyboard.press('ArrowLeft');
-    await page.waitForTimeout(100);
+
     await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -85,12 +85,12 @@ test.describe('Settings Panel @ui', () => {
     // Focus first tab, then press End
     await tabs.first().focus();
     await page.keyboard.press('End');
-    await page.waitForTimeout(100);
+
     await expect(tabs.nth(tabCount - 1)).toHaveAttribute('aria-selected', 'true');
 
     // Press Home to go back to first
     await page.keyboard.press('Home');
-    await page.waitForTimeout(100);
+
     await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -100,7 +100,7 @@ test.describe('Settings Panel @ui', () => {
 
     if (await tokensTab.isVisible().catch(() => false)) {
       await tokensTab.click();
-      await page.waitForTimeout(300);
+
 
       // Should show token-related content (balance, usage, etc.)
       const tokenContent = dialog.locator('[role="tabpanel"]').first();
@@ -114,7 +114,7 @@ test.describe('Settings Panel @ui', () => {
 
     if (await keysTab.isVisible().catch(() => false)) {
       await keysTab.click();
-      await page.waitForTimeout(300);
+
 
       // Should show API key management content
       const keyContent = dialog.locator('[role="tabpanel"]').first();
@@ -128,7 +128,7 @@ test.describe('Settings Panel @ui', () => {
 
     if (await billingTab.isVisible().catch(() => false)) {
       await billingTab.click();
-      await page.waitForTimeout(300);
+
 
       // Should show billing/plan content
       const billingContent = dialog.locator('[role="tabpanel"]').first();
@@ -177,7 +177,7 @@ test.describe('Settings Panel @ui', () => {
     for (let i = 0; i < tabCount; i++) {
       const tab = tabs.nth(i);
       await tab.click();
-      await page.waitForTimeout(200);
+
 
       const controls = await tab.getAttribute('aria-controls');
       expect(controls).not.toBeNull();
@@ -203,17 +203,17 @@ test.describe('Settings Panel @ui', () => {
     // Focus last tab
     await tabs.nth(tabCount - 1).focus();
     await tabs.nth(tabCount - 1).click();
-    await page.waitForTimeout(100);
+
     await expect(tabs.nth(tabCount - 1)).toHaveAttribute('aria-selected', 'true');
 
     // ArrowRight should wrap to first
     await page.keyboard.press('ArrowRight');
-    await page.waitForTimeout(100);
+
     await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
 
     // ArrowLeft from first should wrap to last
     await page.keyboard.press('ArrowLeft');
-    await page.waitForTimeout(100);
+
     await expect(tabs.nth(tabCount - 1)).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -224,7 +224,7 @@ test.describe('Settings Panel @ui', () => {
     if (!(await keysTab.isVisible().catch(() => false))) return;
 
     await keysTab.click();
-    await page.waitForTimeout(300);
+
 
     // Should show "Provider API Keys (BYOK)" heading
     const byokHeading = dialog.getByText('Provider API Keys', { exact: false });
@@ -245,7 +245,7 @@ test.describe('Settings Panel @ui', () => {
     if (!(await keysTab.isVisible().catch(() => false))) return;
 
     await keysTab.click();
-    await page.waitForTimeout(300);
+
 
     // Should show "MCP API Keys" heading
     const mcpHeading = dialog.getByText('MCP API Keys', { exact: false });
@@ -293,7 +293,7 @@ test.describe('Settings Panel @ui', () => {
     // Click outside the dialog (on the backdrop)
     // The backdrop is the parent fixed overlay at position 0,0
     await page.mouse.click(10, 10);
-    await page.waitForTimeout(300);
+
 
     await expect(dialog).not.toBeVisible();
   });

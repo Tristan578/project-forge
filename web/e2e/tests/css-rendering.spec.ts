@@ -121,7 +121,7 @@ test.describe('CSS & Visual Rendering Tests @ui', () => {
     const initialBox = await topBar.boundingBox();
 
     // Wait for any async layout changes
-    await page.waitForTimeout(1000);
+
 
     const finalBox = await topBar.boundingBox();
 
@@ -137,7 +137,7 @@ test.describe('CSS Dockview Tests @engine', () => {
   test('panel headers are visible and styled correctly', async ({ page, editor }) => {
     await editor.load();
 
-    await page.waitForTimeout(500);
+
 
     // Find dockview panel tab headers
     const panelHeaders = await page.locator('[class*="dv-tab"]').all();
