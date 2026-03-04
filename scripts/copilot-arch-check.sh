@@ -35,7 +35,7 @@ CHANGED_TS=$(git diff --name-only --diff-filter=ACMR HEAD 2>/dev/null \
 if [ -n "$CHANGED_TS" ]; then
   echo "Running ESLint on changed files..."
   cd web
-  if ! npx eslint --max-warnings 0 $CHANGED_TS 2>/dev/null; then
+  if ! printf '%s\n' "$CHANGED_TS" | xargs -r npx eslint --max-warnings 0 2>/dev/null; then
     echo "::error::ESLint found issues in changed files"
     ERRORS=$((ERRORS + 1))
   fi
