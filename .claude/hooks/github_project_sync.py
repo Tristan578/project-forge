@@ -66,7 +66,7 @@ METADATA_RE = re.compile(
 OLD_TASKBOARD_RE = re.compile(
     r"\*\*Taskboard:\*\*\s*PF-(\d+)\s*\(([A-Z0-9]+)\)"
 )
-SUBTASK_RE = re.compile(r"^- \[([ xX])\] (.+)$", re.MULTILINE)
+SUBTASK_RE = re.compile(r"^[ \t]*[-*] \[([ xX])\] (.+)$", re.MULTILINE)
 
 
 # ---------------------------------------------------------------------------
