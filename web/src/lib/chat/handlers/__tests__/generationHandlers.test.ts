@@ -2,7 +2,7 @@
 /**
  * Tests for generationHandlers — AI asset generation commands.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { generationHandlers } from '../generationHandlers';
 
@@ -52,7 +52,14 @@ vi.mock('@/lib/generate/postProcess', () => ({
 // Mock global fetch
 // ---------------------------------------------------------------------------
 const mockFetch = vi.fn();
-(globalThis as unknown as Record<string, unknown>).fetch = mockFetch;
+
+beforeAll(() => {
+  vi.stubGlobal('fetch', mockFetch);
+});
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
 
 // ---------------------------------------------------------------------------
 // Helper
