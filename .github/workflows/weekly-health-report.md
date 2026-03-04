@@ -1,7 +1,6 @@
 ---
 on:
-  schedule:
-    cron: "0 9 * * 1"
+  schedule: weekly on monday around 9am
   workflow_dispatch:
 permissions:
   contents: read
@@ -13,6 +12,7 @@ safe-outputs:
     title-prefix: "[health] "
     labels: [report]
     close-older-issues: true
+    max: 1
 ---
 
 ## Weekly Repository Health Report

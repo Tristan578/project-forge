@@ -7,9 +7,10 @@ permissions:
   issues: read
 safe-outputs:
   add-labels:
-    allowed-labels: [bug, feature, enhancement, engine, web, mcp, docs, test, security, P0, P1, P2]
+    allowed: [bug, feature, enhancement, engine, web, mcp, docs, test, security, P0, P1, P2]
+    max: 5
   add-comment:
-    max-length: 500
+    max: 1
 ---
 
 ## Issue Triage

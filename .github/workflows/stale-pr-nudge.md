@@ -1,14 +1,14 @@
 ---
 on:
-  schedule:
-    cron: "0 14 * * 1-5"
+  schedule: daily around 2pm
   workflow_dispatch:
 permissions:
   contents: read
   pull-requests: read
 safe-outputs:
-  add-pr-comment:
-    max-length: 300
+  add-comment:
+    max: 3
+    pull-requests: true
 ---
 
 ## Stale PR Nudge
