@@ -11,5 +11,5 @@ allow = ["**/*"]
 
 # Disable features that could bypass workflow
 [features]
-shell_tool = true
+shell_tool = false
 web_search = false
