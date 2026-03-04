@@ -4,7 +4,7 @@
 
 /**
  * Creates a ReadableStream from an array of SSE event objects.
- * Each event is encoded as `data: JSON\n\n` followed by `data: [DONE]\n\n`.
+ * Each event is encoded as `data: JSON\n\n`, with a single `data: [DONE]\n\n` sentinel at the end.
  */
 export function createSSEStream(events: unknown[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -48,7 +48,7 @@ export function makeChatSSEEvents(opts: {
   const events: unknown[] = [];
 
   // Usage: input tokens
-  if (opts.inputTokens) {
+  if (opts.inputTokens != null) {
     events.push({ type: 'usage', inputTokens: opts.inputTokens });
   }
 
@@ -74,7 +74,7 @@ export function makeChatSSEEvents(opts: {
   }
 
   // Usage: output tokens
-  if (opts.outputTokens) {
+  if (opts.outputTokens != null) {
     events.push({ type: 'usage', outputTokens: opts.outputTokens });
   }
 

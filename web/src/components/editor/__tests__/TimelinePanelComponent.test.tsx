@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { TimelinePanel } from '../TimelinePanel';
 import { useEditorStore } from '@/stores/editorStore';
@@ -84,16 +84,24 @@ const mockCtx = {
   putImageData: vi.fn(),
 };
 
-const origCreateElement = document.createElement.bind(document);
-vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: ElementCreationOptions) => {
-  const el = origCreateElement(tag, options);
-  if (tag === 'canvas') {
-    (el as HTMLCanvasElement).getContext = (() => mockCtx) as unknown as HTMLCanvasElement['getContext'];
-  }
-  return el;
-});
-
 describe('TimelinePanel component', () => {
+  let createElementSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeAll(() => {
+    const origCreateElement = document.createElement.bind(document);
+    createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: ElementCreationOptions) => {
+      const el = origCreateElement(tag, options);
+      if (tag === 'canvas') {
+        (el as HTMLCanvasElement).getContext = (() => mockCtx) as unknown as HTMLCanvasElement['getContext'];
+      }
+      return el;
+    });
+  });
+
+  afterAll(() => {
+    createElementSpy.mockRestore();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -175,7 +183,7 @@ describe('TimelinePanel component', () => {
 
   it('resets to beginning on stop', () => {
     setupStore();
-    render(<TimelinePanel />);
+    const { container } = render(<TimelinePanel />);
 
     // First play, then stop
     fireEvent.click(screen.getByTitle('Play'));
@@ -183,8 +191,7 @@ describe('TimelinePanel component', () => {
 
     // Should show Play again (not Pause)
     expect(screen.getByTitle('Play')).toBeDefined();
-    // Playhead time should reset to 0.00s
-    const { container } = render(<TimelinePanel />);
+    // Playhead time should reset to 0.00s in the same render
     expect(container.textContent).toContain('0.00s');
   });
 

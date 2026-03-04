@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { PixelArtEditor } from '../PixelArtEditor';
 import { useEditorStore } from '@/stores/editorStore';
@@ -39,16 +39,6 @@ const mockCtx = {
   getImageData: vi.fn((x: number, y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h })),
 };
 
-const origCreateElement = document.createElement.bind(document);
-vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: ElementCreationOptions) => {
-  const el = origCreateElement(tag, options);
-  if (tag === 'canvas') {
-    (el as HTMLCanvasElement).getContext = (() => mockCtx) as unknown as HTMLCanvasElement['getContext'];
-    (el as HTMLCanvasElement).toDataURL = () => 'data:image/png;base64,mockbase64';
-  }
-  return el;
-});
-
 function setupStoreMock() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
@@ -58,6 +48,24 @@ function setupStoreMock() {
 }
 
 describe('PixelArtEditor', () => {
+  let createElementSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeAll(() => {
+    const origCreateElement = document.createElement.bind(document);
+    createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: ElementCreationOptions) => {
+      const el = origCreateElement(tag, options);
+      if (tag === 'canvas') {
+        (el as HTMLCanvasElement).getContext = (() => mockCtx) as unknown as HTMLCanvasElement['getContext'];
+        (el as HTMLCanvasElement).toDataURL = () => 'data:image/png;base64,mockbase64';
+      }
+      return el;
+    });
+  });
+
+  afterAll(() => {
+    createElementSpy.mockRestore();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     setupStoreMock();
