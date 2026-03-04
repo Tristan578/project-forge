@@ -22,10 +22,10 @@ export default defineConfig({
       // Ratcheted up per sprint — see docs/coverage-plan.md
       // Final target: 55/45/50/55
       thresholds: {
-        statements: 42,
-        branches: 35,
-        functions: 35,
-        lines: 43,
+        statements: 44,
+        branches: 36,
+        functions: 39,
+        lines: 45,
       },
     },
   },
