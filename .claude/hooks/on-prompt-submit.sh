@@ -82,6 +82,7 @@ Before writing any code, you MUST:
 This ensures all contributors can track progress via the shared GitHub Project board.
 Planning before development is mandatory for this project.
 EOF
+    exit 1
 fi
 
 exit 0
