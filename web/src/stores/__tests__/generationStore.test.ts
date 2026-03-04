@@ -363,25 +363,23 @@ describe('generationStore', () => {
       const { addJob } = useGenerationStore.getState();
       addJob(mockJob);
 
-      // Wait for fire-and-forget
-      await new Promise((r) => setTimeout(r, 10));
-
       const fetchMock = vi.mocked(fetch);
-      const postCalls = fetchMock.mock.calls.filter(
-        (c) => c[0] === '/api/jobs' && (c[1] as RequestInit)?.method === 'POST'
-      );
-      expect(postCalls).toHaveLength(1);
+      await vi.waitFor(() => {
+        const postCalls = fetchMock.mock.calls.filter(
+          (c) => c[0] === '/api/jobs' && (c[1] as RequestInit)?.method === 'POST'
+        );
+        expect(postCalls).toHaveLength(1);
+      });
     });
 
     it('should store dbId after server responds', async () => {
       const { addJob } = useGenerationStore.getState();
       addJob(mockJob);
 
-      // Wait for fire-and-forget
-      await new Promise((r) => setTimeout(r, 50));
-
-      const state = useGenerationStore.getState();
-      expect(state.jobs['client-123'].dbId).toBe('db-1');
+      await vi.waitFor(() => {
+        const state = useGenerationStore.getState();
+        expect(state.jobs['client-123'].dbId).toBe('db-1');
+      });
     });
 
     it('should PATCH status to server when dbId exists', async () => {
@@ -391,13 +389,13 @@ describe('generationStore', () => {
 
       useGenerationStore.getState().updateJob('client-123', { status: 'completed', progress: 100 });
 
-      await new Promise((r) => setTimeout(r, 10));
-
       const fetchMock = vi.mocked(fetch);
-      const patchCalls = fetchMock.mock.calls.filter(
-        (c) => c[0] === '/api/jobs/db-xyz' && (c[1] as RequestInit)?.method === 'PATCH'
-      );
-      expect(patchCalls).toHaveLength(1);
+      await vi.waitFor(() => {
+        const patchCalls = fetchMock.mock.calls.filter(
+          (c) => c[0] === '/api/jobs/db-xyz' && (c[1] as RequestInit)?.method === 'PATCH'
+        );
+        expect(patchCalls).toHaveLength(1);
+      });
     });
   });
 
