@@ -14,7 +14,7 @@ Manage project work via the taskboard API at `http://localhost:3010`.
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| GET | `/api/board?projectId=...` | View full Kanban board |
+| GET | `/api/board` | View full Kanban board |
 | GET | `/api/tickets?project=...&status=...` | List tickets with filters |
 | GET | `/api/tickets/{id}` | Get ticket details |
 | POST | `/api/tickets` | Create ticket (requires projectId, title) |
