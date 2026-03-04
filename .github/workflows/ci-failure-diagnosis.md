@@ -3,14 +3,17 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    conclusions: [failure]
+    branches:
+      - main
 permissions:
   contents: read
   actions: read
   pull-requests: read
 safe-outputs:
-  add-pr-comment:
-    max-length: 2000
+  add-comment:
+    max: 1
+    pull-requests: true
+    hide-older-comments: true
 ---
 
 ## CI Failure Diagnosis

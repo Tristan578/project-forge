@@ -1,7 +1,6 @@
 ---
 on:
-  schedule:
-    cron: "0 10 * * 3"
+  schedule: weekly on wednesday around 10am
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,6 +10,7 @@ safe-outputs:
     title-prefix: "[doc-drift] "
     labels: [docs]
     close-older-issues: true
+    max: 1
 ---
 
 ## Documentation Drift Detection
