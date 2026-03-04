@@ -29,13 +29,19 @@ import { useEngineStatus, emitStatusEvent } from '../useEngineStatus';
 import type { InitEvent } from '@/lib/initLog';
 
 describe('useEngineStatus', () => {
+  let originalLocationDescriptor: PropertyDescriptor | undefined;
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    originalLocationDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    if (originalLocationDescriptor) {
+      Object.defineProperty(window, 'location', originalLocationDescriptor);
+    }
   });
 
   // ---------------------------------------------------------------------------
