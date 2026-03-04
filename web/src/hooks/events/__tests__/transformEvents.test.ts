@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 // Mock the editor store module
 vi.mock('@/stores/editorStore', () => ({
@@ -22,8 +22,7 @@ describe('handleTransformEvent', () => {
     vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore.getState).mockReturnValue(actions as any);
+    vi.mocked(useEditorStore.getState).mockReturnValue(actions as unknown as StoreState);
   });
 
   it('returns false for unknown event types', () => {
@@ -338,8 +337,7 @@ describe('handleTransformEvent', () => {
   describe('SCENE_EXPORTED', () => {
     it('dispatches forge:scene-exported DOM event', () => {
       const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
 
       const payload = { json: '{"entities":[]}', name: 'MyScene' };
 
@@ -362,8 +360,7 @@ describe('handleTransformEvent', () => {
     });
 
     it('saves to localStorage when autoSaveEnabled is true', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as unknown as StoreState);
       const mockSetItem = vi.fn();
       const origLocalStorage = globalThis.localStorage;
       Object.defineProperty(globalThis, 'localStorage', {
@@ -394,8 +391,7 @@ describe('handleTransformEvent', () => {
     });
 
     it('handles localStorage quota exceeded gracefully', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as unknown as StoreState);
       const origLocalStorage = globalThis.localStorage;
       Object.defineProperty(globalThis, 'localStorage', {
         value: {
@@ -432,8 +428,7 @@ describe('handleTransformEvent', () => {
     });
 
     it('does not save to localStorage when autoSaveEnabled is false', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
       const mockSetItem = vi.fn();
       const origLocalStorage = globalThis.localStorage;
       Object.defineProperty(globalThis, 'localStorage', {

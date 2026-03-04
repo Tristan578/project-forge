@@ -394,8 +394,7 @@ describe('zipExporter', () => {
 
     it('returns false when window is undefined', () => {
       const origWindow = global.window;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (global as any).window;
+      delete (global as unknown as Record<string, unknown>).window;
       expect(supportsCompression()).toBe(false);
       global.window = origWindow;
     });
