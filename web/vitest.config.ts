@@ -19,11 +19,13 @@ export default defineConfig({
         'src/app/**/layout.tsx',
         'src/app/**/page.tsx',
       ],
+      // Ratcheted up per sprint — see docs/coverage-plan.md
+      // Final target: 55/45/50/55
       thresholds: {
-        statements: 20,
-        branches: 15,
-        functions: 15,
-        lines: 20,
+        statements: 41,
+        branches: 34,
+        functions: 34,
+        lines: 42,
       },
     },
   },
