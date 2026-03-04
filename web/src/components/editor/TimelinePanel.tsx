@@ -57,6 +57,10 @@ function snapToFrame(time: number): number {
   return Math.round(time / FRAME_DURATION) * FRAME_DURATION;
 }
 
+/* ─── Exported helpers for testing ───────────────────────────────────────── */
+export { timeToPixels, pixelsToTime, snapToFrame, PROPERTY_TARGETS, TRACK_HEIGHT, RULER_HEIGHT, FPS, FRAME_DURATION };
+export type { TimelineViewState };
+
 export const TimelinePanel = memo(function TimelinePanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
