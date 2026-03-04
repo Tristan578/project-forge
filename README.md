@@ -98,7 +98,7 @@ The MCP server and the visual editor share the same command interface — there 
 - [Rust](https://rustup.rs/) (stable) with the `wasm32-unknown-unknown` target
 - [wasm-bindgen-cli](https://rustwasm.github.io/wasm-bindgen/reference/cli.html)
 - [Node.js](https://nodejs.org/) 18+
-- PowerShell (Windows) or compatible shell for build scripts
+- Bash (macOS/Linux) or PowerShell (Windows) for build scripts
 
 ### Install the WASM target
 
@@ -118,7 +118,10 @@ cd project-forge
 
 ### 2. Build the WASM engine
 
-```powershell
+```bash
+# macOS / Linux
+./build_wasm.sh
+
 # Windows (PowerShell)
 .\build_wasm.ps1
 
@@ -182,7 +185,8 @@ project-forge/
 │   ├── guides/              # End-to-end tutorials
 │   └── reference/           # Command reference, script API, entity types
 ├── specs/                   # Feature specifications and sprint plans
-├── build_wasm.ps1           # Dual WASM build script (WebGL2 + WebGPU)
+├── build_wasm.sh            # WASM build script — macOS / Linux
+├── build_wasm.ps1           # WASM build script — Windows (PowerShell)
 └── README.md
 ```
 
@@ -192,12 +196,13 @@ project-forge/
 
 | Command | Description |
 |---------|-------------|
-| `.\build_wasm.ps1` | Build both WASM variants (WebGL2 + WebGPU) |
+| `./build_wasm.sh` | Build both WASM variants — macOS / Linux |
+| `.\build_wasm.ps1` | Build both WASM variants — Windows (PowerShell) |
 | `cd web && npm run dev` | Start the Next.js dev server |
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
-| `cd web && npx vitest run` | Run web tests (~2000 tests) |
+| `cd web && npx vitest run` | Run web tests (~4100+ tests) |
 | `cd mcp-server && npx vitest run` | Run MCP server tests |
 
 ### Key conventions
@@ -232,7 +237,8 @@ Contributions are welcome! Here's how to get involved.
 2. Make your changes and verify they work:
    ```bash
    # Build WASM engine
-   .\build_wasm.ps1
+   ./build_wasm.sh          # macOS/Linux
+   # .\build_wasm.ps1       # Windows
 
    # TypeScript check
    cd web && npx tsc --noEmit
@@ -274,7 +280,7 @@ Contributions are welcome! Here's how to get involved.
 
 | Layer | Technology |
 |-------|-----------|
-| Engine | Bevy 0.16, wgpu 24, bevy_rapier3d, bevy_hanabi, bevy_panorbit_camera, csgrs, noise |
+| Engine | Bevy 0.18, wgpu 24, bevy_rapier3d, bevy_hanabi, bevy_panorbit_camera, csgrs, noise |
 | Frontend | Next.js 16, React 19, Zustand 5, Tailwind CSS, React Flow |
 | Auth | Clerk |
 | Payments | Stripe |

@@ -20,25 +20,15 @@ rustup target list --installed | grep wasm32
 
 2. Build the WASM engine (this takes 5-10 minutes):
 ```bash
-powershell -ExecutionPolicy Bypass -File build_wasm.ps1
-```
+# macOS / Linux
+./build_wasm.sh
 
-If on Mac/Linux without PowerShell, build manually:
-```bash
-cd engine && cargo build --target wasm32-unknown-unknown --release --features webgl2
-cd engine && cargo build --target wasm32-unknown-unknown --release --features webgpu
-wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
-wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
+# Windows (PowerShell)
+# powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 ```
+The script builds all 4 variants (WebGL2/WebGPU × editor/runtime), runs wasm-opt if available, and copies artifacts to `web/public/`.
 
-3. Copy WASM artifacts to web/public/:
-```bash
-mkdir -p web/public/engine-pkg-webgl2 web/public/engine-pkg-webgpu
-cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
-cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
-```
-
-4. Verify the build produced valid WASM files:
+3. Verify the build produced valid WASM files:
 // turbo
 ```bash
 ls -la web/public/engine-pkg-webgl2/forge_engine_bg.wasm web/public/engine-pkg-webgpu/forge_engine_bg.wasm
