@@ -38,7 +38,7 @@ EOF
     echo ""
     echo "MANDATORY: Install taskboard before doing any development work."
     echo "No code changes should be made without a tracked ticket."
-    exit 0
+    exit 1
 fi
 
 # ── Step 2: Auto-start taskboard if not running ───────────────────────────
