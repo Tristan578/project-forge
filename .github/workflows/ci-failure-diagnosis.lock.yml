@@ -48,7 +48,7 @@ jobs:
     # zizmor: ignore[dangerous-triggers] - workflow_run trigger is secured with role and fork validation
     if: >
       (needs.pre_activation.outputs.activated == 'true') && ((github.event_name != 'workflow_run') || ((github.event.workflow_run.repository.id == github.repository_id) &&
-      (!(github.event.workflow_run.repository.fork))))
+      (!(github.event.workflow_run.repository.fork)) && (github.event.workflow_run.conclusion == 'failure')))
     runs-on: ubuntu-slim
     permissions:
       contents: read
