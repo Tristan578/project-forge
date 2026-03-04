@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "bash .claude/hooks/on-session-start.sh",
+        "powershell": "bash .claude/hooks/on-session-start.sh",
+        "cwd": ".",
+        "timeoutSec": 20
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "bash .claude/hooks/on-prompt-submit.sh",
+        "powershell": "bash .claude/hooks/on-prompt-submit.sh",
+        "cwd": ".",
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "bash .claude/hooks/on-stop.sh",
+        "powershell": "bash .claude/hooks/on-stop.sh",
+        "cwd": ".",
+        "timeoutSec": 20
+      }
+    ]
+  }
+}

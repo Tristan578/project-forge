@@ -48,9 +48,9 @@ As a [persona], I want [specific goal] so that [measurable benefit].
 
 ### Validation Rules
 
-1. **User Story** — MUST follow "As a... I want... so that..." format
-2. **Description** — MUST include technical context sufficient for implementation
-3. **Acceptance Criteria** — MUST use Given/When/Then format for testability
+1. **User Story** — MUST match regex `As an?\s+.+,\s+I want\s+.+\s+so that\s+.+` (case-insensitive). Exact format enforced by hooks
+2. **Description** — MUST include technical context (at least 20 chars beyond user story + AC sections)
+3. **Acceptance Criteria** — MUST use Given/When/Then format, **minimum 3 complete scenarios**: happy path, edge case, negative/error case
 4. **Priority** — MUST be set: `urgent`, `high`, `medium`, or `low`
 5. **Team** — MUST be assigned: `SpawnForge PM`, `SpawnForge Engineering`, or `SpawnForge Leadership`
 6. **Subtasks** — MUST have at least 3 implementation steps before work begins

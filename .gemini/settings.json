@@ -1,0 +1,66 @@
+{
+  "model": {
+    "name": "gemini-3.1-pro-preview"
+  },
+  "context": {
+    "fileName": ["GEMINI.md", "AGENTS.md", "CLAUDE.md"]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "taskboard-status",
+            "type": "command",
+            "command": "bash .claude/hooks/on-session-start.sh",
+            "timeout": 20000,
+            "description": "Load taskboard state and pull GitHub Project changes"
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "prompt-check",
+            "type": "command",
+            "command": "bash .claude/hooks/on-prompt-submit.sh",
+            "timeout": 5000,
+            "description": "Check for stale tickets and remind about active ticket"
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "stop-validation",
+            "type": "command",
+            "command": "bash .claude/hooks/on-stop.sh",
+            "timeout": 20000,
+            "description": "Validate ticket docs and push changes to GitHub Project"
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "WriteFile|EditFile",
+        "hooks": [
+          {
+            "name": "post-edit-lint",
+            "type": "command",
+            "command": "bash .claude/hooks/post-edit-lint.sh",
+            "timeout": 15000,
+            "description": "Run ESLint on changed files"
+          }
+        ]
+      }
+    ]
+  }
+}
