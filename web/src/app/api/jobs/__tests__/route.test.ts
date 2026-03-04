@@ -56,10 +56,10 @@ function setupDb() {
     orderBy: vi.fn().mockReturnThis(),
     limit: mockSelectFrom,
   };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(getDb).mockReturnValue({
     insert: vi.fn(() => insertChain),
     select: vi.fn(() => selectChain),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
   return { insertChain, selectChain };
 }

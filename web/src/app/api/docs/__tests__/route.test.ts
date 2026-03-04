@@ -39,7 +39,7 @@ describe('/api/docs GET', () => {
   it('returns docs array and meta on success', async () => {
     vi.mocked(readdir).mockResolvedValueOnce([
       makeDirent('guide.md', false),
-    ] as any);
+    ] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
     vi.mocked(readFile)
       .mockResolvedValueOnce('# Getting Started\n## Setup\nInstall deps.')
@@ -58,7 +58,7 @@ describe('/api/docs GET', () => {
   });
 
   it('returns empty docs when directory is empty', async () => {
-    vi.mocked(readdir).mockResolvedValueOnce([] as any);
+    vi.mocked(readdir).mockResolvedValueOnce([] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
     vi.mocked(readFile).mockRejectedValueOnce(new Error('no _meta.json'));
 
     const response = await GET();
@@ -71,8 +71,8 @@ describe('/api/docs GET', () => {
   it('recurses into subdirectories', async () => {
     // Root readdir returns a directory
     vi.mocked(readdir)
-      .mockResolvedValueOnce([makeDirent('features', true)] as any)
-      .mockResolvedValueOnce([makeDirent('physics.md', false)] as any);
+      .mockResolvedValueOnce([makeDirent('features', true)] as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+      .mockResolvedValueOnce([makeDirent('physics.md', false)] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
     vi.mocked(readFile)
       .mockResolvedValueOnce('# Physics Engine\n## Collisions\nHit detection.')
@@ -91,7 +91,7 @@ describe('/api/docs GET', () => {
       makeDirent('.hidden', true),
       makeDirent('_private', true),
       makeDirent('readme.md', false),
-    ] as any);
+    ] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
     vi.mocked(readFile)
       .mockResolvedValueOnce('# README\nContent here.')
@@ -107,7 +107,7 @@ describe('/api/docs GET', () => {
   it('extracts title as Untitled when no heading', async () => {
     vi.mocked(readdir).mockResolvedValueOnce([
       makeDirent('noheading.md', false),
-    ] as any);
+    ] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
     vi.mocked(readFile)
       .mockResolvedValueOnce('Just some text without a heading.')
@@ -122,7 +122,7 @@ describe('/api/docs GET', () => {
   it('extracts multiple sections from markdown', async () => {
     vi.mocked(readdir).mockResolvedValueOnce([
       makeDirent('multi.md', false),
-    ] as any);
+    ] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
 
     vi.mocked(readFile)
       .mockResolvedValueOnce('# Title\n## Section A\nContent A.\n## Section B\nContent B.\n### Sub C\nContent C.')
@@ -138,7 +138,7 @@ describe('/api/docs GET', () => {
   });
 
   it('includes meta when _meta.json exists', async () => {
-    vi.mocked(readdir).mockResolvedValueOnce([] as any);
+    vi.mocked(readdir).mockResolvedValueOnce([] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
     vi.mocked(readFile).mockResolvedValueOnce('{"order": ["intro", "guide"]}');
 
     const response = await GET();
