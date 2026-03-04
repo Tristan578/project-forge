@@ -14,6 +14,34 @@ const eslintConfig = defineConfig([
       }],
     },
   },
+  {
+    files: ['src/**/*.{test,spec}.{ts,tsx,js,jsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: "CallExpression[callee.object.name=/^(?:it|test|describe)$/][callee.property.name=/^(?:skip|only)$/]",
+          message: 'Do not use .skip/.only in tests.',
+        },
+        {
+          selector: "CallExpression[callee.name=/^(?:xit|xtest|xdescribe)$/]",
+          message: 'Do not disable tests with x-prefixed helpers.',
+        },
+        {
+          selector: "CallExpression[callee.object.name='xit'][callee.property.name='each']",
+          message: 'Do not disable tests with x-prefixed helpers.',
+        },
+        {
+          selector: "CallExpression[callee.property.name=/^(toMatchSnapshot|toMatchInlineSnapshot|toThrowErrorMatchingSnapshot)$/]",
+          message: 'Snapshot assertions are not allowed; assert explicit behavior.',
+        },
+        {
+          selector: "CallExpression[callee.name='setTimeout']",
+          message: 'Avoid setTimeout sleeps in tests; use vi.waitFor() or fake timers.',
+        },
+      ],
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
