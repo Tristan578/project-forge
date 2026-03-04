@@ -363,8 +363,8 @@ describe('generationStore', () => {
       const { addJob } = useGenerationStore.getState();
       addJob(mockJob);
 
+      const fetchMock = vi.mocked(fetch);
       await vi.waitFor(() => {
-        const fetchMock = vi.mocked(fetch);
         const postCalls = fetchMock.mock.calls.filter(
           (c) => c[0] === '/api/jobs' && (c[1] as RequestInit)?.method === 'POST'
         );
@@ -389,8 +389,8 @@ describe('generationStore', () => {
 
       useGenerationStore.getState().updateJob('client-123', { status: 'completed', progress: 100 });
 
+      const fetchMock = vi.mocked(fetch);
       await vi.waitFor(() => {
-        const fetchMock = vi.mocked(fetch);
         const patchCalls = fetchMock.mock.calls.filter(
           (c) => c[0] === '/api/jobs/db-xyz' && (c[1] as RequestInit)?.method === 'PATCH'
         );
