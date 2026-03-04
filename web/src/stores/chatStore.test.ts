@@ -2,13 +2,15 @@
  * Unit tests for the chatStore Zustand store.
  *
  * Tests cover messages, model settings, right panel tab, thinking mode,
- * approval mode, entity picker, localStorage persistence, and tool call updates.
+ * approval mode, entity picker, localStorage persistence, tool call updates,
+ * sendMessage streaming, stopStreaming, rejectToolCalls, and buildApiMessages.
  *
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useChatStore, type ChatMessage, type ToolCallStatus } from './chatStore';
+import { mockSSEResponse, makeChatSSEEvents } from '@/test/utils/streamingTestUtils';
 
 describe('chatStore', () => {
   beforeEach(() => {
@@ -505,6 +507,423 @@ describe('chatStore', () => {
       expect(state.messages).toHaveLength(2);
       expect(state.messages[0].role).toBe('user');
       expect(state.messages[1].toolCalls?.[0].name).toBe('spawn_cube');
+    });
+  });
+
+  describe('stopStreaming', () => {
+    it('aborts active stream and resets streaming state', () => {
+      const controller = new AbortController();
+      const abortSpy = vi.spyOn(controller, 'abort');
+      useChatStore.setState({
+        isStreaming: true,
+        abortController: controller,
+        loopIteration: 2,
+      });
+
+      const { stopStreaming } = useChatStore.getState();
+      stopStreaming();
+
+      const state = useChatStore.getState();
+      expect(abortSpy).toHaveBeenCalled();
+      expect(state.isStreaming).toBe(false);
+      expect(state.abortController).toBeNull();
+      expect(state.loopIteration).toBe(0);
+    });
+
+    it('does nothing when no active stream', () => {
+      useChatStore.setState({ isStreaming: false, abortController: null });
+      const { stopStreaming } = useChatStore.getState();
+      stopStreaming(); // should not throw
+      expect(useChatStore.getState().isStreaming).toBe(false);
+    });
+  });
+
+  describe('rejectToolCalls', () => {
+    it('sets preview tool calls to rejected status', () => {
+      const message: ChatMessage = {
+        id: 'msg1',
+        role: 'assistant',
+        content: 'Here are the changes',
+        toolCalls: [
+          { id: 'tc1', name: 'spawn_cube', input: {}, status: 'preview', undoable: true },
+          { id: 'tc2', name: 'update_material', input: {}, status: 'preview', undoable: true },
+        ],
+        timestamp: Date.now(),
+      };
+      useChatStore.setState({ messages: [message] });
+
+      const { rejectToolCalls } = useChatStore.getState();
+      rejectToolCalls('msg1');
+
+      const updated = useChatStore.getState().messages[0].toolCalls;
+      expect(updated?.[0].status).toBe('rejected');
+      expect(updated?.[1].status).toBe('rejected');
+    });
+
+    it('does not affect non-preview tool calls', () => {
+      const message: ChatMessage = {
+        id: 'msg1',
+        role: 'assistant',
+        content: 'Done',
+        toolCalls: [
+          { id: 'tc1', name: 'spawn_cube', input: {}, status: 'success', undoable: true },
+          { id: 'tc2', name: 'update_material', input: {}, status: 'preview', undoable: true },
+        ],
+        timestamp: Date.now(),
+      };
+      useChatStore.setState({ messages: [message] });
+
+      const { rejectToolCalls } = useChatStore.getState();
+      rejectToolCalls('msg1');
+
+      const updated = useChatStore.getState().messages[0].toolCalls;
+      expect(updated?.[0].status).toBe('success'); // unchanged
+      expect(updated?.[1].status).toBe('rejected');
+    });
+  });
+
+  describe('sendMessage', () => {
+    const mockEditorState = {
+      getState: () => ({
+        sceneGraph: { nodes: {}, rootIds: [] },
+        selectedIds: new Set<string>(),
+        primaryId: null,
+        primaryTransform: null,
+        primaryMaterial: null,
+        primaryLight: null,
+        ambientLight: { color: [1, 1, 1], brightness: 1 },
+        environment: {},
+        canUndo: false,
+        canRedo: false,
+        undoDescription: null,
+        redoDescription: null,
+      }),
+    };
+
+    beforeEach(() => {
+      vi.resetModules();
+
+      // Mock the dynamic imports used by sendMessage and streamOneTurn
+      vi.doMock('./editorStore', () => ({
+        useEditorStore: mockEditorState,
+      }));
+
+      vi.doMock('../lib/chat/context', () => ({
+        buildSceneContext: vi.fn(() => '## Scene\nEmpty'),
+      }));
+
+      vi.doMock('../lib/chat/executor', () => ({
+        executeToolCall: vi.fn(() => Promise.resolve({ success: true, result: 'Done' })),
+      }));
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('adds user and assistant messages on send', async () => {
+      const events = makeChatSSEEvents({ text: 'Hello there!', inputTokens: 50, outputTokens: 10 });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      // Re-import to pick up mocks
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'inspector',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Create a cube');
+
+      const state = store.getState();
+      expect(state.messages).toHaveLength(2);
+      expect(state.messages[0].role).toBe('user');
+      expect(state.messages[0].content).toBe('Create a cube');
+      expect(state.messages[1].role).toBe('assistant');
+      expect(state.isStreaming).toBe(false);
+      expect(state.error).toBeNull();
+    });
+
+    it('appends entity references to message content', async () => {
+      const events = makeChatSSEEvents({ text: 'OK' });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'inspector',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Move @MyCube', undefined, { '@MyCube': 'eid-42' });
+
+      const userMsg = store.getState().messages[0];
+      expect(userMsg.content).toContain('[Referenced entities: @MyCube (id: eid-42)]');
+      expect(userMsg.entityRefs).toEqual({ '@MyCube': 'eid-42' });
+    });
+
+    it('does not send when already streaming', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: true,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'inspector',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('This should be ignored');
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(store.getState().messages).toHaveLength(0);
+    });
+
+    it('sets hasUnreadMessages when not on chat tab', async () => {
+      const events = makeChatSSEEvents({ text: 'Done' });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'inspector', // not 'chat'
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Hello');
+
+      expect(store.getState().hasUnreadMessages).toBe(true);
+    });
+
+    it('handles fetch error gracefully', async () => {
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(JSON.stringify({ error: 'Server error' }), { status: 500 }),
+      );
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'inspector',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Hello');
+
+      const state = store.getState();
+      expect(state.isStreaming).toBe(false);
+      expect(state.error).toContain('Server error');
+    });
+
+    it('handles abort error silently', async () => {
+      const abortError = new Error('AbortError');
+      abortError.name = 'AbortError';
+      vi.spyOn(globalThis, 'fetch').mockRejectedValue(abortError);
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'inspector',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Hello');
+
+      const state = store.getState();
+      expect(state.isStreaming).toBe(false);
+      expect(state.error).toBeNull(); // abort is not an error
+    });
+
+    it('accumulates session tokens', async () => {
+      const events = makeChatSSEEvents({ text: 'Hi', inputTokens: 100, outputTokens: 50 });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 200, output: 100 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Hello');
+
+      const state = store.getState();
+      expect(state.sessionTokens.input).toBe(300); // 200 + 100
+      expect(state.sessionTokens.output).toBe(150); // 100 + 50
+    });
+
+    it('streams thinking deltas', async () => {
+      const events = makeChatSSEEvents({ text: 'Answer', thinking: 'Let me think about this...' });
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: true,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('Think about this');
+
+      const assistantMsg = store.getState().messages[1];
+      expect(assistantMsg.thinking).toContain('Let me think about this...');
+    });
+
+    it('filters system messages from API messages', async () => {
+      const events = makeChatSSEEvents({ text: 'OK' });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [
+          { id: 'sys1', role: 'system', content: 'System message', timestamp: 1000 },
+          { id: 'usr1', role: 'user', content: 'Hello', timestamp: 2000 },
+        ] as ChatMessage[],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('New message');
+
+      // Check that system messages are filtered from the API call
+      const fetchCall = fetchSpy.mock.calls[0];
+      const body = JSON.parse(fetchCall[1]?.body as string);
+      const roles = body.messages.map((m: { role: string }) => m.role);
+      expect(roles).not.toContain('system');
+    });
+
+    it('sends images in multimodal format', async () => {
+      const events = makeChatSSEEvents({ text: 'I see the image' });
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockSSEResponse(events));
+
+      const { useChatStore: store } = await import('./chatStore');
+      store.setState({
+        messages: [],
+        isStreaming: false,
+        activeModel: 'claude-sonnet-4-5-20250929',
+        rightPanelTab: 'chat',
+        error: null,
+        abortController: null,
+        thinkingEnabled: false,
+        loopIteration: 0,
+        sessionTokens: { input: 0, output: 0 },
+        hasUnreadMessages: false,
+        approvalMode: false,
+        showEntityPicker: false,
+        entityPickerFilter: '',
+        pendingEntityRefs: {},
+      });
+
+      await store.getState().sendMessage('What is this?', ['data:image/png;base64,abc123']);
+
+      // The user message with images should be formatted as multimodal content
+      const fetchCall = fetchSpy.mock.calls[0];
+      const body = JSON.parse(fetchCall[1]?.body as string);
+      const userMsg = body.messages.find((m: { role: string }) => m.role === 'user');
+      expect(Array.isArray(userMsg.content)).toBe(true);
+      expect(userMsg.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: 'image' }),
+          expect.objectContaining({ type: 'text' }),
+        ]),
+      );
     });
   });
 });
