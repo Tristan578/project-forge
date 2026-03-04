@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
@@ -19,8 +19,7 @@ describe('handleAnimationEvent', () => {
   beforeEach(() => {
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore.getState).mockReturnValue(actions as any);
+    vi.mocked(useEditorStore.getState).mockReturnValue(actions as unknown as StoreState);
     vi.mocked(useEditorStore.setState).mockClear();
   });
 

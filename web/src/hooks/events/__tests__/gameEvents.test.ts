@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 // Mock the editor store module
 vi.mock('@/stores/editorStore', () => ({
@@ -23,8 +23,7 @@ describe('handleGameEvent', () => {
     vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as any);
+    vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
   });
 
   it('returns false for unknown event types', () => {
@@ -40,8 +39,7 @@ describe('handleGameEvent', () => {
   describe('GAME_COMPONENT_CHANGED', () => {
     it('updates allGameComponents for non-selected entity', () => {
       // Entity is not the primary selected entity
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'other-entity', primaryGameComponents: [], allGameComponents: {} } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'other-entity', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -69,8 +67,7 @@ describe('handleGameEvent', () => {
 
     it('updates both allGameComponents and primaryGameComponents for selected entity', () => {
       // Entity IS the primary selected entity
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [], allGameComponents: {} } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
 
       const components = [
         { type: 'CharacterController', config: { speed: 5, jumpForce: 10 } },
@@ -101,8 +98,7 @@ describe('handleGameEvent', () => {
       const existingComponents = {
         'entity-0': [{ type: 'Health', config: { maxHealth: 50, currentHealth: 50 } }],
       };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: existingComponents } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -127,8 +123,7 @@ describe('handleGameEvent', () => {
     });
 
     it('handles empty components array', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [{ type: 'Health', config: {} }], allGameComponents: {} } as any);
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: 'entity-1', primaryGameComponents: [{ type: 'Health', config: {} }], allGameComponents: {} } as unknown as StoreState);
 
       const payload = {
         entityId: 'entity-1',
@@ -219,8 +214,7 @@ describe('handleGameEvent', () => {
 
       for (const mode of modes) {
         vi.clearAllMocks();
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as any);
+        vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, primaryId: null, primaryGameComponents: [], allGameComponents: {} } as unknown as StoreState);
 
         const payload = {
           entityId: 'cam-mode-test',

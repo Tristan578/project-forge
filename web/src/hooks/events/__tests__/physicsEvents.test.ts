@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 // Mock the editor store module
 vi.mock('@/stores/editorStore', () => ({
@@ -36,8 +36,7 @@ describe('handlePhysicsEvent', () => {
     vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore.getState).mockReturnValue(actions as any);
+    vi.mocked(useEditorStore.getState).mockReturnValue(actions as unknown as StoreState);
   });
 
   it('returns false for unknown event types', () => {
@@ -152,8 +151,7 @@ describe('handlePhysicsEvent', () => {
     it('handles null joint data (joint removed)', () => {
       const result = handlePhysicsEvent(
         'JOINT_CHANGED',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        null as any,
+        null as unknown as Record<string, unknown>,
         mockSetGet.set,
         mockSetGet.get
       );
@@ -429,8 +427,7 @@ describe('handlePhysicsEvent', () => {
   describe('RAYCAST_RESULT', () => {
     it('forwards non-occlusion raycast to script callback', () => {
       const mockRaycastCb = vi.fn();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__scriptRaycastCallback = mockRaycastCb;
+      (window as unknown as Record<string, unknown>).__scriptRaycastCallback = mockRaycastCb;
 
       const payload = {
         requestId: 'my-raycast-1',
@@ -449,8 +446,7 @@ describe('handlePhysicsEvent', () => {
       expect(result).toBe(true);
       expect(mockRaycastCb).toHaveBeenCalledWith(payload);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any).__scriptRaycastCallback;
+      delete (window as unknown as Record<string, unknown>).__scriptRaycastCallback;
     });
 
     it('handles audio occlusion raycast (occluded)', () => {
@@ -521,8 +517,7 @@ describe('handlePhysicsEvent', () => {
 
     it('handles no script raycast callback gracefully', () => {
       // Ensure no callback is set on window
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any).__scriptRaycastCallback;
+      delete (window as unknown as Record<string, unknown>).__scriptRaycastCallback;
 
       const payload = {
         requestId: 'my-raycast-2',
