@@ -1,0 +1,15 @@
+# SpawnForge — OpenAI Codex project configuration
+# See: https://developers.openai.com/codex/config-reference/
+
+# Model & approval
+model = "gpt-5.3-codex"
+approval_policy = "unless-allow-listed"
+
+# Sandbox: allow writes only within the project
+[sandbox_workspace_write]
+allow = ["**/*"]
+
+# Disable features that could bypass workflow
+[features]
+shell_tool = true
+web_search = false

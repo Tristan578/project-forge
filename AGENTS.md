@@ -1,0 +1,117 @@
+# SpawnForge — Agent Instructions (Cross-Tool)
+
+This file is read by Gemini CLI, GitHub Copilot, Google Antigravity, OpenAI Codex CLI, and other AI coding tools. For Claude Code, see `.claude/CLAUDE.md`.
+
+## MANDATORY: Planning Before Development
+
+**No code changes without a ticket.** This is enforced by hooks on all AI tools.
+
+Before writing ANY code, you MUST:
+1. Check the taskboard for existing work (review session startup suggestions)
+2. Either pick an existing ticket OR create a new one with ALL required fields
+3. Move the ticket to `in_progress`
+4. Only then begin implementation
+
+If you are asked to write code and no ticket exists, **create the ticket first**. This is not optional — it ensures all three contributors can monitor progress through the shared GitHub Project board.
+
+## Taskboard Setup
+
+The taskboard (tcarac/taskboard) is the single source of truth for all project work.
+
+### Installation
+```bash
+# Option 1: Go install
+go install github.com/tcarac/taskboard@latest
+
+# Option 2: Download binary from releases
+# https://github.com/tcarac/taskboard/releases
+# Place in: ../taskboard/, ~/.local/bin/, /usr/local/bin/, or PATH
+```
+
+### Starting the Server
+```bash
+cd project-forge
+taskboard start --port 3010 --db .claude/taskboard.db
+```
+
+The session start hook will auto-start the server if the binary is found. If it fails, start manually.
+
+- **Web UI**: http://localhost:3010
+- **API**: http://localhost:3010/api
+- **Project ID**: `01KJEE8R1XXFF0CZT1WCSTGRDP` (prefix: PF)
+
+### Required Ticket Fields
+Every ticket MUST have ALL of these before work begins:
+- **User Story**: Must match regex `As an?\s+.+,\s+I want\s+.+\s+so that\s+.+` (case-insensitive)
+- **Description**: Technical context, affected files, scope (at least 20 chars beyond user story + AC)
+- **Acceptance Criteria**: Given/When/Then format — **minimum 3 scenarios** (happy path, edge case, negative/error case)
+- **Priority**: urgent, high, medium, low
+- **Team**: Engineering (`01KJFNHZC49XG9KXRYTMYEEDTS`), PM (`01KJFNJC02QK6F5NSDND7NH5MS`), or Leadership (`01KJFNK35JVPQJESS3RZM0F5HP`)
+- **Subtasks**: At least 3 implementation steps (the plan)
+
+### Workflow
+1. **Session start**: Taskboard auto-starts, GitHub sync pulls, backlog is displayed
+2. **Pick work**: Resume in-progress tickets first, then highest priority todo
+3. **Create ticket if needed**: Fill ALL required fields — this IS the planning step
+4. **Move to in_progress**: Only after ticket is fully documented
+5. **Toggle subtasks**: As you complete each implementation step
+6. **Move to done**: After ALL acceptance criteria are verified
+7. **Session end**: Changes auto-push to GitHub Project
+
+## GitHub Project Sync
+
+Tickets sync bidirectionally with GitHub Project "SpawnForge" (#2, owner: Tristan578).
+
+- **Automatic push**: After each response via Stop hook
+- **Automatic pull**: At session start via SessionStart hook
+- **Manual sync**: `python3 .claude/hooks/github_project_sync.py push|pull|status`
+
+All three contributors see the same board on GitHub regardless of which AI tool they use.
+
+## Architecture Overview
+
+SpawnForge is an AI-native 2D/3D game engine for the browser.
+
+```
+React Shell (Next.js 16, Zustand, Tailwind)  <- Editor UI + AI chat
+    |  JSON events via wasm-bindgen
+Bevy Editor Engine (Rust -> WASM)             <- Scene editing, rendering
+    |
+Game Runtime + TypeScript Scripting           <- Playing user-created games
+```
+
+### Key Rules
+- **Bridge isolation**: Only `engine/src/bridge/` may import web_sys/js_sys/wasm_bindgen
+- **Command-driven**: All engine ops go through `handle_command()` JSON commands
+- **Zero ESLint warnings**: `npx eslint --max-warnings 0`
+- **wasm-bindgen v0.2.108**: Must match Cargo.lock exactly
+
+## Build Commands
+
+```bash
+# WASM engine build
+powershell.exe -File ".\build_wasm.ps1"
+
+# Web dev server
+cd web && npm install && npm run dev
+
+# Quick validation
+cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
+```
+
+## Hook Scripts (shared across all tools)
+
+All hooks live in `.claude/hooks/` and are called by each tool's config:
+
+| Script | Purpose | Trigger |
+|--------|---------|---------|
+| `on-session-start.sh` | Install check + auto-start + GitHub pull + backlog | Session start |
+| `on-prompt-submit.sh` | Ticket enforcement gate + stale reminders | Before prompt |
+| `on-stop.sh` | Ticket validation + GitHub push | After response |
+| `post-edit-lint.sh` | ESLint on changed files | After file edit |
+| `sync-to-github.sh` | Push local changes to GitHub Project | Called by on-stop |
+| `sync-from-github.sh` | Pull GitHub changes to local | Called by on-session-start |
+
+**Tool hook support**: Claude Code, Copilot, Gemini CLI, and Windsurf run these automatically via their hook configs. Codex CLI and Antigravity do not support hooks — developers must run the scripts manually (see `.codex/AGENTS.md` or `.agent/rules/taskboard-sync.md`).
+
+**Skills directory note**: Gemini CLI and Copilot read `.agents/skills/` (plural). Antigravity reads `.agent/skills/` (singular). Both contain the same skills.

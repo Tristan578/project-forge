@@ -206,6 +206,296 @@ project-forge/
 - **Command-driven:** All engine operations are expressed as JSON commands through `handle_command()`. This enables both the UI and programmatic integrations to drive the editor.
 - **Event-driven updates:** Bevy systems emit events via the bridge -> JS callback -> Zustand store -> React re-render. No direct DOM manipulation from Rust.
 
+## Agentic Development
+
+SpawnForge is designed for **AI-assisted development**. Six AI coding tools are pre-configured with shared enforcement hooks, skills, and project context. Any contributor can open the repo in their preferred tool and start working immediately — ticket tracking, code quality, and GitHub sync are enforced consistently across all tools.
+
+### Supported Tools
+
+| Tool | Config Dir | Hooks | Skills | Default Model |
+|------|-----------|-------|--------|---------------|
+| [Claude Code](https://claude.ai/claude-code) | `.claude/` | Automatic | `.claude/skills/` | Opus 4.6 / Sonnet 4.6 |
+| [GitHub Copilot](https://github.com/features/copilot) | `.github/` | Automatic | `.github/skills/` | GitHub-managed |
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `.gemini/` | Automatic | `.agents/skills/` | `gemini-3.1-pro-preview` |
+| [Windsurf](https://windsurf.com) | `.windsurf/` | Automatic | `.windsurf/workflows/` | App-managed |
+| [Google Antigravity](https://antigravity.google) | `.agent/` + `.gemini/` | Manual | `.agent/skills/` | Gemini 3 |
+| [OpenAI Codex CLI](https://github.com/openai/codex) | `.codex/` | Manual | `.codex/skills/` | `gpt-5.3-codex` |
+
+**First-time setup:** Install the [taskboard binary](https://github.com/tcarac/taskboard/releases), then open the repo in your AI tool. Tools with automatic hooks will self-configure on first session. Tools without hooks (Codex, Antigravity) include manual workflow instructions in their `AGENTS.md` files.
+
+### Quick Start by Tool
+
+<details>
+<summary><strong>Claude Code</strong></summary>
+
+```bash
+cd project-forge
+claude  # hooks auto-start taskboard, pull GitHub, display backlog
+```
+Everything is automatic. Hooks enforce ticket-before-code on every prompt, validate tickets after every response, push changes to GitHub, and lint edited files. Skills are invoked via `/kanban`, `/sync-push`, `/sync-pull`, `/planner`, `/builder`, `/cycle`.
+
+Claude Code also has three **subagents** (`.claude/agents/`):
+- **Planner** (Opus) — Architect that creates specs in `specs/`, never writes code
+- **Builder** (Sonnet) — Implementation specialist, reads specs and writes code
+- **Validator** (Sonnet) — QA gatekeeper, runs tests and architecture checks
+
+</details>
+
+<details>
+<summary><strong>GitHub Copilot</strong></summary>
+
+```bash
+cd project-forge
+# Copilot reads .github/hooks/hooks.json and .github/instructions/copilot.instructions.md
+```
+Hooks trigger on session start (pull), prompt submit (ticket gate), and post-tool-use (validate + push). Skills available in `.github/skills/` and `.agents/skills/`. Prompts for manual sync in `.github/prompts/`.
+
+</details>
+
+<details>
+<summary><strong>Gemini CLI</strong></summary>
+
+```bash
+cd project-forge
+gemini  # reads .gemini/settings.json, GEMINI.md, AGENTS.md
+```
+Hooks configured in `.gemini/settings.json` for SessionStart, BeforeAgent, AfterAgent, and AfterTool (file edits). Skills in `.agents/skills/`.
+
+</details>
+
+<details>
+<summary><strong>Windsurf</strong></summary>
+
+```bash
+cd project-forge
+# Windsurf reads .windsurf/hooks.json and .windsurf/rules/taskboard.md
+```
+Hooks trigger on `post_write_code`, `post_run_command`, `post_cascade_response`, and `pre_user_prompt`. Workflows for sync in `.windsurf/workflows/`.
+
+</details>
+
+<details>
+<summary><strong>Google Antigravity</strong></summary>
+
+```bash
+cd project-forge
+# Antigravity reads GEMINI.md (with AGENTS.md loading directive) and .agent/skills/
+# No auto-hooks — run manually:
+bash .claude/hooks/on-session-start.sh   # start of session
+bash .claude/hooks/on-stop.sh             # after work
+bash .claude/hooks/post-edit-lint.sh      # after editing
+```
+Skills in `.agent/skills/` (singular — Antigravity uses `.agent/`, not `.agents/`). Rules in `.agent/rules/`.
+
+</details>
+
+<details>
+<summary><strong>OpenAI Codex CLI</strong></summary>
+
+```bash
+cd project-forge
+codex  # reads .codex/config.toml and .codex/AGENTS.md
+# No auto-hooks — run manually:
+bash .claude/hooks/on-session-start.sh   # start of session
+bash .claude/hooks/on-stop.sh             # after work
+bash .claude/hooks/post-edit-lint.sh      # after editing
+```
+Config in `.codex/config.toml`. Skills in `.codex/skills/`. Full enforcement rules in `.codex/AGENTS.md`.
+
+</details>
+
+### Shared Hook System
+
+All tools call the same bash scripts in `.claude/hooks/`. Tools with hook support wire them up automatically via their config files; tools without hooks require manual execution.
+
+```
+Tool Config (JSON/TOML)
+    │
+    ▼
+Shared Bash Scripts (.claude/hooks/)
+    │
+    ├── taskboard-state.sh      ← Library: API helpers, validation, consistency
+    ├── github_project_sync.py  ← Sync engine: push/pull with GitHub Projects v2
+    └── github-sync-config.json ← GitHub Project metadata
+```
+
+#### Hook Lifecycle
+
+| Hook | Script | Trigger | What It Does |
+|------|--------|---------|-------------|
+| **Session Start** | `on-session-start.sh` | Tool opens | Checks taskboard binary, auto-starts server, pulls from GitHub Project, displays backlog with prioritized work suggestions, warns about stale tickets |
+| **Prompt Submit** | `on-prompt-submit.sh` | Before each prompt | Detects development-intent keywords, blocks code work if no active ticket, injects active ticket context |
+| **Stop** | `on-stop.sh` | After each response | Validates active ticket (user story, AC, priority, team, subtasks), checks open ticket consistency, pushes changes to GitHub Project |
+| **Post-Edit Lint** | `post-edit-lint.sh` | After file edits | Runs ESLint on changed `.ts`/`.tsx` files under `web/` (skips tests, node_modules, coverage) |
+| **Sync Push** | `sync-to-github.sh` | Called by Stop | Guards for `gh` CLI + auth, calls `github_project_sync.py push` |
+| **Sync Pull** | `sync-from-github.sh` | Called by Session Start | Guards for `gh` CLI + auth, calls `github_project_sync.py pull` |
+
+#### Ticket Validation Rules
+
+The `tb_validate_ticket()` function in `taskboard-state.sh` enforces:
+
+1. **User Story** — Must match regex `As an?\s+.+,\s+I want\s+.+\s+so that\s+.+`
+2. **Acceptance Criteria** — Minimum 3 complete Given/When/Then scenarios (happy path, edge case, negative)
+3. **Description Substance** — At least 20 characters of technical context beyond user story and AC
+4. **Priority** — Must be `urgent`, `high`, `medium`, or `low`
+5. **Team** — Must be assigned to Engineering, PM, or Leadership
+6. **Subtasks** — At least 3 implementation steps
+
+### Skills Reference
+
+Skills are callable capabilities loaded on-demand. Each tool stores them in its own directory, but all reference the same shared hook scripts.
+
+| Skill | Available In | Purpose |
+|-------|-------------|---------|
+| **kanban** | All 6 tools | View board, create/update/move tickets, validate fields, toggle subtasks. Claude Code uses MCP tools; other tools use REST API (`curl` to `localhost:3010`) |
+| **sync-push** | All 6 tools | Push local ticket changes to GitHub Project. Syncs full body (description, priority, subtask checkboxes, metadata block). Detects changes via content hashing |
+| **sync-pull** | All 6 tools | Pull GitHub Project changes to local taskboard. Reconstructs subtasks from checkboxes, re-links tickets by ULID from metadata, imports new tickets with parsed fields |
+| **planner** | Claude Code | Architect agent — analyzes requests, creates detailed specs in `specs/`, never writes code |
+| **builder** | Claude Code | Implementation agent — reads specs, writes Rust/TypeScript, runs lint/check after coding |
+| **cycle** | Claude Code | Orchestration — runs Plan → Build → Verify loop, updates project context after each cycle |
+| **arch-validator** | Claude Code | Runs `check_arch.py` — 7 structural rules (bridge isolation, file sizes, dispatch chain, store composition) |
+
+### GitHub Project Sync
+
+The `github_project_sync.py` engine provides **bidirectional sync** between the local taskboard and [GitHub Project "SpawnForge" (#2)](https://github.com/orgs/Tristan578/projects/2).
+
+**V2 body format:** Each ticket on GitHub contains a structured body:
+```markdown
+**Priority:** high
+
+[ticket description — user story, AC, technical context]
+
+## Subtasks
+- [ ] Step 1
+- [x] Step 2 (completed)
+- [ ] Step 3
+
+---
+<!-- SPAWNFORGE_METADATA
+{ "version": 2, "ticketId": "...", "bodyHash": "...", "subtaskHash": "..." }
+SPAWNFORGE_METADATA -->
+```
+
+- `- [ ]`/`- [x]` renders as interactive checkboxes on GitHub
+- The HTML comment is invisible but machine-parseable for re-linking
+- Content hashes detect changes without full comparison
+- Old v1 format (`**Taskboard:** PF-N (ULID)`) is still parsed on pull and auto-upgraded to v2 on next push
+
+**Commands:**
+```bash
+python3 .claude/hooks/github_project_sync.py push       # incremental push
+python3 .claude/hooks/github_project_sync.py push-all   # full push (upgrades all to v2)
+python3 .claude/hooks/github_project_sync.py pull        # pull remote changes
+python3 .claude/hooks/github_project_sync.py status      # show sync state
+```
+
+### Architecture Validator
+
+The `check_arch.py` script enforces 7 structural rules:
+
+| Rule | Limit | What It Checks |
+|------|-------|---------------|
+| Bridge isolation | Hard fail | No `web_sys`/`js_sys`/`wasm_bindgen` imports outside `engine/src/bridge/` |
+| Rust file size | 800 lines | No Rust source file exceeds limit |
+| TypeScript file size | 500 lines | No TS/TSX file exceeds limit (excludes tests, `.d.ts`, legacy) |
+| Command dispatch | 50 match arms | `commands/mod.rs` delegates to domain modules, not monolithic match |
+| Pending mod.rs | No request structs | Request types live in domain modules, not `pending/mod.rs` |
+| Store composition | 200 lines | `editorStore.ts` composes slices, doesn't define inline state |
+| Event delegation | 150 lines | `useEngineEvents.ts` delegates to `hooks/events/` handlers |
+
+```bash
+python3 .claude/skills/arch-validator/check_arch.py           # warnings
+python3 .claude/skills/arch-validator/check_arch.py --strict   # exit 1 on any violation
+python3 .claude/skills/arch-validator/check_arch.py --json     # machine-readable output
+```
+
+### Taskboard
+
+All work is tracked on a local [taskboard](https://github.com/tcarac/taskboard) that syncs to GitHub Projects.
+
+**Install:**
+```bash
+go install github.com/tcarac/taskboard@latest
+# Or download from https://github.com/tcarac/taskboard/releases
+```
+
+**Start:**
+```bash
+cd project-forge
+taskboard start --port 3010 --db .claude/taskboard.db
+```
+
+- **Web UI:** http://localhost:3010
+- **API:** http://localhost:3010/api
+- **Project ID:** `01KJEE8R1XXFF0CZT1WCSTGRDP` (prefix: PF)
+- **Database:** `.claude/taskboard.db` (SQLite, 186+ tickets)
+
+Tools with hook support auto-start the taskboard on session start. The database is committed to the repo so all contributors share the same ticket state.
+
+### Config Directory Map
+
+```
+project-forge/
+├── AGENTS.md                    # Cross-tool instructions (Copilot, Gemini, Antigravity, Codex)
+├── GEMINI.md                    # Gemini CLI + Antigravity instructions
+├── .claude/                     # Claude Code (primary tool)
+│   ├── CLAUDE.md                #   Full project constitution (280+ lines)
+│   ├── settings.json            #   Tool settings
+│   ├── agents/                  #   Subagent definitions
+│   │   ├── planner.md           #     Architect (Opus model)
+│   │   ├── builder.md           #     Implementer (Sonnet model)
+│   │   └── validator.md         #     QA gatekeeper (Sonnet model)
+│   ├── hooks/                   #   SHARED hook scripts (all tools call these)
+│   │   ├── taskboard-state.sh   #     Library: API helpers, validation, staleness
+│   │   ├── on-session-start.sh  #     Session start lifecycle
+│   │   ├── on-prompt-submit.sh  #     Prompt submit gate
+│   │   ├── on-stop.sh           #     Post-response validation
+│   │   ├── post-edit-lint.sh    #     ESLint on changed files
+│   │   ├── sync-to-github.sh    #     Push to GitHub Project
+│   │   ├── sync-from-github.sh  #     Pull from GitHub Project
+│   │   ├── github_project_sync.py  #  Sync engine (Python)
+│   │   ├── github-sync-config.json #  GitHub Project metadata
+│   │   └── github-project-map.json #  Ticket ↔ GitHub item mapping
+│   ├── rules/                   #   Architecture & quality rules
+│   │   ├── bevy-api.md          #     Bevy 0.18 API patterns
+│   │   ├── entity-snapshot.md   #     ECS snapshot patterns
+│   │   ├── web-quality.md       #     ESLint & React patterns
+│   │   ├── library-apis.md      #     Third-party library APIs
+│   │   └── file-map.md          #     Project file structure
+│   ├── skills/                  #   Claude Code skills
+│   │   ├── kanban/SKILL.md      #     Taskboard management
+│   │   ├── sync-push/SKILL.md   #     Push to GitHub
+│   │   ├── sync-pull/SKILL.md   #     Pull from GitHub
+│   │   ├── planner/SKILL.md     #     Spec generation
+│   │   ├── builder/SKILL.md     #     Code implementation
+│   │   ├── cycle/SKILL.md       #     Plan→Build→Verify loop
+│   │   └── arch-validator/      #     Architecture validation
+│   │       ├── SKILL.md
+│   │       └── check_arch.py
+│   └── taskboard.db             #   SQLite database (186+ tickets)
+├── .github/                     # GitHub Copilot
+│   ├── hooks/hooks.json         #   Hook wiring (sessionStart, promptSubmit, postToolUse)
+│   ├── instructions/copilot.instructions.md  # Copilot-specific guidance
+│   ├── skills/                  #   kanban, sync-push, sync-pull
+│   └── prompts/                 #   sync-push.prompt.md, sync-pull.prompt.md
+├── .gemini/                     # Gemini CLI (+ Antigravity model config)
+│   └── settings.json            #   Hooks + model (gemini-3.1-pro-preview)
+├── .agents/                     # Shared skills (Copilot + Gemini CLI)
+│   ├── rules/taskboard-sync.md  #   Ticket enforcement rules
+│   └── skills/                  #   kanban, sync-push, sync-pull
+├── .agent/                      # Google Antigravity (singular — NOT .agents/)
+│   ├── rules/taskboard-sync.md  #   Ticket enforcement rules
+│   └── skills/                  #   kanban, sync-push, sync-pull
+├── .windsurf/                   # Windsurf
+│   ├── hooks.json               #   Hook wiring (post_write_code, pre_user_prompt, etc.)
+│   ├── rules/taskboard.md       #   Ticket enforcement rules
+│   └── workflows/               #   sync-push.md, sync-pull.md
+└── .codex/                      # OpenAI Codex CLI
+    ├── config.toml              #   Model (gpt-5.3-codex), approval policy, sandbox
+    ├── AGENTS.md                #   Full instructions (no hooks, so rules are inline)
+    └── skills/                  #   kanban, sync-push, sync-pull
+```
+
 ## Contributing
 
 Contributions are welcome! Here's how to get involved.
@@ -274,7 +564,7 @@ Contributions are welcome! Here's how to get involved.
 
 | Layer | Technology |
 |-------|-----------|
-| Engine | Bevy 0.16, wgpu 24, bevy_rapier3d, bevy_hanabi, bevy_panorbit_camera, csgrs, noise |
+| Engine | Bevy 0.18, wgpu 27, bevy_rapier3d 0.33, bevy_hanabi 0.18, bevy_panorbit_camera 0.34, csgrs 0.20, noise 0.9 |
 | Frontend | Next.js 16, React 19, Zustand 5, Tailwind CSS, React Flow |
 | Auth | Clerk |
 | Payments | Stripe |
