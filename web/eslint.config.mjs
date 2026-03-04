@@ -20,11 +20,15 @@ const eslintConfig = defineConfig([
       'no-restricted-syntax': [
         'error',
         {
-          selector: "CallExpression[callee.object.name=/^(it|test|describe)$/][callee.property.name=/^(skip|only)$/]",
+          selector: "CallExpression[callee.object.name=/^(?:it|test|describe)$/][callee.property.name=/^(?:skip|only)$/]",
           message: 'Do not use .skip/.only in tests.',
         },
         {
-          selector: "CallExpression[callee.name=/^(xit|xit\\.each|xtest|xdescribe)$/]",
+          selector: "CallExpression[callee.name=/^(?:xit|xtest|xdescribe)$/]",
+          message: 'Do not disable tests with x-prefixed helpers.',
+        },
+        {
+          selector: "CallExpression[callee.object.name='xit'][callee.property.name='each']",
           message: 'Do not disable tests with x-prefixed helpers.',
         },
         {
