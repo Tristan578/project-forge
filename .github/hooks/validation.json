@@ -6,7 +6,7 @@
         "type": "command",
         "bash": "./scripts/copilot-arch-check.sh",
         "cwd": ".",
-        "timeoutSec": 60
+        "timeoutSec": 30
       }
     ]
   }

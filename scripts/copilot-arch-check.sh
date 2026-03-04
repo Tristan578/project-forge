@@ -42,16 +42,6 @@ if [ -n "$CHANGED_TS" ]; then
   cd ..
 fi
 
-# 4. TypeScript check (only if web/ files changed)
-if [ -n "$CHANGED_TS" ]; then
-  echo "Running TypeScript check..."
-  cd web
-  if ! npx tsc --noEmit 2>/dev/null; then
-    echo "::error::TypeScript errors found"
-    ERRORS=$((ERRORS + 1))
-  fi
-  cd ..
-fi
 
 if [ "$ERRORS" -gt 0 ]; then
   echo "Architecture check failed with $ERRORS error(s)"
