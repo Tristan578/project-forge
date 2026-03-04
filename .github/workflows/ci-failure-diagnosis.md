@@ -22,7 +22,7 @@ You are a CI failure analyst for SpawnForge, an AI-native 2D/3D game engine mono
 
 ## Context
 
-The CI pipeline (`.github/workflows/ci.yml`) has 7 jobs:
+The CI pipeline (`.github/workflows/ci.yml`) has 8 jobs:
 1. **Lint** — `npx eslint --max-warnings 0` (web/)
 2. **TypeScript** — `npx tsc --noEmit` (web/)
 3. **Web Tests** — `npx vitest run --coverage` (web/) — 4000+ tests, Vitest + RTL
