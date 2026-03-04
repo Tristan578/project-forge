@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "cd web && npm ci --prefer-offline 2>/dev/null && cd ../mcp-server && npm ci --prefer-offline 2>/dev/null && echo 'Dependencies installed'",
+        "cwd": ".",
+        "timeoutSec": 120
+      }
+    ]
+  }
+}
