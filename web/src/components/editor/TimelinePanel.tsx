@@ -4,7 +4,7 @@ import { useRef, useEffect, useCallback, useState, memo, useMemo } from 'react';
 import { Play, Pause, Square, ZoomIn, ZoomOut, Circle } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 
-const PROPERTY_TARGETS = [
+export const PROPERTY_TARGETS = [
   { value: 'position_x', label: 'Position X', group: 'Transform', color: '#3b82f6' },
   { value: 'position_y', label: 'Position Y', group: 'Transform', color: '#3b82f6' },
   { value: 'position_z', label: 'Position Z', group: 'Transform', color: '#3b82f6' },
@@ -31,10 +31,10 @@ const PROPERTY_TARGETS = [
   { value: 'light_range', label: 'Range', group: 'Light', color: '#8b5cf6' },
 ];
 
-const TRACK_HEIGHT = 32;
-const RULER_HEIGHT = 30;
-const FPS = 60;
-const FRAME_DURATION = 1 / FPS;
+export const TRACK_HEIGHT = 32;
+export const RULER_HEIGHT = 30;
+export const FPS = 60;
+export const FRAME_DURATION = 1 / FPS;
 
 interface TimelineViewState {
   zoom: number; // 0.1 to 100
@@ -45,21 +45,17 @@ interface TimelineViewState {
   recordingEnabled: boolean;
 }
 
-function timeToPixels(time: number, zoom: number, pixelsPerSecond: number): number {
+export function timeToPixels(time: number, zoom: number, pixelsPerSecond: number): number {
   return time * pixelsPerSecond * zoom;
 }
 
-function pixelsToTime(pixels: number, zoom: number, pixelsPerSecond: number): number {
+export function pixelsToTime(pixels: number, zoom: number, pixelsPerSecond: number): number {
   return pixels / (pixelsPerSecond * zoom);
 }
 
-function snapToFrame(time: number): number {
+export function snapToFrame(time: number): number {
   return Math.round(time / FRAME_DURATION) * FRAME_DURATION;
 }
-
-/* ─── Exported helpers for testing ───────────────────────────────────────── */
-export { timeToPixels, pixelsToTime, snapToFrame, PROPERTY_TARGETS, TRACK_HEIGHT, RULER_HEIGHT, FPS, FRAME_DURATION };
-export type { TimelineViewState };
 
 export const TimelinePanel = memo(function TimelinePanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);

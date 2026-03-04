@@ -11,13 +11,16 @@ import { renderHook, act } from '@testing-library/react';
 // Mock initLog before importing the hook
 vi.mock('@/lib/initLog', () => {
   let events: Array<{ phase: string; timestamp: number; message?: string; error?: string }> = [];
+  let startTime: number | null = null;
   return {
     logInitEvent: vi.fn((phase: string, message?: string, error?: string) => {
-      const event = { phase, timestamp: Date.now(), message, error };
+      const now = Date.now();
+      if (startTime === null) startTime = now;
+      const event = { phase, timestamp: now - startTime, message, error };
       events.push(event);
       return event;
     }),
-    clearInitEvents: vi.fn(() => { events = []; }),
+    clearInitEvents: vi.fn(() => { events = []; startTime = null; }),
     getInitEvents: vi.fn(() => [...events]),
   };
 });
@@ -301,8 +304,15 @@ describe('useEngineStatus', () => {
   it('totalElapsed tracks last event timestamp', () => {
     const { result } = renderHook(() => useEngineStatus());
 
+    // Log a first event to set startTime, then advance time before the second
     act(() => {
       result.current.logEvent('wasm_loading');
+    });
+
+    vi.advanceTimersByTime(500);
+
+    act(() => {
+      result.current.logEvent('renderer_init');
     });
 
     expect(result.current.totalElapsed).toBeGreaterThan(0);
