@@ -128,8 +128,8 @@ const STORAGE_KEY = 'forge-checklist-dismissed';
 
 export function OnboardingChecklist() {
   const [dismissed, setDismissed] = useState(() => {
-    if (typeof localStorage === 'undefined') return true;
-    return !!localStorage.getItem(STORAGE_KEY);
+    if (typeof window === 'undefined') return true;
+    return !!window.localStorage.getItem(STORAGE_KEY);
   });
   const [collapsed, setCollapsed] = useState(false);
   const [completedTasks, setCompletedTasks] = useState<Set<string>>(new Set());

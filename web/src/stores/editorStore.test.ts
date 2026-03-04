@@ -11,11 +11,13 @@ import { useEditorStore, setCommandDispatcher } from './editorStore';
 import {
   createMockDispatch,
   makeSceneGraph,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- kept for future test cases
+  makeEntity,
   makeTransform,
   makeMaterialData,
   makeLightData,
   makePhysicsData,
-} from '@/test/fixtures';
+  } from '@/test/utils/fixtures';
 
 describe('editorStore', () => {
   let mockDispatch: ReturnType<typeof createMockDispatch>;

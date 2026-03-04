@@ -10,7 +10,7 @@ test.describe('Animation Workflow @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Look for animation section in inspector
     const animSection = page.getByText(/animation/i, { exact: false });
@@ -23,7 +23,7 @@ test.describe('Animation Workflow @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Should have Transform, Material sections at minimum
     const transform = page.getByText('Transform', { exact: false });

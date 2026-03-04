@@ -35,7 +35,7 @@ test.describe('Chat Command Execution @engine', () => {
     });
 
     // Wait for the WASM engine to process
-    await page.waitForTimeout(1000);
+
 
     // Check the scene hierarchy UI for the new entity
     const cubeElement = page.getByText(/TestCube|Cube/i, { exact: false });
@@ -47,7 +47,7 @@ test.describe('Chat Command Execution @engine', () => {
   test('chat panel opens and shows input field', async ({ page }) => {
     // Open chat with Ctrl+K
     await page.keyboard.press('Control+k');
-    await page.waitForTimeout(500);
+
 
     // Chat input should be visible
     const chatInput = page.locator('textarea, input[type="text"]').filter({
@@ -92,7 +92,7 @@ test.describe('Chat Command Execution @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
+
 
     // Transform section should be visible in inspector
     const transformSection = page.getByText('Transform', { exact: false });
@@ -105,10 +105,10 @@ test.describe('Chat Command Execution @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await editor.waitForEntityCount(2);
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(200);
+
 
     await page.keyboard.press('Delete');
-    await page.waitForTimeout(500);
+
 
     // Should be back to 1 entity (camera only)
     await page.waitForFunction(
@@ -130,13 +130,13 @@ test.describe('Chat Command Execution @engine', () => {
 
     // Select and delete
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(200);
+
     await page.keyboard.press('Delete');
-    await page.waitForTimeout(500);
+
 
     // Undo
     await page.keyboard.press('Control+z');
-    await page.waitForTimeout(500);
+
 
     // Cube should reappear
     const cubeEl = page.getByText(/Cube/, { exact: false });
@@ -151,9 +151,9 @@ test.describe('Chat Command Execution @engine', () => {
 
     // Select and duplicate
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(200);
+
     await page.keyboard.press('Control+d');
-    await page.waitForTimeout(500);
+
 
     // Should now have 3 entities (camera + 2 cubes)
     await editor.waitForEntityCount(3);
@@ -167,18 +167,18 @@ test.describe('Chat Command Execution @engine', () => {
 
     // Select and trigger rename (double-click or F2)
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(200);
+
 
     // Try F2 to rename
     await page.keyboard.press('F2');
-    await page.waitForTimeout(300);
+
 
     // Look for an active input in the hierarchy
     const renameInput = page.locator('input[type="text"]').first();
     if (await renameInput.isVisible()) {
       await renameInput.fill('MyCube');
       await renameInput.press('Enter');
-      await page.waitForTimeout(300);
+
 
       const renamed = page.getByText('MyCube', { exact: false });
       const count = await renamed.count();

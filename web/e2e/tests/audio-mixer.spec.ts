@@ -8,7 +8,7 @@ test.describe('Audio Mixer @engine', () => {
     const mixerBtn = page.getByRole('button', { name: /audio.*mixer|mixer/i });
     if (await mixerBtn.isVisible()) {
       await mixerBtn.click();
-      await page.waitForTimeout(500);
+
 
       // Panel should be visible
       await editor.expectPanelVisible('Audio Mixer');
@@ -17,12 +17,12 @@ test.describe('Audio Mixer @engine', () => {
       const panelsMenuBtn = page.getByRole('button', { name: /panels|windows/i });
       if (await panelsMenuBtn.isVisible()) {
         await panelsMenuBtn.click();
-        await page.waitForTimeout(200);
+
 
         const audioMixerOption = page.getByText(/audio.*mixer/i).first();
         if (await audioMixerOption.isVisible()) {
           await audioMixerOption.click();
-          await page.waitForTimeout(500);
+
 
           await editor.expectPanelVisible('Audio Mixer');
         }
@@ -37,7 +37,7 @@ test.describe('Audio Mixer @engine', () => {
     const mixerBtn = page.getByRole('button', { name: /audio.*mixer|mixer/i });
     if (await mixerBtn.isVisible()) {
       await mixerBtn.click();
-      await page.waitForTimeout(500);
+
     }
 
     // Look for bus/channel controls
@@ -53,7 +53,7 @@ test.describe('Audio Mixer @engine', () => {
     const mixerBtn = page.getByRole('button', { name: /audio.*mixer|mixer/i });
     if (await mixerBtn.isVisible()) {
       await mixerBtn.click();
-      await page.waitForTimeout(500);
+
     }
 
     // Look for volume sliders (input[type=range] or custom slider)
@@ -69,13 +69,13 @@ test.describe('Audio Mixer @engine', () => {
     const mixerBtn = page.getByRole('button', { name: /audio.*mixer|mixer/i });
     if (await mixerBtn.isVisible()) {
       await mixerBtn.click();
-      await page.waitForTimeout(500);
+
 
       // Look for close button on the panel tab
       const closeBtn = page.locator('.dv-tab [class*="close"], .dv-tab button').filter({ hasText: /×|close/i }).first();
       if (await closeBtn.isVisible()) {
         await closeBtn.click();
-        await page.waitForTimeout(300);
+
 
         // Panel should no longer be visible
         const panelTab = page.locator('.dv-tab').filter({ hasText: /audio.*mixer/i });
@@ -94,7 +94,7 @@ test.describe('Audio Mixer @engine', () => {
     const mixerBtn = page.getByRole('button', { name: /audio.*mixer|mixer/i });
     if (await mixerBtn.isVisible()) {
       await mixerBtn.click();
-      await page.waitForTimeout(500);
+
 
       // Look for multiple bus channels (Master, Music, SFX, Voice)
       const masterBus = page.locator('text=/master/i').first();

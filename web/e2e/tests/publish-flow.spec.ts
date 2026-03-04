@@ -23,7 +23,7 @@ test.describe('Publish Flow @engine', () => {
 
     if (await publishBtn.count() > 0) {
       await publishBtn.click();
-      await page.waitForTimeout(300);
+
 
       // Should see a dialog with publish-related content
       const dialog = page
@@ -82,7 +82,7 @@ test.describe('Publish Flow @engine', () => {
 
     if (await publishBtn.count() > 0) {
       await publishBtn.click();
-      await page.waitForTimeout(300);
+
 
       // Find slug input and try short slug
       const slugInput = page
@@ -90,7 +90,7 @@ test.describe('Publish Flow @engine', () => {
         .first();
       if (await slugInput.count() > 0) {
         await slugInput.fill('ab');
-        await page.waitForTimeout(200);
+
 
         // Publish button should be disabled with slug < 3 chars
         const publishActionBtn = page
@@ -113,7 +113,7 @@ test.describe('Publish Flow @engine', () => {
 
     if (await publishBtn.count() > 0) {
       await publishBtn.click();
-      await page.waitForTimeout(300);
+
 
       // Find title input and enter a title
       const titleInput = page
@@ -125,7 +125,7 @@ test.describe('Publish Flow @engine', () => {
 
       if (await titleInput.count() > 0 && await slugInput.count() > 0) {
         await titleInput.fill('My Awesome Game');
-        await page.waitForTimeout(300);
+
 
         const slugValue = await slugInput.inputValue();
         // Slug should be auto-generated (lowercased, hyphenated)

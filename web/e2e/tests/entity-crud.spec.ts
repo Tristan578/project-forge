@@ -30,7 +30,7 @@ test.describe('Entity CRUD Operations @engine', () => {
     await editor.selectEntity('Cube');
 
     // Wait for selection state update
-    await page.waitForTimeout(300);
+
 
     // Check that inspector panel is showing
     await editor.expectPanelVisible('Inspector');
@@ -48,13 +48,13 @@ test.describe('Entity CRUD Operations @engine', () => {
 
     // Select the cube
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(200);
+
 
     // Press Delete key
     await page.keyboard.press('Delete');
 
     // Wait for deletion to process
-    await page.waitForTimeout(500);
+
 
     // Check that cube is no longer in hierarchy (only Camera remains)
     const sceneNodes = await editor.getStoreState<Record<string, unknown>>('sceneGraph.nodes');
@@ -69,13 +69,13 @@ test.describe('Entity CRUD Operations @engine', () => {
 
     // Select and delete
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(200);
+
     await page.keyboard.press('Delete');
-    await page.waitForTimeout(500);
+
 
     // Undo
     await editor.pressShortcut('Control+z');
-    await page.waitForTimeout(500);
+
 
     // Check that cube is restored
     await editor.waitForEntityCount(2);
@@ -91,11 +91,11 @@ test.describe('Entity CRUD Operations @engine', () => {
 
     // Select cube
     await editor.selectEntity('Cube');
-    await page.waitForTimeout(200);
+
 
     // Duplicate with Ctrl+D
     await editor.pressShortcut('Control+d');
-    await page.waitForTimeout(500);
+
 
     // Check that we now have 3 entities (Camera + Cube + Cube Copy)
     await editor.waitForEntityCount(3);
@@ -110,7 +110,7 @@ test.describe('Entity CRUD Operations @engine', () => {
       // Open menu and spawn entity
       await page.getByRole('button', { name: 'Add Entity' }).click();
       await page.getByText(type, { exact: true }).click();
-      await page.waitForTimeout(300);
+
     }
 
     // Wait for all entities to spawn (Camera + 3 entities = 4)

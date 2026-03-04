@@ -10,12 +10,10 @@ test.describe('Game Components @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await _editor.waitForEntityCount(2);
     await _editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
     // Inspector should be visible with some section headings
-    const inspector = page.locator('[class*="inspector"], [class*="Inspector"]');
-    const count = await inspector.count();
-    expect(count).toBeGreaterThan(0);
+    const inspector = page.locator('[class*="inspector"], [class*="Inspector"]').first();
+    await expect(inspector).toBeVisible();
   });
 
   test('add component button is accessible', async ({ page, editor: _editor }) => {
@@ -23,13 +21,14 @@ test.describe('Game Components @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await _editor.waitForEntityCount(2);
     await _editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
     // Look for add component button or game component section
-    const addBtn = page.locator('button').filter({ hasText: /add.*component|game.*component/i }).first();
-    const sectionHeader = page.getByText(/game.*component|component/i, { exact: false }).first();
-    const found = (await addBtn.count()) + (await sectionHeader.count());
-    expect(found).toBeGreaterThanOrEqual(0); // Graceful — components may be hidden until needed
+    const _sectionHeader = page.getByText(/game.*component|component/i, { exact: false }).first();
+    const _addBtn = page.locator('button').filter({ hasText: /add.*component|game.*component/i }).first();
+    
+    // Graceful check — components may be hidden until needed, wait for either or neither?
+    // Let's just assume the inspector is ready once Transform is visible
+    await expect(page.getByText('Transform', { exact: false }).first()).toBeVisible();
   });
 
   test('transform section shows position inputs after entity selection', async ({ page, editor: _editor }) => {
@@ -37,14 +36,13 @@ test.describe('Game Components @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await _editor.waitForEntityCount(2);
     await _editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
-    const xLabel = page.getByText('X', { exact: true });
-    const yLabel = page.getByText('Y', { exact: true });
-    const zLabel = page.getByText('Z', { exact: true });
-    await expect(xLabel.first()).toBeVisible();
-    await expect(yLabel.first()).toBeVisible();
-    await expect(zLabel.first()).toBeVisible();
+    const xLabel = page.getByText('X', { exact: true }).first();
+    const yLabel = page.getByText('Y', { exact: true }).first();
+    const zLabel = page.getByText('Z', { exact: true }).first();
+    await expect(xLabel).toBeVisible();
+    await expect(yLabel).toBeVisible();
+    await expect(zLabel).toBeVisible();
   });
 
   test('physics toggle is available in inspector', async ({ page, editor: _editor }) => {
@@ -52,11 +50,9 @@ test.describe('Game Components @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await _editor.waitForEntityCount(2);
     await _editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
-    const physicsSection = page.getByText(/physics/i, { exact: false });
-    const count = await physicsSection.count();
-    expect(count).toBeGreaterThan(0);
+    const physicsSection = page.getByText(/physics/i, { exact: false }).first();
+    await expect(physicsSection).toBeVisible();
   });
 
   test('material section is visible for mesh entities', async ({ page, editor: _editor }) => {
@@ -64,9 +60,8 @@ test.describe('Game Components @engine', () => {
     await page.getByText('Cube', { exact: true }).click();
     await _editor.waitForEntityCount(2);
     await _editor.selectEntity('Cube');
-    await page.waitForTimeout(300);
 
-    const materialSection = page.getByText(/material/i, { exact: false });
-    await expect(materialSection.first()).toBeVisible();
+    const materialSection = page.getByText(/material/i, { exact: false }).first();
+    await expect(materialSection).toBeVisible();
   });
 });

@@ -8,7 +8,7 @@ test.describe('Scene Settings @engine', () => {
     const settingsBtn = page.getByRole('button', { name: /scene.*settings/i });
     if (await settingsBtn.isVisible()) {
       await settingsBtn.click();
-      await page.waitForTimeout(300);
+
     }
 
     // Check for scene settings panel title in dockview
@@ -22,7 +22,7 @@ test.describe('Scene Settings @engine', () => {
     const settingsBtn = page.getByRole('button', { name: /scene.*settings/i });
     if (await settingsBtn.isVisible()) {
       await settingsBtn.click();
-      await page.waitForTimeout(300);
+
     }
 
     // Look for environment-related controls
@@ -38,7 +38,7 @@ test.describe('Scene Settings @engine', () => {
     const settingsBtn = page.getByRole('button', { name: /scene.*settings/i });
     if (await settingsBtn.isVisible()) {
       await settingsBtn.click();
-      await page.waitForTimeout(500);
+
     }
 
     // Look for fog controls
@@ -54,7 +54,7 @@ test.describe('Scene Settings @engine', () => {
     const settingsBtn = page.getByRole('button', { name: /scene.*settings/i });
     if (await settingsBtn.isVisible()) {
       await settingsBtn.click();
-      await page.waitForTimeout(500);
+
     }
 
     // Look for quality preset selector
@@ -73,7 +73,7 @@ test.describe('Scene Settings @engine', () => {
     const settingsBtn = page.getByRole('button', { name: /scene.*settings/i });
     if (await settingsBtn.isVisible()) {
       await settingsBtn.click();
-      await page.waitForTimeout(500);
+
     }
 
     // Look for post-processing controls (bloom, color grading, etc.)
@@ -89,7 +89,7 @@ test.describe('Scene Settings @engine', () => {
     const settingsBtn = page.getByRole('button', { name: /scene.*settings/i });
     if (await settingsBtn.isVisible()) {
       await settingsBtn.click();
-      await page.waitForTimeout(500);
+
     }
 
     // Look for skybox controls
@@ -105,7 +105,7 @@ test.describe('Scene Settings @engine', () => {
     const settingsBtn = page.getByRole('button', { name: /scene.*settings/i });
     if (await settingsBtn.isVisible()) {
       await settingsBtn.click();
-      await page.waitForTimeout(500);
+
     }
 
     // Look for mobile control settings
