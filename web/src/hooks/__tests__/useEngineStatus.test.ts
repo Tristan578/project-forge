@@ -11,13 +11,16 @@ import { renderHook, act } from '@testing-library/react';
 // Mock initLog before importing the hook
 vi.mock('@/lib/initLog', () => {
   let events: Array<{ phase: string; timestamp: number; message?: string; error?: string }> = [];
+  let startTime: number | null = null;
   return {
     logInitEvent: vi.fn((phase: string, message?: string, error?: string) => {
-      const event = { phase, timestamp: Date.now(), message, error };
+      const now = Date.now();
+      if (startTime === null) startTime = now;
+      const event = { phase, timestamp: now - startTime, message, error };
       events.push(event);
       return event;
     }),
-    clearInitEvents: vi.fn(() => { events = []; }),
+    clearInitEvents: vi.fn(() => { events = []; startTime = null; }),
     getInitEvents: vi.fn(() => [...events]),
   };
 });
@@ -155,12 +158,16 @@ describe('useEngineStatus', () => {
 
     act(() => {
       emitStatusEvent(event);
-      emitStatusEvent(event); // duplicate
     });
 
-    // Should only have one event, not two
-    const wasmPhases = result.current.phases.filter(p => p.phase === 'wasm_loading');
-    expect(wasmPhases).toHaveLength(1);
+    const renderCountAfterFirst = result.all.length;
+
+    act(() => {
+      emitStatusEvent(event); // duplicate — should not trigger a new render
+    });
+
+    // Duplicate event should not cause additional state update
+    expect(result.all.length).toBe(renderCountAfterFirst);
   });
 
   // ---------------------------------------------------------------------------

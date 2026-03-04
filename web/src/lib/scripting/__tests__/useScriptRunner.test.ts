@@ -50,6 +50,7 @@ const TestWorker = class extends MockWorker {
   }
 };
 vi.stubGlobal('Worker', TestWorker);
+afterAll(() => vi.unstubAllGlobals());
 
 // ---------------------------------------------------------------------------
 // Mock stores & modules
