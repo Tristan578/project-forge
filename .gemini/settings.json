@@ -3,7 +3,7 @@
     "name": "gemini-3.1-pro-preview"
   },
   "context": {
-    "fileName": ["GEMINI.md", "AGENTS.md", "CLAUDE.md"]
+    "fileName": ["GEMINI.md", "AGENTS.md", ".claude/CLAUDE.md", "CLAUDE.md"]
   },
   "hooks": {
     "SessionStart": [
