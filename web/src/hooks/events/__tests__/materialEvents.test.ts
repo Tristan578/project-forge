@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 // Mock the editor store module
 vi.mock('@/stores/editorStore', () => ({
@@ -20,8 +20,7 @@ describe('handleMaterialEvent', () => {
   beforeEach(() => {
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore.getState).mockReturnValue(actions as any);
+    vi.mocked(useEditorStore.getState).mockReturnValue(actions as unknown as StoreState);
   });
 
   it('returns false for unknown event types', () => {

@@ -2,6 +2,10 @@
  * Shared test utilities for domain event handler tests.
  */
 import { vi } from 'vitest';
+import type { useEditorStore } from '@/stores/editorStore';
+
+/** Store state type alias for type-safe mock casts */
+export type StoreState = ReturnType<typeof useEditorStore.getState>;
 
 /**
  * Creates mock set/get functions for event handler testing.

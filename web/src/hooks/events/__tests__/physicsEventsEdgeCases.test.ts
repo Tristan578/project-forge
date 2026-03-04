@@ -6,7 +6,7 @@
  * rapid event sequences, idempotent state transitions.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createMockSetGet, createMockActions } from './eventTestUtils';
+import { createMockSetGet, createMockActions, type StoreState } from './eventTestUtils';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
@@ -39,14 +39,12 @@ describe('handlePhysicsEvent — edge cases', () => {
     vi.clearAllMocks();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore.getState).mockReturnValue(actions as any);
+    vi.mocked(useEditorStore.getState).mockReturnValue(actions as unknown as StoreState);
   });
 
   afterEach(() => {
     // Clean up any window callbacks left by tests
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    delete (window as any).__scriptRaycastCallback;
+    delete (window as unknown as Record<string, unknown>).__scriptRaycastCallback;
   });
 
   // =========================================================================
@@ -126,8 +124,7 @@ describe('handlePhysicsEvent — edge cases', () => {
     });
 
     it('returns true even when callback is undefined (not null)', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vi.mocked(getScriptCollisionCallback).mockReturnValue(undefined as any);
+      vi.mocked(getScriptCollisionCallback).mockReturnValue(undefined as unknown as ReturnType<typeof getScriptCollisionCallback>);
 
       const result = handlePhysicsEvent(
         'COLLISION_EVENT',
@@ -171,8 +168,7 @@ describe('handlePhysicsEvent — edge cases', () => {
 
   describe('RAYCAST_RESULT — edge cases', () => {
     it('does not call audioManager for non-occlusion requestId', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__scriptRaycastCallback = vi.fn();
+      (window as unknown as Record<string, unknown>).__scriptRaycastCallback = vi.fn();
 
       handlePhysicsEvent(
         'RAYCAST_RESULT',
@@ -186,8 +182,7 @@ describe('handlePhysicsEvent — edge cases', () => {
 
     it('does not call script callback for occlusion requestId', () => {
       const mockRaycastCb = vi.fn();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__scriptRaycastCallback = mockRaycastCb;
+      (window as unknown as Record<string, unknown>).__scriptRaycastCallback = mockRaycastCb;
 
       handlePhysicsEvent(
         'RAYCAST_RESULT',
@@ -245,8 +240,7 @@ describe('handlePhysicsEvent — edge cases', () => {
 
     it('passes full payload to script callback for script raycast', () => {
       const mockRaycastCb = vi.fn();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__scriptRaycastCallback = mockRaycastCb;
+      (window as unknown as Record<string, unknown>).__scriptRaycastCallback = mockRaycastCb;
 
       const payload = { requestId: 'script-ray-99', hitEntity: 'floor', point: [10, 0, -5], distance: 12.3 };
       handlePhysicsEvent('RAYCAST_RESULT', payload, mockSetGet.set, mockSetGet.get);
@@ -256,8 +250,7 @@ describe('handlePhysicsEvent — edge cases', () => {
 
     it('handles raycast miss (hitEntity=null) forwarded to script callback', () => {
       const mockRaycastCb = vi.fn();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__scriptRaycastCallback = mockRaycastCb;
+      (window as unknown as Record<string, unknown>).__scriptRaycastCallback = mockRaycastCb;
 
       const payload = { requestId: 'miss-ray', hitEntity: null, point: [0, 0, 0], distance: 0 };
       handlePhysicsEvent('RAYCAST_RESULT', payload, mockSetGet.set, mockSetGet.get);
@@ -268,8 +261,7 @@ describe('handlePhysicsEvent — edge cases', () => {
 
     it('handles multiple concurrent raycast requests independently', () => {
       const mockRaycastCb = vi.fn();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any).__scriptRaycastCallback = mockRaycastCb;
+      (window as unknown as Record<string, unknown>).__scriptRaycastCallback = mockRaycastCb;
 
       const ray1 = { requestId: 'ray-a', hitEntity: 'ground', point: [0, -1, 0], distance: 1.0 };
       const ray2 = { requestId: 'audio_occlusion:ent-1', hitEntity: 'wall', point: [3, 0, 3], distance: 4.24 };
@@ -290,8 +282,7 @@ describe('handlePhysicsEvent — edge cases', () => {
     });
 
     it('returns true for RAYCAST_RESULT even without script callback', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      delete (window as any).__scriptRaycastCallback;
+      delete (window as unknown as Record<string, unknown>).__scriptRaycastCallback;
 
       const result = handlePhysicsEvent(
         'RAYCAST_RESULT',

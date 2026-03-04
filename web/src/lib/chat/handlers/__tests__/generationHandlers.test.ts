@@ -52,8 +52,7 @@ vi.mock('@/lib/generate/postProcess', () => ({
 // Mock global fetch
 // ---------------------------------------------------------------------------
 const mockFetch = vi.fn();
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-(globalThis as any).fetch = mockFetch;
+(globalThis as unknown as Record<string, unknown>).fetch = mockFetch;
 
 // ---------------------------------------------------------------------------
 // Helper
