@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,6 @@ const TestWorker = class extends MockWorker {
   }
 };
 vi.stubGlobal('Worker', TestWorker);
-afterAll(() => vi.unstubAllGlobals());
 
 // ---------------------------------------------------------------------------
 // Mock stores & modules
@@ -142,6 +141,8 @@ import { useScriptRunner, getScriptCollisionCallback } from '../useScriptRunner'
 import { audioManager } from '@/lib/audio/audioManager';
 
 describe('useScriptRunner', () => {
+  afterAll(() => vi.unstubAllGlobals());
+
   const mockWasmModule = {
     handle_command: vi.fn(),
   };

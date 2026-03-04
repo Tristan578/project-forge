@@ -160,14 +160,14 @@ describe('useEngineStatus', () => {
       emitStatusEvent(event);
     });
 
-    const renderCountAfterFirst = result.all.length;
+    const phaseCountAfterFirst = result.current.phases.length;
 
     act(() => {
-      emitStatusEvent(event); // duplicate — should not trigger a new render
+      emitStatusEvent(event); // duplicate — should not trigger a new state change
     });
 
-    // Duplicate event should not cause additional state update
-    expect(result.all.length).toBe(renderCountAfterFirst);
+    // Duplicate event should not add another phase entry
+    expect(result.current.phases.length).toBe(phaseCountAfterFirst);
   });
 
   // ---------------------------------------------------------------------------
@@ -308,8 +308,15 @@ describe('useEngineStatus', () => {
   it('totalElapsed tracks last event timestamp', () => {
     const { result } = renderHook(() => useEngineStatus());
 
+    // Log a first event to set startTime, then advance time before the second
     act(() => {
       result.current.logEvent('wasm_loading');
+    });
+
+    vi.advanceTimersByTime(500);
+
+    act(() => {
+      result.current.logEvent('renderer_init');
     });
 
     expect(result.current.totalElapsed).toBeGreaterThan(0);
