@@ -48,7 +48,7 @@ export function makeChatSSEEvents(opts: {
   const events: unknown[] = [];
 
   // Usage: input tokens
-  if (opts.inputTokens != null) {
+  if (opts.inputTokens !== undefined) {
     events.push({ type: 'usage', inputTokens: opts.inputTokens });
   }
 
@@ -74,7 +74,7 @@ export function makeChatSSEEvents(opts: {
   }
 
   // Usage: output tokens
-  if (opts.outputTokens != null) {
+  if (opts.outputTokens !== undefined) {
     events.push({ type: 'usage', outputTokens: opts.outputTokens });
   }
 
