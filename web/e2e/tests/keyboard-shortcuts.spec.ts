@@ -46,10 +46,9 @@ test.describe('Keyboard Shortcuts @ui', () => {
                el.getAttribute('aria-pressed') === 'true' ||
                el.getAttribute('data-active') === 'true';
       });
-      // If explicit active state exists, verify it; otherwise just verify button exists
-      if (isActive !== undefined) {
-        expect(await translateBtn.count()).toBeGreaterThan(0);
-      }
+      // Button should exist and report an explicit active state
+      expect(await translateBtn.count()).toBeGreaterThan(0);
+      expect(isActive).toBe(true);
     }
   });
 
