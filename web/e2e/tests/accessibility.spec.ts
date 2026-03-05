@@ -177,7 +177,7 @@ test.describe('Accessibility @ui', () => {
 
       // Focus indicator should exist (may be via outline, shadow, or class)
       // Some frameworks use class-based focus styling, so this is best-effort
-      expect(hasFocusStyle).toBeDefined();
+      expect(hasFocusStyle).toBe(true);
     });
   });
 
