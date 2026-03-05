@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "post_write_code": [
+      {
+        "command": "bash .claude/hooks/post-edit-lint.sh",
+        "show_output": true,
+        "working_directory": "."
+      },
+      {
+        "command": "bash .claude/hooks/sync-to-github.sh",
+        "show_output": true,
+        "working_directory": "."
+      }
+    ],
+    "post_run_command": [
+      {
+        "command": "bash .claude/hooks/sync-to-github.sh",
+        "show_output": false,
+        "working_directory": "."
+      }
+    ],
+    "post_cascade_response": [
+      {
+        "command": "bash .claude/hooks/on-stop.sh",
+        "show_output": true,
+        "working_directory": "."
+      }
+    ],
+    "pre_user_prompt": [
+      {
+        "command": "bash .claude/hooks/on-prompt-submit.sh",
+        "show_output": true,
+        "working_directory": "."
+      }
+    ]
+  }
+}
