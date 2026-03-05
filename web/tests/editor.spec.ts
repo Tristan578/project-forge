@@ -57,7 +57,7 @@ test.describe('Editor Scene', () => {
       await playerNode.click();
 
       // Wait for transform data to arrive (Position label appears)
-      await expect(page.locator('text=Position')).toBeVisible({ timeout: 10000 }).catch(() => {});
+      await expect(page.locator('text=Position')).toBeVisible({ timeout: 10000 });
 
       // Check that the Inspector panel shows transform data, not "Loading transform..."
       const loadingMessage = page.locator('text=Loading transform...');
