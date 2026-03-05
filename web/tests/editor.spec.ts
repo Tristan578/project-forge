@@ -53,30 +53,17 @@ test.describe('Editor Scene', () => {
   test('clicking entity in hierarchy shows transform in inspector', async ({ page }) => {
     // Find and click on "Player" in the hierarchy
     const playerNode = page.locator('text=Player').first();
-    if (await playerNode.isVisible({ timeout: 15000 }).catch(() => false)) {
-      await playerNode.click();
+    await expect(playerNode).toBeVisible({ timeout: 15000 });
+    await playerNode.click();
 
-      // Wait for transform data to arrive (Position label appears)
-      await expect(page.locator('text=Position')).toBeVisible({ timeout: 10000 }).catch(() => {});
+    // Wait for transform data to arrive (Position label appears)
+    await expect(page.locator('text=Position')).toBeVisible({ timeout: 10000 });
 
-      // Check that the Inspector panel shows transform data, not "Loading transform..."
-      const loadingMessage = page.locator('text=Loading transform...');
-      const isLoading = await loadingMessage.isVisible().catch(() => false);
+    // Check that the Inspector panel shows transform data, not "Loading transform..."
+    await expect(page.locator('text=Loading transform...')).not.toBeVisible();
 
-      console.log('Is still loading transform:', isLoading);
-      expect(isLoading).toBe(false);
-
-      // Check that position/rotation/scale inputs are visible
-      const positionLabel = page.locator('text=Position');
-      const hasPosition = await positionLabel.isVisible().catch(() => false);
-      console.log('Has position label:', hasPosition);
-      expect(hasPosition).toBe(true);
-    } else {
-      console.log('Player node not found in hierarchy - checking what IS visible');
-      const bodyText = await page.locator('body').innerText();
-      console.log('Page text (first 2000 chars):', bodyText.substring(0, 2000));
-      expect(false).toBe(true); // Fail with context
-    }
+    // Check that position/rotation/scale inputs are visible
+    await expect(page.locator('text=Position')).toBeVisible();
   });
 
   test('camera preset buttons work without infinite loop', async ({ page }) => {
