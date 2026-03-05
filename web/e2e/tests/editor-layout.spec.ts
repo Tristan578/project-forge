@@ -139,8 +139,8 @@ test.describe('Editor Layout @engine', () => {
         await page.mouse.up();
 
 
-        // If we reach here without error, resize worked
-        expect(true).toBe(true);
+        // Verify panel is still visible after resize
+        await expect(resizablePanel).toBeVisible();
       }
     }
   });

@@ -22,8 +22,9 @@ test.describe('Editor Smoke Tests @engine', () => {
     // load() internally waits for WASM initialization
     await editor.load();
 
-    // If we reach here without timeout, WASM loaded successfully
-    expect(true).toBe(true);
+    // WASM loaded successfully — verify canvas is present and has dimensions
+    const box = await editor.canvas.boundingBox();
+    expect(box).not.toBeNull();
   });
 
   test('canvas renders with non-zero dimensions', async ({ editor }) => {

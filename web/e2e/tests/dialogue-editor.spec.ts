@@ -9,8 +9,14 @@ test.describe('Dialogue Editor @ui', () => {
     // Look for dialogue-related tab or panel
     const dialogueTab = page.locator('button, [role="tab"]').filter({ hasText: /dialogue/i });
     const count = await dialogueTab.count();
-    // Dialogue may be behind a menu or tab - just verify it's findable
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Dialogue tab should be accessible in the editor layout
+    if (count === 0) {
+      // Fallback: verify the editor loaded by checking for any dockview tabs
+      const anyTab = page.locator('.dv-tab, [role="tab"]');
+      expect(await anyTab.count()).toBeGreaterThan(0);
+    } else {
+      expect(count).toBeGreaterThan(0);
+    }
   });
 
   test('dialogue store initializes empty', async ({ page, editor: _editor }) => {

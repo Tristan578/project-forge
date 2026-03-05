@@ -9,7 +9,7 @@ test.describe('Visual Scripting @engine', () => {
     // Look for script-related tab or panel
     const scriptTab = page.locator('button, [role="tab"]').filter({ hasText: /script/i });
     const count = await scriptTab.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('script editor opens when entity with script is selected', async ({ page, editor: _editor }) => {
@@ -35,21 +35,22 @@ test.describe('Visual Scripting @engine', () => {
     // Look for Code/Graph toggle or tabs
     const codeTabs = page.locator('button, [role="tab"]').filter({ hasText: /code|graph|visual/i });
     const count = await codeTabs.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('script templates are available', async ({ page, editor: _editor }) => {
     // Look for script template UI
     const templateUI = page.locator('button, select').filter({ hasText: /template|character.*controller|collectible/i });
     const count = await templateUI.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('editor supports keyboard shortcuts for common actions', async ({ page, editor: _editor }) => {
     // Verify Ctrl+Z (undo) and Ctrl+D (duplicate) don't crash
     await page.keyboard.press('Control+z');
 
-    // No crash = pass
-    expect(true).toBe(true);
+    // Verify editor is still functional after undo shortcut
+    const storeExists = await page.evaluate(() => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE);
+    expect(storeExists).toBe(true);
   });
 });
