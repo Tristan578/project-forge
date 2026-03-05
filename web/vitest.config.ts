@@ -6,6 +6,9 @@ export default defineConfig({
     environment: 'jsdom',
     testTimeout: 10000,
     hookTimeout: 10000,
+    pool: 'forks',
+    isolate: true,
+    retry: process.env.CI ? 1 : 0,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
