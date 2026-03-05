@@ -306,9 +306,12 @@ def gh_run(args, timeout=30):
     return result.stdout
 
 
-def gh_graphql(query, timeout=30):
+def gh_graphql(query, variables=None, timeout=30):
+    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
+    if variables:
+        cmd.extend(["-F", f"variables={json.dumps(variables)}"])
     result = subprocess.run(
-        ["gh", "api", "graphql", "-f", f"query={query}"],
+        cmd,
         capture_output=True, text=True, encoding="utf-8",
         errors="replace", timeout=timeout,
     )
@@ -331,19 +334,19 @@ def gh_get_project_items(config):
 
 def gh_create_draft(config, title, body=""):
     """Create a draft issue in the GitHub Project. Returns the item node ID."""
-    # Escape for inline GraphQL string
-    t = title.replace("\\", "\\\\").replace('"', '\\"')
-    b = body.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-
     query = (
-        "mutation {"
-        f'  addProjectV2DraftIssue(input: {{projectId: "{config["projectId"]}", '
-        f'title: "{t}", body: "{b}"}}) {{'
+        "mutation($projectId: ID!, $title: String!, $body: String) {"
+        "  addProjectV2DraftIssue(input: {projectId: $projectId, title: $title, body: $body}) {"
         "    projectItem { id }"
         "  }"
         "}"
     )
-    data = gh_graphql(query)
+    variables = {
+        "projectId": config["projectId"],
+        "title": title,
+        "body": body,
+    }
+    data = gh_graphql(query, variables)
     return data["data"]["addProjectV2DraftIssue"]["projectItem"]["id"]
 
 
