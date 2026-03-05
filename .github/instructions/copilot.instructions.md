@@ -8,9 +8,9 @@ applyTo: "**"
 
 SpawnForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot monorepo with three pipelines:
 
-- **engine/** — Rust (Bevy 0.16) compiled to WebAssembly via wasm-bindgen. Pure game logic (ECS systems, physics, rendering, animation) lives in `engine/src/core/`. The JS interop bridge lives in `engine/src/bridge/`. The bridge is the ONLY module that imports `web-sys` or `wasm-bindgen`.
+- **engine/** — Rust (Bevy 0.18) compiled to WebAssembly via wasm-bindgen. Pure game logic (ECS systems, physics, rendering, animation) lives in `engine/src/core/`. The JS interop bridge lives in `engine/src/bridge/`. The bridge is the ONLY module that imports `web-sys` or `wasm-bindgen`.
 - **web/** — TypeScript/React (Next.js 16) editor frontend. State management via Zustand stores with discrete slices. Strict TypeScript mode, zero ESLint warnings enforced.
-- **mcp-server/** — TypeScript MCP server (Model Context Protocol SDK) exposing 329 engine commands as AI-callable tools. Communicates with the editor via WebSocket bridge.
+- **mcp-server/** — TypeScript MCP server (Model Context Protocol SDK) exposing 306 engine commands as AI-callable tools. Communicates with the editor via WebSocket bridge.
 
 ## Architecture Principles
 
@@ -116,6 +116,31 @@ The engine WASM binary is ~53MB. CI enforces a 60MB threshold. When adding new B
 - `mcp-server/src/` — MCP tool definitions and transport
 - `mcp-server/src/transport/websocket.ts` — WebSocket bridge to editor
 - `.github/workflows/ci.yml` — CI/CD pipeline
+
+## MANDATORY: Taskboard & Planning Before Development
+
+**No code changes without a ticket. No exceptions.**
+
+All work MUST be tracked on the local taskboard (tcarac/taskboard at http://localhost:3010). Tickets sync bidirectionally with GitHub Project "SpawnForge" (#2). All three contributors monitor progress through this shared board.
+
+### On Session Start (enforced by hooks)
+1. Taskboard binary is checked (install: `go install github.com/tcarac/taskboard@latest`)
+2. Server auto-starts if not running
+3. GitHub Project changes are pulled (other contributors' updates)
+4. Backlog is displayed with prioritized work suggestions
+
+### Before Writing Code
+1. Review the backlog suggestions from session startup
+2. Pick an existing ticket OR create a new one
+3. Every ticket MUST have: user story, acceptance criteria, priority, team, subtasks
+4. Move to `in_progress` before starting implementation
+
+### Sync
+- **Automatic**: SessionStart pulls, Stop pushes (`.github/hooks/hooks.json`)
+- **Manual**: `/sync-push` or `/sync-pull` prompts
+- **Scripts**: `.claude/hooks/github_project_sync.py` (push/pull/status)
+- **Project ID**: `01KJEE8R1XXFF0CZT1WCSTGRDP`
+- **Skills**: `.github/skills/` and `.agents/skills/` (kanban, sync-push, sync-pull)
 
 ## Outstanding Work (from evaluation)
 

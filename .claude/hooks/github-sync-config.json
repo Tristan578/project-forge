@@ -1,0 +1,18 @@
+{
+  "owner": "Tristan578",
+  "repo": "project-forge",
+  "projectNumber": 2,
+  "projectId": "PVT_kwHOAC6zHc4BQCSI",
+  "statusFieldId": "PVTSSF_lAHOAC6zHc4BQCSIzg-RYrw",
+  "statusOptions": {
+    "todo": "f75ad846",
+    "in_progress": "47fc9ee4",
+    "done": "98236657"
+  },
+  "localToGithubStatus": {
+    "todo": "Todo",
+    "in_progress": "In Progress",
+    "done": "Done"
+  },
+  "localProjectId": "01KJEE8R1XXFF0CZT1WCSTGRDP"
+}

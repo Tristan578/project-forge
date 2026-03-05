@@ -4,7 +4,7 @@
 
 SpawnForge is a browser-based, AI-native 2D/3D game engine. It is a polyglot monorepo:
 
-- **engine/** — Rust (Bevy 0.16) compiled to WebAssembly via wasm-bindgen. Pure game logic in `engine/src/core/`, JS interop bridge in `engine/src/bridge/`.
+- **engine/** — Rust (Bevy 0.18) compiled to WebAssembly via wasm-bindgen. Pure game logic in `engine/src/core/`, JS interop bridge in `engine/src/bridge/`.
 - **web/** — TypeScript/React (Next.js 16) editor frontend. State via Zustand store slices. Strict TypeScript, zero ESLint warnings.
 - **mcp-server/** — TypeScript MCP server exposing engine commands as AI-callable tools via WebSocket.
 
