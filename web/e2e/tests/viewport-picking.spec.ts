@@ -1,21 +1,20 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/editor.fixture';
 
-test.describe('Viewport Picking', () => {
-  test('clicking on 3D object in viewport selects it', async ({ page }) => {
+test.describe('Viewport Picking @engine', () => {
+  test('clicking on 3D object in viewport selects it', async ({ page, editor }) => {
     const consoleLogs: string[] = [];
     page.on('console', (msg) => {
       consoleLogs.push(`[${msg.type()}] ${msg.text()}`);
     });
 
-    await page.goto('http://localhost:3000', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('#game-canvas')).toBeVisible({ timeout: 10000 });
+    await editor.load();
 
     // Wait for engine to fully initialize — hierarchy populates when ready
     const groundNode = page.locator('text=Ground');
     await expect(groundNode.first()).toBeVisible({ timeout: 30000 });
 
     // Get canvas dimensions for click targeting
-    const canvas = page.locator('#game-canvas');
+    const canvas = editor.canvas;
     const box = await canvas.boundingBox();
     if (!box) {
       throw new Error('Canvas bounding box not found');
@@ -29,7 +28,7 @@ test.describe('Viewport Picking', () => {
     const centerY = box.height / 2;
 
     console.log(`Clicking canvas center: ${centerX}, ${centerY}`);
-    await canvas.click({ position: { x: centerX, y: centerY } });
+    await editor.clickViewport(centerX, centerY);
 
     // Wait for selection to register (Position label appears in inspector)
     await expect(page.locator('text=Position')).toBeVisible({ timeout: 10000 }).catch(() => {});
