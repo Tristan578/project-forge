@@ -106,7 +106,7 @@ test.describe('Editor Scene', () => {
     });
 
     // Wait for page to be fully loaded and stable
-    await expect(page.locator('[data-testid="scene-node"]').first()).toBeVisible({ timeout: 30000 }).catch(() => {});
+    await expect(page.locator('[data-testid="scene-node"]').first()).toBeVisible({ timeout: 30000 });
 
     // Filter out known non-critical errors
     const criticalErrors = errors.filter(e =>
