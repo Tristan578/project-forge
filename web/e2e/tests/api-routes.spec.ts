@@ -55,15 +55,14 @@ test.describe('API Routes @ui', () => {
       const response = await request.get('/api/openapi');
 
       // Should return 200 with JSON
-      if (response.ok()) {
-        expect(response.headers()['content-type']).toContain('application/json');
+      expect(response.status()).toBe(200);
+      expect(response.headers()['content-type']).toContain('application/json');
 
-        const body = await response.json();
-        // OpenAPI spec should have openapi version and info
-        expect(body).toHaveProperty('openapi');
-        expect(body).toHaveProperty('info');
-        expect(body.info).toHaveProperty('title');
-      }
+      const body = await response.json();
+      // OpenAPI spec should have openapi version and info
+      expect(body).toHaveProperty('openapi');
+      expect(body).toHaveProperty('info');
+      expect(body.info).toHaveProperty('title');
     });
   });
 
