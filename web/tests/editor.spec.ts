@@ -13,14 +13,8 @@ test.describe('Editor Scene', () => {
     // Wait for the canvas to be present
     await expect(page.locator('#game-canvas')).toBeVisible({ timeout: 10000 });
 
-    // Wait for WASM engine to initialize - look for scene hierarchy entries
-    // The engine emits SCENE_GRAPH_UPDATE events which populate the hierarchy
-    await expect(page.locator('[data-testid="scene-node"]').first()).toBeVisible({ timeout: 30000 }).catch(() => {
-      // Fallback: wait for hierarchy text content
-    });
-
-    // Give engine time to fully initialize and emit events
-    await page.waitForTimeout(5000);
+    // Wait for WASM engine to initialize — scene nodes appear when ready
+    await expect(page.locator('[data-testid="scene-node"]').first()).toBeVisible({ timeout: 30000 });
   });
 
   test('scene hierarchy shows entities', async ({ page }) => {
@@ -57,16 +51,13 @@ test.describe('Editor Scene', () => {
   });
 
   test('clicking entity in hierarchy shows transform in inspector', async ({ page }) => {
-    // Wait for hierarchy to populate
-    await page.waitForTimeout(3000);
-
     // Find and click on "Player" in the hierarchy
     const playerNode = page.locator('text=Player').first();
-    if (await playerNode.isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (await playerNode.isVisible({ timeout: 15000 }).catch(() => false)) {
       await playerNode.click();
 
-      // Wait for transform data to arrive
-      await page.waitForTimeout(1000);
+      // Wait for transform data to arrive (Position label appears)
+      await expect(page.locator('text=Position')).toBeVisible({ timeout: 10000 });
 
       // Check that the Inspector panel shows transform data, not "Loading transform..."
       const loadingMessage = page.locator('text=Loading transform...');
@@ -89,16 +80,13 @@ test.describe('Editor Scene', () => {
   });
 
   test('camera preset buttons work without infinite loop', async ({ page }) => {
-    // Wait for engine
-    await page.waitForTimeout(3000);
-
-    // Find the "Top View" button
+    // Find the "Top View" button (wait for scene to be ready)
     const topButton = page.locator('button[title*="Top View"]');
-    if (await topButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (await topButton.isVisible({ timeout: 15000 }).catch(() => false)) {
       await topButton.click();
 
-      // Wait a moment for the camera animation
-      await page.waitForTimeout(2000);
+      // Wait for the camera animation to complete (button becomes active)
+      await expect(topButton).toHaveClass(/bg-blue-600/, { timeout: 5000 }).catch(() => {});
 
       // The camera should have stabilized - check that the button is active (blue)
       const buttonClasses = await topButton.getAttribute('class');
@@ -117,7 +105,8 @@ test.describe('Editor Scene', () => {
       }
     });
 
-    await page.waitForTimeout(5000);
+    // Wait for page to be fully loaded and stable
+    await expect(page.locator('[data-testid="scene-node"]').first()).toBeVisible({ timeout: 30000 });
 
     // Filter out known non-critical errors
     const criticalErrors = errors.filter(e =>
