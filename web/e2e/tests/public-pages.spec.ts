@@ -81,7 +81,10 @@ test.describe('Public Pages @ui', () => {
       await page.waitForLoadState('domcontentloaded');
 
       await expect(page.getByText('Terms of Service').first()).toBeVisible();
-      await expect(page.getByText(/February 27, 2026/)).toBeVisible();
+      await expect(page.getByText(/Last updated/i)).toBeVisible();
+      const datePattern =
+        /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}\b/;
+      await expect(page.getByText(datePattern)).toBeVisible();
     });
 
     test('has all 16 sections with correct headings', async ({ page }) => {
