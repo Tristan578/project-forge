@@ -108,3 +108,4 @@ split_commands*.py
 *.seed
 *.pid.lock
 .cache/
+.claude/hooks/__pycache__/
