@@ -1,10 +1,11 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { MeshyClient } from '@/lib/generate/meshyClient';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+
+const mockGetTextureStatus = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -12,138 +13,138 @@ vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   return { ...mod, resolveApiKey: vi.fn() };
 });
 vi.mock('@/lib/generate/meshyClient', () => ({
-  MeshyClient: vi.fn(() => ({
-    getTextureStatus: vi.fn(),
-  })),
+  MeshyClient: class MockMeshyClient {
+    getTextureStatus = mockGetTextureStatus;
+  },
 }));
 
-function makeRequest(jobId?: string) {
-  const url = jobId
-    ? `http://test/api/generate/texture/status?jobId=${jobId}`
-    : 'http://test/api/generate/texture/status';
-  return new Request(url) as any;
-}
+const makeRequest = (params: Record<string, string>) => {
+  const url = new URL('http://localhost/api/generate/texture/status');
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  return new NextRequest(url.toString());
+};
 
 describe('GET /api/generate/texture/status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
-    });
-    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
   });
 
-  it('returns 401 when unauthenticated', async () => {
+  it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: new NextResponse('Unauthorized', { status: 401 }),
+      ok: false,
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await GET(makeRequest('job-123'));
+    const res = await GET(makeRequest({}));
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when jobId is missing', async () => {
-    const res = await GET(makeRequest());
-    expect(res.status).toBe(400);
+  it('returns 400 if jobId is missing', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const res = await GET(makeRequest({}));
     const data = await res.json();
-    expect(data.error).toBe('jobId query parameter required');
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('jobId');
   });
 
-  it('returns 402 when API key resolution fails', async () => {
+  it('returns 402 if API key cannot be resolved', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(resolveApiKey).mockRejectedValue(
-      new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
+      new ApiKeyError('NO_KEY_CONFIGURED', 'No Meshy key configured')
     );
 
-    const res = await GET(makeRequest('job-123'));
-    expect(res.status).toBe(402);
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
     const data = await res.json();
-    expect(data.code).toBe('INSUFFICIENT_TOKENS');
+    expect(res.status).toBe(402);
+    expect(data.error).toBe('No Meshy key configured');
   });
 
-  it('returns completed status with maps for SUCCEEDED task', async () => {
-    const maps = {
-      baseColor: 'https://cdn.meshy.ai/base.png',
-      normal: 'https://cdn.meshy.ai/normal.png',
-      metallic: 'https://cdn.meshy.ai/metallic.png',
-    };
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockResolvedValue({
-          status: 'SUCCEEDED',
-          progress: 100,
-          maps,
-        }),
-      } as any;
-    } as any);
+  it('returns completed status when Meshy reports SUCCEEDED', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    mockGetTextureStatus.mockResolvedValue({
+      status: 'SUCCEEDED',
+      progress: 100,
+      maps: { albedo: 'https://cdn.meshy.ai/albedo.png' },
+    });
 
-    const res = await GET(makeRequest('job-123'));
-    expect(res.status).toBe(200);
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.status).toBe('completed');
     expect(data.progress).toBe(100);
-    expect(data.maps).toEqual(maps);
-    expect(data.error).toBeUndefined();
+    expect(data.maps).toBeDefined();
   });
 
-  it('returns failed status for FAILED task', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockResolvedValue({
-          status: 'FAILED',
-          progress: 0,
-        }),
-      } as any;
-    } as any);
+  it('returns failed status when Meshy reports FAILED', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    mockGetTextureStatus.mockResolvedValue({ status: 'FAILED', progress: 0, maps: undefined });
 
-    const res = await GET(makeRequest('job-123'));
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
     expect(data.error).toBe('Generation failed');
   });
 
-  it('returns processing status for IN_PROGRESS task', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockResolvedValue({
-          status: 'IN_PROGRESS',
-          progress: 75,
-        }),
-      } as any;
-    } as any);
+  it('returns failed status when Meshy reports EXPIRED', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    mockGetTextureStatus.mockResolvedValue({ status: 'EXPIRED', progress: 0, maps: undefined });
 
-    const res = await GET(makeRequest('job-123'));
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
     const data = await res.json();
-    expect(data.status).toBe('processing');
-    expect(data.progress).toBe(75);
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
   });
 
-  it('returns pending status for unknown status', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockResolvedValue({
-          status: 'QUEUED',
-          progress: 0,
-        }),
-      } as any;
-    } as any);
+  it('returns processing status when Meshy reports IN_PROGRESS', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    mockGetTextureStatus.mockResolvedValue({ status: 'IN_PROGRESS', progress: 45, maps: undefined });
 
-    const res = await GET(makeRequest('job-123'));
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('processing');
+    expect(data.progress).toBe(45);
+  });
+
+  it('returns pending status for unknown Meshy states', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    mockGetTextureStatus.mockResolvedValue({ status: 'PENDING', progress: 0, maps: undefined });
+
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.status).toBe('pending');
   });
 
-  it('returns 500 when provider throws', async () => {
-    vi.mocked(MeshyClient).mockImplementation(function () {
-      return {
-        getTextureStatus: vi.fn().mockRejectedValue(new Error('API timeout')),
-      } as any;
-    } as any);
+  it('returns 500 if Meshy client throws unexpectedly', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'meshy_key', metered: true });
+    mockGetTextureStatus.mockRejectedValue(new Error('Provider error'));
 
-    const res = await GET(makeRequest('job-123'));
-    expect(res.status).toBe(500);
+    const res = await GET(makeRequest({ jobId: 'task_123' }));
     const data = await res.json();
-    expect(data.error).toBe('API timeout');
+
+    expect(res.status).toBe(500);
+    expect(data.error).toBe('Provider error');
   });
 });

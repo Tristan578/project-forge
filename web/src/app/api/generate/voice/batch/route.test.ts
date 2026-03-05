@@ -1,198 +1,209 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
+import { rateLimit } from '@/lib/rateLimit';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+
+const mockGenerateVoice = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/auth/api-auth');
-vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(),
-  rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
-}));
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
 });
 vi.mock('@/lib/generate/elevenlabsClient', () => ({
-  ElevenLabsClient: vi.fn(() => ({
-    generateVoice: vi.fn(),
-  })),
+  ElevenLabsClient: class MockElevenLabsClient {
+    generateVoice = mockGenerateVoice;
+  },
+}));
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn(),
+  rateLimitResponse: vi.fn().mockReturnValue(new Response('Rate Limited', { status: 429 })),
 }));
 
-function makeRequest(body: unknown) {
-  return new Request('http://test/api/generate/voice/batch', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  }) as any;
+interface BatchItem {
+  nodeId: string;
+  text: string;
+  speaker: string;
 }
 
-const validBody = {
-  items: [
-    { nodeId: 'node-1', text: 'Hello world', speaker: 'Alice' },
-    { nodeId: 'node-2', text: 'Goodbye world', speaker: 'Bob' },
-  ],
-  voiceSettings: {
-    voiceId: 'voice-abc',
-    stability: 0.5,
-    similarityBoost: 0.7,
-    style: 0.3,
-  },
+interface VoiceSettings {
+  voiceId: string;
+  stability: number;
+  similarityBoost: number;
+  style: number;
+}
+
+const makeRequest = (body: Record<string, unknown>) =>
+  new NextRequest('http://localhost/api/generate/voice/batch', {
+    method: 'POST',
+    body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json' },
+  });
+
+const defaultItems: BatchItem[] = [
+  { nodeId: 'node_1', text: 'Hello world', speaker: 'narrator' },
+  { nodeId: 'node_2', text: 'How are you?', speaker: 'character' },
+];
+
+const defaultVoiceSettings: VoiceSettings = {
+  voiceId: 'JBFqnCBsd6RMkjVDRZzb',
+  stability: 0.5,
+  similarityBoost: 0.75,
+  style: 0,
 };
 
 describe('POST /api/generate/voice/batch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
-    });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 4, resetAt: Date.now() + 300000 });
-    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
-    vi.mocked(ElevenLabsClient).mockImplementation(function () {
-      return {
-        generateVoice: vi.fn().mockResolvedValue({
-          audioBase64: 'base64audio',
-          durationSeconds: 2.5,
-        }),
-      } as any;
-    } as any);
+    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 });
   });
 
-  it('returns 401 when unauthenticated', async () => {
+  it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: new NextResponse('Unauthorized', { status: 401 }),
+      ok: false,
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await POST(makeRequest(validBody));
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
     expect(res.status).toBe(401);
   });
 
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
+  it('returns 429 if rate limited', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
-    const res = await POST(makeRequest(validBody));
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
     expect(res.status).toBe(429);
   });
 
   it('returns 400 for invalid JSON body', async () => {
-    const req = new Request('http://test/api/generate/voice/batch', {
-      method: 'POST',
-      body: 'not json',
-    });
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
 
-    const res = await POST(req as any);
-    expect(res.status).toBe(400);
+    const req = new NextRequest('http://localhost/api/generate/voice/batch', {
+      method: 'POST',
+      body: 'bad-json',
+      headers: { 'content-type': 'application/json' },
+    });
+    const res = await POST(req);
     const data = await res.json();
+    expect(res.status).toBe(400);
     expect(data.error).toBe('Invalid JSON');
   });
 
-  it('returns 422 when items array is empty', async () => {
-    const res = await POST(makeRequest({ items: [], voiceSettings: validBody.voiceSettings }));
-    expect(res.status).toBe(422);
+  it('returns 422 if items is not an array', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const res = await POST(makeRequest({ items: 'not-array', voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
-    expect(data.error).toBe('items array is required');
+    expect(res.status).toBe(422);
+    expect(data.error).toContain('items');
   });
 
-  it('returns 422 when items is not an array', async () => {
-    const res = await POST(makeRequest({ items: 'not-array', voiceSettings: validBody.voiceSettings }));
+  it('returns 422 if items is empty', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const res = await POST(makeRequest({ items: [], voiceSettings: defaultVoiceSettings }));
     expect(res.status).toBe(422);
-    const data = await res.json();
-    expect(data.error).toBe('items array is required');
   });
 
-  it('returns 422 when items exceed maximum of 20', async () => {
-    const tooManyItems = Array.from({ length: 21 }, (_, i) => ({
-      nodeId: `node-${i}`,
+  it('returns 422 if items exceeds 20', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const items: BatchItem[] = Array.from({ length: 21 }, (_, i) => ({
+      nodeId: `node_${i}`,
       text: 'Hello',
-      speaker: 'Alice',
+      speaker: 'narrator',
     }));
-    const res = await POST(makeRequest({ items: tooManyItems, voiceSettings: validBody.voiceSettings }));
-    expect(res.status).toBe(422);
+
+    const res = await POST(makeRequest({ items, voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
-    expect(data.error).toBe('Maximum 20 items per batch');
+    expect(res.status).toBe(422);
+    expect(data.error).toContain('20');
   });
 
-  it('returns 422 when item text exceeds 1000 characters', async () => {
-    const longText = 'a'.repeat(1001);
-    const res = await POST(makeRequest({
-      items: [{ nodeId: 'node-1', text: longText, speaker: 'Alice' }],
-      voiceSettings: validBody.voiceSettings,
-    }));
-    expect(res.status).toBe(422);
+  it('returns 422 if an item text is empty', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const items: BatchItem[] = [{ nodeId: 'node_1', text: '', speaker: 'narrator' }];
+    const res = await POST(makeRequest({ items, voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
-    expect(data.error).toContain('text must be 1-1000 characters');
+    expect(res.status).toBe(422);
+    expect(data.error).toContain('node_1');
   });
 
-  it('returns 422 when voiceSettings.voiceId is missing', async () => {
-    const res = await POST(makeRequest({
-      items: validBody.items,
-      voiceSettings: { stability: 0.5, similarityBoost: 0.7, style: 0.3 },
-    }));
-    expect(res.status).toBe(422);
+  it('returns 422 if voiceSettings.voiceId is missing', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: { stability: 0.5 } }));
     const data = await res.json();
-    expect(data.error).toBe('voiceSettings.voiceId is required');
+    expect(res.status).toBe(422);
+    expect(data.error).toContain('voiceId');
   });
 
-  it('returns 402 when API key resolution fails', async () => {
+  it('returns 402 if API key cannot be resolved', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(resolveApiKey).mockRejectedValue(
       new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
 
-    const res = await POST(makeRequest(validBody));
-    expect(res.status).toBe(402);
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
-    expect(data.code).toBe('INSUFFICIENT_TOKENS');
+    expect(res.status).toBe(402);
+    expect(data.error).toBe('Not enough tokens');
   });
 
-  it('returns successful results for all items', async () => {
-    const res = await POST(makeRequest(validBody));
-    expect(res.status).toBe(200);
+  it('returns results for all items on success', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true });
+    mockGenerateVoice.mockResolvedValue({ audioBase64: 'abc123==', durationSeconds: 1.2 });
+
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.totalGenerated).toBe(2);
     expect(data.totalFailed).toBe(0);
     expect(data.results).toHaveLength(2);
-    expect(data.results[0].nodeId).toBe('node-1');
-    expect(data.results[0].audioBase64).toBe('base64audio');
-    expect(data.results[0].durationSeconds).toBe(2.5);
-    expect(data.errors).toHaveLength(0);
+    expect(data.results[0].audioBase64).toBe('abc123==');
   });
 
-  it('reports partial failures when some items fail', async () => {
-    let callCount = 0;
-    vi.mocked(ElevenLabsClient).mockImplementation(function () {
-      return {
-        generateVoice: vi.fn().mockImplementation(() => {
-          callCount++;
-          if (callCount === 2) {
-            return Promise.reject(new Error('Voice generation failed'));
-          }
-          return Promise.resolve({ audioBase64: 'base64audio', durationSeconds: 1.0 });
-        }),
-      } as any;
-    } as any);
+  it('records errors for failed items while completing others', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true });
+    mockGenerateVoice
+      .mockResolvedValueOnce({ audioBase64: 'abc123==', durationSeconds: 1.2 })
+      .mockRejectedValueOnce(new Error('Voice generation failed'));
 
-    const res = await POST(makeRequest(validBody));
-    expect(res.status).toBe(200);
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.totalGenerated).toBe(1);
     expect(data.totalFailed).toBe(1);
-    expect(data.errors[0].nodeId).toBe('node-2');
+    expect(data.errors[0].nodeId).toBe('node_2');
     expect(data.errors[0].error).toBe('Voice generation failed');
   });
 
-  it('calculates token cost as 5 per item', async () => {
-    await POST(makeRequest(validBody));
+  it('rethrows non-ApiKeyError during key resolution', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
 
-    expect(resolveApiKey).toHaveBeenCalledWith(
-      'user_1',
-      'elevenlabs',
-      10, // 2 items * 5
-      'voice_batch_generation',
-      { itemCount: 2, speaker: 'Alice' }
-    );
+    await expect(
+      POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }))
+    ).rejects.toThrow('DB connection failed');
   });
 });

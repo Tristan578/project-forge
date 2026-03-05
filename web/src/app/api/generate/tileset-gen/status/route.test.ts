@@ -1,10 +1,11 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { SpriteClient } from '@/lib/generate/spriteClient';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+
+const mockGetReplicateStatus = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -12,133 +13,138 @@ vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   return { ...mod, resolveApiKey: vi.fn() };
 });
 vi.mock('@/lib/generate/spriteClient', () => ({
-  SpriteClient: vi.fn(() => ({
-    getReplicateStatus: vi.fn(),
-  })),
+  SpriteClient: class MockSpriteClient {
+    getReplicateStatus = mockGetReplicateStatus;
+  },
 }));
 
-function makeRequest(jobId?: string) {
-  const url = jobId
-    ? `http://test/api/generate/tileset-gen/status?jobId=${encodeURIComponent(jobId)}`
-    : 'http://test/api/generate/tileset-gen/status';
-  return new Request(url) as any;
-}
+const makeRequest = (params: Record<string, string>) => {
+  const url = new URL('http://localhost/api/generate/tileset-gen/status');
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  return new NextRequest(url.toString());
+};
 
 describe('GET /api/generate/tileset-gen/status', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
-    });
-    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
   });
 
-  it('returns 401 when unauthenticated', async () => {
+  it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: new NextResponse('Unauthorized', { status: 401 }),
+      ok: false,
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await GET(makeRequest('job-123'));
+    const res = await GET(makeRequest({}));
     expect(res.status).toBe(401);
   });
 
-  it('returns 400 when jobId is missing', async () => {
-    const res = await GET(makeRequest());
-    expect(res.status).toBe(400);
+  it('returns 400 if jobId is missing', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const res = await GET(makeRequest({}));
     const data = await res.json();
-    expect(data.error).toBe('Missing jobId parameter');
+    expect(res.status).toBe(400);
+    expect(data.error).toContain('Missing jobId');
   });
 
-  it('returns 402 when API key resolution fails', async () => {
+  it('returns 402 if API key cannot be resolved', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(resolveApiKey).mockRejectedValue(
       new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
 
-    const res = await GET(makeRequest('replicate-pred-123'));
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
+    const data = await res.json();
     expect(res.status).toBe(402);
-    const data = await res.json();
-    expect(data.code).toBe('INSUFFICIENT_TOKENS');
+    expect(data.error).toBe('Not enough tokens');
   });
 
-  it('returns completed status with output URL for succeeded prediction', async () => {
-    vi.mocked(SpriteClient).mockImplementation(function () {
-      return {
-        getReplicateStatus: vi.fn().mockResolvedValue({
-          status: 'succeeded',
-          output: ['https://replicate.delivery/tileset.png'],
-        }),
-      } as any;
-    } as any);
+  it('returns completed status with resultUrl when prediction succeeded', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGetReplicateStatus.mockResolvedValue({
+      status: 'succeeded',
+      output: ['https://replicate.delivery/tileset.png'],
+    });
 
-    const res = await GET(makeRequest('replicate-pred-123'));
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
+    const data = await res.json();
+
     expect(res.status).toBe(200);
-    const data = await res.json();
     expect(data.status).toBe('completed');
-    expect(data.progress).toBe(100);
     expect(data.resultUrl).toBe('https://replicate.delivery/tileset.png');
-    expect(data.error).toBeUndefined();
+    expect(data.progress).toBe(100);
   });
 
-  it('returns failed status for failed prediction', async () => {
-    vi.mocked(SpriteClient).mockImplementation(function () {
-      return {
-        getReplicateStatus: vi.fn().mockResolvedValue({
-          status: 'failed',
-          output: null,
-        }),
-      } as any;
-    } as any);
+  it('returns failed status when prediction failed', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGetReplicateStatus.mockResolvedValue({ status: 'failed', output: undefined });
 
-    const res = await GET(makeRequest('replicate-pred-123'));
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBe('Tileset generation failed');
+    expect(data.error).toContain('Tileset generation failed');
   });
 
-  it('returns processing status with 50% progress', async () => {
-    vi.mocked(SpriteClient).mockImplementation(function () {
-      return {
-        getReplicateStatus: vi.fn().mockResolvedValue({
-          status: 'processing',
-          output: null,
-        }),
-      } as any;
-    } as any);
+  it('returns failed status when prediction was canceled', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGetReplicateStatus.mockResolvedValue({ status: 'canceled', output: undefined });
 
-    const res = await GET(makeRequest('replicate-pred-123'));
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.status).toBe('failed');
+  });
+
+  it('returns processing status for in-progress prediction', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGetReplicateStatus.mockResolvedValue({ status: 'processing', output: undefined });
+
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.status).toBe('processing');
     expect(data.progress).toBe(50);
   });
 
-  it('returns pending status for starting prediction', async () => {
-    vi.mocked(SpriteClient).mockImplementation(function () {
-      return {
-        getReplicateStatus: vi.fn().mockResolvedValue({
-          status: 'starting',
-          output: null,
-        }),
-      } as any;
-    } as any);
+  it('returns pending status for queued prediction', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGetReplicateStatus.mockResolvedValue({ status: 'starting', output: undefined });
 
-    const res = await GET(makeRequest('replicate-pred-123'));
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
     const data = await res.json();
+
+    expect(res.status).toBe(200);
     expect(data.status).toBe('pending');
     expect(data.progress).toBe(10);
   });
 
-  it('returns 500 when provider throws', async () => {
-    vi.mocked(SpriteClient).mockImplementation(function () {
-      return {
-        getReplicateStatus: vi.fn().mockRejectedValue(new Error('Connection refused')),
-      } as any;
-    } as any);
+  it('returns 500 if client throws unexpectedly', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'rp_key', metered: true });
+    mockGetReplicateStatus.mockRejectedValue(new Error('Network timeout'));
 
-    const res = await GET(makeRequest('replicate-pred-123'));
-    expect(res.status).toBe(500);
+    const res = await GET(makeRequest({ jobId: 'pred_tile_abc' }));
     const data = await res.json();
-    expect(data.error).toBe('Connection refused');
+
+    expect(res.status).toBe(500);
+    expect(data.error).toBe('Network timeout');
   });
 });

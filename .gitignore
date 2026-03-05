@@ -28,6 +28,8 @@ secrets.json
 .claude/settings.local.json
 .claude/taskboard.db-wal
 .claude/taskboard.db-shm
+# Generated sync state — not for version control
+.claude/hooks/github-project-map.json
 
 # ----- Windsurf / AI Tooling -----
 # Track Windsurf rules and workflows

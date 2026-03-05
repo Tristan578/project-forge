@@ -1,120 +1,154 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit } from '@/lib/rateLimit';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
-import { getTokenCost } from '@/lib/tokens/pricing';
-import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
+import { captureException } from '@/lib/monitoring/sentry-server';
+import { rateLimit } from '@/lib/rateLimit';
+import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
+
+const mockGenerateVoice = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/auth/api-auth');
-vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(),
-  rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
-}));
-vi.mock('@/lib/monitoring/sentry-server');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
 });
-vi.mock('@/lib/tokens/pricing');
 vi.mock('@/lib/generate/elevenlabsClient', () => ({
-  ElevenLabsClient: vi.fn(() => ({
-    generateVoice: vi.fn().mockResolvedValue({ audioBase64: 'base64voice', durationSeconds: 3 }),
-  })),
+  ElevenLabsClient: class MockElevenLabsClient {
+    generateVoice = mockGenerateVoice;
+  },
+}));
+vi.mock('@/lib/monitoring/sentry-server');
+vi.mock('@/lib/tokens/pricing', () => ({ getTokenCost: vi.fn().mockReturnValue(10) }));
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn(),
+  rateLimitResponse: vi.fn().mockReturnValue(new Response('Rate Limited', { status: 429 })),
 }));
 
-function makeRequest(body: unknown) {
-  return new Request('http://test/api/generate/voice', {
+const makeRequest = (body: Record<string, unknown>) =>
+  new NextRequest('http://localhost/api/generate/voice', {
     method: 'POST',
     body: JSON.stringify(body),
+    headers: { 'content-type': 'application/json' },
   });
-}
 
 describe('POST /api/generate/voice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
-    });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
-    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
-    vi.mocked(getTokenCost).mockReturnValue(100);
-    vi.mocked(ElevenLabsClient).mockImplementation(function () {
-      return {
-        generateVoice: vi.fn().mockResolvedValue({ audioBase64: 'base64voice', durationSeconds: 3 }),
-      } as any;
-    } as any);
+    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
   });
 
-  it('returns 401 when unauthenticated', async () => {
+  it('returns 401 if unauthenticated', async () => {
     vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: new NextResponse('Unauthorized', { status: 401 }),
+      ok: false,
+      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
+    const res = await POST(makeRequest({ text: 'Hello world' }));
     expect(res.status).toBe(401);
   });
 
-  it('returns 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
+  it('returns 429 if rate limited', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
-    const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
+    const res = await POST(makeRequest({ text: 'Hello world' }));
     expect(res.status).toBe(429);
   });
 
-  it('returns 400 for invalid JSON', async () => {
-    const req = new Request('http://test/api/generate/voice', {
-      method: 'POST',
-      body: 'not json',
-    });
+  it('returns 400 for invalid JSON body', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
 
-    const res = await POST(req as any);
-    expect(res.status).toBe(400);
+    const req = new NextRequest('http://localhost/api/generate/voice', {
+      method: 'POST',
+      body: 'bad-json',
+      headers: { 'content-type': 'application/json' },
+    });
+    const res = await POST(req);
     const data = await res.json();
+    expect(res.status).toBe(400);
     expect(data.error).toBe('Invalid JSON');
   });
 
-  it('returns 422 for empty text', async () => {
-    const res = await POST(makeRequest({ text: '' }) as any);
-    expect(res.status).toBe(422);
+  it('returns 422 if text is empty', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const res = await POST(makeRequest({ text: '' }));
     const data = await res.json();
-    expect(data.error).toContain('Text must be between 1 and 1000');
+    expect(res.status).toBe(422);
+    expect(data.error).toContain('Text must be');
   });
 
-  it('returns 402 when tokens insufficient', async () => {
+  it('returns 422 if text exceeds 1000 characters', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+
+    const res = await POST(makeRequest({ text: 'x'.repeat(1001) }));
+    expect(res.status).toBe(422);
+  });
+
+  it('returns 402 if API key cannot be resolved', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(resolveApiKey).mockRejectedValue(
       new ApiKeyError('INSUFFICIENT_TOKENS', 'Not enough tokens')
     );
 
-    const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
+    const res = await POST(makeRequest({ text: 'Hello world' }));
+    const data = await res.json();
     expect(res.status).toBe(402);
-    const data = await res.json();
-    expect(data.code).toBe('INSUFFICIENT_TOKENS');
+    expect(data.error).toBe('Not enough tokens');
   });
 
-  it('returns 500 when provider fails', async () => {
-    vi.mocked(ElevenLabsClient).mockImplementation(function () {
-      return {
-        generateVoice: vi.fn().mockRejectedValue(new Error('ElevenLabs API down')),
-      } as any;
-    } as any);
+  it('returns audioBase64 and durationSeconds on success', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true });
+    mockGenerateVoice.mockResolvedValue({ audioBase64: 'dGVzdA==', durationSeconds: 2.5 });
 
-    const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
-    expect(res.status).toBe(500);
+    const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'JBFqnCBsd6RMkjVDRZzb' }));
     const data = await res.json();
-    expect(data.error).toBe('ElevenLabs API down');
-  });
 
-  it('returns 200 on successful voice generation', async () => {
-    const res = await POST(makeRequest({ text: 'Hello world', voiceId: 'voice-1' }) as any);
     expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.audioBase64).toBe('base64voice');
-    expect(data.durationSeconds).toBe(3);
+    expect(data.audioBase64).toBe('dGVzdA==');
+    expect(data.durationSeconds).toBe(2.5);
     expect(data.provider).toBe('elevenlabs');
+  });
+
+  it('maps voiceStyle string to numeric style before generating', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true });
+    mockGenerateVoice.mockResolvedValue({ audioBase64: 'dGVzdA==', durationSeconds: 1.0 });
+
+    await POST(makeRequest({ text: 'Hello world', voiceStyle: 'excited' }));
+
+    expect(mockGenerateVoice).toHaveBeenCalledWith(expect.objectContaining({ style: 1.0 }));
+  });
+
+  it('returns 500 and captures exception on ElevenLabs error', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true });
+    mockGenerateVoice.mockRejectedValue(new Error('ElevenLabs quota exceeded'));
+
+    const res = await POST(makeRequest({ text: 'Hello world' }));
+    const data = await res.json();
+
+    expect(res.status).toBe(500);
+    expect(data.error).toBe('ElevenLabs quota exceeded');
+    expect(captureException).toHaveBeenCalled();
+  });
+
+  it('rethrows non-ApiKeyError during key resolution', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    vi.mocked(resolveApiKey).mockRejectedValue(new Error('DB connection failed'));
+
+    await expect(POST(makeRequest({ text: 'Hello world' }))).rejects.toThrow('DB connection failed');
   });
 });

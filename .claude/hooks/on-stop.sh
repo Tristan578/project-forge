@@ -1,10 +1,9 @@
 #!/bin/bash
 # ============================================================================
-# on-stop.sh — Stop hook
+# on-stop.sh — Stop hook (all AI tools)
 # ============================================================================
-# Fires after Claude finishes responding.
-# Checks if there are in-progress tickets that should be updated,
-# and validates ticket documentation quality.
+# Fires after the AI finishes responding.
+# Validates ticket documentation, checks consistency, pushes to GitHub.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/taskboard-state.sh"
@@ -32,12 +31,12 @@ if [ -n "$ACTIVE" ]; then
     fi
 fi
 
-# Count in-progress tickets
+# Count in-progress tickets — warn if too many
 IN_PROGRESS=$(tb_get_tickets "in_progress")
 if [ -n "$IN_PROGRESS" ]; then
     COUNT=$(echo "$IN_PROGRESS" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null)
     if [ "$COUNT" -gt 2 ] 2>/dev/null; then
-        WARNINGS="$WARNINGS\n[TASKBOARD] $COUNT tickets in progress — consider completing some before starting more."
+        WARNINGS="$WARNINGS\n[TASKBOARD] $COUNT tickets in progress — complete some before starting more."
     fi
 fi
 
@@ -51,5 +50,8 @@ fi
 if [ -n "$WARNINGS" ]; then
     echo -e "$WARNINGS"
 fi
+
+# Push any local ticket changes to GitHub Project
+bash "$SCRIPT_DIR/sync-to-github.sh"
 
 exit 0
