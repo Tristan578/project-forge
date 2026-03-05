@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for /api/docs route — extractTitle, extractSections, GET handler.
  *
