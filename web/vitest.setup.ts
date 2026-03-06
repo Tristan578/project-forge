@@ -1,8 +1,8 @@
 /**
- * Vitest global setup — polyfill localStorage for Node 25+.
+ * Vitest setup — polyfill localStorage for Node 22+.
  *
  * Node 22+ exposes a built-in `globalThis.localStorage` that is an empty
- * object with no standard Web Storage methods (`getItem`, `setItem`,
+ * object without standard Web Storage methods (`getItem`, `setItem`,
  * `removeItem`, `clear`).  This breaks any test that calls
  * `localStorage.clear()` — even under jsdom, because Node's stub shadows
  * jsdom's implementation.
