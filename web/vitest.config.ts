@@ -7,6 +7,7 @@ export default defineConfig({
     testTimeout: 10000,
     hookTimeout: 10000,
     pool: 'forks',
+    teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],

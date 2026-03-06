@@ -12,12 +12,12 @@ vi.mock('@/stores/workspaceStore', () => ({
   })),
 }));
 
-vi.mock('lucide-react', () => new Proxy({}, {
-  get: (_, name) => {
-    if (name === '__esModule') return true;
-    return vi.fn(() => null);
-  },
-}));
+vi.mock('lucide-react', () => {
+  const stub = () => null;
+  return new Proxy({ __esModule: true }, {
+    get: (target, name) => (name in target ? (target as Record<string, unknown>)[name] : stub),
+  });
+});
 
 vi.mock('../GenerateSoundDialog', () => ({ GenerateSoundDialog: () => null }));
 vi.mock('../GenerateMusicDialog', () => ({ GenerateMusicDialog: () => null }));

@@ -8,6 +8,10 @@ vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
   marketplaceAssets: { id: 'id', sellerId: 'sellerId' },
 }));
+vi.mock('drizzle-orm', () => ({
+  eq: vi.fn(),
+  and: vi.fn(),
+}));
 
 describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
   beforeEach(() => {
@@ -102,8 +106,9 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
     formData.append('preview', new File(['data'], 'preview.png', { type: 'image/png' }));
     const req = new NextRequest('http://localhost:3000/api/marketplace/seller/assets/a1/upload', {
       method: 'POST',
-      body: formData,
     });
+    // Bypass Node's undici FormData parser which rejects jsdom File objects
+    vi.spyOn(req, 'formData').mockResolvedValue(formData);
     const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
     const body = await res.json();
 
