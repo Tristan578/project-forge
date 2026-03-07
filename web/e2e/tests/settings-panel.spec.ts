@@ -261,7 +261,9 @@ test.describe('Settings Panel @ui', () => {
     const billingTab = dialog.getByRole('tab', { name: /billing/i });
 
     await expect(billingTab).toBeVisible({ timeout: 5000 });
-    await billingTab.click();
+    // Use force:true — the tab is visible but can be intercepted by
+    // overlapping elements after scroll-into-view inside the dialog.
+    await billingTab.click({ force: true });
 
     // "Current Plan" heading renders once the loading state resolves.
     // The loading text "Loading billing information..." also satisfies the pattern.
