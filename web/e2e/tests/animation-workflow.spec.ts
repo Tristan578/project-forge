@@ -15,7 +15,7 @@ test.describe('Animation Workflow @engine', () => {
     // Look for animation section in inspector
     const animSection = page.getByText(/animation/i, { exact: false });
     const count = await animSection.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('entity inspector has multiple sections', async ({ page, editor }) => {
@@ -36,7 +36,7 @@ test.describe('Animation Workflow @engine', () => {
     // Look for audio mixer tab or panel
     const mixerTab = page.locator('button, [role="tab"]').filter({ hasText: /mixer|audio/i });
     const count = await mixerTab.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    expect(count).toBeGreaterThan(0);
   });
 
   test('play controls are visible', async ({ page }) => {

@@ -12,7 +12,13 @@ test.describe('Terrain & Procedural @engine', () => {
     // Look for terrain option
     const terrainOption = page.getByText(/terrain/i, { exact: false });
     const count = await terrainOption.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Entity menu should be open with at least primitives
+    if (count === 0) {
+      const cubeOption = page.getByText('Cube', { exact: true });
+      expect(await cubeOption.count()).toBeGreaterThan(0);
+    } else {
+      expect(count).toBeGreaterThan(0);
+    }
   });
 
   test('entity menu shows primitive types', async ({ page }) => {
@@ -57,10 +63,13 @@ test.describe('Terrain & Procedural @engine', () => {
     const gridBtn = page.locator('button[title*="Grid"], button[title*="grid"]').first();
     if (await gridBtn.count() > 0) {
       await gridBtn.click();
-
-      // No crash = pass
+      // Verify button is still interactive after toggle
+      await expect(gridBtn).toBeVisible();
+    } else {
+      // Verify sidebar has interactive buttons even without grid toggle
+      const sidebarBtns = page.locator('button[title]');
+      expect(await sidebarBtns.count()).toBeGreaterThan(0);
     }
-    expect(true).toBe(true);
   });
 
   test('coordinate mode can be toggled', async ({ page }) => {
@@ -68,8 +77,12 @@ test.describe('Terrain & Procedural @engine', () => {
     const coordBtn = page.locator('button[title*="coordinate"], button[title*="Local"], button[title*="Global"]').first();
     if (await coordBtn.count() > 0) {
       await coordBtn.click();
-
+      // Verify button is still interactive after toggle
+      await expect(coordBtn).toBeVisible();
+    } else {
+      // Verify transform tools exist as fallback
+      const transformBtn = page.locator('button[title*="Translate"]').first();
+      expect(await transformBtn.count()).toBeGreaterThan(0);
     }
-    expect(true).toBe(true);
   });
 });

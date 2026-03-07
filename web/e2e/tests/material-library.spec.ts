@@ -40,7 +40,14 @@ test.describe('Material Library @engine', () => {
     // Look for preset/library button in material section
     const presetBtn = page.locator('button').filter({ hasText: /preset|library|browse/i });
     const count = await presetBtn.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Material section should have some interactive controls
+    if (count === 0) {
+      // Fallback: verify material section itself is present
+      const materialLabel = page.getByText(/material/i, { exact: false });
+      expect(await materialLabel.count()).toBeGreaterThan(0);
+    } else {
+      expect(count).toBeGreaterThan(0);
+    }
   });
 
   test('metallic and roughness sliders exist', async ({ page, editor }) => {

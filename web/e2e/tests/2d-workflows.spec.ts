@@ -25,8 +25,13 @@ test.describe('2D Workflows @ui', () => {
     // Look for 2D/3D project type selector
     const projectTypeUI = page.locator('button, select, [role="tab"]').filter({ hasText: /2d|3d|project.*type/i });
     const count = await projectTypeUI.count();
-    // May or may not be visible depending on UI state
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Project type selector may be behind a menu — verify at least the editor loaded
+    if (count === 0) {
+      // Fallback: verify canvas exists as proof the editor loaded
+      await expect(page.locator('canvas').first()).toBeVisible();
+    } else {
+      expect(count).toBeGreaterThan(0);
+    }
   });
 
   test('editor has main canvas area', async ({ page }) => {
@@ -51,8 +56,9 @@ test.describe('2D Workflows @ui', () => {
     // Look for sprite or 2D entity options (menu should appear after click)
     const spriteOption = page.getByText(/sprite|2d/i, { exact: false });
     const count = await spriteOption.count();
-    // Sprite option may exist in the add entity menu
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Entity menu should show at least primitives (Cube, Sphere) even if no 2D options
+    const cubeOption = page.getByText('Cube', { exact: true });
+    expect((await cubeOption.count()) + count).toBeGreaterThan(0);
   });
 
   test('toolbar shows gizmo mode buttons', async ({ page }) => {

@@ -9,7 +9,14 @@ test.describe('Templates & Prefabs @engine', () => {
     // Look for template/new project button
     const templateBtn = page.locator('button').filter({ hasText: /template|new.*project|starter/i }).first();
     const count = await templateBtn.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Template or new project button should be accessible
+    if (count === 0) {
+      // Fallback: verify scene toolbar has some buttons
+      const toolbarBtns = page.locator('button');
+      expect(await toolbarBtns.count()).toBeGreaterThan(0);
+    } else {
+      expect(count).toBeGreaterThan(0);
+    }
   });
 
   test('scene toolbar has new scene button', async ({ page }) => {
