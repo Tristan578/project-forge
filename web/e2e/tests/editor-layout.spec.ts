@@ -139,8 +139,8 @@ test.describe('Editor Layout @engine', () => {
         await page.mouse.up();
 
 
-        // Verify panel is still visible after resize
-        await expect(resizablePanel).toBeVisible();
+        // Verify resize handle is still visible after resize
+        await expect(resizeHandle).toBeVisible();
       }
     }
   });
