@@ -10,7 +10,7 @@ vi.mock('@/stores/editorStore', () => ({
 vi.mock('lucide-react', () => {
   const stub = () => null;
   return new Proxy({ __esModule: true }, {
-    get: (target, name) => (name in target ? (target as Record<string, unknown>)[name] : stub),
+    get: (target, name) => (name in target ? (target as Record<string, unknown>)[name as string] : stub),
   });
 });
 
