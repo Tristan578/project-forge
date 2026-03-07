@@ -5,9 +5,13 @@ import { test, expect } from '@playwright/test';
  * Verifies page routing, redirects, link navigation, and URL behavior
  * across the application.
  */
+// PricingPage uses useAuth() from Clerk — skip if Clerk is not configured
+const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
 test.describe('Navigation & Routing @ui', () => {
   test.describe('Public Route Access', () => {
     test('/pricing loads without redirect', async ({ page }) => {
+      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       const response = await page.goto('/pricing');
       expect(response?.status()).toBe(200);
       expect(page.url()).toContain('/pricing');
@@ -83,6 +87,7 @@ test.describe('Navigation & Routing @ui', () => {
     });
 
     test('pricing page Sign In button navigates to sign-in', async ({ page }) => {
+      test.skip(!hasClerk, 'Pricing page requires Clerk (useAuth hook)');
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
