@@ -43,6 +43,7 @@ features = [
     "bevy_scene",
     "ktx2",
     "zstd_rust",
+    "debug",
 ]
 
 [dependencies.web-sys]
@@ -101,4 +102,4 @@ default-features = false
 opt-level = "z"
 lto = true
 codegen-units = 1
-strip = true
+strip = false
