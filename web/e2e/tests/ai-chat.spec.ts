@@ -29,7 +29,7 @@ test.describe('AI Chat @ui', () => {
     await editor.pressShortcut('Control+k');
 
     // Look for textarea in the chat overlay (the fixed z-50 overlay)
-    const chatInput = page.locator('.fixed.z-50 textarea, .fixed.z-50 input[type="text"]').first();
+    const chatInput = page.getByRole('textbox', { name: 'Chat message' });
     await expect(chatInput).toBeVisible({ timeout: 5000 });
   });
 
@@ -38,8 +38,9 @@ test.describe('AI Chat @ui', () => {
 
     await editor.pressShortcut('Control+k');
 
-    const chatInput = page.locator('.fixed.z-50 textarea').first();
+    const chatInput = page.getByRole('textbox', { name: 'Chat message' });
     await expect(chatInput).toBeVisible({ timeout: 5000 });
+    await chatInput.click();
     await chatInput.fill('Create a cube');
 
     const value = await chatInput.inputValue();
@@ -128,10 +129,11 @@ test.describe('AI Chat @ui', () => {
     await editor.loadPage();
 
     await editor.pressShortcut('Control+k');
-    const chatInput = page.locator('.fixed.z-50 textarea').first();
+    const chatInput = page.getByRole('textbox', { name: 'Chat message' });
     await expect(chatInput).toBeVisible({ timeout: 5000 });
 
     // Textarea should accept multiline
+    await chatInput.click();
     await chatInput.fill('Line 1\nLine 2\nLine 3');
     const value = await chatInput.inputValue();
     expect(value).toContain('Line 1');

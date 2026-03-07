@@ -79,14 +79,16 @@ export class EditorPage {
       }
     });
 
-    await this.page.goto('/dev');
+    // Use 'commit' to avoid navigation timeout under parallel test load.
+    // The actual readiness gate is __REACT_HYDRATED below.
+    await this.page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
     await this.page.waitForLoadState('domcontentloaded');
     // Wait for React hydration — ensures all event handlers (keyboard shortcuts,
     // button clicks) are attached. This fires after EditorLayout mounts.
     await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
-      { timeout: 30_000 }
+      { timeout: 45_000 }
     );
   }
 

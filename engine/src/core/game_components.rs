@@ -1184,15 +1184,17 @@ fn system_spawner(
 fn system_follower(
     time: Res<Time>,
     _runtime: Option<Res<GameComponentRuntime>>,
-    mut follower_entities: Query<(&EntityId, &GameComponents, &mut Transform)>,
-    all_entities: Query<(&EntityId, &Transform)>,
+    mut queries: ParamSet<(
+        Query<(&EntityId, &GameComponents, &mut Transform)>,
+        Query<(&EntityId, &Transform)>,
+    )>,
 ) {
 
 
     let dt = time.delta_secs();
 
-    // Collect follower data first to avoid query conflicts
-    let followers: Vec<_> = follower_entities.iter()
+    // Phase 1: Collect follower data (entity id, follower config, current position)
+    let followers: Vec<_> = queries.p0().iter()
         .filter_map(|(eid, gc, transform)| {
             gc.get("follower").and_then(|comp| {
                 if let GameComponentData::Follower(data) = comp {
@@ -1204,12 +1206,13 @@ fn system_follower(
         })
         .collect();
 
-    // Process each follower
+    // Phase 2: Collect target positions using the read-only query
+    let mut target_positions: Vec<(String, Vec3, Vec3, f32, f32, bool)> = Vec::new();
     for (eid, data, current_pos) in followers {
         let Some(target_id) = &data.target_entity_id else { continue; };
 
         // Find target position
-        let target_pos = all_entities.iter()
+        let target_pos = queries.p1().iter()
             .find(|(tid, _)| tid.0 == *target_id)
             .map(|(_, t)| t.translation);
 
@@ -1223,16 +1226,20 @@ fn system_follower(
             continue;
         }
 
-        // Update transform
-        if let Some((_, _, mut transform)) = follower_entities.iter_mut()
+        target_positions.push((eid, target_pos, direction, distance, data.speed, data.look_at_target));
+    }
+
+    // Phase 3: Apply movement using the mutable query
+    for (eid, target_pos, direction, distance, speed, look_at_target) in target_positions {
+        if let Some((_, _, mut transform)) = queries.p0().iter_mut()
             .find(|(fid, _, _)| fid.0 == eid)
         {
             // Move toward target
-            let movement = direction.normalize() * data.speed * dt;
+            let movement = direction.normalize() * speed * dt;
             transform.translation += movement;
 
             // Optionally rotate to face target
-            if data.look_at_target && distance > 0.01 {
+            if look_at_target && distance > 0.01 {
                 transform.look_at(target_pos, Vec3::Y);
             }
         }
