@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
         userId: user?.id ?? null,
         type: typeResult.value,
         description: descResult.value,
-        metadata: (parsed.body.metadata as Record<string, unknown>) ?? null,
+        metadata: parsed.body.metadata ?? null,
       })
       .returning({ id: feedback.id });
 

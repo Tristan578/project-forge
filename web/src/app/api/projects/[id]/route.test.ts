@@ -108,6 +108,59 @@ describe('PUT /api/projects/[id]', () => {
     expect(res.status).toBe(404);
     expect(body.error).toBe('Project not found');
   });
+
+  it('should return 400 for null name', async () => {
+    const { PUT } = await import('./route');
+    const req = new Request('http://localhost:3000/api/projects/p1', {
+      method: 'PUT',
+      body: JSON.stringify({ name: null }),
+    });
+    const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('should return 400 for null sceneData', async () => {
+    const { PUT } = await import('./route');
+    const req = new Request('http://localhost:3000/api/projects/p1', {
+      method: 'PUT',
+      body: JSON.stringify({ sceneData: null }),
+    });
+    const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('should return 400 for non-integer entityCount', async () => {
+    const { PUT } = await import('./route');
+    const req = new Request('http://localhost:3000/api/projects/p1', {
+      method: 'PUT',
+      body: JSON.stringify({ entityCount: 3.5 }),
+    });
+    const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('should return 400 for negative entityCount', async () => {
+    const { PUT } = await import('./route');
+    const req = new Request('http://localhost:3000/api/projects/p1', {
+      method: 'PUT',
+      body: JSON.stringify({ entityCount: -1 }),
+    });
+    const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('should allow thumbnail: null to clear thumbnail', async () => {
+    vi.mocked(updateProject).mockResolvedValue({ id: 'p1', name: 'Test', thumbnail: null } as never);
+
+    const { PUT } = await import('./route');
+    const req = new Request('http://localhost:3000/api/projects/p1', {
+      method: 'PUT',
+      body: JSON.stringify({ thumbnail: null }),
+    });
+    const res = await PUT(req, { params: Promise.resolve({ id: 'p1' }) });
+    expect(res.status).toBe(200);
+    expect(updateProject).toHaveBeenCalledWith('user_1', 'p1', { thumbnail: null });
+  });
 });
 
 describe('DELETE /api/projects/[id]', () => {

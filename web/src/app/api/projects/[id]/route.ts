@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getProject, updateProject, deleteProject } from '@/lib/projects/service';
-import { parseJsonBody, optionalString } from '@/lib/apiValidation';
+import { parseJsonBody, requireString, requireObject, optionalString } from '@/lib/apiValidation';
 
 /**
  * GET /api/projects/[id]
@@ -42,13 +42,15 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   } = {};
 
   if (parsed.body.name !== undefined) {
-    const nameResult = optionalString(parsed.body.name, 'name', { maxLength: 200 });
+    const nameResult = requireString(parsed.body.name, 'name', { minLength: 1, maxLength: 200 });
     if (!nameResult.ok) return nameResult.response;
     updates.name = nameResult.value;
   }
 
   if (parsed.body.sceneData !== undefined) {
-    updates.sceneData = parsed.body.sceneData;
+    const sceneResult = requireObject(parsed.body.sceneData, 'sceneData');
+    if (!sceneResult.ok) return sceneResult.response;
+    updates.sceneData = sceneResult.value;
   }
 
   if (parsed.body.thumbnail !== undefined) {
