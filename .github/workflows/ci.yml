@@ -71,18 +71,19 @@ jobs:
       - run: npm ci
         working-directory: web
 
-      - name: Run tests
+      - name: Run tests with coverage
         working-directory: web
-        # Use threads pool in CI to avoid known fork-pool open-handle hang.
-        # Timeout is a safeguard — threads pool exits cleanly.
+        # Use threads pool in CI to avoid known fork-pool open-handle hang (vitest#3077).
+        # Coverage thresholds enforced via vitest.config.ts (statements/branches/functions/lines).
+        # Timeout is a safety net — threads pool should exit cleanly.
         run: |
           set +e
-          timeout 600 npx vitest run --pool=threads
+          timeout 600 npx vitest run --pool=threads --coverage
           EXIT_CODE=$?
           set -e
           if [ $EXIT_CODE -eq 124 ]; then
-            echo "::warning::vitest process hung after tests completed — killed by timeout"
-            exit 0
+            echo "::error::vitest process timed out — this may indicate stuck tests or a pool hang"
+            exit 1
           fi
           exit $EXIT_CODE
 
