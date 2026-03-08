@@ -1,11 +1,15 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments, featuredGames } from '@/lib/db/schema';
 import { eq, sql, and, gt } from 'drizzle-orm';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const limited = rateLimitPublicRoute(req, 'featured-games', 30, 5 * 60 * 1000);
+  if (limited) return limited;
+
   try {
     const db = getDb();
 
