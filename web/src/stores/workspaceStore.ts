@@ -12,7 +12,7 @@ export interface CustomPreset {
   layout: SerializedDockview;
 }
 
-interface WorkspaceState {
+export interface WorkspaceState {
   /** The dockview API instance, set once on mount */
   api: DockviewApi | null;
   /** Currently active preset (null if user has customized) */

@@ -799,8 +799,7 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
     // Shadow dangerous globals to prevent network access from user scripts.
     // This runs inside a Web Worker (no DOM access) with additional globals
     // explicitly overridden to undefined to sandbox user-provided code.
-    // codeql[js/code-injection]: intentional for user-authored scripts; execution is isolated in a worker, dangerous globals are shadowed, source size is capped, and runtime exceptions are contained
-    const fn = new Function(
+    const fn = new Function( // codeql[js/code-injection] intentional: user-authored game scripts execute in an isolated Web Worker with shadowed globals, size cap, and exception containment
       'forge', 'entityId',
       ...SHADOWED_GLOBALS,
       `

@@ -8,9 +8,36 @@ import { NextRequest, NextResponse } from 'next/server';
  *
  * The envelope format is newline-delimited JSON. The first line (header)
  * contains a `dsn` field we use to determine the upstream project URL.
+ *
+ * Security: The upstream host and project ID are derived from a trusted
+ * server-side env var (SENTRY_DSN / NEXT_PUBLIC_SENTRY_DSN) at module load.
+ * Envelopes whose DSN does not match the configured values are rejected,
+ * preventing server-side request forgery via user-controlled hosts.
  */
+
+// --- Trusted configuration derived once at module load ---
+function parseTrustedSentryConfig(): { host: string; projectId: string } | null {
+  const dsn = process.env.SENTRY_DSN || process.env.NEXT_PUBLIC_SENTRY_DSN;
+  if (!dsn) return null;
+  try {
+    const url = new URL(dsn);
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (segments.length !== 1 || !/^\d+$/.test(segments[0])) return null;
+    if (!url.hostname.endsWith('.sentry.io') && url.hostname !== 'sentry.io') return null;
+    return { host: url.hostname, projectId: segments[0] };
+  } catch {
+    return null;
+  }
+}
+
+const TRUSTED_SENTRY = parseTrustedSentryConfig();
+
 export async function POST(request: NextRequest) {
   try {
+    if (!TRUSTED_SENTRY) {
+      return NextResponse.json({ error: 'Sentry tunnel not configured' }, { status: 503 });
+    }
+
     const envelope = await request.text();
     if (!envelope) {
       return NextResponse.json({ error: 'Empty envelope' }, { status: 400 });
@@ -30,8 +57,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing DSN in envelope' }, { status: 400 });
     }
 
-    // Parse the DSN to extract host and project ID
-    // DSN format: https://<key>@<host>/<project-id>
+    // Validate the envelope DSN matches our trusted configuration
     let dsnUrl: URL;
     try {
       dsnUrl = new URL(dsn);
@@ -39,27 +65,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid DSN URL' }, { status: 400 });
     }
 
-    // Only allow forwarding to sentry.io hosts
-    const host = dsnUrl.hostname;
-    if (!host.endsWith('.sentry.io') && host !== 'sentry.io') {
-      return NextResponse.json({ error: 'Invalid Sentry host' }, { status: 403 });
+    const dsnSegments = dsnUrl.pathname.split('/').filter(Boolean);
+    if (
+      dsnUrl.hostname !== TRUSTED_SENTRY.host ||
+      dsnSegments.length !== 1 ||
+      dsnSegments[0] !== TRUSTED_SENTRY.projectId
+    ) {
+      return NextResponse.json({ error: 'DSN does not match configured Sentry project' }, { status: 403 });
     }
 
-    // Build the upstream envelope URL
-    // https://<host>/api/<project-id>/envelope/
-    // Extract single expected path segment (DSN format: https://key@host/project-id)
-    const pathSegments = dsnUrl.pathname.split('/').filter(Boolean);
-    if (pathSegments.length !== 1) {
-      return NextResponse.json({ error: 'Invalid DSN path' }, { status: 400 });
-    }
-    const projectId = pathSegments[0];
-
-    // Validate projectId is a numeric string (Sentry project IDs are always numeric)
-    if (!/^\d+$/.test(projectId)) {
-      return NextResponse.json({ error: 'Invalid project ID in DSN' }, { status: 400 });
-    }
-
-    const upstreamUrl = new URL(`https://${host}/api/${projectId}/envelope/`);
+    // Build the upstream URL from trusted config only (not from request data)
+    const upstreamUrl = `https://${TRUSTED_SENTRY.host}/api/${TRUSTED_SENTRY.projectId}/envelope/`;
 
     // Forward the envelope
     const upstreamResponse = await fetch(upstreamUrl, {
