@@ -1,0 +1,69 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan: Monday 08:00 UTC
+    - cron: '0 8 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    concurrency:
+      group: codeql-${{ github.ref }}-${{ matrix.language }}
+      cancel-in-progress: true
+    permissions:
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python, actions, rust]
+        include:
+          - language: javascript-typescript
+            build-mode: none
+          - language: python
+            build-mode: none
+          - language: actions
+            build-mode: none
+          - language: rust
+            build-mode: manual
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Rust requires a manual build targeting WASM (autobuild won't detect this)
+      - name: Install Rust toolchain
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust dependencies
+        if: matrix.language == 'rust'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine -> target
+
+      - name: Build Rust (WASM target)
+        if: matrix.language == 'rust'
+        working-directory: engine
+        env:
+          CARGO_TERM_COLOR: always
+          RUSTFLAGS: --cfg=web_sys_unstable_apis
+        run: cargo build --target wasm32-unknown-unknown --release --features webgl2
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
