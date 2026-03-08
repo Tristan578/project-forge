@@ -105,15 +105,15 @@ describe('/api/user/profile', () => {
       vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user: makeUser() } });
       vi.mocked(updateDisplayName).mockRejectedValue(new Error('Validation failed'));
 
-      const req = new NextRequest('http://localhost/api/user/profile', { 
+      const req = new NextRequest('http://localhost/api/user/profile', {
         method: 'PUT',
-        body: JSON.stringify({ displayName: 'a' }), // too short
+        body: JSON.stringify({ displayName: 'a' }), // too short — now caught by requireString
       });
       const res = await PUT(req);
       const data = await res.json();
-      
+
       expect(res.status).toBe(400);
-      expect(data.error).toBe('Validation failed');
+      expect(data.error).toContain('at least 2 character');
     });
   });
 });

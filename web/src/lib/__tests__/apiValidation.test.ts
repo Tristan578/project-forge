@@ -4,6 +4,7 @@ import {
   requireString,
   optionalString,
   requireObject,
+  requireInteger,
   requireOneOf,
 } from '../apiValidation';
 
@@ -149,6 +150,56 @@ describe('requireObject', () => {
 
   it('rejects undefined', () => {
     const result = requireObject(undefined, 'data');
+    expect(result.ok).toBe(false);
+  });
+});
+
+describe('requireInteger', () => {
+  it('accepts valid integer', () => {
+    const result = requireInteger(5, 'count');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(5);
+  });
+
+  it('accepts zero', () => {
+    const result = requireInteger(0, 'count');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(0);
+  });
+
+  it('rejects non-number', () => {
+    const result = requireInteger('5', 'count');
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects float', () => {
+    const result = requireInteger(3.5, 'count');
+    expect(result.ok).toBe(false);
+  });
+
+  it('enforces min', () => {
+    const result = requireInteger(0, 'rating', { min: 1 });
+    expect(result.ok).toBe(false);
+  });
+
+  it('enforces max', () => {
+    const result = requireInteger(6, 'rating', { max: 5 });
+    expect(result.ok).toBe(false);
+  });
+
+  it('accepts value within range', () => {
+    const result = requireInteger(3, 'rating', { min: 1, max: 5 });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toBe(3);
+  });
+
+  it('rejects undefined', () => {
+    const result = requireInteger(undefined, 'count');
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects null', () => {
+    const result = requireInteger(null, 'count');
     expect(result.ok).toBe(false);
   });
 });

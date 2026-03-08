@@ -3,8 +3,9 @@ import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { storeProviderKey, deleteProviderKey } from '@/lib/keys/resolver';
 import type { Provider } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 
-const VALID_PROVIDERS: Provider[] = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno'];
+const VALID_PROVIDERS = ['anthropic', 'meshy', 'hyper3d', 'elevenlabs', 'suno'] as const;
 
 /** PUT /api/keys/:provider — store/update a BYOK key */
 export async function PUT(
@@ -22,26 +23,17 @@ export async function PUT(
   if (tierCheck) return tierCheck;
 
   const { provider } = await params;
-  if (!VALID_PROVIDERS.includes(provider as Provider)) {
-    return NextResponse.json(
-      { error: `Invalid provider. Valid: ${VALID_PROVIDERS.join(', ')}` },
-      { status: 400 }
-    );
-  }
+  const providerResult = requireOneOf(provider, 'Provider', VALID_PROVIDERS);
+  if (!providerResult.ok) return providerResult.response;
 
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
-  const key = body.key as string;
-  if (!key || typeof key !== 'string' || key.length < 8) {
-    return NextResponse.json({ error: 'Invalid API key' }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(req);
+  if (!parsed.ok) return parsed.response;
 
-  await storeProviderKey(authResult.ctx.user.id, provider as Provider, key);
-  return NextResponse.json({ success: true, provider, configured: true });
+  const keyResult = requireString(parsed.body.key, 'API key', { minLength: 8, maxLength: 500 });
+  if (!keyResult.ok) return keyResult.response;
+
+  await storeProviderKey(authResult.ctx.user.id, providerResult.value as Provider, keyResult.value);
+  return NextResponse.json({ success: true, provider: providerResult.value, configured: true });
 }
 
 /** DELETE /api/keys/:provider — remove a BYOK key */
@@ -57,10 +49,9 @@ export async function DELETE(
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { provider } = await params;
-  if (!VALID_PROVIDERS.includes(provider as Provider)) {
-    return NextResponse.json({ error: 'Invalid provider' }, { status: 400 });
-  }
+  const providerResult = requireOneOf(provider, 'Provider', VALID_PROVIDERS);
+  if (!providerResult.ok) return providerResult.response;
 
-  await deleteProviderKey(authResult.ctx.user.id, provider as Provider);
-  return NextResponse.json({ success: true, provider, configured: false });
+  await deleteProviderKey(authResult.ctx.user.id, providerResult.value as Provider);
+  return NextResponse.json({ success: true, provider: providerResult.value, configured: false });
 }

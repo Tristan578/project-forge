@@ -117,7 +117,7 @@ describe('POST /api/community/games/[id]/comment', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Content is required');
+    expect(body.error).toContain('Content is required');
   });
 
   it('should return 400 for empty content after sanitization', async () => {

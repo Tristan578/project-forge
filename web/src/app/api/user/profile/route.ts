@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { updateDisplayName } from '@/lib/auth/user-service';
+import { parseJsonBody, requireString } from '@/lib/apiValidation';
 
 /**
  * GET /api/user/profile
@@ -28,19 +29,14 @@ export async function PUT(request: NextRequest) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  let body: { displayName?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return parsed.response;
 
-  if (typeof body.displayName !== 'string') {
-    return NextResponse.json({ error: 'displayName is required' }, { status: 400 });
-  }
+  const nameResult = requireString(parsed.body.displayName, 'displayName', { minLength: 2, maxLength: 100 });
+  if (!nameResult.ok) return nameResult.response;
 
   try {
-    const user = await updateDisplayName(authResult.ctx.user.id, body.displayName);
+    const user = await updateDisplayName(authResult.ctx.user.id, nameResult.value);
     return NextResponse.json({
       displayName: user.displayName,
       email: user.email,

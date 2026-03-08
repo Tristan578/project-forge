@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
+import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,19 +72,18 @@ export async function POST(
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const { id: gameId } = await params;
-    const body = await req.json();
-    const { content, parentId } = body;
 
-    // Validate content
-    if (!content || typeof content !== 'string') {
-      return NextResponse.json({ error: 'Content is required' }, { status: 400 });
-    }
+    const parsed = await parseJsonBody(req);
+    if (!parsed.ok) return parsed.response;
 
-    // Sanitize content (remove angle brackets to prevent tag injection, limit length)
-    const sanitized = content
-      .replace(/[<>]/g, '')
-      .trim()
-      .slice(0, 1000); // Max 1000 chars
+    const contentResult = requireString(parsed.body.content, 'Content', { minLength: 1, maxLength: 1000 });
+    if (!contentResult.ok) return contentResult.response;
+
+    const parentResult = optionalString(parsed.body.parentId, 'Parent ID', { maxLength: 100 });
+    if (!parentResult.ok) return parentResult.response;
+
+    // Sanitize content (remove angle brackets to prevent tag injection)
+    const sanitized = contentResult.value.replace(/[<>]/g, '');
 
     if (sanitized.length === 0) {
       return NextResponse.json(
@@ -108,7 +108,7 @@ export async function POST(
         gameId,
         userId: authResult.ctx.user.id,
         content: sanitized,
-        parentId: parentId || null,
+        parentId: parentResult.value ?? null,
         flagged: modResult.severity === 'flag' ? 1 : 0,
       })
       .returning();

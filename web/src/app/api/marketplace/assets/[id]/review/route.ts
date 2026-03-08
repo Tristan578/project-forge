@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db/client';
 import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { parseJsonBody, requireInteger, optionalString } from '@/lib/apiValidation';
 
 export async function POST(
   req: NextRequest,
@@ -22,17 +23,14 @@ export async function POST(
     const rl = rateLimit(`review:${clerkId}`, 20, 60_000);
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-    let body;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
-    const { rating, content } = body;
+    const parsed = await parseJsonBody(req);
+    if (!parsed.ok) return parsed.response;
 
-    if (!rating || rating < 1 || rating > 5) {
-      return NextResponse.json({ error: 'Rating must be between 1 and 5' }, { status: 400 });
-    }
+    const ratingResult = requireInteger(parsed.body.rating, 'Rating', { min: 1, max: 5 });
+    if (!ratingResult.ok) return ratingResult.response;
+
+    const contentResult = optionalString(parsed.body.content, 'Review content', { maxLength: 2000 });
+    if (!contentResult.ok) return contentResult.response;
 
     // Check if user purchased the asset
     const [purchase] = await db
@@ -56,15 +54,15 @@ export async function POST(
       // Update existing review
       await db
         .update(assetReviews)
-        .set({ rating, content: content || null })
+        .set({ rating: ratingResult.value, content: contentResult.value ?? null })
         .where(eq(assetReviews.id, existingReview.id));
     } else {
       // Insert new review
       await db.insert(assetReviews).values({
         assetId,
         userId: user.id,
-        rating,
-        content: content || null,
+        rating: ratingResult.value,
+        content: contentResult.value ?? null,
       });
     }
 

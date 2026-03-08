@@ -65,7 +65,7 @@ describe('PUT /api/keys/[provider]', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toContain('Invalid provider');
+    expect(body.error).toContain('must be one of');
   });
 
   it('should return 400 for short API key', async () => {
@@ -78,7 +78,7 @@ describe('PUT /api/keys/[provider]', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Invalid API key');
+    expect(body.error).toContain('at least 8 character');
   });
 
   it('should store key and return success', async () => {
@@ -130,7 +130,7 @@ describe('DELETE /api/keys/[provider]', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Invalid provider');
+    expect(body.error).toContain('must be one of');
   });
 
   it('should delete key and return success', async () => {

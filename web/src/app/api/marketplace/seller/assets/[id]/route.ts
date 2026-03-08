@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { parseJsonBody, optionalString } from '@/lib/apiValidation';
 
 export async function PATCH(
   req: NextRequest,
@@ -28,24 +29,59 @@ export async function PATCH(
       return NextResponse.json({ error: 'Asset not found' }, { status: 404 });
     }
 
-    let body;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
-    const { name, description, priceTokens, license, tags, status, previewUrl, assetFileUrl, assetFileSize } = body;
+    const parsed = await parseJsonBody(req);
+    if (!parsed.ok) return parsed.response;
 
     const updates: Record<string, unknown> = {};
-    if (name !== undefined) updates.name = name;
-    if (description !== undefined) updates.description = description;
-    if (priceTokens !== undefined) updates.priceTokens = priceTokens;
-    if (license !== undefined) updates.license = license;
-    if (tags !== undefined) updates.tags = tags;
-    if (previewUrl !== undefined) updates.previewUrl = previewUrl;
-    if (assetFileUrl !== undefined) updates.assetFileUrl = assetFileUrl;
-    if (assetFileSize !== undefined) updates.assetFileSize = assetFileSize;
-    if (status !== undefined) {
+
+    if (parsed.body.name !== undefined) {
+      const r = optionalString(parsed.body.name, 'Name', { maxLength: 200 });
+      if (!r.ok) return r.response;
+      updates.name = r.value;
+    }
+    if (parsed.body.description !== undefined) {
+      const r = optionalString(parsed.body.description, 'Description', { maxLength: 5000 });
+      if (!r.ok) return r.response;
+      updates.description = r.value;
+    }
+    if (parsed.body.priceTokens !== undefined) {
+      const p = parsed.body.priceTokens;
+      if (typeof p !== 'number' || !Number.isInteger(p) || p < 0) {
+        return NextResponse.json({ error: 'priceTokens must be a non-negative integer' }, { status: 400 });
+      }
+      updates.priceTokens = p;
+    }
+    if (parsed.body.license !== undefined) {
+      const r = optionalString(parsed.body.license, 'License', { maxLength: 50 });
+      if (!r.ok) return r.response;
+      updates.license = r.value;
+    }
+    if (parsed.body.tags !== undefined) {
+      if (!Array.isArray(parsed.body.tags)) {
+        return NextResponse.json({ error: 'Tags must be an array' }, { status: 400 });
+      }
+      updates.tags = (parsed.body.tags as unknown[])
+        .filter((t): t is string => typeof t === 'string')
+        .slice(0, 20);
+    }
+    if (parsed.body.previewUrl !== undefined) {
+      const r = optionalString(parsed.body.previewUrl, 'Preview URL', { maxLength: 2000 });
+      if (!r.ok) return r.response;
+      updates.previewUrl = r.value;
+    }
+    if (parsed.body.assetFileUrl !== undefined) {
+      const r = optionalString(parsed.body.assetFileUrl, 'Asset file URL', { maxLength: 2000 });
+      if (!r.ok) return r.response;
+      updates.assetFileUrl = r.value;
+    }
+    if (parsed.body.assetFileSize !== undefined) {
+      const s = parsed.body.assetFileSize;
+      if (typeof s !== 'number' || !Number.isInteger(s) || s < 0) {
+        return NextResponse.json({ error: 'assetFileSize must be a non-negative integer' }, { status: 400 });
+      }
+      updates.assetFileSize = s;
+    }
+    if (parsed.body.status !== undefined) {
       // Sellers can only transition draft -> pending_review. Publishing requires admin review.
       const allowedTransitions: Record<string, string[]> = {
         draft: ['pending_review'],
@@ -53,13 +89,14 @@ export async function PATCH(
         rejected: ['pending_review', 'draft'], // Can resubmit
       };
       const allowed = allowedTransitions[asset.status] || [];
-      if (!allowed.includes(status)) {
+      const newStatus = parsed.body.status;
+      if (typeof newStatus !== 'string' || !allowed.includes(newStatus)) {
         return NextResponse.json(
-          { error: `Cannot transition from '${asset.status}' to '${status}'` },
+          { error: `Cannot transition from '${asset.status}' to '${newStatus}'` },
           { status: 400 }
         );
       }
-      updates.status = status;
+      updates.status = newStatus;
     }
 
     await db

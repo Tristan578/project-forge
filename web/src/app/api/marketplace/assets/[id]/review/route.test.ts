@@ -69,7 +69,7 @@ describe('POST /api/marketplace/assets/[id]/review', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Rating must be between 1 and 5');
+    expect(body.error).toContain('Rating must be');
   });
 
   it('should return 403 when asset not purchased', async () => {

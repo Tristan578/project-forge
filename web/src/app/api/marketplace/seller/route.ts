@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { sellerProfiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 
 export async function GET() {
   try {
@@ -46,17 +47,17 @@ export async function POST(req: NextRequest) {
 
     const db = getDb();
 
-    let body;
-    try {
-      body = await req.json();
-    } catch {
-      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-    }
-    const { displayName, bio, portfolioUrl } = body;
+    const parsed = await parseJsonBody(req);
+    if (!parsed.ok) return parsed.response;
 
-    if (!displayName || displayName.length < 2) {
-      return NextResponse.json({ error: 'Display name required' }, { status: 400 });
-    }
+    const nameResult = requireString(parsed.body.displayName, 'Display name', { minLength: 2, maxLength: 100 });
+    if (!nameResult.ok) return nameResult.response;
+
+    const bioResult = optionalString(parsed.body.bio, 'Bio', { maxLength: 1000 });
+    if (!bioResult.ok) return bioResult.response;
+
+    const urlResult = optionalString(parsed.body.portfolioUrl, 'Portfolio URL', { maxLength: 500 });
+    if (!urlResult.ok) return urlResult.response;
 
     // Check if profile exists
     const [existing] = await db
@@ -70,18 +71,18 @@ export async function POST(req: NextRequest) {
       await db
         .update(sellerProfiles)
         .set({
-          displayName,
-          bio: bio || null,
-          portfolioUrl: portfolioUrl || null,
+          displayName: nameResult.value,
+          bio: bioResult.value ?? null,
+          portfolioUrl: urlResult.value ?? null,
         })
         .where(eq(sellerProfiles.userId, user.id));
     } else {
       // Create
       await db.insert(sellerProfiles).values({
         userId: user.id,
-        displayName,
-        bio: bio || null,
-        portfolioUrl: portfolioUrl || null,
+        displayName: nameResult.value,
+        bio: bioResult.value ?? null,
+        portfolioUrl: urlResult.value ?? null,
       });
     }
 

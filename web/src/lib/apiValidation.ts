@@ -111,6 +111,44 @@ export function requireObject(
 }
 
 /**
+ * Validates a required integer field within an optional range.
+ */
+export function requireInteger(
+  value: unknown,
+  fieldName: string,
+  { min, max }: { min?: number; max?: number } = {}
+): { ok: true; value: number } | { ok: false; response: NextResponse } {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `${fieldName} must be an integer` },
+        { status: 400 }
+      ),
+    };
+  }
+  if (min !== undefined && value < min) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `${fieldName} must be at least ${min}` },
+        { status: 400 }
+      ),
+    };
+  }
+  if (max !== undefined && value > max) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: `${fieldName} must be at most ${max}` },
+        { status: 400 }
+      ),
+    };
+  }
+  return { ok: true, value };
+}
+
+/**
  * Validates that a value is one of an allowed set.
  */
 export function requireOneOf<T extends string>(

@@ -5,6 +5,7 @@ import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
+import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 
 export async function POST(request: NextRequest) {
   const authResult = await authenticateRequest();
@@ -15,23 +16,31 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(`publish:${clerkId}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  const body = await request.json();
-  const { projectId, title, slug, description, tags } = body;
+  const parsed = await parseJsonBody(request);
+  if (!parsed.ok) return parsed.response;
 
-  if (!projectId || !title || !slug) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-  }
+  const projectIdResult = requireString(parsed.body.projectId, 'Project ID', { maxLength: 100 });
+  if (!projectIdResult.ok) return projectIdResult.response;
+
+  const titleResult = requireString(parsed.body.title, 'Title', { maxLength: 200 });
+  if (!titleResult.ok) return titleResult.response;
+
+  const slugResult = requireString(parsed.body.slug, 'Slug', { minLength: 3, maxLength: 50 });
+  if (!slugResult.ok) return slugResult.response;
+
+  const descResult = optionalString(parsed.body.description, 'Description', { maxLength: 5000 });
+  if (!descResult.ok) return descResult.response;
 
   // Content moderation check on title and description
-  const titleMod = moderateContent(title);
+  const titleMod = moderateContent(titleResult.value);
   if (titleMod.severity === 'block') {
     return NextResponse.json(
       { error: 'Game title contains prohibited content' },
       { status: 422 }
     );
   }
-  if (description) {
-    const descMod = moderateContent(description);
+  if (descResult.value) {
+    const descMod = moderateContent(descResult.value);
     if (descMod.severity === 'block') {
       return NextResponse.json(
         { error: 'Game description contains prohibited content' },
@@ -41,7 +50,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Validate slug format
-  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slug) || slug.length < 3 || slug.length > 50) {
+  if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slugResult.value)) {
     return NextResponse.json({ error: 'Invalid slug format' }, { status: 400 });
   }
 
@@ -61,21 +70,21 @@ export async function POST(request: NextRequest) {
   // Check slug availability (for this user)
   const existingSlug = await db.select({ id: publishedGames.id, version: publishedGames.version })
     .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
+    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slugResult.value)))
     .limit(1);
 
   // Get project data (verify ownership)
   const [project] = await db.select().from(projects)
-    .where(and(eq(projects.id, projectId), eq(projects.userId, user.id)))
+    .where(and(eq(projects.id, projectIdResult.value), eq(projects.userId, user.id)))
     .limit(1);
   if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
 
-  const gameUrl = `/play/${clerkId}/${slug}`;
+  const gameUrl = `/play/${clerkId}/${slugResult.value}`;
 
   // Validate tags
-  const validTags: string[] = Array.isArray(tags)
-    ? tags.filter((t: unknown) => typeof t === 'string' && t.trim().length > 0)
-        .map((t: string) => t.trim().toLowerCase().slice(0, 30))
+  const validTags: string[] = Array.isArray(parsed.body.tags)
+    ? (parsed.body.tags as unknown[]).filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+        .map((t) => t.trim().toLowerCase().slice(0, 30))
         .slice(0, 5)
     : [];
 
@@ -85,8 +94,8 @@ export async function POST(request: NextRequest) {
     const newVersion = existingSlug[0].version + 1;
     await db.update(publishedGames)
       .set({
-        title,
-        description: description || null,
+        title: titleResult.value,
+        description: descResult.value ?? null,
         status: 'published',
         version: newVersion,
         cdnUrl: gameUrl,
@@ -110,10 +119,10 @@ export async function POST(request: NextRequest) {
   const [publication] = await db.insert(publishedGames)
     .values({
       userId: user.id,
-      projectId,
-      slug,
-      title,
-      description: description || null,
+      projectId: projectIdResult.value,
+      slug: slugResult.value,
+      title: titleResult.value,
+      description: descResult.value ?? null,
       status: 'published',
       cdnUrl: gameUrl,
     })
