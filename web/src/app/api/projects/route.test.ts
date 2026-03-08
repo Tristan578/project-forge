@@ -100,7 +100,7 @@ describe('POST /api/projects', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Project name is required');
+    expect(body.error).toBe('Project name is required and must be a string');
   });
 
   it('should return 400 when sceneData is missing', async () => {
@@ -113,7 +113,7 @@ describe('POST /api/projects', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Scene data is required');
+    expect(body.error).toBe('Scene data is required and must be an object');
   });
 
   it('should create project and return 201', async () => {

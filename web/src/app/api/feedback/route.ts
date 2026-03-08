@@ -4,6 +4,7 @@ import { getUserByClerkId } from '@/lib/auth/user-service';
 import { getDb } from '@/lib/db/client';
 import { feedback } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 
 const VALID_TYPES = ['bug', 'feature', 'general'] as const;
 
@@ -18,37 +19,14 @@ export async function POST(req: NextRequest) {
   const rl = rateLimit(`feedback:${clerkId}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(req);
+  if (!parsed.ok) return parsed.response;
 
-  const { type, description, metadata } = body;
+  const typeResult = requireOneOf(parsed.body.type, 'Type', VALID_TYPES);
+  if (!typeResult.ok) return typeResult.response;
 
-  // Validate type
-  if (!type || !VALID_TYPES.includes(type)) {
-    return NextResponse.json(
-      { error: 'Type must be one of: bug, feature, general' },
-      { status: 400 }
-    );
-  }
-
-  // Validate description
-  if (!description || typeof description !== 'string' || description.trim().length < 10) {
-    return NextResponse.json(
-      { error: 'Description must be at least 10 characters' },
-      { status: 400 }
-    );
-  }
-
-  if (description.length > 5000) {
-    return NextResponse.json(
-      { error: 'Description must be under 5000 characters' },
-      { status: 400 }
-    );
-  }
+  const descResult = requireString(parsed.body.description, 'Description', { minLength: 10, maxLength: 5000 });
+  if (!descResult.ok) return descResult.response;
 
   try {
     const db = getDb();
@@ -57,9 +35,9 @@ export async function POST(req: NextRequest) {
       .insert(feedback)
       .values({
         userId: user?.id ?? null,
-        type,
-        description: description.trim(),
-        metadata: metadata ?? null,
+        type: typeResult.value,
+        description: descResult.value,
+        metadata: (parsed.body.metadata as Record<string, unknown>) ?? null,
       })
       .returning({ id: feedback.id });
 

@@ -80,7 +80,7 @@ describe('POST /api/feedback', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toContain('at least 10 characters');
+    expect(body.error).toContain('at least 10 character');
   });
 
   it('should submit feedback successfully', async () => {
