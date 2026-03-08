@@ -8,8 +8,8 @@ import { creditAddonTokens } from '@/lib/tokens/service';
 import { updateUserStripe } from '@/lib/auth/user-service';
 import type { TokenPackage } from '@/lib/tokens/pricing';
 import {
-  isEventProcessed,
-  markEventProcessed,
+  claimEvent,
+  releaseEvent,
   handleSubscriptionCreated,
   handleSubscriptionUpdated,
   handleSubscriptionDeleted,
@@ -61,21 +61,22 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
   }
 
-  // Idempotency: skip duplicate webhook deliveries
-  if (isEventProcessed(event.id)) {
+  // Idempotency: atomically claim the event so only one concurrent
+  // delivery processes it. If claimEvent returns false, another request
+  // already owns this event ID.
+  if (!claimEvent(event.id)) {
     return NextResponse.json({ received: true, duplicate: true });
   }
 
   try {
     await processEvent(event);
   } catch (err) {
-    // Log but still return 200 to Stripe to prevent infinite retries on
-    // application errors. The error is logged for manual investigation.
+    // Release the claim so Stripe can retry on transient failures.
+    releaseEvent(event.id);
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
   }
 
-  markEventProcessed(event.id);
   return NextResponse.json({ received: true });
 }
 

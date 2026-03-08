@@ -2,6 +2,7 @@
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { captureException } from '@/lib/monitoring/sentry-client';
 
 interface Props {
   children: ReactNode;
@@ -30,6 +31,10 @@ export class InspectorErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    captureException(error, {
+      section: this.props.section,
+      componentStack: errorInfo.componentStack,
+    });
     console.error(`[InspectorErrorBoundary] ${this.props.section} crashed:`, error, errorInfo);
   }
 

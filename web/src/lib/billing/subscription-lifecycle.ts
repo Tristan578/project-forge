@@ -25,17 +25,20 @@ import { updateUserTier } from '@/lib/auth/user-service';
 const processedEvents = new Set<string>();
 
 /**
- * Check if a webhook event has already been processed (idempotency guard).
- * Returns true if the event should be skipped.
+ * Atomically claim a webhook event for processing (idempotency guard).
+ *
+ * Returns true if this caller successfully claimed the event (first time
+ * seen). Returns false if the event was already claimed by a prior
+ * delivery. This is atomic — the check and mark happen in a single
+ * synchronous call, eliminating the TOCTOU race between a separate
+ * `isEventProcessed()` and `markEventProcessed()`.
+ *
+ * On processing failure, call `releaseEvent()` so Stripe retries succeed.
  */
-export function isEventProcessed(eventId: string): boolean {
-  return processedEvents.has(eventId);
-}
-
-/**
- * Mark a webhook event as processed.
- */
-export function markEventProcessed(eventId: string): void {
+export function claimEvent(eventId: string): boolean {
+  if (processedEvents.has(eventId)) {
+    return false;
+  }
   processedEvents.add(eventId);
 
   // Prevent unbounded memory growth -- keep only the most recent 10,000 IDs.
@@ -47,6 +50,16 @@ export function markEventProcessed(eventId: string): void {
       processedEvents.delete(first);
     }
   }
+
+  return true;
+}
+
+/**
+ * Release a previously claimed event so it can be retried.
+ * Call this when processing fails and Stripe should be allowed to redeliver.
+ */
+export function releaseEvent(eventId: string): void {
+  processedEvents.delete(eventId);
 }
 
 /**
