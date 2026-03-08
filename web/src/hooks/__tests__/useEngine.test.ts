@@ -65,4 +65,36 @@ describe('useEngine', () => {
 
     consoleSpy.mockRestore();
   });
+
+  it('getWasmModule returns null when not initialized', async () => {
+    const { getWasmModule } = await import('../useEngine');
+    expect(getWasmModule()).toBeNull();
+  });
+
+  it('resetEngine clears module and promise', async () => {
+    const { resetEngine: reset, getWasmModule: getModule } = await import('../useEngine');
+    reset();
+    expect(getModule()).toBeNull();
+  });
+
+  it('returns wasmModule as null in hook return', () => {
+    const { result } = renderHook(() => useEngine('forge-canvas'));
+    expect(result.current.wasmModule).toBeNull();
+  });
+
+  it('does not re-initialize on re-render', () => {
+    const { rerender } = renderHook(() => useEngine('forge-canvas'));
+    const firstCallCount = (initLog.logInitEvent as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    rerender();
+    // Should not emit additional events on re-render (initializedRef guards)
+    const secondCallCount = (initLog.logInitEvent as ReturnType<typeof vi.fn>).mock.calls.length;
+    expect(secondCallCount).toBe(firstCallCount);
+  });
+
+  it('starts with isReady=false and error=null', () => {
+    const { result } = renderHook(() => useEngine('forge-canvas'));
+    expect(result.current.isReady).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
 });
