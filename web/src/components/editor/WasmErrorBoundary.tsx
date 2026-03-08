@@ -2,6 +2,7 @@
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { captureException } from '@/lib/monitoring/sentry-client';
 
 interface Props {
   children: ReactNode;
@@ -32,7 +33,10 @@ export class WasmErrorBoundary extends Component<Props, State> {
     // Save scene state to localStorage for recovery
     this.autoSaveScene();
 
-    // Log error details (but don't expose raw panic text to user)
+    captureException(error, {
+      boundary: 'WasmErrorBoundary',
+      componentStack: errorInfo.componentStack,
+    });
     console.error('WASM Error Boundary caught error:', error, errorInfo);
 
     this.setState({ errorInfo });

@@ -62,7 +62,7 @@ export async function POST(req: Request) {
   }
 
   // Idempotency: skip duplicate webhook deliveries
-  if (isEventProcessed(event.id)) {
+  if (await isEventProcessed(event.id)) {
     return NextResponse.json({ received: true, duplicate: true });
   }
 
@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
   }
 
-  markEventProcessed(event.id);
+  await markEventProcessed(event.id);
   return NextResponse.json({ received: true });
 }
 

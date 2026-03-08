@@ -14,39 +14,36 @@
 
 import { eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
-import { users, creditTransactions } from '@/lib/db/schema';
+import { users, creditTransactions, processedWebhookEvents } from '@/lib/db/schema';
 import type { Tier } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
 import { updateUserTier } from '@/lib/auth/user-service';
 
-// In-memory set of processed webhook event IDs. In production, this would
-// be a persistent store (Redis / DB table), but for a single-instance
-// deployment this prevents duplicate processing during the process lifetime.
-const processedEvents = new Set<string>();
-
 /**
  * Check if a webhook event has already been processed (idempotency guard).
+ * Uses the database for persistence across serverless function instances.
  * Returns true if the event should be skipped.
  */
-export function isEventProcessed(eventId: string): boolean {
-  return processedEvents.has(eventId);
+export async function isEventProcessed(eventId: string): Promise<boolean> {
+  const db = getDb();
+  const [existing] = await db
+    .select({ eventId: processedWebhookEvents.eventId })
+    .from(processedWebhookEvents)
+    .where(eq(processedWebhookEvents.eventId, eventId))
+    .limit(1);
+  return !!existing;
 }
 
 /**
  * Mark a webhook event as processed.
+ * Uses ON CONFLICT DO NOTHING for safe concurrent invocations.
  */
-export function markEventProcessed(eventId: string): void {
-  processedEvents.add(eventId);
-
-  // Prevent unbounded memory growth -- keep only the most recent 10,000 IDs.
-  // Stripe rarely re-delivers after the initial retry window.
-  if (processedEvents.size > 10_000) {
-    const iterator = processedEvents.values();
-    const first = iterator.next().value;
-    if (first !== undefined) {
-      processedEvents.delete(first);
-    }
-  }
+export async function markEventProcessed(eventId: string): Promise<void> {
+  const db = getDb();
+  await db
+    .insert(processedWebhookEvents)
+    .values({ eventId })
+    .onConflictDoNothing();
 }
 
 /**

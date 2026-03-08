@@ -498,6 +498,13 @@ export const generationJobs = pgTable(
   ]
 );
 
+// --- Webhook Idempotency ---
+
+export const processedWebhookEvents = pgTable('processed_webhook_events', {
+  eventId: text('event_id').primaryKey(),
+  processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 // --- Types ---
 
 export type User = typeof users.$inferSelect;

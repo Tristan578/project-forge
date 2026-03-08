@@ -36,7 +36,7 @@ describe('POST /api/stripe/webhook', () => {
     process.env.STRIPE_PRICE_CREATOR = 'price_creator_mock';
     process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
     
-    vi.mocked(lifecycle.isEventProcessed).mockReturnValue(false);
+    vi.mocked(lifecycle.isEventProcessed).mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -68,7 +68,7 @@ describe('POST /api/stripe/webhook', () => {
 
   it('skips duplicate events (idempotency)', async () => {
     mockConstructEvent.mockReturnValue({ id: 'evt_123', type: 'customer.subscription.created' });
-    vi.mocked(lifecycle.isEventProcessed).mockReturnValue(true);
+    vi.mocked(lifecycle.isEventProcessed).mockResolvedValue(true);
 
     const req = new Request('http://localhost/api/stripe/webhook', { 
       method: 'POST',
