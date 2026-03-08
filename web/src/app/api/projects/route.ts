@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { parseJsonBody, requireString, requireObject } from '@/lib/apiValidation';
 
 /**
  * GET /api/projects
@@ -30,24 +31,17 @@ export async function POST(req: Request) {
   const rl = rateLimit(`projects-create:${authResult.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  let body;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
-  const { name, sceneData } = body;
+  const parsed = await parseJsonBody(req);
+  if (!parsed.ok) return parsed.response;
 
-  if (!name || typeof name !== 'string') {
-    return NextResponse.json({ error: 'Project name is required' }, { status: 400 });
-  }
+  const nameResult = requireString(parsed.body.name, 'Project name', { maxLength: 200 });
+  if (!nameResult.ok) return nameResult.response;
 
-  if (!sceneData) {
-    return NextResponse.json({ error: 'Scene data is required' }, { status: 400 });
-  }
+  const sceneResult = requireObject(parsed.body.sceneData, 'Scene data');
+  if (!sceneResult.ok) return sceneResult.response;
 
   try {
-    const project = await createProject(authResult.ctx.user.id, name, sceneData);
+    const project = await createProject(authResult.ctx.user.id, nameResult.value, sceneResult.value);
     return NextResponse.json({ id: project.id, name: project.name }, { status: 201 });
   } catch (error) {
     const err = error as Error & { limit?: number };
