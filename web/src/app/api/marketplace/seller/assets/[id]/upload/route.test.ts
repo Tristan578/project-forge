@@ -5,12 +5,22 @@ import { getDb } from '@/lib/db/client';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/db/client');
+vi.mock('@/lib/monitoring/sentry-server', () => ({ captureException: vi.fn() }));
 vi.mock('@/lib/db/schema', () => ({
   marketplaceAssets: { id: 'id', sellerId: 'sellerId' },
 }));
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn(),
   and: vi.fn(),
+}));
+
+const mockUploadToR2 = vi.fn();
+vi.mock('@/lib/storage/r2', () => ({
+  uploadToR2: (...args: unknown[]) => mockUploadToR2(...args),
+  buildAssetKey: vi.fn(
+    (sellerId: string, assetId: string, filename: string, type: string) =>
+      `assets/${sellerId}/${assetId}/${type}/${filename}`
+  ),
 }));
 
 describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
@@ -20,7 +30,6 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as never },
     });
-    delete process.env.ASSET_STORAGE_TYPE;
   });
 
   it('should return 401 when not authenticated', async () => {
@@ -47,10 +56,7 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue([]),
     };
-    const mockDb = {
-      select: vi.fn().mockReturnValue(selectChain),
-    };
-    vi.mocked(getDb).mockReturnValue(mockDb as never);
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(selectChain) } as never);
 
     const { POST } = await import('./route');
     const formData = new FormData();
@@ -72,10 +78,7 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'user_1' }]),
     };
-    const mockDb = {
-      select: vi.fn().mockReturnValue(selectChain),
-    };
-    vi.mocked(getDb).mockReturnValue(mockDb as never);
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(selectChain) } as never);
 
     const { POST } = await import('./route');
     const formData = new FormData();
@@ -90,30 +93,89 @@ describe('POST /api/marketplace/seller/assets/[id]/upload', () => {
     expect(body.error).toContain('No files provided');
   });
 
-  it('should return 501 when storage not configured', async () => {
+  it('should return 400 for invalid file types', async () => {
     const selectChain = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockReturnThis(),
       limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'user_1' }]),
     };
-    const mockDb = {
-      select: vi.fn().mockReturnValue(selectChain),
-    };
-    vi.mocked(getDb).mockReturnValue(mockDb as never);
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(selectChain) } as never);
 
     const { POST } = await import('./route');
     const formData = new FormData();
-    formData.append('preview', new File(['data'], 'preview.png', { type: 'image/png' }));
+    formData.append('preview', new File(['data'], 'evil.exe', { type: 'application/x-executable' }));
     const req = new NextRequest('http://localhost:3000/api/marketplace/seller/assets/a1/upload', {
       method: 'POST',
     });
-    // Bypass Node's undici FormData parser which rejects jsdom File objects
     vi.spyOn(req, 'formData').mockResolvedValue(formData);
     const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
     const body = await res.json();
 
-    expect(res.status).toBe(501);
-    expect(body.error).toBe('File storage not configured');
-    expect(body.validated.preview).toBeDefined();
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('Validation failed');
+    expect(body.details[0]).toContain('not allowed');
+  });
+
+  it('should upload to R2 and return CDN URLs', async () => {
+    const selectChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'user_1' }]),
+    };
+    const updateChain = {
+      set: vi.fn().mockReturnValue({
+        where: vi.fn().mockReturnValue({
+          returning: vi.fn().mockResolvedValue([{
+            id: 'a1',
+            previewUrl: 'https://cdn.spawnforge.ai/assets/user_1/a1/preview/thumb.png',
+          }]),
+        }),
+      }),
+    };
+    vi.mocked(getDb).mockReturnValue({
+      select: vi.fn().mockReturnValue(selectChain),
+      update: vi.fn().mockReturnValue(updateChain),
+    } as never);
+
+    mockUploadToR2.mockResolvedValue({
+      url: 'https://cdn.spawnforge.ai/assets/user_1/a1/preview/thumb.png',
+      key: 'assets/user_1/a1/preview/thumb.png',
+    });
+
+    const { POST } = await import('./route');
+    const formData = new FormData();
+    formData.append('preview', new File(['imgdata'], 'thumb.png', { type: 'image/png' }));
+    const req = new NextRequest('http://localhost:3000/api/marketplace/seller/assets/a1/upload', {
+      method: 'POST',
+    });
+    vi.spyOn(req, 'formData').mockResolvedValue(formData);
+    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.uploaded.preview).toContain('cdn.spawnforge.ai');
+    expect(mockUploadToR2).toHaveBeenCalled();
+  });
+
+  it('should return 500 when R2 upload fails', async () => {
+    const selectChain = {
+      from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(),
+      limit: vi.fn().mockResolvedValue([{ id: 'a1', sellerId: 'user_1' }]),
+    };
+    vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(selectChain) } as never);
+
+    mockUploadToR2.mockRejectedValue(new Error('R2 connection failed'));
+
+    const { POST } = await import('./route');
+    const formData = new FormData();
+    formData.append('preview', new File(['imgdata'], 'thumb.png', { type: 'image/png' }));
+    const req = new NextRequest('http://localhost:3000/api/marketplace/seller/assets/a1/upload', {
+      method: 'POST',
+    });
+    vi.spyOn(req, 'formData').mockResolvedValue(formData);
+    const res = await POST(req, { params: Promise.resolve({ id: 'a1' }) });
+
+    expect(res.status).toBe(500);
   });
 });
