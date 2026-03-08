@@ -35,8 +35,8 @@ describe('POST /api/stripe/webhook', () => {
     process.env.STRIPE_PRICE_STARTER = 'price_starter_mock';
     process.env.STRIPE_PRICE_CREATOR = 'price_creator_mock';
     process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
-    
-    vi.mocked(lifecycle.isEventProcessed).mockResolvedValue(false);
+
+    vi.mocked(lifecycle.claimEvent).mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -58,7 +58,7 @@ describe('POST /api/stripe/webhook', () => {
 
   it('returns 400 if signature is invalid', async () => {
     mockConstructEvent.mockImplementation(() => { throw new Error('Invalid sig'); });
-    const req = new Request('http://localhost/api/stripe/webhook', { 
+    const req = new Request('http://localhost/api/stripe/webhook', {
       method: 'POST',
       headers: { 'stripe-signature': 'invalid_sig' }
     });
@@ -68,9 +68,9 @@ describe('POST /api/stripe/webhook', () => {
 
   it('skips duplicate events (idempotency)', async () => {
     mockConstructEvent.mockReturnValue({ id: 'evt_123', type: 'customer.subscription.created' });
-    vi.mocked(lifecycle.isEventProcessed).mockResolvedValue(true);
+    vi.mocked(lifecycle.claimEvent).mockReturnValue(false);
 
-    const req = new Request('http://localhost/api/stripe/webhook', { 
+    const req = new Request('http://localhost/api/stripe/webhook', {
       method: 'POST',
       headers: { 'stripe-signature': 'valid_sig' }
     });
@@ -95,7 +95,7 @@ describe('POST /api/stripe/webhook', () => {
       },
     });
 
-    const req = new Request('http://localhost/api/stripe/webhook', { 
+    const req = new Request('http://localhost/api/stripe/webhook', {
       method: 'POST',
       headers: { 'stripe-signature': 'valid_sig' },
       body: 'body',
@@ -104,7 +104,7 @@ describe('POST /api/stripe/webhook', () => {
 
     expect(res.status).toBe(200);
     expect(lifecycle.handleSubscriptionCreated).toHaveBeenCalledWith('cus_123', 'sub_123', 'creator');
-    expect(lifecycle.markEventProcessed).toHaveBeenCalledWith('evt_create');
+    expect(lifecycle.claimEvent).toHaveBeenCalledWith('evt_create');
   });
 
   it('processes customer.subscription.updated', async () => {
@@ -121,7 +121,7 @@ describe('POST /api/stripe/webhook', () => {
       },
     });
 
-    const req = new Request('http://localhost/api/stripe/webhook', { 
+    const req = new Request('http://localhost/api/stripe/webhook', {
       method: 'POST',
       headers: { 'stripe-signature': 'valid_sig' },
       body: 'body',
@@ -132,7 +132,7 @@ describe('POST /api/stripe/webhook', () => {
     expect(lifecycle.handleSubscriptionUpdated).toHaveBeenCalledWith('cus_123', 'sub_123', 'pro', 'active');
   });
 
-  it('catches and logs errors but still returns 200', async () => {
+  it('releases claim and logs errors on processing failure', async () => {
     mockConstructEvent.mockReturnValue({
       id: 'evt_err',
       type: 'customer.subscription.created',
@@ -143,7 +143,7 @@ describe('POST /api/stripe/webhook', () => {
 
     vi.mocked(lifecycle.handleSubscriptionCreated).mockRejectedValue(new Error('DB Error'));
 
-    const req = new Request('http://localhost/api/stripe/webhook', { 
+    const req = new Request('http://localhost/api/stripe/webhook', {
       method: 'POST',
       headers: { 'stripe-signature': 'valid_sig' },
       body: 'body',
@@ -152,5 +152,7 @@ describe('POST /api/stripe/webhook', () => {
 
     expect(res.status).toBe(200); // Stripe needs 2xx
     expect(captureException).toHaveBeenCalled();
+    // The claim should be released so Stripe can retry
+    expect(lifecycle.releaseEvent).toHaveBeenCalledWith('evt_err');
   });
 });

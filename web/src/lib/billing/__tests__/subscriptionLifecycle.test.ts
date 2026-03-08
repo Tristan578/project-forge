@@ -1,79 +1,61 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// Mock the DB before importing the module
-const mockSelect = vi.fn();
-const mockFrom = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
-const mockInsert = vi.fn();
-const mockValues = vi.fn();
-const mockOnConflictDoNothing = vi.fn();
-
-vi.mock('@/lib/db/client', () => ({
-  getDb: vi.fn(() => ({
-    select: mockSelect,
-    insert: mockInsert,
-    update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn() }) }),
-  })),
-}));
-
-vi.mock('@/lib/db/schema', () => ({
-  users: {},
-  creditTransactions: {},
-  processedWebhookEvents: { eventId: 'event_id' },
-}));
-
-vi.mock('@/lib/tokens/pricing', () => ({
-  TIER_MONTHLY_TOKENS: { starter: 100, hobbyist: 500, creator: 2000, pro: 10000 },
-}));
-
-vi.mock('@/lib/auth/user-service', () => ({
-  updateUserTier: vi.fn(),
-}));
+// These are the only pure (non-DB) functions in subscription-lifecycle
+let claimEvent: typeof import('../subscription-lifecycle').claimEvent;
+let releaseEvent: typeof import('../subscription-lifecycle').releaseEvent;
 
 describe('subscription-lifecycle idempotency', () => {
-  let isEventProcessed: typeof import('../subscription-lifecycle').isEventProcessed;
-  let markEventProcessed: typeof import('../subscription-lifecycle').markEventProcessed;
-
   beforeEach(async () => {
-    vi.clearAllMocks();
+    // Reset module state to get a fresh processedEvents Set
     vi.resetModules();
-
-    // Chain: select() -> from() -> where() -> limit() -> result
-    mockSelect.mockReturnValue({ from: mockFrom });
-    mockFrom.mockReturnValue({ where: mockWhere });
-    mockWhere.mockReturnValue({ limit: mockLimit });
-
-    // Chain: insert() -> values() -> onConflictDoNothing()
-    mockInsert.mockReturnValue({ values: mockValues });
-    mockValues.mockReturnValue({ onConflictDoNothing: mockOnConflictDoNothing });
-
     const mod = await import('../subscription-lifecycle');
-    isEventProcessed = mod.isEventProcessed;
-    markEventProcessed = mod.markEventProcessed;
+    claimEvent = mod.claimEvent;
+    releaseEvent = mod.releaseEvent;
   });
 
-  it('should return false for unprocessed events', async () => {
-    mockLimit.mockResolvedValue([]);
-    expect(await isEventProcessed('evt_123')).toBe(false);
+  it('should claim an unprocessed event and return true', () => {
+    expect(claimEvent('evt_123')).toBe(true);
   });
 
-  it('should return true for already-processed events', async () => {
-    mockLimit.mockResolvedValue([{ eventId: 'evt_456' }]);
-    expect(await isEventProcessed('evt_456')).toBe(true);
+  it('should reject a duplicate claim (already processed)', () => {
+    claimEvent('evt_456');
+    expect(claimEvent('evt_456')).toBe(false);
   });
 
-  it('should insert into DB when marking an event', async () => {
-    mockOnConflictDoNothing.mockResolvedValue(undefined);
-    await markEventProcessed('evt_789');
-    expect(mockValues).toHaveBeenCalledWith({ eventId: 'evt_789' });
-    expect(mockOnConflictDoNothing).toHaveBeenCalled();
+  it('should handle multiple events independently', () => {
+    expect(claimEvent('evt_a')).toBe(true);
+    expect(claimEvent('evt_b')).toBe(true);
+    // Already claimed
+    expect(claimEvent('evt_a')).toBe(false);
+    expect(claimEvent('evt_b')).toBe(false);
+    // New event still claimable
+    expect(claimEvent('evt_c')).toBe(true);
   });
 
-  it('should be safe to mark the same event twice (ON CONFLICT DO NOTHING)', async () => {
-    mockOnConflictDoNothing.mockResolvedValue(undefined);
-    await markEventProcessed('evt_same');
-    await markEventProcessed('evt_same');
-    expect(mockOnConflictDoNothing).toHaveBeenCalledTimes(2);
+  it('should be idempotent (claiming twice returns false on second attempt)', () => {
+    expect(claimEvent('evt_same')).toBe(true);
+    expect(claimEvent('evt_same')).toBe(false);
+  });
+
+  it('should allow reclaiming after releaseEvent', () => {
+    expect(claimEvent('evt_retry')).toBe(true);
+    releaseEvent('evt_retry');
+    expect(claimEvent('evt_retry')).toBe(true);
+  });
+
+  it('releaseEvent is safe to call on unclaimed events', () => {
+    // Should not throw
+    releaseEvent('evt_never_claimed');
+  });
+
+  it('should evict oldest event when exceeding 10,000 limit', () => {
+    // Claim 10,001 events — the first should be evicted
+    for (let i = 0; i <= 10_000; i++) {
+      claimEvent(`evt_${i}`);
+    }
+    // The very first event should have been evicted, so it's claimable again
+    expect(claimEvent('evt_0')).toBe(true);
+    // The most recent should still be claimed
+    expect(claimEvent('evt_10000')).toBe(false);
   });
 });
