@@ -62,13 +62,14 @@ describe('R2 storage client', () => {
       expect(result.key).toBe('test/key.png');
     });
 
-    it('returns key-only URL when CDN_URL is not set', async () => {
+    it('throws when CDN_URL is not set', async () => {
       delete process.env.CDN_URL;
       mockSend.mockResolvedValue({});
       const { uploadToR2 } = await import('../r2');
 
-      const result = await uploadToR2('test/key.png', Buffer.from('data'), 'image/png');
-      expect(result.url).toBe('test/key.png');
+      await expect(uploadToR2('test/key.png', Buffer.from('data'), 'image/png')).rejects.toThrow(
+        'CDN_URL not configured'
+      );
     });
   });
 
@@ -90,11 +91,30 @@ describe('R2 storage client', () => {
       expect(await existsInR2('test/key.png')).toBe(true);
     });
 
-    it('returns false when object does not exist', async () => {
-      mockSend.mockRejectedValue(new Error('NotFound'));
+    it('returns false when object does not exist (NotFound by name)', async () => {
+      const notFoundError = new Error('NotFound');
+      notFoundError.name = 'NotFound';
+      mockSend.mockRejectedValue(notFoundError);
       const { existsInR2 } = await import('../r2');
 
       expect(await existsInR2('missing/key.png')).toBe(false);
+    });
+
+    it('returns false when object does not exist (404 metadata)', async () => {
+      const notFoundError = Object.assign(new Error('not found'), {
+        $metadata: { httpStatusCode: 404 },
+      });
+      mockSend.mockRejectedValue(notFoundError);
+      const { existsInR2 } = await import('../r2');
+
+      expect(await existsInR2('missing/key.png')).toBe(false);
+    });
+
+    it('rethrows non-NotFound errors', async () => {
+      mockSend.mockRejectedValue(new Error('NetworkFailure'));
+      const { existsInR2 } = await import('../r2');
+
+      await expect(existsInR2('test/key.png')).rejects.toThrow('NetworkFailure');
     });
   });
 

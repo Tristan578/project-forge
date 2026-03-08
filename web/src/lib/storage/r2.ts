@@ -44,6 +44,7 @@ function getCdnUrl(): string {
 /**
  * Upload a file buffer to R2.
  * Returns the public CDN URL and the storage key.
+ * Throws if CDN_URL is not configured, since callers treat the URL as absolute.
  */
 export async function uploadToR2(
   key: string,
@@ -63,7 +64,12 @@ export async function uploadToR2(
   );
 
   const cdn = getCdnUrl();
-  const url = cdn ? `https://${cdn}/${key}` : key;
+  if (!cdn) {
+    throw new Error(
+      'CDN_URL not configured. Cannot produce a valid asset URL without it.'
+    );
+  }
+  const url = `https://${cdn}/${key}`;
 
   return { url, key };
 }
@@ -85,6 +91,7 @@ export async function deleteFromR2(key: string): Promise<void> {
 
 /**
  * Check if a file exists in R2.
+ * Returns false only for NotFound errors; rethrows all other errors.
  */
 export async function existsInR2(key: string): Promise<boolean> {
   const r2 = getR2Client();
@@ -93,8 +100,13 @@ export async function existsInR2(key: string): Promise<boolean> {
   try {
     await r2.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
     return true;
-  } catch {
-    return false;
+  } catch (error: unknown) {
+    const isNotFound =
+      (error instanceof Error && error.name === 'NotFound') ||
+      (typeof error === 'object' && error !== null && '$metadata' in error &&
+        (error as { $metadata: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404);
+    if (isNotFound) return false;
+    throw error;
   }
 }
 
@@ -118,7 +130,7 @@ export async function getSignedDownloadUrl(
 
 /**
  * Build a deterministic storage key for marketplace assets.
- * Format: assets/{sellerId}/{assetId}/{filename}
+ * Format: assets/{sellerId}/{assetId}/{type}/{filename}
  */
 export function buildAssetKey(
   sellerId: string,

@@ -83,6 +83,11 @@ export async function POST(
       updatedAt?: Date;
     } = { updatedAt: new Date() };
 
+    // NOTE: Files are buffered entirely in memory before upload. For large assets (up to 100 MB),
+    // this may cause memory pressure. Streaming uploads would be preferable but require S3's
+    // multipart upload API or a presigned-URL flow, which adds significant complexity.
+    // Acceptable for MVP; revisit if memory issues arise in production.
+
     if (previewFile) {
       const buffer = Buffer.from(await previewFile.arrayBuffer());
       const key = buildAssetKey(user.id, assetId, previewFile.name, 'preview');
@@ -97,6 +102,10 @@ export async function POST(
       updates.assetFileUrl = url;
       updates.assetFileSize = assetFile.size;
     }
+
+    // NOTE: If the DB update below fails after R2 upload succeeds, the uploaded objects become
+    // orphaned. A cleanup job or reconciliation step could address this, but the added complexity
+    // is not warranted for MVP.
 
     const [updated] = await db
       .update(marketplaceAssets)

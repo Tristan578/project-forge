@@ -62,13 +62,23 @@ export async function GET(
       return NextResponse.json({ error: 'No file available' }, { status: 404 });
     }
 
-    // If the URL is a CDN URL, generate a signed download URL from R2
+    // If the URL is a CDN URL, generate a signed download URL from R2.
+    // Compare parsed hostnames explicitly to avoid substring false positives
+    // (e.g. "evil-cdn.spawnforge.ai" matching "cdn.spawnforge.ai").
     const cdnHost = process.env.CDN_URL;
-    if (cdnHost && asset.assetFileUrl.includes(cdnHost)) {
-      const storageKey = extractStorageKey(asset.assetFileUrl);
-      if (storageKey) {
-        const signedUrl = await getSignedDownloadUrl(storageKey);
-        return NextResponse.json({ downloadUrl: signedUrl });
+    if (cdnHost) {
+      try {
+        const assetHostname = new URL(asset.assetFileUrl).hostname;
+        const cdnHostname = cdnHost.includes('://') ? new URL(cdnHost).hostname : cdnHost;
+        if (assetHostname === cdnHostname) {
+          const storageKey = extractStorageKey(asset.assetFileUrl);
+          if (storageKey) {
+            const signedUrl = await getSignedDownloadUrl(storageKey);
+            return NextResponse.redirect(signedUrl);
+          }
+        }
+      } catch {
+        // assetFileUrl is not a valid URL — fall through to validation below
       }
     }
 
