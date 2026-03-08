@@ -54,6 +54,13 @@ export async function uploadToR2(
   const r2 = getR2Client();
   const bucket = getBucket();
 
+  const cdn = getCdnUrl();
+  if (!cdn) {
+    throw new Error(
+      'CDN_URL not configured. Cannot produce a valid asset URL without it.'
+    );
+  }
+
   await r2.send(
     new PutObjectCommand({
       Bucket: bucket,
@@ -63,12 +70,6 @@ export async function uploadToR2(
     })
   );
 
-  const cdn = getCdnUrl();
-  if (!cdn) {
-    throw new Error(
-      'CDN_URL not configured. Cannot produce a valid asset URL without it.'
-    );
-  }
   const url = `https://${cdn}/${key}`;
 
   return { url, key };

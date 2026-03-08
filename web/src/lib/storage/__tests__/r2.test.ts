@@ -62,7 +62,7 @@ describe('R2 storage client', () => {
       expect(result.key).toBe('test/key.png');
     });
 
-    it('throws when CDN_URL is not set', async () => {
+    it('throws when CDN_URL is not set (before uploading)', async () => {
       delete process.env.CDN_URL;
       mockSend.mockResolvedValue({});
       const { uploadToR2 } = await import('../r2');
@@ -70,6 +70,8 @@ describe('R2 storage client', () => {
       await expect(uploadToR2('test/key.png', Buffer.from('data'), 'image/png')).rejects.toThrow(
         'CDN_URL not configured'
       );
+      // Should fail fast — no upload attempt when CDN_URL is missing
+      expect(mockSend).not.toHaveBeenCalled();
     });
   });
 
