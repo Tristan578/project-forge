@@ -3,6 +3,24 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets, assetPurchases } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { getSignedDownloadUrl } from '@/lib/storage/r2';
+import { captureException } from '@/lib/monitoring/sentry-server';
+
+/**
+ * Extract the R2 storage key from a CDN URL.
+ * e.g. "https://cdn.spawnforge.ai/assets/seller/asset/file/model.glb"
+ *   -> "assets/seller/asset/file/model.glb"
+ */
+function extractStorageKey(cdnUrl: string): string | null {
+  try {
+    const url = new URL(cdnUrl);
+    // Strip leading slash from pathname
+    const key = url.pathname.replace(/^\//, '');
+    return key || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function GET(
   _req: NextRequest,
@@ -17,7 +35,6 @@ export async function GET(
 
     const db = getDb();
 
-    // Get asset
     const [asset] = await db
       .select()
       .from(marketplaceAssets)
@@ -45,18 +62,34 @@ export async function GET(
       return NextResponse.json({ error: 'No file available' }, { status: 404 });
     }
 
-    // Validate URL against allowed domains to prevent open redirect
+    // If the URL is a CDN URL, generate a signed download URL from R2.
+    // Compare parsed hostnames explicitly to avoid substring false positives
+    // (e.g. "evil-cdn.spawnforge.ai" matching "cdn.spawnforge.ai").
+    const cdnHost = process.env.CDN_URL;
+    if (cdnHost) {
+      try {
+        const assetHostname = new URL(asset.assetFileUrl).hostname;
+        const cdnHostname = cdnHost.includes('://') ? new URL(cdnHost).hostname : cdnHost;
+        if (assetHostname === cdnHostname) {
+          const storageKey = extractStorageKey(asset.assetFileUrl);
+          if (storageKey) {
+            const signedUrl = await getSignedDownloadUrl(storageKey);
+            return NextResponse.redirect(signedUrl);
+          }
+        }
+      } catch {
+        // assetFileUrl is not a valid URL — fall through to validation below
+      }
+    }
+
+    // Fallback: validate URL against allowed domains to prevent open redirect
     const allowedHosts = (process.env.ASSET_CDN_HOSTS || 'localhost').split(',').map(h => h.trim());
     try {
       const fileUrl = new URL(asset.assetFileUrl);
       const localhostNames = ['localhost', '127.0.0.1', '::1'];
-      // Only allow https (or http for localhost/loopback dev)
       if (fileUrl.protocol !== 'https:' && !localhostNames.includes(fileUrl.hostname)) {
-        console.error(`Blocked redirect to non-HTTPS URL: ${fileUrl.protocol}`);
         return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
       }
-      // Check each allowed host by exact hostname or exact subdomain label match
-      // to avoid incomplete substring sanitization (e.g. evil-cdn.com matching cdn.com)
       const hostLabels = fileUrl.hostname.split('.');
       const isAllowed = allowedHosts.some(host => {
         if (fileUrl.hostname === host) return true;
@@ -67,7 +100,6 @@ export async function GET(
         );
       });
       if (!isAllowed) {
-        console.error(`Blocked redirect to disallowed host: ${fileUrl.hostname}`);
         return NextResponse.json({ error: 'Invalid file URL' }, { status: 400 });
       }
     } catch {
@@ -76,6 +108,7 @@ export async function GET(
 
     return NextResponse.redirect(asset.assetFileUrl);
   } catch (error) {
+    captureException(error, { route: '/api/marketplace/assets/[id]/download', assetId });
     console.error('Error downloading asset:', error);
     return NextResponse.json({ error: 'Failed to download asset' }, { status: 500 });
   }

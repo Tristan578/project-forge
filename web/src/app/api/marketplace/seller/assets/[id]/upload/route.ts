@@ -3,6 +3,8 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { uploadToR2, buildAssetKey } from '@/lib/storage/r2';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const ALLOWED_PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_ASSET_TYPES = [
@@ -17,8 +19,7 @@ const MAX_ASSET_SIZE = 100 * 1024 * 1024; // 100 MB
  * POST /api/marketplace/seller/assets/[id]/upload
  *
  * Accepts multipart/form-data with `preview` and/or `asset` file fields.
- * Currently validates files and returns 501 — actual cloud storage upload
- * requires ASSET_STORAGE_TYPE and storage credentials to be configured.
+ * Uploads to Cloudflare R2 and updates the asset record with CDN URLs.
  */
 export async function POST(
   req: NextRequest,
@@ -75,25 +76,53 @@ export async function POST(
       return NextResponse.json({ error: 'Validation failed', details: errors }, { status: 400 });
     }
 
-    // Check if cloud storage is configured
-    const storageType = process.env.ASSET_STORAGE_TYPE;
-    if (!storageType) {
-      return NextResponse.json(
-        {
-          error: 'File storage not configured',
-          message: 'Cloud object storage (R2/S3) is not yet configured. Set ASSET_STORAGE_TYPE and storage credentials in environment variables.',
-          validated: {
-            preview: previewFile ? { name: previewFile.name, type: previewFile.type, size: previewFile.size } : null,
-            asset: assetFile ? { name: assetFile.name, type: assetFile.type, size: assetFile.size } : null,
-          },
-        },
-        { status: 501 }
-      );
+    const updates: {
+      previewUrl?: string;
+      assetFileUrl?: string;
+      assetFileSize?: number;
+      updatedAt?: Date;
+    } = { updatedAt: new Date() };
+
+    // NOTE: Files are buffered entirely in memory before upload. For large assets (up to 100 MB),
+    // this may cause memory pressure. Streaming uploads would be preferable but require S3's
+    // multipart upload API or a presigned-URL flow, which adds significant complexity.
+    // Acceptable for MVP; revisit if memory issues arise in production.
+
+    if (previewFile) {
+      const buffer = Buffer.from(await previewFile.arrayBuffer());
+      const key = buildAssetKey(user.id, assetId, previewFile.name, 'preview');
+      const { url } = await uploadToR2(key, buffer, previewFile.type);
+      updates.previewUrl = url;
     }
 
-    // Future: Upload to R2/S3 and update DB with URLs
-    return NextResponse.json({ error: 'Storage integration not yet implemented' }, { status: 501 });
+    if (assetFile) {
+      const buffer = Buffer.from(await assetFile.arrayBuffer());
+      const key = buildAssetKey(user.id, assetId, assetFile.name, 'file');
+      const { url } = await uploadToR2(key, buffer, assetFile.type);
+      updates.assetFileUrl = url;
+      updates.assetFileSize = assetFile.size;
+    }
+
+    // NOTE: If the DB update below fails after R2 upload succeeds, the uploaded objects become
+    // orphaned. A cleanup job or reconciliation step could address this, but the added complexity
+    // is not warranted for MVP.
+
+    const [updated] = await db
+      .update(marketplaceAssets)
+      .set(updates)
+      .where(eq(marketplaceAssets.id, assetId))
+      .returning();
+
+    return NextResponse.json({
+      uploaded: {
+        preview: updates.previewUrl ?? null,
+        asset: updates.assetFileUrl ?? null,
+        assetFileSize: updates.assetFileSize ?? null,
+      },
+      asset: updated,
+    });
   } catch (error) {
+    captureException(error, { route: '/api/marketplace/seller/assets/[id]/upload', assetId });
     console.error('Error uploading asset files:', error);
     return NextResponse.json({ error: 'Failed to upload files' }, { status: 500 });
   }

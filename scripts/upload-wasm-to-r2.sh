@@ -12,12 +12,19 @@
 # Usage:
 #   ./scripts/upload-wasm-to-r2.sh              # Upload all 4 variants
 #   ./scripts/upload-wasm-to-r2.sh webgl2       # Upload only webgl2 editor variant
+#
+# Environment:
+#   WASM_SOURCE_DIR  — Override source dir (default: web/public)
+#   ENGINE_VERSION   — Version tag for uploads (default: "latest")
+#                      In CI this is set to the short git SHA for cache-busting.
+#                      Files upload to both /<variant>/ (latest) and /v/<version>/<variant>/
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-PUBLIC_DIR="$PROJECT_ROOT/web/public"
+SOURCE_DIR="${WASM_SOURCE_DIR:-$PROJECT_ROOT/web/public}"
+ENGINE_VERSION="${ENGINE_VERSION:-latest}"
 
 # Validate environment
 : "${R2_ACCOUNT_ID:?Set R2_ACCOUNT_ID}"
@@ -43,35 +50,43 @@ if [[ ${1:-} ]]; then
   VARIANTS=("engine-pkg-$1")
 fi
 
+upload_file() {
+  local src="$1" dest="$2" content_type="$3"
+  aws s3 cp "$src" "s3://$R2_BUCKET/$dest" \
+    --endpoint-url "$R2_ENDPOINT" \
+    --content-type "$content_type" \
+    --cache-control "public, max-age=31536000, immutable" \
+    --no-cli-pager
+}
+
 uploaded=0
 
 for variant in "${VARIANTS[@]}"; do
-  dir="$PUBLIC_DIR/$variant"
+  dir="$SOURCE_DIR/$variant"
   if [[ ! -d "$dir" ]]; then
-    echo "⚠ Skipping $variant (directory not found: $dir)"
+    echo "Skipping $variant (directory not found: $dir)"
     continue
   fi
 
-  echo "Uploading $variant..."
+  echo "Uploading $variant (version: $ENGINE_VERSION)..."
 
-  # Upload .js with correct content type
-  aws s3 cp "$dir/forge_engine.js" "s3://$R2_BUCKET/$variant/forge_engine.js" \
-    --endpoint-url "$R2_ENDPOINT" \
-    --content-type "application/javascript" \
-    --cache-control "public, max-age=31536000, immutable" \
-    --no-cli-pager
+  # Upload to latest path (what NEXT_PUBLIC_ENGINE_CDN_URL points to)
+  upload_file "$dir/forge_engine.js"      "$variant/forge_engine.js"      "application/javascript"
+  upload_file "$dir/forge_engine_bg.wasm" "$variant/forge_engine_bg.wasm" "application/wasm"
 
-  # Upload .wasm with correct content type
-  aws s3 cp "$dir/forge_engine_bg.wasm" "s3://$R2_BUCKET/$variant/forge_engine_bg.wasm" \
-    --endpoint-url "$R2_ENDPOINT" \
-    --content-type "application/wasm" \
-    --cache-control "public, max-age=31536000, immutable" \
-    --no-cli-pager
+  # Also upload to versioned path for rollback capability
+  if [[ "$ENGINE_VERSION" != "latest" ]]; then
+    upload_file "$dir/forge_engine.js"      "v/$ENGINE_VERSION/$variant/forge_engine.js"      "application/javascript"
+    upload_file "$dir/forge_engine_bg.wasm" "v/$ENGINE_VERSION/$variant/forge_engine_bg.wasm" "application/wasm"
+  fi
 
-  echo "  ✓ $variant uploaded"
+  echo "  Done: $variant"
   uploaded=$((uploaded + 1))
 done
 
 echo ""
-echo "Done — $uploaded variant(s) uploaded to s3://$R2_BUCKET"
+echo "Uploaded $uploaded variant(s) to s3://$R2_BUCKET"
+if [[ "$ENGINE_VERSION" != "latest" ]]; then
+  echo "Versioned path: v/$ENGINE_VERSION/"
+fi
 echo "Set NEXT_PUBLIC_ENGINE_CDN_URL to your R2 public domain in Vercel."
