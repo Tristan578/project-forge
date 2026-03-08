@@ -158,6 +158,8 @@ export function useGenerationPolling() {
         return '/api/generate/sprite-sheet/status';
       case 'tileset':
         return '/api/generate/tileset-gen/status';
+      case 'pixel-art':
+        return '/api/generate/pixel-art/status';
       default:
         throw new Error(`Unknown generation type: ${type}`);
     }
@@ -269,6 +271,25 @@ export function useGenerationPolling() {
         const base64 = await blobToBase64(blob);
 
         useEditorStore.getState().importAudio(base64, `Music_${job.prompt.slice(0, 20)}`);
+
+        updateJob(id, {
+          status: 'completed',
+          resultUrl: data.resultUrl,
+          metadata: { ...job.metadata, ...ppResult.metadata },
+        });
+      } else if (type === 'pixel-art') {
+        // Download pixel art result image and store as asset
+        if (!data.resultUrl) throw new Error('No result URL');
+
+        const blob = await downloadBinary(data.resultUrl);
+        const base64 = await blobToBase64(blob);
+
+        const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
+        const entityId = job.entityId;
+
+        if (entityId) {
+          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
+        }
 
         updateJob(id, {
           status: 'completed',
