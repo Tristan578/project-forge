@@ -50,8 +50,9 @@ engine/pkg-webgpu/
 engine/pkg-webgl2-runtime/
 engine/pkg-webgpu-runtime/
 
-# ----- WASM Build Artifacts -----
-web/public/engine-pkg/
+# ----- WASM Build Artifacts (intermediate) -----
+# WASM engine binaries are hosted on CDN (Cloudflare R2), not committed to git.
+# Set NEXT_PUBLIC_ENGINE_CDN_URL in production to point to the CDN origin.
 web/public/engine-pkg-webgl2/
 web/public/engine-pkg-webgpu/
 web/public/engine-pkg-webgl2-runtime/

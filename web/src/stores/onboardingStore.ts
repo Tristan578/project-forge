@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-interface OnboardingState {
+export interface OnboardingState {
   // Tutorial state
   activeTutorial: string | null;
   tutorialStep: number;

@@ -73,6 +73,14 @@ pub struct RuntimeEntity;
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EditorSystemSet;
 
+/// Editor sub-set for systems that mutate ECS components (runs first).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EditorApplySet;
+
+/// Editor sub-set for read-only emit/sync systems (runs after EditorApplySet).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EditorEmitSet;
+
 /// Systems that should only run during Play (not Paused, not Edit).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlaySystemSet;

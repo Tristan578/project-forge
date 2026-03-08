@@ -23,6 +23,25 @@ function detectWebGPU(): boolean {
   return typeof navigator !== 'undefined' && 'gpu' in navigator;
 }
 
+/**
+ * Base URL for WASM engine files. When NEXT_PUBLIC_ENGINE_CDN_URL is set
+ * (e.g. "https://cdn.spawnforge.ai"), files are loaded from the CDN.
+ * Otherwise falls back to same-origin paths (local dev / self-hosted).
+ */
+const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
+
+async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string): Promise<WasmModule> {
+  const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
+  await wasm.default(`${basePath}${wasmFile}`);
+  const mod = wasm as unknown as WasmModule;
+  if (mod.set_init_callback) {
+    mod.set_init_callback((phase: string, message?: string, error?: string) => {
+      emitEvent(phase as InitPhase, message, error);
+    });
+  }
+  return mod;
+}
+
 async function loadWasm(): Promise<WasmModule> {
   // Skip WASM loading when engine is explicitly disabled (CI E2E @ui tests)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -38,29 +57,13 @@ async function loadWasm(): Promise<WasmModule> {
 
     emitEvent('wasm_loading', `Fetching WASM module (${backend})...`);
 
-    // Choose pkg directory based on detected backend
-    const basePath = `/engine-pkg-${backend}/`;
+    const basePath = `${ENGINE_CDN_BASE}/engine-pkg-${backend}/`;
     const jsFile = 'forge_engine.js';
     const wasmFile = 'forge_engine_bg.wasm';
 
     try {
-      // Dynamic import with bundler bypass
-      const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
-
+      wasmModule = await loadWasmFromPath(basePath, jsFile, wasmFile);
       emitEvent('wasm_loaded', `WASM JS module loaded (${backend}), initializing...`);
-
-      // Initialize with explicit WASM path (don't rely on import.meta.url)
-      await wasm.default(`${basePath}${wasmFile}`);
-
-      wasmModule = wasm as unknown as WasmModule;
-
-      // Register callback for Rust-side events
-      if (wasmModule.set_init_callback) {
-        wasmModule.set_init_callback((phase: string, message?: string, error?: string) => {
-          emitEvent(phase as InitPhase, message, error);
-        });
-      }
-
       return wasmModule;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -68,16 +71,9 @@ async function loadWasm(): Promise<WasmModule> {
       // If WebGPU failed, try falling back to WebGL2
       if (useWebGPU) {
         emitEvent('wasm_loading', 'WebGPU load failed, falling back to WebGL2...');
-        const fallbackPath = '/engine-pkg-webgl2/';
+        const fallbackPath = `${ENGINE_CDN_BASE}/engine-pkg-webgl2/`;
         try {
-          const fallbackWasm = await import(/* webpackIgnore: true */ `${fallbackPath}${jsFile}`);
-          await fallbackWasm.default(`${fallbackPath}${wasmFile}`);
-          wasmModule = fallbackWasm as unknown as WasmModule;
-          if (wasmModule.set_init_callback) {
-            wasmModule.set_init_callback((phase: string, message?: string, error?: string) => {
-              emitEvent(phase as InitPhase, message, error);
-            });
-          }
+          wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile);
           return wasmModule;
         } catch (fallbackErr) {
           const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
