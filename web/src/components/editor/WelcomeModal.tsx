@@ -33,7 +33,10 @@ export function WelcomeModal() {
   // stored XSS via malicious project records in localStorage (CodeQL js/xss-through-dom).
   const [recentProjects] = useState(() =>
     getRecentProjects()
-      .filter((p) => /^[\w-]+$/.test(p.id))
+      .filter((p) => {
+        const id = p.id;
+        return typeof id === 'string' && id.length > 0 && /^[\w-]+$/.test(id);
+      })
       .slice(0, 5),
   );
 

@@ -16,7 +16,7 @@ describe('POST /api/sentry', () => {
 
   beforeEach(() => {
     vi.stubEnv('SENTRY_DSN', VALID_DSN);
-    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({ status: 200, body: null } as Response);
+    fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue(new Response(null, { status: 200 }));
   });
 
   afterEach(() => {

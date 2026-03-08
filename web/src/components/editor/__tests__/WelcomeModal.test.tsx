@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { WelcomeModal } from '../WelcomeModal';
-import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useOnboardingStore } from '@/stores/onboardingStore';
+import { useWorkspaceStore, type WorkspaceState } from '@/stores/workspaceStore';
+import { useOnboardingStore, type OnboardingState } from '@/stores/onboardingStore';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
 
 vi.mock('@/stores/workspaceStore', () => ({
@@ -25,12 +25,10 @@ describe('WelcomeModal', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.clearAllMocks();
-    vi.mocked(useWorkspaceStore).mockImplementation((selector: any) =>
-      selector({ navigateDocs: vi.fn() }),
-    );
-    vi.mocked(useOnboardingStore).mockImplementation((selector: any) =>
-      selector({ startTutorial: vi.fn() }),
-    );
+    const workspaceState = { navigateDocs: vi.fn() } as unknown as WorkspaceState;
+    const onboardingState = { startTutorial: vi.fn() } as unknown as OnboardingState;
+    vi.mocked(useWorkspaceStore).mockImplementation((selector) => selector(workspaceState));
+    vi.mocked(useOnboardingStore).mockImplementation((selector) => selector(onboardingState));
   });
 
   afterEach(() => {
