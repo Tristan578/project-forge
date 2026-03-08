@@ -71,17 +71,9 @@ jobs:
       - run: npm ci
         working-directory: web
 
-      - name: Run tests with coverage
+      - name: Run tests
         working-directory: web
-        run: npx vitest run --coverage --coverage.reporter=text --coverage.reporter=json-summary --coverage.reporter=json
-
-      - name: Upload coverage summary
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: coverage-report
-          path: web/coverage/
-          retention-days: 14
+        run: npx vitest run
 
   test-mcp:
     name: MCP Tests
