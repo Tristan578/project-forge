@@ -257,8 +257,58 @@ jobs:
         working-directory: mcp-server
         run: npm audit --audit-level=high
 
+  # ---- WASM CDN Upload ----
+  # Uploads WASM engine binaries to Cloudflare R2 so the frontend can load
+  # them from a CDN instead of bundling 123 MB into every Vercel deployment.
+  # Gated by the R2_CDN_ENABLED repository variable.
+  # Required GitHub Secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
+  upload-wasm-cdn:
+    name: Upload WASM to R2 CDN
+    runs-on: ubuntu-latest
+    needs: [build-wasm]
+    if: ${{ vars.R2_CDN_ENABLED == 'true' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install AWS CLI
+        run: |
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install --update
+
+      - name: Download WASM artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-binaries
+          path: engine/
+
+      - name: Prepare WASM source directory
+        run: |
+          mkdir -p wasm-upload/engine-pkg-webgl2
+          mkdir -p wasm-upload/engine-pkg-webgpu
+          mkdir -p wasm-upload/engine-pkg-webgl2-runtime
+          mkdir -p wasm-upload/engine-pkg-webgpu-runtime
+          cp engine/pkg-webgl2/* wasm-upload/engine-pkg-webgl2/
+          cp engine/pkg-webgpu/* wasm-upload/engine-pkg-webgpu/
+          cp engine/pkg-webgl2-runtime/* wasm-upload/engine-pkg-webgl2-runtime/ 2>/dev/null || true
+          cp engine/pkg-webgpu-runtime/* wasm-upload/engine-pkg-webgpu-runtime/ 2>/dev/null || true
+
+      - name: Upload to R2
+        run: bash scripts/upload-wasm-to-r2.sh
+        env:
+          WASM_SOURCE_DIR: ${{ github.workspace }}/wasm-upload
+          ENGINE_VERSION: ${{ github.sha }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_ENGINE_BUCKET || 'spawnforge-engine' }}
+
   # ---- Deployment ----
   # Deploys to Vercel after all checks pass.
+  # When R2_CDN_ENABLED=true, WASM files are served from CDN and NOT bundled
+  # into the Vercel deployment (saves ~123 MB per deploy).
   # Required GitHub Secrets:
   #   VERCEL_TOKEN        — Personal access token from https://vercel.com/account/tokens
   #   VERCEL_ORG_ID       — From .vercel/project.json after `vercel link`
@@ -269,7 +319,6 @@ jobs:
     name: Deploy to Vercel
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security]
-    # Only deploy when all secrets are configured
     if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' }}
     permissions:
       contents: read
@@ -289,13 +338,17 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@latest
 
+      # When R2_CDN_ENABLED=true, WASM is served from CDN — skip bundling into Vercel.
+      # The frontend reads NEXT_PUBLIC_ENGINE_CDN_URL and loads from CDN at runtime.
       - name: Download WASM artifacts
+        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
         uses: actions/download-artifact@v8
         with:
           name: wasm-binaries
           path: engine/
 
-      - name: Copy WASM to web/public
+      - name: Copy WASM to web/public (self-hosted fallback)
+        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
         run: |
           mkdir -p web/public/engine-pkg-webgl2
           mkdir -p web/public/engine-pkg-webgpu
