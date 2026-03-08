@@ -77,8 +77,10 @@ jobs:
         # 10-minute timeout lets all tests run, then kills the hung process.
         # Exit code 124 = timeout (tests passed but process didn't exit).
         run: |
+          set +e
           timeout 600 npx vitest run
           EXIT_CODE=$?
+          set -e
           if [ $EXIT_CODE -eq 124 ]; then
             echo "::warning::vitest process hung after tests completed — killed by timeout (known vitest fork-pool issue)"
             exit 0
