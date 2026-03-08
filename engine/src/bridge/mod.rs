@@ -56,7 +56,7 @@ use crate::core::{
 // Editor-only imports
 #[cfg(not(feature = "runtime"))]
 use crate::core::{
-    engine_mode::{EditorSystemSet, in_edit_mode},
+    engine_mode::{EditorSystemSet, EditorApplySet, EditorEmitSet, in_edit_mode},
     gizmo::ForgeGizmoPlugin,
     snap::SnapPlugin,
     visibility,
@@ -401,6 +401,8 @@ impl Plugin for SelectionPlugin {
         {
             app.add_observer(core_systems::handle_picking_pressed)
                 .configure_sets(Update, EditorSystemSet.run_if(in_edit_mode))
+                .configure_sets(Update, EditorApplySet.in_set(EditorSystemSet))
+                .configure_sets(Update, EditorEmitSet.in_set(EditorSystemSet).after(EditorApplySet))
                 .add_systems(Update, (
                     core_systems::apply_pending_transforms,
                     core_systems::apply_pending_renames,
@@ -422,12 +424,12 @@ impl Plugin for SelectionPlugin {
                     entity_factory::apply_redo_requests,
                     core::reparent::apply_reparent_requests,
                     core_systems::apply_selection_requests,
-                ).in_set(EditorSystemSet))
+                ).in_set(EditorApplySet))
                 .add_systems(Update, (
                     core_systems::apply_pending_visibility,
                     core_systems::apply_pending_clear_selection,
                     core_systems::apply_pending_gizmo_mode,
-                ).in_set(EditorSystemSet))
+                ).in_set(EditorApplySet))
                 .add_systems(Update, (
                     core_systems::process_pick_buffer,
                     core_systems::emit_selection_events,
@@ -447,7 +449,7 @@ impl Plugin for SelectionPlugin {
                     sprite::emit_sprite_on_selection,
                     sprite::emit_tilemap_on_selection,
                     visibility::sync_visibility,
-                ).chain().in_set(EditorSystemSet))
+                ).chain().in_set(EditorEmitSet))
                 .add_systems(Update, animation::poll_animation_state.in_set(EditorSystemSet))
                 .add_systems(Update, procedural::apply_csg_requests.in_set(EditorSystemSet))
                 .add_systems(Update, (
