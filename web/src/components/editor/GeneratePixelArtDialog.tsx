@@ -65,7 +65,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
       addJob({
         id: crypto.randomUUID(),
         jobId: data.jobId,
-        type: 'sprite',
+        type: 'pixel-art',
         prompt,
         status: data.status === 'completed' ? 'completed' : 'pending',
         progress: 0,
@@ -94,7 +94,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
             <Wand2 size={18} className="text-blue-400" />
             <h2 className="text-sm font-semibold text-zinc-100">Generate Pixel Art</h2>
           </div>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-200">
+          <button onClick={onClose} aria-label="Close" className="text-zinc-400 hover:text-zinc-200">
             <X size={16} />
           </button>
         </div>

@@ -57,6 +57,7 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
     const data = await response.json();
     return {
       success: true,
+      result: { jobId: data.jobId, provider: data.provider, usageId: data.usageId, tokenCost: data.tokenCost },
       message: `Pixel art generation started (${data.provider}, ${data.tokenCost} tokens). Style: ${style}, Size: ${targetSize}px, Palette: ${data.palette}`,
     };
   } catch (err) {

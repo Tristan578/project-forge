@@ -51,15 +51,26 @@ export function labDistance(a: LAB, b: LAB): number {
   );
 }
 
+const paletteLabCache = new WeakMap<RGB[], LAB[]>();
+
 export function findNearestColor(pixel: RGB, palette: RGB[]): RGB {
+  if (palette.length === 0) return [...pixel] as RGB;
+
   const pixelLab = rgbToLab(pixel);
+
+  let paletteLab = paletteLabCache.get(palette);
+  if (!paletteLab || paletteLab.length !== palette.length) {
+    paletteLab = palette.map((color) => rgbToLab(color));
+    paletteLabCache.set(palette, paletteLab);
+  }
+
   let bestDist = Infinity;
   let best = palette[0];
-  for (const color of palette) {
-    const dist = labDistance(pixelLab, rgbToLab(color));
+  for (let i = 0; i < palette.length; i++) {
+    const dist = labDistance(pixelLab, paletteLab[i]);
     if (dist < bestDist) {
       bestDist = dist;
-      best = color;
+      best = palette[i];
     }
   }
   return best;

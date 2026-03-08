@@ -158,6 +158,8 @@ export function useGenerationPolling() {
         return '/api/generate/sprite-sheet/status';
       case 'tileset':
         return '/api/generate/tileset-gen/status';
+      case 'pixel-art':
+        return '/api/generate/pixel-art/status';
       default:
         throw new Error(`Unknown generation type: ${type}`);
     }

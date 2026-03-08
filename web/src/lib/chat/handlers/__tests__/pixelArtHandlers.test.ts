@@ -42,14 +42,15 @@ describe('handleGeneratePixelArt', () => {
     expect(result.error).toContain('Target size');
   });
 
-  it('should succeed with valid args', async () => {
+  it('should succeed with valid args and return job metadata', async () => {
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ provider: 'replicate', tokenCost: 10, palette: 'Pico-8' }),
+      json: async () => ({ jobId: 'pxart-123', provider: 'replicate', tokenCost: 10, palette: 'Pico-8', usageId: 'usage-1' }),
     });
     const result = await handleGeneratePixelArt({ prompt: 'a warrior knight' }, mockCtx);
     expect(result.success).toBe(true);
     expect(result.message).toContain('Pixel art generation started');
+    expect(result.result).toEqual({ jobId: 'pxart-123', provider: 'replicate', usageId: 'usage-1', tokenCost: 10 });
   });
 
   it('should handle API error response', async () => {

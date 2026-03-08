@@ -91,6 +91,8 @@ export async function POST(request: NextRequest) {
       ? { name: 'Custom', colors: customPalette as string[] }
       : getPalette(palette as PaletteId);
 
+    // Phase 1: Returns a pending job stub. Phase 2 will integrate PixelArtClient
+    // to start the actual provider generation and add a /pixel-art/status endpoint.
     const jobId = `pxart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     return NextResponse.json({

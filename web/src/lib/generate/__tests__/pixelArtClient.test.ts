@@ -1,6 +1,6 @@
 // web/src/lib/generate/__tests__/pixelArtClient.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PixelArtClient, buildPixelArtPrompt, type PixelArtStyle } from '../pixelArtClient';
+import { PixelArtClient, buildPixelArtPrompt } from '../pixelArtClient';
 
 describe('pixelArtClient', () => {
   beforeEach(() => {

@@ -77,5 +77,9 @@ describe('colorUtils', () => {
     it('should handle single-color palette', () => {
       expect(findNearestColor([100, 200, 50], [[0, 0, 0]])).toEqual([0, 0, 0]);
     });
+    it('should return input pixel for empty palette', () => {
+      const pixel: RGB = [128, 64, 32];
+      expect(findNearestColor(pixel, [])).toEqual([128, 64, 32]);
+    });
   });
 });

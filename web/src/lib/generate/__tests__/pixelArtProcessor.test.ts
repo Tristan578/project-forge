@@ -216,4 +216,14 @@ describe('processPixelArt full pipeline', () => {
     });
     expect(withDither.pixels).toEqual(noDither.pixels);
   });
+
+  it('should throw on zero target dimensions', () => {
+    const grid = solidGrid(4, 4, [128, 128, 128]);
+    expect(() => processPixelArt(grid, {
+      targetWidth: 0,
+      targetHeight: 4,
+      dithering: 'none',
+      ditheringIntensity: 0,
+    })).toThrow('positive integers');
+  });
 });
