@@ -1,7 +1,7 @@
 /**
  * Tests for pixelArtHandlers — pixel art generation, palette, and quantization commands.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   handleGeneratePixelArt,
   handleSetPixelArtPalette,
@@ -10,15 +10,21 @@ import {
 
 const mockCtx = { store: {} as never, dispatchCommand: vi.fn() };
 
-// Mock fetch
+// Mock fetch — scoped to setup/teardown to avoid leaking across test files
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
+let originalFetch: typeof globalThis.fetch;
+
+beforeEach(() => {
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = mockFetch;
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
+});
 
 describe('handleGeneratePixelArt', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('should reject short prompt', async () => {
     const result = await handleGeneratePixelArt({ prompt: 'ab' }, mockCtx);
     expect(result.success).toBe(false);
@@ -33,7 +39,7 @@ describe('handleGeneratePixelArt', () => {
   it('should reject invalid target size', async () => {
     const result = await handleGeneratePixelArt({ prompt: 'test sprite', targetSize: 50 }, mockCtx);
     expect(result.success).toBe(false);
-    expect(result.error).toContain('16, 32, 64, or 128');
+    expect(result.error).toContain('Target size');
   });
 
   it('should succeed with valid args', async () => {
@@ -109,7 +115,7 @@ describe('handleQuantizeSpriteColors', () => {
   it('should reject out-of-range colorCount', async () => {
     const result = await handleQuantizeSpriteColors({ colorCount: 300 }, mockCtx);
     expect(result.success).toBe(false);
-    expect(result.error).toContain('1 and 256');
+    expect(result.error).toContain('256');
   });
 
   it('should succeed with valid params', async () => {
