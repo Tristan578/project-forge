@@ -56,6 +56,7 @@ jobs:
   test-web:
     name: Web Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
