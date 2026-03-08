@@ -28,7 +28,7 @@ function detectWebGPU(): boolean {
  * (e.g. "https://cdn.spawnforge.ai"), files are loaded from the CDN.
  * Otherwise falls back to same-origin paths (local dev / self-hosted).
  */
-const ENGINE_CDN_BASE = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '';
+const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
 
 async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string): Promise<WasmModule> {
   const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);

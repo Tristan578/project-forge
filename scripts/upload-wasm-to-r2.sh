@@ -25,6 +25,10 @@ PUBLIC_DIR="$PROJECT_ROOT/web/public"
 : "${R2_SECRET_ACCESS_KEY:?Set R2_SECRET_ACCESS_KEY}"
 : "${R2_BUCKET:=spawnforge-engine}"
 
+# Map R2 credentials to AWS CLI env vars (R2 is S3-compatible)
+export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+
 R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
 VARIANTS=(
@@ -55,14 +59,14 @@ for variant in "${VARIANTS[@]}"; do
     --endpoint-url "$R2_ENDPOINT" \
     --content-type "application/javascript" \
     --cache-control "public, max-age=31536000, immutable" \
-    --no-sign-request=false 2>/dev/null
+    --no-cli-pager
 
   # Upload .wasm with correct content type
   aws s3 cp "$dir/forge_engine_bg.wasm" "s3://$R2_BUCKET/$variant/forge_engine_bg.wasm" \
     --endpoint-url "$R2_ENDPOINT" \
     --content-type "application/wasm" \
     --cache-control "public, max-age=31536000, immutable" \
-    --no-sign-request=false 2>/dev/null
+    --no-cli-pager
 
   echo "  ✓ $variant uploaded"
   uploaded=$((uploaded + 1))

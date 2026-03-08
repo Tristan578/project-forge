@@ -1030,7 +1030,7 @@ describe('graphCompiler - Edge Cases', () => {
         expect(result).toBeDefined();
       } catch (e) {
         // Stack overflow is expected with the current implementation
-        expect(e).toBeDefined();
+        expect(e).toBeInstanceOf(RangeError);
       }
     });
 
@@ -1050,7 +1050,7 @@ describe('graphCompiler - Edge Cases', () => {
         expect(result).toBeDefined();
       } catch (e) {
         // Stack overflow expected
-        expect(e).toBeDefined();
+        expect(e).toBeInstanceOf(RangeError);
       }
     });
 
@@ -1098,7 +1098,7 @@ describe('graphCompiler - Edge Cases', () => {
         expect(result).toBeDefined();
       } catch (e) {
         // Stack overflow expected from recursive resolveInput
-        expect(e).toBeDefined();
+        expect(e).toBeInstanceOf(RangeError);
       }
     });
   });
