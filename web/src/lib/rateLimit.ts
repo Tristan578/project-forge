@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 interface RateLimitEntry {
   timestamps: number[];
@@ -88,6 +88,35 @@ export function rateLimit(
  * @param resetAt - Unix timestamp (ms) when the rate limit resets
  * @returns NextResponse with appropriate status and headers
  */
+/**
+ * Extract a client identifier from the request for rate limiting.
+ * Uses X-Forwarded-For (Vercel/proxy), falling back to a generic key.
+ */
+export function getClientIp(req: NextRequest): string {
+  return req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    || req.headers.get('x-real-ip')
+    || 'unknown';
+}
+
+/**
+ * Rate limit a public (unauthenticated) route by IP address.
+ * Returns a 429 response if limit is exceeded, or null if allowed.
+ */
+export function rateLimitPublicRoute(
+  req: NextRequest,
+  endpoint: string,
+  maxRequests: number = 30,
+  windowMs: number = 5 * 60 * 1000
+): NextResponse | null {
+  const ip = getClientIp(req);
+  const key = `public:${endpoint}:${ip}`;
+  const result = rateLimit(key, maxRequests, windowMs);
+  if (!result.allowed) {
+    return rateLimitResponse(result.remaining, result.resetAt);
+  }
+  return null;
+}
+
 export function rateLimitResponse(remaining: number, resetAt: number): NextResponse {
   const resetInSeconds = Math.ceil((resetAt - Date.now()) / 1000);
 

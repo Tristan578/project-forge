@@ -1,7 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
 
 vi.mock('@/lib/db/client');
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimitPublicRoute: vi.fn().mockReturnValue(null),
+}));
+
+function mockRequest(): NextRequest {
+  return new NextRequest('http://localhost:3000/api/community/games/featured');
+}
 vi.mock('@/lib/db/schema', () => ({
   publishedGames: { id: 'id', title: 'title', description: 'description', slug: 'slug', userId: 'userId', playCount: 'playCount', cdnUrl: 'cdnUrl', createdAt: 'createdAt', status: 'status' },
   users: { id: 'id', displayName: 'displayName' },
@@ -36,7 +44,7 @@ describe('GET /api/community/games/featured', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(mockRequest());
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -71,7 +79,7 @@ describe('GET /api/community/games/featured', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(mockRequest());
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -84,7 +92,7 @@ describe('GET /api/community/games/featured', () => {
     vi.mocked(getDb).mockImplementation(() => { throw new Error('DB error'); });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(mockRequest());
     const body = await res.json();
 
     expect(res.status).toBe(500);

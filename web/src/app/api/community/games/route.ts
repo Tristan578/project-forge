@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments } from '@/lib/db/schema';
 import { eq, sql, and, or, ilike, desc } from 'drizzle-orm';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
+  const limited = rateLimitPublicRoute(req, 'community-games', 30, 5 * 60 * 1000);
+  if (limited) return limited;
+
   try {
     const db = getDb();
     const searchParams = req.nextUrl.searchParams;

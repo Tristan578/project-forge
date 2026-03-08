@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, users } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,9 +12,12 @@ export const dynamic = 'force-dynamic';
  * No authentication required (anyone with the link can play).
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
+  const limited = rateLimitPublicRoute(req, 'play-game', 60, 5 * 60 * 1000);
+  if (limited) return limited;
+
   try {
     const { userId: clerkId, slug } = await params;
 
