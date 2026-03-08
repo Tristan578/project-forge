@@ -15,6 +15,7 @@ const TYPE_LABELS: Record<GenerationType, string> = {
   sprite: 'Sprite',
   sprite_sheet: 'Sprite Sheet',
   tileset: 'Tileset',
+  'pixel-art': 'Pixel Art',
 };
 
 const TYPE_COLORS: Record<GenerationType, string> = {
@@ -27,10 +28,11 @@ const TYPE_COLORS: Record<GenerationType, string> = {
   sprite: 'bg-yellow-600',
   sprite_sheet: 'bg-yellow-700',
   tileset: 'bg-teal-600',
+  'pixel-art': 'bg-indigo-600',
 };
 
 const ALL_TYPES: GenerationType[] = [
-  'model', 'texture', 'sfx', 'voice', 'skybox', 'music', 'sprite', 'sprite_sheet', 'tileset',
+  'model', 'texture', 'sfx', 'voice', 'skybox', 'music', 'sprite', 'sprite_sheet', 'tileset', 'pixel-art',
 ];
 
 interface GenerationLibraryProps {
