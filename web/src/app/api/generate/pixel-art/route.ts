@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { getPalette, validateCustomPalette } from '@/lib/generate/palettes';
+import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
 
 const VALID_SIZES = [16, 32, 64, 128];
 const VALID_DITHERING = ['none', 'bayer4x4', 'bayer8x8'];
 const VALID_STYLES = ['character', 'prop', 'tile', 'icon', 'environment'];
 const VALID_PROVIDERS = ['auto', 'openai', 'replicate'];
-const PALETTE_IDS: PaletteId[] = ['pico-8', 'db16', 'db32', 'endesga-32', 'endesga-64', 'nes', 'game-boy', 'cga', 'custom'];
+const PALETTE_IDS = Object.keys(PALETTES) as PaletteId[];
 const TOKEN_COSTS: Record<string, number> = { replicate: 10, openai: 20 };
 
 export async function POST(request: NextRequest) {
@@ -43,8 +43,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Invalid palette. Must be one of: ${PALETTE_IDS.join(', ')}` }, { status: 400 });
     }
     if (palette === 'custom') {
-      if (!customPalette) {
-        return NextResponse.json({ error: 'Custom palette colors required when palette is "custom"' }, { status: 400 });
+      if (!Array.isArray(customPalette)) {
+        return NextResponse.json({ error: 'Custom palette colors required when palette is "custom" (must be an array)' }, { status: 400 });
       }
       const validation = validateCustomPalette(customPalette as string[]);
       if (!validation.valid) {

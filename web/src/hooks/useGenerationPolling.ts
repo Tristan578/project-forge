@@ -277,6 +277,25 @@ export function useGenerationPolling() {
           resultUrl: data.resultUrl,
           metadata: { ...job.metadata, ...ppResult.metadata },
         });
+      } else if (type === 'pixel-art') {
+        // Download pixel art result image and store as asset
+        if (!data.resultUrl) throw new Error('No result URL');
+
+        const blob = await downloadBinary(data.resultUrl);
+        const base64 = await blobToBase64(blob);
+
+        const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
+        const entityId = job.entityId;
+
+        if (entityId) {
+          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
+        }
+
+        updateJob(id, {
+          status: 'completed',
+          resultUrl: data.resultUrl,
+          metadata: { ...job.metadata, ...ppResult.metadata },
+        });
       } else if (type === 'sprite' || type === 'sprite_sheet' || type === 'tileset') {
         // Download image and apply as texture to target entity (or store as asset)
         if (!data.resultUrl) throw new Error('No result URL');

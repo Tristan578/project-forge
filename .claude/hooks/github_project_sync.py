@@ -419,9 +419,10 @@ def push(include_done=False):
         number = ticket.get("number", 0)
         display = f"PF-{number}: {title}" if number else title
 
-        # Skip done tickets unless they're tracked and just changed to done
+        # Skip done tickets that were already synced as done
+        # Always sync newly-done tickets (status changed) or never-synced tickets
         if status == "done" and not include_done:
-            if tid not in tmap or tmap[tid].get("lastLocalStatus") == "done":
+            if tid in tmap and tmap[tid].get("lastLocalStatus") == "done":
                 skipped += 1
                 continue
 

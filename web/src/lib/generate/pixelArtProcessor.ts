@@ -151,7 +151,7 @@ export function applyBayerDithering(
 }
 
 export function processPixelArt(src: PixelGrid, opts: ProcessOptions): PixelGrid {
-  if (opts.targetWidth <= 0 || opts.targetHeight <= 0) {
+  if (opts.targetWidth <= 0 || opts.targetHeight <= 0 || !Number.isInteger(opts.targetWidth) || !Number.isInteger(opts.targetHeight)) {
     throw new Error('targetWidth and targetHeight must be positive integers');
   }
   const downscaled = nearestNeighborDownscale(src, opts.targetWidth, opts.targetHeight);

@@ -1,4 +1,6 @@
+// Server-only: This module uses API keys directly and must not be imported in client components.
 // web/src/lib/generate/pixelArtClient.ts
+import 'server-only';
 
 export type PixelArtStyle = 'character' | 'prop' | 'tile' | 'icon' | 'environment';
 export type PixelArtProvider = 'openai' | 'replicate';

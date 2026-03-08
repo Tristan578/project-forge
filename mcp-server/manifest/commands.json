@@ -5751,7 +5751,8 @@
               "sprite",
               "voice",
               "sprite_sheet",
-              "tileset"
+              "tileset",
+              "pixel-art"
             ],
             "description": "Job type (auto-detected if omitted)"
           }
@@ -5762,6 +5763,94 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "generate_pixel_art",
+      "description": "Generate pixel art from a text prompt with palette and dithering options",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Description of the pixel art to generate"
+          },
+          "targetSize": {
+            "type": "number",
+            "enum": [16, 32, 64, 128],
+            "description": "Target sprite size in pixels (default: 32)"
+          },
+          "palette": {
+            "type": "string",
+            "description": "Palette preset ID (e.g., pico-8, db16, db32, nes, game-boy, cga, custom)"
+          },
+          "style": {
+            "type": "string",
+            "enum": ["character", "prop", "tile", "icon", "environment"],
+            "description": "Pixel art style preset"
+          },
+          "dithering": {
+            "type": "string",
+            "enum": ["none", "bayer4x4", "bayer8x8"],
+            "description": "Dithering algorithm (default: none)"
+          },
+          "ditheringIntensity": {
+            "type": "number",
+            "description": "Dithering intensity 0-1 (default: 0)"
+          }
+        },
+        "required": ["prompt"]
+      },
+      "tokenCost": 10,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "set_pixel_art_palette",
+      "description": "Set the active palette for pixel art generation",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "palette": {
+            "type": "string",
+            "description": "Palette preset ID or 'custom'"
+          },
+          "colors": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Hex color array (required when palette is 'custom')"
+          }
+        },
+        "required": ["palette"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "generation:write"
+    },
+    {
+      "name": "quantize_sprite_colors",
+      "description": "Reduce sprite colors to a target count with optional dithering",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "colorCount": {
+            "type": "number",
+            "description": "Target number of colors (1-256)"
+          },
+          "dithering": {
+            "type": "string",
+            "enum": ["none", "bayer4x4", "bayer8x8"],
+            "description": "Dithering algorithm (default: none)"
+          },
+          "ditheringIntensity": {
+            "type": "number",
+            "description": "Dithering intensity 0-1 (default: 0.5)"
+          }
+        },
+        "required": ["colorCount"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "generation:write"
     },
     {
       "name": "create_ui_screen",

@@ -19,7 +19,9 @@ const generatePixelArtSchema = z.object({
   targetSize: z.number().refine((n) => (VALID_SIZES as readonly number[]).includes(n), {
     message: `Target size must be ${VALID_SIZES.join(', ')}`,
   }).optional().default(32),
-  palette: z.string().optional().default('pico-8'),
+  palette: z.string().refine((v) => VALID_PALETTE_IDS.includes(v as PaletteId), {
+    message: `Palette must be one of: ${Object.keys(PALETTES).join(', ')}`,
+  }).optional().default('pico-8'),
   style: z.enum(VALID_STYLES).optional().default('character'),
   dithering: z.enum(VALID_DITHERING).optional().default('none'),
   ditheringIntensity: z.number().min(0).max(1).optional().default(0),
