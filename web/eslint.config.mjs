@@ -53,6 +53,8 @@ const eslintConfig = defineConfig([
     "public/engine-pkg/**",
     "public/engine-pkg-webgl2/**",
     "public/engine-pkg-webgpu/**",
+    "public/engine-pkg-webgl2-runtime/**",
+    "public/engine-pkg-webgpu-runtime/**",
     // Test coverage output
     "coverage/**",
   ]),

@@ -28,8 +28,14 @@ export function WelcomeModal() {
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
 
   // Load recent projects once on mount (useState lazy init avoids referential instability
-  // that useSyncExternalStore would cause with array snapshots — Object.is([], []) is false)
-  const [recentProjects] = useState(() => getRecentProjects().slice(0, 5));
+  // that useSyncExternalStore would cause with array snapshots — Object.is([], []) is false).
+  // Security: filter out entries with IDs that don't match the expected format to prevent
+  // stored XSS via malicious project records in localStorage (CodeQL js/xss-through-dom).
+  const [recentProjects] = useState(() =>
+    getRecentProjects()
+      .filter((p) => /^[\w-]+$/.test(p.id))
+      .slice(0, 5),
+  );
 
   const handleDismiss = useCallback(() => {
     setDismissed(true);
