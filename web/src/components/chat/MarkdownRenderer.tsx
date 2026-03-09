@@ -82,12 +82,18 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
 
   const components: Components = useMemo(
     () => ({
-      // Code blocks with language-based CSS classes for syntax highlighting
+      // Fenced code blocks are wrapped in <pre><code> by react-markdown.
+      // Override `pre` to pass through, and detect block vs inline in `code`.
+      pre({ children }) {
+        return <>{children}</>;
+      },
       code({ className, children, ...props }) {
-        const match = /language-(\w+)/.exec(className || '');
-        const isInline = !match;
+        const langMatch = /language-(\w+)/.exec(className || '');
+        // Detect fenced code blocks: they have a language class OR contain newlines
+        const childStr = String(children);
+        const isBlock = !!langMatch || childStr.includes('\n');
 
-        if (isInline) {
+        if (!isBlock) {
           return (
             <code
               className="rounded bg-zinc-700/50 px-1 py-0.5 text-[0.85em] text-zinc-200"
@@ -98,11 +104,12 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           );
         }
 
+        const language = langMatch?.[1] || 'text';
         return (
           <div className="my-2 overflow-x-auto rounded-md border border-zinc-700 bg-zinc-900">
             <div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1">
               <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-                {match[1]}
+                {language}
               </span>
             </div>
             <pre className="overflow-x-auto p-3">
@@ -210,6 +217,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
 
 /**
  * Recursively process React children, replacing text nodes with entity-aware versions.
+ * Descends into nested React elements to find text nodes at any depth.
  */
 function processChildren(
   children: React.ReactNode,
@@ -219,6 +227,10 @@ function processChildren(
 
   if (typeof children === 'string') {
     return processText(children);
+  }
+
+  if (typeof children === 'number') {
+    return processText(String(children));
   }
 
   if (Array.isArray(children)) {
@@ -231,9 +243,40 @@ function processChildren(
           <span key={i}>{processed}</span>
         );
       }
-      return child;
+      return processChildElement(child, i, processText);
     });
   }
 
-  return children;
+  // Single non-array, non-string child — try to recurse into it
+  return processChildElement(children, 0, processText);
+}
+
+/**
+ * Process a single React child element, recursing into its children if it has props.children.
+ */
+function processChildElement(
+  child: React.ReactNode,
+  key: number,
+  processText: (text: string) => React.ReactNode[]
+): React.ReactNode {
+  if (child == null || typeof child === 'boolean') return child;
+  if (typeof child === 'string') return processText(child);
+  if (typeof child === 'number') return processText(String(child));
+
+  // Check if it's a React element with children we can recurse into
+  if (
+    typeof child === 'object' &&
+    'props' in child &&
+    child.props != null &&
+    typeof child.props === 'object' &&
+    'children' in child.props
+  ) {
+    const element = child as React.ReactElement<{ children?: React.ReactNode }>;
+    const processedChildren = processChildren(element.props.children, processText);
+    // Reconstruct the element with processed children
+    const { children: _children, ...restProps } = element.props;
+    return { ...element, props: { ...restProps, children: processedChildren, key } };
+  }
+
+  return child;
 }

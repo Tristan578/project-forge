@@ -476,6 +476,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } finally {
       set({ isStreaming: false, abortController: null, loopIteration: 0 });
+
+      // Sync current messages to the active conversation so they persist
+      const { messages: finalMessages, activeConversationId: activeId, conversations: convs } = get();
+      if (activeId) {
+        const syncedConversations = convs.map((c) =>
+          c.id === activeId
+            ? { ...c, messages: finalMessages.slice(-MAX_STORED_MESSAGES), updatedAt: Date.now() }
+            : c
+        );
+        set({ conversations: syncedConversations });
+        saveConversationsToStorage(syncedConversations);
+      }
     }
   },
 
@@ -698,11 +710,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const now = Date.now();
 
     // Save current conversation first
-    const updatedConversations = conversations.map((c) =>
+    let updatedConversations = conversations.map((c) =>
       c.id === activeConversationId
         ? { ...c, messages: messages.slice(-MAX_STORED_MESSAGES), updatedAt: now }
         : c
     );
+
+    // If there's no active conversation but there are unsaved messages,
+    // auto-create a conversation to preserve them
+    if (!activeConversationId && messages.length > 0) {
+      const autoId = `conv_${now}_auto`;
+      const autoName = messages[0]?.content?.slice(0, 30) || 'Untitled';
+      updatedConversations = [...updatedConversations, {
+        id: autoId,
+        name: autoName,
+        messages: messages.slice(-MAX_STORED_MESSAGES),
+        createdAt: now,
+        updatedAt: now,
+      }];
+    }
 
     // Load the target conversation
     const target = updatedConversations.find((c) => c.id === conversationId);
@@ -753,7 +779,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const stored = localStorage.getItem(CONVERSATIONS_KEY);
       if (stored) {
         const parsed = JSON.parse(stored) as Conversation[];
-        set({ conversations: parsed });
+        // Restore the most recently updated conversation so state survives page reload
+        const sorted = [...parsed].sort((a, b) => b.updatedAt - a.updatedAt);
+        const mostRecent = sorted[0];
+        set({
+          conversations: parsed,
+          activeConversationId: mostRecent?.id ?? null,
+          messages: mostRecent?.messages ?? [],
+        });
       }
     } catch {
       // Corrupt data
@@ -801,8 +834,9 @@ function buildApiMessages(messages: ChatMessage[]): { role: string; content: unk
 
 // System prompt + tools overhead estimate (tokens)
 const SYSTEM_OVERHEAD_TOKENS = 6000;
-// Max context window tokens (conservative estimate for Claude)
-const MAX_CONTEXT_TOKENS = 180000;
+// Max context tokens — must stay within server-side MAX_INPUT_CHARS (600k chars / ~4 chars per token = 150k tokens).
+// Use 140k to leave headroom and avoid 413 errors from the server.
+const MAX_CONTEXT_TOKENS = 140000;
 
 /**
  * Build API messages with context window truncation.
@@ -829,35 +863,26 @@ export function buildTruncatedApiMessages(
   // If everything fits, return as-is
   if (totalTokens <= budget) return allApiMessages;
 
-  // Drop oldest messages, but preserve tool_use/tool_result pairs
-  // Always keep the last message (the current user message)
+  // Drop oldest messages, but preserve tool_use/tool_result pairs.
+  // Always keep the last message (the current user message).
   let droppedCount = 0;
   let droppedTokens = 0;
 
-  // Identify which messages can be dropped (skip tool_result blocks that
-  // are paired with a tool_use in the previous message)
-  const canDrop: boolean[] = allApiMessages.map(() => true);
-
-  // Mark tool_use/tool_result pairs: if message i is assistant with tool_use blocks,
-  // and message i+1 is user with tool_result blocks, they must be dropped together
+  // Mark tool_result messages that are paired with a preceding tool_use.
+  // These cannot be dropped independently — only together with their tool_use.
+  const pairedToolResult = new Set<number>();
   for (let i = 0; i < allApiMessages.length - 1; i++) {
-    const msg = allApiMessages[i];
-    const next = allApiMessages[i + 1];
-    if (isToolUseMessage(msg) && isToolResultMessage(next)) {
-      // These two are paired - they'll be dropped together
-      canDrop[i] = true;
-      canDrop[i + 1] = true;
+    if (isToolUseMessage(allApiMessages[i]) && isToolResultMessage(allApiMessages[i + 1])) {
+      pairedToolResult.add(i + 1);
     }
   }
-
-  // Never drop the last message
-  canDrop[canDrop.length - 1] = false;
 
   // Drop from the front until we fit
   let currentTokens = totalTokens;
   let i = 0;
   while (currentTokens > budget && i < allApiMessages.length - 1) {
-    if (!canDrop[i]) {
+    // Skip paired tool_result messages — they are dropped with their tool_use
+    if (pairedToolResult.has(i)) {
       i++;
       continue;
     }
@@ -880,18 +905,29 @@ export function buildTruncatedApiMessages(
 
   // Build result with summary marker
   const remaining = allApiMessages.slice(i);
-  const summaryMessage = {
-    role: 'user' as const,
-    content: `[Earlier conversation summarized: ${droppedCount} messages (~${droppedTokens} tokens) were truncated to fit context window]`,
-  };
+  const summaryContent = `[Earlier conversation summarized: ${droppedCount} messages (~${droppedTokens} tokens) were truncated to fit context window]`;
 
-  // Ensure first message after marker is a user message (API requirement)
   if (remaining.length > 0 && remaining[0].role === 'assistant') {
-    // Insert a placeholder user message before assistant continuation
-    return [summaryMessage, { role: 'user' as const, content: '(continuing from earlier)' }, ...remaining];
+    // First remaining is assistant — insert a user summary before it to maintain alternation
+    return [
+      { role: 'user' as const, content: summaryContent },
+      ...remaining,
+    ];
   }
 
-  return [summaryMessage, ...remaining];
+  if (remaining.length > 0 && remaining[0].role === 'user') {
+    // First remaining is user — merge summary into it to avoid two consecutive user messages
+    const merged = {
+      ...remaining[0],
+      content: typeof remaining[0].content === 'string'
+        ? `${summaryContent}\n\n${remaining[0].content}`
+        : remaining[0].content,
+    };
+    return [merged, ...remaining.slice(1)];
+  }
+
+  // Fallback: just prepend the summary as a user message
+  return [{ role: 'user' as const, content: summaryContent }, ...remaining];
 }
 
 function isToolUseMessage(msg: { role: string; content: unknown }): boolean {

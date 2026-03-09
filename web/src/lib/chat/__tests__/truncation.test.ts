@@ -50,18 +50,55 @@ describe('buildTruncatedApiMessages', () => {
   });
 
   it('preserves tool_use/tool_result pairs (drops both together)', () => {
+    // Create enough messages to force truncation, including an assistant
+    // message with tool calls that will produce tool_use/tool_result API pairs
+    const longText = 'a'.repeat(8000); // ~2000 tokens each
+    const assistantWithTools: ChatMessage = {
+      id: 'msg_tool_asst',
+      role: 'assistant',
+      content: longText,
+      toolCalls: [
+        { id: 'tc_1', name: 'spawn_entity', input: { type: 'cube' }, status: 'success', undoable: true, result: 'ok' },
+      ],
+      timestamp: Date.now(),
+    };
+
     const messages: ChatMessage[] = [
-      makeMessage('user', 'a'.repeat(2000)), // ~500 tokens
-      makeMessage('assistant', 'response'),  // small
-      makeMessage('user', 'second question'),
+      makeMessage('user', longText),         // ~2000 tokens — should be dropped
+      assistantWithTools,                     // ~2000 tokens — should be dropped
+      makeMessage('user', longText),         // ~2000 tokens — should be dropped
+      makeMessage('assistant', longText),    // ~2000 tokens
+      makeMessage('user', 'final question'), // keep this
     ];
 
-    // Patch the second message to simulate tool_use blocks
-    // (buildApiMessages converts them, but since we use ChatMessage format,
-    // we just test the raw API messages behavior here)
-    const result = buildTruncatedApiMessages(messages, 200000, 1000);
-    // Should fit everything
-    expect(result.length).toBe(3);
+    // Budget fits ~3000 tokens (after overhead), so the first messages must be dropped
+    const result = buildTruncatedApiMessages(messages, 5000, 1000);
+
+    // The final user message must always be present
+    const finalMsg = result.find(
+      (m) => typeof m.content === 'string' && (m.content === 'final question' || m.content.includes('final question'))
+    );
+    expect(finalMsg).toBeTruthy();
+
+    // Dropped messages should have produced a summary marker
+    const hasSummary = result.some(
+      (m) => typeof m.content === 'string' && m.content.includes('Earlier conversation summarized')
+    );
+    expect(hasSummary).toBe(true);
+
+    // Verify no orphaned tool_result without its preceding tool_use
+    for (let idx = 0; idx < result.length; idx++) {
+      const msg = result[idx];
+      if (Array.isArray(msg.content)) {
+        const hasToolResult = (msg.content as Array<{ type?: string }>).some(b => b.type === 'tool_result');
+        if (hasToolResult) {
+          // Must have a preceding assistant message with tool_use
+          const prev = result[idx - 1];
+          expect(prev).toBeTruthy();
+          expect(prev.role).toBe('assistant');
+        }
+      }
+    }
   });
 
   it('always keeps the last message', () => {
@@ -76,7 +113,9 @@ describe('buildTruncatedApiMessages', () => {
 
     const result = buildTruncatedApiMessages(messages, 5000, 1000);
     const lastMsg = result[result.length - 1];
-    expect(typeof lastMsg.content === 'string' && lastMsg.content).toBe('keep this');
+    // When the last remaining message is a user message, the summary is merged into it
+    // to avoid two consecutive user messages. The original content must still be present.
+    expect(typeof lastMsg.content === 'string' && lastMsg.content).toContain('keep this');
   });
 
   it('handles empty messages array', () => {

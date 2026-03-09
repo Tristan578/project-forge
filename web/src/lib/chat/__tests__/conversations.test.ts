@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { useChatStore, type ChatMessage } from '@/stores/chatStore';
 
-// Mock localStorage
+// Mock localStorage using vi.stubGlobal for proper cleanup
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
   return {
@@ -9,10 +9,16 @@ const localStorageMock = (() => {
     setItem: vi.fn((key: string, value: string) => { store[key] = value; }),
     removeItem: vi.fn((key: string) => { delete store[key]; }),
     clear: vi.fn(() => { store = {}; }),
+    get length() { return Object.keys(store).length; },
+    key: vi.fn((index: number) => Object.keys(store)[index] ?? null),
   };
 })();
 
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock });
+vi.stubGlobal('localStorage', localStorageMock);
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
 
 // Mock the dynamic imports that sendMessage uses
 vi.mock('@/stores/editorStore', () => ({

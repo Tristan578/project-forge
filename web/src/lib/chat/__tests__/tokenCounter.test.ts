@@ -7,8 +7,10 @@ describe('tokenCounter', () => {
       expect(estimateTokenCount('')).toBe(0);
     });
 
-    it('returns 0 for null/undefined-like', () => {
-      expect(estimateTokenCount('')).toBe(0);
+    it('returns 0 for null/undefined coerced to falsy', () => {
+      // estimateTokenCount guards on falsy input — verify null-like values
+      expect(estimateTokenCount(null as unknown as string)).toBe(0);
+      expect(estimateTokenCount(undefined as unknown as string)).toBe(0);
     });
 
     it('estimates ~1 token per 4 chars', () => {

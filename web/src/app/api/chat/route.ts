@@ -146,11 +146,12 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(`chat:${auth.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  // 2. Validate request size (max 10KB)
+  // 2. Validate request size (max 1MB — generous limit for conversation history + scene context;
+  //    the more precise MAX_INPUT_CHARS check below enforces the actual token budget)
   const bodyText = await request.text();
-  if (!validateBodySize(bodyText, 10 * 1024)) {
+  if (!validateBodySize(bodyText, 1024 * 1024)) {
     return Response.json(
-      { error: 'Request too large. Maximum 10KB allowed.' },
+      { error: 'Request too large. Maximum 1MB allowed.' },
       { status: 413 }
     );
   }
