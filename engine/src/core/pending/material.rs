@@ -181,3 +181,26 @@ pub fn queue_update_skybox_from_bridge(request: UpdateSkyboxRequest) -> bool {
 pub fn queue_custom_skybox_from_bridge(request: SetCustomSkyboxRequest) -> bool {
     super::with_pending(|pc| pc.queue_custom_skybox(request)).is_some()
 }
+
+// === Custom WGSL Request Structs ===
+
+/// Request to update the scene-global custom WGSL source.
+#[derive(Debug, Clone)]
+pub struct CustomWgslSourceUpdate {
+    pub user_code: String,
+    pub name: String,
+}
+
+// === Custom WGSL Queue Methods ===
+
+impl PendingCommands {
+    pub fn queue_custom_wgsl_source_update(&mut self, update: CustomWgslSourceUpdate) {
+        self.custom_wgsl_source_updates.push(update);
+    }
+}
+
+// === Custom WGSL Bridge Functions ===
+
+pub fn queue_custom_wgsl_source_update_from_bridge(update: CustomWgslSourceUpdate) -> bool {
+    super::with_pending(|pc| pc.queue_custom_wgsl_source_update(update)).is_some()
+}

@@ -15,11 +15,13 @@ use crate::core::pending_commands::{
     queue_shader_update_from_bridge, queue_shader_removal_from_bridge,
     queue_set_skybox_from_bridge, queue_remove_skybox_from_bridge,
     queue_update_skybox_from_bridge, queue_custom_skybox_from_bridge,
+    queue_custom_wgsl_source_update_from_bridge,
     MaterialUpdate, LightUpdate, AmbientLightUpdate, EnvironmentUpdate,
     PostProcessingUpdate, ShaderUpdate, ShaderRemoval,
     SetSkyboxRequest, UpdateSkyboxRequest, SetCustomSkyboxRequest,
-    QueryRequest,
+    CustomWgslSourceUpdate, QueryRequest,
 };
+use crate::core::custom_wgsl::validate_wgsl_source;
 
 /// Material and lighting command dispatcher.
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
@@ -48,6 +50,8 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "remove_skybox" => Some(handle_remove_skybox(payload.clone())),
         "update_skybox" => Some(handle_update_skybox(payload.clone())),
         "set_custom_skybox" => Some(handle_set_custom_skybox(payload.clone())),
+        "set_custom_wgsl_source" => Some(handle_set_custom_wgsl_source(payload.clone())),
+        "validate_wgsl" => Some(handle_validate_wgsl(payload.clone())),
         _ => None,
     }
 }
@@ -442,5 +446,65 @@ fn handle_set_custom_skybox(payload: serde_json::Value) -> super::CommandResult 
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+// === Custom WGSL Command Handlers ===
+
+/// Payload for set_custom_wgsl_source command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SetCustomWgslSourcePayload {
+    user_code: String,
+    name: Option<String>,
+}
+
+/// Handle set_custom_wgsl_source command from React/MCP.
+/// Validates and queues the WGSL source update.
+fn handle_set_custom_wgsl_source(payload: serde_json::Value) -> super::CommandResult {
+    let data: SetCustomWgslSourcePayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid set_custom_wgsl_source payload: {}", e))?;
+
+    // Validate before queuing.
+    let validation = validate_wgsl_source(&data.user_code);
+    if !validation.valid {
+        return Err(validation
+            .error
+            .unwrap_or_else(|| "WGSL validation failed".to_string()));
+    }
+
+    let update = CustomWgslSourceUpdate {
+        user_code: data.user_code,
+        name: data.name.unwrap_or_else(|| "Custom WGSL".to_string()),
+    };
+
+    if queue_custom_wgsl_source_update_from_bridge(update) {
+        tracing::info!("Queued custom WGSL source update");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for validate_wgsl command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ValidateWgslPayload {
+    code: String,
+}
+
+/// Handle validate_wgsl command — synchronous, no queue needed.
+/// Returns JSON with { valid, error? }.
+fn handle_validate_wgsl(payload: serde_json::Value) -> super::CommandResult {
+    let data: ValidateWgslPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid validate_wgsl payload: {}", e))?;
+
+    let validation = validate_wgsl_source(&data.code);
+    if validation.valid {
+        Ok(())
+    } else {
+        Err(validation
+            .error
+            .unwrap_or_else(|| "WGSL validation failed".to_string()))
     }
 }

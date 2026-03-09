@@ -51,6 +51,7 @@ use crate::core::{
     scene_graph::{self, SceneGraphCache},
     selection::{Selection, SelectionChangedEvent},
     shader_effects::ShaderEffectsPlugin,
+    custom_wgsl::CustomWgslPlugin,
 };
 
 // Editor-only imports
@@ -179,6 +180,7 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
         .add_plugins(PhysicsPlugin)
         .add_plugins(Physics2dPlugin)
         .add_plugins(ShaderEffectsPlugin)
+        .add_plugins(CustomWgslPlugin)
         .add_plugins(CameraControlPlugin)
         .add_plugins(core::game_camera::GameCameraPlugin)
         .add_plugins(core::game_components::GameComponentsPlugin);
@@ -354,8 +356,9 @@ impl Plugin for SelectionPlugin {
                 animation::register_gltf_animations,
                 animation::apply_animation_requests,
             ))
-            // Shader sync system (always-active)
+            // Shader sync systems (always-active)
             .add_systems(Update, material::sync_extended_material_data)
+            .add_systems(Update, material::sync_custom_wgsl_uniforms)
             // Sprite rendering pipeline (always-active): spawn sprites, sync SpriteData -> Bevy Sprite
             .add_systems(Update, sprite::apply_spawn_sprite_requests)
             .add_systems(Update, sprite::apply_sprite_data_updates)
@@ -429,6 +432,7 @@ impl Plugin for SelectionPlugin {
                     core::reparent::apply_reparent_requests,
                     core_systems::apply_selection_requests,
                 ).in_set(EditorApplySet))
+                .add_systems(Update, material::apply_custom_wgsl_source_updates.in_set(EditorApplySet))
                 .add_systems(Update, (
                     core_systems::apply_pending_visibility,
                     core_systems::apply_pending_clear_selection,
