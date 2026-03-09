@@ -495,6 +495,19 @@ export function buildSceneContext(state: EditorSnapshot): string {
     // uiBuilderStore not available or screens not initialized
   }
 
+  // AI Memory (project preferences)
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { buildMemoryContext } = require('./aiMemory');
+    const projectId = (state as { projectId?: string }).projectId ?? 'default';
+    const memoryContext = buildMemoryContext(projectId);
+    if (memoryContext) {
+      sections.push('\n' + memoryContext);
+    }
+  } catch {
+    // aiMemory not available
+  }
+
   // Entity reference hint
   sections.push('\n## Entity References\nUsers may reference entities with @EntityName format. When mentioned, entity IDs are provided in brackets at the end of the message. Use the provided entity IDs for commands.');
 
