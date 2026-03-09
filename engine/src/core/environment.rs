@@ -209,7 +209,7 @@ pub fn equirectangular_to_cubemap(source: &Image, face_size: u32) -> Image {
                 let src_idx = (sy as usize * src_width as usize + sx as usize) * bpp;
                 let dst_idx = (face as usize * face_pixels + y as usize * face_size as usize + x as usize) * out_bpp;
 
-                if src_idx + 3 < src_data.len() && dst_idx + 3 < data.len() {
+                if src_idx + bpp <= src_data.len() && dst_idx + out_bpp <= data.len() {
                     if bpp == 8 {
                         // Rgba16Float -> Rgba8: read f16 values, convert to u8
                         // For simplicity, use a basic conversion (clamp to [0,1])
