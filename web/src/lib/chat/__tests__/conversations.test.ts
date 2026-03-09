@@ -98,7 +98,7 @@ describe('Conversation Management', () => {
       const msgs = [makeMessage('user', 'In chat 1')];
       useChatStore.setState({ messages: msgs });
 
-      const id2 = useChatStore.getState().createConversation('Chat 2');
+      useChatStore.getState().createConversation('Chat 2');
       useChatStore.setState({ messages: [makeMessage('user', 'In chat 2')] });
 
       // Switch back to Chat 1
