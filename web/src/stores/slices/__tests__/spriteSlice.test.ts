@@ -198,6 +198,57 @@ describe('spriteSlice', () => {
     });
   });
 
+  describe('spawnSprite', () => {
+    it('should dispatch spawn_sprite with all options', () => {
+      store.getState().spawnSprite({
+        name: 'Hero',
+        textureAssetId: 'hero.png',
+        position: [1, 2, 3],
+        sortingLayer: 'Foreground',
+        sortingOrder: 5,
+      });
+
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_sprite', {
+        name: 'Hero',
+        textureAssetId: 'hero.png',
+        position: [1, 2, 3],
+        sortingLayer: 'Foreground',
+        sortingOrder: 5,
+      });
+    });
+
+    it('should dispatch spawn_sprite with no options', () => {
+      store.getState().spawnSprite();
+
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_sprite', {
+        name: undefined,
+        textureAssetId: undefined,
+        position: undefined,
+        sortingLayer: undefined,
+        sortingOrder: undefined,
+      });
+    });
+
+    it('should dispatch spawn_sprite with partial options', () => {
+      store.getState().spawnSprite({ name: 'BG' });
+
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_sprite', {
+        name: 'BG',
+        textureAssetId: undefined,
+        position: undefined,
+        sortingLayer: undefined,
+        sortingOrder: undefined,
+      });
+    });
+
+    it('should not dispatch when no dispatcher is set', () => {
+      setSpriteDispatcher(null as unknown as (command: string, payload: unknown) => void);
+      store.getState().spawnSprite({ name: 'Test' });
+
+      expect(mockDispatch).not.toHaveBeenCalled();
+    });
+  });
+
   describe('setCamera2dData', () => {
     it('should set camera data and dispatch', () => {
       const data: Camera2dData = { zoom: 1.5, pixelPerfect: false, bounds: null };
