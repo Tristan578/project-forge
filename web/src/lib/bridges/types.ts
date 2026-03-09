@@ -15,8 +15,6 @@ export interface BridgeToolConfig {
   paths: PlatformPaths;
   activeVersion: string | null;
   status: BridgeToolStatus;
-  /** User-provided path override (takes precedence over auto-discovered paths). */
-  customPath?: string;
 }
 
 /** An operation to execute on a bridge tool. */
@@ -41,6 +39,5 @@ export interface BridgesConfig {
   [toolId: string]: {
     paths: PlatformPaths;
     activeVersion: string | null;
-    customPath?: string;
   };
 }

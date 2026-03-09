@@ -2,7 +2,7 @@
  * Bridge slice — tracks external tool connections and running operations.
  */
 
-import { StateCreator } from 'zustand';
+import type { StateCreator } from 'zustand';
 import type { PlatformPaths } from '@/lib/bridges/types';
 
 export interface BridgeToolInfo {
@@ -11,7 +11,6 @@ export interface BridgeToolInfo {
   paths: PlatformPaths;
   activeVersion: string | null;
   status: 'connected' | 'disconnected' | 'not_found' | 'error';
-  customPath?: string;
 }
 
 export interface BridgeOperationInfo {

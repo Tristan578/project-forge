@@ -4,7 +4,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import type { BridgeOperation, BridgeResult } from './types';
-import { buildScript } from './luaTemplates';
+import { buildScript, ALLOWED_TEMPLATES } from './luaTemplates';
 
 const TEMP_DIR = join(tmpdir(), 'spawnforge-bridge');
 
@@ -38,21 +38,47 @@ export function parseOutput(stdout: string, stderr: string, exitCode: number): B
   };
 }
 
+/**
+ * Coerce operation params to string values.
+ * Rejects non-primitive values to prevent injection via objects.
+ */
+function coerceParams(params: Record<string, unknown>): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === 'string') {
+      result[key] = value;
+    } else if (typeof value === 'number' || typeof value === 'boolean') {
+      result[key] = String(value);
+    } else {
+      throw new Error(`Invalid param type for "${key}": expected string/number/boolean`);
+    }
+  }
+  return result;
+}
+
 /** Execute a bridge operation against Aseprite. Uses execFile (not exec) to prevent shell injection. */
 export async function executeOperation(
   binaryPath: string,
   operation: BridgeOperation
 ): Promise<BridgeResult> {
+  // Validate operation name against template allowlist
+  if (!ALLOWED_TEMPLATES.has(operation.name)) {
+    return {
+      success: false,
+      error: `Unknown operation: "${operation.name}". Allowed: ${[...ALLOWED_TEMPLATES].join(', ')}`,
+      exitCode: 1,
+    };
+  }
+
   if (!existsSync(TEMP_DIR)) {
     mkdirSync(TEMP_DIR, { recursive: true });
   }
 
-  const scriptContent = buildScript(
-    operation.name,
-    operation.params as Record<string, string>
-  );
+  const safeParams = coerceParams(operation.params as Record<string, unknown>);
+  const scriptContent = buildScript(operation.name, safeParams);
 
-  const scriptPath = join(TEMP_DIR, `${operation.name}-${randomUUID()}.lua`);
+  // Use UUID-only filename to prevent any name-based injection
+  const scriptPath = join(TEMP_DIR, `${randomUUID()}.lua`);
   writeFileSync(scriptPath, scriptContent, 'utf-8');
 
   try {

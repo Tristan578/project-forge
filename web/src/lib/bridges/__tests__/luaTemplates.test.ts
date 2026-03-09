@@ -62,8 +62,8 @@ describe('Lua Templates', () => {
     });
 
     it('throws for unknown template', () => {
-      vi.mocked(fs.existsSync).mockReturnValueOnce(false);
-      expect(() => luaTemplates.getTemplate('nonexistent')).toThrow();
+      // Allowlist rejects before checking filesystem
+      expect(() => luaTemplates.getTemplate('nonexistent')).toThrow('Unknown bridge template');
     });
   });
 
@@ -77,14 +77,30 @@ describe('Lua Templates', () => {
   });
 
   describe('template safety', () => {
-    it('does not allow Lua injection via params', () => {
+    it('rejects Lua injection patterns in params', () => {
       const malicious = 'os.execute("rm -rf /")';
+      expect(() =>
+        luaTemplates.renderTemplate('local name = "{{name}}"', { name: malicious })
+      ).toThrow('Unsafe parameter value');
+    });
+
+    it('rejects params exceeding max length', () => {
+      const longValue = 'x'.repeat(1001);
+      expect(() =>
+        luaTemplates.renderTemplate('local x = "{{val}}"', { val: longValue })
+      ).toThrow('exceeds maximum length');
+    });
+
+    it('allows safe string params', () => {
       const result = luaTemplates.renderTemplate(
         'local name = "{{name}}"',
-        { name: malicious }
+        { name: 'knight_walk_cycle' }
       );
-      // The value should be escaped, not executable as Lua
-      expect(result).not.toContain('os.execute("rm');
+      expect(result).toBe('local name = "knight_walk_cycle"');
+    });
+
+    it('blocks path traversal in template names', () => {
+      expect(() => luaTemplates.getTemplate('../../../etc/passwd')).toThrow('Unknown bridge template');
     });
   });
 });

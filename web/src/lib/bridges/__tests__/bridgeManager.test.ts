@@ -45,7 +45,7 @@ describe('BridgeManager', () => {
     it('returns connected config when binary exists on macOS', async () => {
       const mockExecFile = vi.mocked(childProcess.execFile);
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, cb: unknown) => {
+      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
         (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Aseprite 1.3.17-arm64', '');
         return {} as ReturnType<typeof childProcess.execFile>;
       });
@@ -63,16 +63,15 @@ describe('BridgeManager', () => {
       expect(config.activeVersion).toBeNull();
     });
 
-    it('uses customPath over default paths when provided', async () => {
-      const mockExecFile = vi.mocked(childProcess.execFile);
-      vi.mocked(fs.existsSync).mockImplementation((p) => p === '/custom/aseprite');
-      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, cb: unknown) => {
-        (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Aseprite 1.3.17', '');
-        return {} as ReturnType<typeof childProcess.execFile>;
-      });
+    it('rejects unknown toolId with not_found status', async () => {
+      const config = await bridgeManager.discoverTool('unknown-tool');
+      expect(config.status).toBe('not_found');
+    });
 
-      const config = await bridgeManager.discoverTool('aseprite', '/custom/aseprite');
-      expect(config.status).toBe('connected');
+    it('validates toolId against allowlist', () => {
+      expect(bridgeManager.isAllowedToolId('aseprite')).toBe(true);
+      expect(bridgeManager.isAllowedToolId('unknown')).toBe(false);
+      expect(bridgeManager.isAllowedToolId('../etc/passwd')).toBe(false);
     });
   });
 
@@ -111,7 +110,7 @@ describe('BridgeManager', () => {
     it('returns connected when binary responds', async () => {
       const mockExecFile = vi.mocked(childProcess.execFile);
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, cb: unknown) => {
+      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
         (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Aseprite 1.3.17', '');
         return {} as ReturnType<typeof childProcess.execFile>;
       });
@@ -123,7 +122,7 @@ describe('BridgeManager', () => {
     it('returns error when binary fails', async () => {
       const mockExecFile = vi.mocked(childProcess.execFile);
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, cb: unknown) => {
+      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
         (cb as (err: Error, stdout: string, stderr: string) => void)(new Error('ENOENT'), '', 'not found');
         return {} as ReturnType<typeof childProcess.execFile>;
       });

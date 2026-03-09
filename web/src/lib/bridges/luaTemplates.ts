@@ -1,9 +1,18 @@
 import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve, relative } from 'path';
 import { fileURLToPath } from 'url';
 
 // Resolve templates dir relative to this file (works in both CJS and ESM)
 const TEMPLATES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'aseprite', 'templates');
+
+/** Allowlist of valid template names — prevents path traversal. */
+export const ALLOWED_TEMPLATES = new Set([
+  'createSprite',
+  'createAnimation',
+  'editSprite',
+  'applyPalette',
+  'exportSheet',
+]);
 
 /** Escape a string value for safe inclusion in Lua source code. */
 function escapeForLua(value: string): string {
@@ -14,6 +23,24 @@ function escapeForLua(value: string): string {
     .replace(/\r/g, '\\r');
 }
 
+/**
+ * Validate that a param value is safe for Lua template substitution.
+ * Numeric params are passed through. String params are quoted and escaped.
+ * Rejects values containing Lua code injection patterns.
+ */
+function validateParamValue(key: string, value: string): string {
+  // Reject values that look like Lua code injection
+  const dangerousPatterns = /(^|;|\))\s*(os|io|require|dofile|loadfile|load|pcall)\s*[.(]/i;
+  if (dangerousPatterns.test(value)) {
+    throw new Error(`Unsafe parameter value for "${key}": contains prohibited Lua patterns`);
+  }
+  // Limit length to prevent abuse
+  if (value.length > 1000) {
+    throw new Error(`Parameter "${key}" exceeds maximum length (1000 chars)`);
+  }
+  return escapeForLua(value);
+}
+
 /** Render a Lua template by replacing {{key}} placeholders. */
 export function renderTemplate(
   template: string,
@@ -22,15 +49,23 @@ export function renderTemplate(
   return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
     const value = params[key];
     if (value === undefined) return '';
-    return escapeForLua(value);
+    return validateParamValue(key, value);
   });
 }
 
-/** Load a named template from disk. */
+/** Load a named template from disk. Validates against allowlist to prevent path traversal. */
 export function getTemplate(name: string): string {
-  const filePath = join(TEMPLATES_DIR, `${name}.lua`);
+  if (!ALLOWED_TEMPLATES.has(name)) {
+    throw new Error(`Unknown bridge template: "${name}". Allowed: ${[...ALLOWED_TEMPLATES].join(', ')}`);
+  }
+  const filePath = resolve(TEMPLATES_DIR, `${name}.lua`);
+  // Double-check resolved path stays within templates dir
+  const rel = relative(TEMPLATES_DIR, filePath);
+  if (rel.startsWith('..') || rel.includes('/')) {
+    throw new Error(`Template path traversal blocked: "${name}"`);
+  }
   if (!existsSync(filePath)) {
-    throw new Error(`Bridge template not found: ${name} (expected at ${filePath})`);
+    throw new Error(`Bridge template not found: ${name}`);
   }
   return readFileSync(filePath, 'utf-8');
 }

@@ -7,6 +7,9 @@ import type { BridgeToolConfig, BridgeToolStatus, BridgesConfig, PlatformPaths }
 const CONFIG_DIR = join(homedir(), '.spawnforge');
 const CONFIG_FILE = join(CONFIG_DIR, 'bridges.json');
 
+/** Allowlist of known tool IDs — rejects arbitrary toolId values. */
+const ALLOWED_TOOL_IDS = new Set(['aseprite']);
+
 /** Default installation paths per platform for known tools. */
 const TOOL_DEFAULTS: Record<string, { name: string; paths: PlatformPaths }> = {
   aseprite: {
@@ -26,6 +29,11 @@ const EXTRA_SEARCH_PATHS: Record<string, Record<string, string[]>> = {
     linux: ['/usr/local/bin/aseprite', join(homedir(), '.local/bin/aseprite')],
   },
 };
+
+/** Validate that a toolId is in the allowlist. */
+export function isAllowedToolId(toolId: string): boolean {
+  return ALLOWED_TOOL_IDS.has(toolId);
+}
 
 /** Get default paths for a known tool. */
 export function getDefaultPaths(toolId: string): PlatformPaths {
@@ -56,27 +64,28 @@ function parseVersion(stdout: string): string | null {
   return match ? match[1] : null;
 }
 
-/** Find a working binary path for a tool on the current platform. */
-function findBinaryPath(toolId: string, customPath?: string): string | null {
-  // 1. Custom path takes priority
-  if (customPath && existsSync(customPath)) return customPath;
+/**
+ * Find a working binary path for a tool on the current platform.
+ * Only searches known default paths and extra search paths — no user-supplied paths.
+ */
+function findBinaryPath(toolId: string): string | null {
+  if (!isAllowedToolId(toolId)) return null;
 
   const plat = platform() as 'darwin' | 'win32' | 'linux';
   const defaults = TOOL_DEFAULTS[toolId]?.paths ?? {};
 
-  // 2. Default path for current platform
+  // 1. Default path for current platform
   const defaultPath = defaults[plat];
   if (defaultPath && existsSync(defaultPath)) return defaultPath;
 
-  // 3. Extra search paths
+  // 2. Extra search paths (hardcoded, not user-supplied)
   const extras = EXTRA_SEARCH_PATHS[toolId]?.[plat] ?? [];
   for (const p of extras) {
     if (existsSync(p)) return p;
   }
 
-  // 4. Check saved config
+  // 3. Check saved config (only platform paths, not custom)
   const saved = loadBridgesConfig()[toolId];
-  if (saved?.customPath && existsSync(saved.customPath)) return saved.customPath;
   const savedPlatPath = saved?.paths?.[plat];
   if (savedPlatPath && existsSync(savedPlatPath)) return savedPlatPath;
 
@@ -86,7 +95,7 @@ function findBinaryPath(toolId: string, customPath?: string): string | null {
 /** Run --version on a binary and return its version string. */
 function getVersion(binaryPath: string): Promise<{ version: string | null; error?: string }> {
   return new Promise((resolve) => {
-    execFile(binaryPath, ['--version'], (err, stdout, stderr) => {
+    execFile(binaryPath, ['--version'], { timeout: 10000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ version: null, error: stderr || err.message });
         return;
@@ -97,11 +106,21 @@ function getVersion(binaryPath: string): Promise<{ version: string | null; error
 }
 
 /** Discover a bridge tool: find binary, check version, return config. */
-export async function discoverTool(toolId: string, customPath?: string): Promise<BridgeToolConfig> {
+export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {
+  if (!isAllowedToolId(toolId)) {
+    return {
+      id: toolId,
+      name: toolId,
+      paths: {},
+      activeVersion: null,
+      status: 'not_found',
+    };
+  }
+
   const defaults = TOOL_DEFAULTS[toolId];
   const name = defaults?.name ?? toolId;
 
-  const binaryPath = findBinaryPath(toolId, customPath);
+  const binaryPath = findBinaryPath(toolId);
   if (!binaryPath) {
     return {
       id: toolId,
@@ -109,7 +128,6 @@ export async function discoverTool(toolId: string, customPath?: string): Promise
       paths: defaults?.paths ?? {},
       activeVersion: null,
       status: 'not_found',
-      customPath,
     };
   }
 
@@ -121,7 +139,6 @@ export async function discoverTool(toolId: string, customPath?: string): Promise
       paths: defaults?.paths ?? {},
       activeVersion: null,
       status: 'error',
-      customPath,
     };
   }
 
@@ -131,7 +148,6 @@ export async function discoverTool(toolId: string, customPath?: string): Promise
   config[toolId] = {
     paths: { ...defaults?.paths, [plat]: binaryPath },
     activeVersion: version,
-    customPath,
   };
   saveBridgesConfig(config);
 
@@ -141,7 +157,6 @@ export async function discoverTool(toolId: string, customPath?: string): Promise
     paths: { ...defaults?.paths, [plat]: binaryPath },
     activeVersion: version,
     status: 'connected',
-    customPath,
   };
 }
 

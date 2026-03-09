@@ -7,7 +7,7 @@ export function BridgeToolsSection() {
   const bridgeTools = useEditorStore((s) => s.bridgeTools);
   const setBridgeTool = useEditorStore((s) => s.setBridgeTool);
   const [discovering, setDiscovering] = useState(false);
-  const [customPath, setCustomPath] = useState('');
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
 
   const handleDiscover = useCallback(async () => {
     setDiscovering(true);
@@ -15,21 +15,24 @@ export function BridgeToolsSection() {
       const res = await fetch('/api/bridges/discover', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          toolId: 'aseprite',
-          customPath: customPath || undefined,
-        }),
+        body: JSON.stringify({ toolId: 'aseprite' }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Discovery failed' }));
+        setDiscoverError(typeof err.error === 'string' ? err.error : 'Discovery failed');
+        return;
+      }
       const data = await res.json();
       if (data.id) {
         setBridgeTool(data);
+        setDiscoverError(null);
       }
     } catch {
-      // Discovery failed — UI shows current state
+      setDiscoverError('Network error');
     } finally {
       setDiscovering(false);
     }
-  }, [customPath, setBridgeTool]);
+  }, [setBridgeTool]);
 
   const statusColor = (status: string) => {
     switch (status) {
@@ -76,18 +79,9 @@ export function BridgeToolsSection() {
         </div>
       ))}
 
-      <div className="space-y-2">
-        <label className="block text-xs text-zinc-400">
-          Custom path override (optional)
-        </label>
-        <input
-          type="text"
-          value={customPath}
-          onChange={(e) => setCustomPath(e.target.value)}
-          placeholder="/path/to/aseprite"
-          className="w-full rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600"
-        />
-      </div>
+      {discoverError && (
+        <p className="text-xs text-red-400">{discoverError}</p>
+      )}
 
       <button
         onClick={handleDiscover}
