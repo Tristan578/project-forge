@@ -50,6 +50,9 @@ pub struct TilemapRenderState {
 #[derive(Component)]
 pub struct AtlasLayoutHandle(pub Handle<TextureAtlasLayout>);
 
+/// Default pixel size for sprites that have no texture and no explicit custom_size.
+const DEFAULT_SPRITE_SIZE: f32 = 64.0;
+
 /// Convert our SpriteAnchor enum to Bevy's Anchor constant.
 /// In Bevy 0.17+, Anchor variants are UPPER_CASE associated constants.
 fn to_bevy_anchor(anchor: &SpriteAnchor) -> Anchor {
@@ -110,13 +113,13 @@ pub(super) fn apply_spawn_sprite_requests(
             Transform::from_xyz(position[0], position[1], z),
         ));
 
-        // Record spawn in history
+        // Record spawn in history — use the calculated z so undo/redo restores correct depth
         let mut snapshot = EntitySnapshot::new(
             eid_str,
             EntityType::Sprite,
             name,
             TransformSnapshot {
-                position,
+                position: [position[0], position[1], z],
                 rotation: [0.0, 0.0, 0.0, 1.0],
                 scale: [1.0, 1.0, 1.0],
             },
@@ -241,7 +244,7 @@ pub(super) fn sync_sprite_rendering(
         let effective_custom_size = if sprite_data.custom_size.is_some() {
             sprite_data.custom_size.map(|s| Vec2::new(s[0], s[1]))
         } else if sprite_data.texture_asset_id.is_none() {
-            Some(Vec2::new(64.0, 64.0))
+            Some(Vec2::new(DEFAULT_SPRITE_SIZE, DEFAULT_SPRITE_SIZE))
         } else {
             None
         };
