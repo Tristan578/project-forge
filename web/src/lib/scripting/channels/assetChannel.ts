@@ -7,7 +7,7 @@ export interface AssetChannelDeps {
 }
 
 export function createAssetHandler(deps: AssetChannelDeps): AsyncHandler {
-  return async (method: string, args: Record<string, unknown>, reportProgress) => {
+  return async (method: string, args: Record<string, unknown>, reportProgress, signal: AbortSignal) => {
     switch (method) {
       case 'loadImage': {
         reportProgress(0, 'Loading image...');
@@ -15,6 +15,7 @@ export function createAssetHandler(deps: AssetChannelDeps): AsyncHandler {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'image', url: args.url, assetId: args.assetId }),
+          signal,
         });
         reportProgress(100, 'Image loaded');
         return result;
@@ -25,6 +26,7 @@ export function createAssetHandler(deps: AssetChannelDeps): AsyncHandler {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'model', url: args.url, assetId: args.assetId }),
+          signal,
         });
         reportProgress(100, 'Model loaded');
         return result;

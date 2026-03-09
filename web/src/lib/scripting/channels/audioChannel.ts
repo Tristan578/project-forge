@@ -8,7 +8,7 @@ export interface AudioChannelDeps {
 }
 
 export function createAudioHandler(deps: AudioChannelDeps): AsyncHandler {
-  return async (method: string, args: Record<string, unknown>) => {
+  return async (method: string, args: Record<string, unknown>, _reportProgress, _signal) => {
     switch (method) {
       case 'detectLoopPoints': {
         const assetId = args.assetId as string;

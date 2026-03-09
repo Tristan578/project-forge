@@ -18,7 +18,7 @@ const AI_ROUTE_MAP: Record<string, string> = {
 };
 
 export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
-  return async (method: string, args: Record<string, unknown>, reportProgress) => {
+  return async (method: string, args: Record<string, unknown>, reportProgress, signal: AbortSignal) => {
     reportProgress(0, 'Submitting request...');
 
     const route = AI_ROUTE_MAP[method];
@@ -31,6 +31,7 @@ export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(args),
+      signal,
     }) as { jobId?: string; error?: string };
 
     if (!submitResult.jobId) {
@@ -41,8 +42,8 @@ export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
     const { jobId } = submitResult;
     reportProgress(10, 'Processing...');
 
-    while (true) {
-      const status = await deps.fetchJson(`/api/generate/status/${jobId}`) as {
+    while (!signal.aborted) {
+      const status = await deps.fetchJson(`/api/generate/status/${jobId}`, { signal }) as {
         status: string;
         progress?: number;
         message?: string;
@@ -62,8 +63,13 @@ export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
       // Report intermediate progress
       reportProgress(status.progress ?? 50, status.message ?? 'Processing...');
 
-      // Wait before next poll
-      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      // Wait before next poll (abortable)
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, POLL_INTERVAL_MS);
+        signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      });
     }
+
+    throw new Error('AI generation request was cancelled');
   };
 }

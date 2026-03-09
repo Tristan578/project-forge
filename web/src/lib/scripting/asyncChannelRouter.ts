@@ -8,6 +8,7 @@ export type AsyncHandler = (
   method: string,
   args: Record<string, unknown>,
   reportProgress: (percent: number, message?: string) => void,
+  signal: AbortSignal,
 ) => Promise<unknown>;
 
 interface ChannelState {
@@ -20,6 +21,7 @@ export class AsyncChannelRouter {
   private channels = new Map<string, ChannelState>();
   private pendingResponses: AsyncResponse[] = [];
   private _isPlayMode = false;
+  private activeAbortControllers = new Set<AbortController>();
 
   /**
    * Register a handler for an async channel.
@@ -93,6 +95,9 @@ export class AsyncChannelRouter {
     // Dispatch to handler
     state.activeCount++;
 
+    const abortController = new AbortController();
+    this.activeAbortControllers.add(abortController);
+
     const reportProgress = (percent: number, message?: string) => {
       if (state.config.supportsProgress) {
         this.pendingResponses.push({
@@ -103,9 +108,14 @@ export class AsyncChannelRouter {
       }
     };
 
+    // Enforce per-channel timeout from CHANNEL_CONFIGS
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, state.config.timeoutMs);
+
     try {
       const args = (request.args ?? {}) as Record<string, unknown>;
-      const data = await state.handler(method, args, reportProgress);
+      const data = await state.handler(method, args, reportProgress, abortController.signal);
       this.pendingResponses.push({
         requestId,
         status: 'ok',
@@ -113,13 +123,18 @@ export class AsyncChannelRouter {
       });
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
-      console.error(`[forge:async:${channel}] ${method} handler error (${requestId}):`, err);
+      // Only log non-abort errors (aborts are expected during cleanup)
+      if (!abortController.signal.aborted) {
+        console.error(`[forge:async:${channel}] ${method} handler error (${requestId}):`, err);
+      }
       this.pendingResponses.push({
         requestId,
         status: 'error',
-        error: `[${requestId}] ${errorMessage}`,
+        error: `[${requestId}] ${abortController.signal.aborted ? 'Request timed out or was cancelled' : errorMessage}`,
       });
     } finally {
+      clearTimeout(timeoutId);
+      this.activeAbortControllers.delete(abortController);
       state.activeCount--;
     }
   }
@@ -146,6 +161,11 @@ export class AsyncChannelRouter {
    * Reset all state (used when stopping play mode).
    */
   reset(): void {
+    // Abort all in-flight async operations (cancels polling loops, fetch requests, etc.)
+    for (const controller of this.activeAbortControllers) {
+      controller.abort();
+    }
+    this.activeAbortControllers.clear();
     for (const state of this.channels.values()) {
       state.activeCount = 0;
     }

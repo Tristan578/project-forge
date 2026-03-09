@@ -196,6 +196,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       }));
       router.register('ai', createAiHandler({ fetchJson }));
       router.register('asset', createAssetHandler({ fetchJson }));
+      // NOTE: 'multiplayer' channel is declared in asyncTypes.ts but intentionally not
+      // registered here — no networking backend exists yet. Requests to it will fail with
+      // "Unknown async channel" until multiplayer is implemented.
 
       routerRef.current = router;
 
@@ -562,6 +565,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         workerRef.current.postMessage({ type: 'stop' });
         workerRef.current.terminate();
         workerRef.current = null;
+      }
+      // Reset async channel router to abort in-flight operations and prevent leaks
+      if (routerRef.current) {
+        routerRef.current.reset();
+        routerRef.current = null;
       }
     };
   }, []);

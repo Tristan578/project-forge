@@ -6,6 +6,7 @@ import { createAudioHandler } from '../channels/audioChannel';
 import { createAnimationHandler } from '../channels/animationChannel';
 
 const noProgress = () => { /* no-op */ };
+const neverAbort = new AbortController().signal;
 
 describe('Channel Handlers', () => {
   // ─── Physics ──────────────────────────────────────────────────
@@ -19,7 +20,7 @@ describe('Channel Handlers', () => {
         origin: [0, 1, 0],
         direction: [0, -1, 0],
         maxDistance: 50,
-      }, noProgress);
+      }, noProgress, neverAbort);
 
       expect(dispatchCommand).toHaveBeenCalledWith('raycast_query', {
         origin: [0, 1, 0],
@@ -33,7 +34,7 @@ describe('Channel Handlers', () => {
       const dispatchCommand = vi.fn().mockReturnValue(null);
       const handler = createPhysicsHandler({ dispatchCommand });
 
-      await handler('raycast', { origin: [0, 0, 0], direction: [1, 0, 0] }, noProgress);
+      await handler('raycast', { origin: [0, 0, 0], direction: [1, 0, 0] }, noProgress, neverAbort);
       expect(dispatchCommand).toHaveBeenCalledWith('raycast_query', expect.objectContaining({
         maxDistance: 100,
       }));
@@ -45,7 +46,7 @@ describe('Channel Handlers', () => {
 
       const result = await handler('raycast2d', {
         originX: 0, originY: 0, dirX: 1, dirY: 0, maxDistance: 10,
-      }, noProgress);
+      }, noProgress, neverAbort);
 
       expect(dispatchCommand).toHaveBeenCalledWith('raycast2d_query', expect.objectContaining({
         originX: 0, dirX: 1, maxDistance: 10,
@@ -57,7 +58,7 @@ describe('Channel Handlers', () => {
       const dispatchCommand = vi.fn().mockReturnValue({ entityId: 'ground' });
       const handler = createPhysicsHandler({ dispatchCommand });
 
-      const result = await handler('isGrounded', { entityId: 'player', distance: 0.2 }, noProgress);
+      const result = await handler('isGrounded', { entityId: 'player', distance: 0.2 }, noProgress, neverAbort);
       expect(result).toBe(true);
     });
 
@@ -65,13 +66,13 @@ describe('Channel Handlers', () => {
       const dispatchCommand = vi.fn().mockReturnValue(null);
       const handler = createPhysicsHandler({ dispatchCommand });
 
-      const result = await handler('isGrounded', { entityId: 'player' }, noProgress);
+      const result = await handler('isGrounded', { entityId: 'player' }, noProgress, neverAbort);
       expect(result).toBe(false);
     });
 
     it('throws for unknown method', async () => {
       const handler = createPhysicsHandler({ dispatchCommand: vi.fn() });
-      await expect(handler('unknownMethod', {}, noProgress)).rejects.toThrow('Unknown physics method');
+      await expect(handler('unknownMethod', {}, noProgress, neverAbort)).rejects.toThrow('Unknown physics method');
     });
   });
 
@@ -87,7 +88,7 @@ describe('Channel Handlers', () => {
       const reportProgress = vi.fn();
       const handler = createAiHandler({ fetchJson });
 
-      const result = await handler('generateModel', { prompt: 'a sword' }, reportProgress);
+      const result = await handler('generateModel', { prompt: 'a sword' }, reportProgress, neverAbort);
 
       expect(fetchJson).toHaveBeenCalledTimes(3);
       expect(fetchJson).toHaveBeenCalledWith('/api/generate/model', expect.objectContaining({
@@ -105,7 +106,7 @@ describe('Channel Handlers', () => {
         .mockResolvedValueOnce({ status: 'failed', error: 'Rate limited' });
 
       const handler = createAiHandler({ fetchJson });
-      await expect(handler('generateTexture', { prompt: 'stone' }, vi.fn()))
+      await expect(handler('generateTexture', { prompt: 'stone' }, vi.fn(), neverAbort))
         .rejects.toThrow('Rate limited');
     });
 
@@ -113,13 +114,13 @@ describe('Channel Handlers', () => {
       const fetchJson = vi.fn().mockResolvedValueOnce({ error: 'Unauthorized' });
       const handler = createAiHandler({ fetchJson });
 
-      await expect(handler('generateTexture', { prompt: 'wood' }, vi.fn()))
+      await expect(handler('generateTexture', { prompt: 'wood' }, vi.fn(), neverAbort))
         .rejects.toThrow('Unauthorized');
     });
 
     it('throws for unknown AI method', async () => {
       const handler = createAiHandler({ fetchJson: vi.fn() });
-      await expect(handler('unknownAiMethod', {}, vi.fn()))
+      await expect(handler('unknownAiMethod', {}, vi.fn(), neverAbort))
         .rejects.toThrow('Unknown AI method');
     });
   });
@@ -132,7 +133,7 @@ describe('Channel Handlers', () => {
       const reportProgress = vi.fn();
       const handler = createAssetHandler({ fetchJson });
 
-      const result = await handler('loadImage', { url: 'https://example.com/img.png' }, reportProgress);
+      const result = await handler('loadImage', { url: 'https://example.com/img.png' }, reportProgress, neverAbort);
 
       expect(fetchJson).toHaveBeenCalledWith('/api/assets/load', expect.objectContaining({
         method: 'POST',
@@ -147,14 +148,14 @@ describe('Channel Handlers', () => {
       const reportProgress = vi.fn();
       const handler = createAssetHandler({ fetchJson });
 
-      await handler('loadModel', { url: 'https://example.com/model.glb' }, reportProgress);
+      await handler('loadModel', { url: 'https://example.com/model.glb' }, reportProgress, neverAbort);
       expect(reportProgress).toHaveBeenCalledWith(0, 'Loading model...');
       expect(reportProgress).toHaveBeenCalledWith(100, 'Model loaded');
     });
 
     it('throws for unknown method', async () => {
       const handler = createAssetHandler({ fetchJson: vi.fn() });
-      await expect(handler('unknownMethod', {}, vi.fn())).rejects.toThrow('Unknown asset method');
+      await expect(handler('unknownMethod', {}, vi.fn(), neverAbort)).rejects.toThrow('Unknown asset method');
     });
   });
 
@@ -168,7 +169,7 @@ describe('Channel Handlers', () => {
         getWaveform: vi.fn(),
       });
 
-      const result = await handler('detectLoopPoints', { assetId: 'music_01' }, noProgress);
+      const result = await handler('detectLoopPoints', { assetId: 'music_01' }, noProgress, neverAbort);
       expect(detectLoopPoints).toHaveBeenCalledWith('music_01');
       expect(result).toEqual([{ start: 0, end: 1.5 }]);
     });
@@ -178,7 +179,7 @@ describe('Channel Handlers', () => {
         detectLoopPoints: vi.fn(),
         getWaveform: vi.fn(),
       });
-      await expect(handler('detectLoopPoints', {}, noProgress))
+      await expect(handler('detectLoopPoints', {}, noProgress, neverAbort))
         .rejects.toThrow('Missing assetId');
     });
 
@@ -189,7 +190,7 @@ describe('Channel Handlers', () => {
         getWaveform,
       });
 
-      const result = await handler('getWaveform', { assetId: 'sfx_01' }, noProgress);
+      const result = await handler('getWaveform', { assetId: 'sfx_01' }, noProgress, neverAbort);
       expect(getWaveform).toHaveBeenCalledWith('sfx_01');
       expect(result).toEqual({ samples: [0.1, 0.5] });
     });
@@ -202,7 +203,7 @@ describe('Channel Handlers', () => {
       const dispatchCommand = vi.fn().mockReturnValue(['idle', 'run', 'jump']);
       const handler = createAnimationHandler({ dispatchCommand });
 
-      const result = await handler('listClips', { entityId: 'player' }, noProgress);
+      const result = await handler('listClips', { entityId: 'player' }, noProgress, neverAbort);
       expect(dispatchCommand).toHaveBeenCalledWith('list_animation_clips', { entityId: 'player' });
       expect(result).toEqual(['idle', 'run', 'jump']);
     });
@@ -214,7 +215,7 @@ describe('Channel Handlers', () => {
       const result = await handler('getClipDuration', {
         entityId: 'player',
         clipName: 'run',
-      }, noProgress);
+      }, noProgress, neverAbort);
       expect(result).toBe(2.5);
     });
 
@@ -222,13 +223,13 @@ describe('Channel Handlers', () => {
       const dispatchCommand = vi.fn().mockReturnValue(null);
       const handler = createAnimationHandler({ dispatchCommand });
 
-      const result = await handler('listClips', { entityId: 'player' }, noProgress);
+      const result = await handler('listClips', { entityId: 'player' }, noProgress, neverAbort);
       expect(result).toEqual([]);
     });
 
     it('throws for unknown method', async () => {
       const handler = createAnimationHandler({ dispatchCommand: vi.fn() });
-      await expect(handler('unknownMethod', {}, noProgress)).rejects.toThrow('Unknown animation method');
+      await expect(handler('unknownMethod', {}, noProgress, neverAbort)).rejects.toThrow('Unknown animation method');
     });
   });
 });

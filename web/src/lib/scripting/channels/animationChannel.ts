@@ -7,7 +7,7 @@ export interface AnimationChannelDeps {
 }
 
 export function createAnimationHandler(deps: AnimationChannelDeps): AsyncHandler {
-  return async (method: string, args: Record<string, unknown>) => {
+  return async (method: string, args: Record<string, unknown>, _reportProgress, _signal) => {
     switch (method) {
       case 'listClips': {
         const result = deps.dispatchCommand('list_animation_clips', {

@@ -7,7 +7,7 @@ export interface PhysicsChannelDeps {
 }
 
 export function createPhysicsHandler(deps: PhysicsChannelDeps): AsyncHandler {
-  return async (method: string, args: Record<string, unknown>, _reportProgress) => {
+  return async (method: string, args: Record<string, unknown>, _reportProgress, _signal) => {
     switch (method) {
       case 'raycast': {
         const result = deps.dispatchCommand('raycast_query', {
