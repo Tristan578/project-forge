@@ -274,6 +274,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<SkyboxHandles>()
             .init_resource::<core::project_type::ProjectType>()
             .init_resource::<core::lod::PerformanceMetrics>()
+            .init_resource::<core::lod::SimplificationBackend>()
             .add_message::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]

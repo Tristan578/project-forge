@@ -36,6 +36,11 @@ pub struct SetLodDistancesRequest {
     pub distances: [f32; 3],
 }
 
+#[derive(Debug, Clone)]
+pub struct SetSimplificationBackendRequest {
+    pub backend_name: String,
+}
+
 // === Queue Methods ===
 
 impl PendingCommands {
@@ -61,6 +66,10 @@ impl PendingCommands {
 
     pub fn queue_set_lod_distances(&mut self, request: SetLodDistancesRequest) {
         self.set_lod_distances_requests.push(request);
+    }
+
+    pub fn queue_set_simplification_backend(&mut self, request: SetSimplificationBackendRequest) {
+        self.set_simplification_backend_requests.push(request);
     }
 }
 
@@ -119,5 +128,11 @@ pub fn bridge_optimize_scene() {
 pub fn bridge_set_lod_distances(distances: [f32; 3]) {
     super::with_pending(|pc| {
         pc.queue_set_lod_distances(SetLodDistancesRequest { distances });
+    });
+}
+
+pub fn bridge_set_simplification_backend(backend_name: String) {
+    super::with_pending(|pc| {
+        pc.queue_set_simplification_backend(SetSimplificationBackendRequest { backend_name });
     });
 }
