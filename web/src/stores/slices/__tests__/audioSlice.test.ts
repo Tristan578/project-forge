@@ -1,13 +1,46 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createSliceStore, createMockDispatch } from './sliceTestTemplate';
 import { createAudioSlice, setAudioDispatcher, type AudioSlice } from '../audioSlice';
 import type { AudioData, AudioBusDef, AudioEffectDef, ReverbZoneData } from '../types';
+import { audioManager } from '@/lib/audio/audioManager';
+
+// Snapshot map is declared at module scope for the mock factory, but cleared in beforeEach
+// to prevent state leaking between tests.
+const snapshots = new Map<string, { name: string; busStates: Record<string, { volume: number; muted: boolean }>; crossfadeDurationMs: number }>();
+
+vi.mock('@/lib/audio/audioManager', () => {
+  return {
+    audioManager: {
+      crossfade: vi.fn(),
+      fadeIn: vi.fn(),
+      fadeOut: vi.fn(),
+      playOneShot: vi.fn(),
+      addLayer: vi.fn(),
+      removeLayer: vi.fn(),
+      addDuckingRule: vi.fn(),
+      saveSnapshot: vi.fn().mockImplementation((name: string, crossfadeDurationMs: number = 1000) => {
+        const snap = {
+          name,
+          busStates: { master: { volume: 1.0, muted: false }, sfx: { volume: 1.0, muted: false }, music: { volume: 0.65, muted: false } },
+          crossfadeDurationMs,
+        };
+        snapshots.set(name, snap);
+        return snap;
+      }),
+      loadSnapshot: vi.fn().mockImplementation((name: string) => snapshots.has(name)),
+      deleteSnapshot: vi.fn().mockImplementation((name: string) => snapshots.delete(name)),
+      getSnapshot: vi.fn().mockImplementation((name: string) => snapshots.get(name)),
+      listSnapshots: vi.fn().mockImplementation(() => Array.from(snapshots.keys())),
+    },
+  };
+});
 
 describe('audioSlice', () => {
   let store: ReturnType<typeof createSliceStore<AudioSlice>>;
   let mockDispatch: ReturnType<typeof createMockDispatch>;
 
   beforeEach(() => {
+    snapshots.clear();
     mockDispatch = createMockDispatch();
     setAudioDispatcher(mockDispatch);
     store = createSliceStore(createAudioSlice);
@@ -401,6 +434,97 @@ describe('audioSlice', () => {
         entityId: 'entity-3',
         ...audioData,
       });
+    });
+  });
+
+  describe('Audio Snapshots', () => {
+    it('should save snapshot and store in Zustand', () => {
+      store.getState().saveAudioSnapshot('calm', 500);
+
+      expect(audioManager.saveSnapshot).toHaveBeenCalledWith('calm', 500);
+
+      const state = store.getState();
+      expect(state.audioSnapshots['calm']).toBeDefined();
+      expect(state.audioSnapshots['calm'].name).toBe('calm');
+      expect(state.audioSnapshots['calm'].crossfadeDurationMs).toBe(500);
+    });
+
+    it('should save snapshot with default crossfade duration', () => {
+      store.getState().saveAudioSnapshot('default-dur');
+
+      expect(audioManager.saveSnapshot).toHaveBeenCalledWith('default-dur', 1000);
+
+      const state = store.getState();
+      expect(state.audioSnapshots['default-dur']).toBeDefined();
+    });
+
+    it('should load snapshot via audioManager', () => {
+      // First save so it exists
+      store.getState().saveAudioSnapshot('battle');
+      store.getState().loadAudioSnapshot('battle', 2000);
+
+      expect(audioManager.loadSnapshot).toHaveBeenCalledWith('battle', 2000);
+    });
+
+    it('should warn on loading non-existent snapshot', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.mocked(audioManager.loadSnapshot).mockReturnValueOnce(false);
+
+      store.getState().loadAudioSnapshot('nonexistent');
+
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('nonexistent'));
+      warnSpy.mockRestore();
+    });
+
+    it('should delete snapshot from Zustand and audioManager', () => {
+      store.getState().saveAudioSnapshot('temp');
+      expect(store.getState().audioSnapshots['temp']).toBeDefined();
+
+      store.getState().deleteAudioSnapshot('temp');
+
+      expect(audioManager.deleteSnapshot).toHaveBeenCalledWith('temp');
+      expect(store.getState().audioSnapshots['temp']).toBeUndefined();
+    });
+
+    it('should list snapshot names from Zustand state', () => {
+      store.getState().saveAudioSnapshot('snap-a');
+      store.getState().saveAudioSnapshot('snap-b');
+
+      const names = store.getState().listAudioSnapshots();
+      expect(names).toContain('snap-a');
+      expect(names).toContain('snap-b');
+      expect(names).toHaveLength(2);
+    });
+
+    it('should sync bus volumes from loaded snapshot', () => {
+      // Verify initial music bus volume is 0.8 (slice default)
+      const initialMusicBus = store.getState().audioBuses.find(b => b.name === 'music');
+      expect(initialMusicBus?.volume).toBe(0.8);
+
+      store.getState().saveAudioSnapshot('vol-test');
+
+      // The mock returns busStates with music: { volume: 0.65, muted: false }
+      // which differs from the slice default of 0.8, proving the sync works
+      store.getState().loadAudioSnapshot('vol-test');
+
+      const state = store.getState();
+      const musicBus = state.audioBuses.find(b => b.name === 'music');
+      expect(musicBus?.volume).toBe(0.65);
+    });
+
+    it('should have empty audioSnapshots in initial state', () => {
+      const state = store.getState();
+      expect(state.audioSnapshots).toEqual({});
+    });
+
+    it('should set adaptive music intensity', () => {
+      store.getState().setAdaptiveMusicIntensity(0.7);
+      expect(store.getState().adaptiveMusicIntensity).toBe(0.7);
+    });
+
+    it('should set current music segment', () => {
+      store.getState().setCurrentMusicSegment('boss');
+      expect(store.getState().currentMusicSegment).toBe('boss');
     });
   });
 });
