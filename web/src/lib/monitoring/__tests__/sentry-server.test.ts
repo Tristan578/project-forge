@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@sentry/node', () => ({
+vi.mock('@sentry/nextjs', () => ({
   init: vi.fn(),
   captureException: vi.fn(),
   captureMessage: vi.fn(),
   startSpan: vi.fn((_opts: unknown, cb: () => unknown) => cb()),
 }));
 
-import * as Sentry from '@sentry/node';
+import * as Sentry from '@sentry/nextjs';
 
 describe('sentry-server', () => {
   beforeEach(() => {

@@ -1,37 +1,14 @@
-import * as Sentry from '@sentry/browser';
+import * as Sentry from '@sentry/nextjs';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
-const IS_PROD = process.env.NODE_ENV === 'production';
-
-let initialized = false;
 
 /**
  * Initialize the Sentry browser SDK.
- * Called once from the SentryProvider component on mount.
- * No-ops when NEXT_PUBLIC_SENTRY_DSN is not set.
+ * With @sentry/nextjs, init happens via sentry.client.config.ts automatically.
+ * This function is kept for backward compatibility with SentryProvider.
  */
 export function initSentryClient(): void {
-  if (initialized || !DSN) return;
-  initialized = true;
-
-  Sentry.init({
-    dsn: DSN,
-    environment: process.env.NODE_ENV ?? 'development',
-    release: process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA ?? 'local',
-    tracesSampleRate: IS_PROD ? 0.1 : 1.0,
-
-    // Use the tunnel to bypass ad-blockers when available
-    tunnel: '/api/sentry',
-
-    integrations: [
-      Sentry.browserTracingIntegration(),
-      Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false }),
-    ],
-
-    // Capture 10% of sessions for Replay in prod, 100% in dev
-    replaysSessionSampleRate: IS_PROD ? 0.1 : 1.0,
-    replaysOnErrorSampleRate: 1.0,
-  });
+  // No-op — @sentry/nextjs initializes from sentry.client.config.ts
 }
 
 /**
