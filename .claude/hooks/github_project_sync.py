@@ -433,6 +433,8 @@ def push(include_done=False):
     tmap = mapping.get("tickets", {})
     project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
 
+    allowed_team = config.get("allowedTeamId")
+
     tickets = tb_get(f"/tickets?project={project_id}")
     if tickets is None:
         print("[SYNC] Taskboard API unavailable — skipping push")
@@ -441,6 +443,7 @@ def push(include_done=False):
     created = 0
     updated = 0
     skipped = 0
+    filtered = 0
     errors = 0
     upgrades_needed = 0
 
@@ -450,6 +453,13 @@ def push(include_done=False):
         title = ticket.get("title", "Untitled")
         number = ticket.get("number", 0)
         display = f"PF-{number}: {title}" if number else title
+
+        # Team filter: only push tickets assigned to the allowed team
+        if allowed_team:
+            ticket_team = ticket.get("teamId") or ""
+            if ticket_team and ticket_team != allowed_team:
+                filtered += 1
+                continue
 
         # Skip done tickets that were already synced as done
         # Always sync newly-done tickets (status changed) or never-synced tickets
@@ -555,6 +565,9 @@ def push(include_done=False):
     mapping["tickets"] = tmap
     save_map(mapping)
 
+    if filtered:
+        print(f"  [filter] {filtered} tickets skipped (wrong team)")
+
     if created or updated or errors:
         parts = []
         if created:
@@ -586,6 +599,8 @@ def pull():
         print(f"[SYNC] GitHub fetch failed: {e}", file=sys.stderr)
         return
 
+    allowed_team = config.get("allowedTeamId")
+
     items = gh_data.get("items", [])
 
     # Build reverse map: GitHub item ID → local ticket ID
@@ -595,6 +610,7 @@ def pull():
     updated = 0
     relinked = 0
     skipped = 0
+    filtered = 0
     errors = 0
 
     for item in items:
@@ -672,6 +688,19 @@ def pull():
             if content_type not in ("Issue", "DraftIssue", ""):
                 skipped += 1
                 continue
+
+            # Team filter: only import items that belong to the allowed team
+            # Items with v2 metadata carry a teamId — reject if it doesn't match
+            # Items without metadata are also rejected (could be from another project)
+            if allowed_team:
+                item_team = parsed.get("teamId", "") if parsed else ""
+                if item_team and item_team != allowed_team:
+                    filtered += 1
+                    continue
+                # No metadata at all = unknown origin, skip to prevent cross-project import
+                if not parsed:
+                    filtered += 1
+                    continue
 
             # Extract GitHub issue number from content if available
             gh_issue_num = content.get("number") if content else None
@@ -775,6 +804,9 @@ def pull():
 
     mapping["tickets"] = tmap
     save_map(mapping)
+
+    if filtered:
+        print(f"  [filter] {filtered} items skipped (wrong team / no metadata)")
 
     if created or updated or relinked or errors:
         parts = []
