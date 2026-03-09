@@ -1,0 +1,11 @@
+{
+  "operation": "version",
+  "args": [
+    "--version"
+  ],
+  "exitCode": 0,
+  "stdout": "Aseprite 1.3.17-arm64\n",
+  "stderr": "",
+  "timestamp": "2026-03-09T01:26:41.125Z",
+  "asepriteVersion": "Aseprite 1.3.17-arm64"
+}
