@@ -276,6 +276,8 @@ export function useGenerationPolling() {
         store.importAudio(base64, assetName);
 
         // Attach looping music audio to target entity
+        // Note: importAudio uses the name as the asset ID in the engine's asset registry,
+        // so assetName IS the correct identifier to reference this asset.
         if (job.entityId) {
           store.setAudio(job.entityId, {
             assetId: assetName,
