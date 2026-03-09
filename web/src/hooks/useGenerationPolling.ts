@@ -335,7 +335,7 @@ export function useGenerationPolling() {
         const frames = sliceSheet(imgDims.width, imgDims.height, grid.rows, grid.columns);
         const sheetData = buildSpriteSheetData(
           assetName,
-          { image: null as unknown as HTMLImageElement, width: imgDims.width, height: imgDims.height, grid, frames },
+          { width: imgDims.width, height: imgDims.height, grid, frames },
           assetName,
         );
 
