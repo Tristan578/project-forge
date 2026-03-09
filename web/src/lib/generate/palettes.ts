@@ -10,12 +10,14 @@ export type PaletteId =
   | 'custom';
 
 export interface PaletteDefinition {
+  id: PaletteId;
   name: string;
   colors: string[];
 }
 
 export const PALETTES: Record<PaletteId, PaletteDefinition> = {
   'pico-8': {
+    id: 'pico-8',
     name: 'Pico-8',
     colors: [
       '#000000', '#1d2b53', '#7e2553', '#008751',
@@ -25,6 +27,7 @@ export const PALETTES: Record<PaletteId, PaletteDefinition> = {
     ],
   },
   'db16': {
+    id: 'db16',
     name: 'DawnBringer 16',
     colors: [
       '#140c1c', '#442434', '#30346d', '#4e4a4e',
@@ -34,6 +37,7 @@ export const PALETTES: Record<PaletteId, PaletteDefinition> = {
     ],
   },
   'db32': {
+    id: 'db32',
     name: 'DawnBringer 32',
     colors: [
       '#000000', '#222034', '#45283c', '#663931',
@@ -47,6 +51,7 @@ export const PALETTES: Record<PaletteId, PaletteDefinition> = {
     ],
   },
   'endesga-32': {
+    id: 'endesga-32',
     name: 'Endesga 32',
     colors: [
       '#be4a2f', '#d77643', '#ead4aa', '#e4a672',
@@ -60,6 +65,7 @@ export const PALETTES: Record<PaletteId, PaletteDefinition> = {
     ],
   },
   'endesga-64': {
+    id: 'endesga-64',
     name: 'Endesga 64',
     colors: [
       '#ff0040', '#131313', '#1b1b1b', '#272727',
@@ -81,6 +87,7 @@ export const PALETTES: Record<PaletteId, PaletteDefinition> = {
     ],
   },
   'nes': {
+    id: 'nes',
     name: 'NES',
     colors: [
       '#7c7c7c', '#0000fc', '#0000bc', '#4428bc',
@@ -100,10 +107,12 @@ export const PALETTES: Record<PaletteId, PaletteDefinition> = {
     ],
   },
   'game-boy': {
+    id: 'game-boy',
     name: 'Game Boy',
     colors: ['#0f380f', '#306230', '#8bac0f', '#9bbc0f'],
   },
   'cga': {
+    id: 'cga',
     name: 'CGA',
     colors: [
       '#000000', '#0000aa', '#00aa00', '#00aaaa',
@@ -113,6 +122,7 @@ export const PALETTES: Record<PaletteId, PaletteDefinition> = {
     ],
   },
   'custom': {
+    id: 'custom',
     name: 'Custom',
     colors: [],
   },
