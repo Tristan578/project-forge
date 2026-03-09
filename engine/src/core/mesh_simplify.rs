@@ -448,3 +448,294 @@ fn compute_smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 
 
     normals
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+    use bevy::asset::RenderAssetUsages;
+
+    /// Build a simple quad (2 triangles, 4 vertices) for testing.
+    fn make_quad() -> Mesh {
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [1.0, 0.0, 1.0],
+                [0.0, 0.0, 1.0],
+            ],
+        );
+        mesh.insert_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+        mesh
+    }
+
+    /// Build a grid mesh with many triangles suitable for simplification.
+    fn make_grid(size: u32) -> Mesh {
+        let mut positions = Vec::new();
+        let mut indices = Vec::new();
+
+        for z in 0..=size {
+            for x in 0..=size {
+                positions.push([x as f32, 0.0, z as f32]);
+            }
+        }
+
+        let cols = size + 1;
+        for z in 0..size {
+            for x in 0..size {
+                let tl = z * cols + x;
+                let tr = tl + 1;
+                let bl = tl + cols;
+                let br = bl + 1;
+                indices.push(tl);
+                indices.push(bl);
+                indices.push(tr);
+                indices.push(tr);
+                indices.push(bl);
+                indices.push(br);
+            }
+        }
+
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_indices(Indices::U32(indices));
+        mesh
+    }
+
+    #[test]
+    fn simplify_mesh_returns_clone_for_small_mesh() {
+        // A quad with only 2 triangles (< 4) should be returned as-is
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default());
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        );
+        mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
+
+        let result = simplify_mesh(&mesh, 0.5);
+        // Should still have 1 triangle (unchanged)
+        assert_eq!(result.indices().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn simplify_mesh_returns_clone_when_ratio_is_one() {
+        let mesh = make_quad();
+        let result = simplify_mesh(&mesh, 1.0);
+        // target_tris >= tri_count so mesh is returned as-is
+        assert_eq!(result.indices().unwrap().len(), mesh.indices().unwrap().len());
+    }
+
+    #[test]
+    fn simplify_mesh_reduces_triangle_count() {
+        // 10x10 grid = 200 triangles. Simplify to ~50%.
+        let mesh = make_grid(10);
+        let original_tri_count = mesh.indices().unwrap().len() / 3;
+        assert_eq!(original_tri_count, 200);
+
+        let result = simplify_mesh(&mesh, 0.5);
+        let simplified_tri_count = result.indices().unwrap().len() / 3;
+
+        // Should have fewer triangles than original
+        assert!(
+            simplified_tri_count < original_tri_count,
+            "Expected fewer triangles: got {} vs original {}",
+            simplified_tri_count,
+            original_tri_count
+        );
+        // Should be roughly around the target (allow some tolerance)
+        assert!(
+            simplified_tri_count <= (original_tri_count as f32 * 0.7) as usize,
+            "Expected at most 70% of original: got {} vs target ~100",
+            simplified_tri_count
+        );
+    }
+
+    #[test]
+    fn simplify_mesh_aggressive_ratio() {
+        let mesh = make_grid(10);
+        let original_tri_count = mesh.indices().unwrap().len() / 3;
+
+        let result = simplify_mesh(&mesh, 0.1);
+        let simplified_tri_count = result.indices().unwrap().len() / 3;
+
+        assert!(
+            simplified_tri_count < original_tri_count / 2,
+            "Expected aggressive simplification: got {} from {}",
+            simplified_tri_count,
+            original_tri_count
+        );
+    }
+
+    #[test]
+    fn simplify_mesh_preserves_topology() {
+        let mesh = make_grid(5);
+        let result = simplify_mesh(&mesh, 0.5);
+
+        // Result must be a triangle list with valid indices
+        assert_eq!(result.primitive_topology(), PrimitiveTopology::TriangleList);
+        assert!(result.indices().unwrap().len() % 3 == 0);
+
+        // All indices must refer to valid positions
+        let pos_count = match result.attribute(Mesh::ATTRIBUTE_POSITION).unwrap() {
+            VertexAttributeValues::Float32x3(p) => p.len(),
+            _ => panic!("Expected Float32x3 positions"),
+        };
+        match result.indices().unwrap() {
+            Indices::U32(idx) => {
+                for &i in idx {
+                    assert!(
+                        (i as usize) < pos_count,
+                        "Index {} out of bounds (positions: {})",
+                        i,
+                        pos_count
+                    );
+                }
+            }
+            _ => panic!("Expected U32 indices"),
+        }
+    }
+
+    #[test]
+    fn simplify_mesh_has_normals_and_uvs() {
+        let mesh = make_grid(5);
+        let result = simplify_mesh(&mesh, 0.5);
+
+        assert!(result.attribute(Mesh::ATTRIBUTE_NORMAL).is_some(), "Missing normals");
+        assert!(result.attribute(Mesh::ATTRIBUTE_UV_0).is_some(), "Missing UVs");
+    }
+
+    #[test]
+    fn simplify_mesh_non_triangle_list_returns_clone() {
+        let mut mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default());
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+        );
+        let result = simplify_mesh(&mesh, 0.5);
+        assert_eq!(result.primitive_topology(), PrimitiveTopology::LineList);
+    }
+
+    // --- Quadric tests ---
+
+    #[test]
+    fn quadric_zero_evaluates_to_zero() {
+        let q = Quadric::zero();
+        assert_eq!(q.evaluate(1.0, 2.0, 3.0), 0.0);
+    }
+
+    #[test]
+    fn quadric_from_plane_evaluates_correctly() {
+        // Plane: y = 0 (normal [0,1,0], d = 0)
+        let q = Quadric::from_plane(0.0, 1.0, 0.0, 0.0);
+        // Point on the plane should have zero error
+        assert!((q.evaluate(5.0, 0.0, 3.0)).abs() < 1e-6);
+        // Point off the plane should have non-zero error
+        assert!((q.evaluate(0.0, 1.0, 0.0) - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn quadric_add_combines() {
+        let q1 = Quadric::from_plane(1.0, 0.0, 0.0, 0.0);
+        let q2 = Quadric::from_plane(0.0, 1.0, 0.0, 0.0);
+        let combined = q1.add(&q2);
+
+        // Point at origin should have zero error for both planes
+        assert!(combined.evaluate(0.0, 0.0, 0.0).abs() < 1e-6);
+        // Point at (1, 1, 0) should have error = 1 + 1 = 2
+        assert!((combined.evaluate(1.0, 1.0, 0.0) - 2.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn quadric_optimal_point_falls_back_to_midpoint_for_singular() {
+        // Zero quadric has a singular matrix
+        let q = Quadric::zero();
+        let v1 = [0.0, 0.0, 0.0];
+        let v2 = [2.0, 4.0, 6.0];
+        let opt = q.optimal_point(v1, v2);
+        assert!((opt[0] - 1.0).abs() < 1e-6);
+        assert!((opt[1] - 2.0).abs() < 1e-6);
+        assert!((opt[2] - 3.0).abs() < 1e-6);
+    }
+
+    // --- compute_smooth_normals tests ---
+
+    #[test]
+    fn compute_smooth_normals_produces_unit_normals() {
+        let positions = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+        ];
+        let indices = vec![0, 1, 2, 1, 3, 2];
+        let normals = compute_smooth_normals(&positions, &indices);
+
+        assert_eq!(normals.len(), positions.len());
+        for n in &normals {
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            assert!(
+                (len - 1.0).abs() < 1e-5,
+                "Normal not unit length: {:?} (len={})",
+                n,
+                len
+            );
+        }
+    }
+
+    #[test]
+    fn compute_smooth_normals_flat_plane_points_up() {
+        // XZ plane: normal should be (0, -1, 0) or (0, 1, 0) depending on winding
+        let positions = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        let indices = vec![0, 1, 2];
+        let normals = compute_smooth_normals(&positions, &indices);
+
+        // Cross product of (1,0,0) x (0,0,1) = (0,-1,0) — negative Y
+        for n in &normals {
+            assert!((n[0]).abs() < 1e-5);
+            assert!((n[1].abs() - 1.0).abs() < 1e-5);
+            assert!((n[2]).abs() < 1e-5);
+        }
+    }
+
+    // --- EdgeCollapse NaN ordering ---
+
+    #[test]
+    fn edge_collapse_nan_cost_sorts_last() {
+        use std::cmp::Reverse;
+        let mut heap = BinaryHeap::new();
+
+        heap.push(Reverse(EdgeCollapse {
+            cost: f32::NAN,
+            v1: 0,
+            v2: 1,
+            optimal: [0.0; 3],
+        }));
+        heap.push(Reverse(EdgeCollapse {
+            cost: 1.0,
+            v1: 2,
+            v2: 3,
+            optimal: [0.0; 3],
+        }));
+        heap.push(Reverse(EdgeCollapse {
+            cost: 0.5,
+            v1: 4,
+            v2: 5,
+            optimal: [0.0; 3],
+        }));
+
+        // Min-heap: smallest cost should come out first
+        let first = heap.pop().unwrap().0;
+        assert_eq!(first.cost, 0.5);
+        let second = heap.pop().unwrap().0;
+        assert_eq!(second.cost, 1.0);
+        // NaN should be last
+        let third = heap.pop().unwrap().0;
+        assert!(third.cost.is_nan());
+    }
+}
