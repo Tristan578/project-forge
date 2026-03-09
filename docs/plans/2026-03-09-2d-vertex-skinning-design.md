@@ -280,23 +280,26 @@ forward_transform(pos, rot, scale, v):
     return rotated + pos
 ```
 
-### 4.5 Bind-Pose Inverse Computation
+### 4.5 Bind-Pose Transform Computation
 
 Computed once at init time from the skeleton's rest-pose bone hierarchy:
 
 ```rust
-fn compute_bind_pose_inverses(bones: &[Bone2dDef]) -> Vec<(Vec2, f32, Vec2)> {
+fn compute_bind_pose_transforms(bones: &[Bone2dDef]) -> Vec<(Vec2, f32, Vec2)> {
     let world = compute_bone_world_transforms(bones);
     world.iter().map(|(pos, rot_deg, scale)| {
-        // Store the world-space rest pose for each bone
-        // The "inverse" is applied analytically during skinning
+        // Store the forward world-space rest pose for each bone.
+        // These are NOT matrix inverses -- the inverse is applied analytically
+        // during skinning by reversing the transform steps.
         (*pos, rot_deg.to_radians(), *scale)
     }).collect()
 }
 ```
 
-The inverse is not a matrix inverse -- it is applied procedurally during skinning
-by reversing the transform steps (translate, rotate, scale in reverse order).
+Despite the `bind_pose_inverses` field name in `SkinnedMesh2d`, this function
+returns forward world-space transforms. The actual inverse operation is applied
+procedurally during skinning by reversing the transform steps (translate, rotate,
+scale in reverse order) in the `inverse_transform` helper.
 
 ## 5. Integration Points
 
@@ -385,7 +388,7 @@ vertices per frame on WASM without issue):
 
 ### 7.1 Unit Tests (Rust, `#[cfg(test)]`)
 
-- `test_compute_bind_pose_inverses` -- verify inverse matches forward transform
+- `test_compute_bind_pose_transforms` -- verify inverse matches forward transform
 - `test_lbs_identity` -- skinning with identity transforms returns bind pose
 - `test_lbs_single_bone` -- single bone rotation moves vertices correctly
 - `test_lbs_two_bone_blend` -- 50/50 weight blend between two bones
