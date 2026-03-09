@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 use super::asset_manager::AssetMetadata;
 use super::audio::AudioBusConfig;
+use super::custom_wgsl::CustomWgslSource;
 use super::environment::EnvironmentSettings;
 use super::history::EntitySnapshot;
 use super::input::InputMap;
@@ -36,6 +37,9 @@ pub struct SceneFile {
     pub entities: Vec<EntitySnapshot>,
     #[serde(default)]
     pub game_ui: Option<String>,
+    /// Scene-global custom WGSL shader source (optional, preserved across save/load).
+    #[serde(default)]
+    pub custom_wgsl_source: Option<CustomWgslSource>,
 }
 
 /// Scene metadata (name, timestamps).
@@ -95,6 +99,7 @@ pub fn build_scene_file(
     audio_buses: &AudioBusConfig,
     entities: Vec<EntitySnapshot>,
     game_ui: Option<String>,
+    custom_wgsl_source: Option<CustomWgslSource>,
 ) -> SceneFile {
     SceneFile {
         format_version: 3,
@@ -118,5 +123,6 @@ pub fn build_scene_file(
         audio_buses: audio_buses.clone(),
         entities,
         game_ui,
+        custom_wgsl_source,
     }
 }
