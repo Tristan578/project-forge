@@ -241,6 +241,21 @@ describe('spriteSlice', () => {
       });
     });
 
+    it('should normalize 2D position [x, y] to [x, y, 0]', () => {
+      store.getState().spawnSprite({
+        name: 'Sprite2D',
+        position: [10, 20],
+      });
+
+      expect(mockDispatch).toHaveBeenCalledWith('spawn_sprite', {
+        name: 'Sprite2D',
+        textureAssetId: undefined,
+        position: [10, 20, 0],
+        sortingLayer: undefined,
+        sortingOrder: undefined,
+      });
+    });
+
     it('should not dispatch when no dispatcher is set', () => {
       setSpriteDispatcher(null as unknown as (command: string, payload: unknown) => void);
       store.getState().spawnSprite({ name: 'Test' });
