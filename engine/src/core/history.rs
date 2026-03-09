@@ -20,6 +20,7 @@ use super::physics::{JointData, PhysicsData};
 use super::physics_2d::{PhysicsJoint2d, Physics2dData};
 use super::scripting::ScriptData;
 use super::shader_effects::ShaderEffectData;
+use super::lod::LodData;
 use super::skeletal_animation2d::SkeletalAnimation2d;
 use super::skeleton2d::SkeletonData2d;
 use super::sprite::SpriteData;
@@ -163,6 +164,9 @@ pub struct EntitySnapshot {
     /// Skeletal animations (if entity has skeletal animations)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skeletal_animations: Option<Vec<SkeletalAnimation2d>>,
+    /// LOD configuration (if entity has LOD data)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lod_data: Option<LodData>,
 }
 
 impl EntitySnapshot {
@@ -210,6 +214,7 @@ impl EntitySnapshot {
             skeleton2d_data: None,
             skeleton2d_enabled: false,
             skeletal_animations: None,
+            lod_data: None,
         }
     }
 }
