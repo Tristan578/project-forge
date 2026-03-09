@@ -31,11 +31,17 @@ cd project-forge && python3 .claude/hooks/github_project_sync.py pull   # GitHub
 cd project-forge && python3 .claude/hooks/github_project_sync.py status # show state
 ```
 
+## Worktree Commit Safety
+
+When working in a git worktree (subagents, feature branches), **commit after every logical chunk of work** (each test file, each feature, each bug fix). Rate limits and crashes can kill agents at any time — uncommitted work is permanently lost. Never accumulate large uncommitted changesets.
+
+The stop hook auto-commits as a safety net via `worktree-safety-commit.sh`, but you MUST commit frequently yourself.
+
 ## Hook Scripts
 
 Run these manually since Antigravity does not auto-execute hooks:
 ```bash
-cd project-forge && bash .claude/hooks/on-session-start.sh   # session start
-cd project-forge && bash .claude/hooks/on-stop.sh             # after completing work
-cd project-forge && bash .claude/hooks/post-edit-lint.sh      # after editing web/ files
+cd project-forge && bash .claude/hooks/on-session-start.sh   # session start (taskboard + GitHub pull)
+cd project-forge && bash .claude/hooks/on-stop.sh             # after work (worktree safety commit + GitHub push)
+cd project-forge && bash .claude/hooks/post-edit-lint.sh      # after editing web/ files (ESLint)
 ```

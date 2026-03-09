@@ -47,3 +47,21 @@ export function startSpan<T>(
   if (!DSN) return callback();
   return Sentry.startSpan(options, callback);
 }
+
+/**
+ * Add a breadcrumb for debugging context.
+ * No-ops when NEXT_PUBLIC_SENTRY_DSN is not configured.
+ */
+export function addBreadcrumb(breadcrumb: Sentry.Breadcrumb): void {
+  if (!DSN) return;
+  Sentry.addBreadcrumb(breadcrumb);
+}
+
+/**
+ * Set a tag on the current scope.
+ * No-ops when NEXT_PUBLIC_SENTRY_DSN is not configured.
+ */
+export function setTag(key: string, value: string): void {
+  if (!DSN) return;
+  Sentry.setTag(key, value);
+}

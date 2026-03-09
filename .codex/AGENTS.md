@@ -107,6 +107,24 @@ Bevy Editor Engine (Rust -> WASM)             <- Scene editing, rendering
 Game Runtime + TypeScript Scripting           <- Playing user-created games
 ```
 
+## Worktree Commit Safety
+
+When working in a git worktree (subagents, feature branches), **commit after every logical chunk of work** (each test file, each feature, each bug fix). Rate limits and crashes can kill agents at any time — uncommitted work is permanently lost. Never accumulate large uncommitted changesets.
+
+After completing work, run `bash .claude/hooks/on-stop.sh` to trigger worktree safety commit and GitHub sync.
+
+## CI/CD Enforcement
+
+**All PRs must pass CI before merge.** Branch protection is enabled on `main`.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
+- Lint (ESLint zero warnings), TypeScript check, Web tests (vitest), MCP tests
+- WASM build (WebGL2 + WebGPU), Next.js production build
+- E2E UI tests (Playwright), Security audit (npm audit + cargo audit)
+- CodeQL analysis (JS/TS, Python, Rust, Actions)
+
+**Never skip CI checks.** If CI fails, fix the code — do not force-merge.
+
 ## Architecture Rules
 
 - **Bridge isolation**: Only `engine/src/bridge/` may import web_sys/js_sys/wasm_bindgen

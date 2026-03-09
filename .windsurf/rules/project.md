@@ -89,6 +89,23 @@ cd web && npx playwright test                   # E2E (requires WASM build)
 ### CSS/Styling
 - Tailwind CSS for all styling. No inline styles or CSS modules.
 
+## MANDATORY: Taskboard-Driven Development
+
+**No code changes without a ticket.** See `AGENTS.md` for full taskboard setup.
+
+Before writing ANY code:
+1. Check the taskboard at http://localhost:3010 (API: http://localhost:3010/api)
+2. Pick an existing ticket OR create a new one with ALL required fields
+3. Move the ticket to `in_progress`
+
+Project ID: `01KJEE8R1XXFF0CZT1WCSTGRDP`
+
+## Worktree Commit Safety
+
+When working in a git worktree (subagents, feature branches), **commit after every logical chunk of work** (each test file, each feature, each bug fix). Rate limits and crashes can kill agents at any time — uncommitted work is permanently lost. Never accumulate large uncommitted changesets.
+
+The stop hook (`.claude/hooks/on-stop.sh`) auto-commits as a safety net via `worktree-safety-commit.sh`, but agents MUST commit frequently themselves.
+
 ## Security Rules
 
 - All user/AI chat input passes through `sanitizeChatInput()`.

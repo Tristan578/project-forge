@@ -55,3 +55,9 @@ The hooks automatically:
 4. Display backlog with prioritized suggestions
 
 **Always review the suggestions and pick work from the board.**
+
+## Worktree Commit Safety
+
+When working in a git worktree (subagents, feature branches), **commit after every logical chunk of work** (each test file, each feature, each bug fix). Rate limits and crashes can kill agents at any time — uncommitted work is permanently lost. Never accumulate large uncommitted changesets.
+
+The stop hook auto-commits as a safety net via `worktree-safety-commit.sh`, but you MUST commit frequently yourself.

@@ -1,21 +1,8 @@
 import * as Sentry from '@sentry/nextjs';
 
+// Sentry is auto-initialized by sentry.server.config.ts (loaded by @sentry/nextjs).
+// This wrapper provides guarded access — no-ops when SENTRY_DSN is not set.
 const DSN = process.env.SENTRY_DSN;
-const IS_PROD = process.env.NODE_ENV === 'production';
-
-let initialized = false;
-
-function ensureInit(): void {
-  if (initialized || !DSN) return;
-  initialized = true;
-
-  Sentry.init({
-    dsn: DSN,
-    environment: process.env.NODE_ENV ?? 'development',
-    release: process.env.VERCEL_GIT_COMMIT_SHA ?? 'local',
-    tracesSampleRate: IS_PROD ? 0.1 : 1.0,
-  });
-}
 
 /**
  * Report an exception to Sentry (server-side).
@@ -26,7 +13,7 @@ export function captureException(
   context?: Record<string, unknown>,
 ): void {
   if (!DSN) return;
-  ensureInit();
+
   Sentry.captureException(error, context ? { extra: context } : undefined);
 }
 
@@ -39,7 +26,7 @@ export function captureMessage(
   level: 'info' | 'warning' | 'error' = 'info',
 ): void {
   if (!DSN) return;
-  ensureInit();
+
   Sentry.captureMessage(message, level);
 }
 
@@ -53,6 +40,6 @@ export function startSpan<T>(
   callback: () => T,
 ): T {
   if (!DSN) return callback();
-  ensureInit();
+
   return Sentry.startSpan(options, callback);
 }

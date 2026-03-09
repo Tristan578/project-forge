@@ -32,6 +32,9 @@ const NUMERIC_PARAMS = new Set([
   'columns',
 ]);
 
+/** Params that are comma-separated hex color lists (e.g. "FF0000","00FF00"). */
+const HEX_COLOR_LIST_PARAMS = new Set(['paletteColors']);
+
 /**
  * Validate that a param value is safe for Lua template substitution.
  * Numeric params are coerced to integers. All other params are escaped.
@@ -45,6 +48,17 @@ function validateParamValue(key: string, value: string): string {
       throw new Error(`Parameter "${key}" must be an integer 0-99999, got: "${value}"`);
     }
     return String(num);
+  }
+
+  // Hex color list params: validate each entry is a strict hex string
+  if (HEX_COLOR_LIST_PARAMS.has(key)) {
+    const colors = value.split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+    for (const color of colors) {
+      if (!/^[0-9a-fA-F]{6,8}$/.test(color)) {
+        throw new Error(`Parameter "${key}" contains invalid hex color: "${color}"`);
+      }
+    }
+    return colors.map(c => `"${c}"`).join(', ');
   }
 
   // Reject values that look like Lua code injection (dot and bracket notation)

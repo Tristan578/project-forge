@@ -2,9 +2,24 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { executeOperation } from '@/lib/bridges/asepriteBridge';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
+import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 
 export const runtime = 'nodejs';
+
+// Cache discovered tool config to avoid spawning a child process on every request
+let cachedTool: { config: BridgeToolConfig; expiresAt: number } | null = null;
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
+async function getCachedTool(): Promise<BridgeToolConfig> {
+  const now = Date.now();
+  if (cachedTool && now < cachedTool.expiresAt) {
+    return cachedTool.config;
+  }
+  const config = await discoverTool('aseprite');
+  cachedTool = { config, expiresAt: now + CACHE_TTL_MS };
+  return config;
+}
 
 export async function POST(req: Request) {
   const auth = await authenticateRequest();
@@ -32,7 +47,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'params must be a plain object' }, { status: 400 });
     }
 
-    const tool = await discoverTool('aseprite');
+    const tool = await getCachedTool();
     if (tool.status !== 'connected') {
       return NextResponse.json(
         { error: `Aseprite not available: ${tool.status}` },
