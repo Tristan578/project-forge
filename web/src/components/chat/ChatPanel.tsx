@@ -6,6 +6,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
 import { SuggestionChips } from './SuggestionChips';
+import { ConversationList } from './ConversationList';
 
 // Static prompts are replaced by dynamic SuggestionChips
 
@@ -35,6 +36,7 @@ export function ChatPanel() {
         <div className="flex items-center gap-1.5">
           <MessageSquare size={14} className="text-purple-400" />
           <span className="text-xs font-medium text-zinc-300">AI Assistant</span>
+          <ConversationList />
           {totalSessionTokens > 0 && (
             <span className="text-[9px] text-zinc-600" title="Session token usage">
               {totalSessionTokens.toLocaleString()} tokens

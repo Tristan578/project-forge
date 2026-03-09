@@ -28,9 +28,19 @@ export type ChatModel = 'claude-sonnet-4-5-20250929' | 'claude-haiku-4-5-2025100
 
 export type RightPanelTab = 'inspector' | 'chat' | 'script' | 'ui';
 
+export interface Conversation {
+  id: string;
+  name: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 const MAX_LOOP_ITERATIONS = 10;
 const PERSISTENCE_KEY = 'forge-chat-';
+const CONVERSATIONS_KEY = 'forge-conversations';
 const MAX_STORED_MESSAGES = 50;
+const MAX_CONVERSATIONS = 20;
 
 interface ChatState {
   messages: ChatMessage[];
@@ -47,6 +57,8 @@ interface ChatState {
   showEntityPicker: boolean;
   entityPickerFilter: string;
   pendingEntityRefs: Record<string, string>; // @DisplayName → entity ID for current input
+  conversations: Conversation[];
+  activeConversationId: string | null;
 
   sendMessage: (text: string, images?: string[], entityRefs?: Record<string, string>) => Promise<void>;
   stopStreaming: () => void;
@@ -67,6 +79,11 @@ interface ChatState {
   setEntityPickerFilter: (filter: string) => void;
   addEntityRef: (displayName: string, entityId: string) => void;
   clearEntityRefs: () => void;
+  createConversation: (name?: string) => string;
+  switchConversation: (conversationId: string) => void;
+  deleteConversation: (conversationId: string) => void;
+  renameConversation: (conversationId: string, name: string) => void;
+  loadConversations: () => void;
 }
 
 let messageCounter = 0;
@@ -265,6 +282,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showEntityPicker: false,
   entityPickerFilter: '',
   pendingEntityRefs: {},
+  conversations: [],
+  activeConversationId: null,
 
   sendMessage: async (text: string, images?: string[], entityRefs?: Record<string, string>) => {
     const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab } = get();
@@ -620,7 +639,140 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ pendingEntityRefs: refs });
   },
   clearEntityRefs: () => set({ pendingEntityRefs: {} }),
+
+  createConversation: (name?: string) => {
+    const { messages, conversations, activeConversationId } = get();
+    const now = Date.now();
+    const id = `conv_${now}_${Math.random().toString(36).slice(2, 8)}`;
+    const newName = name || `Chat ${conversations.length + 1}`;
+
+    // Save current messages to the active conversation before creating new one
+    let updatedConversations = [...conversations];
+    if (activeConversationId) {
+      updatedConversations = updatedConversations.map((c) =>
+        c.id === activeConversationId
+          ? { ...c, messages: messages.slice(-MAX_STORED_MESSAGES), updatedAt: now }
+          : c
+      );
+    } else if (messages.length > 0) {
+      // Auto-create conversation for existing messages
+      const autoId = `conv_${now - 1}_auto`;
+      const autoName = messages[0]?.content?.slice(0, 30) || 'Untitled';
+      updatedConversations.push({
+        id: autoId,
+        name: autoName,
+        messages: messages.slice(-MAX_STORED_MESSAGES),
+        createdAt: now - 1,
+        updatedAt: now - 1,
+      });
+    }
+
+    const newConv: Conversation = {
+      id,
+      name: newName,
+      messages: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Keep within max conversations limit
+    updatedConversations.push(newConv);
+    if (updatedConversations.length > MAX_CONVERSATIONS) {
+      updatedConversations = updatedConversations.slice(-MAX_CONVERSATIONS);
+    }
+
+    set({
+      conversations: updatedConversations,
+      activeConversationId: id,
+      messages: [],
+      error: null,
+      sessionTokens: { input: 0, output: 0 },
+    });
+
+    saveConversationsToStorage(updatedConversations);
+    return id;
+  },
+
+  switchConversation: (conversationId: string) => {
+    const { messages, conversations, activeConversationId } = get();
+    const now = Date.now();
+
+    // Save current conversation first
+    let updatedConversations = conversations.map((c) =>
+      c.id === activeConversationId
+        ? { ...c, messages: messages.slice(-MAX_STORED_MESSAGES), updatedAt: now }
+        : c
+    );
+
+    // Load the target conversation
+    const target = updatedConversations.find((c) => c.id === conversationId);
+    if (!target) return;
+
+    set({
+      conversations: updatedConversations,
+      activeConversationId: conversationId,
+      messages: target.messages,
+      error: null,
+      sessionTokens: { input: 0, output: 0 },
+    });
+
+    saveConversationsToStorage(updatedConversations);
+  },
+
+  deleteConversation: (conversationId: string) => {
+    const { conversations, activeConversationId } = get();
+    const updatedConversations = conversations.filter((c) => c.id !== conversationId);
+
+    // If deleting the active conversation, switch to the latest or clear
+    if (conversationId === activeConversationId) {
+      const latest = updatedConversations[updatedConversations.length - 1];
+      set({
+        conversations: updatedConversations,
+        activeConversationId: latest?.id ?? null,
+        messages: latest?.messages ?? [],
+        error: null,
+      });
+    } else {
+      set({ conversations: updatedConversations });
+    }
+
+    saveConversationsToStorage(updatedConversations);
+  },
+
+  renameConversation: (conversationId: string, name: string) => {
+    const { conversations } = get();
+    const updatedConversations = conversations.map((c) =>
+      c.id === conversationId ? { ...c, name } : c
+    );
+    set({ conversations: updatedConversations });
+    saveConversationsToStorage(updatedConversations);
+  },
+
+  loadConversations: () => {
+    try {
+      const stored = localStorage.getItem(CONVERSATIONS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Conversation[];
+        set({ conversations: parsed });
+      }
+    } catch {
+      // Corrupt data
+    }
+  },
 }));
+
+function saveConversationsToStorage(conversations: Conversation[]) {
+  try {
+    // Store only metadata + limited messages
+    const toStore = conversations.map((c) => ({
+      ...c,
+      messages: c.messages.slice(-MAX_STORED_MESSAGES),
+    }));
+    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(toStore));
+  } catch {
+    // localStorage full or unavailable
+  }
+}
 
 /** Convert ChatMessages to Anthropic API format */
 function buildApiMessages(messages: ChatMessage[]): { role: string; content: unknown }[] {
