@@ -22,7 +22,7 @@ tracing = "0.1"
 base64 = "0.22"
 
 [dependencies.bevy]
-version = "0.18"
+version = "0.18.1"
 default-features = false
 features = [
     "bevy_winit",
