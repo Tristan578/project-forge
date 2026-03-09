@@ -21,6 +21,7 @@ import { useGenerationStore } from '@/stores/generationStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 import { analyzeModelQuality } from '@/lib/generate/modelQuality';
+import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_COUNT = 100; // 5 minutes
@@ -264,13 +265,31 @@ export function useGenerationPolling() {
           metadata: { ...job.metadata, ...ppResult.metadata },
         });
       } else if (type === 'music') {
-        // Download audio and import
+        // Download audio and import with looping enabled
         if (!data.resultUrl) throw new Error('No result URL');
 
         const blob = await downloadBinary(data.resultUrl);
         const base64 = await blobToBase64(blob);
 
-        useEditorStore.getState().importAudio(base64, `Music_${job.prompt.slice(0, 20)}`);
+        const assetName = (ppResult.metadata.assetName as string) ?? `Music_${job.prompt.slice(0, 20)}`;
+        const store = useEditorStore.getState();
+        store.importAudio(base64, assetName);
+
+        // Attach looping music audio to target entity
+        if (job.entityId) {
+          store.setAudio(job.entityId, {
+            assetId: assetName,
+            volume: 0.7,
+            pitch: 1.0,
+            loopAudio: true,
+            spatial: false,
+            maxDistance: 100,
+            refDistance: 1,
+            rolloffFactor: 1,
+            autoplay: true,
+            bus: 'music',
+          });
+        }
 
         updateJob(id, {
           status: 'completed',
@@ -296,7 +315,50 @@ export function useGenerationPolling() {
           resultUrl: data.resultUrl,
           metadata: { ...job.metadata, ...ppResult.metadata },
         });
-      } else if (type === 'sprite' || type === 'sprite_sheet' || type === 'tileset') {
+      } else if (type === 'sprite_sheet') {
+        // Download sprite sheet, slice into frames, and set sprite sheet data
+        if (!data.resultUrl) throw new Error('No result URL');
+
+        const blob = await downloadBinary(data.resultUrl);
+        const base64 = await blobToBase64(blob);
+
+        const assetName = (ppResult.metadata.assetName as string) ?? `SpriteSheet_${job.prompt.slice(0, 20)}`;
+        const entityId = job.entityId;
+
+        if (entityId) {
+          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
+        }
+
+        // Slice the sprite sheet into individual frames
+        const imgDims = await getImageDimensions(blob);
+        const grid = detectGridDimensions(imgDims.width, imgDims.height);
+        const frames = sliceSheet(imgDims.width, imgDims.height, grid.rows, grid.columns);
+        const sheetData = buildSpriteSheetData(
+          assetName,
+          { image: null as unknown as HTMLImageElement, width: imgDims.width, height: imgDims.height, grid, frames },
+          assetName,
+        );
+
+        if (entityId) {
+          useEditorStore.getState().setSpriteSheet(entityId, sheetData);
+        }
+
+        updateJob(id, {
+          status: 'completed',
+          resultUrl: data.resultUrl,
+          metadata: {
+            ...job.metadata,
+            ...ppResult.metadata,
+            spriteSheet: {
+              columns: grid.columns,
+              rows: grid.rows,
+              frameWidth: grid.frameWidth,
+              frameHeight: grid.frameHeight,
+              frameCount: frames.length,
+            },
+          },
+        });
+      } else if (type === 'sprite' || type === 'tileset') {
         // Download image and apply as texture to target entity (or store as asset)
         if (!data.resultUrl) throw new Error('No result URL');
 
@@ -355,6 +417,22 @@ export function useGenerationPolling() {
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
+    });
+  }
+
+  async function getImageDimensions(blob: Blob): Promise<{ width: number; height: number }> {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Failed to decode sprite sheet image for slicing'));
+      };
+      img.src = url;
     });
   }
 }

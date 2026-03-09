@@ -92,6 +92,9 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
         provider: data.provider,
         createdAt: Date.now(),
         usageId: data.usageId,
+        metadata: activeTab === 'sheet'
+          ? { frameCount, frameSize: size.split('x')[0] }
+          : undefined,
       });
 
       // Job started successfully
