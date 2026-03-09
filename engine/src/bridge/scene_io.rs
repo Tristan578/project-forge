@@ -16,7 +16,7 @@ use crate::core::{
     lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
-    pending_commands::{EntityType, PendingCommands},
+    pending_commands::{EntityType, GenerateLodsRequest, PendingCommands},
     physics::{JointData, PhysicsData, PhysicsEnabled},
     post_processing::PostProcessingSettings,
     procedural_mesh::ProceduralMeshData,
@@ -271,6 +271,19 @@ pub(super) fn apply_scene_load(
                     snap.entity_id,
                     parent_id,
                 );
+            }
+        }
+    }
+
+    // 8b. Regenerate LOD meshes for entities that had LodData
+    // LodMeshes holds Handle<Mesh> which cannot be serialized, so we
+    // regenerate simplified meshes after loading by queueing generate_lods requests.
+    for snap in &scene_file.entities {
+        if let Some(ref ld) = snap.lod_data {
+            if ld.auto_generate {
+                pending.queue_generate_lods(GenerateLodsRequest {
+                    entity_id: snap.entity_id.clone(),
+                });
             }
         }
     }

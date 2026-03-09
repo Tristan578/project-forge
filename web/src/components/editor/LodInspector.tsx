@@ -11,7 +11,9 @@ interface LodConfig {
 export function LodInspector() {
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const sceneGraph = useEditorStore((state) => state.sceneGraph);
-  const lodLevels = usePerformanceStore((state) => state.lodLevels);
+
+  const primaryId = Array.from(selectedIds)[0];
+  const currentLod = usePerformanceStore((state) => primaryId ? (state.lodLevels[primaryId] ?? 0) : 0);
 
   const [lodConfig, setLodConfig] = useState<LodConfig>({
     lodDistances: [20, 50, 100],
@@ -20,9 +22,7 @@ export function LodInspector() {
   });
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
 
-  const primaryId = Array.from(selectedIds)[0];
   const entity = primaryId ? sceneGraph.nodes[primaryId] : null;
-  const currentLod = primaryId ? (lodLevels[primaryId] ?? 0) : 0;
 
   const dispatchToEngine = useCallback((command: string, payload: unknown) => {
     const dispatch = getCommandDispatcher();

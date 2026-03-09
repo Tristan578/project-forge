@@ -51,7 +51,7 @@ impl Quadric {
     }
 
     /// Try to find the optimal collapse point by solving the linear system.
-    /// Returns None if the matrix is singular.
+    /// Falls back to the midpoint of v1 and v2 if the matrix is singular.
     fn optimal_point(&self, v1: [f32; 3], v2: [f32; 3]) -> [f32; 3] {
         let q = &self.0;
         // Try to solve the 3x3 system (top-left of Q with last column as RHS)
@@ -113,7 +113,14 @@ impl PartialOrd for EdgeCollapse {
 
 impl Ord for EdgeCollapse {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.cost.partial_cmp(&other.cost).unwrap_or(std::cmp::Ordering::Equal)
+        // Treat NaN costs as greater than any finite value so they sink
+        // to the bottom of the min-heap and are never collapsed first.
+        match (self.cost.is_nan(), other.cost.is_nan()) {
+            (true, true) => std::cmp::Ordering::Equal,
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            (false, false) => self.cost.partial_cmp(&other.cost).unwrap_or(std::cmp::Ordering::Equal),
+        }
     }
 }
 
@@ -165,7 +172,7 @@ pub fn simplify_mesh(mesh: &Mesh, target_ratio: f32) -> Mesh {
     result.insert_attribute(Mesh::ATTRIBUTE_POSITION, new_positions.clone());
 
     // Recompute flat normals for the simplified mesh
-    let normals = compute_flat_normals(&new_positions, &new_indices);
+    let normals = compute_smooth_normals(&new_positions, &new_indices);
     result.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
 
     // Generate trivial UVs (planar projection) for simplified mesh
@@ -399,8 +406,8 @@ fn resolve(remap: &[usize], mut v: usize) -> usize {
     v
 }
 
-/// Compute flat (per-vertex averaged from adjacent faces) normals.
-fn compute_flat_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
+/// Compute smooth per-vertex normals by averaging adjacent face normals.
+fn compute_smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![[0.0f32; 3]; positions.len()];
 
     let tri_count = indices.len() / 3;

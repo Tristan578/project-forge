@@ -3,12 +3,16 @@
 use bevy::prelude::*;
 use bevy::mesh::Mesh;
 use crate::core::{
+    camera::EditorCamera,
     entity_id::EntityId,
     lod::{LodData, LodMeshes, PerformanceBudget, PerformanceMetrics},
     mesh_simplify,
     pending::PendingCommands,
 };
 use crate::bridge::events;
+
+/// Number of frames between expensive metrics collection passes.
+const METRICS_COLLECTION_INTERVAL: u32 = 10;
 
 /// System that processes pending LOD commands including mesh generation.
 #[cfg(not(feature = "runtime"))]
@@ -160,11 +164,13 @@ pub fn apply_performance_budget_commands(
 }
 
 /// Runtime system: update LOD levels based on camera distance and swap meshes.
+/// Uses the editor camera specifically to avoid ambiguity when multiple cameras
+/// exist during play mode.
 pub(super) fn update_lod_levels(
-    camera_query: Query<&Transform, With<Camera>>,
+    camera_query: Query<&Transform, With<EditorCamera>>,
     mut lod_query: Query<(&EntityId, &Transform, &mut LodData, Option<&LodMeshes>, Option<&mut Mesh3d>)>,
 ) {
-    // Use the first camera found
+    // Use the editor camera for LOD distance calculations
     let Ok(camera_transform) = camera_query.single() else {
         return;
     };
@@ -204,7 +210,7 @@ pub(super) fn collect_performance_metrics(
     time: Res<Time>,
     mut metrics: ResMut<PerformanceMetrics>,
     entity_query: Query<&EntityId>,
-    visible_mesh_query: Query<(&Mesh3d, &Visibility)>,
+    visible_mesh_query: Query<(&Mesh3d, &ViewVisibility)>,
     mesh_assets: Res<Assets<Mesh>>,
 ) {
     // Always update FPS (cheap)
@@ -214,8 +220,8 @@ pub(super) fn collect_performance_metrics(
 
     metrics.frame_counter += 1;
 
-    // Expensive stats every 10 frames
-    if metrics.frame_counter % 10 != 0 {
+    // Expensive stats every N frames
+    if metrics.frame_counter % METRICS_COLLECTION_INTERVAL != 0 {
         return;
     }
 
@@ -225,8 +231,8 @@ pub(super) fn collect_performance_metrics(
     let mut total_triangles: u32 = 0;
     let mut draw_calls: u32 = 0;
 
-    for (mesh3d, visibility) in visible_mesh_query.iter() {
-        if *visibility == Visibility::Hidden {
+    for (mesh3d, view_visibility) in visible_mesh_query.iter() {
+        if !view_visibility.get() {
             continue;
         }
         draw_calls += 1;
