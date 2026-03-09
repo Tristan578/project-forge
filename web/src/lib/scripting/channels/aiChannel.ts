@@ -41,7 +41,6 @@ export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
     const { jobId } = submitResult;
     reportProgress(10, 'Processing...');
 
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const status = await deps.fetchJson(`/api/generate/status/${jobId}`) as {
         status: string;
