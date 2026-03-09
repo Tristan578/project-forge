@@ -1,5 +1,9 @@
 // web/src/lib/generate/__tests__/pixelArtClient.test.ts
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+// Mock server-only before importing the module
+vi.mock('server-only', () => ({}));
+
 import { PixelArtClient, buildPixelArtPrompt } from '../pixelArtClient';
 
 describe('pixelArtClient', () => {

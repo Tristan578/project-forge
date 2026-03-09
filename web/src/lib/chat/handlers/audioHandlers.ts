@@ -66,7 +66,7 @@ export const audioHandlers: Record<string, ToolHandler> = {
     try {
       const p = parseArgs(z.object({
         segment: z.string().min(1),
-        crossfadeDurationMs: z.number().positive().optional(),
+        crossfadeDurationMs: z.number().nonnegative().optional(),
       }), args);
       if (p.error) return p.error;
 
@@ -83,25 +83,13 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
   create_audio_snapshot: async (args, ctx): Promise<ExecutionResult> => {
     try {
-      const p = parseArgs(z.object({ name: z.string().min(1) }), args);
+      const p = parseArgs(z.object({
+        name: z.string().min(1),
+        crossfadeDurationMs: z.number().nonnegative().optional(),
+      }), args);
       if (p.error) return p.error;
 
-      // Capture current audio state
-      const snapshot = {
-        name: p.data.name,
-        buses: ctx.store.audioBuses.map(bus => ({
-          name: bus.name,
-          volume: audioManager.getBusVolume(bus.name),
-          muted: audioManager.isBusMuted(bus.name),
-          effects: bus.effects,
-        })),
-        timestamp: Date.now(),
-      };
-
-      // Store in local storage (or could be in zustand)
-      const snapshots = JSON.parse(localStorage.getItem('audioSnapshots') || '[]');
-      snapshots.push(snapshot);
-      localStorage.setItem('audioSnapshots', JSON.stringify(snapshots));
+      ctx.store.saveAudioSnapshot(p.data.name, p.data.crossfadeDurationMs);
 
       return {
         success: true,
@@ -119,14 +107,11 @@ export const audioHandlers: Record<string, ToolHandler> = {
     try {
       const p = parseArgs(z.object({
         name: z.string().min(1),
-        crossfadeDurationMs: z.number().positive().optional(),
+        crossfadeDurationMs: z.number().nonnegative().optional(),
       }), args);
       if (p.error) return p.error;
 
-      // Load snapshot
-      const snapshots = JSON.parse(localStorage.getItem('audioSnapshots') || '[]');
-      const snapshot = snapshots.find((s: { name: string }) => s.name === p.data.name);
-
+      const snapshot = audioManager.getSnapshot(p.data.name);
       if (!snapshot) {
         return {
           success: false,
@@ -134,24 +119,9 @@ export const audioHandlers: Record<string, ToolHandler> = {
         };
       }
 
-      const duration = p.data.crossfadeDurationMs ?? 1000;
-      const durationSec = duration / 1000;
+      ctx.store.loadAudioSnapshot(p.data.name, p.data.crossfadeDurationMs);
 
-      // Apply bus volumes with crossfade
-      for (const bus of snapshot.buses) {
-        // Animate volume change
-        setTimeout(() => {
-          audioManager.setBusVolume(bus.name, bus.volume);
-          audioManager.muteBus(bus.name, bus.muted);
-        }, durationSec);
-
-        // Update store
-        ctx.store.updateAudioBus(bus.name, { volume: bus.volume, muted: bus.muted });
-        if (bus.effects) {
-          ctx.store.setBusEffects(bus.name, bus.effects);
-        }
-      }
-
+      const duration = p.data.crossfadeDurationMs ?? snapshot.crossfadeDurationMs;
       return {
         success: true,
         result: `Applied audio snapshot: ${p.data.name} (${duration}ms crossfade)`,

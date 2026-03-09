@@ -61,6 +61,20 @@ interface AdaptiveMusicTrack {
   bus: string;
 }
 
+export interface AudioSnapshot {
+  name: string;
+  busStates: Record<string, { volume: number; muted: boolean }>;
+  crossfadeDurationMs: number;
+}
+
+export interface LoopPoint {
+  startSample: number;
+  endSample: number;
+  startTime: number;
+  endTime: number;
+  score: number;
+}
+
 class AudioManager {
   private ctx: AudioContext | null = null;
   private instances: Map<string, AudioInstance> = new Map();
@@ -73,7 +87,9 @@ class AudioManager {
   private activeDuckTriggers: Map<string, number> = new Map();
   private occlusionEnabled: Set<string> = new Set();
   private occlusionFilters: Map<string, BiquadFilterNode> = new Map();
+  // Note: Reverb-based occlusion is not yet implemented. Only lowpass filter + Q modulation is active.
   private adaptiveTracks: Map<string, AdaptiveMusicTrack> = new Map();
+  private snapshots: Map<string, AudioSnapshot> = new Map();
 
   /**
    * Lazily initialize AudioContext (handles browser autoplay policy).
@@ -1407,6 +1423,238 @@ class AudioManager {
    */
   isOcclusionEnabled(entityId: string): boolean {
     return this.occlusionEnabled.has(entityId);
+  }
+
+  /**
+   * Update occlusion with a graduated amount (0.0 = clear, 1.0 = fully occluded).
+   * Adjusts lowpass frequency and Q value for realistic wall transmission.
+   */
+  updateOcclusionAmount(entityId: string, amount: number): void {
+    if (!this.occlusionEnabled.has(entityId)) return;
+
+    const filter = this.occlusionFilters.get(entityId);
+    if (!filter || !this.ctx) return;
+
+    const clamped = Math.max(0, Math.min(1, amount));
+    const now = this.ctx.currentTime;
+
+    // Frequency: 5000 Hz (clear) to 200 Hz (fully occluded) — exponential interpolation
+    const targetFreq = 5000 * Math.pow(200 / 5000, clamped);
+    filter.frequency.cancelScheduledValues(now);
+    filter.frequency.setValueAtTime(filter.frequency.value, now);
+    filter.frequency.linearRampToValueAtTime(targetFreq, now + 0.05);
+
+    // Q: 1.0 (clear) to 4.0 (fully occluded) — resonant muffling
+    const targetQ = 1.0 + 3.0 * clamped;
+    filter.Q.value = targetQ;
+
+  }
+
+  // --- Audio Snapshots ---
+
+  /**
+   * Save a snapshot of current bus states.
+   * Calls ensureContext() so buses are initialized even if no audio has played yet.
+   */
+  saveSnapshot(name: string, crossfadeDurationMs: number = 1000): AudioSnapshot {
+    this.ensureContext();
+    const busStates: Record<string, { volume: number; muted: boolean }> = {};
+    for (const [busName, bus] of this.buses) {
+      busStates[busName] = { volume: bus.volume, muted: bus.muted };
+    }
+    const snapshot: AudioSnapshot = { name, busStates, crossfadeDurationMs };
+    this.snapshots.set(name, snapshot);
+    return snapshot;
+  }
+
+  /**
+   * Load a snapshot, crossfading bus states over the specified duration.
+   * Calls ensureContext() so buses are initialized even if no audio has played yet.
+   */
+  loadSnapshot(name: string, durationMs?: number): boolean {
+    const snapshot = this.snapshots.get(name);
+    if (!snapshot) return false;
+
+    const ctx = this.ensureContext();
+
+    const duration = (durationMs ?? snapshot.crossfadeDurationMs) / 1000;
+    const now = ctx.currentTime;
+
+    // First, update stored state for all buses in the snapshot
+    for (const [busName, targetState] of Object.entries(snapshot.busStates)) {
+      const bus = this.buses.get(busName);
+      if (!bus) continue;
+      bus.volume = targetState.volume;
+      bus.muted = targetState.muted;
+    }
+
+    // Compute effective mute state respecting active solo rules
+    const anySoloed = Array.from(this.buses.values()).some(
+      (b) => b.name !== 'master' && b.soloed
+    );
+    for (const bus of this.buses.values()) {
+      if (bus.name === 'master') {
+        bus.effectiveMuted = bus.muted;
+      } else {
+        bus.effectiveMuted = bus.muted || (anySoloed && !bus.soloed);
+      }
+    }
+
+    // Now ramp gains using effective mute state (respects solo rules)
+    for (const [busName, targetState] of Object.entries(snapshot.busStates)) {
+      const bus = this.buses.get(busName);
+      if (!bus) continue;
+
+      const targetGain = bus.effectiveMuted ? 0 : targetState.volume;
+      bus.gainNode.gain.cancelScheduledValues(now);
+      bus.gainNode.gain.setValueAtTime(bus.gainNode.gain.value, now);
+      bus.gainNode.gain.linearRampToValueAtTime(targetGain, now + duration);
+    }
+
+    return true;
+  }
+
+  /**
+   * Delete a snapshot by name.
+   */
+  deleteSnapshot(name: string): boolean {
+    return this.snapshots.delete(name);
+  }
+
+  /**
+   * Get a snapshot by name.
+   */
+  getSnapshot(name: string): AudioSnapshot | undefined {
+    return this.snapshots.get(name);
+  }
+
+  /**
+   * List all snapshot names.
+   */
+  listSnapshots(): string[] {
+    return Array.from(this.snapshots.keys());
+  }
+
+  // --- Loop Point Detection ---
+
+  /**
+   * Analyze an audio buffer to find optimal loop points.
+   * Uses zero-crossing analysis to find points where the waveform crosses zero,
+   * then scores candidates based on waveform similarity at start/end points.
+   */
+  detectLoopPoints(assetId: string, options?: {
+    maxResults?: number;
+    minLoopDuration?: number;
+  }): LoopPoint[] {
+    const buffer = this.buffers.get(assetId);
+    if (!buffer) return [];
+
+    const maxResults = options?.maxResults ?? 5;
+    const minLoopDurationSec = options?.minLoopDuration ?? 0.5;
+    const sampleRate = buffer.sampleRate;
+    const minLoopSamples = Math.floor(minLoopDurationSec * sampleRate);
+    const data = buffer.getChannelData(0); // Analyze first channel
+    const totalSamples = data.length;
+
+    if (totalSamples < minLoopSamples) {
+      // Buffer too short; return full-length loop
+      return [{
+        startSample: 0,
+        endSample: totalSamples - 1,
+        startTime: 0,
+        endTime: (totalSamples - 1) / sampleRate,
+        score: 0.5,
+      }];
+    }
+
+    // Find zero crossings (where sign changes)
+    const zeroCrossings: number[] = [];
+    for (let i = 1; i < totalSamples; i++) {
+      if ((data[i - 1] >= 0 && data[i] < 0) || (data[i - 1] < 0 && data[i] >= 0)) {
+        zeroCrossings.push(i);
+      }
+    }
+
+    // If no zero crossings found (e.g., silent buffer), return full loop
+    if (zeroCrossings.length < 2) {
+      return [{
+        startSample: 0,
+        endSample: totalSamples - 1,
+        startTime: 0,
+        endTime: (totalSamples - 1) / sampleRate,
+        score: 0.5,
+      }];
+    }
+
+    // Score candidate loop points: compare waveform at start and end regions
+    const candidates: LoopPoint[] = [];
+    const windowSize = Math.min(256, Math.floor(totalSamples / 10));
+
+    // Take early zero crossings as potential start points
+    const startCandidates = zeroCrossings.filter(z => z < totalSamples / 3).slice(0, 10);
+    // Take late zero crossings as potential end points
+    const endCandidates = zeroCrossings.filter(z => z > totalSamples * 2 / 3).slice(-10);
+
+    for (const startSample of startCandidates) {
+      for (const endSample of endCandidates) {
+        if (endSample - startSample < minLoopSamples) continue;
+
+        // Score by waveform similarity at boundaries
+        const score = this.scoreLoopPoint(data, startSample, endSample, windowSize);
+        candidates.push({
+          startSample,
+          endSample,
+          startTime: startSample / sampleRate,
+          endTime: endSample / sampleRate,
+          score,
+        });
+      }
+    }
+
+    // Fallback: if no valid candidates found (short buffers where all pairs < minLoopSamples),
+    // return a full-length loop rather than an empty array
+    if (candidates.length === 0) {
+      return [{
+        startSample: 0,
+        endSample: totalSamples - 1,
+        startTime: 0,
+        endTime: (totalSamples - 1) / sampleRate,
+        score: 0.3,
+      }];
+    }
+
+    // Sort by score (highest first) and return top N
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates.slice(0, maxResults);
+  }
+
+  /**
+   * Score a loop point by comparing waveform similarity at the boundary.
+   * Returns 0-1 where 1 = perfect match.
+   */
+  private scoreLoopPoint(
+    data: Float32Array,
+    startSample: number,
+    endSample: number,
+    windowSize: number
+  ): number {
+    let sumDiff = 0;
+    let sumEnergy = 0;
+    const safeWindow = Math.min(windowSize, endSample - startSample);
+
+    for (let i = 0; i < safeWindow; i++) {
+      const startIdx = startSample + i;
+      const endIdx = endSample - safeWindow + i;
+      if (startIdx >= data.length || endIdx >= data.length) break;
+
+      const diff = data[startIdx] - data[endIdx];
+      sumDiff += diff * diff;
+      sumEnergy += data[startIdx] * data[startIdx] + data[endIdx] * data[endIdx];
+    }
+
+    if (sumEnergy < 1e-10) return 1.0; // Silent — perfect match
+    // Normalized cross-correlation-like score
+    return Math.max(0, 1.0 - (sumDiff / (sumEnergy + 1e-10)));
   }
 }
 

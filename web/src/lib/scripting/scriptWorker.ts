@@ -500,6 +500,16 @@ function buildForgeApi(scriptEntityId: string) {
       loadStems: (stems: Record<string, string>) => {
         pendingCommands.push({ cmd: 'set_music_stems', stems });
       },
+      saveSnapshot: (name: string, crossfadeDurationMs?: number) => {
+        pendingCommands.push({ cmd: 'audio_save_snapshot', name, crossfadeDurationMs: crossfadeDurationMs ?? 1000 });
+      },
+      loadSnapshot: (name: string, durationMs?: number) => {
+        pendingCommands.push({ cmd: 'audio_load_snapshot', name, ...(durationMs !== undefined && { durationMs }) });
+      },
+      detectLoopPoints: (assetId: string) => {
+        pendingCommands.push({ cmd: 'audio_detect_loop_points', assetId });
+        return []; // Results returned async via main thread
+      },
     },
 
     // --- UI/HUD system ---
