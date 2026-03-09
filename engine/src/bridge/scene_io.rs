@@ -16,7 +16,7 @@ use crate::core::{
     lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
-    pending_commands::{EntityType, GenerateLodsRequest, PendingCommands},
+    pending_commands::{EntityType, PendingCommands},
     physics::{JointData, PhysicsData, PhysicsEnabled},
     post_processing::PostProcessingSettings,
     procedural_mesh::ProceduralMeshData,
@@ -275,18 +275,13 @@ pub(super) fn apply_scene_load(
         }
     }
 
-    // 8b. Regenerate LOD meshes for entities that had LodData
-    // LodMeshes holds Handle<Mesh> which cannot be serialized, so we
-    // regenerate simplified meshes after loading by queueing generate_lods requests.
-    for snap in &scene_file.entities {
-        if let Some(ref ld) = snap.lod_data {
-            if ld.auto_generate {
-                pending.queue_generate_lods(GenerateLodsRequest {
-                    entity_id: snap.entity_id.clone(),
-                });
-            }
-        }
-    }
+    // 8b. LOD mesh regeneration is handled automatically by
+    // `regenerate_missing_lod_meshes` which runs every frame and detects
+    // entities with LodData(auto_generate=true) but no LodMeshes component.
+    // Previously we queued explicit GenerateLodsRequest entries here, but that
+    // caused duplicate QEM generation: apply_lod_commands inserts LodMeshes via
+    // deferred commands (not flushed until end of frame), so the regenerate
+    // system's Without<LodMeshes> filter still matched in the same frame.
 
     // 9. Update scene name
     scene_name.0 = scene_file.metadata.name.clone();
