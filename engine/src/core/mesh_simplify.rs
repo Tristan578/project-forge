@@ -99,7 +99,8 @@ struct EdgeCollapse {
 
 impl PartialEq for EdgeCollapse {
     fn eq(&self, other: &Self) -> bool {
-        self.cost == other.cost
+        // Match Ord's NaN handling: two NaN costs are considered equal
+        self.cmp(other) == std::cmp::Ordering::Equal
     }
 }
 
@@ -236,12 +237,28 @@ fn qem_simplify(
     let mut heap: BinaryHeap<Reverse<EdgeCollapse>> = BinaryHeap::new();
     let mut seen_edges = std::collections::HashSet::new();
 
+    // Make a mutable copy of indices as triangles
+    let mut triangles: Vec<[usize; 3]> = (0..tri_count_initial)
+        .map(|t| {
+            [
+                indices[t * 3] as usize,
+                indices[t * 3 + 1] as usize,
+                indices[t * 3 + 2] as usize,
+            ]
+        })
+        .collect();
+
+    // Build per-vertex adjacency lists: vertex -> set of triangle indices
+    // This avoids O(T) scans per collapse, giving O(degree) per collapse instead.
+    let mut vertex_tris: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (ti, tri) in triangles.iter().enumerate() {
+        for &vi in tri.iter() {
+            vertex_tris[vi].push(ti);
+        }
+    }
+
     for t in 0..tri_count_initial {
-        let tri_verts = [
-            indices[t * 3] as usize,
-            indices[t * 3 + 1] as usize,
-            indices[t * 3 + 2] as usize,
-        ];
+        let tri_verts = triangles[t];
         for edge_idx in 0..3 {
             let mut v1 = tri_verts[edge_idx];
             let mut v2 = tri_verts[(edge_idx + 1) % 3];
@@ -263,17 +280,6 @@ fn qem_simplify(
         }
     }
 
-    // Make a mutable copy of indices as triangles
-    let mut triangles: Vec<[usize; 3]> = (0..tri_count_initial)
-        .map(|t| {
-            [
-                indices[t * 3] as usize,
-                indices[t * 3 + 1] as usize,
-                indices[t * 3 + 2] as usize,
-            ]
-        })
-        .collect();
-
     let mut current_tri_count = tri_count_initial;
     let mut removed = vec![false; tri_count_initial];
 
@@ -284,9 +290,9 @@ fn qem_simplify(
             None => break,
         };
 
-        // Resolve actual vertices (follow remap chain)
-        let actual_v1 = resolve(&remap, collapse.v1);
-        let actual_v2 = resolve(&remap, collapse.v2);
+        // Resolve actual vertices (follow remap chain with path compression)
+        let actual_v1 = resolve(&mut remap, collapse.v1);
+        let actual_v2 = resolve(&mut remap, collapse.v2);
 
         // Skip if already collapsed to the same vertex
         if actual_v1 == actual_v2 {
@@ -298,45 +304,71 @@ fn qem_simplify(
         remap[actual_v2] = actual_v1;
         quadrics[actual_v1] = quadrics[actual_v1].add(&quadrics[actual_v2]);
 
-        // Update triangles: remap v2 -> v1 and remove degenerate
+        // Collect triangle indices adjacent to both vertices for update.
+        // We merge v2's adjacency into v1's.
+        let v2_adj = std::mem::take(&mut vertex_tris[actual_v2]);
+
+        // Update triangles adjacent to v2: remap and check degeneracy
         let mut tris_removed = 0;
-        for (ti, tri) in triangles.iter_mut().enumerate() {
+        for &ti in &v2_adj {
             if removed[ti] {
                 continue;
             }
+            let tri = &mut triangles[ti];
             for v in tri.iter_mut() {
-                if resolve(&remap, *v) == actual_v2 {
-                    *v = actual_v1;
-                }
-                *v = resolve(&remap, *v);
+                *v = resolve(&mut remap, *v);
             }
 
             // Check degenerate (two or more same vertices)
             if tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2] {
                 removed[ti] = true;
                 tris_removed += 1;
+            } else {
+                // This triangle survived — ensure v1 has it in adjacency
+                vertex_tris[actual_v1].push(ti);
             }
         }
 
+        // Also update triangles adjacent to v1 (they may reference stale vertices)
+        let v1_adj_len = vertex_tris[actual_v1].len();
+        let mut i = 0;
+        while i < vertex_tris[actual_v1].len().min(v1_adj_len) {
+            let ti = vertex_tris[actual_v1][i];
+            if removed[ti] {
+                i += 1;
+                continue;
+            }
+            let tri = &mut triangles[ti];
+            for v in tri.iter_mut() {
+                *v = resolve(&mut remap, *v);
+            }
+            if tri[0] == tri[1] || tri[1] == tri[2] || tri[0] == tri[2] {
+                removed[ti] = true;
+                tris_removed += 1;
+            }
+            i += 1;
+        }
+
+        // Deduplicate v1's adjacency list (remove duplicates and removed triangles)
+        vertex_tris[actual_v1].sort_unstable();
+        vertex_tris[actual_v1].dedup();
+        vertex_tris[actual_v1].retain(|&ti| !removed[ti]);
+
         current_tri_count = current_tri_count.saturating_sub(tris_removed);
 
-        // Re-add edges adjacent to v1 with new costs
+        // Re-add edges adjacent to v1 with new costs (using adjacency list)
         let v1 = actual_v1;
         let mut new_neighbors = std::collections::HashSet::new();
-        for (ti, tri) in triangles.iter().enumerate() {
+        for &ti in &vertex_tris[v1] {
             if removed[ti] {
                 continue;
             }
+            let tri = triangles[ti];
             for &tv in tri.iter() {
-                let rv = resolve(&remap, tv);
-                if rv == v1 {
-                    for &tv2 in tri.iter() {
-                        let rv2 = resolve(&remap, tv2);
-                        if rv2 != v1 {
-                            let key = if v1 < rv2 { (v1, rv2) } else { (rv2, v1) };
-                            new_neighbors.insert(key);
-                        }
-                    }
+                let rv = resolve(&mut remap, tv);
+                if rv != v1 {
+                    let key = if v1 < rv { (v1, rv) } else { (rv, v1) };
+                    new_neighbors.insert(key);
                 }
             }
         }
@@ -362,9 +394,9 @@ fn qem_simplify(
         if removed[ti] {
             continue;
         }
-        let rv0 = resolve(&remap, tri[0]);
-        let rv1 = resolve(&remap, tri[1]);
-        let rv2 = resolve(&remap, tri[2]);
+        let rv0 = resolve(&mut remap, tri[0]);
+        let rv1 = resolve(&mut remap, tri[1]);
+        let rv2 = resolve(&mut remap, tri[2]);
         if rv0 == rv1 || rv1 == rv2 || rv0 == rv2 {
             continue;
         }
@@ -398,12 +430,22 @@ fn qem_simplify(
     (new_positions, new_indices)
 }
 
-/// Follow the remap chain to find the canonical vertex.
-fn resolve(remap: &[usize], mut v: usize) -> usize {
-    while remap[v] != v {
-        v = remap[v];
+/// Follow the remap chain to find the canonical vertex, with path compression.
+/// Each intermediate node is updated to point directly to the root, so future
+/// lookups on the same chain are O(1).
+fn resolve(remap: &mut [usize], mut v: usize) -> usize {
+    // First pass: find the root
+    let mut root = v;
+    while remap[root] != root {
+        root = remap[root];
     }
-    v
+    // Second pass: compress path — point every node on the chain directly to root
+    while remap[v] != root {
+        let next = remap[v];
+        remap[v] = root;
+        v = next;
+    }
+    root
 }
 
 /// Compute smooth per-vertex normals by averaging adjacent face normals.
