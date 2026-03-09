@@ -8212,7 +8212,7 @@
     },
     {
       "name": "create_sprite",
-      "description": "Create a new 2D sprite entity with optional texture",
+      "description": "Create a new 2D sprite entity with optional texture, sorting layer, and position",
       "category": "sprite",
       "parameters": {
         "type": "object",
@@ -8222,9 +8222,9 @@
             "items": {
               "type": "number"
             },
-            "minItems": 3,
+            "minItems": 2,
             "maxItems": 3,
-            "description": "[x, y, z] position"
+            "description": "[x, y] or [x, y, z] position"
           },
           "texture_asset_id": {
             "type": "string",
@@ -8233,6 +8233,15 @@
           "name": {
             "type": "string",
             "description": "Entity name"
+          },
+          "sorting_layer": {
+            "type": "string",
+            "enum": ["Background", "Default", "Foreground", "UI"],
+            "description": "Sorting layer for draw order"
+          },
+          "sorting_order": {
+            "type": "integer",
+            "description": "Order within sorting layer (higher = drawn on top)"
           }
         },
         "required": []

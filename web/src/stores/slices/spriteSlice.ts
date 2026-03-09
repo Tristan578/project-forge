@@ -40,6 +40,7 @@ export interface SpriteSlice {
   setTilemapData: (entityId: string, data: TilemapData) => void;
   removeTilemapData: (entityId: string) => void;
   setActiveTileset: (assetId: string | null) => void;
+  spawnSprite: (opts?: { name?: string; textureAssetId?: string; position?: [number, number, number]; sortingLayer?: string; sortingOrder?: number }) => void;
   setTilemapActiveTool: (tool: 'paint' | 'erase' | 'fill' | 'rectangle' | 'picker' | null) => void;
   setTilemapActiveLayerIndex: (index: number | null) => void;
 }
@@ -161,6 +162,17 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
       return { tilemaps: rest };
     });
     if (dispatchCommand) dispatchCommand('remove_tilemap_data', { entityId });
+  },
+  spawnSprite: (opts) => {
+    if (dispatchCommand) {
+      dispatchCommand('spawn_sprite', {
+        name: opts?.name,
+        textureAssetId: opts?.textureAssetId,
+        position: opts?.position,
+        sortingLayer: opts?.sortingLayer,
+        sortingOrder: opts?.sortingOrder,
+      });
+    }
   },
   setActiveTileset: (assetId) => set({ activeTilesetId: assetId }),
   setTilemapActiveTool: (tool) => set({ tilemapActiveTool: tool }),
