@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   validateImageFile,
   extractBase64,
   getMediaType,
+  processImageFile,
+  resizeImage,
   processImageFiles,
   IMAGE_MAX_SIZE_BYTES,
   IMAGE_ALLOWED_TYPES,
@@ -119,6 +121,172 @@ describe('processImageFiles', () => {
       expect(r.success).toBe(false);
       expect(r.error).toContain('Unsupported');
     }
+  });
+});
+
+describe('resizeImage (mocked DOM)', () => {
+  let originalImage: typeof globalThis.Image;
+
+  beforeEach(() => {
+    originalImage = globalThis.Image;
+  });
+
+  afterEach(() => {
+    globalThis.Image = originalImage;
+    vi.restoreAllMocks();
+  });
+
+  function mockImageClass(width: number, height: number) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).Image = class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      width = width;
+      height = height;
+      set src(_val: string) {
+        // Trigger onload asynchronously via microtask
+        Promise.resolve().then(() => { if (this.onload) this.onload(); });
+      }
+    };
+  }
+
+  it('returns original dataUrl and correct mediaType for small JPEG image', async () => {
+    mockImageClass(100, 80);
+    const dataUrl = 'data:image/jpeg;base64,abc123';
+    const result = await resizeImage(dataUrl);
+    expect(result.dataUrl).toBe(dataUrl);
+    expect(result.mediaType).toBe('image/jpeg');
+    expect(result.width).toBe(100);
+    expect(result.height).toBe(80);
+    expect(result.originalWidth).toBe(100);
+    expect(result.originalHeight).toBe(80);
+  });
+
+  it('returns image/png mediaType for small PNG image', async () => {
+    mockImageClass(200, 150);
+    const dataUrl = 'data:image/png;base64,xyz';
+    const result = await resizeImage(dataUrl);
+    expect(result.mediaType).toBe('image/png');
+  });
+
+  it('resizes large image and returns image/png mediaType', async () => {
+    mockImageClass(3000, 2000);
+    const mockCtx = {
+      drawImage: vi.fn(),
+    };
+    const mockCanvas = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn().mockReturnValue(mockCtx),
+      toDataURL: vi.fn().mockReturnValue('data:image/png;base64,resized'),
+    };
+    vi.spyOn(document, 'createElement').mockReturnValue(mockCanvas as unknown as HTMLCanvasElement);
+
+    const dataUrl = 'data:image/jpeg;base64,largefile';
+    const result = await resizeImage(dataUrl);
+    expect(result.dataUrl).toBe('data:image/png;base64,resized');
+    expect(result.mediaType).toBe('image/png');
+    expect(result.width).toBeLessThanOrEqual(1568);
+    expect(result.height).toBeLessThanOrEqual(1568);
+    expect(result.originalWidth).toBe(3000);
+    expect(result.originalHeight).toBe(2000);
+    expect(mockCtx.drawImage).toHaveBeenCalled();
+  });
+
+  it('rejects when canvas context is null', async () => {
+    mockImageClass(3000, 2000);
+    const mockCanvas = {
+      width: 0,
+      height: 0,
+      getContext: vi.fn().mockReturnValue(null),
+    };
+    vi.spyOn(document, 'createElement').mockReturnValue(mockCanvas as unknown as HTMLCanvasElement);
+
+    await expect(resizeImage('data:image/png;base64,abc')).rejects.toThrow('Failed to create canvas context');
+  });
+
+  it('rejects when image fails to load', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).Image = class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_val: string) {
+        Promise.resolve().then(() => { if (this.onerror) this.onerror(); });
+      }
+    };
+    await expect(resizeImage('data:image/png;base64,bad')).rejects.toThrow('Failed to load image');
+  });
+});
+
+describe('processImageFile (mocked DOM)', () => {
+  let originalImage: typeof globalThis.Image;
+  let originalFileReader: typeof globalThis.FileReader;
+
+  beforeEach(() => {
+    originalImage = globalThis.Image;
+    originalFileReader = globalThis.FileReader;
+  });
+
+  afterEach(() => {
+    globalThis.Image = originalImage;
+    globalThis.FileReader = originalFileReader;
+    vi.restoreAllMocks();
+  });
+
+  it('processes a valid image file through the full pipeline', async () => {
+    // Mock FileReader
+    const fakeDataUrl = 'data:image/jpeg;base64,testdata';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).FileReader = class {
+      result: string | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL(_file: File) {
+        this.result = fakeDataUrl;
+        Promise.resolve().then(() => { if (this.onload) this.onload(); });
+      }
+    };
+
+    // Mock Image (small, no resize needed)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).Image = class {
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      width = 200;
+      height = 150;
+      set src(_val: string) {
+        Promise.resolve().then(() => { if (this.onload) this.onload(); });
+      }
+    };
+
+    const file = makeFile('photo.jpg', 'image/jpeg', 1000);
+    const result = await processImageFile(file);
+    expect(result.success).toBe(true);
+    expect(result.dataUrl).toBe(fakeDataUrl);
+    expect(result.mediaType).toBe('image/jpeg');
+    expect(result.fileName).toBe('photo.jpg');
+    expect(result.originalWidth).toBe(200);
+    expect(result.originalHeight).toBe(150);
+    expect(result.finalWidth).toBe(200);
+    expect(result.finalHeight).toBe(150);
+  });
+
+  it('returns failure result when FileReader errors', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).FileReader = class {
+      result: string | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      readAsDataURL(_file: File) {
+        Promise.resolve().then(() => { if (this.onerror) this.onerror(); });
+      }
+    };
+
+    const file = makeFile('photo.png', 'image/png', 1000);
+    const result = await processImageFile(file);
+    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
+    expect(result.fileName).toBe('photo.png');
   });
 });
 

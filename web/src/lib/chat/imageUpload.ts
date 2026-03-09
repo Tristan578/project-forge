@@ -12,6 +12,8 @@ export interface ImageUploadResult {
   success: boolean;
   /** Base64 data URL */
   dataUrl?: string;
+  /** Actual media type (e.g. 'image/jpeg', 'image/png') extracted from the data URL */
+  mediaType?: string;
   /** Original file name */
   fileName?: string;
   /** Error message if failed */
@@ -57,7 +59,7 @@ export function readFileAsDataUrl(file: File): Promise<string> {
 export function resizeImage(
   dataUrl: string,
   maxDimension: number = IMAGE_MAX_DIMENSION,
-): Promise<{ dataUrl: string; width: number; height: number; originalWidth: number; originalHeight: number }> {
+): Promise<{ dataUrl: string; mediaType: string; width: number; height: number; originalWidth: number; originalHeight: number }> {
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -65,7 +67,7 @@ export function resizeImage(
 
       // Check if resize is needed
       if (width <= maxDimension && height <= maxDimension) {
-        resolve({ dataUrl, width, height, originalWidth: width, originalHeight: height });
+        resolve({ dataUrl, mediaType: getMediaType(dataUrl), width, height, originalWidth: width, originalHeight: height });
         return;
       }
 
@@ -74,7 +76,7 @@ export function resizeImage(
       const newWidth = Math.round(width * ratio);
       const newHeight = Math.round(height * ratio);
 
-      // Resize using canvas
+      // Resize using canvas — always outputs PNG
       const canvas = document.createElement('canvas');
       canvas.width = newWidth;
       canvas.height = newHeight;
@@ -88,6 +90,7 @@ export function resizeImage(
       const resizedUrl = canvas.toDataURL('image/png');
       resolve({
         dataUrl: resizedUrl,
+        mediaType: 'image/png',
         width: newWidth,
         height: newHeight,
         originalWidth: width,
@@ -115,6 +118,7 @@ export async function processImageFile(file: File): Promise<ImageUploadResult> {
     return {
       success: true,
       dataUrl: resized.dataUrl,
+      mediaType: resized.mediaType,
       fileName: file.name,
       originalWidth: resized.originalWidth,
       originalHeight: resized.originalHeight,

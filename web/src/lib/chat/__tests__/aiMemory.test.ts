@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   loadMemories,
   saveMemories,
@@ -26,11 +26,14 @@ const localStorageMock = {
   clear: vi.fn(() => { for (const k of Object.keys(mockStorage)) delete mockStorage[k]; }),
 };
 
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
-
 beforeEach(() => {
+  vi.stubGlobal('localStorage', localStorageMock);
   localStorageMock.clear();
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('loadMemories / saveMemories', () => {

@@ -97,6 +97,16 @@ describe('fillTemplate', () => {
     expect(result).toBe('{{x}}');
   });
 
+  it('handles regex metacharacters in keys safely', () => {
+    const result = fillTemplate('{{a.b}} and {{c+d}}', { 'a.b': 'X', 'c+d': 'Y' });
+    expect(result).toBe('X and Y');
+  });
+
+  it('handles $ replacement tokens in values safely', () => {
+    const result = fillTemplate('Price: {{price}}', { price: '$100' });
+    expect(result).toBe('Price: $100');
+  });
+
   it('works with real template', () => {
     const template = BUILT_IN_TEMPLATES.find((t) => t.id === 'scene-basic-3d')!;
     const result = fillTemplate(template.prompt, { groundSize: 'medium' });

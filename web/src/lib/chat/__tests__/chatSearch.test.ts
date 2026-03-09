@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { ChatMessage } from '@/stores/chatStore';
 import {
   searchChatHistory,
@@ -18,8 +18,6 @@ const localStorageMock = {
   clear: vi.fn(() => { for (const k of Object.keys(mockStorage)) delete mockStorage[k]; }),
 };
 
-Object.defineProperty(globalThis, 'localStorage', { value: localStorageMock, writable: true });
-
 function makeMessage(overrides: Partial<ChatMessage> & { id: string; content: string }): ChatMessage {
   return {
     role: 'user',
@@ -29,8 +27,13 @@ function makeMessage(overrides: Partial<ChatMessage> & { id: string; content: st
 }
 
 beforeEach(() => {
+  vi.stubGlobal('localStorage', localStorageMock);
   localStorageMock.clear();
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe('getStoredConversationIds', () => {

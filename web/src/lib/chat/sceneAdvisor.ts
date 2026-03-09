@@ -76,6 +76,9 @@ export interface SceneAnalysisInput {
 
 /**
  * Analyze a scene and return advice items.
+ *
+ * Library function exported for future UI integration (e.g., a "Scene Health"
+ * panel or proactive chat suggestions). Currently exercised by unit tests only.
  */
 export function analyzeScene(input: SceneAnalysisInput): SceneAdvice[] {
   const advice: SceneAdvice[] = [];

@@ -252,7 +252,8 @@ export function fillTemplate(
 ): string {
   let result = prompt;
   for (const [key, value] of Object.entries(values)) {
-    result = result.replace(new RegExp(`\\{\\{${key}\\}\\}`, 'g'), value);
+    const placeholder = `{{${key}}}`;
+    result = result.split(placeholder).join(value);
   }
   return result;
 }
