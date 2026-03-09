@@ -75,7 +75,7 @@ Priority: [urgent/high/medium/low]
 Labels: [bug/feature/refactor/test/docs]
 ```
 
-## GitHub Project Sync
+## GitHub Project Sync (v3 Architecture)
 
 Tickets sync bidirectionally with GitHub Project "SpawnForge" (#2, owner: Tristan578).
 
@@ -93,7 +93,23 @@ cd project-forge && python3 .claude/hooks/github_project_sync.py push-all
 cd project-forge && python3 .claude/hooks/github_project_sync.py status
 ```
 
-Push syncs full ticket content (description, priority, subtasks as checkboxes, metadata block). Pull reconstructs subtasks and re-links tickets by ULID.
+### Sync Source of Truth: `github_issue_number` + `sync_repo`
+
+**CRITICAL: These two SQLite columns are the SOLE arbiters of sync truth.**
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `github_issue_number` | INTEGER | Links local ticket to a specific GitHub Issue. **THE definitive remote ID.** |
+| `sync_repo` | TEXT | Which repository this ticket syncs to. Must be `"project-forge"` for SpawnForge. |
+
+**Rules:**
+1. **NEVER match tickets by title.** Only `github_issue_number` links local <-> remote.
+2. **NEVER sync tickets where `sync_repo` does not match.** This prevents data leakage between projects sharing the same SQLite database.
+3. **Push behavior**: If `github_issue_number` exists -> UPDATE the remote issue. If NULL -> CREATE a new GitHub issue and IMMEDIATELY write `github_issue_number` back to SQLite.
+4. **Pull behavior**: Match by `github_issue_number` first (authoritative). If new -> create local ticket with `github_issue_number` + `sync_repo` set immediately.
+5. **The JSON map file (`github-project-map.json`) is a CACHE**, not the source of truth. If the map is lost, the SQLite columns allow full reconstruction.
+6. **Auto-migration**: The sync script auto-adds these columns on first run via `_ensure_sync_columns()`, so new developers get them automatically.
+7. **Project isolation**: Tickets from other local projects have `sync_repo = NULL` and are NEVER visible to the sync script.
 
 ## Project Overview
 

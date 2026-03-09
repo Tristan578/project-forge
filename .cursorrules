@@ -71,6 +71,12 @@ See `AGENTS.md` for full taskboard setup, required ticket fields, GitHub Project
 
 Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria (3+ GWT scenarios), Priority, Team (Engineering: `01KJFNHZC49XG9KXRYTMYEEDTS`), Subtasks (3+).
 
+### Sync Architecture (Non-Negotiable)
+- `github_issue_number` (SQLite column) is the SOLE link between local tickets and GitHub Issues. NEVER match by title.
+- `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only tickets where `sync_repo = 'project-forge'` are pushed/pulled.
+- The JSON map file is a CACHE, not truth. SQLite columns are authoritative.
+- Tickets from other projects (Ember etc.) have `sync_repo = NULL` and are NEVER synced.
+
 ## Hook Scripts (shared across all tools)
 
 All hooks live in `.claude/hooks/`:

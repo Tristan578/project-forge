@@ -31,7 +31,7 @@ Place in: `../taskboard/`, `~/.local/bin/`, `/usr/local/bin/`, or PATH.
 - **Team**: Engineering (`01KJFNHZC49XG9KXRYTMYEEDTS`), PM (`01KJFNJC02QK6F5NSDND7NH5MS`), Leadership (`01KJFNK35JVPQJESS3RZM0F5HP`)
 - **Subtasks**: At least 3 implementation steps
 
-## GitHub Project Sync
+## GitHub Project Sync (v3 Architecture)
 
 Tickets sync with GitHub Project "SpawnForge" (#2, owner: Tristan578).
 
@@ -45,6 +45,24 @@ cd project-forge && python3 .claude/hooks/github_project_sync.py push   # local 
 cd project-forge && python3 .claude/hooks/github_project_sync.py pull   # GitHub -> local
 cd project-forge && python3 .claude/hooks/github_project_sync.py status # show state
 ```
+
+### Sync Source of Truth: `github_issue_number` + `sync_repo`
+
+These two SQLite columns are the SOLE arbiters of sync truth:
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `github_issue_number` | INTEGER | Links local ticket to a specific GitHub Issue |
+| `sync_repo` | TEXT | Which repo this ticket syncs to. Must be `"project-forge"` for SpawnForge |
+
+**Rules:**
+1. **NEVER match tickets by title.** Only `github_issue_number` links local <-> remote.
+2. **NEVER sync tickets where `sync_repo` does not match.** Prevents data leakage between projects.
+3. **Push**: `github_issue_number` exists -> UPDATE. NULL -> CREATE and immediately write back.
+4. **Pull**: Match by `github_issue_number` first. New -> create with both columns set.
+5. **JSON map file is a CACHE**, not truth. SQLite columns are authoritative.
+6. **Auto-migration**: `_ensure_sync_columns()` adds columns on first run. Non-destructive.
+7. **Project isolation**: Other projects' tickets have `sync_repo = NULL` and are never synced.
 
 ## On Session Start
 
