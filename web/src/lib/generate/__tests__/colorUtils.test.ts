@@ -20,6 +20,12 @@ describe('colorUtils', () => {
     it('should convert #ff0000 to [255,0,0]', () => {
       expect(hexToRgb('#ff0000')).toEqual([255, 0, 0]);
     });
+    it('should convert #00ff00 to [0,255,0]', () => {
+      expect(hexToRgb('#00ff00')).toEqual([0, 255, 0]);
+    });
+    it('should convert #0000ff to [0,0,255]', () => {
+      expect(hexToRgb('#0000ff')).toEqual([0, 0, 255]);
+    });
   });
 
   describe('rgbToHex', () => {
@@ -32,6 +38,9 @@ describe('colorUtils', () => {
     it('roundtrip hex->rgb->hex', () => {
       expect(rgbToHex(hexToRgb('#ab5236'))).toBe('#ab5236');
     });
+    it('should handle mid-range values', () => {
+      expect(rgbToHex([128, 64, 32])).toBe('#804020');
+    });
   });
 
   describe('rgbToLab', () => {
@@ -39,7 +48,7 @@ describe('colorUtils', () => {
       const lab = rgbToLab([0, 0, 0]);
       expect(lab[0]).toBeCloseTo(0, 0);
     });
-    it('should convert white to L*≈100', () => {
+    it('should convert white to L*~100', () => {
       const lab = rgbToLab([255, 255, 255]);
       expect(lab[0]).toBeCloseTo(100, 0);
     });
@@ -50,6 +59,15 @@ describe('colorUtils', () => {
     it('should convert pure green to negative a*', () => {
       const lab = rgbToLab([0, 128, 0]);
       expect(lab[1]).toBeLessThan(0);
+    });
+    it('should convert pure blue to negative b*', () => {
+      const lab = rgbToLab([0, 0, 255]);
+      expect(lab[2]).toBeLessThan(0);
+    });
+    it('should produce neutral a* and b* for gray', () => {
+      const lab = rgbToLab([128, 128, 128]);
+      expect(Math.abs(lab[1])).toBeLessThan(1);
+      expect(Math.abs(lab[2])).toBeLessThan(1);
     });
   });
 
@@ -63,6 +81,11 @@ describe('colorUtils', () => {
       const b: LAB = [60, 10, -5];
       expect(labDistance(a, b)).toBeGreaterThan(0);
     });
+    it('should be symmetric', () => {
+      const a: LAB = [50, 20, -10];
+      const b: LAB = [60, 10, -5];
+      expect(labDistance(a, b)).toBeCloseTo(labDistance(b, a));
+    });
   });
 
   describe('findNearestColor', () => {
@@ -72,6 +95,7 @@ describe('colorUtils', () => {
     });
     it('should find nearest by LAB distance', () => {
       const palette: RGB[] = [[255, 0, 0], [0, 0, 255]];
+      // orange should be nearer to red than blue
       expect(findNearestColor([255, 128, 0], palette)).toEqual([255, 0, 0]);
     });
     it('should handle single-color palette', () => {
@@ -80,6 +104,10 @@ describe('colorUtils', () => {
     it('should return input pixel for empty palette', () => {
       const pixel: RGB = [128, 64, 32];
       expect(findNearestColor(pixel, [])).toEqual([128, 64, 32]);
+    });
+    it('should match white to white in a mixed palette', () => {
+      const palette: RGB[] = [[0, 0, 0], [128, 128, 128], [255, 255, 255]];
+      expect(findNearestColor([250, 250, 250], palette)).toEqual([255, 255, 255]);
     });
   });
 });
