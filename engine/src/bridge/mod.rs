@@ -396,8 +396,7 @@ impl Plugin for SelectionPlugin {
             ).chain())
             // LOD runtime: distance-based LOD level switching + performance metrics
             .add_systems(Update, performance::update_lod_levels)
-            .add_systems(Update, performance::regenerate_missing_lod_meshes
-                .after(performance::apply_lod_commands))
+            .add_systems(Update, performance::regenerate_missing_lod_meshes)
             .add_systems(Update, performance::collect_performance_metrics);
 
         // Editor-only systems and observers
