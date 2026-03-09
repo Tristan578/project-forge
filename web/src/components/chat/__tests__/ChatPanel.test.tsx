@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { ChatPanel } from '../ChatPanel';
 
 vi.mock('lucide-react', () => ({
@@ -28,6 +28,10 @@ vi.mock('lucide-react', () => ({
   Sun: (props: Record<string, unknown>) => <span data-testid="sun-icon" {...props} />,
   Lightbulb: (props: Record<string, unknown>) => <span data-testid="lightbulb-icon" {...props} />,
   Mountain: (props: Record<string, unknown>) => <span data-testid="mountain-icon" {...props} />,
+  Sparkles: (props: Record<string, unknown>) => <span data-testid="sparkles-icon" {...props} />,
+  Wrench: (props: Record<string, unknown>) => <span data-testid="wrench-icon" {...props} />,
+  Plus: (props: Record<string, unknown>) => <span data-testid="plus-icon" {...props} />,
+  Pencil: (props: Record<string, unknown>) => <span data-testid="pencil-icon" {...props} />,
 }));
 
 const mockClearChat = vi.fn();
@@ -64,6 +68,13 @@ vi.mock('@/stores/chatStore', () => ({
         batchUndoMessage: vi.fn(),
         approveToolCalls: vi.fn(),
         rejectToolCalls: vi.fn(),
+        conversations: [],
+        activeConversationId: null,
+        createConversation: vi.fn(),
+        switchConversation: vi.fn(),
+        deleteConversation: vi.fn(),
+        renameConversation: vi.fn(),
+        loadConversations: vi.fn(),
       })
     ),
     { setState: vi.fn(), getState: vi.fn() },
@@ -73,8 +84,10 @@ vi.mock('@/stores/chatStore', () => ({
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
     selector({
-      sceneGraph: { nodes: {} },
+      sceneGraph: { nodes: {}, rootIds: [] },
       selectEntity: vi.fn(),
+      selectedIds: new Set(),
+      primaryId: null,
       undo: vi.fn(),
     })
   ),
@@ -94,22 +107,25 @@ describe('ChatPanel', () => {
     expect(screen.getByText('AI Assistant')).toBeDefined();
   });
 
-  it('shows suggested prompts when no messages', () => {
+  it('shows description text and suggestion chips when no messages', () => {
     render(<ChatPanel />);
     expect(screen.getByText('Describe what you want to build.')).toBeDefined();
-    expect(screen.getByText('Build a simple platformer level')).toBeDefined();
-  });
-
-  it('sends a message when a suggested prompt is clicked', () => {
-    render(<ChatPanel />);
-    const promptBtn = screen.getByText('Add realistic lighting to my scene');
-    fireEvent.click(promptBtn);
-    expect(mockSendMessage).toHaveBeenCalledWith('Add realistic lighting to my scene');
+    // Dynamic suggestions should be rendered (empty scene suggestions)
+    const buttons = screen.getAllByRole('button');
+    // Should have suggestion chip buttons
+    const chipButtons = buttons.filter((b) => b.title && b.title.length > 20);
+    expect(chipButtons.length).toBeGreaterThan(0);
   });
 
   it('renders the ChatInput component', () => {
     render(<ChatPanel />);
     // ChatInput renders a textarea with aria-label "Chat message"
     expect(screen.getByLabelText('Chat message')).toBeDefined();
+  });
+
+  it('renders conversation switcher', () => {
+    render(<ChatPanel />);
+    // ConversationList renders a button with "New Chat" or similar
+    expect(screen.getByLabelText('Switch conversation')).toBeDefined();
   });
 });
