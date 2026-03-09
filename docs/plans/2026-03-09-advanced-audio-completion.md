@@ -15,7 +15,7 @@ Complete the three remaining stub features in SpawnForge's advanced audio system
 interface AudioSnapshot {
   name: string;
   busStates: Record<string, { volume: number; muted: boolean }>;
-  crossfadeDuration: number;
+  crossfadeDurationMs: number;
 }
 ```
 

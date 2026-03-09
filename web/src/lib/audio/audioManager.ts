@@ -87,7 +87,7 @@ class AudioManager {
   private activeDuckTriggers: Map<string, number> = new Map();
   private occlusionEnabled: Set<string> = new Set();
   private occlusionFilters: Map<string, BiquadFilterNode> = new Map();
-  private occlusionReverbNodes: Map<string, { convolver: ConvolverNode; wetGain: GainNode }> = new Map();
+  // Note: Reverb-based occlusion is not yet implemented. Only lowpass filter + Q modulation is active.
   private adaptiveTracks: Map<string, AdaptiveMusicTrack> = new Map();
   private snapshots: Map<string, AudioSnapshot> = new Map();
 
@@ -1427,7 +1427,7 @@ class AudioManager {
 
   /**
    * Update occlusion with a graduated amount (0.0 = clear, 1.0 = fully occluded).
-   * Adjusts lowpass frequency, Q value, and reverb wetness for realistic wall transmission.
+   * Adjusts lowpass frequency and Q value for realistic wall transmission.
    */
   updateOcclusionAmount(entityId: string, amount: number): void {
     if (!this.occlusionEnabled.has(entityId)) return;

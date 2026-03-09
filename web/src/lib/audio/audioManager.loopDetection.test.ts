@@ -19,7 +19,6 @@ interface AudioManagerInternal {
   activeDuckTriggers: Map<string, number>;
   occlusionEnabled: Set<string>;
   occlusionFilters: Map<string, BiquadFilterNode>;
-  occlusionReverbNodes: Map<string, unknown>;
   adaptiveTracks: Map<string, unknown>;
   snapshots: Map<string, unknown>;
 }
@@ -157,7 +156,6 @@ describe('audioManager - Loop Point Detection', () => {
     internal.activeDuckTriggers = new Map();
     internal.occlusionEnabled = new Set();
     internal.occlusionFilters = new Map();
-    internal.occlusionReverbNodes = new Map();
     internal.adaptiveTracks = new Map();
     internal.snapshots = new Map();
 

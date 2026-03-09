@@ -30,7 +30,6 @@ interface AudioManagerInternal {
   activeDuckTriggers: Map<string, number>;
   occlusionEnabled: Set<string>;
   occlusionFilters: Map<string, BiquadFilterNode>;
-  occlusionReverbNodes: Map<string, { convolver: ConvolverNode; wetGain: GainNode }>;
   adaptiveTracks: Map<string, unknown>;
   snapshots: Map<string, unknown>;
 }
@@ -170,7 +169,7 @@ describe('audioManager - Snapshots', () => {
     internal.activeDuckTriggers = new Map();
     internal.occlusionEnabled = new Set();
     internal.occlusionFilters = new Map();
-    internal.occlusionReverbNodes = new Map();
+
     internal.adaptiveTracks = new Map();
     internal.snapshots = new Map();
 
@@ -283,7 +282,7 @@ describe('audioManager - Occlusion Enhancement', () => {
     internal.activeDuckTriggers = new Map();
     internal.occlusionEnabled = new Set();
     internal.occlusionFilters = new Map();
-    internal.occlusionReverbNodes = new Map();
+
     internal.adaptiveTracks = new Map();
     internal.snapshots = new Map();
 

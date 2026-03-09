@@ -107,6 +107,27 @@ function handleAudioCommand(cmdName: string, payload: Record<string, unknown>): 
     case 'audio_fade_out':
       audioManager.fadeOut(payload.entityId as string, payload.durationMs as number);
       return true;
+    case 'audio_save_snapshot':
+      audioManager.saveSnapshot(
+        payload.name as string,
+        payload.crossfadeDurationMs as number | undefined
+      );
+      return true;
+    case 'audio_load_snapshot':
+      audioManager.loadSnapshot(
+        payload.name as string,
+        payload.durationMs as number | undefined
+      );
+      return true;
+    case 'audio_detect_loop_points':
+      audioManager.detectLoopPoints(
+        payload.assetId as string,
+        {
+          maxResults: payload.maxResults as number | undefined,
+          minLoopDuration: payload.minLoopDuration as number | undefined,
+        }
+      );
+      return true;
     default:
       return false;
   }
