@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 export async function GET() {
   const auth = await authenticateRequest();
   if (!auth.ok) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return auth.response;
   }
 
   try {

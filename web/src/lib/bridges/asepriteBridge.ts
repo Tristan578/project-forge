@@ -44,8 +44,11 @@ export function parseOutput(stdout: string, stderr: string, exitCode: number): B
  * Rejects non-primitive values to prevent injection via objects.
  */
 function coerceParams(params: Record<string, unknown>): Record<string, string> {
-  const result: Record<string, string> = {};
+  const result: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const [key, value] of Object.entries(params)) {
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      throw new Error(`Forbidden parameter key: "${key}"`);
+    }
     if (typeof value === 'string') {
       result[key] = value;
     } else if (typeof value === 'number' || typeof value === 'boolean') {

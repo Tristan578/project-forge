@@ -10,9 +10,10 @@
 
 import { execFile } from 'child_process';
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
-const FIXTURES_DIR = join(__dirname, 'fixtures');
+const FIXTURES_DIR = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const ASEPRITE_BIN = process.env.ASEPRITE_PATH
   || '/Applications/Aseprite.app/Contents/MacOS/aseprite';
 

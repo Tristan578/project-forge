@@ -9,7 +9,7 @@ export const runtime = 'nodejs';
 export async function POST(req: Request) {
   const auth = await authenticateRequest();
   if (!auth.ok) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    return auth.response;
   }
 
   try {
@@ -27,7 +27,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate params is a plain object (not array, not null prototype)
+    // Validate params is a plain object (not array); prototype pollution guarded by coerceParams
     if (params != null && (typeof params !== 'object' || Array.isArray(params))) {
       return NextResponse.json({ error: 'params must be a plain object' }, { status: 400 });
     }

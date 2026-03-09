@@ -577,6 +577,8 @@ describe('useGenerationPolling', () => {
       }
     } as unknown as typeof Image;
 
+    const origCreateObjectURL = globalThis.URL.createObjectURL;
+    const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
     const mockCreateObjectURL = vi.fn(() => 'blob:mock-url');
     const mockRevokeObjectURL = vi.fn();
     globalThis.URL.createObjectURL = mockCreateObjectURL;
@@ -635,6 +637,8 @@ describe('useGenerationPolling', () => {
     expect(meta).toHaveProperty('spriteSheet');
 
     globalThis.Image = OriginalImage;
+    globalThis.URL.createObjectURL = origCreateObjectURL;
+    globalThis.URL.revokeObjectURL = origRevokeObjectURL;
   });
 
   // ---------------------------------------------------------------------------

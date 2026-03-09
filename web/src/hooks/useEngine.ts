@@ -216,7 +216,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         captureException(cmdError, {
           phase: 'handle_command',
           command,
-          payload: typeof payload === 'object' ? JSON.stringify(payload).slice(0, 500) : String(payload),
+          payload: typeof payload === 'object' ? (() => { try { return JSON.stringify(payload).slice(0, 500); } catch { return '[unserializable]'; } })() : String(payload),
         });
         throw err;
       }
