@@ -266,6 +266,10 @@ describe('audioManager - Snapshots', () => {
 });
 
 describe('audioManager - Occlusion Enhancement', () => {
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     const internal = getInternal();
     internal.ctx = null;

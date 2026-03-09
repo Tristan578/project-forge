@@ -1495,8 +1495,20 @@ class AudioManager {
       bus.muted = targetState.muted;
     }
 
-    // Recompute effectiveMuted for all buses (respects solo rules)
-    this.recomputeEffectiveGains();
+    // Update effectiveMuted for all buses (respect solo rules) without
+    // directly touching gainNode.gain.value — the scheduled crossfade ramps
+    // must remain in effect. Setting .value cancels pending automations per
+    // Web Audio spec.
+    const anySoloed = Array.from(this.buses.values()).some(
+      (b) => b.name !== 'master' && b.soloed
+    );
+    for (const bus of this.buses.values()) {
+      if (bus.name === 'master') {
+        bus.effectiveMuted = bus.muted;
+      } else {
+        bus.effectiveMuted = bus.muted || (anySoloed && !bus.soloed);
+      }
+    }
 
     return true;
   }
