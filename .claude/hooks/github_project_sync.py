@@ -38,41 +38,82 @@ def load_config():
         return json.load(f)
 
 
+_resolved_cache = {}
+
+
 def resolve_team_id(config):
     """Resolve allowedTeamName to a team ID via the taskboard API.
 
-    Returns the team ID string, or None if not configured or not found.
-    The result is cached in a module-level dict to avoid repeated API calls.
+    Creates the team if it doesn't exist. Caches the result for the
+    duration of this process to avoid repeated API calls.
     """
+    if "team" in _resolved_cache:
+        return _resolved_cache["team"]
+
     team_name = config.get("allowedTeamName")
     if not team_name:
-        return config.get("allowedTeamId")  # fall back to hardcoded ID
+        result = config.get("allowedTeamId")
+        _resolved_cache["team"] = result
+        return result
 
     teams = tb_get("/teams")
-    if not teams:
-        return None
-    for team in teams:
-        if team.get("name", "").lower() == team_name.lower():
-            return team.get("id")
+    if teams:
+        for team in teams:
+            if team.get("name", "").lower() == team_name.lower():
+                _resolved_cache["team"] = team["id"]
+                return team["id"]
+
+    # Team not found — create it
+    try:
+        new_team = tb_post("/teams", {"name": team_name})
+        tid = new_team.get("id")
+        if tid:
+            print(f"  [bootstrap] Created team: {team_name} ({tid})")
+            _resolved_cache["team"] = tid
+            return tid
+    except Exception as e:
+        print(f"  [bootstrap] Failed to create team {team_name}: {e}", file=sys.stderr)
+
+    _resolved_cache["team"] = None
     return None
 
 
 def resolve_project_id(config):
     """Resolve allowedProjectName to a project ID via the taskboard API.
 
-    Returns the project ID string. Falls back to config localProjectId.
+    Creates the project if it doesn't exist. Caches the result for the
+    duration of this process to avoid repeated API calls.
     """
+    if "project" in _resolved_cache:
+        return _resolved_cache["project"]
+
     project_name = config.get("allowedProjectName")
     if not project_name:
-        return config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+        result = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+        _resolved_cache["project"] = result
+        return result
 
     projects = tb_get("/projects")
-    if not projects:
-        return config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
-    for proj in projects:
-        if proj.get("name", "").lower() == project_name.lower():
-            return proj.get("id")
-    return config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    if projects:
+        for proj in projects:
+            if proj.get("name", "").lower() == project_name.lower():
+                _resolved_cache["project"] = proj["id"]
+                return proj["id"]
+
+    # Project not found — create it
+    try:
+        new_proj = tb_post("/projects", {"name": project_name})
+        pid = new_proj.get("id")
+        if pid:
+            print(f"  [bootstrap] Created project: {project_name} ({pid})")
+            _resolved_cache["project"] = pid
+            return pid
+    except Exception as e:
+        print(f"  [bootstrap] Failed to create project {project_name}: {e}", file=sys.stderr)
+
+    fallback = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    _resolved_cache["project"] = fallback
+    return fallback
 
 
 def load_map():
