@@ -1,3 +1,4 @@
+import 'server-only';
 import { execFile } from 'child_process';
 import { writeFileSync, unlinkSync, mkdirSync, existsSync } from 'fs';
 import { tmpdir } from 'os';

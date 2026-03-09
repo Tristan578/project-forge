@@ -1,3 +1,4 @@
+import 'server-only';
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname, resolve, relative } from 'path';
 import { fileURLToPath } from 'url';
@@ -23,16 +24,37 @@ function escapeForLua(value: string): string {
     .replace(/\r/g, '\\r');
 }
 
+/** Params that must be strictly numeric (integers within safe bounds). */
+const NUMERIC_PARAMS = new Set([
+  'width', 'height', 'newWidth', 'newHeight',
+  'frameCount', 'frameDuration',
+  'baseColorR', 'baseColorG', 'baseColorB', 'baseColorA',
+  'columns',
+]);
+
 /**
  * Validate that a param value is safe for Lua template substitution.
- * Numeric params are passed through. String params are quoted and escaped.
+ * Numeric params are coerced to integers. All other params are escaped.
  * Rejects values containing Lua code injection patterns.
  */
 function validateParamValue(key: string, value: string): string {
+  // Numeric params: strict integer validation — no code can sneak through
+  if (NUMERIC_PARAMS.has(key)) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < 0 || num > 99999) {
+      throw new Error(`Parameter "${key}" must be an integer 0-99999, got: "${value}"`);
+    }
+    return String(num);
+  }
+
   // Reject values that look like Lua code injection
-  const dangerousPatterns = /(^|;|\))\s*(os|io|require|dofile|loadfile|load|pcall)\s*[.(]/i;
+  const dangerousPatterns = /(^|;|\))\s*(os|io|require|dofile|loadfile|load|pcall|app\.command)\s*[.(]/i;
   if (dangerousPatterns.test(value)) {
     throw new Error(`Unsafe parameter value for "${key}": contains prohibited Lua patterns`);
+  }
+  // Reject semicolons and unbalanced braces that could break Lua syntax
+  if (/[;]/.test(value)) {
+    throw new Error(`Unsafe parameter value for "${key}": contains semicolons`);
   }
   // Limit length to prevent abuse
   if (value.length > 1000) {

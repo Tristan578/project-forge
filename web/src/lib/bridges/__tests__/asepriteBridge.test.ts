@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+vi.mock('server-only', () => ({}));
 vi.mock('child_process', () => ({
   execFile: vi.fn(),
   default: { execFile: vi.fn() },

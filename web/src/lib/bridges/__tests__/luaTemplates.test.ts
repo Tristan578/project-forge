@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, vi, beforeAll } from 'vitest';
 
+vi.mock('server-only', () => ({}));
 vi.mock('fs', () => ({
   readFileSync: vi.fn(),
   existsSync: vi.fn(() => true),
@@ -101,6 +102,38 @@ describe('Lua Templates', () => {
 
     it('blocks path traversal in template names', () => {
       expect(() => luaTemplates.getTemplate('../../../etc/passwd')).toThrow('Unknown bridge template');
+    });
+
+    it('validates numeric params are integers in range', () => {
+      expect(() =>
+        luaTemplates.renderTemplate('local w = {{width}}', { width: '64' })
+      ).not.toThrow();
+
+      expect(() =>
+        luaTemplates.renderTemplate('local w = {{width}}', { width: '1; os.execute("bad")' })
+      ).toThrow('must be an integer');
+    });
+
+    it('rejects non-integer numeric params', () => {
+      expect(() =>
+        luaTemplates.renderTemplate('local w = {{width}}', { width: 'abc' })
+      ).toThrow('must be an integer');
+    });
+
+    it('rejects out-of-range numeric params', () => {
+      expect(() =>
+        luaTemplates.renderTemplate('local w = {{width}}', { width: '-1' })
+      ).toThrow('must be an integer');
+
+      expect(() =>
+        luaTemplates.renderTemplate('local w = {{width}}', { width: '100000' })
+      ).toThrow('must be an integer');
+    });
+
+    it('rejects semicolons in string params', () => {
+      expect(() =>
+        luaTemplates.renderTemplate('local x = "{{name}}"', { name: 'a; b' })
+      ).toThrow('contains semicolons');
     });
   });
 });
