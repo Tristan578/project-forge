@@ -5,6 +5,7 @@
 import { StateCreator } from 'zustand';
 import type { AudioData, AudioBusDef, AudioEffectDef, ReverbZoneData } from './types';
 import { audioManager } from '@/lib/audio/audioManager';
+import type { AudioSnapshot } from '@/lib/audio/audioManager';
 
 export interface AudioSlice {
   primaryAudio: AudioData | null;
@@ -14,6 +15,7 @@ export interface AudioSlice {
   reverbZonesEnabled: Record<string, boolean>;
   adaptiveMusicIntensity: number;
   currentMusicSegment: string;
+  audioSnapshots: Record<string, AudioSnapshot>;
 
   setAudio: (entityId: string, data: Partial<AudioData>) => void;
   removeAudio: (entityId: string) => void;
@@ -39,6 +41,10 @@ export interface AudioSlice {
   setDuckingRule: (rule: { triggerBus: string; targetBus: string; duckLevel?: number; attackMs?: number; releaseMs?: number }) => void;
   setAdaptiveMusicIntensity: (intensity: number) => void;
   setCurrentMusicSegment: (segment: string) => void;
+  saveAudioSnapshot: (name: string, crossfadeDurationMs?: number) => void;
+  listAudioSnapshots: () => string[];
+  loadAudioSnapshot: (name: string, crossfadeDurationMs?: number) => void;
+  deleteAudioSnapshot: (name: string) => void;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -61,6 +67,7 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   reverbZonesEnabled: {},
   adaptiveMusicIntensity: 0,
   currentMusicSegment: 'intro',
+  audioSnapshots: {},
 
   setAudio: (entityId, data) => {
     if (dispatchCommand) dispatchCommand('set_audio', { entityId, ...data });
@@ -153,4 +160,39 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   },
   setAdaptiveMusicIntensity: (intensity) => set({ adaptiveMusicIntensity: intensity }),
   setCurrentMusicSegment: (segment) => set({ currentMusicSegment: segment }),
+  listAudioSnapshots: () => {
+    // Read from Zustand state (kept in sync by save/delete actions) to avoid
+    // dual source-of-truth drift with audioManager's internal map.
+    return Object.keys(get().audioSnapshots);
+  },
+  saveAudioSnapshot: (name, crossfadeDurationMs = 1000) => {
+    const snapshot = audioManager.saveSnapshot(name, crossfadeDurationMs);
+    set(state => ({
+      audioSnapshots: { ...state.audioSnapshots, [name]: snapshot },
+    }));
+  },
+  loadAudioSnapshot: (name, crossfadeDurationMs) => {
+    const success = audioManager.loadSnapshot(name, crossfadeDurationMs);
+    if (!success) {
+      console.warn(`[AudioSlice] loadAudioSnapshot("${name}") failed — snapshot not found`);
+      return;
+    }
+    const snapshot = audioManager.getSnapshot(name);
+    if (snapshot) {
+      // Sync Zustand bus state to match the snapshot audioManager just applied
+      const state = get();
+      const updated = state.audioBuses.map(bus => {
+        const target = snapshot.busStates[bus.name];
+        return target ? { ...bus, volume: target.volume, muted: target.muted } : bus;
+      });
+      set({ audioBuses: updated });
+    }
+  },
+  deleteAudioSnapshot: (name) => {
+    audioManager.deleteSnapshot(name);
+    set(state => {
+      const { [name]: _, ...rest } = state.audioSnapshots;
+      return { audioSnapshots: rest };
+    });
+  },
 });
