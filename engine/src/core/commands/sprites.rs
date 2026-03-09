@@ -17,6 +17,52 @@ fn handle_set_project_type(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
+/// Handle spawn_sprite command.
+/// Payload: { name?, textureAssetId?, position?, sortingLayer?, sortingOrder? }
+fn handle_spawn_sprite(payload: serde_json::Value) -> super::CommandResult {
+    let name = payload.get("name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let texture_asset_id = payload.get("textureAssetId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let position = payload.get("position")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            if arr.len() >= 2 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr.get(2).and_then(|z| z.as_f64()).unwrap_or(0.0) as f32,
+                ])
+            } else {
+                None
+            }
+        });
+
+    let sorting_layer = payload.get("sortingLayer")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let sorting_order = payload.get("sortingOrder")
+        .and_then(|v| v.as_i64())
+        .map(|i| i as i32);
+
+    if queue_spawn_sprite_from_bridge(SpawnSpriteRequest {
+        name,
+        texture_asset_id,
+        position,
+        sorting_layer,
+        sorting_order,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 /// Handle set_sprite_data command.
 /// Payload: { entityId, textureAssetId?, colorTint?, flipX?, flipY?, customSize?, sortingLayer?, sortingOrder?, anchor? }
 fn handle_set_sprite_data(payload: serde_json::Value) -> super::CommandResult {
@@ -704,6 +750,7 @@ fn handle_remove_animation_state_machine(payload: serde_json::Value) -> super::C
 
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
     match command {
+        "spawn_sprite" => Some(handle_spawn_sprite(payload.clone())),
         "set_project_type" => Some(handle_set_project_type(payload.clone())),
         "get_project_type" => Some(super::handle_query(QueryRequest::ProjectType)),
         "set_sprite_data" => Some(handle_set_sprite_data(payload.clone())),

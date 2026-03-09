@@ -77,6 +77,17 @@ pub struct AnimationStateMachineRemoval {
     pub entity_id: String,
 }
 
+// === Spawn Sprite Request ===
+
+#[derive(Debug, Clone)]
+pub struct SpawnSpriteRequest {
+    pub name: Option<String>,
+    pub texture_asset_id: Option<String>,
+    pub position: Option<[f32; 3]>,
+    pub sorting_layer: Option<String>,
+    pub sorting_order: Option<i32>,
+}
+
 // === Tilemap Request Structs ===
 
 #[derive(Debug, Clone)]
@@ -134,6 +145,10 @@ impl PendingCommands {
         self.animation_state_machine_removals.push(removal);
     }
 
+    pub fn queue_spawn_sprite(&mut self, request: SpawnSpriteRequest) {
+        self.spawn_sprite_requests.push(request);
+    }
+
     pub fn queue_tilemap_data_update(&mut self, update: TilemapDataUpdate) {
         self.tilemap_data_updates.push(update);
     }
@@ -183,6 +198,10 @@ pub fn queue_animation_state_machine_update_from_bridge(update: AnimationStateMa
 
 pub fn queue_animation_state_machine_removal_from_bridge(removal: AnimationStateMachineRemoval) -> bool {
     super::with_pending(|pc| pc.queue_animation_state_machine_removal(removal)).is_some()
+}
+
+pub fn queue_spawn_sprite_from_bridge(request: SpawnSpriteRequest) -> bool {
+    super::with_pending(|pc| pc.queue_spawn_sprite(request)).is_some()
 }
 
 pub fn queue_tilemap_data_update_from_bridge(update: TilemapDataUpdate) -> bool {

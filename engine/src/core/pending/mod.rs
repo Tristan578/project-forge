@@ -241,6 +241,7 @@ pub struct PendingCommands {
     pub sprite_animator_removals: Vec<SpriteAnimatorRemoval>,
     pub animation_state_machine_updates: Vec<AnimationStateMachineUpdate>,
     pub animation_state_machine_removals: Vec<AnimationStateMachineRemoval>,
+    pub spawn_sprite_requests: Vec<SpawnSpriteRequest>,
     pub tilemap_data_updates: Vec<TilemapDataUpdate>,
     pub tilemap_data_removals: Vec<TilemapDataRemoval>,
     // scene domain
