@@ -134,7 +134,28 @@ pub fn generate_preset_cubemap(preset: &str) -> Image {
 pub fn equirectangular_to_cubemap(source: &Image, face_size: u32) -> Image {
     let src_width = source.width();
     let src_height = source.height();
-    let src_data = source.data.as_ref().expect("Image has no pixel data");
+    let src_data = match source.data.as_ref() {
+        Some(data) => data,
+        None => {
+            bevy::log::error!("equirectangular_to_cubemap: Image has no CPU pixel data, returning blank cubemap");
+            // Return a blank black cubemap instead of panicking
+            let face_pixels = (face_size * face_size) as usize;
+            let data = vec![0u8; face_pixels * 6 * 4];
+            let mut img = Image::new(
+                Extent3d { width: face_size, height: face_size, depth_or_array_layers: 6 },
+                TextureDimension::D2,
+                data,
+                TextureFormat::Rgba8UnormSrgb,
+                bevy::asset::RenderAssetUsages::all(),
+            );
+            img.texture_descriptor.view_formats = &[];
+            img.texture_view_descriptor = Some(TextureViewDescriptor {
+                dimension: Some(TextureViewDimension::Cube),
+                ..Default::default()
+            });
+            return img;
+        }
+    };
 
     // Determine bytes per pixel from the source format
     let bpp: usize = match source.texture_descriptor.format {

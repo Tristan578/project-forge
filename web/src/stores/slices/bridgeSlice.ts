@@ -8,7 +8,7 @@ import type { PlatformPaths } from '@/lib/bridges/types';
 export interface BridgeToolInfo {
   id: string;
   name: string;
-  paths: PlatformPaths;
+  paths?: PlatformPaths;
   activeVersion: string | null;
   status: 'connected' | 'disconnected' | 'not_found' | 'error';
 }

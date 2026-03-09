@@ -130,6 +130,17 @@ describe('Lua Templates', () => {
       ).toThrow('must be an integer');
     });
 
+    it('blocks bracket-notation Lua injection bypass', () => {
+      // os["execute"] should be caught by either dot or bracket pattern
+      expect(() =>
+        luaTemplates.renderTemplate('local x = "{{name}}"', { name: 'os["execute"]("bad")' })
+      ).toThrow('prohibited Lua');
+      // Also test io bracket access
+      expect(() =>
+        luaTemplates.renderTemplate('local x = "{{name}}"', { name: 'io["open"]("/etc/passwd")' })
+      ).toThrow('prohibited Lua');
+    });
+
     it('rejects semicolons in string params', () => {
       expect(() =>
         luaTemplates.renderTemplate('local x = "{{name}}"', { name: 'a; b' })

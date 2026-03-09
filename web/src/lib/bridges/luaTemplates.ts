@@ -47,12 +47,16 @@ function validateParamValue(key: string, value: string): string {
     return String(num);
   }
 
-  // Reject values that look like Lua code injection
-  const dangerousPatterns = /(^|;|\))\s*(os|io|require|dofile|loadfile|load|pcall|app\.command)\s*[.(]/i;
+  // Reject values that look like Lua code injection (dot and bracket notation)
+  const dangerousPatterns = /(^|;|\))\s*(os|io|require|dofile|loadfile|load|pcall|app\.command)\s*[.([]/i;
   if (dangerousPatterns.test(value)) {
     throw new Error(`Unsafe parameter value for "${key}": contains prohibited Lua patterns`);
   }
-  // Reject semicolons and unbalanced braces that could break Lua syntax
+  // Block bracket-notation bypass: os["execute"], io["open"], etc.
+  if (/\b(os|io|require|dofile|loadfile|load|pcall)\s*\[/i.test(value)) {
+    throw new Error(`Unsafe parameter value for "${key}": contains prohibited Lua bracket access`);
+  }
+  // Reject semicolons that could inject new statements
   if (/[;]/.test(value)) {
     throw new Error(`Unsafe parameter value for "${key}": contains semicolons`);
   }

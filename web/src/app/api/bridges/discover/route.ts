@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
 
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
   const auth = await authenticateRequest();
   if (!auth.ok) {

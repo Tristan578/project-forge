@@ -4,6 +4,8 @@ import { executeOperation } from '@/lib/bridges/asepriteBridge';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 
+export const runtime = 'nodejs';
+
 export async function POST(req: Request) {
   const auth = await authenticateRequest();
   if (!auth.ok) {
@@ -25,9 +27,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate params is a plain object with string/number/boolean values
-    if (params != null && typeof params !== 'object') {
-      return NextResponse.json({ error: 'params must be an object' }, { status: 400 });
+    // Validate params is a plain object (not array, not null prototype)
+    if (params != null && (typeof params !== 'object' || Array.isArray(params))) {
+      return NextResponse.json({ error: 'params must be a plain object' }, { status: 400 });
     }
 
     const tool = await discoverTool('aseprite');
