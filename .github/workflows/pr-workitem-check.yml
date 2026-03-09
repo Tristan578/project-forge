@@ -1,0 +1,138 @@
+name: PR Work Item Check
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  require-work-item:
+    name: Require Linked Work Item
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check PR for linked work item
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.head_ref }}
+        run: |
+          echo "=== PR Work Item Enforcement ==="
+          echo "PR #${PR_NUMBER}"
+          echo ""
+
+          # Pattern: PF-<number> (SpawnForge ticket ID)
+          TICKET_PATTERN='PF-[0-9]+'
+
+          FOUND_IN=""
+
+          # Check PR title (safe: using env var, not inline expression)
+          if echo "$PR_TITLE" | grep -qEi "$TICKET_PATTERN"; then
+            TICKET=$(echo "$PR_TITLE" | grep -oEi "$TICKET_PATTERN" | head -1)
+            FOUND_IN="title"
+            echo "Found ticket reference in PR title: $TICKET"
+          fi
+
+          # Check PR body (safe: using env var)
+          if echo "$PR_BODY" | grep -qEi "$TICKET_PATTERN"; then
+            TICKET=$(echo "$PR_BODY" | grep -oEi "$TICKET_PATTERN" | head -1)
+            if [ -z "$FOUND_IN" ]; then
+              FOUND_IN="body"
+            else
+              FOUND_IN="$FOUND_IN, body"
+            fi
+            echo "Found ticket reference in PR body: $TICKET"
+          fi
+
+          # Check branch name (safe: using env var)
+          if echo "$PR_BRANCH" | grep -qEi "$TICKET_PATTERN"; then
+            TICKET=$(echo "$PR_BRANCH" | grep -oEi "$TICKET_PATTERN" | head -1)
+            if [ -z "$FOUND_IN" ]; then
+              FOUND_IN="branch"
+            else
+              FOUND_IN="$FOUND_IN, branch"
+            fi
+            echo "Found ticket reference in branch name: $TICKET"
+          fi
+
+          # Check for linked GitHub Issues (which map to taskboard tickets)
+          LINKED_ISSUES=$(gh pr view "$PR_NUMBER" --json closingIssuesReferences --jq '.closingIssuesReferences | length' 2>/dev/null || echo "0")
+          if [ "$LINKED_ISSUES" -gt 0 ]; then
+            if [ -z "$FOUND_IN" ]; then
+              FOUND_IN="linked issues"
+            else
+              FOUND_IN="$FOUND_IN, linked issues"
+            fi
+            echo "Found $LINKED_ISSUES linked issue(s)"
+          fi
+
+          echo ""
+
+          if [ -z "$FOUND_IN" ]; then
+            echo "::error::No work item reference found in this PR."
+            echo ""
+            echo "Every PR must reference a SpawnForge taskboard ticket (PF-XXX)."
+            echo ""
+            echo "How to fix:"
+            echo "  1. Include PF-XXX in your PR title, e.g.: 'feat: add login flow (PF-123)'"
+            echo "  2. Include PF-XXX in your PR description"
+            echo "  3. Name your branch with the ticket, e.g.: 'feature/PF-123-login-flow'"
+            echo "  4. Link a GitHub Issue that maps to a taskboard ticket"
+            echo ""
+            echo "Why: All work must be tracked on the project taskboard."
+            echo "Create a ticket at http://localhost:3010 or ask your AI assistant"
+            echo "to create one before starting work."
+            exit 1
+          fi
+
+          echo "=== Work item check passed (found in: $FOUND_IN) ==="
+
+      - name: Verify ticket exists on GitHub Project
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_BRANCH: ${{ github.head_ref }}
+        run: |
+          # Extract all PF-XXX references (safe: env vars only)
+          ALL_TEXT="${PR_TITLE} ${PR_BODY} ${PR_BRANCH}"
+          TICKETS=$(echo "$ALL_TEXT" | grep -oEi 'PF-[0-9]+' | sort -u)
+
+          if [ -z "$TICKETS" ]; then
+            echo "No PF-XXX tickets to verify (linked via GitHub Issues instead)"
+            exit 0
+          fi
+
+          echo "Referenced tickets: $TICKETS"
+          echo ""
+
+          # Verify at least one referenced ticket exists as a GitHub Issue
+          VERIFIED=false
+          for TICKET in $TICKETS; do
+            NUMBER=$(echo "$TICKET" | grep -oE '[0-9]+')
+            # Search for issues with PF-XXX in title
+            RESULT=$(gh issue list --search "PF-${NUMBER} in:title" --limit 1 --json number --jq 'length' 2>/dev/null || echo "0")
+            if [ "$RESULT" -gt 0 ]; then
+              echo "Verified: $TICKET exists on GitHub"
+              VERIFIED=true
+            else
+              echo "Warning: $TICKET not found as GitHub Issue (may be local-only)"
+            fi
+          done
+
+          if [ "$VERIFIED" = false ]; then
+            echo ""
+            echo "::warning::Referenced tickets not found as GitHub Issues. Run 'sync-push' to sync your local taskboard to GitHub."
+          fi
+
+          echo ""
+          echo "=== Ticket verification complete ==="
