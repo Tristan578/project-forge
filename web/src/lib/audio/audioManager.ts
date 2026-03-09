@@ -1609,6 +1609,18 @@ class AudioManager {
       }
     }
 
+    // Fallback: if no valid candidates found (short buffers where all pairs < minLoopSamples),
+    // return a full-length loop rather than an empty array
+    if (candidates.length === 0) {
+      return [{
+        startSample: 0,
+        endSample: totalSamples - 1,
+        startTime: 0,
+        endTime: (totalSamples - 1) / sampleRate,
+        score: 0.3,
+      }];
+    }
+
     // Sort by score (highest first) and return top N
     candidates.sort((a, b) => b.score - a.score);
     return candidates.slice(0, maxResults);
