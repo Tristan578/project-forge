@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@sentry/browser', () => ({
+vi.mock('@sentry/nextjs', () => ({
   init: vi.fn(),
   captureException: vi.fn(),
   captureMessage: vi.fn(),
@@ -9,7 +9,7 @@ vi.mock('@sentry/browser', () => ({
   replayIntegration: vi.fn(() => ({})),
 }));
 
-import * as Sentry from '@sentry/browser';
+import * as Sentry from '@sentry/nextjs';
 
 describe('sentry-client', () => {
   beforeEach(() => {
@@ -53,18 +53,13 @@ describe('sentry-client', () => {
   });
 
   describe('when NEXT_PUBLIC_SENTRY_DSN is set', () => {
-    it('initSentryClient initializes Sentry with correct config', async () => {
+    it('initSentryClient is a no-op (init handled by sentry.client.config.ts)', async () => {
       vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://key@sentry.io/456');
       vi.stubEnv('NODE_ENV', 'production');
       const { initSentryClient } = await import('../sentry-client');
       initSentryClient();
-      expect(Sentry.init).toHaveBeenCalledWith(
-        expect.objectContaining({
-          dsn: 'https://key@sentry.io/456',
-          environment: 'production',
-          tunnel: '/api/sentry',
-        }),
-      );
+      // @sentry/nextjs initializes via sentry.client.config.ts, not this function
+      expect(Sentry.init).not.toHaveBeenCalled();
       vi.unstubAllEnvs();
     });
 

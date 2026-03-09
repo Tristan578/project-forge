@@ -22,10 +22,10 @@ secrets.json
 !.claude/agents/
 !.claude/hooks/
 !.claude/settings.json
-!.claude/taskboard.db
 !.claude/TASKBOARD_SETUP.md
-# Always ignore local settings and WAL files
+# Always ignore local settings, DB, and WAL files
 .claude/settings.local.json
+.claude/taskboard.db
 .claude/taskboard.db-wal
 .claude/taskboard.db-shm
 # Generated sync state — not for version control

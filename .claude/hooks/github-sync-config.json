@@ -14,5 +14,8 @@
     "in_progress": "In Progress",
     "done": "Done"
   },
-  "localProjectId": "01KJEE8R1XXFF0CZT1WCSTGRDP"
+  "localProjectId": "01KJEE8R1XXFF0CZT1WCSTGRDP",
+  "allowedTeamName": "Engineering",
+  "allowedProjectName": "Project Forge",
+  "allowedProjectPrefix": "PF"
 }

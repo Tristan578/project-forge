@@ -56,6 +56,12 @@ pub struct InstantiatePrefabRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct AudioImportRequest {
+    pub data_base64: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct QualityPresetRequest {
     pub preset: String,
 }
@@ -93,6 +99,10 @@ impl PendingCommands {
 
     pub fn queue_remove_texture(&mut self, request: RemoveTextureRequest) {
         self.remove_texture_requests.push(request);
+    }
+
+    pub fn queue_audio_import(&mut self, request: AudioImportRequest) {
+        self.audio_import_requests.push(request);
     }
 
     pub fn queue_quality_preset(&mut self, request: QualityPresetRequest) {
@@ -136,6 +146,10 @@ pub fn queue_delete_asset_from_bridge(request: DeleteAssetRequest) -> bool {
 
 pub fn queue_remove_texture_from_bridge(request: RemoveTextureRequest) -> bool {
     super::with_pending(|pc| pc.queue_remove_texture(request)).is_some()
+}
+
+pub fn queue_audio_import_from_bridge(request: AudioImportRequest) -> bool {
+    super::with_pending(|pc| pc.queue_audio_import(request)).is_some()
 }
 
 pub fn queue_quality_preset_from_bridge(request: QualityPresetRequest) -> bool {

@@ -8,6 +8,7 @@ import { GenerateSkyboxDialog } from './GenerateSkyboxDialog';
 import { SceneStatistics } from './SceneStatistics';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
+import { BridgeToolsSection } from './BridgeToolsSection';
 
 const sliderClass = `h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
   [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
@@ -1206,6 +1207,11 @@ export function SceneSettings() {
         isOpen={generateSkyboxOpen}
         onClose={() => setGenerateSkyboxOpen(false)}
       />
+
+      {/* Bridge Tools */}
+      <div className="border-t border-zinc-800 pt-4">
+        <BridgeToolsSection />
+      </div>
     </div>
   );
 }

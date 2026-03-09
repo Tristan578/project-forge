@@ -1,4 +1,4 @@
-import * as Sentry from '@sentry/node';
+import * as Sentry from '@sentry/nextjs';
 
 const DSN = process.env.SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';

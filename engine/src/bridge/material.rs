@@ -214,6 +214,9 @@ pub(super) fn apply_update_skybox_requests(
 }
 
 /// System that applies custom skybox requests from the bridge.
+///
+/// Receives an equirectangular image (typically from AI skybox generation),
+/// converts it to a 6-face cubemap, and applies it as the scene skybox.
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_custom_skybox_requests(
     mut pending: ResMut<PendingCommands>,
@@ -244,8 +247,8 @@ pub(super) fn apply_custom_skybox_requests(
             }
         };
 
-        // Create Image from bytes (assume PNG for skybox cubemaps)
-        let image = match Image::from_buffer(
+        // Create Image from bytes (PNG from AI skybox generation)
+        let source_image = match Image::from_buffer(
             &bytes,
             ImageType::Extension("png"),
             CompressedImageFormats::NONE,
@@ -260,7 +263,27 @@ pub(super) fn apply_custom_skybox_requests(
             }
         };
 
-        let handle = images.add(image);
+        // Check if the image is already a cubemap (6 array layers) or needs conversion
+        let cubemap_image = if source_image.texture_descriptor.size.depth_or_array_layers == 6 {
+            // Already a cubemap — use as-is (just ensure view descriptor is set)
+            let mut img = source_image;
+            img.texture_view_descriptor = Some(bevy::render::render_resource::TextureViewDescriptor {
+                dimension: Some(bevy::render::render_resource::TextureViewDimension::Cube),
+                ..default()
+            });
+            img
+        } else {
+            // Equirectangular image — convert to cubemap
+            // Use face size based on source height, capped at 256 for performance
+            let face_size = (source_image.height() / 2).min(256).max(64);
+            tracing::info!(
+                "Converting equirectangular image ({}x{}) to cubemap ({}x{} per face)",
+                source_image.width(), source_image.height(), face_size, face_size,
+            );
+            environment::equirectangular_to_cubemap(&source_image, face_size)
+        };
+
+        let handle = images.add(cubemap_image);
 
         // Update settings
         settings.skybox_preset = None;

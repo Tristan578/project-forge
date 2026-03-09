@@ -13,7 +13,7 @@ _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 TB_DB="$_TB_PROJECT_ROOT/.claude/taskboard.db"
 TB_API="http://localhost:3010/api"
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
-PROJECT_ID="01KJEE8R1XXFF0CZT1WCSTGRDP"
+export PROJECT_ID="01KJEE8R1XXFF0CZT1WCSTGRDP"
 
 # Known locations for the taskboard binary
 TB_BIN=""
@@ -135,12 +135,13 @@ tb_board_summary() {
     fi
 
     echo "$board" | python3 -c "
-import sys, json
+import sys, json, os
 try:
+    project_id = os.environ.get('PROJECT_ID', '')
     data = json.load(sys.stdin)
     for col in data.get('columns', []):
         status = col['status']
-        tickets = col.get('tickets', [])
+        tickets = [t for t in col.get('tickets', []) if not project_id or t.get('projectId') == project_id]
         count = len(tickets)
         print(f'{status}:{count}')
         for t in tickets:
@@ -166,15 +167,18 @@ tb_check_stale() {
     fi
 
     echo "$board" | python3 -c "
-import sys, json
+import sys, json, os
 from datetime import datetime, timezone
 
+project_id = os.environ.get('PROJECT_ID', '')
 data = json.load(sys.stdin)
 stale = []
 for col in data.get('columns', []):
     if col['status'] != 'in_progress':
         continue
     for t in col.get('tickets', []):
+        if project_id and t.get('projectId') != project_id:
+            continue
         updated = t.get('updatedAt', '')
         try:
             dt = datetime.fromisoformat(updated.replace('Z', '+00:00'))
@@ -339,8 +343,9 @@ tb_suggest_work() {
     fi
 
     echo "$board" | python3 -c "
-import sys, json
+import sys, json, os
 
+project_id = os.environ.get('PROJECT_ID', '')
 data = json.load(sys.stdin)
 in_progress = []
 todo = []
@@ -350,6 +355,8 @@ priority_order = {'urgent': 0, 'high': 1, 'medium': 2, 'low': 3, '': 4}
 for col in data.get('columns', []):
     status = col['status']
     for t in col.get('tickets', []):
+        if project_id and t.get('projectId') != project_id:
+            continue
         entry = {
             'number': t.get('number', 0),
             'title': t.get('title', ''),

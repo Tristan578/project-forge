@@ -21,8 +21,8 @@ export interface GridConfig {
 
 /** Result returned by loadSpriteSheet. */
 export interface SpriteSheetImportResult {
-  /** The loaded image as an HTMLImageElement (for preview rendering). */
-  image: HTMLImageElement;
+  /** The loaded image as an HTMLImageElement (for preview rendering). Optional when importing from server-side generation. */
+  image?: HTMLImageElement;
   /** Original image width in pixels. */
   width: number;
   /** Original image height in pixels. */

@@ -708,10 +708,39 @@ pub(super) fn apply_place_asset(
                 AssetKind::Texture => {
                     tracing::warn!("Cannot place texture assets as entities");
                 }
+                AssetKind::Audio => {
+                    tracing::warn!("Cannot place audio assets as entities");
+                }
             }
         } else {
             tracing::warn!("Unknown asset ID: {}", request.asset_id);
         }
+    }
+}
+
+/// System that processes audio import requests.
+/// Audio playback is handled JS-side (Web Audio API); the engine only registers
+/// the asset in the AssetRegistry so it persists in scene export/import.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_audio_import(
+    mut pending: ResMut<PendingCommands>,
+    mut asset_registry: ResMut<AssetRegistry>,
+) {
+    use crate::core::asset_manager::{AssetKind, AssetMetadata, AssetSource};
+
+    for request in pending.audio_import_requests.drain(..) {
+        let asset_id = uuid::Uuid::new_v4().to_string();
+
+        asset_registry.assets.insert(asset_id.clone(), AssetMetadata {
+            id: asset_id.clone(),
+            name: request.name.clone(),
+            kind: AssetKind::Audio,
+            file_size: 0, // Audio data stays JS-side
+            source: AssetSource::Upload { filename: request.name.clone() },
+        });
+
+        events::emit_asset_imported(&asset_id, &request.name, "audio", 0);
+        tracing::info!("Registered audio asset: {} ({})", request.name, asset_id);
     }
 }
 

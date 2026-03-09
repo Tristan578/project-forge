@@ -38,6 +38,85 @@ def load_config():
         return json.load(f)
 
 
+_resolved_cache = {}
+
+
+def resolve_team_id(config):
+    """Resolve allowedTeamName to a team ID via the taskboard API.
+
+    Creates the team if it doesn't exist. Caches the result for the
+    duration of this process to avoid repeated API calls.
+    """
+    if "team" in _resolved_cache:
+        return _resolved_cache["team"]
+
+    team_name = config.get("allowedTeamName")
+    if not team_name:
+        result = config.get("allowedTeamId")
+        _resolved_cache["team"] = result
+        return result
+
+    teams = tb_get("/teams")
+    if teams:
+        for team in teams:
+            if team.get("name", "").lower() == team_name.lower():
+                _resolved_cache["team"] = team["id"]
+                return team["id"]
+
+    # Team not found — create it
+    try:
+        new_team = tb_post("/teams", {"name": team_name})
+        tid = new_team.get("id")
+        if tid:
+            print(f"  [bootstrap] Created team: {team_name} ({tid})")
+            _resolved_cache["team"] = tid
+            return tid
+    except Exception as e:
+        print(f"  [bootstrap] Failed to create team {team_name}: {e}", file=sys.stderr)
+
+    _resolved_cache["team"] = None
+    return None
+
+
+def resolve_project_id(config):
+    """Resolve allowedProjectName to a project ID via the taskboard API.
+
+    Creates the project if it doesn't exist. Caches the result for the
+    duration of this process to avoid repeated API calls.
+    """
+    if "project" in _resolved_cache:
+        return _resolved_cache["project"]
+
+    project_name = config.get("allowedProjectName")
+    if not project_name:
+        result = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+        _resolved_cache["project"] = result
+        return result
+
+    projects = tb_get("/projects")
+    if projects:
+        for proj in projects:
+            if proj.get("name", "").lower() == project_name.lower():
+                _resolved_cache["project"] = proj["id"]
+                return proj["id"]
+
+    # Project not found — create it
+    try:
+        prefix = config.get("allowedProjectPrefix", "PF")
+        new_proj = tb_post("/projects", {"name": project_name, "prefix": prefix})
+        pid = new_proj.get("id")
+        if pid:
+            print(f"  [bootstrap] Created project: {project_name} ({pid})")
+            _resolved_cache["project"] = pid
+            return pid
+    except Exception as e:
+        print(f"  [bootstrap] Failed to create project {project_name}: {e}", file=sys.stderr)
+
+    fallback = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    _resolved_cache["project"] = fallback
+    return fallback
+
+
 def load_map():
     if MAP_PATH.exists():
         try:
@@ -332,22 +411,52 @@ def gh_get_project_items(config):
     return json.loads(output)
 
 
-def gh_create_draft(config, title, body=""):
-    """Create a draft issue in the GitHub Project. Returns the item node ID."""
-    query = (
-        "mutation($projectId: ID!, $title: String!, $body: String) {"
-        "  addProjectV2DraftIssue(input: {projectId: $projectId, title: $title, body: $body}) {"
-        "    projectItem { id }"
-        "  }"
-        "}"
+def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
+    """Create a real GitHub Issue and add it to the GitHub Project.
+
+    Returns (project_item_id, issue_number).
+    Real issues appear as proper items (not drafts) on the project board.
+    """
+    owner = config["owner"]
+    repo = config["repo"]
+
+    # Step 1: Create a real GitHub Issue
+    create_args = [
+        "gh", "issue", "create",
+        "--repo", f"{owner}/{repo}",
+        "--title", title,
+        "--body", body or "",
+    ]
+    if labels:
+        for label in labels:
+            create_args.extend(["--label", label])
+
+    result = subprocess.run(
+        create_args,
+        capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=30,
     )
-    variables = {
-        "projectId": config["projectId"],
-        "title": title,
-        "body": body,
-    }
-    data = gh_graphql(query, variables)
-    return data["data"]["addProjectV2DraftIssue"]["projectItem"]["id"]
+    if result.returncode != 0:
+        raise RuntimeError(f"Issue creation failed: {result.stderr.strip()}")
+
+    # Parse issue URL to extract issue number (output is URL like https://github.com/owner/repo/issues/123)
+    issue_url = result.stdout.strip()
+    issue_number = int(issue_url.rstrip("/").split("/")[-1])
+
+    # Step 2: Add the issue to the GitHub Project
+    add_result = gh_run([
+        "gh", "project", "item-add", str(config["projectNumber"]),
+        "--owner", owner,
+        "--url", issue_url,
+        "--format", "json",
+    ])
+    item_data = json.loads(add_result)
+    item_id = item_data.get("id", "")
+
+    if not item_id:
+        raise RuntimeError(f"Failed to get project item ID for issue #{issue_number}")
+
+    return item_id, issue_number
 
 
 def gh_set_status(config, item_id, local_status):
@@ -364,17 +473,19 @@ def gh_set_status(config, item_id, local_status):
     ])
 
 
-def gh_update_draft(config, item_id, title=None, body=None):
-    """Update a draft item's title or body."""
+def gh_update_issue(config, issue_number, title=None, body=None):
+    """Update a real GitHub Issue's title or body."""
+    owner = config["owner"]
+    repo = config["repo"]
     args = [
-        "gh", "project", "item-edit",
-        "--id", item_id,
+        "gh", "issue", "edit", str(issue_number),
+        "--repo", f"{owner}/{repo}",
     ]
     if title:
         args.extend(["--title", title])
     if body:
         args.extend(["--body", body])
-    if len(args) > 4:  # only run if there's something to update
+    if len(args) > 5:  # only run if there's something to update
         gh_run(args)
 
 
@@ -399,7 +510,9 @@ def push(include_done=False):
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = resolve_project_id(config)
+
+    allowed_team = resolve_team_id(config)
 
     tickets = tb_get(f"/tickets?project={project_id}")
     if tickets is None:
@@ -409,6 +522,7 @@ def push(include_done=False):
     created = 0
     updated = 0
     skipped = 0
+    filtered = 0
     errors = 0
     upgrades_needed = 0
 
@@ -418,6 +532,13 @@ def push(include_done=False):
         title = ticket.get("title", "Untitled")
         number = ticket.get("number", 0)
         display = f"PF-{number}: {title}" if number else title
+
+        # Team filter: only push tickets assigned to the allowed team
+        if allowed_team:
+            ticket_team = ticket.get("teamId") or ""
+            if ticket_team and ticket_team != allowed_team:
+                filtered += 1
+                continue
 
         # Skip done tickets that were already synced as done
         # Always sync newly-done tickets (status changed) or never-synced tickets
@@ -437,15 +558,18 @@ def push(include_done=False):
         cur_subtask_hash = compute_subtask_hash(full_ticket.get("subtasks", []))
 
         if tid not in tmap:
-            # --- New ticket: create draft on GitHub (v2 format) ---
+            # --- New ticket: create real GitHub Issue and add to project ---
             try:
                 body = format_github_body(full_ticket)
 
-                item_id = gh_create_draft(config, display, body)
+                item_id, gh_issue_number = gh_create_issue_and_add_to_project(
+                    config, display, body
+                )
                 gh_set_status(config, item_id, status)
 
                 tmap[tid] = {
                     "githubItemId": item_id,
+                    "githubIssueNumber": gh_issue_number,
                     "lastLocalStatus": status,
                     "lastGithubStatus": local_to_github(config, status),
                     "title": display,
@@ -480,7 +604,15 @@ def push(include_done=False):
             try:
                 # Rebuild body in v2 format
                 body = format_github_body(full_ticket)
-                gh_update_draft(config, entry["githubItemId"], body=body)
+                gh_issue_num = entry.get("githubIssueNumber")
+                if gh_issue_num:
+                    gh_update_issue(config, gh_issue_num, body=body)
+                else:
+                    # Legacy draft/project item without issue number — skip body update
+                    # Body updates require a real GitHub Issue number.
+                    # New tickets use real issues; legacy items will get their
+                    # githubIssueNumber populated when pull() re-links them.
+                    pass
 
                 if status_changed:
                     gh_set_status(config, entry["githubItemId"], status)
@@ -512,6 +644,9 @@ def push(include_done=False):
     mapping["tickets"] = tmap
     save_map(mapping)
 
+    if filtered:
+        print(f"  [filter] {filtered} tickets skipped (wrong team)")
+
     if created or updated or errors:
         parts = []
         if created:
@@ -531,7 +666,7 @@ def pull():
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = resolve_project_id(config)
 
     if not tb_available():
         print("[SYNC] Taskboard API unavailable — skipping pull")
@@ -543,6 +678,8 @@ def pull():
         print(f"[SYNC] GitHub fetch failed: {e}", file=sys.stderr)
         return
 
+    allowed_team = resolve_team_id(config)
+
     items = gh_data.get("items", [])
 
     # Build reverse map: GitHub item ID → local ticket ID
@@ -552,6 +689,7 @@ def pull():
     updated = 0
     relinked = 0
     skipped = 0
+    filtered = 0
     errors = 0
 
     for item in items:
@@ -623,10 +761,28 @@ def pull():
                 skipped += 1
         else:
             # --- Untracked item: try re-link by ULID, then import ---
-            content_type = content.get("type", "DraftIssue") if content else "DraftIssue"
-            if content_type not in ("DraftIssue", ""):
+            content_type = content.get("type", "") if content else ""
+            # Accept Issues, DraftIssues, and items with no content type
+            # Skip PRs and other content types we don't manage
+            if content_type not in ("Issue", "DraftIssue", ""):
                 skipped += 1
                 continue
+
+            # Team filter: only import items that belong to the allowed team
+            # Items with v2 metadata carry a teamId — reject if it doesn't match
+            # Items without metadata are also rejected (could be from another project)
+            if allowed_team:
+                item_team = parsed.get("teamId", "") if parsed else ""
+                if item_team and item_team != allowed_team:
+                    filtered += 1
+                    continue
+                # No metadata at all = unknown origin, skip to prevent cross-project import
+                if not parsed:
+                    filtered += 1
+                    continue
+
+            # Extract GitHub issue number from content if available
+            gh_issue_num = content.get("number") if content else None
 
             # Check if metadata contains a ticketId we can re-link
             if parsed and parsed.get("ticketId"):
@@ -635,7 +791,7 @@ def pull():
                 local_ticket = tb_get(f"/tickets/{meta_tid}")
                 if local_ticket and meta_tid not in tmap:
                     # Re-link without creating duplicate
-                    tmap[meta_tid] = {
+                    entry_data = {
                         "githubItemId": item_id,
                         "lastLocalStatus": local_ticket.get("status", "todo"),
                         "lastGithubStatus": gh_status,
@@ -645,6 +801,9 @@ def pull():
                         "subtaskHash": parsed.get("subtaskHash", ""),
                         "metadataVersion": parsed.get("version", 2),
                     }
+                    if gh_issue_num:
+                        entry_data["githubIssueNumber"] = gh_issue_num
+                    tmap[meta_tid] = entry_data
                     # Sync status if different
                     if local_ticket.get("status") != local_status:
                         try:
@@ -703,7 +862,7 @@ def pull():
                             except Exception:
                                 pass
 
-                    tmap[new_tid] = {
+                    new_entry = {
                         "githubItemId": item_id,
                         "lastLocalStatus": local_status,
                         "lastGithubStatus": gh_status,
@@ -713,6 +872,9 @@ def pull():
                         "subtaskHash": parsed.get("subtaskHash", "") if parsed else "",
                         "metadataVersion": parsed.get("version", 1) if parsed else 1,
                     }
+                    if gh_issue_num:
+                        new_entry["githubIssueNumber"] = gh_issue_num
+                    tmap[new_tid] = new_entry
                     created += 1
                     print(f"  + PF-{new_num}: {clean_title} [{local_status}]")
             except Exception as e:
@@ -721,6 +883,9 @@ def pull():
 
     mapping["tickets"] = tmap
     save_map(mapping)
+
+    if filtered:
+        print(f"  [filter] {filtered} items skipped (wrong team / no metadata)")
 
     if created or updated or relinked or errors:
         parts = []
@@ -743,7 +908,7 @@ def show_status():
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = resolve_project_id(config)
 
     print(f"GitHub Project: {config['owner']}/{config['repo']} #{config['projectNumber']}")
     print(f"Last sync: {mapping.get('lastSync') or 'never'}")
@@ -782,11 +947,101 @@ def show_status():
 # Main
 # ---------------------------------------------------------------------------
 
+def migrate_drafts():
+    """Convert legacy draft items to real GitHub Issues.
+
+    For each mapping entry that lacks a githubIssueNumber:
+    1. Create a real GitHub Issue with the ticket body
+    2. Add it to the project (gets a new PVTI_ item ID)
+    3. Set the correct status
+    4. Remove the old draft from the project
+    5. Update the mapping with the new item ID and issue number
+    """
+    config = load_config()
+    mapping = load_map()
+    tmap = mapping.get("tickets", {})
+    project_id = resolve_project_id(config)
+
+    # Find entries missing githubIssueNumber
+    legacy = {tid: e for tid, e in tmap.items() if not e.get("githubIssueNumber")}
+    total = len(legacy)
+    if total == 0:
+        print("[MIGRATE] No legacy draft items to migrate.")
+        return
+
+    print(f"[MIGRATE] Found {total} legacy draft items to convert to real issues.")
+
+    migrated = 0
+    errors = 0
+    skipped = 0
+
+    for tid, entry in legacy.items():
+        old_item_id = entry.get("githubItemId", "")
+        title = entry.get("title", "Untitled")
+        status = entry.get("lastLocalStatus", "todo")
+
+        # Fetch full ticket for body
+        full_ticket = tb_get(f"/tickets/{tid}")
+        if not full_ticket:
+            skipped += 1
+            print(f"  - {title} (local ticket not found, skipping)")
+            continue
+
+        full_ticket["id"] = tid
+
+        try:
+            body = format_github_body(full_ticket)
+
+            # Create real issue + add to project
+            new_item_id, gh_issue_number = gh_create_issue_and_add_to_project(
+                config, title, body
+            )
+
+            # Set status on the new project item
+            gh_set_status(config, new_item_id, status)
+
+            # Remove the old draft from the project
+            if old_item_id:
+                try:
+                    gh_run([
+                        "gh", "project", "item-delete",
+                        str(config["projectNumber"]),
+                        "--owner", config["owner"],
+                        "--id", old_item_id,
+                    ])
+                except Exception:
+                    pass  # draft removal is best-effort
+
+            # Update mapping
+            entry["githubItemId"] = new_item_id
+            entry["githubIssueNumber"] = gh_issue_number
+            entry["bodyHash"] = compute_body_hash(full_ticket)
+            entry["subtaskHash"] = compute_subtask_hash(full_ticket.get("subtasks", []))
+            entry["metadataVersion"] = 2
+
+            migrated += 1
+            print(f"  ✓ {title} -> Issue #{gh_issue_number}")
+        except Exception as e:
+            errors += 1
+            print(f"  ! {title}: {e}", file=sys.stderr)
+
+        # Save after each item in case of interruption
+        if migrated % 5 == 0:
+            mapping["tickets"] = tmap
+            save_map(mapping)
+
+    mapping["tickets"] = tmap
+    save_map(mapping)
+
+    print(f"[MIGRATE] Done: {migrated} migrated, {skipped} skipped, {errors} errors")
+
+
 COMMANDS = {
     "push": lambda: push(include_done=False),
     "push-all": lambda: push(include_done=True),
     "pull": pull,
     "status": show_status,
+    "migrate-drafts": migrate_drafts,
 }
 
 if __name__ == "__main__":

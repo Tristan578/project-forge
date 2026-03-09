@@ -69,6 +69,7 @@ struct SetAudioPayload {
     ref_distance: Option<f32>,
     rolloff_factor: Option<f32>,
     autoplay: Option<bool>,
+    bus: Option<String>,
 }
 
 /// Handle set_audio command.
@@ -87,6 +88,7 @@ fn handle_set_audio(payload: serde_json::Value) -> super::CommandResult {
         ref_distance: data.ref_distance,
         rolloff_factor: data.rolloff_factor,
         autoplay: data.autoplay,
+        bus: data.bus,
     };
 
     if queue_audio_update_from_bridge(update) {

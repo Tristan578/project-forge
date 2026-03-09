@@ -1,0 +1,181 @@
+import 'server-only';
+import { execFile } from 'child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { homedir, platform } from 'os';
+import { join } from 'path';
+import type { BridgeToolConfig, BridgeToolStatus, BridgesConfig, PlatformPaths } from './types';
+
+const CONFIG_DIR = join(homedir(), '.spawnforge');
+const CONFIG_FILE = join(CONFIG_DIR, 'bridges.json');
+
+/** Allowlist of known tool IDs — rejects arbitrary toolId values. */
+const ALLOWED_TOOL_IDS = new Set(['aseprite']);
+
+/** Validate that a path is a safe absolute path (no traversal, no special chars). */
+function isSafePath(p: string): boolean {
+  // Must be absolute, no null bytes, no path traversal
+  if (!p || p.includes('\0') || p.includes('..')) return false;
+  // Must start with / (Unix) or drive letter (Windows)
+  return p.startsWith('/') || /^[A-Za-z]:\\/.test(p);
+}
+
+/** Default installation paths per platform for known tools. */
+const TOOL_DEFAULTS: Record<string, { name: string; paths: PlatformPaths }> = {
+  aseprite: {
+    name: 'Aseprite',
+    paths: {
+      darwin: '/Applications/Aseprite.app/Contents/MacOS/aseprite',
+      win32: 'C:\\Program Files\\Aseprite\\aseprite.exe',
+      linux: '/usr/bin/aseprite',
+    },
+  },
+};
+
+/** Additional search paths per platform (checked if default is missing). */
+const EXTRA_SEARCH_PATHS: Record<string, Record<string, string[]>> = {
+  aseprite: {
+    win32: ['C:\\Program Files (x86)\\Aseprite\\aseprite.exe'],
+    linux: ['/usr/local/bin/aseprite', join(homedir(), '.local/bin/aseprite')],
+  },
+};
+
+/** Validate that a toolId is in the allowlist. */
+export function isAllowedToolId(toolId: string): boolean {
+  return ALLOWED_TOOL_IDS.has(toolId);
+}
+
+/** Get default paths for a known tool. */
+export function getDefaultPaths(toolId: string): PlatformPaths {
+  return TOOL_DEFAULTS[toolId]?.paths ?? {};
+}
+
+/** Load persistent bridge config from ~/.spawnforge/bridges.json. */
+export function loadBridgesConfig(): BridgesConfig {
+  if (!existsSync(CONFIG_FILE)) return {};
+  try {
+    return JSON.parse(readFileSync(CONFIG_FILE, 'utf-8')) as BridgesConfig;
+  } catch {
+    return {};
+  }
+}
+
+/** Save bridge config to ~/.spawnforge/bridges.json. */
+export function saveBridgesConfig(config: BridgesConfig): void {
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true });
+  }
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+/** Parse Aseprite version from --version output (e.g., "Aseprite 1.3.17-arm64" -> "1.3.17"). */
+function parseVersion(stdout: string): string | null {
+  const match = stdout.match(/(\d+\.\d+\.\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Find a working binary path for a tool on the current platform.
+ * Only searches known default paths and extra search paths — no user-supplied paths.
+ */
+function findBinaryPath(toolId: string): string | null {
+  if (!isAllowedToolId(toolId)) return null;
+
+  const plat = platform() as 'darwin' | 'win32' | 'linux';
+  const defaults = TOOL_DEFAULTS[toolId]?.paths ?? {};
+
+  // 1. Default path for current platform
+  const defaultPath = defaults[plat];
+  if (defaultPath && existsSync(defaultPath)) return defaultPath;
+
+  // 2. Extra search paths (hardcoded, not user-supplied)
+  const extras = EXTRA_SEARCH_PATHS[toolId]?.[plat] ?? [];
+  for (const p of extras) {
+    if (existsSync(p)) return p;
+  }
+
+  // 3. Check saved config (only platform paths, not custom)
+  const saved = loadBridgesConfig()[toolId];
+  const savedPlatPath = saved?.paths?.[plat];
+  if (savedPlatPath && isSafePath(savedPlatPath) && existsSync(savedPlatPath)) return savedPlatPath;
+
+  return null;
+}
+
+/** Run --version on a binary and return its version string. */
+function getVersion(binaryPath: string): Promise<{ version: string | null; error?: string }> {
+  if (!isSafePath(binaryPath)) {
+    return Promise.resolve({ version: null, error: 'Invalid binary path' });
+  }
+  return new Promise((resolve) => {
+    execFile(binaryPath, ['--version'], { timeout: 10000 }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({ version: null, error: stderr || err.message });
+        return;
+      }
+      resolve({ version: parseVersion(stdout) });
+    });
+  });
+}
+
+/** Discover a bridge tool: find binary, check version, return config. */
+export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {
+  if (!isAllowedToolId(toolId)) {
+    return {
+      id: toolId,
+      name: toolId,
+      paths: {},
+      activeVersion: null,
+      status: 'not_found',
+    };
+  }
+
+  const defaults = TOOL_DEFAULTS[toolId];
+  const name = defaults?.name ?? toolId;
+
+  const binaryPath = findBinaryPath(toolId);
+  if (!binaryPath) {
+    return {
+      id: toolId,
+      name,
+      paths: defaults?.paths ?? {},
+      activeVersion: null,
+      status: 'not_found',
+    };
+  }
+
+  const { version, error } = await getVersion(binaryPath);
+  if (error || !version) {
+    return {
+      id: toolId,
+      name,
+      paths: defaults?.paths ?? {},
+      activeVersion: null,
+      status: 'error',
+    };
+  }
+
+  // Save discovered config
+  const config = loadBridgesConfig();
+  const plat = platform() as 'darwin' | 'win32' | 'linux';
+  config[toolId] = {
+    paths: { ...defaults?.paths, [plat]: binaryPath },
+    activeVersion: version,
+  };
+  saveBridgesConfig(config);
+
+  return {
+    id: toolId,
+    name,
+    paths: { ...defaults?.paths, [plat]: binaryPath },
+    activeVersion: version,
+    status: 'connected',
+  };
+}
+
+/** Health check: verify a binary is accessible and returns a version. */
+export async function healthCheck(binaryPath: string): Promise<BridgeToolStatus> {
+  if (!isSafePath(binaryPath) || !existsSync(binaryPath)) return 'not_found';
+  const { version, error } = await getVersion(binaryPath);
+  if (error || !version) return 'error';
+  return 'connected';
+}

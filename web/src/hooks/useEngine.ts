@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
+import { captureException } from '@/lib/monitoring/sentry-client';
+import * as Sentry from '@sentry/nextjs';
 
 export type WasmModule = {
   init_engine: (canvasId: string) => void;
@@ -11,6 +13,32 @@ export type WasmModule = {
 
 let wasmModule: WasmModule | null = null;
 let initPromise: Promise<WasmModule> | null = null;
+let panicInterceptorInstalled = false;
+
+/**
+ * Install a global interceptor for WASM panics.
+ * Rust's console_error_panic_hook writes panics to console.error —
+ * this catches them and forwards to Sentry with structured context.
+ */
+function installPanicInterceptor(): void {
+  if (panicInterceptorInstalled || typeof window === 'undefined') return;
+  panicInterceptorInstalled = true;
+
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    originalConsoleError.apply(console, args);
+
+    // Detect Rust/WASM panics from console_error_panic_hook
+    const msg = args.map(a => (typeof a === 'string' ? a : String(a))).join(' ');
+    if (msg.includes('panicked at') || msg.includes('wasm-bindgen')) {
+      captureException(new Error(`WASM panic: ${msg.slice(0, 500)}`), {
+        source: 'console_error_panic_hook',
+        fullMessage: msg.slice(0, 2000),
+        engineBackend: detectWebGPU() ? 'webgpu' : 'webgl2',
+      });
+    }
+  };
+}
 
 // Emit event helper that logs and notifies listeners
 function emitEvent(phase: InitPhase, message?: string, error?: string) {
@@ -50,6 +78,9 @@ async function loadWasm(): Promise<WasmModule> {
   }
   if (wasmModule) return wasmModule;
   if (initPromise) return initPromise;
+
+  // Intercept WASM panics before loading
+  installPanicInterceptor();
 
   initPromise = (async () => {
     const useWebGPU = detectWebGPU();
@@ -132,6 +163,10 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       .then((wasm) => {
         emitEvent('engine_starting', `Calling init_engine("${canvasId}")`);
 
+        // Set Sentry context for all subsequent errors in this session
+        Sentry.setTag('engine.backend', detectWebGPU() ? 'webgpu' : 'webgl2');
+        Sentry.setTag('engine.canvas', canvasId);
+
         try {
           wasm.init_engine(canvasId);
           // Note: For Bevy on WASM, init_engine may not return immediately
@@ -145,6 +180,11 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         } catch (err) {
           const engineError = err instanceof Error ? err : new Error(String(err));
           emitEvent('error', 'Engine initialization failed', engineError.message);
+          captureException(engineError, {
+            phase: 'init_engine',
+            canvasId,
+            backend: detectWebGPU() ? 'webgpu' : 'webgl2',
+          });
           setError(engineError);
           onErrorRef.current?.(engineError);
           initializedRef.current = false;
@@ -152,6 +192,11 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       })
       .catch((err) => {
         const loadError = err instanceof Error ? err : new Error(String(err));
+        captureException(loadError, {
+          phase: 'wasm_load',
+          backend: detectWebGPU() ? 'webgpu' : 'webgl2',
+          cdnBase: ENGINE_CDN_BASE || '(same-origin)',
+        });
         setError(loadError);
         onErrorRef.current?.(loadError);
         initializedRef.current = false;
@@ -164,7 +209,17 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         console.warn('Engine not initialized');
         return undefined;
       }
-      return wasmModule.handle_command(command, payload) as T;
+      try {
+        return wasmModule.handle_command(command, payload) as T;
+      } catch (err) {
+        const cmdError = err instanceof Error ? err : new Error(String(err));
+        captureException(cmdError, {
+          phase: 'handle_command',
+          command,
+          payload: typeof payload === 'object' ? (() => { try { return JSON.stringify(payload).slice(0, 500); } catch { return '[unserializable]'; } })() : String(payload),
+        });
+        throw err;
+      }
     },
     []
   );

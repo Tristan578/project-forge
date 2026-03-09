@@ -1,6 +1,9 @@
 /**
  * Initialization logging and persistence for debugging.
+ * Integrates with Sentry for production error capture.
  */
+import { captureException } from '@/lib/monitoring/sentry-client';
+import * as Sentry from '@sentry/nextjs';
 
 export type InitPhase =
   | 'wasm_loading'
@@ -85,10 +88,27 @@ export function logInitEvent(
 
   if (error) {
     console.error(`${prefix} ${phase} - ${timeStr} - ERROR: ${error}`);
-  } else if (message) {
-    console.log(`${prefix} ${phase} - ${timeStr} - ${message}`);
+    // Report init errors to Sentry with full context
+    captureException(new Error(`Engine init failed at ${phase}: ${error}`), {
+      phase,
+      elapsed: event.timestamp,
+      message: message ?? '',
+      initEvents: events.map(e => `[${e.timestamp.toFixed(0)}ms] ${e.phase}: ${e.message ?? ''}`),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+    });
   } else {
-    console.log(`${prefix} ${phase} - ${timeStr}`);
+    // Add Sentry breadcrumb for each successful phase
+    Sentry.addBreadcrumb({
+      category: 'engine.init',
+      message: `${phase}: ${message ?? ''}`,
+      level: 'info',
+      data: { elapsed: event.timestamp },
+    });
+    if (message) {
+      console.log(`${prefix} ${phase} - ${timeStr} - ${message}`);
+    } else {
+      console.log(`${prefix} ${phase} - ${timeStr}`);
+    }
   }
 
   return event;

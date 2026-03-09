@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // CDN origin for WASM engine files (e.g. "https://cdn.spawnforge.ai")
 const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '';
@@ -91,4 +92,26 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  // Suppress source map upload logs in CI
+  silent: true,
+
+  // Upload source maps for production builds
+  org: process.env.SENTRY_ORG || 'tristan-nolan',
+  project: process.env.SENTRY_PROJECT || 'spawnforge-ai',
+
+  // Auth token for source map upload (set SENTRY_AUTH_TOKEN in env)
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Automatically tree-shake Sentry logger statements to reduce bundle size
+  disableLogger: true,
+
+  // Source map configuration
+  sourcemaps: {
+    // Hide source maps from users in production
+    deleteSourcemapsAfterUpload: true,
+  },
+
+  // Widen the upload scope to include WASM-related files
+  widenClientFileUpload: true,
+});

@@ -29,6 +29,8 @@ const mockImportGltf = vi.fn();
 const mockLoadTexture = vi.fn();
 const mockSetCustomSkybox = vi.fn();
 const mockImportAudio = vi.fn();
+const mockSetAudio = vi.fn();
+const mockSetSpriteSheet = vi.fn();
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: {
@@ -37,6 +39,8 @@ vi.mock('@/stores/editorStore', () => ({
       loadTexture: mockLoadTexture,
       setCustomSkybox: mockSetCustomSkybox,
       importAudio: mockImportAudio,
+      setAudio: mockSetAudio,
+      setSpriteSheet: mockSetSpriteSheet,
     }),
   },
 }));
@@ -59,6 +63,32 @@ vi.mock('@/lib/generate/modelQuality', () => ({
     primitiveCount: 1,
     materialCount: 1,
     warnings: [],
+  })),
+}));
+
+vi.mock('@/lib/sprites/sheetImporter', () => ({
+  detectGridDimensions: vi.fn((_w: number, _h: number) => ({
+    columns: 4,
+    rows: 1,
+    frameWidth: 64,
+    frameHeight: 64,
+  })),
+  sliceSheet: vi.fn((_w: number, _h: number, _rows: number, _cols: number) => [
+    { index: 0, x: 0, y: 0, width: 64, height: 64 },
+    { index: 1, x: 64, y: 0, width: 64, height: 64 },
+    { index: 2, x: 128, y: 0, width: 64, height: 64 },
+    { index: 3, x: 192, y: 0, width: 64, height: 64 },
+  ]),
+  buildSpriteSheetData: vi.fn((_assetId: string, _result: unknown, _name: string) => ({
+    assetId: 'SpriteSheet_test',
+    sliceMode: { type: 'grid', columns: 4, rows: 1, tileSize: [64, 64], padding: [0, 0], offset: [0, 0] },
+    frames: [
+      { index: 0, x: 0, y: 0, width: 64, height: 64 },
+      { index: 1, x: 64, y: 0, width: 64, height: 64 },
+      { index: 2, x: 128, y: 0, width: 64, height: 64 },
+      { index: 3, x: 192, y: 0, width: 64, height: 64 },
+    ],
+    clips: { idle: { name: 'idle', frames: [0, 1, 2, 3], frameDurations: { type: 'uniform', duration: 0.1 }, looping: true, pingPong: false } },
   })),
 }));
 
@@ -366,6 +396,66 @@ describe('useGenerationPolling', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Skybox completion — verifies the generated image is forwarded to the engine
+  // ---------------------------------------------------------------------------
+  it('applies completed skybox to the scene via setCustomSkybox', async () => {
+    mockJobs['sky1'] = makeJob('sky1', { type: 'skybox' });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/api/generate/skybox/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-sky1',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/skybox.png',
+          }),
+        } as Response;
+      }
+      // resultUrl download
+      return {
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['fake-png-data'], { type: 'image/png' })),
+      } as Response;
+    });
+
+    // Mock FileReader for blobToBase64
+    const mockReadAsDataURL = vi.fn();
+    const origFileReader = globalThis.FileReader;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (globalThis as any).FileReader = class {
+      onloadend: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      result = 'data:image/png;base64,AAAA';
+      readAsDataURL = mockReadAsDataURL.mockImplementation(function (this: { onloadend: (() => void) | null }) {
+        if (this.onloadend) this.onloadend();
+      });
+    };
+
+    renderHook(() => useGenerationPolling());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // Should have called setCustomSkybox with the asset ID and base64 data
+    expect(mockSetCustomSkybox).toHaveBeenCalledWith(
+      expect.stringContaining('generated_skybox_sky1'),
+      'data:image/png;base64,AAAA',
+    );
+
+    // Should mark as completed
+    expect(mockUpdateJob).toHaveBeenCalledWith('sky1', expect.objectContaining({
+      status: 'completed',
+      resultUrl: 'https://example.com/skybox.png',
+    }));
+
+    fetchSpy.mockRestore();
+    globalThis.FileReader = origFileReader;
+  });
+
+  // ---------------------------------------------------------------------------
   // HTTP error handling
   // ---------------------------------------------------------------------------
   it('continues polling on HTTP error (non-ok response)', async () => {
@@ -400,6 +490,155 @@ describe('useGenerationPolling', () => {
       status: 'processing',
       progress: 25,
     });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Music completion — looping audio entity creation
+  // ---------------------------------------------------------------------------
+  it('imports audio and sets looping audio on entity when music completes with entityId', async () => {
+    vi.useRealTimers();
+
+    mockJobs['m2'] = makeJob('m2', {
+      type: 'music',
+      entityId: 'ent-music-1',
+      prompt: 'epic battle theme',
+    });
+
+    const originalFileReader = globalThis.FileReader;
+    class MockFileReader {
+      result = 'data:audio/mpeg;base64,dGVzdA==';
+      onloadend: (() => void) | null = null;
+      onerror: ((_e: unknown) => void) | null = null;
+      readAsDataURL() {
+        queueMicrotask(() => { if (this.onloadend) this.onloadend(); });
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    globalThis.FileReader = MockFileReader as any;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-m2',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/music.mp3',
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['audio-data'], { type: 'audio/mpeg' })),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+
+    await vi.waitFor(() => {
+      expect(mockImportAudio).toHaveBeenCalledWith(
+        'data:audio/mpeg;base64,dGVzdA==',
+        expect.any(String),
+      );
+    });
+
+    expect(mockSetAudio).toHaveBeenCalledWith('ent-music-1', expect.objectContaining({
+      loopAudio: true,
+      bus: 'music',
+      autoplay: true,
+      spatial: false,
+      volume: 0.7,
+    }));
+
+    globalThis.FileReader = originalFileReader;
+    vi.useFakeTimers();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Sprite sheet slicing on completion
+  // ---------------------------------------------------------------------------
+  it('slices sprite_sheet on completion and calls setSpriteSheet', async () => {
+    mockJobs['ss1'] = makeJob('ss1', {
+      type: 'sprite_sheet',
+      entityId: 'entity-ss1',
+      metadata: { frameCount: 4, frameSize: '64' },
+    });
+
+    const OriginalImage = globalThis.Image;
+    globalThis.Image = class MockImage {
+      naturalWidth = 256;
+      naturalHeight = 64;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      set src(_url: string) {
+        Promise.resolve().then(() => this.onload?.());
+      }
+    } as unknown as typeof Image;
+
+    const origCreateObjectURL = globalThis.URL.createObjectURL;
+    const origRevokeObjectURL = globalThis.URL.revokeObjectURL;
+    const mockCreateObjectURL = vi.fn(() => 'blob:mock-url');
+    const mockRevokeObjectURL = vi.fn();
+    globalThis.URL.createObjectURL = mockCreateObjectURL;
+    globalThis.URL.revokeObjectURL = mockRevokeObjectURL;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      const urlStr = typeof url === 'string' ? url : (url as Request).url;
+      if (urlStr.includes('/api/generate/sprite-sheet/status')) {
+        return {
+          ok: true,
+          json: () => Promise.resolve({
+            jobId: 'job-ss1',
+            status: 'completed',
+            progress: 100,
+            resultUrl: 'https://example.com/spritesheet.png',
+          }),
+        } as Response;
+      }
+      return {
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['fake-png'], { type: 'image/png' })),
+      } as Response;
+    });
+
+    renderHook(() => useGenerationPolling());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+
+    expect(mockLoadTexture).toHaveBeenCalledWith(
+      expect.any(String),
+      'TestAsset',
+      'entity-ss1',
+      'base_color',
+    );
+
+    expect(mockSetSpriteSheet).toHaveBeenCalledWith(
+      'entity-ss1',
+      expect.objectContaining({
+        assetId: 'SpriteSheet_test',
+        frames: expect.arrayContaining([
+          expect.objectContaining({ index: 0, x: 0, y: 0 }),
+        ]),
+      }),
+    );
+
+    const completedCall = mockUpdateJob.mock.calls.find(
+      (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
+    );
+    expect(completedCall).toBeDefined();
+    const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
+    expect(meta).toHaveProperty('spriteSheet');
+
+    globalThis.Image = OriginalImage;
+    globalThis.URL.createObjectURL = origCreateObjectURL;
+    globalThis.URL.revokeObjectURL = origRevokeObjectURL;
   });
 
   // ---------------------------------------------------------------------------
