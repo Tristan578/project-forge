@@ -111,7 +111,7 @@ fn handle_import_gltf(payload: serde_json::Value) -> super::CommandResult {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LoadTexturePayload {
-    data: String,
+    data_base64: String,
     name: String,
     entity_id: String,
     slot: String,
@@ -123,7 +123,7 @@ fn handle_load_texture(payload: serde_json::Value) -> super::CommandResult {
         .map_err(|e| format!("Invalid load_texture payload: {}", e))?;
 
     let request = TextureLoadRequest {
-        data_base64: data.data,
+        data_base64: data.data_base64,
         name: data.name.clone(),
         entity_id: data.entity_id.clone(),
         slot: data.slot,
