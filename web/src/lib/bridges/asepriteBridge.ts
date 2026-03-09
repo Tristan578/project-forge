@@ -57,11 +57,26 @@ function coerceParams(params: Record<string, unknown>): Record<string, string> {
   return result;
 }
 
+/** Validate that a path is a safe absolute path (no traversal, no special chars). */
+function isSafeBinaryPath(p: string): boolean {
+  if (!p || p.includes('\0') || p.includes('..')) return false;
+  return p.startsWith('/') || /^[A-Za-z]:\\/.test(p);
+}
+
 /** Execute a bridge operation against Aseprite. Uses execFile (not exec) to prevent shell injection. */
 export async function executeOperation(
   binaryPath: string,
   operation: BridgeOperation
 ): Promise<BridgeResult> {
+  // Validate binary path to prevent command injection
+  if (!isSafeBinaryPath(binaryPath)) {
+    return {
+      success: false,
+      error: 'Invalid binary path',
+      exitCode: 1,
+    };
+  }
+
   // Validate operation name against template allowlist
   if (!ALLOWED_TEMPLATES.has(operation.name)) {
     return {

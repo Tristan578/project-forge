@@ -11,6 +11,14 @@ const CONFIG_FILE = join(CONFIG_DIR, 'bridges.json');
 /** Allowlist of known tool IDs — rejects arbitrary toolId values. */
 const ALLOWED_TOOL_IDS = new Set(['aseprite']);
 
+/** Validate that a path is a safe absolute path (no traversal, no special chars). */
+function isSafePath(p: string): boolean {
+  // Must be absolute, no null bytes, no path traversal
+  if (!p || p.includes('\0') || p.includes('..')) return false;
+  // Must start with / (Unix) or drive letter (Windows)
+  return p.startsWith('/') || /^[A-Za-z]:\\/.test(p);
+}
+
 /** Default installation paths per platform for known tools. */
 const TOOL_DEFAULTS: Record<string, { name: string; paths: PlatformPaths }> = {
   aseprite: {
@@ -88,13 +96,16 @@ function findBinaryPath(toolId: string): string | null {
   // 3. Check saved config (only platform paths, not custom)
   const saved = loadBridgesConfig()[toolId];
   const savedPlatPath = saved?.paths?.[plat];
-  if (savedPlatPath && existsSync(savedPlatPath)) return savedPlatPath;
+  if (savedPlatPath && isSafePath(savedPlatPath) && existsSync(savedPlatPath)) return savedPlatPath;
 
   return null;
 }
 
 /** Run --version on a binary and return its version string. */
 function getVersion(binaryPath: string): Promise<{ version: string | null; error?: string }> {
+  if (!isSafePath(binaryPath)) {
+    return Promise.resolve({ version: null, error: 'Invalid binary path' });
+  }
   return new Promise((resolve) => {
     execFile(binaryPath, ['--version'], { timeout: 10000 }, (err, stdout, stderr) => {
       if (err) {
@@ -163,7 +174,7 @@ export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {
 
 /** Health check: verify a binary is accessible and returns a version. */
 export async function healthCheck(binaryPath: string): Promise<BridgeToolStatus> {
-  if (!existsSync(binaryPath)) return 'not_found';
+  if (!isSafePath(binaryPath) || !existsSync(binaryPath)) return 'not_found';
   const { version, error } = await getVersion(binaryPath);
   if (error || !version) return 'error';
   return 'connected';

@@ -39,7 +39,7 @@ pub(super) fn apply_audio_updates(
                     ref_distance: update.ref_distance.unwrap_or(base.ref_distance),
                     rolloff_factor: update.rolloff_factor.unwrap_or(base.rolloff_factor),
                     autoplay: update.autoplay.unwrap_or(base.autoplay),
-                    bus: base.bus,
+                    bus: update.bus.unwrap_or(base.bus),
                 };
 
                 // Insert or update audio components

@@ -5,9 +5,9 @@ use serde::Deserialize;
 use crate::core::pending::scene::{
     queue_scene_export_from_bridge, queue_scene_load_from_bridge, queue_new_scene_from_bridge,
     queue_gltf_import_from_bridge, queue_texture_load_from_bridge, queue_place_asset_from_bridge,
-    queue_delete_asset_from_bridge, queue_remove_texture_from_bridge,
+    queue_delete_asset_from_bridge, queue_remove_texture_from_bridge, queue_audio_import_from_bridge,
     SceneLoadRequest, GltfImportRequest, TextureLoadRequest, RemoveTextureRequest,
-    PlaceAssetRequest, DeleteAssetRequest,
+    PlaceAssetRequest, DeleteAssetRequest, AudioImportRequest,
 };
 use crate::core::pending::audio::{
     queue_script_update_from_bridge, queue_script_removal_from_bridge,
@@ -26,6 +26,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "remove_texture" => Some(handle_remove_texture(payload.clone())),
         "place_asset" => Some(handle_place_asset(payload.clone())),
         "delete_asset" => Some(handle_delete_asset(payload.clone())),
+        "import_audio" => Some(handle_import_audio(payload.clone())),
         "list_assets" => Some(super::handle_query(QueryRequest::AssetList)),
         "set_script" => Some(handle_set_script(payload.clone())),
         "remove_script" => Some(handle_remove_script(payload.clone())),
@@ -207,6 +208,32 @@ fn handle_delete_asset(payload: serde_json::Value) -> super::CommandResult {
 
     if queue_delete_asset_from_bridge(request) {
         tracing::info!("Queued asset deletion: {}", data.asset_id);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for import_audio command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportAudioPayload {
+    name: String,
+}
+
+/// Handle import_audio command — registers audio asset in the AssetRegistry.
+/// Audio playback is handled JS-side (Web Audio API); the engine tracks metadata only.
+fn handle_import_audio(payload: serde_json::Value) -> super::CommandResult {
+    let data: ImportAudioPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid import_audio payload: {}", e))?;
+
+    let request = AudioImportRequest {
+        data_base64: String::new(), // Audio data stays JS-side; engine only tracks metadata
+        name: data.name.clone(),
+    };
+
+    if queue_audio_import_from_bridge(request) {
+        tracing::info!("Queued audio import: {}", data.name);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

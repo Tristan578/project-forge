@@ -485,6 +485,7 @@ impl Plugin for SelectionPlugin {
                 .add_systems(Update, (
                     scene_io::apply_place_asset,
                     scene_io::apply_delete_asset,
+                    scene_io::apply_audio_import,
                     mesh_ops::apply_instantiate_prefab,
                 ))
                 .add_systems(Update, (

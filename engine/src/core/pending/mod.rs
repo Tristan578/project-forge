@@ -252,6 +252,7 @@ pub struct PendingCommands {
     pub place_asset_requests: Vec<PlaceAssetRequest>,
     pub delete_asset_requests: Vec<DeleteAssetRequest>,
     pub remove_texture_requests: Vec<RemoveTextureRequest>,
+    pub audio_import_requests: Vec<AudioImportRequest>,
     pub quality_preset_requests: Vec<QualityPresetRequest>,
     pub instantiate_prefab_requests: Vec<InstantiatePrefabRequest>,
     // query domain

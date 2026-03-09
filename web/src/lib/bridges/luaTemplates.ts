@@ -84,6 +84,10 @@ export function getTemplate(name: string): string {
   if (!ALLOWED_TEMPLATES.has(name)) {
     throw new Error(`Unknown bridge template: "${name}". Allowed: ${[...ALLOWED_TEMPLATES].join(', ')}`);
   }
+  // Defense-in-depth: even though allowlist checks above, validate the name contains only safe chars
+  if (!/^[a-zA-Z0-9_]+$/.test(name)) {
+    throw new Error(`Invalid template name: "${name}"`);
+  }
   const filePath = resolve(TEMPLATES_DIR, `${name}.lua`);
   // Double-check resolved path stays within templates dir
   const rel = relative(TEMPLATES_DIR, filePath);

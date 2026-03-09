@@ -104,6 +104,24 @@ describe('AsepriteBridge', () => {
       );
     });
 
+    it('rejects binary paths with traversal', async () => {
+      const result = await asepriteBridge.executeOperation(
+        '/usr/../../../etc/malicious',
+        { name: 'createSprite', params: { width: '32', height: '32' } }
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid binary path');
+    });
+
+    it('rejects relative binary paths', async () => {
+      const result = await asepriteBridge.executeOperation(
+        'aseprite',
+        { name: 'createSprite', params: { width: '32', height: '32' } }
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid binary path');
+    });
+
     it('cleans up temp script after execution', async () => {
       const mockExecFile = vi.mocked(childProcess.execFile);
       const mockUnlink = vi.mocked(fs.unlinkSync);

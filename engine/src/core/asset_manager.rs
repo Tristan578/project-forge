@@ -23,6 +23,7 @@ pub struct AssetRef {
 pub enum AssetKind {
     GltfModel,
     Texture,
+    Audio,
 }
 
 /// Resource tracking all known assets in the current session.

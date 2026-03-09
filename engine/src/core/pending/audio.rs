@@ -30,6 +30,7 @@ pub struct AudioUpdate {
     pub ref_distance: Option<f32>,
     pub rolloff_factor: Option<f32>,
     pub autoplay: Option<bool>,
+    pub bus: Option<String>,
 }
 
 #[derive(Debug, Clone)]
