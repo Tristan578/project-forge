@@ -3,7 +3,7 @@
  *
  * Tests for loop point detection in audioManager.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { audioManager } from './audioManager';
 
 // ---- Internal access ----
@@ -163,6 +163,10 @@ describe('audioManager - Loop Point Detection', () => {
 
     vi.stubGlobal('AudioContext', MockAudioContext);
     audioManager.ensureContext();
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
   });
 
   it('returns empty array for unknown asset', () => {

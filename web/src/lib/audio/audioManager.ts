@@ -64,7 +64,7 @@ interface AdaptiveMusicTrack {
 export interface AudioSnapshot {
   name: string;
   busStates: Record<string, { volume: number; muted: boolean }>;
-  crossfadeDuration: number;
+  crossfadeDurationMs: number;
 }
 
 export interface LoopPoint {
@@ -1448,14 +1448,6 @@ class AudioManager {
     const targetQ = 1.0 + 3.0 * clamped;
     filter.Q.value = targetQ;
 
-    // Reverb wetness for "through-wall" effect
-    const reverbNode = this.occlusionReverbNodes.get(entityId);
-    if (reverbNode) {
-      const wetAmount = clamped * 0.6; // Max 60% wet
-      reverbNode.wetGain.gain.cancelScheduledValues(now);
-      reverbNode.wetGain.gain.setValueAtTime(reverbNode.wetGain.gain.value, now);
-      reverbNode.wetGain.gain.linearRampToValueAtTime(wetAmount, now + 0.05);
-    }
   }
 
   // --- Audio Snapshots ---
@@ -1463,12 +1455,12 @@ class AudioManager {
   /**
    * Save a snapshot of current bus states.
    */
-  saveSnapshot(name: string, crossfadeDuration: number = 1000): AudioSnapshot {
+  saveSnapshot(name: string, crossfadeDurationMs: number = 1000): AudioSnapshot {
     const busStates: Record<string, { volume: number; muted: boolean }> = {};
     for (const [busName, bus] of this.buses) {
       busStates[busName] = { volume: bus.volume, muted: bus.muted };
     }
-    const snapshot: AudioSnapshot = { name, busStates, crossfadeDuration };
+    const snapshot: AudioSnapshot = { name, busStates, crossfadeDurationMs };
     this.snapshots.set(name, snapshot);
     return snapshot;
   }
@@ -1483,7 +1475,7 @@ class AudioManager {
     const ctx = this.ctx;
     if (!ctx) return false;
 
-    const duration = (durationMs ?? snapshot.crossfadeDuration) / 1000;
+    const duration = (durationMs ?? snapshot.crossfadeDurationMs) / 1000;
     const now = ctx.currentTime;
 
     for (const [busName, targetState] of Object.entries(snapshot.busStates)) {
@@ -1502,6 +1494,9 @@ class AudioManager {
       bus.volume = targetState.volume;
       bus.muted = targetState.muted;
     }
+
+    // Recompute effectiveMuted for all buses (respects solo rules)
+    this.recomputeEffectiveGains();
 
     return true;
   }

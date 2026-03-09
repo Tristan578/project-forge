@@ -41,7 +41,8 @@ export interface AudioSlice {
   setDuckingRule: (rule: { triggerBus: string; targetBus: string; duckLevel?: number; attackMs?: number; releaseMs?: number }) => void;
   setAdaptiveMusicIntensity: (intensity: number) => void;
   setCurrentMusicSegment: (segment: string) => void;
-  saveAudioSnapshot: (name: string, crossfadeDuration?: number) => void;
+  saveAudioSnapshot: (name: string, crossfadeDurationMs?: number) => void;
+  listAudioSnapshots: () => string[];
   loadAudioSnapshot: (name: string, crossfadeDurationMs?: number) => void;
   deleteAudioSnapshot: (name: string) => void;
 }
@@ -159,8 +160,11 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   },
   setAdaptiveMusicIntensity: (intensity) => set({ adaptiveMusicIntensity: intensity }),
   setCurrentMusicSegment: (segment) => set({ currentMusicSegment: segment }),
-  saveAudioSnapshot: (name, crossfadeDuration = 1000) => {
-    const snapshot = audioManager.saveSnapshot(name, crossfadeDuration);
+  listAudioSnapshots: () => {
+    return audioManager.listSnapshots();
+  },
+  saveAudioSnapshot: (name, crossfadeDurationMs = 1000) => {
+    const snapshot = audioManager.saveSnapshot(name, crossfadeDurationMs);
     set(state => ({
       audioSnapshots: { ...state.audioSnapshots, [name]: snapshot },
     }));

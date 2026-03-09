@@ -500,8 +500,8 @@ function buildForgeApi(scriptEntityId: string) {
       loadStems: (stems: Record<string, string>) => {
         pendingCommands.push({ cmd: 'set_music_stems', stems });
       },
-      saveSnapshot: (name: string, crossfadeDuration?: number) => {
-        pendingCommands.push({ cmd: 'audio_save_snapshot', name, crossfadeDuration: crossfadeDuration ?? 1000 });
+      saveSnapshot: (name: string, crossfadeDurationMs?: number) => {
+        pendingCommands.push({ cmd: 'audio_save_snapshot', name, crossfadeDurationMs: crossfadeDurationMs ?? 1000 });
       },
       loadSnapshot: (name: string, durationMs?: number) => {
         pendingCommands.push({ cmd: 'audio_load_snapshot', name, durationMs: durationMs ?? 1000 });

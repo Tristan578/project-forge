@@ -66,7 +66,7 @@ export const audioHandlers: Record<string, ToolHandler> = {
     try {
       const p = parseArgs(z.object({
         segment: z.string().min(1),
-        crossfadeDurationMs: z.number().positive().optional(),
+        crossfadeDurationMs: z.number().nonnegative().optional(),
       }), args);
       if (p.error) return p.error;
 
@@ -85,11 +85,11 @@ export const audioHandlers: Record<string, ToolHandler> = {
     try {
       const p = parseArgs(z.object({
         name: z.string().min(1),
-        crossfadeDuration: z.number().positive().optional(),
+        crossfadeDurationMs: z.number().nonnegative().optional(),
       }), args);
       if (p.error) return p.error;
 
-      ctx.store.saveAudioSnapshot(p.data.name, p.data.crossfadeDuration);
+      ctx.store.saveAudioSnapshot(p.data.name, p.data.crossfadeDurationMs);
 
       return {
         success: true,
@@ -107,7 +107,7 @@ export const audioHandlers: Record<string, ToolHandler> = {
     try {
       const p = parseArgs(z.object({
         name: z.string().min(1),
-        crossfadeDurationMs: z.number().positive().optional(),
+        crossfadeDurationMs: z.number().nonnegative().optional(),
       }), args);
       if (p.error) return p.error;
 
@@ -121,7 +121,7 @@ export const audioHandlers: Record<string, ToolHandler> = {
 
       ctx.store.loadAudioSnapshot(p.data.name, p.data.crossfadeDurationMs);
 
-      const duration = p.data.crossfadeDurationMs ?? snapshot.crossfadeDuration;
+      const duration = p.data.crossfadeDurationMs ?? snapshot.crossfadeDurationMs;
       return {
         success: true,
         result: `Applied audio snapshot: ${p.data.name} (${duration}ms crossfade)`,

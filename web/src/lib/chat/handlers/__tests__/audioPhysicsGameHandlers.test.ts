@@ -269,7 +269,7 @@ describe('audioHandlers', () => {
     it('passes crossfade duration to store action', async () => {
       const store = createMockStore();
       await audioHandlers.create_audio_snapshot(
-        { name: 'Quick', crossfadeDuration: 500 },
+        { name: 'Quick', crossfadeDurationMs: 500 },
         { store, dispatchCommand: vi.fn() }
       );
       expect(store.saveAudioSnapshot).toHaveBeenCalledWith('Quick', 500);
@@ -296,7 +296,7 @@ describe('audioHandlers', () => {
       mockSnapshots.set('MySnap', {
         name: 'MySnap',
         busStates: { master: { volume: 0.5, muted: true } },
-        crossfadeDuration: 1000,
+        crossfadeDurationMs: 1000,
       });
       const store = createMockStore();
       const result = await audioHandlers.apply_audio_snapshot(
@@ -313,7 +313,7 @@ describe('audioHandlers', () => {
       mockSnapshots.set('Fast', {
         name: 'Fast',
         busStates: { sfx: { volume: 0.7, muted: false } },
-        crossfadeDuration: 1000,
+        crossfadeDurationMs: 1000,
       });
       const store = createMockStore();
       const result = await audioHandlers.apply_audio_snapshot(

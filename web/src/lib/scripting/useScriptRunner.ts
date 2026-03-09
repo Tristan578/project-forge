@@ -38,6 +38,8 @@ const SCRIPT_ALLOWED_COMMANDS = new Set([
   'set_ik_target2d',
   // Input
   'vibrate',
+  // Audio snapshots & loop detection
+  'audio_save_snapshot', 'audio_load_snapshot', 'audio_detect_loop_points',
   // Scene control
   'stop',
 ]);

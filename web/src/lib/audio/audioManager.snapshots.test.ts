@@ -3,7 +3,7 @@
  *
  * Tests for audio snapshot save/load/delete and occlusion enhancement.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
 import { audioManager } from './audioManager';
 
 // ---- Internal access ----
@@ -179,6 +179,10 @@ describe('audioManager - Snapshots', () => {
     audioManager.ensureContext(); // Initializes buses
   });
 
+  afterAll(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('saveSnapshot captures current bus volumes and mute states', () => {
     audioManager.setBusVolume('music', 0.5);
     audioManager.muteBus('sfx', true);
@@ -253,7 +257,7 @@ describe('audioManager - Snapshots', () => {
   it('loadSnapshot uses default crossfade duration from snapshot', () => {
     audioManager.saveSnapshot('with-duration', 2000);
     const snap = audioManager.getSnapshot('with-duration');
-    expect(snap?.crossfadeDuration).toBe(2000);
+    expect(snap?.crossfadeDurationMs).toBe(2000);
 
     // Load without specifying duration — uses snapshot's default
     const success = audioManager.loadSnapshot('with-duration');

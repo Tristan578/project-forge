@@ -87,6 +87,7 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
     saveAudioSnapshot: vi.fn(),
     loadAudioSnapshot: vi.fn(),
     deleteAudioSnapshot: vi.fn(),
+    listAudioSnapshots: vi.fn().mockReturnValue([]),
 
     // Animation
     primaryAnimation: null,

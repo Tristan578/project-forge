@@ -91,7 +91,7 @@ interface LoopPoint {
 
 ### Script API
 
-- `forge.audio.detectLoopPoints(assetId: string): LoopPoint[]` — synchronous analysis, returns results
+- `forge.audio.detectLoopPoints(assetId: string)` — queues command to main thread; returns `[]` immediately (results delivered asynchronously via main-thread audioManager)
 
 ## Test Plan (20+ tests)
 
