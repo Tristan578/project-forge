@@ -1,0 +1,13 @@
+{
+  "operation": "badScript",
+  "args": [
+    "--batch",
+    "--script",
+    "/tmp/fixture_bad.lua"
+  ],
+  "exitCode": 1,
+  "stdout": "/tmp/fixture_bad.lua:1: syntax error near 'is'\n",
+  "stderr": "",
+  "timestamp": "2026-03-09T01:26:41.237Z",
+  "asepriteVersion": ""
+}

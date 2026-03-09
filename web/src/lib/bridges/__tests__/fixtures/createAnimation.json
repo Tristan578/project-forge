@@ -1,0 +1,13 @@
+{
+  "operation": "createAnimation",
+  "args": [
+    "--batch",
+    "--script",
+    "/tmp/fixture_anim.lua"
+  ],
+  "exitCode": 0,
+  "stdout": "OK:animation:4frames\n",
+  "stderr": "",
+  "timestamp": "2026-03-09T01:26:41.302Z",
+  "asepriteVersion": ""
+}
