@@ -163,6 +163,38 @@ pub fn apply_performance_budget_commands(
     }
 }
 
+/// System that detects entities with `LodData` (auto_generate=true) but missing
+/// `LodMeshes` and regenerates simplified meshes. This handles scene load where
+/// only `LodData` is serialized — `LodMeshes` (containing GPU mesh handles) cannot
+/// be serialized and must be regenerated from the source mesh.
+pub(super) fn regenerate_missing_lod_meshes(
+    mut commands: Commands,
+    query: Query<(Entity, &LodData, &Mesh3d), Without<LodMeshes>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    for (entity, lod, mesh3d) in query.iter() {
+        if !lod.auto_generate {
+            continue;
+        }
+
+        let mesh_handle = mesh3d.0.clone();
+        let original_mesh_clone = meshes.get(&mesh_handle).cloned();
+        if let Some(original_mesh) = original_mesh_clone {
+            let mut lod_meshes = LodMeshes::default();
+            lod_meshes.levels[0] = Some(mesh_handle);
+
+            for (i, &ratio) in lod.lod_ratios.iter().enumerate() {
+                let simplified = mesh_simplify::simplify_mesh(&original_mesh, ratio);
+                let handle = meshes.add(simplified);
+                lod_meshes.levels[i + 1] = Some(handle);
+            }
+
+            commands.entity(entity).insert(lod_meshes);
+            tracing::info!("Regenerated LOD meshes for entity after scene load");
+        }
+    }
+}
+
 /// Runtime system: update LOD levels based on camera distance and swap meshes.
 /// Uses the editor camera specifically to avoid ambiguity when multiple cameras
 /// exist during play mode.
