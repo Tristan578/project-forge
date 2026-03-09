@@ -5,6 +5,7 @@
 import { StateCreator } from 'zustand';
 import type { AudioData, AudioBusDef, AudioEffectDef, ReverbZoneData } from './types';
 import { audioManager } from '@/lib/audio/audioManager';
+import type { AudioSnapshot } from '@/lib/audio/audioManager';
 
 export interface AudioSlice {
   primaryAudio: AudioData | null;
@@ -14,6 +15,7 @@ export interface AudioSlice {
   reverbZonesEnabled: Record<string, boolean>;
   adaptiveMusicIntensity: number;
   currentMusicSegment: string;
+  audioSnapshots: Record<string, AudioSnapshot>;
 
   setAudio: (entityId: string, data: Partial<AudioData>) => void;
   removeAudio: (entityId: string) => void;
@@ -39,6 +41,9 @@ export interface AudioSlice {
   setDuckingRule: (rule: { triggerBus: string; targetBus: string; duckLevel?: number; attackMs?: number; releaseMs?: number }) => void;
   setAdaptiveMusicIntensity: (intensity: number) => void;
   setCurrentMusicSegment: (segment: string) => void;
+  saveAudioSnapshot: (name: string, crossfadeDuration?: number) => void;
+  loadAudioSnapshot: (name: string, crossfadeDurationMs?: number) => void;
+  deleteAudioSnapshot: (name: string) => void;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -61,6 +66,7 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   reverbZonesEnabled: {},
   adaptiveMusicIntensity: 0,
   currentMusicSegment: 'intro',
+  audioSnapshots: {},
 
   setAudio: (entityId, data) => {
     if (dispatchCommand) dispatchCommand('set_audio', { entityId, ...data });
@@ -153,4 +159,32 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   },
   setAdaptiveMusicIntensity: (intensity) => set({ adaptiveMusicIntensity: intensity }),
   setCurrentMusicSegment: (segment) => set({ currentMusicSegment: segment }),
+  saveAudioSnapshot: (name, crossfadeDuration = 1000) => {
+    const snapshot = audioManager.saveSnapshot(name, crossfadeDuration);
+    set(state => ({
+      audioSnapshots: { ...state.audioSnapshots, [name]: snapshot },
+    }));
+  },
+  loadAudioSnapshot: (name, crossfadeDurationMs) => {
+    const success = audioManager.loadSnapshot(name, crossfadeDurationMs);
+    if (success) {
+      const snapshot = audioManager.getSnapshot(name);
+      if (snapshot) {
+        // Update bus volumes in store to match snapshot target
+        const state = get();
+        const updated = state.audioBuses.map(bus => {
+          const target = snapshot.busStates[bus.name];
+          return target ? { ...bus, volume: target.volume, muted: target.muted } : bus;
+        });
+        set({ audioBuses: updated });
+      }
+    }
+  },
+  deleteAudioSnapshot: (name) => {
+    audioManager.deleteSnapshot(name);
+    set(state => {
+      const { [name]: _, ...rest } = state.audioSnapshots;
+      return { audioSnapshots: rest };
+    });
+  },
 });

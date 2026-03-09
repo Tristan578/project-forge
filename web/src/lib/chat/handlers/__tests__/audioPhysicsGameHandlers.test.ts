@@ -11,6 +11,8 @@ import type { ToolCallContext, ExecutionResult } from '../types';
 // ---------------------------------------------------------------------------
 // Mock the audioManager module so audio handlers don't need real Web Audio
 // ---------------------------------------------------------------------------
+const mockSnapshots = new Map<string, { name: string; busStates: Record<string, { volume: number; muted: boolean }>; crossfadeDuration: number }>();
+
 vi.mock('@/lib/audio/audioManager', () => ({
   audioManager: {
     setAdaptiveMusic: vi.fn(),
@@ -20,6 +22,14 @@ vi.mock('@/lib/audio/audioManager', () => ({
     isBusMuted: vi.fn().mockReturnValue(false),
     setBusVolume: vi.fn(),
     muteBus: vi.fn(),
+    saveSnapshot: vi.fn().mockImplementation((name: string, crossfadeDuration: number = 1000) => {
+      const snap = { name, busStates: { master: { volume: 0.8, muted: false } }, crossfadeDuration };
+      mockSnapshots.set(name, snap);
+      return snap;
+    }),
+    getSnapshot: vi.fn().mockImplementation((name: string) => mockSnapshots.get(name)),
+    loadSnapshot: vi.fn().mockReturnValue(true),
+    deleteSnapshot: vi.fn().mockReturnValue(true),
   },
 }));
 
@@ -82,8 +92,8 @@ let audioHandlers: Record<string, (args: Record<string, unknown>, ctx: ToolCallC
 beforeEach(async () => {
   const mod = await import('../audioHandlers');
   audioHandlers = mod.audioHandlers;
-  // Reset localStorage for snapshot tests
-  localStorage.clear();
+  // Reset mock snapshot storage
+  mockSnapshots.clear();
 });
 
 // ===========================================================================
@@ -245,34 +255,24 @@ describe('audioHandlers', () => {
   // create_audio_snapshot
   // -------------------------------------------------------------------------
   describe('create_audio_snapshot', () => {
-    it('creates and stores audio snapshot in localStorage', async () => {
-      const buses = [
-        { name: 'master', volume: 1.0, muted: false, soloed: false, effects: [] },
-        { name: 'sfx', volume: 0.8, muted: false, soloed: false, effects: [] },
-      ];
-      const store = createMockStore({ audioBuses: buses });
+    it('creates audio snapshot via store action', async () => {
+      const store = createMockStore();
       const result = await audioHandlers.create_audio_snapshot(
         { name: 'BattleSnapshot' },
         { store, dispatchCommand: vi.fn() }
       );
       expect(result.success).toBe(true);
       expect(result.result).toContain('BattleSnapshot');
-
-      const stored = JSON.parse(localStorage.getItem('audioSnapshots') || '[]');
-      expect(stored).toHaveLength(1);
-      expect(stored[0].name).toBe('BattleSnapshot');
-      expect(stored[0].buses).toHaveLength(2);
+      expect(store.saveAudioSnapshot).toHaveBeenCalledWith('BattleSnapshot', undefined);
     });
 
-    it('appends to existing snapshots', async () => {
-      localStorage.setItem('audioSnapshots', JSON.stringify([{ name: 'Old', buses: [], timestamp: 1 }]));
-      const store = createMockStore({ audioBuses: [] });
+    it('passes crossfade duration to store action', async () => {
+      const store = createMockStore();
       await audioHandlers.create_audio_snapshot(
-        { name: 'New' },
+        { name: 'Quick', crossfadeDuration: 500 },
         { store, dispatchCommand: vi.fn() }
       );
-      const stored = JSON.parse(localStorage.getItem('audioSnapshots') || '[]');
-      expect(stored).toHaveLength(2);
+      expect(store.saveAudioSnapshot).toHaveBeenCalledWith('Quick', 500);
     });
   });
 
@@ -281,6 +281,7 @@ describe('audioHandlers', () => {
   // -------------------------------------------------------------------------
   describe('apply_audio_snapshot', () => {
     it('returns error when snapshot is not found', async () => {
+      mockSnapshots.clear();
       const store = createMockStore();
       const result = await audioHandlers.apply_audio_snapshot(
         { name: 'NonExistent' },
@@ -290,15 +291,13 @@ describe('audioHandlers', () => {
       expect(result.error).toContain('NonExistent');
     });
 
-    it('applies stored snapshot with default crossfade', async () => {
-      const snapshot = {
+    it('applies stored snapshot via store loadAudioSnapshot', async () => {
+      // Pre-create snapshot via the mock
+      mockSnapshots.set('MySnap', {
         name: 'MySnap',
-        buses: [
-          { name: 'master', volume: 0.5, muted: true, effects: [{ type: 'reverb' }] },
-        ],
-        timestamp: 1000,
-      };
-      localStorage.setItem('audioSnapshots', JSON.stringify([snapshot]));
+        busStates: { master: { volume: 0.5, muted: true } },
+        crossfadeDuration: 1000,
+      });
       const store = createMockStore();
       const result = await audioHandlers.apply_audio_snapshot(
         { name: 'MySnap' },
@@ -307,17 +306,15 @@ describe('audioHandlers', () => {
       expect(result.success).toBe(true);
       expect(result.result).toContain('MySnap');
       expect(result.result).toContain('1000ms');
-      expect(store.updateAudioBus).toHaveBeenCalledWith('master', { volume: 0.5, muted: true });
-      expect(store.setBusEffects).toHaveBeenCalledWith('master', [{ type: 'reverb' }]);
+      expect(store.loadAudioSnapshot).toHaveBeenCalledWith('MySnap', undefined);
     });
 
     it('applies snapshot with custom crossfade duration', async () => {
-      const snapshot = {
+      mockSnapshots.set('Fast', {
         name: 'Fast',
-        buses: [{ name: 'sfx', volume: 0.7, muted: false }],
-        timestamp: 2000,
-      };
-      localStorage.setItem('audioSnapshots', JSON.stringify([snapshot]));
+        busStates: { sfx: { volume: 0.7, muted: false } },
+        crossfadeDuration: 1000,
+      });
       const store = createMockStore();
       const result = await audioHandlers.apply_audio_snapshot(
         { name: 'Fast', crossfadeDurationMs: 250 },
@@ -325,21 +322,7 @@ describe('audioHandlers', () => {
       );
       expect(result.success).toBe(true);
       expect(result.result).toContain('250ms');
-    });
-
-    it('skips setBusEffects if bus has no effects', async () => {
-      const snapshot = {
-        name: 'NoFx',
-        buses: [{ name: 'music', volume: 0.6, muted: false }],
-        timestamp: 3000,
-      };
-      localStorage.setItem('audioSnapshots', JSON.stringify([snapshot]));
-      const store = createMockStore();
-      await audioHandlers.apply_audio_snapshot(
-        { name: 'NoFx' },
-        { store, dispatchCommand: vi.fn() }
-      );
-      expect(store.setBusEffects).not.toHaveBeenCalled();
+      expect(store.loadAudioSnapshot).toHaveBeenCalledWith('Fast', 250);
     });
   });
 
