@@ -14,17 +14,7 @@ function makeInput(overrides: Partial<SceneAnalysisInput> = {}): SceneAnalysisIn
     physics: {},
     physicsEnabled: {},
     ambientLight: { color: [1, 1, 1], brightness: 0.3 },
-    environment: {
-      clearColor: [0.1, 0.1, 0.1, 1],
-      fogEnabled: false,
-      fogColor: [0.5, 0.5, 0.5],
-      fogStart: 20,
-      fogEnd: 100,
-      skyboxPreset: null,
-      skyboxBrightness: 1.0,
-      iblIntensity: 0.5,
-      iblRotationDegrees: 0,
-    },
+    environment: { fogEnabled: false },
     entityCount: 0,
     ...overrides,
   };
@@ -64,7 +54,7 @@ describe('analyzeScene', () => {
     it('does not warn when lights exist', () => {
       const advice = analyzeScene(makeInput({
         entityCount: 5,
-        lights: { light1: { lightType: 'directional', color: [1, 1, 1], intensity: 1000, shadowsEnabled: true, range: 10, innerAngle: 0, outerAngle: 45 } },
+        lights: { light1: { lightType: 'directional', color: [1, 1, 1], intensity: 1000, shadowsEnabled: true } },
       }));
       expect(findAdvice(advice, 'no-lighting')).toBeUndefined();
     });
@@ -103,7 +93,7 @@ describe('analyzeScene', () => {
     it('warns when dynamic bodies exist without fixed body', () => {
       const advice = analyzeScene(makeInput({
         entityCount: 1,
-        physics: { e1: { bodyType: 'dynamic', colliderShape: 'cuboid', restitution: 0.3, friction: 0.5, density: 1, gravityScale: 1, isSensor: false } },
+        physics: { e1: { bodyType: 'dynamic', colliderShape: 'cuboid' } },
         physicsEnabled: { e1: true },
       }));
       expect(findAdvice(advice, 'no-physics-ground')).toBeDefined();
@@ -113,8 +103,8 @@ describe('analyzeScene', () => {
       const advice = analyzeScene(makeInput({
         entityCount: 2,
         physics: {
-          e1: { bodyType: 'dynamic', colliderShape: 'cuboid', restitution: 0.3, friction: 0.5, density: 1, gravityScale: 1, isSensor: false },
-          e2: { bodyType: 'fixed', colliderShape: 'cuboid', restitution: 0.3, friction: 0.5, density: 1, gravityScale: 1, isSensor: false },
+          e1: { bodyType: 'dynamic', colliderShape: 'cuboid' },
+          e2: { bodyType: 'fixed', colliderShape: 'cuboid' },
         },
         physicsEnabled: { e1: true, e2: true },
       }));
@@ -124,7 +114,7 @@ describe('analyzeScene', () => {
     it('does not warn when physics is disabled', () => {
       const advice = analyzeScene(makeInput({
         entityCount: 1,
-        physics: { e1: { bodyType: 'dynamic', colliderShape: 'cuboid', restitution: 0.3, friction: 0.5, density: 1, gravityScale: 1, isSensor: false } },
+        physics: { e1: { bodyType: 'dynamic', colliderShape: 'cuboid' } },
         physicsEnabled: { e1: false },
       }));
       expect(findAdvice(advice, 'no-physics-ground')).toBeUndefined();
@@ -153,18 +143,18 @@ describe('analyzeScene', () => {
 
   describe('default materials', () => {
     it('flags when >3 entities have default material', () => {
-      const materials: Record<string, { baseColor: [number, number, number, number]; metallic: number; perceptualRoughness: number; unlit: boolean }> = {};
+      const materials: Record<string, { baseColor: [number, number, number]; metallic: number; perceptualRoughness: number }> = {};
       for (let i = 0; i < 5; i++) {
-        materials[`e${i}`] = { baseColor: [1, 1, 1, 1], metallic: 0, perceptualRoughness: 0.5, unlit: false };
+        materials[`e${i}`] = { baseColor: [1, 1, 1], metallic: 0, perceptualRoughness: 0.5 };
       }
       const advice = analyzeScene(makeInput({ entityCount: 5, materials }));
       expect(findAdvice(advice, 'default-materials')).toBeDefined();
     });
 
     it('does not flag when materials are customized', () => {
-      const materials: Record<string, { baseColor: [number, number, number, number]; metallic: number; perceptualRoughness: number; unlit: boolean }> = {
-        e1: { baseColor: [1, 0, 0, 1], metallic: 0.8, perceptualRoughness: 0.2, unlit: false },
-        e2: { baseColor: [0, 1, 0, 1], metallic: 0.3, perceptualRoughness: 0.7, unlit: false },
+      const materials: Record<string, { baseColor: [number, number, number]; metallic: number; perceptualRoughness: number }> = {
+        e1: { baseColor: [1, 0, 0], metallic: 0.8, perceptualRoughness: 0.2 },
+        e2: { baseColor: [0, 1, 0], metallic: 0.3, perceptualRoughness: 0.7 },
       };
       const advice = analyzeScene(makeInput({ entityCount: 2, materials }));
       expect(findAdvice(advice, 'default-materials')).toBeUndefined();
@@ -176,7 +166,7 @@ describe('analyzeScene', () => {
       const advice = analyzeScene(makeInput({
         entityCount: 3,
         lights: {
-          l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1000, shadowsEnabled: false, range: 10, innerAngle: 0, outerAngle: 45 },
+          l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1000, shadowsEnabled: false },
         },
       }));
       expect(findAdvice(advice, 'no-shadows')).toBeDefined();
@@ -186,7 +176,7 @@ describe('analyzeScene', () => {
       const advice = analyzeScene(makeInput({
         entityCount: 3,
         lights: {
-          l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1000, shadowsEnabled: true, range: 10, innerAngle: 0, outerAngle: 45 },
+          l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1000, shadowsEnabled: true },
         },
       }));
       expect(findAdvice(advice, 'no-shadows')).toBeUndefined();
@@ -195,9 +185,9 @@ describe('analyzeScene', () => {
 
   describe('too many shadow lights', () => {
     it('warns with >4 shadow-casting lights', () => {
-      const lights: Record<string, { lightType: string; color: [number, number, number]; intensity: number; shadowsEnabled: boolean; range: number; innerAngle: number; outerAngle: number }> = {};
+      const lights: Record<string, { lightType: string; color: [number, number, number]; intensity: number; shadowsEnabled: boolean }> = {};
       for (let i = 0; i < 6; i++) {
-        lights[`l${i}`] = { lightType: 'point', color: [1, 1, 1], intensity: 500, shadowsEnabled: true, range: 10, innerAngle: 0, outerAngle: 45 };
+        lights[`l${i}`] = { lightType: 'point', color: [1, 1, 1], intensity: 500, shadowsEnabled: true };
       }
       const advice = analyzeScene(makeInput({ entityCount: 6, lights }));
       expect(findAdvice(advice, 'too-many-shadow-lights')).toBeDefined();
@@ -225,9 +215,9 @@ describe('analyzeScene', () => {
         entityCount: 3,
         transforms,
         lights: {
-          l1: { lightType: 'point', color: [1, 1, 1], intensity: 500, shadowsEnabled: false, range: 10, innerAngle: 0, outerAngle: 45 },
-          l2: { lightType: 'point', color: [1, 1, 1], intensity: 500, shadowsEnabled: false, range: 10, innerAngle: 0, outerAngle: 45 },
-          l3: { lightType: 'directional', color: [1, 1, 1], intensity: 500, shadowsEnabled: false, range: 10, innerAngle: 0, outerAngle: 45 },
+          l1: { lightType: 'point', color: [1, 1, 1], intensity: 500, shadowsEnabled: false },
+          l2: { lightType: 'point', color: [1, 1, 1], intensity: 500, shadowsEnabled: false },
+          l3: { lightType: 'directional', color: [1, 1, 1], intensity: 500, shadowsEnabled: false },
         },
       }));
       expect(findAdvice(advice, 'floating-entities')).toBeUndefined();
@@ -238,7 +228,7 @@ describe('analyzeScene', () => {
     it('flags low-intensity lights with low ambient', () => {
       const advice = analyzeScene(makeInput({
         entityCount: 3,
-        lights: { l1: { lightType: 'point', color: [1, 1, 1], intensity: 100, shadowsEnabled: false, range: 10, innerAngle: 0, outerAngle: 45 } },
+        lights: { l1: { lightType: 'point', color: [1, 1, 1], intensity: 100, shadowsEnabled: false } },
         ambientLight: { color: [1, 1, 1], brightness: 0.01 },
       }));
       expect(findAdvice(advice, 'dark-scene')).toBeDefined();

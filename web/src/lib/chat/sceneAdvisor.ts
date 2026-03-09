@@ -3,16 +3,43 @@
  * Analyzes the current scene state and produces actionable advice.
  */
 
-import type {
-  SceneGraph,
-  TransformData,
-  MaterialData,
-  LightData,
-  PhysicsData,
-  AmbientLightData,
-  EnvironmentData,
-  PostProcessingData,
-} from '@/stores/editorStore';
+/**
+ * Minimal interfaces for scene analysis — only the fields the advisor reads.
+ * This avoids coupling to the full EditorStore types and makes testing easy.
+ */
+
+export interface AdvisorTransform {
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+}
+
+export interface AdvisorMaterial {
+  baseColor: [number, number, number] | [number, number, number, number];
+  metallic: number;
+  perceptualRoughness: number;
+}
+
+export interface AdvisorLight {
+  lightType: string;
+  color: [number, number, number];
+  intensity: number;
+  shadowsEnabled: boolean;
+}
+
+export interface AdvisorPhysics {
+  bodyType: string;
+  colliderShape: string;
+}
+
+export interface AdvisorAmbientLight {
+  color: [number, number, number];
+  brightness: number;
+}
+
+export interface AdvisorEnvironment {
+  fogEnabled: boolean;
+}
 
 export type AdvisorSeverity = 'info' | 'warning' | 'error';
 export type AdvisorCategory =
@@ -36,15 +63,14 @@ export interface SceneAdvice {
 }
 
 export interface SceneAnalysisInput {
-  sceneGraph: SceneGraph;
-  transforms: Record<string, TransformData>;
-  materials: Record<string, MaterialData>;
-  lights: Record<string, LightData>;
-  physics: Record<string, PhysicsData>;
+  sceneGraph: { rootIds: string[]; nodes: Record<string, unknown> };
+  transforms: Record<string, AdvisorTransform>;
+  materials: Record<string, AdvisorMaterial>;
+  lights: Record<string, AdvisorLight>;
+  physics: Record<string, AdvisorPhysics>;
   physicsEnabled: Record<string, boolean>;
-  ambientLight: AmbientLightData;
-  environment: EnvironmentData;
-  postProcessing?: PostProcessingData;
+  ambientLight: AdvisorAmbientLight;
+  environment: AdvisorEnvironment;
   entityCount: number;
 }
 
