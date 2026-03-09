@@ -117,8 +117,15 @@ function getVersion(binaryPath: string): Promise<{ version: string | null; error
   });
 }
 
+// Cache discovery results to avoid spawning child processes on every API call.
+// TTL: 60 seconds — stale discovery is acceptable for a local tool check.
+const discoveryCache = new Map<string, { result: BridgeToolConfig; expires: number }>();
+const CACHE_TTL_MS = 60_000;
+
 /** Discover a bridge tool: find binary, check version, return config. */
 export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {
+  const cached = discoveryCache.get(toolId);
+  if (cached && Date.now() < cached.expires) return cached.result;
   if (!isAllowedToolId(toolId)) {
     return {
       id: toolId,
@@ -163,13 +170,15 @@ export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {
   };
   saveBridgesConfig(config);
 
-  return {
+  const result: BridgeToolConfig = {
     id: toolId,
     name,
     paths: { ...defaults?.paths, [plat]: binaryPath },
     activeVersion: version,
     status: 'connected',
   };
+  discoveryCache.set(toolId, { result, expires: Date.now() + CACHE_TTL_MS });
+  return result;
 }
 
 /** Health check: verify a binary is accessible and returns a version. */

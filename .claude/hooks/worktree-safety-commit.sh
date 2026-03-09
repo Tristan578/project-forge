@@ -21,9 +21,7 @@ if ! git diff --quiet HEAD 2>/dev/null || ! git diff --cached --quiet 2>/dev/nul
   git commit -m "wip: auto-save uncommitted work on agent stop (branch: ${BRANCH:-detached})
 
 This is an automatic safety commit created because the agent was
-terminated with uncommitted changes. Review and squash as needed.
-
-Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>" 2>/dev/null
+terminated with uncommitted changes. Review and squash as needed." 2>/dev/null
 fi
 
 exit 0

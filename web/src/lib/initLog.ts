@@ -2,8 +2,7 @@
  * Initialization logging and persistence for debugging.
  * Integrates with Sentry for production error capture.
  */
-import { captureException } from '@/lib/monitoring/sentry-client';
-import * as Sentry from '@sentry/nextjs';
+import { captureException, addBreadcrumb } from '@/lib/monitoring/sentry-client';
 
 export type InitPhase =
   | 'wasm_loading'
@@ -98,7 +97,7 @@ export function logInitEvent(
     });
   } else {
     // Add Sentry breadcrumb for each successful phase
-    Sentry.addBreadcrumb({
+    addBreadcrumb({
       category: 'engine.init',
       message: `${phase}: ${message ?? ''}`,
       level: 'info',

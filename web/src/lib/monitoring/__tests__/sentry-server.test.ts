@@ -48,7 +48,7 @@ describe('sentry-server', () => {
       const { captureException } = await import('../sentry-server');
       const err = new Error('boom');
       captureException(err, { userId: '1' });
-      expect(Sentry.init).toHaveBeenCalled();
+      // Sentry is auto-initialized by sentry.server.config.ts, not by the wrapper
       expect(Sentry.captureException).toHaveBeenCalledWith(err, { extra: { userId: '1' } });
       vi.unstubAllEnvs();
     });

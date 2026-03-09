@@ -1,8 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
-import { captureException } from '@/lib/monitoring/sentry-client';
-import * as Sentry from '@sentry/nextjs';
+import { captureException, setTag } from '@/lib/monitoring/sentry-client';
 
 export type WasmModule = {
   init_engine: (canvasId: string) => void;
@@ -164,8 +163,8 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         emitEvent('engine_starting', `Calling init_engine("${canvasId}")`);
 
         // Set Sentry context for all subsequent errors in this session
-        Sentry.setTag('engine.backend', detectWebGPU() ? 'webgpu' : 'webgl2');
-        Sentry.setTag('engine.canvas', canvasId);
+        setTag('engine.backend', detectWebGPU() ? 'webgpu' : 'webgl2');
+        setTag('engine.canvas', canvasId);
 
         try {
           wasm.init_engine(canvasId);
