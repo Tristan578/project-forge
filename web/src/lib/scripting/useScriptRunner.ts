@@ -2,6 +2,15 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useEditorStore, setPlayTickCallback } from '@/stores/editorStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
 import { audioManager } from '@/lib/audio/audioManager';
+import { AsyncChannelRouter } from '@/lib/scripting/asyncChannelRouter';
+import {
+  createPhysicsHandler,
+  createAiHandler,
+  createAssetHandler,
+  createAudioHandler,
+  createAnimationHandler,
+} from '@/lib/scripting/channels';
+import type { AsyncRequest } from '@/lib/scripting/asyncTypes';
 
 // Commands allowed from user scripts (maps to forge.* API surface)
 const SCRIPT_ALLOWED_COMMANDS = new Set([
@@ -142,16 +151,18 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const lastTickRef = useRef(0);
   const lastOcclusionCheckRef = useRef(0);
   const collisionEventCallbackRef = useRef<((event: { entityA: string; entityB: string; started: boolean }) => void) | null>(null);
+  const routerRef = useRef<AsyncChannelRouter | null>(null);
 
   const dispatchCommand = useCallback(
-    (command: string, payload: unknown) => {
+    (command: string, payload: unknown): unknown => {
       if (wasmModule?.handle_command) {
         try {
-          wasmModule.handle_command(command, payload);
+          return wasmModule.handle_command(command, payload);
         } catch (error) {
           console.error(`[ScriptRunner] Command error '${command}':`, error);
         }
       }
+      return undefined;
     },
     [wasmModule]
   );
@@ -163,6 +174,33 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         new URL('./scriptWorker.ts', import.meta.url),
         { type: 'module' }
       );
+
+      // Initialize async channel router
+      const router = new AsyncChannelRouter();
+      router.setPlayMode(true);
+
+      // Register channel handlers with their dependencies
+      const fetchJson = async (url: string, init?: RequestInit) => {
+        const resp = await fetch(url, init);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
+        return resp.json();
+      };
+
+      router.register('physics', createPhysicsHandler({ dispatchCommand }));
+      router.register('animation', createAnimationHandler({ dispatchCommand }));
+      router.register('audio', createAudioHandler({
+        detectLoopPoints: (assetId: string) => Promise.resolve(audioManager.detectLoopPoints(assetId)),
+        getWaveform: (_assetId: string) => Promise.resolve(null), // TODO: implement waveform extraction
+      }));
+      router.register('ai', createAiHandler({ fetchJson }));
+      router.register('asset', createAssetHandler({ fetchJson }));
+      // NOTE: 'multiplayer' channel is declared in asyncTypes.ts but intentionally not
+      // registered here — no networking backend exists yet. Requests to it will fail with
+      // "Unknown async channel" until multiplayer is implemented.
+
+      routerRef.current = router;
 
       const setHudElements = useEditorStore.getState().setHudElements;
 
@@ -300,6 +338,13 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
             }
             break;
           }
+          case 'async_request': {
+            // Route async request through the channel router
+            if (routerRef.current) {
+              void routerRef.current.handleRequest(msg as unknown as AsyncRequest);
+            }
+            break;
+          }
         }
       };
 
@@ -424,6 +469,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           };
         }
 
+        // Flush any pending async responses into the tick message
+        const asyncResponses = routerRef.current?.flush();
+
         worker.postMessage({
           type: 'tick',
           dt,
@@ -433,6 +481,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
           inputState: tickData.inputState,
           audioPlayingStates: audioManager.getPlayingStates(),
           tilemapStates: tickTilemapStates,
+          asyncResponses,
         });
 
         // Dispatch audio occlusion raycasts (throttled)
@@ -487,6 +536,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         clearTimeout(watchdogRef.current);
         watchdogRef.current = null;
       }
+      // Reset async channel router
+      if (routerRef.current) {
+        routerRef.current.reset();
+        routerRef.current = null;
+      }
       workerRef.current.postMessage({ type: 'stop' });
       workerRef.current.terminate();
       workerRef.current = null;
@@ -511,6 +565,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         workerRef.current.postMessage({ type: 'stop' });
         workerRef.current.terminate();
         workerRef.current = null;
+      }
+      // Reset async channel router to abort in-flight operations and prevent leaks
+      if (routerRef.current) {
+        routerRef.current.reset();
+        routerRef.current = null;
       }
     };
   }, []);

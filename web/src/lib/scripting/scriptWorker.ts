@@ -75,6 +75,75 @@ let spawnCounter = 0;
 const uiElements: Map<string, UIElement> = new Map();
 let uiDirty = false;
 
+// ─── Async Channel Protocol ─────────────────────────────────────
+
+interface PendingAsyncRequest {
+  resolve: (data: unknown) => void;
+  reject: (error: Error) => void;
+  onProgress?: (progress: { percent: number; message?: string }) => void;
+  channel: string;
+  method: string;
+}
+
+const pendingAsyncRequests = new Map<string, PendingAsyncRequest>();
+let nextRequestId = 0;
+
+function generateRequestId(): string {
+  return `req_${++nextRequestId}`;
+}
+
+function asyncRequest(
+  channel: string,
+  method: string,
+  args: unknown,
+  onProgress?: (progress: { percent: number; message?: string }) => void,
+): Promise<unknown> {
+  const requestId = generateRequestId();
+
+  return new Promise((resolve, reject) => {
+    pendingAsyncRequests.set(requestId, {
+      resolve, reject, onProgress,
+      channel, method,
+    });
+
+    (self as unknown as Worker).postMessage({
+      type: 'async_request',
+      requestId, channel, method, args,
+    });
+  });
+}
+
+function processAsyncResponses(responses: Array<{
+  requestId: string;
+  status: 'ok' | 'error' | 'progress';
+  data?: unknown;
+  error?: string;
+  progress?: { percent: number; message?: string };
+}>) {
+  for (const resp of responses) {
+    const pending = pendingAsyncRequests.get(resp.requestId);
+    if (!pending) continue;
+
+    if (resp.status === 'ok') {
+      pending.resolve(resp.data);
+      pendingAsyncRequests.delete(resp.requestId);
+    } else if (resp.status === 'error') {
+      pending.reject(new Error(resp.error || 'Unknown async error'));
+      pendingAsyncRequests.delete(resp.requestId);
+    } else if (resp.status === 'progress') {
+      pending.onProgress?.(resp.progress ?? { percent: 0 });
+    }
+  }
+}
+
+function clearPendingAsyncRequests(reason: string) {
+  for (const [, req] of pendingAsyncRequests) {
+    req.reject(new Error(reason));
+  }
+  pendingAsyncRequests.clear();
+  nextRequestId = 0;
+}
+
 // Synced domain state (from main thread)
 let tilemapStates: Record<string, TilemapState> = {};
 let skeletonStates: Record<string, SkeletonState> = {};
@@ -777,6 +846,14 @@ function buildForgeApi(scriptEntityId: string) {
         return 'landscape-primary'; // Workers can't access screen orientation
       },
     },
+
+    // ─── Async Channel Protocol (internal bridge) ─────────────────
+    __asyncRequest: (
+      channel: string,
+      method: string,
+      args: unknown,
+      onProgress?: (progress: { percent: number; message?: string }) => void,
+    ) => asyncRequest(channel, method, args, onProgress),
   };
 }
 
@@ -862,6 +939,7 @@ self.onmessage = (e: MessageEvent) => {
       scripts = [];
       sharedState = {};
       spawnCounter = 0;
+      clearPendingAsyncRequests('Script re-initialized');
       entityStates = msg.entities || {};
       entityInfos = msg.entityInfos || {};
       currentInput = msg.inputState || { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
@@ -896,6 +974,11 @@ self.onmessage = (e: MessageEvent) => {
     }
 
     case 'tick': {
+      // Process async responses before running scripts (so promises resolve)
+      if (msg.asyncResponses) {
+        processAsyncResponses(msg.asyncResponses);
+      }
+
       timeData.delta = msg.dt || 0;
       timeData.elapsed = msg.elapsed || 0;
       const newEntities = msg.entities || {};
@@ -956,6 +1039,7 @@ self.onmessage = (e: MessageEvent) => {
     }
 
     case 'stop': {
+      clearPendingAsyncRequests('Script execution stopped');
       for (const script of scripts) {
         if (script.onDestroy) {
           try {
