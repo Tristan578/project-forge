@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      promote_to_production:
+        description: 'Promote staging to production'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: cd-${{ github.ref }}
@@ -14,6 +20,8 @@ env:
   RUSTFLAGS: --cfg=web_sys_unstable_apis
 
 jobs:
+  # ---- Quality Gates (must all pass before any deployment) ----
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -211,8 +219,6 @@ jobs:
         run: npx playwright test --project=chromium --grep-invert @engine
         env:
           CI: true
-          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.CLERK_PUBLISHABLE_KEY }}
-          CLERK_SECRET_KEY: ${{ secrets.CLERK_SECRET_KEY }}
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
@@ -259,10 +265,6 @@ jobs:
         run: npm audit --audit-level=high
 
   # ---- WASM CDN Upload ----
-  # Uploads WASM engine binaries to Cloudflare R2 so the frontend can load
-  # them from a CDN instead of bundling 123 MB into every Vercel deployment.
-  # Gated by the R2_CDN_ENABLED repository variable.
-  # Required GitHub Secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY
   upload-wasm-cdn:
     name: Upload WASM to R2 CDN
     runs-on: ubuntu-latest
@@ -299,33 +301,26 @@ jobs:
       - name: Upload to R2
         run: bash scripts/upload-wasm-to-r2.sh
         env:
-          WASM_SOURCE_DIR: ${{ github.workspace }}/wasm-upload
+          WASM_SOURCE_DIR: wasm-upload
           ENGINE_VERSION: ${{ github.sha }}
           R2_ACCOUNT_ID: ${{ secrets.ASSET_R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.ASSET_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.ASSET_R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ vars.R2_ENGINE_BUCKET || 'spawnforge-engine' }}
+          R2_BUCKET: spawnforge-engine
 
-  # ---- Deployment ----
-  # Deploys to Vercel after all checks pass.
-  # When R2_CDN_ENABLED=true, WASM files are served from CDN and NOT bundled
-  # into the Vercel deployment (saves ~123 MB per deploy).
-  # Required GitHub Secrets:
-  #   VERCEL_TOKEN        — Personal access token from https://vercel.com/account/tokens
-  #   VERCEL_ORG_ID       — From .vercel/project.json after `vercel link`
-  #   VERCEL_PROJECT_ID   — From .vercel/project.json after `vercel link`
-  #   CLERK_PUBLISHABLE_KEY, CLERK_SECRET_KEY — Clerk auth keys
-  #   + all other env vars from .env.example
-  deploy:
-    name: Deploy to Vercel
+  # ---- Stage 1: Deploy to Staging ----
+  # Runs automatically after all quality gates pass on push to main.
+  # Staging mirrors production config but receives new code first.
+  deploy-staging:
+    name: Deploy to Staging
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security]
-    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' }}
+    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' && github.event.inputs.promote_to_production != 'true' }}
     permissions:
       contents: read
       deployments: write
     environment:
-      name: production
+      name: staging
       url: ${{ steps.deploy.outputs.url }}
     steps:
       - uses: actions/checkout@v6
@@ -339,8 +334,6 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@latest
 
-      # When R2_CDN_ENABLED=true, WASM is served from CDN — skip bundling into Vercel.
-      # The frontend reads NEXT_PUBLIC_ENGINE_CDN_URL and loads from CDN at runtime.
       - name: Download WASM artifacts
         if: ${{ vars.R2_CDN_ENABLED != 'true' }}
         uses: actions/download-artifact@v8
@@ -360,27 +353,103 @@ jobs:
           cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
           cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
 
-      - name: Pull Vercel environment
+      - name: Pull Vercel environment (staging)
         working-directory: web
-        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
       - name: Build with Vercel
         working-directory: web
-        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel build --token="$VERCEL_TOKEN"
 
-      - name: Deploy to Vercel
+      - name: Deploy to staging
         id: deploy
         working-directory: web
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          url=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
-          echo "url=$url" >> $GITHUB_OUTPUT
-          echo "Deployed to: $url"
+          url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed to staging: $url"
+
+  # ---- Stage 2: Promote to Production ----
+  # Triggered manually via workflow_dispatch with promote_to_production=true.
+  # This deploys to production only after staging has been validated.
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security]
+    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' && github.event.inputs.promote_to_production == 'true' }}
+    permissions:
+      contents: read
+      deployments: write
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Download WASM artifacts
+        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-binaries
+          path: engine/
+
+      - name: Copy WASM to web/public (self-hosted fallback)
+        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
+        run: |
+          mkdir -p web/public/engine-pkg-webgl2
+          mkdir -p web/public/engine-pkg-webgpu
+          mkdir -p web/public/engine-pkg-webgl2-runtime
+          mkdir -p web/public/engine-pkg-webgpu-runtime
+          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
+          cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
+          cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
+          cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
+
+      - name: Pull Vercel environment (production)
+        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build with Vercel
+        working-directory: web
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy to production
+        id: deploy
+        working-directory: web
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Deployed to production: $url"
