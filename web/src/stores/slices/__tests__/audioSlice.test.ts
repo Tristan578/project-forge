@@ -4,8 +4,11 @@ import { createAudioSlice, setAudioDispatcher, type AudioSlice } from '../audioS
 import type { AudioData, AudioBusDef, AudioEffectDef, ReverbZoneData } from '../types';
 import { audioManager } from '@/lib/audio/audioManager';
 
+// Snapshot map is declared at module scope for the mock factory, but cleared in beforeEach
+// to prevent state leaking between tests.
+const snapshots = new Map<string, { name: string; busStates: Record<string, { volume: number; muted: boolean }>; crossfadeDurationMs: number }>();
+
 vi.mock('@/lib/audio/audioManager', () => {
-  const snapshots = new Map<string, { name: string; busStates: Record<string, { volume: number; muted: boolean }>; crossfadeDurationMs: number }>();
   return {
     audioManager: {
       crossfade: vi.fn(),
@@ -18,7 +21,7 @@ vi.mock('@/lib/audio/audioManager', () => {
       saveSnapshot: vi.fn().mockImplementation((name: string, crossfadeDurationMs: number = 1000) => {
         const snap = {
           name,
-          busStates: { master: { volume: 1.0, muted: false }, sfx: { volume: 1.0, muted: false }, music: { volume: 0.8, muted: false } },
+          busStates: { master: { volume: 1.0, muted: false }, sfx: { volume: 1.0, muted: false }, music: { volume: 0.65, muted: false } },
           crossfadeDurationMs,
         };
         snapshots.set(name, snap);
@@ -37,6 +40,7 @@ describe('audioSlice', () => {
   let mockDispatch: ReturnType<typeof createMockDispatch>;
 
   beforeEach(() => {
+    snapshots.clear();
     mockDispatch = createMockDispatch();
     setAudioDispatcher(mockDispatch);
     store = createSliceStore(createAudioSlice);
@@ -493,14 +497,19 @@ describe('audioSlice', () => {
     });
 
     it('should sync bus volumes from loaded snapshot', () => {
+      // Verify initial music bus volume is 0.8 (slice default)
+      const initialMusicBus = store.getState().audioBuses.find(b => b.name === 'music');
+      expect(initialMusicBus?.volume).toBe(0.8);
+
       store.getState().saveAudioSnapshot('vol-test');
 
-      // The mock returns busStates with music: { volume: 0.8, muted: false }
+      // The mock returns busStates with music: { volume: 0.65, muted: false }
+      // which differs from the slice default of 0.8, proving the sync works
       store.getState().loadAudioSnapshot('vol-test');
 
       const state = store.getState();
       const musicBus = state.audioBuses.find(b => b.name === 'music');
-      expect(musicBus?.volume).toBe(0.8);
+      expect(musicBus?.volume).toBe(0.65);
     });
 
     it('should have empty audioSnapshots in initial state', () => {
