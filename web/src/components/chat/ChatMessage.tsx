@@ -6,6 +6,7 @@ import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
 import { useEditorStore } from '@/stores/editorStore';
 import { ToolCallCard } from './ToolCallCard';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface ChatMessageProps {
   message: ChatMessageType;
@@ -163,7 +164,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
               : 'bg-zinc-800 text-zinc-300'
           }`}
         >
-          {!isUser ? <EntityAwareText text={message.content} /> : message.content}
+          {!isUser ? <MarkdownRenderer content={message.content} /> : message.content}
         </div>
       )}
 
