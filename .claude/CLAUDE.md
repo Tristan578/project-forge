@@ -166,37 +166,37 @@ Key rules:
 
 ## Phase Roadmap
 
-| Phase | Name | Status |
-|-------|------|--------|
-| 1-2 | Foundation | DONE |
-| 3 | Rendering & Materials | DONE |
-| 4-A | MCP Server (143 commands) | DONE |
-| 4-B | AI Chat Panel | deferred |
-| 5-A | Play/Edit Mode | DONE |
-| 5-B | Input System | DONE |
-| 5-C | Physics | DONE |
-| 6 | Save/Load | DONE |
-| 7 | Asset Pipeline | DONE |
-| 8 | Game Scripting | DONE |
-| 9 | Audio | DONE |
-| 10 | Export | DONE |
-| 11 | Platform & Payments | DONE |
-| B | Post-Processing | DONE |
-| A | Audio Mixer | DONE |
-| C | GPU Particles | DONE |
-| D-1 | Skeletal Animation | DONE |
-| F-1 | Extended Primitives | DONE |
-| E-1 | Extended Materials | DONE |
-| A-3 | Audio Layering | DONE |
-| E-2 | Custom Shader Library | DONE |
-| F-2 | CSG Boolean Ops | DONE |
-| F-3 | Procedural Terrain | DONE |
-| F-4 | Procedural Mesh Gen | DONE |
-| D-4 | Animation Blending | DONE |
-| G-1 | Help & Documentation | DONE |
-| G-2 | Script Runtime & HUD | DONE |
-| 12 | Polish (responsive, onboarding, perf) | DONE |
-| 13 | AI Chat & Orchestration | DONE |
+| Phase | Name | Status | Details |
+|-------|------|--------|---------|
+| 1-2 | Foundation | DONE | |
+| 3 | Rendering & Materials | DONE | |
+| 4-A | MCP Server (143 commands) | DONE | |
+| 4-B | AI Chat Panel | DONE | ChatPanel, ChatInput (image upload, voice, model selection), entity @-mentions, thinking mode, approval mode, batch undo, feedback, conversation persistence, streaming |
+| 5-A | Play/Edit Mode | DONE | |
+| 5-B | Input System | DONE | |
+| 5-C | Physics | DONE | |
+| 6 | Save/Load | DONE | |
+| 7 | Asset Pipeline | DONE | |
+| 8 | Game Scripting | DONE | |
+| 9 | Audio | DONE | |
+| 10 | Export | DONE | |
+| 11 | Platform & Payments | DONE | |
+| B | Post-Processing | DONE | |
+| A | Audio Mixer | DONE | |
+| C | GPU Particles | DONE | |
+| D-1 | Skeletal Animation | DONE | |
+| F-1 | Extended Primitives | DONE | |
+| E-1 | Extended Materials | DONE | |
+| A-3 | Audio Layering | DONE | |
+| E-2 | Custom Shader Library | DONE | |
+| F-2 | CSG Boolean Ops | DONE | |
+| F-3 | Procedural Terrain | DONE | |
+| F-4 | Procedural Mesh Gen | DONE | |
+| D-4 | Animation Blending | DONE | |
+| G-1 | Help & Documentation | DONE | |
+| G-2 | Script Runtime & HUD | DONE | |
+| 12 | Polish (responsive, onboarding, perf) | DONE | |
+| 13 | AI Chat & Orchestration | DONE | |
 | 32 | Chat UX Enhancements | DONE | Entity @-mentions, command preview/approval, response feedback, batch undo |
 | 35 | Quality Presets | DONE | Low/Medium/High/Ultra rendering presets (MSAA, shadows, bloom, sharpening, particles) |
 | 36 | Material Library Browser | DONE | 56 presets across 9 categories, CSS sphere previews, custom material saving |
@@ -227,15 +227,15 @@ Key rules:
 | CP | Cloud Publishing | DONE | Publish to shareable URLs, publishStore, PublishDialog, slug validation, tier-based limits, 4 API routes, 4 MCP commands |
 | 15 | Visual Scripting | DONE | React Flow node graph editor, 73 node types (10 categories), graph-to-TypeScript compiler, CustomNode/NodePalette/NodeInspector, Code/Graph tabs, 5 MCP commands, 15 compiler tests |
 | E2E | Playwright E2E Tests | DONE | 81 E2E tests (11 spec files), EditorPage POM, smoke/CSS/entity-CRUD/inspector/layout/chat/settings/mixer/modals/export/script tests, WASM readiness hook |
-| 2D-1 | 2D Foundation | UI ONLY — no engine integration | ProjectType (2D/3D), SpriteData ECS component, Camera2dData, sorting layers, SpriteInspector, Camera2dInspector, SortingLayerPanel, useProjectType hook, 8 MCP commands |
-| 2D-2 | Sprite Animation | UI ONLY — no engine integration | SpriteSheetData, SpriteAnimClip, SpriteAnimatorData, AnimationStateMachine, SpriteAnimationInspector, state transitions, forge.sprite script API, 6 MCP commands |
-| 2D-4 | 2D Physics | UI ONLY — no engine integration | Physics2dData/Physics2dEnabled ECS, 6 collider shapes, 4 joint types, one-way platforms, surface velocity, Physics2dInspector, forge.physics2d script API, 8 MCP commands |
-| 2D-3 | Tilemap System | UI ONLY — no engine integration | TilesetData/TilemapData ECS, multi-layer tiles, TilesetPanel, TilemapInspector, TilemapToolbar, TilemapLayerPanel, tilemap editor tools, forge.tilemap script API, 10 MCP commands |
-| 2D-5 | Skeletal 2D Animation | UI ONLY — no engine integration | SkeletonData2d/SkeletalAnimation2d/BlendTree2d ECS, bone hierarchy, skins, IK constraints, SkeletonInspector, forge.skeleton2d script API, 11 MCP commands |
-| 20 | Advanced Audio | PARTIAL — basic audio done, adaptive/occlusion stubs | Spatial audio, bus mixer, reverb zones work; adaptive music snapshots, occlusion, horizontal re-sequencing are console-log stubs, 6 MCP commands |
+| 2D-1 | 2D Foundation | DONE | ProjectType (2D/3D), SpriteData ECS + Bevy Sprite rendering, Camera2dData + OrthographicProjection sync, sorting layers, SpriteInspector, Camera2dInspector, SortingLayerPanel, useProjectType hook, 8 MCP commands |
+| 2D-2 | Sprite Animation | DONE | SpriteSheetData, TextureAtlas slicing, frame timing, AnimationStateMachine evaluation, SpriteAnimationInspector, state transitions, forge.sprite script API, 6 MCP commands |
+| 2D-4 | 2D Physics | DONE | Physics2dData + Rapier2D integration (RapierPhysicsPlugin), 6 collider shapes, 4 joint types, one-way platforms, surface velocity, Physics2dInspector, forge.physics2d script API, 8 MCP commands |
+| 2D-3 | Tilemap System | DONE | TilesetData/TilemapData ECS + tile sprite rendering (TextureAtlas children), multi-layer tiles, hash-based change detection, TilesetPanel, TilemapInspector, TilemapToolbar, TilemapLayerPanel, tilemap editor tools, forge.tilemap script API, 10 MCP commands |
+| 2D-5 | Skeletal 2D Animation | DONE | SkeletonData2d/SkeletalAnimation2d/BlendTree2d ECS + runtime systems (animation playback, IK solving, vertex skinning), bone hierarchy, skins, auto-weight, SkeletonInspector, forge.skeleton2d script API, 11 MCP commands |
+| 20 | Advanced Audio | DONE | Spatial audio, bus mixer, reverb zones, adaptive music (multi-stem intensity crossfade), snapshots (save/load with gain ramp), occlusion (lowpass BiquadFilter), loop point detection (zero-crossing analysis), 6 MCP commands |
 | 24 | Editor Collaboration | REMOVED (PF-142) | Stubs removed — no networking backend existed. Will rebuild from scratch when real-time sync is prioritized |
 | 25 | Multiplayer Networking | REMOVED (PF-141) | Stubs removed — no networking backend existed. Will rebuild from scratch when multiplayer is prioritized |
-| 31 | LOD & Performance | PARTIAL — UI + metrics stubs | LodData ECS component, LOD inspector, performance budget UI; bridge drains queues but does not generate mesh LODs or collect real perf stats, 6 MCP commands |
+| 31 | LOD & Performance | DONE | QEM mesh simplification (Garland-Heckbert), LodMeshes pre-generated handles, distance-based LOD switching, real performance metrics (fps/triangles/draw calls/memory), PerformanceMetrics resource, LOD inspector, performance budget with warnings, 6 MCP commands |
 
 ## New Component / Command Checklist
 
