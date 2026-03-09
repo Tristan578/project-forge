@@ -57,6 +57,8 @@ import {
   EditModeSlice,
   createEditModeSlice,
   setEditModeDispatcher,
+  BridgeSlice,
+  createBridgeSlice,
 } from './slices';
 
 // Re-export all types for backward compatibility
@@ -79,7 +81,8 @@ export type EditorState =
   & HistorySlice
   & SceneSlice
   & AssetSlice
-  & EditModeSlice;
+  & EditModeSlice
+  & BridgeSlice;
 
 // Create the store by composing all slices
 export const useEditorStore = create<EditorState>()((...args) => ({
@@ -99,6 +102,7 @@ export const useEditorStore = create<EditorState>()((...args) => ({
   ...createSceneSlice(...args),
   ...createAssetSlice(...args),
   ...createEditModeSlice(...args),
+  ...createBridgeSlice(...args),
 }));
 
 // Best-effort store exposure for E2E tests (dev/test only).
