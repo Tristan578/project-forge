@@ -94,6 +94,7 @@ runtime = []                                 # Strips editor-only systems for ex
    - **New file or structural change?** Update `rules/file-map.md`
    - **Unsure if a pattern is stable?** Log in `MEMORY.md` "Session Learnings" first, promote to rules after confirmation
 9. **Taskboard-Driven:** ALL work MUST be tracked on the taskboard (MCP server: `taskboard`). See Taskboard Rules below.
+10. **Worktree Commit Safety:** When working in a git worktree (subagents, feature branches), **commit after every logical chunk of work** (each test file, each feature, each bug fix). Rate limits and crashes can kill agents at any time — uncommitted work is permanently lost. Never accumulate large uncommitted changesets.
 
 ## Taskboard Rules
 
