@@ -698,7 +698,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const now = Date.now();
 
     // Save current conversation first
-    let updatedConversations = conversations.map((c) =>
+    const updatedConversations = conversations.map((c) =>
       c.id === activeConversationId
         ? { ...c, messages: messages.slice(-MAX_STORED_MESSAGES), updatedAt: now }
         : c

@@ -1,87 +1,14 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState } from 'react';
 import { ChevronDown, ChevronRight, Brain, ThumbsUp, ThumbsDown, RotateCcw, Check, X } from 'lucide-react';
 import type { ChatMessage as ChatMessageType } from '@/stores/chatStore';
 import { useChatStore } from '@/stores/chatStore';
-import { useEditorStore } from '@/stores/editorStore';
 import { ToolCallCard } from './ToolCallCard';
 import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface ChatMessageProps {
   message: ChatMessageType;
-}
-
-/** Parse text for entity names that match scene graph and render as clickable chips */
-function EntityAwareText({ text }: { text: string }) {
-  const sceneGraph = useEditorStore((s) => s.sceneGraph);
-  const selectEntity = useEditorStore((s) => s.selectEntity);
-
-  // Build a Set of entity names for fast lookup
-  const entityNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const node of Object.values(sceneGraph.nodes)) {
-      map.set(node.name.toLowerCase(), node.entityId);
-    }
-    return map;
-  }, [sceneGraph.nodes]);
-
-  // Split text into segments — entity names become clickable chips
-  const segments = useMemo(() => {
-    if (entityNameMap.size === 0) return [{ type: 'text' as const, value: text }];
-
-    // Build regex from entity names (escape special chars, sort by length descending)
-    const names = [...entityNameMap.keys()].sort((a, b) => b.length - a.length);
-    if (names.length === 0) return [{ type: 'text' as const, value: text }];
-
-    const escaped = names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-    const pattern = new RegExp(`\\b(${escaped.join('|')})\\b`, 'gi');
-
-    const result: { type: 'text' | 'entity'; value: string; entityId?: string }[] = [];
-    let lastIndex = 0;
-
-    for (const match of text.matchAll(pattern)) {
-      if (match.index > lastIndex) {
-        result.push({ type: 'text', value: text.slice(lastIndex, match.index) });
-      }
-      const id = entityNameMap.get(match[0].toLowerCase());
-      if (id) {
-        result.push({ type: 'entity', value: match[0], entityId: id });
-      } else {
-        result.push({ type: 'text', value: match[0] });
-      }
-      lastIndex = match.index + match[0].length;
-    }
-
-    if (lastIndex < text.length) {
-      result.push({ type: 'text', value: text.slice(lastIndex) });
-    }
-
-    return result;
-  }, [text, entityNameMap]);
-
-  const handleEntityClick = useCallback((entityId: string) => {
-    selectEntity(entityId, 'replace');
-  }, [selectEntity]);
-
-  return (
-    <span>
-      {segments.map((seg, i) =>
-        seg.type === 'entity' && seg.entityId ? (
-          <button
-            key={i}
-            onClick={() => handleEntityClick(seg.entityId!)}
-            className="mx-0.5 inline-flex items-center rounded-full bg-purple-600/20 px-1.5 py-0.5 text-purple-300 hover:bg-purple-600/30 transition-colors"
-            title={`Select ${seg.value} (${seg.entityId})`}
-          >
-            {seg.value}
-          </button>
-        ) : (
-          <span key={i}>{seg.value}</span>
-        )
-      )}
-    </span>
-  );
 }
 
 export function ChatMessage({ message }: ChatMessageProps) {
