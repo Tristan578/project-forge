@@ -10,12 +10,12 @@ import type { AsyncRequest, AsyncResponse } from '../asyncTypes';
  */
 describe('Async Channel Protocol Integration', () => {
   let router: AsyncChannelRouter;
-  let mockDispatch: ReturnType<typeof vi.fn>;
+  let mockDispatch: ReturnType<typeof vi.fn<(command: string, payload: unknown) => unknown>>;
 
   beforeEach(() => {
     router = new AsyncChannelRouter();
     router.setPlayMode(true);
-    mockDispatch = vi.fn();
+    mockDispatch = vi.fn<(command: string, payload: unknown) => unknown>();
   });
 
   // ─── End-to-end raycast flow ──────────────────────────────────
@@ -148,8 +148,9 @@ describe('Async Channel Protocol Integration', () => {
       });
     }
 
-    await new Promise(r => setTimeout(r, 0));
-    expect(router.getActiveCount('physics')).toBe(32);
+    await vi.waitFor(() => {
+      expect(router.getActiveCount('physics')).toBe(32);
+    });
 
     // Audio should still work
     await router.handleRequest({

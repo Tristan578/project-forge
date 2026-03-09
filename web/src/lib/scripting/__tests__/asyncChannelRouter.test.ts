@@ -91,9 +91,9 @@ describe('AsyncChannelRouter', () => {
     }
 
     // Wait a tick for the handlers to start
-    await new Promise(r => setTimeout(r, 0));
-
-    expect(router.getActiveCount('audio')).toBe(4);
+    await vi.waitFor(() => {
+      expect(router.getActiveCount('audio')).toBe(4);
+    });
 
     // 5th should fail immediately
     await router.handleRequest(makeRequest({
