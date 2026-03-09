@@ -1,26 +1,64 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { MessageSquare, Trash2, Loader } from 'lucide-react';
+import { useEffect, useRef, useMemo } from 'react';
+import { MessageSquare, Trash2, Wrench, Sparkles } from 'lucide-react';
 import { useChatStore } from '@/stores/chatStore';
 import { ChatMessage } from './ChatMessage';
 import { ChatInput } from './ChatInput';
+import { SuggestionChips } from './SuggestionChips';
+import { ConversationList } from './ConversationList';
 
-const SUGGESTED_PROMPTS = [
-  'Build a simple platformer level',
-  'Add realistic lighting to my scene',
-  'Create a forest with trees and a path',
-  'Write a script to make my player move',
-  'Set up physics for my objects',
-  'Add particle effects to this entity',
-];
+// Static prompts are replaced by dynamic SuggestionChips
+
+/** Streaming status indicator with descriptive text based on current activity */
+function StreamingIndicator({ messages, loopIteration }: { messages: { role: string; toolCalls?: { name: string; status: string }[] }[]; loopIteration: number }) {
+  // Find the active tool being executed
+  const statusText = useMemo(() => {
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    if (!lastAssistant?.toolCalls?.length) {
+      if (loopIteration > 0) return `Step ${loopIteration + 1}: Analyzing results...`;
+      return 'Thinking...';
+    }
+
+    const pendingTools = lastAssistant.toolCalls.filter((tc) => tc.status === 'pending');
+    if (pendingTools.length > 0) {
+      const toolName = pendingTools[pendingTools.length - 1].name;
+      const friendlyName = toolName.replace(/_/g, ' ');
+      if (loopIteration > 0) {
+        return `Step ${loopIteration + 1}: Executing ${friendlyName}...`;
+      }
+      return `Executing ${friendlyName}...`;
+    }
+
+    if (loopIteration > 0) return `Step ${loopIteration + 1}: Planning next action...`;
+    return 'Generating response...';
+  }, [messages, loopIteration]);
+
+  return (
+    <div className="px-3 py-2 flex items-center gap-2">
+      <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-purple-400" />
+      <span className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+        {loopIteration > 0 ? (
+          <Wrench size={11} className="text-purple-500 animate-spin" />
+        ) : (
+          <Sparkles size={11} className="text-purple-500" />
+        )}
+        {statusText}
+      </span>
+      {loopIteration > 0 && (
+        <span className="text-[9px] text-zinc-600">
+          (agentic loop)
+        </span>
+      )}
+    </div>
+  );
+}
 
 export function ChatPanel() {
   const messages = useChatStore((s) => s.messages);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const error = useChatStore((s) => s.error);
   const clearChat = useChatStore((s) => s.clearChat);
-  const sendMessage = useChatStore((s) => s.sendMessage);
   const loopIteration = useChatStore((s) => s.loopIteration);
   const sessionTokens = useChatStore((s) => s.sessionTokens);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -41,6 +79,7 @@ export function ChatPanel() {
         <div className="flex items-center gap-1.5">
           <MessageSquare size={14} className="text-purple-400" />
           <span className="text-xs font-medium text-zinc-300">AI Assistant</span>
+          <ConversationList />
           {totalSessionTokens > 0 && (
             <span className="text-[9px] text-zinc-600" title="Session token usage">
               {totalSessionTokens.toLocaleString()} tokens
@@ -67,17 +106,7 @@ export function ChatPanel() {
             <p className="text-xs text-zinc-500">
               Describe what you want to build.
             </p>
-            <div className="flex flex-col gap-1.5 w-full max-w-[220px]">
-              {SUGGESTED_PROMPTS.map((prompt) => (
-                <button
-                  key={prompt}
-                  onClick={() => sendMessage(prompt)}
-                  className="rounded-md border border-zinc-800 bg-zinc-900 px-2.5 py-1.5 text-left text-[11px] text-zinc-400 hover:border-zinc-700 hover:text-zinc-300 transition-colors"
-                >
-                  {prompt}
-                </button>
-              ))}
-            </div>
+            <SuggestionChips className="max-w-[280px] justify-center" />
           </div>
         ) : (
           <div className="py-2">
@@ -85,14 +114,11 @@ export function ChatPanel() {
               <ChatMessage key={msg.id} message={msg} />
             ))}
             {isStreaming && (
-              <div className="px-3 py-1 flex items-center gap-1.5">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-purple-400" />
-                {loopIteration > 0 && (
-                  <span className="flex items-center gap-1 text-[10px] text-zinc-500">
-                    <Loader size={10} className="animate-spin" />
-                    Step {loopIteration + 1}
-                  </span>
-                )}
+              <StreamingIndicator messages={messages} loopIteration={loopIteration} />
+            )}
+            {!isStreaming && messages.length > 0 && (
+              <div className="px-3 py-2">
+                <SuggestionChips />
               </div>
             )}
           </div>

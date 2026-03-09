@@ -146,11 +146,12 @@ export async function POST(request: NextRequest) {
   const rl = rateLimit(`chat:${auth.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  // 2. Validate request size (max 10KB)
+  // 2. Validate request size (max 1MB — generous limit for conversation history + scene context;
+  //    the more precise MAX_INPUT_CHARS check below enforces the actual token budget)
   const bodyText = await request.text();
-  if (!validateBodySize(bodyText, 10 * 1024)) {
+  if (!validateBodySize(bodyText, 1024 * 1024)) {
     return Response.json(
-      { error: 'Request too large. Maximum 10KB allowed.' },
+      { error: 'Request too large. Maximum 1MB allowed.' },
       { status: 413 }
     );
   }
@@ -227,12 +228,35 @@ export async function POST(request: NextRequest) {
     throw err;
   }
 
+  // 5b. Server-side token budget validation
+  // Rough estimate: 4 chars/token. Reject if messages exceed reasonable budget.
+  const MAX_INPUT_CHARS = 600000; // ~150k tokens (well within Claude's window)
+  let totalChars = 0;
+  for (const msg of messages) {
+    if (typeof msg.content === 'string') {
+      totalChars += msg.content.length;
+    } else if (Array.isArray(msg.content)) {
+      for (const block of msg.content) {
+        if (typeof block === 'object' && block !== null) {
+          const b = block as Record<string, unknown>;
+          if (b.type === 'text' && typeof b.text === 'string') {
+            totalChars += b.text.length;
+          } else if (b.type === 'tool_result' && typeof b.content === 'string') {
+            totalChars += b.content.length;
+          }
+        }
+      }
+    }
+  }
+  if (totalChars > MAX_INPUT_CHARS) {
+    return Response.json(
+      { error: 'Conversation too long. Please start a new conversation or clear chat.' },
+      { status: 413 }
+    );
+  }
+
   // 6. Build Claude request
   const client = new Anthropic({ apiKey });
-
-  const systemPrompt = sceneContext
-    ? `${SYSTEM_PROMPT}\n\n${sceneContext}`
-    : SYSTEM_PROMPT;
 
   const tools = getChatTools();
 
@@ -252,13 +276,40 @@ export async function POST(request: NextRequest) {
       }
 
       try {
+        // Build system prompt with cache_control for prompt caching
+        // The static system prompt gets cached; sceneContext changes per request
+        const systemBlocks: Anthropic.TextBlockParam[] = [
+          {
+            type: 'text' as const,
+            text: SYSTEM_PROMPT,
+            cache_control: { type: 'ephemeral' as const },
+          },
+        ];
+        if (sceneContext) {
+          systemBlocks.push({
+            type: 'text' as const,
+            text: sceneContext,
+          });
+        }
+
+        // Add cache_control to the last tool definition for tool caching
+        const cachedTools = tools.map((tool, i) => {
+          if (i === tools.length - 1) {
+            return {
+              ...tool,
+              cache_control: { type: 'ephemeral' as const },
+            };
+          }
+          return tool;
+        });
+
         // Build params with proper typing for streaming
         const baseParams = {
           model: model || 'claude-sonnet-4-5-20250929',
           max_tokens: thinking ? 16384 : 4096,
-          system: systemPrompt,
+          system: systemBlocks,
           messages: anthropicMessages,
-          tools: tools as Anthropic.Tool[],
+          tools: cachedTools as Anthropic.Tool[],
           stream: true as const,
           ...(thinking ? { thinking: { type: 'enabled' as const, budget_tokens: 10000 } } : {}),
         };

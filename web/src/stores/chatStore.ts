@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 
 export interface ToolCallStatus {
   id: string;
@@ -27,9 +28,20 @@ export type ChatModel = 'claude-sonnet-4-5-20250929' | 'claude-haiku-4-5-2025100
 
 export type RightPanelTab = 'inspector' | 'chat' | 'script' | 'ui';
 
+export interface Conversation {
+  id: string;
+  name: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 const MAX_LOOP_ITERATIONS = 10;
 const PERSISTENCE_KEY = 'forge-chat-';
+const CONVERSATIONS_KEY = 'forge-conversations';
+const ACTIVE_CONVERSATION_KEY = 'forge-active-conversation';
 const MAX_STORED_MESSAGES = 50;
+const MAX_CONVERSATIONS = 20;
 
 interface ChatState {
   messages: ChatMessage[];
@@ -46,6 +58,8 @@ interface ChatState {
   showEntityPicker: boolean;
   entityPickerFilter: string;
   pendingEntityRefs: Record<string, string>; // @DisplayName → entity ID for current input
+  conversations: Conversation[];
+  activeConversationId: string | null;
 
   sendMessage: (text: string, images?: string[], entityRefs?: Record<string, string>) => Promise<void>;
   stopStreaming: () => void;
@@ -66,6 +80,11 @@ interface ChatState {
   setEntityPickerFilter: (filter: string) => void;
   addEntityRef: (displayName: string, entityId: string) => void;
   clearEntityRefs: () => void;
+  createConversation: (name?: string) => string;
+  switchConversation: (conversationId: string) => void;
+  deleteConversation: (conversationId: string) => void;
+  renameConversation: (conversationId: string, name: string) => void;
+  loadConversations: () => void;
 }
 
 let messageCounter = 0;
@@ -264,6 +283,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   showEntityPicker: false,
   entityPickerFilter: '',
   pendingEntityRefs: {},
+  conversations: [],
+  activeConversationId: null,
 
   sendMessage: async (text: string, images?: string[], entityRefs?: Record<string, string>) => {
     const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab } = get();
@@ -312,9 +333,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { buildSceneContext } = await import('../lib/chat/context');
       const sceneContext = buildSceneContext(editorState);
 
-      // Build initial API messages from conversation history
+      // Build initial API messages from conversation history (with context truncation)
       const allMessages = [...messages, userMessage];
-      const apiMessages = buildApiMessages(allMessages);
+      const apiMessages = buildTruncatedApiMessages(allMessages);
 
       const assistantMsgId = assistantMessage.id;
       const turnTokens = { input: 0, output: 0 };
@@ -456,6 +477,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     } finally {
       set({ isStreaming: false, abortController: null, loopIteration: 0 });
+
+      // Sync current messages to the active conversation so they persist
+      const { messages: finalMessages, activeConversationId: convId, conversations: convs } = get();
+      if (convId) {
+        const syncedConversations = convs.map((c) =>
+          c.id === convId
+            ? { ...c, messages: finalMessages.slice(-MAX_STORED_MESSAGES), updatedAt: Date.now() }
+            : c
+        );
+        set({ conversations: syncedConversations });
+        saveConversationsToStorage(syncedConversations, convId);
+      }
     }
   },
 
@@ -619,7 +652,171 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ pendingEntityRefs: refs });
   },
   clearEntityRefs: () => set({ pendingEntityRefs: {} }),
+
+  createConversation: (name?: string) => {
+    const { messages, conversations, activeConversationId } = get();
+    const now = Date.now();
+    const id = `conv_${now}_${Math.random().toString(36).slice(2, 8)}`;
+    const newName = name || `Chat ${conversations.length + 1}`;
+
+    // Save current messages to the active conversation before creating new one
+    let updatedConversations = [...conversations];
+    if (activeConversationId) {
+      updatedConversations = updatedConversations.map((c) =>
+        c.id === activeConversationId
+          ? { ...c, messages: messages.slice(-MAX_STORED_MESSAGES), updatedAt: now }
+          : c
+      );
+    } else if (messages.length > 0) {
+      // Auto-create conversation for existing messages
+      const autoId = `conv_${now - 1}_auto`;
+      const autoName = messages[0]?.content?.slice(0, 30) || 'Untitled';
+      updatedConversations.push({
+        id: autoId,
+        name: autoName,
+        messages: messages.slice(-MAX_STORED_MESSAGES),
+        createdAt: now - 1,
+        updatedAt: now - 1,
+      });
+    }
+
+    const newConv: Conversation = {
+      id,
+      name: newName,
+      messages: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Keep within max conversations limit
+    updatedConversations.push(newConv);
+    if (updatedConversations.length > MAX_CONVERSATIONS) {
+      updatedConversations = updatedConversations.slice(-MAX_CONVERSATIONS);
+    }
+
+    set({
+      conversations: updatedConversations,
+      activeConversationId: id,
+      messages: [],
+      error: null,
+      sessionTokens: { input: 0, output: 0 },
+    });
+
+    saveConversationsToStorage(updatedConversations, id);
+    return id;
+  },
+
+  switchConversation: (conversationId: string) => {
+    const { messages, conversations, activeConversationId } = get();
+    const now = Date.now();
+
+    // Save current conversation first — handle null activeConversationId
+    const updatedConversations = conversations.map((c) =>
+      c.id === activeConversationId
+        ? { ...c, messages: messages.slice(-MAX_STORED_MESSAGES), updatedAt: now }
+        : c
+    );
+
+    // If there are unsaved messages with no active conversation, auto-create one
+    if (!activeConversationId && messages.length > 0) {
+      const autoId = `conv_${now}_auto`;
+      const autoName = messages[0]?.content?.slice(0, 30) || 'Untitled';
+      updatedConversations.push({
+        id: autoId,
+        name: autoName,
+        messages: messages.slice(-MAX_STORED_MESSAGES),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+
+    // Load the target conversation
+    const target = updatedConversations.find((c) => c.id === conversationId);
+    if (!target) return;
+
+    set({
+      conversations: updatedConversations,
+      activeConversationId: conversationId,
+      messages: target.messages,
+      error: null,
+      sessionTokens: { input: 0, output: 0 },
+    });
+
+    saveConversationsToStorage(updatedConversations, conversationId);
+  },
+
+  deleteConversation: (conversationId: string) => {
+    const { conversations, activeConversationId } = get();
+    const updatedConversations = conversations.filter((c) => c.id !== conversationId);
+
+    // If deleting the active conversation, switch to the latest or clear
+    if (conversationId === activeConversationId) {
+      const latest = updatedConversations[updatedConversations.length - 1];
+      const newActiveId = latest?.id ?? null;
+      set({
+        conversations: updatedConversations,
+        activeConversationId: newActiveId,
+        messages: latest?.messages ?? [],
+        error: null,
+      });
+      saveConversationsToStorage(updatedConversations, newActiveId);
+    } else {
+      set({ conversations: updatedConversations });
+      saveConversationsToStorage(updatedConversations);
+    }
+  },
+
+  renameConversation: (conversationId: string, name: string) => {
+    const { conversations } = get();
+    const updatedConversations = conversations.map((c) =>
+      c.id === conversationId ? { ...c, name } : c
+    );
+    set({ conversations: updatedConversations });
+    saveConversationsToStorage(updatedConversations);
+  },
+
+  loadConversations: () => {
+    try {
+      const stored = localStorage.getItem(CONVERSATIONS_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Conversation[];
+        // Restore persisted active conversation, falling back to most recently updated
+        const persistedId = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+        const restoredId = persistedId && parsed.some((c) => c.id === persistedId)
+          ? persistedId
+          : [...parsed].sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id ?? null;
+        const activeConv = restoredId ? parsed.find((c) => c.id === restoredId) : null;
+        set({
+          conversations: parsed,
+          activeConversationId: restoredId,
+          messages: activeConv?.messages ?? [],
+        });
+      }
+    } catch {
+      // Corrupt data
+    }
+  },
 }));
+
+function saveConversationsToStorage(conversations: Conversation[], activeId?: string | null) {
+  try {
+    // Store only metadata + limited messages
+    const toStore = conversations.map((c) => ({
+      ...c,
+      messages: c.messages.slice(-MAX_STORED_MESSAGES),
+    }));
+    localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(toStore));
+    if (activeId !== undefined) {
+      if (activeId) {
+        localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId);
+      } else {
+        localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+      }
+    }
+  } catch {
+    // localStorage full or unavailable
+  }
+}
 
 /** Convert ChatMessages to Anthropic API format */
 function buildApiMessages(messages: ChatMessage[]): { role: string; content: unknown }[] {
@@ -644,4 +841,105 @@ function buildApiMessages(messages: ChatMessage[]): { role: string; content: unk
       }
       return { role: m.role as 'user' | 'assistant', content: m.content };
     });
+}
+
+// System prompt + tools overhead estimate (tokens)
+const SYSTEM_OVERHEAD_TOKENS = 6000;
+// Max context window tokens, aligned with /api/chat MAX_INPUT_CHARS (600k chars ≈ 150k tokens)
+const MAX_CONTEXT_TOKENS = 150000;
+
+/**
+ * Build API messages with context window truncation.
+ * Drops oldest messages (preserving tool_use/tool_result pairs) to fit within budget.
+ * Inserts a "[Earlier conversation summarized]" marker when messages are dropped.
+ */
+export function buildTruncatedApiMessages(
+  messages: ChatMessage[],
+  maxTokens: number = MAX_CONTEXT_TOKENS,
+  systemOverhead: number = SYSTEM_OVERHEAD_TOKENS
+): { role: string; content: unknown }[] {
+  const allApiMessages = buildApiMessages(messages);
+  const budget = maxTokens - systemOverhead;
+
+  if (budget <= 0) return allApiMessages.slice(-2);
+
+  // Estimate tokens for each message
+  const tokenCounts: number[] = allApiMessages.map((m) =>
+    estimateMessageTokens(m)
+  );
+
+  const totalTokens = tokenCounts.reduce((a: number, b: number) => a + b, 0);
+
+  // If everything fits, return as-is
+  if (totalTokens <= budget) return allApiMessages;
+
+  // Drop oldest messages, but preserve tool_use/tool_result pairs
+  // Always keep the last message (the current user message)
+  let droppedCount = 0;
+  let droppedTokens = 0;
+
+  // Drop from the front until we fit (never drop the last message)
+  let currentTokens = totalTokens;
+  let i = 0;
+  while (currentTokens > budget && i < allApiMessages.length - 1) {
+    // If this is a tool_use message, also drop its paired tool_result
+    if (isToolUseMessage(allApiMessages[i]) && i + 1 < allApiMessages.length && isToolResultMessage(allApiMessages[i + 1])) {
+      currentTokens -= tokenCounts[i] + tokenCounts[i + 1];
+      droppedTokens += tokenCounts[i] + tokenCounts[i + 1];
+      droppedCount += 2;
+      i += 2;
+    } else {
+      currentTokens -= tokenCounts[i];
+      droppedTokens += tokenCounts[i];
+      droppedCount += 1;
+      i += 1;
+    }
+  }
+
+  if (droppedCount === 0) return allApiMessages;
+
+  // Build result with summary marker
+  const remaining = allApiMessages.slice(i);
+  const summaryContent = `[Earlier conversation summarized: ${droppedCount} messages (~${droppedTokens} tokens) were truncated to fit context window]`;
+
+  if (remaining.length > 0 && remaining[0].role === 'assistant') {
+    // First remaining is assistant — insert a user summary before it to maintain alternation
+    return [
+      { role: 'user' as const, content: summaryContent },
+      ...remaining,
+    ];
+  }
+
+  if (remaining.length > 0 && remaining[0].role === 'user') {
+    // First remaining is user — merge summary into it to avoid two consecutive user messages
+    let mergedContent: typeof remaining[0]['content'];
+    if (typeof remaining[0].content === 'string') {
+      mergedContent = `${summaryContent}\n\n${remaining[0].content}`;
+    } else if (Array.isArray(remaining[0].content)) {
+      // Content is an array (e.g., text + image blocks) — prepend summary as a text block
+      mergedContent = [
+        { type: 'text' as const, text: summaryContent },
+        ...(remaining[0].content as Array<Record<string, unknown>>),
+      ];
+    } else {
+      mergedContent = remaining[0].content;
+    }
+    const merged = { ...remaining[0], content: mergedContent };
+    return [merged, ...remaining.slice(1)];
+  }
+
+  // Fallback: just prepend the summary as a user message
+  return [{ role: 'user' as const, content: summaryContent }, ...remaining];
+}
+
+function isToolUseMessage(msg: { role: string; content: unknown }): boolean {
+  if (msg.role !== 'assistant') return false;
+  if (!Array.isArray(msg.content)) return false;
+  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_use');
+}
+
+function isToolResultMessage(msg: { role: string; content: unknown }): boolean {
+  if (msg.role !== 'user') return false;
+  if (!Array.isArray(msg.content)) return false;
+  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_result');
 }
