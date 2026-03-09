@@ -917,12 +917,19 @@ export function buildTruncatedApiMessages(
 
   if (remaining.length > 0 && remaining[0].role === 'user') {
     // First remaining is user — merge summary into it to avoid two consecutive user messages
-    const merged = {
-      ...remaining[0],
-      content: typeof remaining[0].content === 'string'
-        ? `${summaryContent}\n\n${remaining[0].content}`
-        : remaining[0].content,
-    };
+    let mergedContent: typeof remaining[0]['content'];
+    if (typeof remaining[0].content === 'string') {
+      mergedContent = `${summaryContent}\n\n${remaining[0].content}`;
+    } else if (Array.isArray(remaining[0].content)) {
+      // Content is an array (e.g., text + image blocks) — prepend summary as a text block
+      mergedContent = [
+        { type: 'text' as const, text: summaryContent },
+        ...(remaining[0].content as Array<Record<string, unknown>>),
+      ];
+    } else {
+      mergedContent = remaining[0].content;
+    }
+    const merged = { ...remaining[0], content: mergedContent };
     return [merged, ...remaining.slice(1)];
   }
 
