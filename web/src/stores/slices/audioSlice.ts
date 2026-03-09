@@ -161,7 +161,9 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   setAdaptiveMusicIntensity: (intensity) => set({ adaptiveMusicIntensity: intensity }),
   setCurrentMusicSegment: (segment) => set({ currentMusicSegment: segment }),
   listAudioSnapshots: () => {
-    return audioManager.listSnapshots();
+    // Read from Zustand state (kept in sync by save/delete actions) to avoid
+    // dual source-of-truth drift with audioManager's internal map.
+    return Object.keys(get().audioSnapshots);
   },
   saveAudioSnapshot: (name, crossfadeDurationMs = 1000) => {
     const snapshot = audioManager.saveSnapshot(name, crossfadeDurationMs);
@@ -171,17 +173,19 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   },
   loadAudioSnapshot: (name, crossfadeDurationMs) => {
     const success = audioManager.loadSnapshot(name, crossfadeDurationMs);
-    if (success) {
-      const snapshot = audioManager.getSnapshot(name);
-      if (snapshot) {
-        // Update bus volumes in store to match snapshot target
-        const state = get();
-        const updated = state.audioBuses.map(bus => {
-          const target = snapshot.busStates[bus.name];
-          return target ? { ...bus, volume: target.volume, muted: target.muted } : bus;
-        });
-        set({ audioBuses: updated });
-      }
+    if (!success) {
+      console.warn(`[AudioSlice] loadAudioSnapshot("${name}") failed — snapshot not found`);
+      return;
+    }
+    const snapshot = audioManager.getSnapshot(name);
+    if (snapshot) {
+      // Sync Zustand bus state to match the snapshot audioManager just applied
+      const state = get();
+      const updated = state.audioBuses.map(bus => {
+        const target = snapshot.busStates[bus.name];
+        return target ? { ...bus, volume: target.volume, muted: target.muted } : bus;
+      });
+      set({ audioBuses: updated });
     }
   },
   deleteAudioSnapshot: (name) => {

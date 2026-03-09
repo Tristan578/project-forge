@@ -4,7 +4,7 @@
 
 Complete the three remaining stub features in SpawnForge's advanced audio system:
 1. Adaptive Music Snapshots (save/load bus states with crossfade)
-2. Enhanced Spatial Audio Occlusion (distance-based occlusion with reverb)
+2. Enhanced Spatial Audio Occlusion (distance-based lowpass + Q modulation)
 3. Loop Point Detection (zero-crossing analysis for seamless loops)
 
 ## 1. Adaptive Music Snapshots

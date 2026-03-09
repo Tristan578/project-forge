@@ -504,7 +504,7 @@ function buildForgeApi(scriptEntityId: string) {
         pendingCommands.push({ cmd: 'audio_save_snapshot', name, crossfadeDurationMs: crossfadeDurationMs ?? 1000 });
       },
       loadSnapshot: (name: string, durationMs?: number) => {
-        pendingCommands.push({ cmd: 'audio_load_snapshot', name, durationMs: durationMs ?? 1000 });
+        pendingCommands.push({ cmd: 'audio_load_snapshot', name, ...(durationMs !== undefined && { durationMs }) });
       },
       detectLoopPoints: (assetId: string) => {
         pendingCommands.push({ cmd: 'audio_detect_loop_points', assetId });

@@ -1454,8 +1454,10 @@ class AudioManager {
 
   /**
    * Save a snapshot of current bus states.
+   * Calls ensureContext() so buses are initialized even if no audio has played yet.
    */
   saveSnapshot(name: string, crossfadeDurationMs: number = 1000): AudioSnapshot {
+    this.ensureContext();
     const busStates: Record<string, { volume: number; muted: boolean }> = {};
     for (const [busName, bus] of this.buses) {
       busStates[busName] = { volume: bus.volume, muted: bus.muted };
@@ -1467,13 +1469,13 @@ class AudioManager {
 
   /**
    * Load a snapshot, crossfading bus states over the specified duration.
+   * Calls ensureContext() so buses are initialized even if no audio has played yet.
    */
   loadSnapshot(name: string, durationMs?: number): boolean {
     const snapshot = this.snapshots.get(name);
     if (!snapshot) return false;
 
-    const ctx = this.ctx;
-    if (!ctx) return false;
+    const ctx = this.ensureContext();
 
     const duration = (durationMs ?? snapshot.crossfadeDurationMs) / 1000;
     const now = ctx.currentTime;
