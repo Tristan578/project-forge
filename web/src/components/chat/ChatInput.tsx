@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { Send, Square, Paperclip, Mic, MicOff, Brain, Shield } from 'lucide-react';
 import { useChatStore, type ChatModel } from '@/stores/chatStore';
 import { EntityPicker } from './EntityPicker';
+import { estimateTokenCount, formatTokenEstimate } from '@/lib/chat/tokenCounter';
 
 const MODEL_OPTIONS: { value: ChatModel; label: string }[] = [
   { value: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5' },
@@ -161,6 +162,12 @@ export function ChatInput() {
 
   const entityRefChips = Object.entries(pendingEntityRefs);
 
+  const tokenEstimate = useMemo(() => {
+    const trimmed = text.trim();
+    if (!trimmed) return 0;
+    return estimateTokenCount(trimmed);
+  }, [text]);
+
   return (
     <div className="border-t border-zinc-700 bg-zinc-900">
       {/* Entity reference chips */}
@@ -251,6 +258,11 @@ export function ChatInput() {
 
       {/* Bottom toolbar */}
       <div className="flex items-center gap-2 border-t border-zinc-800 px-2 py-1">
+        {tokenEstimate > 0 && (
+          <span className="text-[9px] text-zinc-600" title="Estimated token cost for this message">
+            {formatTokenEstimate(tokenEstimate)} tokens
+          </span>
+        )}
         <select
           value={activeModel}
           onChange={(e) => setModel(e.target.value as ChatModel)}

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 
 export interface ToolCallStatus {
   id: string;
@@ -312,9 +313,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const { buildSceneContext } = await import('../lib/chat/context');
       const sceneContext = buildSceneContext(editorState);
 
-      // Build initial API messages from conversation history
+      // Build initial API messages from conversation history (with context truncation)
       const allMessages = [...messages, userMessage];
-      const apiMessages = buildApiMessages(allMessages);
+      const apiMessages = buildTruncatedApiMessages(allMessages);
 
       const assistantMsgId = assistantMessage.id;
       const turnTokens = { input: 0, output: 0 };
@@ -644,4 +645,111 @@ function buildApiMessages(messages: ChatMessage[]): { role: string; content: unk
       }
       return { role: m.role as 'user' | 'assistant', content: m.content };
     });
+}
+
+// System prompt + tools overhead estimate (tokens)
+const SYSTEM_OVERHEAD_TOKENS = 6000;
+// Max context window tokens (conservative estimate for Claude)
+const MAX_CONTEXT_TOKENS = 180000;
+
+/**
+ * Build API messages with context window truncation.
+ * Drops oldest messages (preserving tool_use/tool_result pairs) to fit within budget.
+ * Inserts a "[Earlier conversation summarized]" marker when messages are dropped.
+ */
+export function buildTruncatedApiMessages(
+  messages: ChatMessage[],
+  maxTokens: number = MAX_CONTEXT_TOKENS,
+  systemOverhead: number = SYSTEM_OVERHEAD_TOKENS
+): { role: string; content: unknown }[] {
+  const allApiMessages = buildApiMessages(messages);
+  const budget = maxTokens - systemOverhead;
+
+  if (budget <= 0) return allApiMessages.slice(-2);
+
+  // Estimate tokens for each message
+  const tokenCounts: number[] = allApiMessages.map((m) =>
+    estimateMessageTokens(m)
+  );
+
+  const totalTokens = tokenCounts.reduce((a: number, b: number) => a + b, 0);
+
+  // If everything fits, return as-is
+  if (totalTokens <= budget) return allApiMessages;
+
+  // Drop oldest messages, but preserve tool_use/tool_result pairs
+  // Always keep the last message (the current user message)
+  let droppedCount = 0;
+  let droppedTokens = 0;
+
+  // Identify which messages can be dropped (skip tool_result blocks that
+  // are paired with a tool_use in the previous message)
+  const canDrop: boolean[] = allApiMessages.map(() => true);
+
+  // Mark tool_use/tool_result pairs: if message i is assistant with tool_use blocks,
+  // and message i+1 is user with tool_result blocks, they must be dropped together
+  for (let i = 0; i < allApiMessages.length - 1; i++) {
+    const msg = allApiMessages[i];
+    const next = allApiMessages[i + 1];
+    if (isToolUseMessage(msg) && isToolResultMessage(next)) {
+      // These two are paired - they'll be dropped together
+      canDrop[i] = true;
+      canDrop[i + 1] = true;
+    }
+  }
+
+  // Never drop the last message
+  canDrop[canDrop.length - 1] = false;
+
+  // Drop from the front until we fit
+  let currentTokens = totalTokens;
+  let i = 0;
+  while (currentTokens > budget && i < allApiMessages.length - 1) {
+    if (!canDrop[i]) {
+      i++;
+      continue;
+    }
+
+    // If this is a tool_use message, also drop its paired tool_result
+    if (isToolUseMessage(allApiMessages[i]) && i + 1 < allApiMessages.length && isToolResultMessage(allApiMessages[i + 1])) {
+      currentTokens -= tokenCounts[i] + tokenCounts[i + 1];
+      droppedTokens += tokenCounts[i] + tokenCounts[i + 1];
+      droppedCount += 2;
+      i += 2;
+    } else {
+      currentTokens -= tokenCounts[i];
+      droppedTokens += tokenCounts[i];
+      droppedCount += 1;
+      i += 1;
+    }
+  }
+
+  if (droppedCount === 0) return allApiMessages;
+
+  // Build result with summary marker
+  const remaining = allApiMessages.slice(i);
+  const summaryMessage = {
+    role: 'user' as const,
+    content: `[Earlier conversation summarized: ${droppedCount} messages (~${droppedTokens} tokens) were truncated to fit context window]`,
+  };
+
+  // Ensure first message after marker is a user message (API requirement)
+  if (remaining.length > 0 && remaining[0].role === 'assistant') {
+    // Insert a placeholder user message before assistant continuation
+    return [summaryMessage, { role: 'user' as const, content: '(continuing from earlier)' }, ...remaining];
+  }
+
+  return [summaryMessage, ...remaining];
+}
+
+function isToolUseMessage(msg: { role: string; content: unknown }): boolean {
+  if (msg.role !== 'assistant') return false;
+  if (!Array.isArray(msg.content)) return false;
+  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_use');
+}
+
+function isToolResultMessage(msg: { role: string; content: unknown }): boolean {
+  if (msg.role !== 'user') return false;
+  if (!Array.isArray(msg.content)) return false;
+  return (msg.content as Array<{ type?: string }>).some((b) => b.type === 'tool_result');
 }
