@@ -10307,6 +10307,26 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write"
+    },
+    {
+      "name": "set_simplification_backend",
+      "description": "Select the mesh simplification algorithm used for LOD generation. 'qem' preserves UVs, normals and vertex colors via attribute interpolation. 'fast' uses position-only collapse (faster but destroys texture coordinates).",
+      "category": "performance",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "backend": {
+            "type": "string",
+            "enum": ["qem", "fast"],
+            "description": "Simplification backend: 'qem' (attribute-preserving, default) or 'fast' (position-only)"
+          }
+        },
+        "required": [
+          "backend"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "performance:write"
     }
   ],
   "resources": [

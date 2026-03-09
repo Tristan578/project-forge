@@ -20,6 +20,7 @@ export function LodInspector() {
     autoGenerate: false,
     lodRatios: [0.5, 0.25, 0.1],
   });
+  const [backend, setBackend] = useState<'qem' | 'fast'>('qem');
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
 
   const entity = primaryId ? sceneGraph.nodes[primaryId] : null;
@@ -47,6 +48,14 @@ export function LodInspector() {
     [lodConfig.lodRatios]
   );
 
+  const handleBackendChange = useCallback(
+    (newBackend: 'qem' | 'fast') => {
+      setBackend(newBackend);
+      dispatchToEngine('set_simplification_backend', { backend: newBackend });
+    },
+    [dispatchToEngine]
+  );
+
   const handleAutoGenerateToggle = useCallback(() => {
     const newValue = !lodConfig.autoGenerate;
     setLodConfig((prev) => ({ ...prev, autoGenerate: newValue }));
@@ -69,9 +78,10 @@ export function LodInspector() {
         lodRatios: lodConfig.lodRatios,
       });
       dispatchToEngine('generate_lods', { entityId: primaryId });
-      setGenerateStatus('LOD meshes generated via QEM simplification. Distance-based switching is active.');
+      const backendLabel = backend === 'fast' ? 'Fast (position-only)' : 'QEM (attribute-preserving)';
+      setGenerateStatus(`LOD meshes generated via ${backendLabel} simplification. Distance-based switching is active.`);
     }
-  }, [primaryId, lodConfig, dispatchToEngine]);
+  }, [primaryId, lodConfig, backend, dispatchToEngine]);
 
   if (!entity) {
     return null;
@@ -190,6 +200,19 @@ export function LodInspector() {
           />
           <div className="text-xs text-gray-500 text-right">{Math.round(lodConfig.lodRatios[2] * 100)}%</div>
         </div>
+      </div>
+
+      {/* Simplification Backend Selector */}
+      <div className="mb-3">
+        <label className="text-xs text-gray-400 block mb-1">Simplification Algorithm</label>
+        <select
+          value={backend}
+          onChange={(e) => handleBackendChange(e.target.value as 'qem' | 'fast')}
+          className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm"
+        >
+          <option value="qem">QEM — attribute-preserving (recommended)</option>
+          <option value="fast">Fast — position-only (lower quality)</option>
+        </select>
       </div>
 
       {/* Generate LODs Button */}
