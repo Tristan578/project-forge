@@ -72,7 +72,7 @@ After thorough analysis, the engine integration is **substantially more complete
 **Impact:** Camera bounds are cosmetic only; the camera can move anywhere.
 
 **Solution:**
-- Add a `clamp_camera_2d_bounds` system in `bridge/sprite.rs` that runs in `PlaySystemSet`.
+- Add a `clamp_camera_2d_bounds` system in `bridge/sprite.rs` that runs in `PlaySystemSet` (both editor play-test and exported runtime builds -- NOT editor-only).
 - Read `Camera2dData.bounds` and clamp `Transform.translation.xy()` each frame.
 
 **Estimated complexity:** Tiny (1 system, ~15 lines).
@@ -274,11 +274,13 @@ New systems added to `SelectionPlugin::build()` in `bridge/mod.rs`:
 .add_systems(Update, sprite::apply_sorting_layer_updates)
 .add_systems(Update, sprite::animate_tilemap_tiles)
 
-// Editor-only systems
+// Play-mode system (editor play-test AND exported runtime builds)
+.add_systems(Update, sprite::clamp_camera_2d_bounds.in_set(PlaySystemSet))
+
+// Editor-only systems (stripped from runtime builds)
 #[cfg(not(feature = "runtime"))]
 {
     .add_systems(Update, sprite::render_2d_grid)
-    .add_systems(Update, sprite::clamp_camera_2d_bounds.in_set(PlaySystemSet))
 }
 ```
 
