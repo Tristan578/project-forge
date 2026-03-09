@@ -1,10 +1,14 @@
 use bevy::prelude::*;
-use bevy::mesh::VertexAttributeValues;
+use bevy::mesh::Mesh2d;
+use bevy::sprite_render::{ColorMaterial, MeshMaterial2d};
 use crate::core::{
     entity_id::EntityId,
     entity_factory,
     pending_commands::{PendingCommands, QueryRequest},
-    skeleton2d::{SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d, AttachmentData},
+    skeleton2d::{
+        SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d, AttachmentData,
+        SkinnedMesh2d, BoneWorldTransforms2d, VertexWeights,
+    },
     skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
     history::UndoableAction,
 };
@@ -514,122 +518,293 @@ fn compute_bone_world_transforms(bones: &[Bone2dDef]) -> HashMap<String, (Vec2, 
     world_transforms
 }
 
-/// CPU vertex skinning: deform mesh vertices based on skeleton bone transforms.
-/// Runs every frame after animation + IK, transforming mesh positions using
-/// weighted bone world transforms from the active skin's mesh attachments.
-pub(super) fn apply_vertex_skinning_2d(
-    skeleton_query: Query<(&SkeletonData2d, &SkeletonEnabled2d, &Mesh2d)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-) {
-    for (skeleton, _, mesh_handle) in skeleton_query.iter() {
-        let world_transforms = compute_bone_world_transforms(&skeleton.bones);
+// ========== Pure Functions (Bind-Pose Init + Corrected LBS) ==========
 
-        // Get the active skin's mesh attachments
-        let Some(skin) = skeleton.skins.get(&skeleton.active_skin) else {
-            continue;
-        };
-
-        // Find the first mesh attachment with vertex weights
-        for attachment in skin.attachments.values() {
-            if let AttachmentData::Mesh {
-                ref vertices,
-                ref weights,
-                ..
-            } = attachment
-            {
-                if weights.is_empty() || vertices.is_empty() || weights.len() != vertices.len() {
-                    continue;
-                }
-
-                // Deform vertices using weighted bone transforms
-                let deformed = skin_vertices(vertices, weights, &world_transforms);
-
-                // Apply deformed positions to the Bevy mesh
-                if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
-                    if let Some(VertexAttributeValues::Float32x3(ref mut positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
-                        for (i, pos) in deformed.iter().enumerate() {
-                            if i < positions.len() {
-                                positions[i] = [pos[0], pos[1], 0.0];
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+/// Compute bind-pose world transforms for each bone, ordered by bone index.
+/// Called once at mesh initialization time.
+fn compute_bind_pose_transforms(bones: &[Bone2dDef]) -> Vec<(Vec2, f32, Vec2)> {
+    let world_map = compute_bone_world_transforms(bones);
+    bones.iter().map(|bone| {
+        world_map
+            .get(&bone.name)
+            .copied()
+            .unwrap_or((Vec2::ZERO, 0.0, Vec2::ONE))
+    }).collect()
 }
 
-/// Skin vertices by blending bone transforms weighted per-vertex.
-fn skin_vertices(
-    bind_pose: &[[f32; 2]],
-    weights: &[crate::core::skeleton2d::VertexWeights],
-    bone_transforms: &HashMap<String, (Vec2, f32, Vec2)>,
-) -> Vec<[f32; 2]> {
-    bind_pose
+/// Map bone name strings to indices in the bones array.
+/// Returns (bone_indices, bone_weights) parallel vecs per vertex.
+fn resolve_bone_indices(
+    weights: &[VertexWeights],
+    bones: &[Bone2dDef],
+) -> (Vec<Vec<usize>>, Vec<Vec<f32>>) {
+    let name_to_idx: HashMap<&str, usize> = bones
         .iter()
-        .zip(weights.iter())
-        .map(|(vertex, vw)| {
+        .enumerate()
+        .map(|(i, b)| (b.name.as_str(), i))
+        .collect();
+
+    let mut all_indices = Vec::with_capacity(weights.len());
+    let mut all_weights = Vec::with_capacity(weights.len());
+
+    for vw in weights {
+        let mut indices = Vec::with_capacity(vw.bones.len());
+        let mut ws = Vec::with_capacity(vw.weights.len());
+        for (name, &w) in vw.bones.iter().zip(vw.weights.iter()) {
+            if let Some(&idx) = name_to_idx.get(name.as_str()) {
+                indices.push(idx);
+                ws.push(w);
+            }
+        }
+        all_indices.push(indices);
+        all_weights.push(ws);
+    }
+
+    (all_indices, all_weights)
+}
+
+/// Corrected Linear Blend Skinning with bind-pose inverse.
+///
+/// For each vertex: v' = sum(w_i * forward(world_i, inverse(bind_i, v_bind)))
+///
+/// The inverse operation transforms the vertex from mesh space into
+/// bone-local space by undoing the bind-pose transform. The forward
+/// operation then applies the current animated world transform.
+fn skin_vertices_lbs(
+    bind_positions: &[[f32; 2]],
+    vertex_bone_indices: &[Vec<usize>],
+    vertex_bone_weights: &[Vec<f32>],
+    bind_pose_transforms: &[(Vec2, f32, Vec2)],
+    world_transforms: &[(Vec2, f32, Vec2)],
+) -> Vec<[f32; 3]> {
+    bind_positions
+        .iter()
+        .enumerate()
+        .map(|(vi, &vertex)| {
+            let v = Vec2::new(vertex[0], vertex[1]);
             let mut result = Vec2::ZERO;
             let mut total_weight = 0.0f32;
 
-            for (bone_name, &weight) in vw.bones.iter().zip(vw.weights.iter()) {
+            let indices = &vertex_bone_indices[vi];
+            let weights = &vertex_bone_weights[vi];
+
+            for (&bone_idx, &weight) in indices.iter().zip(weights.iter()) {
                 if weight < 1e-6 {
                     continue;
                 }
-                if let Some(&(bone_pos, bone_rot, bone_scale)) = bone_transforms.get(bone_name) {
-                    let rad = bone_rot.to_radians();
-                    let cos_r = rad.cos();
-                    let sin_r = rad.sin();
 
-                    // Transform vertex: scale -> rotate -> translate
-                    let scaled = Vec2::new(vertex[0] * bone_scale.x, vertex[1] * bone_scale.y);
-                    let rotated = Vec2::new(
-                        scaled.x * cos_r - scaled.y * sin_r,
-                        scaled.x * sin_r + scaled.y * cos_r,
-                    );
-                    let transformed = rotated + bone_pos;
+                let (bind_pos, bind_rot_deg, bind_scale) = bind_pose_transforms[bone_idx];
+                let (world_pos, world_rot_deg, world_scale) = world_transforms[bone_idx];
 
-                    result += transformed * weight;
-                    total_weight += weight;
-                }
+                // Step 1: Inverse bind-pose — vertex to bone-local space
+                let bind_rad = bind_rot_deg.to_radians();
+                let translated = v - bind_pos;
+                let cos_b = (-bind_rad).cos();
+                let sin_b = (-bind_rad).sin();
+                let rotated = Vec2::new(
+                    translated.x * cos_b - translated.y * sin_b,
+                    translated.x * sin_b + translated.y * cos_b,
+                );
+                let local = Vec2::new(
+                    if bind_scale.x.abs() > 1e-6 { rotated.x / bind_scale.x } else { 0.0 },
+                    if bind_scale.y.abs() > 1e-6 { rotated.y / bind_scale.y } else { 0.0 },
+                );
+
+                // Step 2: Forward world transform — bone-local to world space
+                let world_rad = world_rot_deg.to_radians();
+                let scaled = Vec2::new(local.x * world_scale.x, local.y * world_scale.y);
+                let cos_w = world_rad.cos();
+                let sin_w = world_rad.sin();
+                let world_rotated = Vec2::new(
+                    scaled.x * cos_w - scaled.y * sin_w,
+                    scaled.x * sin_w + scaled.y * cos_w,
+                );
+                let world_point = world_rotated + world_pos;
+
+                result += world_point * weight;
+                total_weight += weight;
             }
 
-            if total_weight > 0.0 {
-                [result.x / total_weight, result.y / total_weight]
+            if total_weight > 1e-6 {
+                [result.x / total_weight, result.y / total_weight, 0.0]
             } else {
-                *vertex
+                [vertex[0], vertex[1], 0.0]
             }
         })
         .collect()
 }
 
+// ========== Skinned Mesh Initialization System ==========
+
+/// Initialize Mesh2d + SkinnedMesh2d for entities with skeleton mesh attachments.
+///
+/// Runs on entities that have SkeletonData2d + SkeletonEnabled2d but no SkinnedMesh2d yet.
+/// Also re-initializes when the active skin changes (detected by source_attachment mismatch).
+pub(super) fn init_skinned_meshes_2d(
+    mut commands: Commands,
+    query: Query<
+        (Entity, &SkeletonData2d, Option<&SkinnedMesh2d>),
+        (With<SkeletonEnabled2d>, Or<(Added<SkeletonEnabled2d>, Changed<SkeletonData2d>)>),
+    >,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ColorMaterial>>,
+) {
+    for (entity, skeleton, existing_skinned) in query.iter() {
+        // Find the first mesh attachment in the active skin
+        let Some(skin) = skeleton.skins.get(&skeleton.active_skin) else {
+            continue;
+        };
+
+        let mut found_mesh: Option<(&Vec<[f32; 2]>, &Vec<[f32; 2]>, &Vec<u16>, &Vec<VertexWeights>)> = None;
+        let mut attachment_name = String::new();
+        for (name, attachment) in &skin.attachments {
+            if let AttachmentData::Mesh { ref vertices, ref uvs, ref triangles, ref weights, .. } = attachment {
+                if !vertices.is_empty() && !triangles.is_empty() && !weights.is_empty() {
+                    found_mesh = Some((vertices, uvs, triangles, weights));
+                    attachment_name = name.clone();
+                    break;
+                }
+            }
+        }
+
+        let Some((vertices, uvs, triangles, weights)) = found_mesh else {
+            continue;
+        };
+
+        // Skip if already initialized for this attachment
+        if let Some(existing) = existing_skinned {
+            if existing.source_attachment == attachment_name {
+                continue;
+            }
+            // Skin changed — remove old mesh components (will be re-created below)
+            commands.entity(entity).remove::<(SkinnedMesh2d, Mesh2d, MeshMaterial2d<ColorMaterial>)>();
+        }
+
+        // Build the Bevy Mesh
+        let positions: Vec<[f32; 3]> = vertices.iter().map(|v| [v[0], v[1], 0.0]).collect();
+        let uv_data: Vec<[f32; 2]> = if uvs.len() == vertices.len() {
+            uvs.clone()
+        } else {
+            vec![[0.0, 0.0]; vertices.len()]
+        };
+        let mesh_indices: Vec<u32> = triangles.iter().map(|&i| i as u32).collect();
+
+        let mut mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::MAIN_WORLD | bevy::asset::RenderAssetUsages::RENDER_WORLD,
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv_data);
+        mesh.insert_indices(bevy::mesh::Indices::U32(mesh_indices));
+
+        let mesh_handle = meshes.add(mesh);
+        let material_handle = materials.add(ColorMaterial::default());
+
+        // Resolve bone indices (string -> index)
+        let (vertex_bone_indices, vertex_bone_weights) = resolve_bone_indices(weights, &skeleton.bones);
+
+        // Compute bind-pose transforms
+        let bind_pose_transforms = compute_bind_pose_transforms(&skeleton.bones);
+
+        // Compute initial world transforms (same as bind pose before any animation)
+        let world_transforms = BoneWorldTransforms2d {
+            transforms: bind_pose_transforms.clone(),
+        };
+
+        let skinned = SkinnedMesh2d {
+            bind_positions: vertices.clone(),
+            bind_uvs: uvs.clone(),
+            triangles: triangles.clone(),
+            vertex_bone_indices,
+            vertex_bone_weights,
+            bind_pose_transforms,
+            source_attachment: attachment_name,
+        };
+
+        commands.entity(entity).insert((
+            Mesh2d(mesh_handle),
+            MeshMaterial2d(material_handle),
+            skinned,
+            world_transforms,
+        ));
+    }
+}
+
+// ========== Cached World Transforms System ==========
+
+/// Compute and cache bone world transforms for all enabled skeletons.
+/// Runs after animation + IK, before skinning.
+pub(super) fn compute_bone_world_transforms_2d(
+    mut query: Query<
+        (&SkeletonData2d, &mut BoneWorldTransforms2d),
+        With<SkeletonEnabled2d>,
+    >,
+) {
+    for (skeleton, mut world_xforms) in query.iter_mut() {
+        let world_map = compute_bone_world_transforms(&skeleton.bones);
+        world_xforms.transforms = skeleton.bones.iter().map(|bone| {
+            world_map
+                .get(&bone.name)
+                .copied()
+                .unwrap_or((Vec2::ZERO, 0.0, Vec2::ONE))
+        }).collect();
+    }
+}
+
+// ========== Refactored Vertex Skinning System ==========
+
+/// CPU vertex skinning: deform mesh vertices using corrected LBS.
+pub(super) fn apply_vertex_skinning_2d(
+    query: Query<(
+        &SkinnedMesh2d,
+        &BoneWorldTransforms2d,
+        &Mesh2d,
+    )>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    for (skinned, world_xforms, mesh_handle) in query.iter() {
+        let deformed = skin_vertices_lbs(
+            &skinned.bind_positions,
+            &skinned.vertex_bone_indices,
+            &skinned.vertex_bone_weights,
+            &skinned.bind_pose_transforms,
+            &world_xforms.transforms,
+        );
+
+        if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, deformed);
+        }
+    }
+}
+
 /// Render skeleton bones as gizmo lines in the editor (edit mode only).
 #[cfg(not(feature = "runtime"))]
 pub(super) fn render_skeleton_bones(
-    query: Query<(&Transform, &SkeletonData2d, &SkeletonEnabled2d)>,
+    query: Query<(&Transform, &SkeletonData2d, &BoneWorldTransforms2d), With<SkeletonEnabled2d>>,
     mut gizmos: Gizmos,
 ) {
-    for (transform, skeleton, _) in query.iter() {
+    for (transform, skeleton, world_xforms) in query.iter() {
         let entity_pos = transform.translation.truncate();
-        let world_transforms = compute_bone_world_transforms(&skeleton.bones);
 
-        for bone in &skeleton.bones {
-            if let Some(&(bone_pos, bone_rot, _)) = world_transforms.get(&bone.name) {
-                let start = entity_pos + bone_pos;
-                let rot_rad = bone_rot.to_radians();
-                let end = start + Vec2::new(
-                    bone.length * rot_rad.cos(),
-                    bone.length * rot_rad.sin(),
-                );
-
-                let color = Color::srgba(bone.color[0], bone.color[1], bone.color[2], bone.color[3]);
-
-                // Draw bone line
-                gizmos.line_2d(start, end, color);
-
-                // Draw joint circle at bone origin
-                gizmos.circle_2d(Isometry2d::from_translation(start), 2.0, color);
+        for (i, bone) in skeleton.bones.iter().enumerate() {
+            if i >= world_xforms.transforms.len() {
+                break;
             }
+            let (bone_pos, bone_rot, _) = world_xforms.transforms[i];
+            let start = entity_pos + bone_pos;
+            let rot_rad = bone_rot.to_radians();
+            let end = start + Vec2::new(
+                bone.length * rot_rad.cos(),
+                bone.length * rot_rad.sin(),
+            );
+
+            let color = Color::srgba(bone.color[0], bone.color[1], bone.color[2], bone.color[3]);
+
+            // Draw bone line
+            gizmos.line_2d(start, end, color);
+
+            // Draw joint circle at bone origin
+            gizmos.circle_2d(Isometry2d::from_translation(start), 2.0, color);
         }
     }
 }
@@ -729,5 +904,153 @@ pub(super) fn emit_skeleton2d_on_selection(
         if let Ok((entity_id, skeleton_data, skel_enabled)) = query.get(primary) {
             events::emit_skeleton2d_updated(&entity_id.0, skeleton_data, skel_enabled.is_some());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::skeleton2d::{Bone2dDef, VertexWeights};
+
+    fn make_bone(name: &str, parent: Option<&str>, pos: [f32; 2], rot: f32, length: f32) -> Bone2dDef {
+        Bone2dDef {
+            name: name.to_string(),
+            parent_bone: parent.map(|s| s.to_string()),
+            local_position: pos,
+            local_rotation: rot,
+            local_scale: [1.0, 1.0],
+            length,
+            color: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+
+    #[test]
+    fn test_identity_skinning_returns_bind_pose() {
+        // Single root bone at origin, no rotation, no scale
+        let bones = vec![make_bone("root", None, [0.0, 0.0], 0.0, 50.0)];
+        let bind_pose = compute_bind_pose_transforms(&bones);
+
+        let bind_positions = vec![[10.0, 20.0], [30.0, 40.0]];
+        let vertex_bone_indices = vec![vec![0], vec![0]];
+        let vertex_bone_weights = vec![vec![1.0], vec![1.0]];
+
+        // World transforms == bind-pose transforms (no animation)
+        let world_transforms = bind_pose.clone();
+
+        let result = skin_vertices_lbs(
+            &bind_positions,
+            &vertex_bone_indices,
+            &vertex_bone_weights,
+            &bind_pose,
+            &world_transforms,
+        );
+
+        // With identity skinning (world == bind), output should match input
+        assert!((result[0][0] - 10.0).abs() < 0.01, "x0: {}", result[0][0]);
+        assert!((result[0][1] - 20.0).abs() < 0.01, "y0: {}", result[0][1]);
+        assert!((result[1][0] - 30.0).abs() < 0.01, "x1: {}", result[1][0]);
+        assert!((result[1][1] - 40.0).abs() < 0.01, "y1: {}", result[1][1]);
+    }
+
+    #[test]
+    fn test_single_bone_rotation() {
+        // Root bone at origin, bind pose has 0 rotation
+        let bones = vec![make_bone("root", None, [0.0, 0.0], 0.0, 50.0)];
+        let bind_pose = compute_bind_pose_transforms(&bones);
+
+        // Vertex at (10, 0) bound to root bone
+        let bind_positions = vec![[10.0, 0.0]];
+        let vertex_bone_indices = vec![vec![0]];
+        let vertex_bone_weights = vec![vec![1.0]];
+
+        // Animate: rotate root 90 degrees
+        let world_transforms = vec![(Vec2::ZERO, 90.0, Vec2::ONE)];
+
+        let result = skin_vertices_lbs(
+            &bind_positions,
+            &vertex_bone_indices,
+            &vertex_bone_weights,
+            &bind_pose,
+            &world_transforms,
+        );
+
+        // (10, 0) rotated 90 degrees -> (0, 10)
+        assert!((result[0][0] - 0.0).abs() < 0.1, "x: {}", result[0][0]);
+        assert!((result[0][1] - 10.0).abs() < 0.1, "y: {}", result[0][1]);
+    }
+
+    #[test]
+    fn test_two_bone_blend() {
+        // Two bones at different positions
+        let bones = vec![
+            make_bone("a", None, [0.0, 0.0], 0.0, 50.0),
+            make_bone("b", None, [100.0, 0.0], 0.0, 50.0),
+        ];
+        let bind_pose = compute_bind_pose_transforms(&bones);
+
+        // Vertex at (50, 0) with 50/50 blend between bone a and bone b
+        let bind_positions = vec![[50.0, 0.0]];
+        let vertex_bone_indices = vec![vec![0, 1]];
+        let vertex_bone_weights = vec![vec![0.5, 0.5]];
+
+        // Move bone a up by 20, bone b down by 20
+        let world_transforms = vec![
+            (Vec2::new(0.0, 20.0), 0.0, Vec2::ONE),
+            (Vec2::new(100.0, -20.0), 0.0, Vec2::ONE),
+        ];
+
+        let result = skin_vertices_lbs(
+            &bind_positions,
+            &vertex_bone_indices,
+            &vertex_bone_weights,
+            &bind_pose,
+            &world_transforms,
+        );
+
+        // 50/50 blend: y should average to 0 ((20 + -20) / 2)
+        assert!((result[0][0] - 50.0).abs() < 0.1, "x: {}", result[0][0]);
+        assert!((result[0][1] - 0.0).abs() < 0.1, "y: {}", result[0][1]);
+    }
+
+    #[test]
+    fn test_resolve_bone_indices() {
+        let bones = vec![
+            make_bone("hip", None, [0.0, 0.0], 0.0, 30.0),
+            make_bone("knee", Some("hip"), [0.0, -30.0], 0.0, 30.0),
+        ];
+        let weights = vec![
+            VertexWeights {
+                bones: vec!["knee".to_string(), "hip".to_string()],
+                weights: vec![0.7, 0.3],
+            },
+        ];
+
+        let (indices, ws) = resolve_bone_indices(&weights, &bones);
+
+        assert_eq!(indices[0], vec![1, 0]); // knee=1, hip=0
+        assert!((ws[0][0] - 0.7).abs() < 1e-6);
+        assert!((ws[0][1] - 0.3).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_bind_pose_transforms_two_bone_chain() {
+        let bones = vec![
+            make_bone("root", None, [0.0, 0.0], 0.0, 50.0),
+            make_bone("child", Some("root"), [10.0, 0.0], 45.0, 30.0),
+        ];
+
+        let bind = compute_bind_pose_transforms(&bones);
+
+        // Root should be at origin
+        assert!((bind[0].0.x).abs() < 0.01);
+        assert!((bind[0].0.y).abs() < 0.01);
+        assert!((bind[0].1).abs() < 0.01); // 0 degrees
+
+        // Child should be offset from root's end (root length=50, rot=0 -> end at (50,0))
+        // plus child local_position (10, 0) rotated by parent's world rot (0 deg)
+        // child world pos = (50, 0) + rotate(0, (10, 0)) = (60, 0)
+        assert!((bind[1].0.x - 60.0).abs() < 0.1, "child x: {}", bind[1].0.x);
+        assert!((bind[1].0.y).abs() < 0.1, "child y: {}", bind[1].0.y);
+        assert!((bind[1].1 - 45.0).abs() < 0.01); // 45 degrees
     }
 }
