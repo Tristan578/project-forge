@@ -16,5 +16,6 @@
   },
   "localProjectId": "01KJEE8R1XXFF0CZT1WCSTGRDP",
   "allowedTeamName": "Engineering",
-  "allowedProjectName": "SpawnForge"
+  "allowedProjectName": "Project Forge",
+  "allowedProjectPrefix": "PF"
 }

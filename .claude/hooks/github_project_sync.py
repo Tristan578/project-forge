@@ -102,7 +102,8 @@ def resolve_project_id(config):
 
     # Project not found — create it
     try:
-        new_proj = tb_post("/projects", {"name": project_name})
+        prefix = config.get("allowedProjectPrefix", "PF")
+        new_proj = tb_post("/projects", {"name": project_name, "prefix": prefix})
         pid = new_proj.get("id")
         if pid:
             print(f"  [bootstrap] Created project: {project_name} ({pid})")
