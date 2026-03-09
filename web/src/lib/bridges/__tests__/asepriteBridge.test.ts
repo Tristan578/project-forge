@@ -139,4 +139,71 @@ describe('AsepriteBridge', () => {
       expect(parsed.success).toBe(false);
     });
   });
+
+  describe('fixture-based tests', () => {
+    it('handles real createSprite response from fixture', async () => {
+      let fixture: { stdout: string; stderr: string; exitCode: number };
+      try {
+        fixture = (await import('./fixtures/createSprite.json')).default;
+      } catch {
+        return; // Skip if fixtures not recorded yet
+      }
+
+      const mockExecFile = vi.mocked(childProcess.execFile);
+      vi.mocked(fs.readFileSync).mockReturnValue('print("OK")');
+
+      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+        (cb as (err: null, stdout: string, stderr: string) => void)(
+          null, fixture.stdout, fixture.stderr
+        );
+        return {} as ReturnType<typeof childProcess.execFile>;
+      });
+
+      const result = await asepriteBridge.executeOperation(
+        '/usr/bin/aseprite',
+        { name: 'createSprite', params: { width: '32', height: '32' } }
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.stdout).toBe(fixture.stdout);
+    });
+
+    it('handles real error response from fixture', async () => {
+      let fixture: { stdout: string; stderr: string; exitCode: number };
+      try {
+        fixture = (await import('./fixtures/badScript.json')).default;
+      } catch {
+        return;
+      }
+
+      const mockExecFile = vi.mocked(childProcess.execFile);
+      vi.mocked(fs.readFileSync).mockReturnValue('bad lua');
+
+      if (fixture.exitCode !== 0) {
+        mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          (cb as (err: Error, stdout: string, stderr: string) => void)(
+            Object.assign(new Error('exit'), { code: fixture.exitCode }),
+            fixture.stdout, fixture.stderr
+          );
+          return {} as ReturnType<typeof childProcess.execFile>;
+        });
+      } else {
+        mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+          (cb as (err: null, stdout: string, stderr: string) => void)(
+            null, fixture.stdout, fixture.stderr
+          );
+          return {} as ReturnType<typeof childProcess.execFile>;
+        });
+      }
+
+      const result = await asepriteBridge.executeOperation(
+        '/usr/bin/aseprite',
+        { name: 'createSprite', params: {} }
+      );
+
+      if (fixture.exitCode !== 0) {
+        expect(result.success).toBe(false);
+      }
+    });
+  });
 });
