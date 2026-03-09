@@ -131,7 +131,7 @@ function processAsyncResponses(responses: Array<{
       pending.reject(new Error(resp.error || 'Unknown async error'));
       pendingAsyncRequests.delete(resp.requestId);
     } else if (resp.status === 'progress') {
-      pending.onProgress?.(resp.progress!);
+      pending.onProgress?.(resp.progress ?? { percent: 0 });
     }
   }
 }

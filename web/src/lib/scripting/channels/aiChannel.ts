@@ -8,20 +8,20 @@ export interface AiChannelDeps {
 
 const POLL_INTERVAL_MS = 2000;
 
+// Hoisted to module scope to avoid reconstruction on every handler invocation
+const AI_ROUTE_MAP: Record<string, string> = {
+  generateTexture: '/api/generate/texture',
+  generateModel: '/api/generate/model',
+  generateSound: '/api/generate/sound',
+  generateVoice: '/api/generate/voice',
+  generateMusic: '/api/generate/music',
+};
+
 export function createAiHandler(deps: AiChannelDeps): AsyncHandler {
   return async (method: string, args: Record<string, unknown>, reportProgress) => {
     reportProgress(0, 'Submitting request...');
 
-    // Map method to API route
-    const routeMap: Record<string, string> = {
-      generateTexture: '/api/generate/texture',
-      generateModel: '/api/generate/model',
-      generateSound: '/api/generate/sound',
-      generateVoice: '/api/generate/voice',
-      generateMusic: '/api/generate/music',
-    };
-
-    const route = routeMap[method];
+    const route = AI_ROUTE_MAP[method];
     if (!route) {
       throw new Error(`Unknown AI method: ${method}`);
     }

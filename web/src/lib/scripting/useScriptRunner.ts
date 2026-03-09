@@ -154,14 +154,15 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const routerRef = useRef<AsyncChannelRouter | null>(null);
 
   const dispatchCommand = useCallback(
-    (command: string, payload: unknown) => {
+    (command: string, payload: unknown): unknown => {
       if (wasmModule?.handle_command) {
         try {
-          wasmModule.handle_command(command, payload);
+          return wasmModule.handle_command(command, payload);
         } catch (error) {
           console.error(`[ScriptRunner] Command error '${command}':`, error);
         }
       }
+      return undefined;
     },
     [wasmModule]
   );
@@ -181,6 +182,9 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       // Register channel handlers with their dependencies
       const fetchJson = async (url: string, init?: RequestInit) => {
         const resp = await fetch(url, init);
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+        }
         return resp.json();
       };
 
