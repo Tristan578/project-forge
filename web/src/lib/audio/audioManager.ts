@@ -1478,27 +1478,15 @@ class AudioManager {
     const duration = (durationMs ?? snapshot.crossfadeDurationMs) / 1000;
     const now = ctx.currentTime;
 
+    // First, update stored state for all buses in the snapshot
     for (const [busName, targetState] of Object.entries(snapshot.busStates)) {
       const bus = this.buses.get(busName);
       if (!bus) continue;
-
-      // Ramp volume
-      bus.gainNode.gain.cancelScheduledValues(now);
-      bus.gainNode.gain.setValueAtTime(bus.gainNode.gain.value, now);
-      bus.gainNode.gain.linearRampToValueAtTime(
-        targetState.muted ? 0 : targetState.volume,
-        now + duration
-      );
-
-      // Update stored state
       bus.volume = targetState.volume;
       bus.muted = targetState.muted;
     }
 
-    // Update effectiveMuted for all buses (respect solo rules) without
-    // directly touching gainNode.gain.value — the scheduled crossfade ramps
-    // must remain in effect. Setting .value cancels pending automations per
-    // Web Audio spec.
+    // Compute effective mute state respecting active solo rules
     const anySoloed = Array.from(this.buses.values()).some(
       (b) => b.name !== 'master' && b.soloed
     );
@@ -1508,6 +1496,17 @@ class AudioManager {
       } else {
         bus.effectiveMuted = bus.muted || (anySoloed && !bus.soloed);
       }
+    }
+
+    // Now ramp gains using effective mute state (respects solo rules)
+    for (const [busName, targetState] of Object.entries(snapshot.busStates)) {
+      const bus = this.buses.get(busName);
+      if (!bus) continue;
+
+      const targetGain = bus.effectiveMuted ? 0 : targetState.volume;
+      bus.gainNode.gain.cancelScheduledValues(now);
+      bus.gainNode.gain.setValueAtTime(bus.gainNode.gain.value, now);
+      bus.gainNode.gain.linearRampToValueAtTime(targetGain, now + duration);
     }
 
     return true;

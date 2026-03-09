@@ -30,7 +30,7 @@ interface AudioSnapshot {
 ### AudioManager Changes
 
 - Add `saveSnapshot(name: string): AudioSnapshot` — read current bus volumes/mutes
-- Add `loadSnapshot(snapshot: AudioSnapshot, durationMs: number): void` — smoothly ramp bus gains
+- Add `loadSnapshot(name: string, durationMs?: number): boolean` — crossfade to saved state, respects active solo rules
 - Store snapshots in-memory (Map), not localStorage
 
 ### Script API (scriptWorker.ts)
@@ -52,15 +52,16 @@ The audioManager already has a working occlusion system:
 
 Instead of binary occluded/unoccluded, add graduated occlusion based on distance:
 - `updateOcclusionAmount(entityId: string, amount: number)` — 0.0 = clear, 1.0 = fully occluded
-- Filter frequency: lerp between 5000 Hz (clear) and 200 Hz (fully occluded)
-- Add Q adjustment: Q increases with occlusion (1.0 to 4.0) for more resonant muffling
-- Add wet reverb node after filter for "through-wall" effect
+- Filter frequency: exponential interpolation between 5000 Hz (clear) and 200 Hz (fully occluded)
+- Q adjustment: Q increases with occlusion (1.0 to 4.0) for more resonant muffling
 
 ### AudioManager Changes
 
 - Add `updateOcclusionAmount(entityId: string, amount: number)` method
-- Modify occlusion filter chain to include optional reverb wetness
-- `occlusionReverbNodes: Map<string, ConvolverNode>` for wall-transmitted reverb
+
+### Not Implemented (Follow-Up)
+
+- Reverb-based occlusion (ConvolverNode wet/dry mix for "through-wall" effect) is deferred to a follow-up ticket. The current implementation uses lowpass filter + Q modulation only, which provides realistic distance-based muffling without the complexity of impulse response convolution.
 
 ## 3. Loop Point Detection
 
@@ -91,7 +92,7 @@ interface LoopPoint {
 
 ### Script API
 
-- `forge.audio.detectLoopPoints(assetId: string)` — queues command to main thread; returns `[]` immediately (results delivered asynchronously via main-thread audioManager)
+- `forge.audio.detectLoopPoints(assetId: string)` — queues `audio_detect_loop_points` command to main thread. Returns `[]` in the worker (fire-and-forget); results are computed in the main thread's audioManager. A follow-up ticket is needed to wire results back to the worker via a response message protocol.
 
 ## Test Plan (20+ tests)
 
@@ -111,7 +112,7 @@ interface LoopPoint {
 11. updateOcclusionAmount at 0.5 sets intermediate frequency
 12. Occlusion disabled entity ignores amount updates
 13. Q value scales with occlusion amount
-14. Reverb wet amount scales with occlusion
+14. ~~Reverb wet amount scales with occlusion~~ (deferred — reverb occlusion not implemented in this PR)
 
 ### Loop Detection Tests (8)
 15. detectLoopPoints returns empty for unknown asset
@@ -121,7 +122,7 @@ interface LoopPoint {
 19. Results sorted by score (highest first)
 20. maxResults limits output count
 21. Silent buffer returns full-length loop
-22. Single-sample zero crossing detected correctly
+22. ~~Single-sample zero crossing detected correctly~~ (edge case not separately tested — covered by general zero-crossing tests)
 
 ## Files Modified
 
