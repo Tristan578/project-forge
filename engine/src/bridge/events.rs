@@ -780,15 +780,35 @@ pub fn emit_lod_changed(entity_id: &str, current_lod: u8, distances: &[f32; 3]) 
     emit_event("LOD_CHANGED", &LodChangedPayload { entity_id, current_lod, distances });
 }
 
-/// Emit performance stats.
-pub fn emit_performance_stats(fps: f32, frame_time_ms: f32, entity_count: u32) {
+/// Emit performance stats with full metrics.
+pub fn emit_performance_stats(
+    fps: f32,
+    frame_time_ms: f32,
+    entity_count: u32,
+    triangle_count: u32,
+    draw_call_estimate: u32,
+    wasm_heap_bytes: u64,
+    mesh_memory_bytes: u64,
+) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct PerformanceStatsPayload {
         fps: f32,
         frame_time_ms: f32,
         entity_count: u32,
+        triangle_count: u32,
+        draw_call_estimate: u32,
+        wasm_heap_bytes: u64,
+        mesh_memory_bytes: u64,
     }
 
-    emit_event("PERFORMANCE_STATS", &PerformanceStatsPayload { fps, frame_time_ms, entity_count });
+    emit_event("PERFORMANCE_STATS", &PerformanceStatsPayload {
+        fps,
+        frame_time_ms,
+        entity_count,
+        triangle_count,
+        draw_call_estimate,
+        wasm_heap_bytes,
+        mesh_memory_bytes,
+    });
 }

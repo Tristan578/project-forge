@@ -273,6 +273,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<QualitySettings>()
             .init_resource::<SkyboxHandles>()
             .init_resource::<core::project_type::ProjectType>()
+            .init_resource::<core::lod::PerformanceMetrics>()
             .add_message::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
@@ -393,8 +394,9 @@ impl Plugin for SelectionPlugin {
                 skeleton2d::solve_ik_constraints_2d,
                 skeleton2d::apply_vertex_skinning_2d,
             ).chain())
-            // LOD runtime: distance-based LOD level switching
-            .add_systems(Update, performance::update_lod_levels);
+            // LOD runtime: distance-based LOD level switching + performance metrics
+            .add_systems(Update, performance::update_lod_levels)
+            .add_systems(Update, performance::collect_performance_metrics);
 
         // Editor-only systems and observers
         #[cfg(not(feature = "runtime"))]
