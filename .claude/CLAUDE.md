@@ -166,37 +166,37 @@ Key rules:
 
 ## Phase Roadmap
 
-| Phase | Name | Status |
-|-------|------|--------|
-| 1-2 | Foundation | DONE |
-| 3 | Rendering & Materials | DONE |
-| 4-A | MCP Server (143 commands) | DONE |
+| Phase | Name | Status | Details |
+|-------|------|--------|---------|
+| 1-2 | Foundation | DONE | |
+| 3 | Rendering & Materials | DONE | |
+| 4-A | MCP Server (143 commands) | DONE | |
 | 4-B | AI Chat Panel | DONE | ChatPanel, ChatInput (image upload, voice, model selection), entity @-mentions, thinking mode, approval mode, batch undo, feedback, conversation persistence, streaming |
-| 5-A | Play/Edit Mode | DONE |
-| 5-B | Input System | DONE |
-| 5-C | Physics | DONE |
-| 6 | Save/Load | DONE |
-| 7 | Asset Pipeline | DONE |
-| 8 | Game Scripting | DONE |
-| 9 | Audio | DONE |
-| 10 | Export | DONE |
-| 11 | Platform & Payments | DONE |
-| B | Post-Processing | DONE |
-| A | Audio Mixer | DONE |
-| C | GPU Particles | DONE |
-| D-1 | Skeletal Animation | DONE |
-| F-1 | Extended Primitives | DONE |
-| E-1 | Extended Materials | DONE |
-| A-3 | Audio Layering | DONE |
-| E-2 | Custom Shader Library | DONE |
-| F-2 | CSG Boolean Ops | DONE |
-| F-3 | Procedural Terrain | DONE |
-| F-4 | Procedural Mesh Gen | DONE |
-| D-4 | Animation Blending | DONE |
-| G-1 | Help & Documentation | DONE |
-| G-2 | Script Runtime & HUD | DONE |
-| 12 | Polish (responsive, onboarding, perf) | DONE |
-| 13 | AI Chat & Orchestration | DONE |
+| 5-A | Play/Edit Mode | DONE | |
+| 5-B | Input System | DONE | |
+| 5-C | Physics | DONE | |
+| 6 | Save/Load | DONE | |
+| 7 | Asset Pipeline | DONE | |
+| 8 | Game Scripting | DONE | |
+| 9 | Audio | DONE | |
+| 10 | Export | DONE | |
+| 11 | Platform & Payments | DONE | |
+| B | Post-Processing | DONE | |
+| A | Audio Mixer | DONE | |
+| C | GPU Particles | DONE | |
+| D-1 | Skeletal Animation | DONE | |
+| F-1 | Extended Primitives | DONE | |
+| E-1 | Extended Materials | DONE | |
+| A-3 | Audio Layering | DONE | |
+| E-2 | Custom Shader Library | DONE | |
+| F-2 | CSG Boolean Ops | DONE | |
+| F-3 | Procedural Terrain | DONE | |
+| F-4 | Procedural Mesh Gen | DONE | |
+| D-4 | Animation Blending | DONE | |
+| G-1 | Help & Documentation | DONE | |
+| G-2 | Script Runtime & HUD | DONE | |
+| 12 | Polish (responsive, onboarding, perf) | DONE | |
+| 13 | AI Chat & Orchestration | DONE | |
 | 32 | Chat UX Enhancements | DONE | Entity @-mentions, command preview/approval, response feedback, batch undo |
 | 35 | Quality Presets | DONE | Low/Medium/High/Ultra rendering presets (MSAA, shadows, bloom, sharpening, particles) |
 | 36 | Material Library Browser | DONE | 56 presets across 9 categories, CSS sphere previews, custom material saving |
