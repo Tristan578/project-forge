@@ -20,7 +20,7 @@ use bevy::sprite::Anchor;
 use crate::core::{
     asset_manager::TextureHandleMap,
     camera_2d::{Camera2dData, Camera2dEnabled, CameraBounds, Managed2dCamera},
-    entity_id::EntityId,
+    entity_id::{EntityId, EntityName, EntityVisible},
     history::{HistoryStack, UndoableAction},
     pending_commands::PendingCommands,
     project_type::ProjectType,
@@ -63,6 +63,66 @@ fn to_bevy_anchor(anchor: &SpriteAnchor) -> Anchor {
         SpriteAnchor::BottomLeft => Anchor::BOTTOM_LEFT,
         SpriteAnchor::BottomCenter => Anchor::BOTTOM_CENTER,
         SpriteAnchor::BottomRight => Anchor::BOTTOM_RIGHT,
+    }
+}
+
+/// System that processes pending spawn_sprite requests from the bridge.
+/// Creates a new entity with EntityType::Sprite, SpriteData, SpriteEnabled, Transform.
+pub(super) fn apply_spawn_sprite_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut name_counter: Local<crate::core::entity_factory::EntityNameCounter>,
+    mut history: ResMut<HistoryStack>,
+) {
+    use crate::core::entity_factory::{EntitySnapshot, TransformSnapshot};
+    use crate::core::pending_commands::EntityType;
+
+    for request in pending.spawn_sprite_requests.drain(..) {
+        let name = request.name.unwrap_or_else(|| {
+            name_counter.next_name(EntityType::Sprite)
+        });
+
+        let entity_id = EntityId::default();
+        let eid_str = entity_id.0.clone();
+
+        let position = request.position.unwrap_or([0.0, 0.0, 0.0]);
+
+        let mut sprite_data = SpriteData::default();
+        if let Some(texture_id) = request.texture_asset_id {
+            sprite_data.texture_asset_id = Some(texture_id);
+        }
+        if let Some(layer) = request.sorting_layer {
+            sprite_data.sorting_layer = layer;
+        }
+        if let Some(order) = request.sorting_order {
+            sprite_data.sorting_order = order;
+        }
+
+        let z = crate::core::sprite::z_from_sorting(&sprite_data);
+
+        commands.spawn((
+            EntityType::Sprite,
+            entity_id,
+            EntityName::new(&name),
+            EntityVisible(true),
+            sprite_data.clone(),
+            SpriteEnabled,
+            Transform::from_xyz(position[0], position[1], z),
+        ));
+
+        // Record spawn in history
+        let mut snapshot = EntitySnapshot::new(
+            eid_str,
+            EntityType::Sprite,
+            name,
+            TransformSnapshot {
+                position,
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0, 1.0, 1.0],
+            },
+        );
+        snapshot.sprite_data = Some(sprite_data);
+        history.push(UndoableAction::Spawn { snapshot });
     }
 }
 
@@ -177,6 +237,15 @@ pub(super) fn sync_sprite_rendering(
             .as_ref()
             .and_then(|s| s.texture_atlas.clone());
 
+        // Default sprite size: if no texture and no custom_size, use 64x64
+        let effective_custom_size = if sprite_data.custom_size.is_some() {
+            sprite_data.custom_size.map(|s| Vec2::new(s[0], s[1]))
+        } else if sprite_data.texture_asset_id.is_none() {
+            Some(Vec2::new(64.0, 64.0))
+        } else {
+            None
+        };
+
         // Build and insert/update the Bevy Sprite component
         // In Bevy 0.17+, Anchor is a separate required component on Sprite.
         let bevy_sprite = Sprite {
@@ -189,7 +258,7 @@ pub(super) fn sync_sprite_rendering(
             ),
             flip_x: sprite_data.flip_x,
             flip_y: sprite_data.flip_y,
-            custom_size: sprite_data.custom_size.map(|s| Vec2::new(s[0], s[1])),
+            custom_size: effective_custom_size,
             texture_atlas: existing_atlas,
             ..default()
         };
@@ -239,6 +308,7 @@ pub(super) fn apply_project_type_changes(
     mut project_type: ResMut<ProjectType>,
     mut commands: Commands,
     camera_2d_query: Query<Entity, With<Managed2dCamera>>,
+    mut camera_3d_query: Query<&mut Camera, With<crate::core::camera::EditorCamera>>,
 ) {
     for request in pending.set_project_type_requests.drain(..) {
         let new_type = match request.project_type.as_str() {
@@ -255,6 +325,11 @@ pub(super) fn apply_project_type_changes(
 
         match new_type {
             ProjectType::TwoD => {
+                // Disable the 3D camera (do NOT despawn — it has Undeletable marker)
+                if let Ok(mut cam) = camera_3d_query.single_mut() {
+                    cam.is_active = false;
+                }
+
                 // Spawn a 2D camera if none exists
                 if camera_2d_query.is_empty() {
                     let camera_data = Camera2dData::default();
@@ -266,8 +341,6 @@ pub(super) fn apply_project_type_changes(
                         camera_data.clone(),
                         Camera2d,
                         Camera {
-                            // Render after the 3D camera (order 0) so 2D overlays on top,
-                            // but in practice the 3D camera is disabled when in 2D mode.
                             order: 1,
                             clear_color: ClearColorConfig::Default,
                             ..default()
@@ -283,6 +356,11 @@ pub(super) fn apply_project_type_changes(
                 }
             }
             ProjectType::ThreeD => {
+                // Re-enable the 3D camera
+                if let Ok(mut cam) = camera_3d_query.single_mut() {
+                    cam.is_active = true;
+                }
+
                 // Despawn the managed 2D camera when switching back to 3D
                 for entity in camera_2d_query.iter() {
                     commands.entity(entity).despawn();
@@ -528,7 +606,7 @@ pub(super) fn sync_sprite_sheet_atlas(
 pub(super) fn animate_sprite_frames(
     time: Res<Time>,
     mut query: Query<(
-        &SpriteAnimatorData,
+        &mut SpriteAnimatorData,
         &SpriteSheetData,
         &mut SpriteAnimationTimer,
         &mut Sprite,
@@ -536,7 +614,7 @@ pub(super) fn animate_sprite_frames(
 ) {
     let dt = time.delta_secs();
 
-    for (animator, sheet, mut timer, mut sprite) in query.iter_mut() {
+    for (mut animator, sheet, mut timer, mut sprite) in query.iter_mut() {
         // Only animate if playing and a clip is selected
         if !animator.playing {
             continue;
@@ -599,6 +677,9 @@ pub(super) fn animate_sprite_frames(
             // Map clip frame index to the atlas index
             let atlas_index = clip.frames.get(next_frame).copied().unwrap_or(0);
             atlas.index = atlas_index;
+
+            // Write back the frame index so it's accurate for queries
+            animator.frame_index = next_frame;
         }
     }
 }

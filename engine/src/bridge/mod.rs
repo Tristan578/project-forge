@@ -355,7 +355,8 @@ impl Plugin for SelectionPlugin {
             ))
             // Shader sync system (always-active)
             .add_systems(Update, material::sync_extended_material_data)
-            // Sprite rendering pipeline (always-active): sync SpriteData -> Bevy Sprite
+            // Sprite rendering pipeline (always-active): spawn sprites, sync SpriteData -> Bevy Sprite
+            .add_systems(Update, sprite::apply_spawn_sprite_requests)
             .add_systems(Update, sprite::apply_sprite_data_updates)
             .add_systems(Update, sprite::apply_sprite_removals)
             .add_systems(Update, sprite::sync_sprite_rendering)
