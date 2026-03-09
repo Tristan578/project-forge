@@ -39,6 +39,7 @@ export interface Conversation {
 const MAX_LOOP_ITERATIONS = 10;
 const PERSISTENCE_KEY = 'forge-chat-';
 const CONVERSATIONS_KEY = 'forge-conversations';
+const ACTIVE_CONVERSATION_KEY = 'forge-active-conversation';
 const MAX_STORED_MESSAGES = 50;
 const MAX_CONVERSATIONS = 20;
 
@@ -478,15 +479,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ isStreaming: false, abortController: null, loopIteration: 0 });
 
       // Sync current messages to the active conversation so they persist
-      const { messages: finalMessages, activeConversationId: activeId, conversations: convs } = get();
-      if (activeId) {
+      const { messages: finalMessages, activeConversationId: convId, conversations: convs } = get();
+      if (convId) {
         const syncedConversations = convs.map((c) =>
-          c.id === activeId
+          c.id === convId
             ? { ...c, messages: finalMessages.slice(-MAX_STORED_MESSAGES), updatedAt: Date.now() }
             : c
         );
         set({ conversations: syncedConversations });
-        saveConversationsToStorage(syncedConversations);
+        saveConversationsToStorage(syncedConversations, convId);
       }
     }
   },
@@ -701,7 +702,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sessionTokens: { input: 0, output: 0 },
     });
 
-    saveConversationsToStorage(updatedConversations);
+    saveConversationsToStorage(updatedConversations, id);
     return id;
   },
 
@@ -709,25 +710,24 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { messages, conversations, activeConversationId } = get();
     const now = Date.now();
 
-    // Save current conversation first
-    let updatedConversations = conversations.map((c) =>
+    // Save current conversation first — handle null activeConversationId
+    const updatedConversations = conversations.map((c) =>
       c.id === activeConversationId
         ? { ...c, messages: messages.slice(-MAX_STORED_MESSAGES), updatedAt: now }
         : c
     );
 
-    // If there's no active conversation but there are unsaved messages,
-    // auto-create a conversation to preserve them
+    // If there are unsaved messages with no active conversation, auto-create one
     if (!activeConversationId && messages.length > 0) {
       const autoId = `conv_${now}_auto`;
       const autoName = messages[0]?.content?.slice(0, 30) || 'Untitled';
-      updatedConversations = [...updatedConversations, {
+      updatedConversations.push({
         id: autoId,
         name: autoName,
         messages: messages.slice(-MAX_STORED_MESSAGES),
         createdAt: now,
         updatedAt: now,
-      }];
+      });
     }
 
     // Load the target conversation
@@ -742,7 +742,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       sessionTokens: { input: 0, output: 0 },
     });
 
-    saveConversationsToStorage(updatedConversations);
+    saveConversationsToStorage(updatedConversations, conversationId);
   },
 
   deleteConversation: (conversationId: string) => {
@@ -752,17 +752,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // If deleting the active conversation, switch to the latest or clear
     if (conversationId === activeConversationId) {
       const latest = updatedConversations[updatedConversations.length - 1];
+      const newActiveId = latest?.id ?? null;
       set({
         conversations: updatedConversations,
-        activeConversationId: latest?.id ?? null,
+        activeConversationId: newActiveId,
         messages: latest?.messages ?? [],
         error: null,
       });
+      saveConversationsToStorage(updatedConversations, newActiveId);
     } else {
       set({ conversations: updatedConversations });
+      saveConversationsToStorage(updatedConversations);
     }
-
-    saveConversationsToStorage(updatedConversations);
   },
 
   renameConversation: (conversationId: string, name: string) => {
@@ -779,13 +780,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const stored = localStorage.getItem(CONVERSATIONS_KEY);
       if (stored) {
         const parsed = JSON.parse(stored) as Conversation[];
-        // Restore the most recently updated conversation so state survives page reload
-        const sorted = [...parsed].sort((a, b) => b.updatedAt - a.updatedAt);
-        const mostRecent = sorted[0];
+        // Restore persisted active conversation, falling back to most recently updated
+        const persistedId = localStorage.getItem(ACTIVE_CONVERSATION_KEY);
+        const restoredId = persistedId && parsed.some((c) => c.id === persistedId)
+          ? persistedId
+          : [...parsed].sort((a, b) => b.updatedAt - a.updatedAt)[0]?.id ?? null;
+        const activeConv = restoredId ? parsed.find((c) => c.id === restoredId) : null;
         set({
           conversations: parsed,
-          activeConversationId: mostRecent?.id ?? null,
-          messages: mostRecent?.messages ?? [],
+          activeConversationId: restoredId,
+          messages: activeConv?.messages ?? [],
         });
       }
     } catch {
@@ -794,7 +798,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 }));
 
-function saveConversationsToStorage(conversations: Conversation[]) {
+function saveConversationsToStorage(conversations: Conversation[], activeId?: string | null) {
   try {
     // Store only metadata + limited messages
     const toStore = conversations.map((c) => ({
@@ -802,6 +806,13 @@ function saveConversationsToStorage(conversations: Conversation[]) {
       messages: c.messages.slice(-MAX_STORED_MESSAGES),
     }));
     localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(toStore));
+    if (activeId !== undefined) {
+      if (activeId) {
+        localStorage.setItem(ACTIVE_CONVERSATION_KEY, activeId);
+      } else {
+        localStorage.removeItem(ACTIVE_CONVERSATION_KEY);
+      }
+    }
   } catch {
     // localStorage full or unavailable
   }
@@ -834,9 +845,8 @@ function buildApiMessages(messages: ChatMessage[]): { role: string; content: unk
 
 // System prompt + tools overhead estimate (tokens)
 const SYSTEM_OVERHEAD_TOKENS = 6000;
-// Max context tokens — must stay within server-side MAX_INPUT_CHARS (600k chars / ~4 chars per token = 150k tokens).
-// Use 140k to leave headroom and avoid 413 errors from the server.
-const MAX_CONTEXT_TOKENS = 140000;
+// Max context window tokens, aligned with /api/chat MAX_INPUT_CHARS (600k chars ≈ 150k tokens)
+const MAX_CONTEXT_TOKENS = 150000;
 
 /**
  * Build API messages with context window truncation.
@@ -863,30 +873,15 @@ export function buildTruncatedApiMessages(
   // If everything fits, return as-is
   if (totalTokens <= budget) return allApiMessages;
 
-  // Drop oldest messages, but preserve tool_use/tool_result pairs.
-  // Always keep the last message (the current user message).
+  // Drop oldest messages, but preserve tool_use/tool_result pairs
+  // Always keep the last message (the current user message)
   let droppedCount = 0;
   let droppedTokens = 0;
 
-  // Mark tool_result messages that are paired with a preceding tool_use.
-  // These cannot be dropped independently — only together with their tool_use.
-  const pairedToolResult = new Set<number>();
-  for (let i = 0; i < allApiMessages.length - 1; i++) {
-    if (isToolUseMessage(allApiMessages[i]) && isToolResultMessage(allApiMessages[i + 1])) {
-      pairedToolResult.add(i + 1);
-    }
-  }
-
-  // Drop from the front until we fit
+  // Drop from the front until we fit (never drop the last message)
   let currentTokens = totalTokens;
   let i = 0;
   while (currentTokens > budget && i < allApiMessages.length - 1) {
-    // Skip paired tool_result messages — they are dropped with their tool_use
-    if (pairedToolResult.has(i)) {
-      i++;
-      continue;
-    }
-
     // If this is a tool_use message, also drop its paired tool_result
     if (isToolUseMessage(allApiMessages[i]) && i + 1 < allApiMessages.length && isToolResultMessage(allApiMessages[i + 1])) {
       currentTokens -= tokenCounts[i] + tokenCounts[i + 1];
