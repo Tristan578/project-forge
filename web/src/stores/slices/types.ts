@@ -488,6 +488,14 @@ export interface ReverbZoneData {
   priority: number; // higher wins in overlaps
 }
 
+// Custom WGSL shader source (scene-global resource from Rust)
+export interface CustomWgslSource {
+  userCode: string;
+  name: string;
+  compileStatus: 'ok' | 'error' | 'pending';
+  compileError: string | null;
+}
+
 // Shader effect data matching Rust's ShaderEffectData struct
 export interface ShaderEffectData {
   shaderType: string; // "none" | "dissolve" | "hologram" | "force_field" | "lava_flow" | "toon" | "fresnel_glow"
