@@ -149,8 +149,8 @@ pub fn equirectangular_to_cubemap(source: &Image, face_size: u32) -> Image {
                 bevy::asset::RenderAssetUsages::all(),
             );
             img.texture_descriptor.view_formats = &[];
-            img.texture_view_descriptor = Some(TextureViewDescriptor {
-                dimension: Some(TextureViewDimension::Cube),
+            img.texture_view_descriptor = Some(bevy::render::render_resource::TextureViewDescriptor {
+                dimension: Some(bevy::render::render_resource::TextureViewDimension::Cube),
                 ..Default::default()
             });
             return img;
