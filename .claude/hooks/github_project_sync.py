@@ -38,6 +38,43 @@ def load_config():
         return json.load(f)
 
 
+def resolve_team_id(config):
+    """Resolve allowedTeamName to a team ID via the taskboard API.
+
+    Returns the team ID string, or None if not configured or not found.
+    The result is cached in a module-level dict to avoid repeated API calls.
+    """
+    team_name = config.get("allowedTeamName")
+    if not team_name:
+        return config.get("allowedTeamId")  # fall back to hardcoded ID
+
+    teams = tb_get("/teams")
+    if not teams:
+        return None
+    for team in teams:
+        if team.get("name", "").lower() == team_name.lower():
+            return team.get("id")
+    return None
+
+
+def resolve_project_id(config):
+    """Resolve allowedProjectName to a project ID via the taskboard API.
+
+    Returns the project ID string. Falls back to config localProjectId.
+    """
+    project_name = config.get("allowedProjectName")
+    if not project_name:
+        return config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+
+    projects = tb_get("/projects")
+    if not projects:
+        return config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    for proj in projects:
+        if proj.get("name", "").lower() == project_name.lower():
+            return proj.get("id")
+    return config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+
+
 def load_map():
     if MAP_PATH.exists():
         try:
@@ -431,9 +468,9 @@ def push(include_done=False):
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = resolve_project_id(config)
 
-    allowed_team = config.get("allowedTeamId")
+    allowed_team = resolve_team_id(config)
 
     tickets = tb_get(f"/tickets?project={project_id}")
     if tickets is None:
@@ -587,7 +624,7 @@ def pull():
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = resolve_project_id(config)
 
     if not tb_available():
         print("[SYNC] Taskboard API unavailable — skipping pull")
@@ -599,7 +636,7 @@ def pull():
         print(f"[SYNC] GitHub fetch failed: {e}", file=sys.stderr)
         return
 
-    allowed_team = config.get("allowedTeamId")
+    allowed_team = resolve_team_id(config)
 
     items = gh_data.get("items", [])
 
@@ -829,7 +866,7 @@ def show_status():
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = resolve_project_id(config)
 
     print(f"GitHub Project: {config['owner']}/{config['repo']} #{config['projectNumber']}")
     print(f"Last sync: {mapping.get('lastSync') or 'never'}")
@@ -881,7 +918,7 @@ def migrate_drafts():
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = resolve_project_id(config)
 
     # Find entries missing githubIssueNumber
     legacy = {tid: e for tid, e in tmap.items() if not e.get("githubIssueNumber")}

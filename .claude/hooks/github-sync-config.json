@@ -15,5 +15,6 @@
     "done": "Done"
   },
   "localProjectId": "01KJEE8R1XXFF0CZT1WCSTGRDP",
-  "allowedTeamId": "01KJFNHZC49XG9KXRYTMYEEDTS"
+  "allowedTeamName": "Engineering",
+  "allowedProjectName": "SpawnForge"
 }
