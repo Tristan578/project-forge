@@ -11,7 +11,7 @@ import type { ToolCallContext, ExecutionResult } from '../types';
 // ---------------------------------------------------------------------------
 // Mock the audioManager module so audio handlers don't need real Web Audio
 // ---------------------------------------------------------------------------
-const mockSnapshots = new Map<string, { name: string; busStates: Record<string, { volume: number; muted: boolean }>; crossfadeDuration: number }>();
+const mockSnapshots = new Map<string, { name: string; busStates: Record<string, { volume: number; muted: boolean }>; crossfadeDurationMs: number }>();
 
 vi.mock('@/lib/audio/audioManager', () => ({
   audioManager: {
@@ -22,8 +22,8 @@ vi.mock('@/lib/audio/audioManager', () => ({
     isBusMuted: vi.fn().mockReturnValue(false),
     setBusVolume: vi.fn(),
     muteBus: vi.fn(),
-    saveSnapshot: vi.fn().mockImplementation((name: string, crossfadeDuration: number = 1000) => {
-      const snap = { name, busStates: { master: { volume: 0.8, muted: false } }, crossfadeDuration };
+    saveSnapshot: vi.fn().mockImplementation((name: string, crossfadeDurationMs: number = 1000) => {
+      const snap = { name, busStates: { master: { volume: 0.8, muted: false } }, crossfadeDurationMs };
       mockSnapshots.set(name, snap);
       return snap;
     }),
