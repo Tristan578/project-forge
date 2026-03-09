@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::mesh::Mesh;
 use serde::{Deserialize, Serialize};
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize)]
@@ -37,4 +38,33 @@ impl Default for PerformanceBudget {
             warning_threshold: 0.8,
         }
     }
+}
+
+/// Stores pre-generated LOD mesh handles for an entity.
+/// Index 0 = original mesh, indices 1-3 = simplified LODs.
+#[derive(Component, Debug, Clone)]
+pub struct LodMeshes {
+    pub levels: [Option<Handle<Mesh>>; 4],
+}
+
+impl Default for LodMeshes {
+    fn default() -> Self {
+        Self {
+            levels: [None, None, None, None],
+        }
+    }
+}
+
+/// Resource tracking real-time performance metrics.
+#[derive(Resource, Debug, Clone, Default)]
+pub struct PerformanceMetrics {
+    pub fps: f32,
+    pub frame_time_ms: f32,
+    pub entity_count: u32,
+    pub triangle_count: u32,
+    pub draw_call_estimate: u32,
+    pub wasm_heap_bytes: u64,
+    pub mesh_memory_bytes: u64,
+    /// Frame counter for throttling metrics collection.
+    pub frame_counter: u32,
 }

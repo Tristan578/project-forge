@@ -27,6 +27,7 @@ pub mod input;
 pub mod lighting;
 pub mod lod;
 pub mod material;
+pub mod mesh_simplify;
 pub mod observability;
 pub mod particles;
 pub mod pending;
