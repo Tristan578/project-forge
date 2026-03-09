@@ -169,13 +169,21 @@ pub fn apply_performance_budget_commands(
 /// be serialized and must be regenerated from the source mesh.
 pub(super) fn regenerate_missing_lod_meshes(
     mut commands: Commands,
-    query: Query<(Entity, &LodData, &Mesh3d), Without<LodMeshes>>,
+    query: Query<(Entity, &EntityId, &LodData, &Mesh3d), Without<LodMeshes>>,
+    pending: Res<PendingCommands>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    for (entity, lod, mesh3d) in query.iter() {
+    for (entity, eid, lod, mesh3d) in query.iter() {
         if !lod.auto_generate {
             continue;
         }
+
+        // Skip if a generate_lods request is already pending for this entity
+        // to avoid duplicate LOD generation (race with apply_lod_commands)
+        if pending.generate_lods_requests.iter().any(|r| r.entity_id == eid.0) {
+            continue;
+        }
+
 
         let mesh_handle = mesh3d.0.clone();
         let original_mesh_clone = meshes.get(&mesh_handle).cloned();
