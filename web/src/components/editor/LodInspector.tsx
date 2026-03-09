@@ -1,26 +1,27 @@
 import React, { useState, useCallback } from 'react';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
+import { usePerformanceStore } from '@/stores/performanceStore';
 
-interface LodData {
+interface LodConfig {
   lodDistances: [number, number, number];
   autoGenerate: boolean;
   lodRatios: [number, number, number];
-  currentLod: number;
 }
 
 export function LodInspector() {
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const sceneGraph = useEditorStore((state) => state.sceneGraph);
 
-  const [lodData, setLodData] = useState<LodData>({
+  const primaryId = Array.from(selectedIds)[0];
+  const currentLod = usePerformanceStore((state) => primaryId ? (state.lodLevels[primaryId] ?? 0) : 0);
+
+  const [lodConfig, setLodConfig] = useState<LodConfig>({
     lodDistances: [20, 50, 100],
     autoGenerate: false,
     lodRatios: [0.5, 0.25, 0.1],
-    currentLod: 0,
   });
   const [generateStatus, setGenerateStatus] = useState<string | null>(null);
 
-  const primaryId = Array.from(selectedIds)[0];
   const entity = primaryId ? sceneGraph.nodes[primaryId] : null;
 
   const dispatchToEngine = useCallback((command: string, payload: unknown) => {
@@ -30,47 +31,47 @@ export function LodInspector() {
 
   const handleDistanceChange = useCallback(
     (index: number, value: number) => {
-      const newDistances: [number, number, number] = [...lodData.lodDistances] as [number, number, number];
+      const newDistances: [number, number, number] = [...lodConfig.lodDistances] as [number, number, number];
       newDistances[index] = value;
-      setLodData((prev) => ({ ...prev, lodDistances: newDistances }));
+      setLodConfig((prev) => ({ ...prev, lodDistances: newDistances }));
     },
-    [lodData.lodDistances]
+    [lodConfig.lodDistances]
   );
 
   const handleRatioChange = useCallback(
     (index: number, value: number) => {
-      const newRatios: [number, number, number] = [...lodData.lodRatios] as [number, number, number];
+      const newRatios: [number, number, number] = [...lodConfig.lodRatios] as [number, number, number];
       newRatios[index] = value;
-      setLodData((prev) => ({ ...prev, lodRatios: newRatios }));
+      setLodConfig((prev) => ({ ...prev, lodRatios: newRatios }));
     },
-    [lodData.lodRatios]
+    [lodConfig.lodRatios]
   );
 
   const handleAutoGenerateToggle = useCallback(() => {
-    const newValue = !lodData.autoGenerate;
-    setLodData((prev) => ({ ...prev, autoGenerate: newValue }));
+    const newValue = !lodConfig.autoGenerate;
+    setLodConfig((prev) => ({ ...prev, autoGenerate: newValue }));
     if (primaryId) {
       dispatchToEngine('set_lod', {
         entityId: primaryId,
-        lodDistances: lodData.lodDistances,
+        lodDistances: lodConfig.lodDistances,
         autoGenerate: newValue,
-        lodRatios: lodData.lodRatios,
+        lodRatios: lodConfig.lodRatios,
       });
     }
-  }, [lodData, primaryId, dispatchToEngine]);
+  }, [lodConfig, primaryId, dispatchToEngine]);
 
   const handleGenerateLods = useCallback(() => {
     if (primaryId) {
       dispatchToEngine('set_lod', {
         entityId: primaryId,
-        lodDistances: lodData.lodDistances,
-        autoGenerate: lodData.autoGenerate,
-        lodRatios: lodData.lodRatios,
+        lodDistances: lodConfig.lodDistances,
+        autoGenerate: lodConfig.autoGenerate,
+        lodRatios: lodConfig.lodRatios,
       });
       dispatchToEngine('generate_lods', { entityId: primaryId });
-      setGenerateStatus('LOD configuration applied. Distance-based LOD switching is now active.');
+      setGenerateStatus('LOD meshes generated via QEM simplification. Distance-based switching is active.');
     }
-  }, [primaryId, lodData, dispatchToEngine]);
+  }, [primaryId, lodConfig, dispatchToEngine]);
 
   if (!entity) {
     return null;
@@ -84,6 +85,8 @@ export function LodInspector() {
     return null;
   }
 
+  const lodLabels = ['Full', 'Medium', 'Low', 'Lowest'];
+
   return (
     <div className="border-t border-gray-700 pt-3 mt-3">
       <h3 className="text-sm font-medium mb-3">LOD (Level of Detail)</h3>
@@ -92,7 +95,7 @@ export function LodInspector() {
       <label className="flex items-center gap-2 mb-3">
         <input
           type="checkbox"
-          checked={lodData.autoGenerate}
+          checked={lodConfig.autoGenerate}
           onChange={handleAutoGenerateToggle}
           className="rounded"
         />
@@ -108,11 +111,11 @@ export function LodInspector() {
             min="5"
             max="200"
             step="5"
-            value={lodData.lodDistances[0]}
+            value={lodConfig.lodDistances[0]}
             onChange={(e) => handleDistanceChange(0, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{lodData.lodDistances[0]}m</div>
+          <div className="text-xs text-gray-500 text-right">{lodConfig.lodDistances[0]}m</div>
         </div>
 
         <div>
@@ -122,11 +125,11 @@ export function LodInspector() {
             min="10"
             max="300"
             step="10"
-            value={lodData.lodDistances[1]}
+            value={lodConfig.lodDistances[1]}
             onChange={(e) => handleDistanceChange(1, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{lodData.lodDistances[1]}m</div>
+          <div className="text-xs text-gray-500 text-right">{lodConfig.lodDistances[1]}m</div>
         </div>
 
         <div>
@@ -136,11 +139,11 @@ export function LodInspector() {
             min="20"
             max="500"
             step="20"
-            value={lodData.lodDistances[2]}
+            value={lodConfig.lodDistances[2]}
             onChange={(e) => handleDistanceChange(2, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{lodData.lodDistances[2]}m</div>
+          <div className="text-xs text-gray-500 text-right">{lodConfig.lodDistances[2]}m</div>
         </div>
       </div>
 
@@ -153,11 +156,11 @@ export function LodInspector() {
             min="0.1"
             max="1"
             step="0.1"
-            value={lodData.lodRatios[0]}
+            value={lodConfig.lodRatios[0]}
             onChange={(e) => handleRatioChange(0, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{Math.round(lodData.lodRatios[0] * 100)}%</div>
+          <div className="text-xs text-gray-500 text-right">{Math.round(lodConfig.lodRatios[0] * 100)}%</div>
         </div>
 
         <div>
@@ -167,11 +170,11 @@ export function LodInspector() {
             min="0.1"
             max="1"
             step="0.1"
-            value={lodData.lodRatios[1]}
+            value={lodConfig.lodRatios[1]}
             onChange={(e) => handleRatioChange(1, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{Math.round(lodData.lodRatios[1] * 100)}%</div>
+          <div className="text-xs text-gray-500 text-right">{Math.round(lodConfig.lodRatios[1] * 100)}%</div>
         </div>
 
         <div>
@@ -181,11 +184,11 @@ export function LodInspector() {
             min="0.1"
             max="1"
             step="0.1"
-            value={lodData.lodRatios[2]}
+            value={lodConfig.lodRatios[2]}
             onChange={(e) => handleRatioChange(2, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{Math.round(lodData.lodRatios[2] * 100)}%</div>
+          <div className="text-xs text-gray-500 text-right">{Math.round(lodConfig.lodRatios[2] * 100)}%</div>
         </div>
       </div>
 
@@ -206,7 +209,7 @@ export function LodInspector() {
 
       {/* Current LOD Level Display */}
       <div className="mt-3 text-xs text-gray-400">
-        Current LOD: Level {lodData.currentLod}
+        Current LOD: Level {currentLod} ({lodLabels[currentLod] ?? 'Unknown'})
       </div>
     </div>
   );

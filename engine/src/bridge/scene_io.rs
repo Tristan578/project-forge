@@ -13,6 +13,7 @@ use crate::core::{
     history::{EntitySnapshot as HistEntitySnapshot, HistoryStack, TransformSnapshot},
     input::InputMap,
     lighting::{LightData, LightType},
+    lod::LodData,
     material::MaterialData,
     particles::{ParticleData, ParticleEnabled},
     pending_commands::{EntityType, PendingCommands},
@@ -54,7 +55,7 @@ pub(super) fn apply_scene_export(
     script_query: Query<(&EntityId, Option<&ScriptData>)>,
     audio_export_query: Query<(&EntityId, Option<&AudioData>)>,
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
+    shader_lod_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&LodData>)>,
     csg_procedural_joint_query: Query<(&EntityId, Option<&CsgMeshData>, Option<&ProceduralMeshData>, Option<&JointData>, Option<&GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     child_of_query: Query<&ChildOf>,
     eid_query: Query<&EntityId>,
@@ -101,10 +102,11 @@ pub(super) fn apply_scene_export(
             .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
             .unwrap_or((None, false));
 
-        // Look up shader data separately
-        let shader_effect_data = shader_query.iter()
-            .find(|(seid, _)| seid.0 == eid.0)
-            .and_then(|(_, sed)| sed.cloned());
+        // Look up shader & LOD data
+        let (shader_effect_data, lod_data) = shader_lod_query.iter()
+            .find(|(seid, _, _)| seid.0 == eid.0)
+            .map(|(_, sed, ld)| (sed.cloned(), ld.cloned()))
+            .unwrap_or((None, None));
 
         // Look up csg + procedural mesh + joint + game component + game camera data from combined query
         let (csg_mesh_data, procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = csg_procedural_joint_query.iter()
@@ -136,6 +138,9 @@ pub(super) fn apply_scene_export(
         snap.game_components = game_components;
         snap.game_camera_data = game_camera_data;
         snap.active_game_camera = active_game_camera;
+
+        snap.lod_data = lod_data;
+
         snapshots.push(snap);
     }
 
@@ -269,6 +274,14 @@ pub(super) fn apply_scene_load(
             }
         }
     }
+
+    // 8b. LOD mesh regeneration is handled automatically by
+    // `regenerate_missing_lod_meshes` which runs every frame and detects
+    // entities with LodData(auto_generate=true) but no LodMeshes component.
+    // Previously we queued explicit GenerateLodsRequest entries here, but that
+    // caused duplicate QEM generation: apply_lod_commands inserts LodMeshes via
+    // deferred commands (not flushed until end of frame), so the regenerate
+    // system's Without<LodMeshes> filter still matched in the same frame.
 
     // 9. Update scene name
     scene_name.0 = scene_file.metadata.name.clone();

@@ -24,6 +24,8 @@ interface PerformanceState {
   history: PerformanceStats[]; // Last 60 frames for sparkline
   budget: PerformanceBudget;
   warnings: string[];
+  /** Current LOD level per entity (entity_id -> lod_level) */
+  lodLevels: Record<string, number>;
 
   // Actions
   updateStats: (stats: Partial<PerformanceStats>) => void;
@@ -31,6 +33,7 @@ interface PerformanceState {
   setBudget: (budget: Partial<PerformanceBudget>) => void;
   addWarning: (warning: string) => void;
   clearWarnings: () => void;
+  setLodLevel: (entityId: string, level: number) => void;
 }
 
 const defaultStats: PerformanceStats = {
@@ -57,6 +60,7 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
   history: [],
   budget: defaultBudget,
   warnings: [],
+  lodLevels: {},
 
   updateStats: (newStats) =>
     set((state) => {
@@ -91,4 +95,9 @@ export const usePerformanceStore = create<PerformanceState>((set) => ({
     set((state) => ({ warnings: [...state.warnings, warning] })),
 
   clearWarnings: () => set({ warnings: [] }),
+
+  setLodLevel: (entityId, level) =>
+    set((state) => ({
+      lodLevels: { ...state.lodLevels, [entityId]: level },
+    })),
 }));

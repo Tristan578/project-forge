@@ -16,6 +16,7 @@ import {
   handleGameEvent,
   handleSpriteEvent,
   handleParticleEvent,
+  handlePerformanceEvent,
   handleEditModeEvent,
 } from './events';
 
@@ -74,6 +75,7 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       if (handleGameEvent(type, payload, set, get)) return;
       if (handleSpriteEvent(type, payload, set, get)) return;
       if (handleParticleEvent(type, payload, set, get)) return;
+      if (handlePerformanceEvent(type, payload, set, get)) return;
       if (handleEditModeEvent(type, payload, set, get)) return;
 
       console.warn('Unknown engine event:', type);

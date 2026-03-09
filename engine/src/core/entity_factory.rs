@@ -1219,6 +1219,11 @@ pub fn spawn_from_snapshot(
         commands.entity(entity).insert(TilemapEnabled);
     }
 
+    // Restore LOD data if present
+    if let Some(ld) = &snapshot.lod_data {
+        commands.entity(entity).insert(ld.clone());
+    }
+
     entity
 }
 

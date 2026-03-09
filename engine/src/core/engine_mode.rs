@@ -23,6 +23,7 @@ use super::physics::{JointData, PhysicsData, PhysicsEnabled};
 use super::scripting::ScriptData;
 use super::selection::Selection;
 use super::shader_effects::ShaderEffectData;
+use super::lod::LodData;
 use super::tilemap::{TilemapData, TilemapEnabled};
 
 /// The current engine mode.
@@ -127,7 +128,7 @@ pub fn snapshot_scene(
     reverb_particle_shader_query: &Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>, Option<&ShaderEffectData>)>,
     csg_sprite_query: &Query<(&EntityId, Option<&CsgMeshData>, Option<&super::sprite::SpriteData>)>,
     procedural_joint_gc_camera_query: &Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>, Option<&super::game_components::GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>)>,
+    tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>, Option<&LodData>)>,
     selection: &Selection,
 ) -> SceneSnapshot {
     let mut entities = Vec::new();
@@ -172,11 +173,11 @@ pub fn snapshot_scene(
             .map(|(_, pmd, jd, gc, gcd, agc)| (pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some()))
             .unwrap_or((None, None, None, None, false));
 
-        // Look up tilemap & skeleton2d data
-        let (tilemap_data, tilemap_enabled, skeleton2d_data, skeleton2d_enabled, skeletal_animations) = tilemap_skeleton2d_query.iter()
-            .find(|(tseid, _, _, _, _, _)| tseid.0 == eid.0)
-            .map(|(_, tmd, tme, sd, se, sa)| (tmd.cloned(), tme.is_some(), sd.cloned(), se.is_some(), sa.cloned().map(|a| vec![a])))
-            .unwrap_or((None, false, None, false, None));
+        // Look up tilemap, skeleton2d, & LOD data
+        let (tilemap_data, tilemap_enabled, skeleton2d_data, skeleton2d_enabled, skeletal_animations, lod_data) = tilemap_skeleton2d_query.iter()
+            .find(|(tseid, _, _, _, _, _, _)| tseid.0 == eid.0)
+            .map(|(_, tmd, tme, sd, se, sa, ld)| (tmd.cloned(), tme.is_some(), sd.cloned(), se.is_some(), sa.cloned().map(|a| vec![a]), ld.cloned()))
+            .unwrap_or((None, false, None, false, None, None));
 
         let mut snap = EntitySnapshot::new(
             eid.0.clone(),
@@ -209,6 +210,7 @@ pub fn snapshot_scene(
         snap.skeleton2d_data = skeleton2d_data;
         snap.skeleton2d_enabled = skeleton2d_enabled;
         snap.skeletal_animations = skeletal_animations;
+        snap.lod_data = lod_data;
         entities.push(snap);
     }
 

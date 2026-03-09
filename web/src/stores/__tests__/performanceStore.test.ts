@@ -33,6 +33,7 @@ describe('performanceStore', () => {
         warningThreshold: 0.8,
       },
       warnings: [],
+      lodLevels: {},
     });
   });
 
@@ -275,6 +276,38 @@ describe('performanceStore', () => {
 
       const state = usePerformanceStore.getState();
       expect(state.warnings).toEqual([]);
+    });
+  });
+
+  describe('setLodLevel', () => {
+    it('should set LOD level for an entity', () => {
+      const { setLodLevel } = usePerformanceStore.getState();
+
+      setLodLevel('entity-1', 2);
+
+      const state = usePerformanceStore.getState();
+      expect(state.lodLevels['entity-1']).toBe(2);
+    });
+
+    it('should track multiple entities independently', () => {
+      const { setLodLevel } = usePerformanceStore.getState();
+
+      setLodLevel('entity-1', 1);
+      setLodLevel('entity-2', 3);
+
+      const state = usePerformanceStore.getState();
+      expect(state.lodLevels['entity-1']).toBe(1);
+      expect(state.lodLevels['entity-2']).toBe(3);
+    });
+
+    it('should update existing entity LOD level', () => {
+      const { setLodLevel } = usePerformanceStore.getState();
+
+      setLodLevel('entity-1', 1);
+      setLodLevel('entity-1', 3);
+
+      const state = usePerformanceStore.getState();
+      expect(state.lodLevels['entity-1']).toBe(3);
     });
   });
 
