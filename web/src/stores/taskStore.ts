@@ -31,7 +31,7 @@ interface TaskState {
    * Add a new task and return its generated ID.
    */
   addTask: (title: string, description?: string, assignee?: TaskAssignee) => string;
-  updateTask: (id: string, updates: Partial<Omit<EditorTask, 'id' | 'createdAt'>>) => void;
+  updateTask: (id: string, updates: Partial<Omit<EditorTask, 'id' | 'createdAt' | 'updatedAt'>>) => void;
   moveTask: (id: string, status: TaskStatus) => void;
   removeTask: (id: string) => void;
   clearCompleted: () => void;

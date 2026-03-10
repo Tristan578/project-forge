@@ -10,13 +10,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useTaskStore, type EditorTask, type TaskStatus } from '../taskStore';
 
-// ---- Mock crypto.randomUUID ----
-// jsdom doesn't provide crypto.randomUUID, so we polyfill it
-let uuidCounter = 0;
-vi.stubGlobal('crypto', {
-  randomUUID: () => `test-uuid-${++uuidCounter}`,
-});
-
 // ---- Mock localStorage ----
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -34,7 +27,8 @@ const localStorageMock = (() => {
   };
 })();
 
-vi.stubGlobal('localStorage', localStorageMock);
+// ---- Mock crypto.randomUUID ----
+let uuidCounter = 0;
 
 // Helper: reset store to empty state before each test
 function resetStore() {
@@ -45,6 +39,10 @@ function resetStore() {
 
 describe('taskStore', () => {
   beforeEach(() => {
+    vi.stubGlobal('crypto', {
+      randomUUID: () => `test-uuid-${++uuidCounter}`,
+    });
+    vi.stubGlobal('localStorage', localStorageMock);
     vi.useFakeTimers();
     resetStore();
     vi.clearAllMocks();
@@ -52,6 +50,7 @@ describe('taskStore', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   // ---- Initial state ----
@@ -334,13 +333,13 @@ describe('taskStore', () => {
     });
 
     it('does not affect todo or in_progress tasks', () => {
-      const { addTask, moveTask, clearCompleted } = useTaskStore.getState();
+      const { addTask, clearCompleted } = useTaskStore.getState();
       addTask('Todo task');
       const idInProgress = addTask('In progress task');
       const idDone = addTask('Done task');
 
-      moveTask(idInProgress, 'in_progress');
-      moveTask(idDone, 'done');
+      useTaskStore.getState().moveTask(idInProgress, 'in_progress');
+      useTaskStore.getState().moveTask(idDone, 'done');
 
       clearCompleted();
 
@@ -401,6 +400,33 @@ describe('taskStore', () => {
 
       const stored = useTaskStore.getState().tasks.map((t) => t.title);
       expect(stored).toEqual(titles);
+    });
+  });
+
+  // ---- Persistence ----
+
+  describe('Persistence', () => {
+    it('calls localStorage.setItem when tasks change', () => {
+      const { addTask } = useTaskStore.getState();
+      addTask('Persisted task');
+
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(
+        'spawnforge-editor-tasks',
+        expect.any(String)
+      );
+    });
+
+    it('persisted data contains task state', () => {
+      const { addTask } = useTaskStore.getState();
+      addTask('Check persistence');
+
+      const lastCall = localStorageMock.setItem.mock.calls.find(
+        ([key]: [string]) => key === 'spawnforge-editor-tasks'
+      );
+      expect(lastCall).toBeDefined();
+      const stored = JSON.parse(lastCall![1]);
+      expect(stored.state.tasks).toHaveLength(1);
+      expect(stored.state.tasks[0].title).toBe('Check persistence');
     });
   });
 });

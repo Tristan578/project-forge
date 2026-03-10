@@ -13,12 +13,6 @@ import { TaskboardPanel } from '../TaskboardPanel';
 import { useTaskStore } from '@/stores/taskStore';
 import type { EditorTask } from '@/stores/taskStore';
 
-// ---- Mock crypto.randomUUID ----
-let uuidCounter = 0;
-vi.stubGlobal('crypto', {
-  randomUUID: () => `mock-uuid-${++uuidCounter}`,
-});
-
 // ---- Mock localStorage ----
 const localStorageMock = (() => {
   let store: Record<string, string> = {};
@@ -36,7 +30,8 @@ const localStorageMock = (() => {
   };
 })();
 
-vi.stubGlobal('localStorage', localStorageMock);
+// ---- Mock crypto.randomUUID ----
+let uuidCounter = 0;
 
 // ---- Lucide icon mocks ----
 vi.mock('lucide-react', () => ({
@@ -98,12 +93,17 @@ function resetStore(tasks: EditorTask[] = []) {
 
 describe('TaskboardPanel', () => {
   beforeEach(() => {
+    vi.stubGlobal('crypto', {
+      randomUUID: () => `mock-uuid-${++uuidCounter}`,
+    });
+    vi.stubGlobal('localStorage', localStorageMock);
     resetStore();
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   // ---- Basic rendering ----
