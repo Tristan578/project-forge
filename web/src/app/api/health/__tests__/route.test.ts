@@ -152,7 +152,7 @@ describe('GET /api/health', () => {
       const res = await mod.GET();
       const body = await res.json();
 
-      expect(['connected', 'unavailable', 'not_configured']).toContain(body.database);
+      expect(body.database).toBe('connected');
     });
 
     it('returns database=unavailable when neon query throws', async () => {
@@ -171,8 +171,7 @@ describe('GET /api/health', () => {
       const res = await mod.GET();
       const body = await res.json();
 
-      // unavailable or not_configured depending on mock resolution
-      expect(['unavailable', 'not_configured']).toContain(body.database);
+      expect(body.database).toBe('unavailable');
     });
   });
 });

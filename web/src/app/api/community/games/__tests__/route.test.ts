@@ -402,10 +402,11 @@ describe('GET /api/community/games', () => {
     });
 
     it('returns 500 when DB query rejects asynchronously', async () => {
+      const rejectingChain = makeQueryChain([]);
+      rejectingChain.offset = () => Promise.reject(new Error('Query failed'));
+
       vi.mocked(getDb).mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          from: () => ({ where: () => Promise.reject(new Error('Query failed')) }),
-        }),
+        select: vi.fn().mockReturnValue(rejectingChain),
       } as never);
 
       const res = await GET(makeRequest());

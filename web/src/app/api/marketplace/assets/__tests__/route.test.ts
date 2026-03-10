@@ -381,10 +381,11 @@ describe('GET /api/marketplace/assets', () => {
     });
 
     it('returns 500 when DB query rejects', async () => {
+      const rejectingChain = makeQueryChain([]);
+      rejectingChain.offset = vi.fn(() => Promise.reject(new Error('Connection reset')));
+
       vi.mocked(getDb).mockReturnValue({
-        select: vi.fn().mockReturnValue({
-          from: () => ({ where: () => Promise.reject(new Error('Connection reset')) }),
-        }),
+        select: vi.fn().mockReturnValue(rejectingChain),
       } as never);
 
       const res = await GET(makeRequest());
