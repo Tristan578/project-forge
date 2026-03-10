@@ -678,4 +678,399 @@ describe('useGenerationPolling', () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Auto-place: model import gated on autoPlace flag
+  // ---------------------------------------------------------------------------
+  describe('auto-place model', () => {
+    function setupModelCompletion(jobOverrides: Record<string, unknown> = {}) {
+      mockJobs['ap1'] = makeJob('ap1', {
+        type: 'model',
+        prompt: 'a sword',
+        ...jobOverrides,
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:model/gltf-binary;base64,AAAA';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-ap1',
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/model.glb',
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['glb-data'], { type: 'model/gltf-binary' })),
+        } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    it('imports model into scene when autoPlace is true', async () => {
+      const cleanup = setupModelCompletion({ autoPlace: true, targetEntityId: 'ent-1' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalledWith(
+        'data:model/gltf-binary;base64,AAAA',
+        'TestAsset',
+      );
+
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: true, targetEntityId: 'ent-1' }),
+      }));
+
+      cleanup();
+    });
+
+    it('imports model when autoPlace is undefined (legacy behavior)', async () => {
+      const cleanup = setupModelCompletion({}); // no autoPlace field
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).toHaveBeenCalled();
+      cleanup();
+    });
+
+    it('skips import when autoPlace is false', async () => {
+      const cleanup = setupModelCompletion({ autoPlace: false });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockImportGltf).not.toHaveBeenCalled();
+
+      expect(mockUpdateJob).toHaveBeenCalledWith('ap1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({ autoPlaced: false }),
+      }));
+
+      cleanup();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Auto-place: texture loading with materialSlot
+  // ---------------------------------------------------------------------------
+  describe('auto-place texture', () => {
+    function setupTextureCompletion(jobOverrides: Record<string, unknown> = {}) {
+      mockJobs['at1'] = makeJob('at1', {
+        type: 'texture',
+        prompt: 'wood texture',
+        entityId: 'ent-tex-1',
+        ...jobOverrides,
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,AAAA';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-at1',
+              status: 'completed',
+              progress: 100,
+              maps: {
+                albedo: 'https://example.com/albedo.png',
+                normal: 'https://example.com/normal.png',
+              },
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['img-data'], { type: 'image/png' })),
+        } as Response;
+      });
+
+      return () => { globalThis.FileReader = origFileReader; };
+    }
+
+    it('applies all texture maps to target entity when no materialSlot specified', async () => {
+      const cleanup = setupTextureCompletion({ autoPlace: true, targetEntityId: 'ent-tex-target' });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      // Should apply both albedo (base_color) and normal maps
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,AAAA',
+        expect.stringContaining('albedo'),
+        'ent-tex-target',
+        'base_color',
+      );
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,AAAA',
+        expect.stringContaining('normal'),
+        'ent-tex-target',
+        'normal',
+      );
+
+      cleanup();
+    });
+
+    it('applies only the specified materialSlot map', async () => {
+      const cleanup = setupTextureCompletion({
+        autoPlace: true,
+        targetEntityId: 'ent-tex-target',
+        materialSlot: 'normal',
+      });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      // Should only apply normal map, not albedo
+      expect(mockLoadTexture).toHaveBeenCalledTimes(1);
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,AAAA',
+        expect.stringContaining('normal'),
+        'ent-tex-target',
+        'normal',
+      );
+
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: true,
+          targetEntityId: 'ent-tex-target',
+          materialSlot: 'normal',
+        }),
+      }));
+
+      cleanup();
+    });
+
+    it('skips texture loading when autoPlace is false', async () => {
+      const cleanup = setupTextureCompletion({ autoPlace: false });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).not.toHaveBeenCalled();
+
+      expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
+        status: 'completed',
+      }));
+
+      cleanup();
+    });
+
+    it('uses targetEntityId over entityId when both are present', async () => {
+      const cleanup = setupTextureCompletion({
+        autoPlace: true,
+        entityId: 'legacy-entity',
+        targetEntityId: 'target-entity',
+      });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      // Should use targetEntityId, not entityId
+      for (const call of mockLoadTexture.mock.calls) {
+        expect(call[2]).toBe('target-entity');
+      }
+
+      cleanup();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Auto-place: sprite with materialSlot
+  // ---------------------------------------------------------------------------
+  describe('auto-place sprite', () => {
+    it('applies sprite texture to targetEntityId with materialSlot', async () => {
+      mockJobs['sp2'] = makeJob('sp2', {
+        type: 'sprite',
+        prompt: 'hero sprite',
+        autoPlace: true,
+        targetEntityId: 'ent-sprite',
+        materialSlot: 'emissive',
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,SPRITE';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-sp2',
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/sprite.png',
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['sprite'], { type: 'image/png' })),
+        } as Response;
+      });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).toHaveBeenCalledWith(
+        'data:image/png;base64,SPRITE',
+        'TestAsset',
+        'ent-sprite',
+        'emissive',
+      );
+
+      expect(mockUpdateJob).toHaveBeenCalledWith('sp2', expect.objectContaining({
+        status: 'completed',
+        metadata: expect.objectContaining({
+          autoPlaced: true,
+          targetEntityId: 'ent-sprite',
+          materialSlot: 'emissive',
+        }),
+      }));
+
+      globalThis.FileReader = origFileReader;
+    });
+
+    it('skips sprite texture when autoPlace is false', async () => {
+      mockJobs['sp3'] = makeJob('sp3', {
+        type: 'sprite',
+        prompt: 'enemy sprite',
+        autoPlace: false,
+        entityId: 'ent-nope',
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        result = 'data:image/png;base64,SPRITE';
+        readAsDataURL = vi.fn().mockImplementation(function (this: { onloadend: (() => void) | null }) {
+          if (this.onloadend) this.onloadend();
+        });
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-sp3',
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/sprite.png',
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['sprite'], { type: 'image/png' })),
+        } as Response;
+      });
+
+      renderHook(() => useGenerationPolling());
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+
+      expect(mockLoadTexture).not.toHaveBeenCalled();
+      globalThis.FileReader = origFileReader;
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Auto-place: music with targetEntityId
+  // ---------------------------------------------------------------------------
+  describe('auto-place music', () => {
+    it('skips audio attachment when autoPlace is false', async () => {
+      vi.useRealTimers();
+
+      mockJobs['m3'] = makeJob('m3', {
+        type: 'music',
+        entityId: 'ent-music-skip',
+        autoPlace: false,
+        prompt: 'calm music',
+      });
+
+      const origFileReader = globalThis.FileReader;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).FileReader = class {
+        result = 'data:audio/mpeg;base64,dGVzdA==';
+        onloadend: (() => void) | null = null;
+        onerror: ((_e: unknown) => void) | null = null;
+        readAsDataURL() {
+          queueMicrotask(() => { if (this.onloadend) this.onloadend(); });
+        }
+      };
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        const urlStr = typeof url === 'string' ? url : (url as Request).url;
+        if (urlStr.includes('/status')) {
+          return {
+            ok: true,
+            json: () => Promise.resolve({
+              jobId: 'job-m3',
+              status: 'completed',
+              progress: 100,
+              resultUrl: 'https://example.com/music.mp3',
+            }),
+          } as Response;
+        }
+        return {
+          ok: true,
+          blob: () => Promise.resolve(new Blob(['audio'], { type: 'audio/mpeg' })),
+        } as Response;
+      });
+
+      renderHook(() => useGenerationPolling());
+
+      await vi.waitFor(() => {
+        expect(mockImportAudio).toHaveBeenCalled();
+      });
+
+      // Audio is always imported, but setAudio should NOT be called when autoPlace is false
+      expect(mockSetAudio).not.toHaveBeenCalled();
+
+      globalThis.FileReader = origFileReader;
+      vi.useFakeTimers();
+    });
+  });
 });
