@@ -90,6 +90,14 @@ function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false);
   const updateTask = useTaskStore((s) => s.updateTask);
 
+  // Buffer description locally to avoid persisting to store on every keystroke
+  const [localDesc, setLocalDesc] = useState(task.description ?? '');
+  const [prevDesc, setPrevDesc] = useState(task.description ?? '');
+  if ((task.description ?? '') !== prevDesc) {
+    setPrevDesc(task.description ?? '');
+    setLocalDesc(task.description ?? '');
+  }
+
   const handleToggleExpand = useCallback(() => {
     setExpanded((prev) => !prev);
   }, []);
@@ -111,10 +119,14 @@ function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
 
   const handleDescriptionChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      updateTask(task.id, { description: e.target.value });
+      setLocalDesc(e.target.value);
     },
-    [updateTask, task.id]
+    []
   );
+
+  const handleDescriptionBlur = useCallback(() => {
+    updateTask(task.id, { description: localDesc });
+  }, [updateTask, task.id, localDesc]);
 
   return (
     <div
@@ -181,8 +193,9 @@ function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
           onClick={(e) => e.stopPropagation()}
         >
           <textarea
-            value={task.description ?? ''}
+            value={localDesc}
             onChange={handleDescriptionChange}
+            onBlur={handleDescriptionBlur}
             placeholder="Add description…"
             rows={3}
             className="w-full resize-none rounded bg-zinc-900/50 px-2 py-1 text-[10px] text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-600"
