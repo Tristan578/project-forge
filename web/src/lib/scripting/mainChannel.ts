@@ -132,7 +132,14 @@ export class MainThreadChannel {
     this.callbackHandlers.get(type)!.add(handler);
 
     return () => {
-      this.callbackHandlers.get(type)?.delete(handler);
+      const handlers = this.callbackHandlers.get(type);
+      if (!handlers) {
+        return;
+      }
+      handlers.delete(handler);
+      if (handlers.size === 0) {
+        this.callbackHandlers.delete(type);
+      }
     };
   }
 
@@ -234,7 +241,21 @@ export class MainThreadChannel {
             this.pendingRequests.delete(payload.requestId);
             this.pendingCount = Math.max(0, this.pendingCount - 1);
             pending.reject(new Error(payload.message));
+          } else {
+            // Received an error for a request that is no longer pending.
+            console.error(
+              '[MainThreadChannel] Received worker error for unknown requestId',
+              payload.requestId,
+              '-',
+              payload.message,
+            );
           }
+        } else {
+          // Uncorrelated worker error (no requestId) — surface it so it is observable.
+          console.error(
+            '[MainThreadChannel] Uncorrelated worker error:',
+            payload.message,
+          );
         }
         break;
       }

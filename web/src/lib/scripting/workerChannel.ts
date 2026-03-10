@@ -24,7 +24,7 @@ export type CommandHandler = (
 
 export type EventHandler = (eventType: string, data: unknown) => void;
 
-export type BackpressureHandler = (queueSize: number) => void;
+export type BackpressureHandler = (pendingCount: number) => void;
 
 // ─── WorkerChannel ────────────────────────────────────────────────────────────
 
@@ -81,13 +81,17 @@ export class WorkerChannel {
   }
 
   /**
-   * Report an error to the main thread, optionally correlating to a request.
+   * Report an error to the main thread.
+   *
+   * If `requestId` is provided, the error will be associated with that
+   * in-flight command. If omitted/undefined, the error is treated as a
+   * non-request-scoped worker error.
    */
   sendError(requestId: string | undefined, error: Error): void {
     this.assertInitialized();
     const msg = createChannelMessage<ErrorPayload>('error', {
-      requestId,
       message: error.message,
+      ...(requestId !== undefined ? { requestId } : {}),
     });
     this.port!.postMessage(msg);
   }
@@ -112,7 +116,12 @@ export class WorkerChannel {
 
   /**
    * Register a handler invoked when the main thread signals backpressure.
-   * The worker should throttle or pause sending until pressure eases.
+   *
+   * This is typically emitted when the main thread rejects a send due to a
+   * full queue. The protocol does not currently emit a dedicated
+   * "backpressure cleared" event, so the worker is responsible for deciding
+   * when and how to resume sending (e.g. via time-based backoff or other
+   * application-level signals) after throttling or pausing.
    */
   onBackpressure(handler: BackpressureHandler): void {
     this.backpressureHandler = handler;

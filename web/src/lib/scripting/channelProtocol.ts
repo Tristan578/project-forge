@@ -23,7 +23,7 @@ export interface ChannelMessage<T = unknown> {
 }
 
 export interface ChannelOptions {
-  /** Maximum number of pending requests before backpressure triggers. Default: 1000. */
+  /** Maximum number of in-flight (pending) requests before backpressure triggers. Default: 1000. */
   maxQueueSize?: number;
   /** Milliseconds before a pending request is rejected. Default: 5000. */
   timeoutMs?: number;
