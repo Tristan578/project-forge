@@ -19,6 +19,23 @@ const AUTOSAVE_KEY_PATTERNS = [
 ];
 
 /**
+ * Keys that form an atomic group — evicting one requires evicting all.
+ * Each group is identified by its primary key; satellite keys share the
+ * same timestamp source (`forge:autosave:time` for the autosave triplet).
+ */
+const AUTOSAVE_GROUPS: ReadonlyArray<{
+  primary: string;
+  keys: readonly string[];
+  timestampKey: string;
+}> = [
+  {
+    primary: 'forge:autosave',
+    keys: ['forge:autosave', 'forge:autosave:name', 'forge:autosave:time'],
+    timestampKey: 'forge:autosave:time',
+  },
+];
+
+/**
  * Estimate localStorage usage by summing all key+value lengths as UTF-16
  * (each character = 2 bytes).
  *
@@ -43,10 +60,26 @@ export function estimateLocalStorageUsage(): StorageEstimate {
     usedBytes = 0;
   }
 
-  const totalBytes = probeLocalStorageCapacity(usedBytes);
+  const totalBytes = getCachedCapacity(usedBytes);
   const usagePercent = totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0;
 
   return { usedBytes, totalBytes, usagePercent };
+}
+
+/** Cached total capacity — probed once per session to avoid main-thread stalls. */
+// Exported for tests only via _resetCapacityCache()
+let cachedTotalCapacity: number | null = null;
+
+/** @internal Reset the cached capacity — for tests only. */
+export function _resetCapacityCache(): void {
+  cachedTotalCapacity = null;
+}
+
+/** Return cached capacity or probe once and cache. */
+function getCachedCapacity(currentUsedBytes: number): number {
+  if (cachedTotalCapacity !== null) return cachedTotalCapacity;
+  cachedTotalCapacity = probeLocalStorageCapacity(currentUsedBytes);
+  return cachedTotalCapacity;
 }
 
 /**
@@ -99,7 +132,8 @@ export function wouldExceedThreshold(sizeBytes: number, threshold = 80): boolean
 
 /** Metadata about an auto-save entry discovered in localStorage. */
 interface AutoSaveEntry {
-  key: string;
+  /** All keys that belong to this logical entry (evicted/kept as a unit). */
+  keys: string[];
   timestamp: number;
   sizeBytes: number;
 }
@@ -107,14 +141,46 @@ interface AutoSaveEntry {
 /**
  * Collect all auto-save related keys, sorted oldest-first by embedded
  * timestamp.  Keys with no parseable timestamp are treated as oldest (0).
+ *
+ * Keys that belong to an atomic group (e.g. the autosave triplet) are
+ * merged into a single entry so they are evicted or kept together.
  */
 function collectAutoSaveEntries(): AutoSaveEntry[] {
   const entries: AutoSaveEntry[] = [];
+  const groupedKeys = new Set<string>();
 
   try {
+    // First pass: emit grouped entries
+    for (const group of AUTOSAVE_GROUPS) {
+      const presentKeys: string[] = [];
+      let sizeBytes = 0;
+
+      for (const gk of group.keys) {
+        const val = localStorage.getItem(gk);
+        if (val !== null) {
+          presentKeys.push(gk);
+          sizeBytes += (gk.length + val.length) * 2;
+          groupedKeys.add(gk);
+        }
+      }
+
+      if (presentKeys.length === 0) continue;
+
+      // Use the dedicated timestamp key for ordering
+      let timestamp = 0;
+      const tsVal = localStorage.getItem(group.timestampKey);
+      if (tsVal !== null) {
+        const t = new Date(tsVal).getTime();
+        if (!Number.isNaN(t)) timestamp = t;
+      }
+
+      entries.push({ keys: presentKeys, timestamp, sizeBytes });
+    }
+
+    // Second pass: ungrouped auto-save keys
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key === null) continue;
+      if (key === null || groupedKeys.has(key)) continue;
 
       const isAutoSave = AUTOSAVE_KEY_PATTERNS.some((p) => key.startsWith(p));
       if (!isAutoSave) continue;
@@ -138,7 +204,7 @@ function collectAutoSaveEntries(): AutoSaveEntry[] {
         // Non-JSON values: use 0 so they're evicted first
       }
 
-      entries.push({ key, timestamp, sizeBytes });
+      entries.push({ keys: [key], timestamp, sizeBytes });
     }
   } catch {
     // localStorage unavailable
@@ -153,18 +219,27 @@ function collectAutoSaveEntries(): AutoSaveEntry[] {
  * Evict old auto-save entries, keeping only the most recent `keepCount`
  * entries (default 2).  Returns the total bytes freed.
  */
-export function evictOldAutoSaves(keepCount = 2): number {
+export function evictOldAutoSaves(
+  keepCount = 2,
+  protectedKeys?: ReadonlySet<string>,
+): number {
   const entries = collectAutoSaveEntries();
   const toEvict = entries.slice(0, Math.max(0, entries.length - keepCount));
 
   let freedBytes = 0;
   for (const entry of toEvict) {
-    try {
-      localStorage.removeItem(entry.key);
-      freedBytes += entry.sizeBytes;
-    } catch {
-      // ignore individual failures
+    // Skip entries that contain any protected key
+    if (protectedKeys && entry.keys.some((k) => protectedKeys.has(k))) {
+      continue;
     }
+    for (const key of entry.keys) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        // ignore individual failures
+      }
+    }
+    freedBytes += entry.sizeBytes;
   }
 
   return freedBytes;
@@ -180,9 +255,15 @@ export interface SafeSetResult {
  * Write `value` to localStorage under `key`.
  *
  * On QuotaExceededError: evict ALL old auto-saves and retry once.
+ * Pass `protectedKeys` to prevent specific keys from being evicted
+ * (e.g. sibling keys being written in the same batch).
  * Returns `{ success, evicted }`.
  */
-export function safeLocalStorageSet(key: string, value: string): SafeSetResult {
+export function safeLocalStorageSet(
+  key: string,
+  value: string,
+  protectedKeys?: ReadonlySet<string>,
+): SafeSetResult {
   try {
     localStorage.setItem(key, value);
     return { success: true, evicted: 0 };
@@ -191,8 +272,9 @@ export function safeLocalStorageSet(key: string, value: string): SafeSetResult {
       return { success: false, evicted: 0 };
     }
 
-    // Evict all old auto-saves (keep 0) to free as much space as possible
-    const evicted = evictOldAutoSaves(0);
+    // Evict all old auto-saves (keep 0) to free as much space as possible,
+    // but skip any keys the caller is currently writing.
+    const evicted = evictOldAutoSaves(0, protectedKeys);
 
     try {
       localStorage.setItem(key, value);

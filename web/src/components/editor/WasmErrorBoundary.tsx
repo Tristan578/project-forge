@@ -4,7 +4,7 @@ import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { captureException } from '@/lib/monitoring/sentry-client';
 import { safeLocalStorageSet } from '@/lib/storage/storageQuota';
-import { saveToIndexedDB } from '@/lib/storage/indexedDBFallback';
+import { saveToIndexedDB, loadFromIndexedDB, deleteFromIndexedDB } from '@/lib/storage/indexedDBFallback';
 
 interface Props {
   children: ReactNode;
@@ -14,6 +14,7 @@ interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
+  hasIndexedDBBackup: boolean;
 }
 
 /**
@@ -23,7 +24,7 @@ interface State {
 export class WasmErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null, errorInfo: null, hasIndexedDBBackup: false };
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
@@ -35,6 +36,9 @@ export class WasmErrorBoundary extends Component<Props, State> {
     // Save scene state to localStorage for recovery
     this.autoSaveScene();
 
+    // Check IndexedDB for backup (async — updates state when resolved)
+    this.checkIndexedDBBackup();
+
     captureException(error, {
       boundary: 'WasmErrorBoundary',
       componentStack: errorInfo.componentStack,
@@ -42,6 +46,18 @@ export class WasmErrorBoundary extends Component<Props, State> {
     console.error('WASM Error Boundary caught error:', error, errorInfo);
 
     this.setState({ errorInfo });
+  }
+
+  private checkIndexedDBBackup() {
+    loadFromIndexedDB('forge-editor-crash-backup')
+      .then((data) => {
+        if (data) {
+          this.setState({ hasIndexedDBBackup: true });
+        }
+      })
+      .catch(() => {
+        // Ignore — best-effort check
+      });
   }
 
   private autoSaveScene() {
@@ -85,25 +101,51 @@ export class WasmErrorBoundary extends Component<Props, State> {
   };
 
   private handleRestore = () => {
+    const restoreFromPayload = (payload: string) => {
+      try {
+        const parsed = JSON.parse(payload) as Record<string, unknown>;
+        if (typeof parsed.state === 'string') {
+          localStorage.setItem('forge-editor-store', parsed.state);
+        }
+      } catch (err) {
+        console.error('Failed to parse backup payload:', err);
+      }
+    };
+
     try {
-      // Load crash backup
+      // Try localStorage first
       const backupData = localStorage.getItem('forge-editor-crash-backup');
       if (backupData) {
-        const backup = JSON.parse(backupData);
-        localStorage.setItem('forge-editor-store', backup.state);
+        restoreFromPayload(backupData);
         localStorage.removeItem('forge-editor-crash-backup');
+        window.location.reload();
+        return;
       }
     } catch (err) {
-      console.error('Failed to restore backup:', err);
+      console.error('Failed to restore from localStorage:', err);
     }
 
-    // Reload page
-    window.location.reload();
+    // Fall back to IndexedDB
+    loadFromIndexedDB('forge-editor-crash-backup')
+      .then((data) => {
+        if (data) {
+          restoreFromPayload(data);
+          return deleteFromIndexedDB('forge-editor-crash-backup');
+        }
+        return undefined;
+      })
+      .then(() => {
+        window.location.reload();
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to restore from IndexedDB:', err);
+        window.location.reload();
+      });
   };
 
   render() {
     if (this.state.hasError) {
-      const hasBackup = !!localStorage.getItem('forge-editor-crash-backup');
+      const hasBackup = !!localStorage.getItem('forge-editor-crash-backup') || this.state.hasIndexedDBBackup;
 
       return (
         <div className="flex h-screen w-full items-center justify-center bg-gray-900 p-4">

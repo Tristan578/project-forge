@@ -4,6 +4,7 @@ import {
   wouldExceedThreshold,
   evictOldAutoSaves,
   safeLocalStorageSet,
+  _resetCapacityCache,
   type StorageEstimate,
 } from '../storageQuota';
 
@@ -62,6 +63,7 @@ function installStoreSpy(store: ReturnType<typeof buildStore>) {
 describe('storageQuota', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    _resetCapacityCache();
   });
 
   // -------------------------------------------------------------------------
@@ -185,6 +187,58 @@ describe('storageQuota', () => {
 
       expect(s.data['forge:autosave']).toBeUndefined();
       expect(s.data['forge-autosave-newer']).toBeDefined();
+    });
+
+    it('evicts the autosave triplet atomically (all three keys together)', () => {
+      const s = buildStore(100_000);
+      // Real autosave triplet format: plain strings, not JSON with timestamps
+      s.data['forge:autosave'] = '{"formatVersion":3,"entities":[]}';
+      s.data['forge:autosave:name'] = 'My Scene';
+      s.data['forge:autosave:time'] = '2024-01-01T00:00:00.000Z';
+      // A newer standalone entry
+      s.data['forge-autosave-other'] = JSON.stringify({ timestamp: '2025-06-01T00:00:00.000Z', state: 'newer' });
+      installStoreSpy(s);
+
+      evictOldAutoSaves(1);
+
+      // The triplet (older) should be evicted as a unit
+      expect(s.data['forge:autosave']).toBeUndefined();
+      expect(s.data['forge:autosave:name']).toBeUndefined();
+      expect(s.data['forge:autosave:time']).toBeUndefined();
+      // The newer standalone entry should be kept
+      expect(s.data['forge-autosave-other']).toBeDefined();
+    });
+
+    it('does not partially evict the autosave triplet', () => {
+      const s = buildStore(100_000);
+      s.data['forge:autosave'] = '{"formatVersion":3,"entities":[{"id":"1"}]}';
+      s.data['forge:autosave:name'] = 'Test';
+      s.data['forge:autosave:time'] = '2025-01-01T00:00:00.000Z';
+      installStoreSpy(s);
+
+      // Keep 1 — the triplet is the only group, so nothing is evicted
+      evictOldAutoSaves(1);
+
+      expect(s.data['forge:autosave']).toBeDefined();
+      expect(s.data['forge:autosave:name']).toBeDefined();
+      expect(s.data['forge:autosave:time']).toBeDefined();
+    });
+
+    it('respects protectedKeys and skips protected entries during eviction', () => {
+      const s = buildStore(100_000);
+      s.data['forge:autosave'] = '{"formatVersion":3}';
+      s.data['forge:autosave:name'] = 'Protected';
+      s.data['forge:autosave:time'] = '2024-01-01T00:00:00.000Z';
+      installStoreSpy(s);
+
+      const protectedKeys = new Set(['forge:autosave', 'forge:autosave:name', 'forge:autosave:time']);
+      const freed = evictOldAutoSaves(0, protectedKeys);
+
+      // Nothing should be evicted because all keys are protected
+      expect(freed).toBe(0);
+      expect(s.data['forge:autosave']).toBeDefined();
+      expect(s.data['forge:autosave:name']).toBeDefined();
+      expect(s.data['forge:autosave:time']).toBeDefined();
     });
   });
 

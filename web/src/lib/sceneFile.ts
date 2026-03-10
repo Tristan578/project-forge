@@ -102,9 +102,11 @@ export function saveAutoSave(json: string, name: string): void {
     evictOldAutoSaves(1);
   }
 
-  const jsonResult = safeLocalStorageSet(AUTOSAVE_KEY, json);
-  const nameResult = safeLocalStorageSet(AUTOSAVE_NAME_KEY, name);
-  const timeResult = safeLocalStorageSet(AUTOSAVE_TIME_KEY, new Date().toISOString());
+  // Protect all three autosave keys from being evicted while writing the triplet
+  const autosaveKeys = new Set([AUTOSAVE_KEY, AUTOSAVE_NAME_KEY, AUTOSAVE_TIME_KEY]);
+  const jsonResult = safeLocalStorageSet(AUTOSAVE_KEY, json, autosaveKeys);
+  const nameResult = safeLocalStorageSet(AUTOSAVE_NAME_KEY, name, autosaveKeys);
+  const timeResult = safeLocalStorageSet(AUTOSAVE_TIME_KEY, new Date().toISOString(), autosaveKeys);
 
   if (!jsonResult.success || !nameResult.success || !timeResult.success) {
     console.warn('[AutoSave] localStorage write failed — storage quota exhausted after eviction.');

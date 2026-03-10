@@ -47,6 +47,8 @@ export async function saveToIndexedDB(key: string, data: string): Promise<boolea
       req.onsuccess = () => resolve(true);
       req.onerror = () => resolve(false);
       tx.oncomplete = () => db.close();
+      tx.onabort = () => { db.close(); resolve(false); };
+      tx.onerror = () => { db.close(); };
     });
   } catch {
     return false;
@@ -93,6 +95,8 @@ export async function deleteFromIndexedDB(key: string): Promise<void> {
       req.onsuccess = () => resolve();
       req.onerror = () => resolve();
       tx.oncomplete = () => db.close();
+      tx.onabort = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); };
     });
   } catch {
     // Ignore — best-effort
