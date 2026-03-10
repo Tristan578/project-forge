@@ -59,6 +59,7 @@ export const useTaskStore = create<TaskState>()(
       },
 
       updateTask: (id, updates) => {
+        if (!get().tasks.some((t) => t.id === id)) return;
         set((s) => ({
           tasks: s.tasks.map((t) =>
             t.id === id ? { ...t, ...updates, updatedAt: Date.now() } : t

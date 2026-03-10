@@ -7,7 +7,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { useTaskStore, type EditorTask, type TaskStatus } from '../taskStore';
 
 // ---- Mock crypto.randomUUID ----
@@ -52,6 +52,10 @@ describe('taskStore', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
   });
 
   // ---- Initial state ----

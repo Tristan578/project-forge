@@ -7,7 +7,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { TaskboardPanel } from '../TaskboardPanel';
 import { useTaskStore } from '@/stores/taskStore';
@@ -104,6 +104,10 @@ describe('TaskboardPanel', () => {
 
   afterEach(() => {
     cleanup();
+  });
+
+  afterAll(() => {
+    vi.unstubAllGlobals();
   });
 
   // ---- Basic rendering ----
