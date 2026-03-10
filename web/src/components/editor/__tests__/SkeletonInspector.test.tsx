@@ -1,0 +1,232 @@
+/**
+ * Render tests for SkeletonInspector component.
+ *
+ * @vitest-environment jsdom
+ */
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
+import { SkeletonInspector } from '../SkeletonInspector';
+import { useEditorStore } from '@/stores/editorStore';
+
+vi.mock('@/stores/editorStore', () => ({
+  useEditorStore: vi.fn(),
+}));
+
+vi.mock('@/components/ui/InfoTooltip', () => ({
+  InfoTooltip: () => null,
+}));
+
+vi.mock('lucide-react', () => ({
+  Plus: (props: Record<string, unknown>) => <span data-testid="plus-icon" {...props} />,
+  Trash2: (props: Record<string, unknown>) => <span data-testid="trash-icon" {...props} />,
+}));
+
+const baseSkeleton = {
+  bones: [
+    {
+      name: 'root',
+      parentBone: null,
+      localPosition: [0, 0] as [number, number],
+      localRotation: 0,
+      localScale: [1, 1] as [number, number],
+      length: 1,
+      color: [1, 1, 1, 1] as [number, number, number, number],
+    },
+  ],
+  slots: [],
+  skins: { default: {} },
+  activeSkin: 'default',
+  ikConstraints: [],
+};
+
+describe('SkeletonInspector', () => {
+  const mockSetSkeleton2d = vi.fn();
+  const mockRemoveSkeleton2d = vi.fn();
+  const mockSetSelectedBone = vi.fn();
+  const mockPlayAnimation = vi.fn();
+
+  function setupStore({
+    skeleton = null as typeof baseSkeleton | null,
+    animations = [] as { name: string; duration: number }[],
+    selectedBone = null as string | null,
+  } = {}) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(useEditorStore).mockImplementation((selector: any) => {
+      const state = {
+        skeletons2d: skeleton ? { 'entity-1': skeleton } : {},
+        skeletalAnimations2d: { 'entity-1': animations },
+        selectedBone,
+        setSelectedBone: mockSetSelectedBone,
+        setSkeleton2d: mockSetSkeleton2d,
+        removeSkeleton2d: mockRemoveSkeleton2d,
+        playAnimation: mockPlayAnimation,
+      };
+      return typeof selector === 'function' ? selector(state) : state;
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('shows "No skeleton data" when no skeleton', () => {
+    setupStore();
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('No skeleton data')).toBeDefined();
+  });
+
+  it('shows Add Skeleton button when no skeleton', () => {
+    setupStore();
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Add Skeleton')).toBeDefined();
+  });
+
+  it('calls setSkeleton2d when Add Skeleton clicked', () => {
+    setupStore();
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByText('Add Skeleton'));
+    expect(mockSetSkeleton2d).toHaveBeenCalledWith(
+      'entity-1',
+      expect.objectContaining({ bones: [], activeSkin: 'default' })
+    );
+  });
+
+  it('renders Bone Hierarchy label when skeleton exists', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Bone Hierarchy')).toBeDefined();
+  });
+
+  it('shows bone name in bone list', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('root')).toBeDefined();
+  });
+
+  it('shows "No bones" when bones array is empty', () => {
+    setupStore({ skeleton: { ...baseSkeleton, bones: [] } });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('No bones')).toBeDefined();
+  });
+
+  it('calls setSelectedBone when bone button clicked', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByText('root'));
+    expect(mockSetSelectedBone).toHaveBeenCalledWith('root');
+  });
+
+  it('renders Create Bone label', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Create Bone')).toBeDefined();
+  });
+
+  it('renders bone name input placeholder', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByPlaceholderText('Bone name')).toBeDefined();
+  });
+
+  it('calls setSkeleton2d when a bone name is entered and add button clicked', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    const input = screen.getByPlaceholderText('Bone name');
+    fireEvent.change(input, { target: { value: 'arm' } });
+    // Click the Plus button (it has no text, only icon)
+    const plusButtons = screen.getAllByTestId('plus-icon');
+    fireEvent.click(plusButtons[0]);
+    expect(mockSetSkeleton2d).toHaveBeenCalledWith(
+      'entity-1',
+      expect.objectContaining({
+        bones: expect.arrayContaining([
+          expect.objectContaining({ name: 'arm' }),
+        ]),
+      })
+    );
+  });
+
+  it('shows "Root bone" when no bone is selected', () => {
+    setupStore({ skeleton: baseSkeleton, selectedBone: null });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Root bone')).toBeDefined();
+  });
+
+  it('shows parent bone name when a bone is selected', () => {
+    setupStore({ skeleton: baseSkeleton, selectedBone: 'root' });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Parent: root')).toBeDefined();
+  });
+
+  it('renders Active Skin label', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Active Skin')).toBeDefined();
+  });
+
+  it('renders skin name as option in skin select', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByRole('option', { name: 'default' })).toBeDefined();
+  });
+
+  it('renders animations section when animations exist', () => {
+    setupStore({
+      skeleton: baseSkeleton,
+      animations: [{ name: 'walk', duration: 1.2 }],
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Animations')).toBeDefined();
+    expect(screen.getByText('walk (1.2s)')).toBeDefined();
+  });
+
+  it('calls playAnimation when animation button clicked', () => {
+    setupStore({
+      skeleton: baseSkeleton,
+      animations: [{ name: 'walk', duration: 1.2 }],
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByText('walk (1.2s)'));
+    expect(mockPlayAnimation).toHaveBeenCalledWith('entity-1', 'walk');
+  });
+
+  it('shows Remove Skeleton button', () => {
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Remove Skeleton')).toBeDefined();
+  });
+
+  it('calls removeSkeleton2d when Remove Skeleton confirmed', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    setupStore({ skeleton: baseSkeleton });
+    render(<SkeletonInspector entityId="entity-1" />);
+    fireEvent.click(screen.getByText('Remove Skeleton'));
+    expect(mockRemoveSkeleton2d).toHaveBeenCalledWith('entity-1');
+  });
+
+  it('renders IK constraints when they exist', () => {
+    setupStore({
+      skeleton: {
+        ...baseSkeleton,
+        ikConstraints: [
+          { name: 'arm_ik', boneChain: ['upper_arm', 'forearm'], mix: 0.8, bendPositive: true },
+        ],
+      },
+    });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('IK Constraints')).toBeDefined();
+    expect(screen.getByText('arm_ik')).toBeDefined();
+  });
+
+  it('shows selected bone properties when a bone is selected', () => {
+    setupStore({ skeleton: baseSkeleton, selectedBone: 'root' });
+    render(<SkeletonInspector entityId="entity-1" />);
+    expect(screen.getByText('Bone: root')).toBeDefined();
+    expect(screen.getByText('Position')).toBeDefined();
+    expect(screen.getByText('Rotation (deg)')).toBeDefined();
+  });
+});
