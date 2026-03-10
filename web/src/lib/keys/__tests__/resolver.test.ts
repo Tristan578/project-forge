@@ -195,7 +195,7 @@ describe('resolveApiKey - platform key', () => {
 
   it('proceeds for pro tier even with zero balance', async () => {
     wireDb([], [makeUser({ tier: 'pro', monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 0 })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, balance: { total: 10 }, usageId: 'u-1' });
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 10, monthlyTotal: 0, addon: 0, total: 10, nextRefillDate: null }, usageId: 'u-1' });
     const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
     expect(result.type).toBe('platform');
     expect(result.metered).toBe(true);
@@ -203,7 +203,7 @@ describe('resolveApiKey - platform key', () => {
 
   it('deducts tokens and returns platform key', async () => {
     wireDb([], [makeUser({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, balance: { total: 950 }, usageId: 'usage-abc' });
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 950, monthlyTotal: 1000, addon: 0, total: 950, nextRefillDate: null }, usageId: 'usage-abc' });
     const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
     expect(result.type).toBe('platform');
     expect(result.key).toBe('platform-meshy-secret');
@@ -214,7 +214,7 @@ describe('resolveApiKey - platform key', () => {
 
   it('throws INSUFFICIENT_TOKENS when deduction fails', async () => {
     wireDb([], [makeUser({ tier: 'creator', monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 0 })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: false, balance: { total: 10 } });
+    mockDeductTokens.mockResolvedValueOnce({ success: false, error: 'INSUFFICIENT_TOKENS', balance: { monthlyRemaining: 10, monthlyTotal: 100, addon: 0, total: 10, nextRefillDate: null }, cost: 50 });
     let caught: ApiKeyError | null = null;
     try {
       await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
@@ -227,7 +227,7 @@ describe('resolveApiKey - platform key', () => {
   it('throws when platform key env var is not set', async () => {
     delete process.env['PLATFORM_MESHY_KEY'];
     wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, balance: { total: 50 }, usageId: 'u-2' });
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 50, monthlyTotal: 3000, addon: 0, total: 50, nextRefillDate: null }, usageId: 'u-2' });
     await expect(resolveApiKey('user-1', 'meshy', 10, 'texture_generation')).rejects.toThrow('Platform key not configured');
   });
 
@@ -238,7 +238,7 @@ describe('resolveApiKey - platform key', () => {
 
   it('passes metadata to deductTokens', async () => {
     wireDb([], [makeUser({ tier: 'pro' })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, balance: { total: 100 }, usageId: 'u-3' });
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 100, monthlyTotal: 3000, addon: 0, total: 100, nextRefillDate: null }, usageId: 'u-3' });
     process.env['PLATFORM_MESHY_KEY'] = 'key';
     const meta = { quality: 'high', width: 1024 };
     await resolveApiKey('user-1', 'meshy', 50, 'texture_generation', meta);
@@ -247,7 +247,7 @@ describe('resolveApiKey - platform key', () => {
 
   it('counts addonTokens in available balance', async () => {
     wireDb([], [makeUser({ tier: 'hobbyist', monthlyTokens: 100, monthlyTokensUsed: 100, addonTokens: 200 })]);
-    mockDeductTokens.mockResolvedValueOnce({ success: true, balance: { total: 200 }, usageId: 'u-4' });
+    mockDeductTokens.mockResolvedValueOnce({ success: true, remaining: { monthlyRemaining: 0, monthlyTotal: 100, addon: 200, total: 200, nextRefillDate: null }, usageId: 'u-4' });
     const result = await resolveApiKey('user-1', 'meshy', 50, 'texture_generation');
     expect(result.type).toBe('platform');
   });

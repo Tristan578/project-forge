@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { BUILT_IN_PREFABS } from '@/lib/prefabs/builtInPrefabs';
-import type { Prefab, PrefabSnapshot } from '@/lib/prefabs/prefabStore';
+import type { PrefabSnapshot } from '@/lib/prefabs/prefabStore';
 
 // ---------------------------------------------------------------------------
 // Structure validation helpers

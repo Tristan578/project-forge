@@ -4,7 +4,7 @@
  * Covers: idempotency guard, subscription CRUD, tier transitions,
  * invoice paid/failed handling, and token grant/rollover logic.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // Mocks (must appear before subject imports)
@@ -274,10 +274,8 @@ describe('handleSubscriptionUpdated', () => {
 
   it('grants difference tokens on upgrade', async () => {
     const user = makeDbUser({ tier: 'hobbyist', monthlyTokens: 300, monthlyTokensUsed: 100 });
-    let updateCallCount = 0;
     const updateChain = {
       set: vi.fn().mockImplementation(() => {
-        updateCallCount++;
         return { where: vi.fn().mockResolvedValue(undefined) };
       }),
     };
