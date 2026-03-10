@@ -12,6 +12,13 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
 }));
 
+interface MockClip {
+  frames: number[];
+  duration: number;
+  looping: boolean;
+  pingPong: boolean;
+}
+
 const baseSpriteSheet = {
   assetId: 'sheet-1',
   frames: [
@@ -22,7 +29,7 @@ const baseSpriteSheet = {
   clips: {
     idle: { frames: [0], duration: 0.2, looping: true, pingPong: false },
     run: { frames: [0, 1], duration: 0.1, looping: true, pingPong: false },
-  },
+  } as Record<string, MockClip>,
 };
 
 const baseAnimator = {
@@ -98,7 +105,7 @@ describe('SpriteAnimationInspector', () => {
 
   it('shows no Animation Clips section when spriteSheet has no clips', () => {
     setupStore({
-      spriteSheet: { ...baseSpriteSheet, clips: {} as Record<string, (typeof baseSpriteSheet.clips)[string]> },
+      spriteSheet: { ...baseSpriteSheet, clips: {} as Record<string, MockClip> },
     });
     render(<SpriteAnimationInspector />);
     expect(screen.queryByText('Animation Clips')).toBeNull();

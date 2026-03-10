@@ -20,24 +20,27 @@ vi.mock('@/lib/initLog', () => ({
   copyInitLogToClipboard: vi.fn().mockResolvedValue(true),
 }));
 
-import { useEngineStatus } from '@/hooks/useEngineStatus';
+import { useEngineStatus, type EngineStatus, type PhaseStatus } from '@/hooks/useEngineStatus';
+import type { InitPhase } from '@/lib/initLog';
 
-const baseStatus = {
-  currentPhase: 'renderer_init' as const,
-  phases: [
-    { phase: 'wasm_loading' as const, status: 'done' as const, duration: 1500, message: null },
-    { phase: 'renderer_init' as const, status: 'active' as const, duration: 0, message: null },
-    { phase: 'scene_setup' as const, status: 'pending' as const, duration: 0, message: null },
-  ],
+const basePhases: PhaseStatus[] = [
+  { phase: 'wasm_loading', status: 'done', duration: 1500 },
+  { phase: 'renderer_init', status: 'active', duration: 0 },
+  { phase: 'scene_setup', status: 'pending', duration: 0 },
+];
+
+const baseStatus: EngineStatus & { retry: () => void; logEvent: (phase: InitPhase, message?: string, error?: string) => void } = {
+  currentPhase: 'renderer_init',
+  phases: basePhases,
   totalElapsed: 2000,
   isTimedOut: false,
-  timeoutPhase: null as string | null,
+  timeoutPhase: null,
   retryCount: 0,
   canRetry: false,
   isReady: false,
   retry: vi.fn(),
   logEvent: vi.fn(),
-  error: null as string | null,
+  error: null,
 };
 
 describe('InitOverlay', () => {

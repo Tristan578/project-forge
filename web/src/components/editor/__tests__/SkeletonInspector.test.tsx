@@ -35,7 +35,7 @@ const baseSkeleton: SkeletonData2d = {
     },
   ],
   slots: [],
-  skins: { default: {} },
+  skins: { default: { name: 'default', attachments: {} } },
   activeSkin: 'default',
   ikConstraints: [],
 };
