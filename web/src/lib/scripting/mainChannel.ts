@@ -43,8 +43,8 @@ export class MainThreadChannel {
   private readonly callbackHandlers = new Map<string, Set<(data: unknown) => void>>();
   private readonly options: Required<ChannelOptions>;
 
-  /** Number of messages currently queued (awaiting space due to backpressure). */
-  private queueSize = 0;
+  /** Number of in-flight command requests awaiting a response. */
+  private pendingCount = 0;
   private destroyed = false;
 
   constructor(worker: Worker, options: ChannelOptions = {}) {
@@ -74,14 +74,14 @@ export class MainThreadChannel {
       return Promise.reject(new Error('MainThreadChannel has been destroyed'));
     }
 
-    if (this.options.enableBackpressure && this.queueSize >= this.options.maxQueueSize) {
+    if (this.options.enableBackpressure && this.pendingCount >= this.options.maxQueueSize) {
       // Signal backpressure to the worker and reject immediately.
       const bpMsg = createChannelMessage<BackpressurePayload>('backpressure', {
-        queueSize: this.queueSize,
+        pendingCount: this.pendingCount,
       });
       this.port.postMessage(bpMsg);
       return Promise.reject(
-        new Error(`Channel backpressure: queue size ${this.queueSize} exceeds limit ${this.options.maxQueueSize}`),
+        new Error(`Channel backpressure: ${this.pendingCount} pending requests exceeds limit ${this.options.maxQueueSize}`),
       );
     }
 
@@ -90,7 +90,7 @@ export class MainThreadChannel {
 
       const timer = setTimeout(() => {
         this.pendingRequests.delete(msg.id);
-        this.queueSize = Math.max(0, this.queueSize - 1);
+        this.pendingCount = Math.max(0, this.pendingCount - 1);
         reject(new Error(`Command "${command}" timed out after ${this.options.timeoutMs}ms (id: ${msg.id})`));
       }, this.options.timeoutMs);
 
@@ -100,8 +100,15 @@ export class MainThreadChannel {
         timer,
       });
 
-      this.queueSize++;
-      this.port.postMessage(msg);
+      this.pendingCount++;
+      try {
+        this.port.postMessage(msg);
+      } catch (err) {
+        clearTimeout(timer);
+        this.pendingRequests.delete(msg.id);
+        this.pendingCount = Math.max(0, this.pendingCount - 1);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
@@ -171,7 +178,7 @@ export class MainThreadChannel {
     this.pendingRequests.clear();
     this.callbackHandlers.clear();
     this.port.close();
-    this.queueSize = 0;
+    this.pendingCount = 0;
   }
 
   // ─── Private ─────────────────────────────────────────────────────────────────
@@ -187,7 +194,7 @@ export class MainThreadChannel {
         if (pending) {
           clearTimeout(pending.timer);
           this.pendingRequests.delete(payload.requestId);
-          this.queueSize = Math.max(0, this.queueSize - 1);
+          this.pendingCount = Math.max(0, this.pendingCount - 1);
           pending.resolve(payload.result);
         }
         break;
@@ -219,7 +226,7 @@ export class MainThreadChannel {
           if (pending) {
             clearTimeout(pending.timer);
             this.pendingRequests.delete(payload.requestId);
-            this.queueSize = Math.max(0, this.queueSize - 1);
+            this.pendingCount = Math.max(0, this.pendingCount - 1);
             pending.reject(new Error(payload.message));
           }
         }

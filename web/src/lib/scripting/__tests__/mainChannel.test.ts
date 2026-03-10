@@ -34,7 +34,7 @@ type MockPort = ReturnType<typeof makeMockPort>;
  * Build a MainThreadChannel with fully mocked internals.
  * Returns the channel and the port mock for inspection / message injection.
  */
-function makeChannel(options?: Parameters<typeof MainThreadChannel>[1]) {
+function makeChannel(options?: ConstructorParameters<typeof MainThreadChannel>[1]) {
   const workerPort = makeMockPort(); // This port goes to the worker
   const mainPort = makeMockPort();   // This port stays on main thread
 
@@ -138,7 +138,7 @@ describe('sendCommand', () => {
     await expect(channel.sendCommand('cmd3', {})).rejects.toThrow(/backpressure/i);
   });
 
-  it('decrements queueSize when a result is received', async () => {
+  it('decrements pendingCount when a result is received', async () => {
     const { channel, mainPort } = makeChannel({ maxQueueSize: 1, enableBackpressure: true });
     const p = channel.sendCommand('cmd1', {});
 

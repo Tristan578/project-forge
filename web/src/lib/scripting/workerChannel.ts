@@ -11,6 +11,7 @@ import {
   type ResultPayload,
   type CallbackPayload,
   type ErrorPayload,
+  type BackpressurePayload,
 } from './channelProtocol';
 
 // ─── Handler types ─────────────────────────────────────────────────────────────
@@ -22,6 +23,8 @@ export type CommandHandler = (
 ) => void;
 
 export type EventHandler = (eventType: string, data: unknown) => void;
+
+export type BackpressureHandler = (queueSize: number) => void;
 
 // ─── WorkerChannel ────────────────────────────────────────────────────────────
 
@@ -41,6 +44,7 @@ export class WorkerChannel {
   private port: MessagePort | null = null;
   private commandHandler: CommandHandler | null = null;
   private eventHandler: EventHandler | null = null;
+  private backpressureHandler: BackpressureHandler | null = null;
 
   // ─── Initialisation ──────────────────────────────────────────────────────────
 
@@ -79,7 +83,7 @@ export class WorkerChannel {
   /**
    * Report an error to the main thread, optionally correlating to a request.
    */
-  sendError(requestId: string, error: Error): void {
+  sendError(requestId: string | undefined, error: Error): void {
     this.assertInitialized();
     const msg = createChannelMessage<ErrorPayload>('error', {
       requestId,
@@ -104,6 +108,14 @@ export class WorkerChannel {
    */
   onEvent(handler: EventHandler): void {
     this.eventHandler = handler;
+  }
+
+  /**
+   * Register a handler invoked when the main thread signals backpressure.
+   * The worker should throttle or pause sending until pressure eases.
+   */
+  onBackpressure(handler: BackpressureHandler): void {
+    this.backpressureHandler = handler;
   }
 
   // ─── Private ─────────────────────────────────────────────────────────────────
@@ -139,7 +151,14 @@ export class WorkerChannel {
         }
         break;
       }
-      // 'result', 'callback', 'error', 'pong', 'backpressure' not expected from main -> worker
+      case 'backpressure': {
+        if (this.backpressureHandler) {
+          const payload = (msg as ChannelMessage<BackpressurePayload>).payload;
+          this.backpressureHandler(payload.pendingCount);
+        }
+        break;
+      }
+      // 'result', 'callback', 'error', 'pong' not expected from main -> worker
       default:
         break;
     }
