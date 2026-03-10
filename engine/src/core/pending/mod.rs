@@ -273,6 +273,7 @@ pub struct PendingCommands {
     pub get_performance_stats_requests: Vec<GetPerformanceStatsRequest>,
     pub optimize_scene_requests: Vec<OptimizeSceneRequest>,
     pub set_lod_distances_requests: Vec<SetLodDistancesRequest>,
+    pub set_simplification_backend_requests: Vec<SetSimplificationBackendRequest>,
 }
 
 // === Thread-Local Bridge Access ===

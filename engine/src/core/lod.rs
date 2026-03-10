@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy::mesh::Mesh;
 use serde::{Deserialize, Serialize};
+use crate::core::mesh_simplify::{MeshSimplifier, QemSimplifier, FastSimplifier};
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize)]
 pub struct LodData {
@@ -51,6 +52,43 @@ impl Default for LodMeshes {
     fn default() -> Self {
         Self {
             levels: [None, None, None, None],
+        }
+    }
+}
+
+/// Bevy resource that holds the active mesh simplification backend.
+///
+/// Defaults to `QemSimplifier` (attribute-preserving QEM). Can be switched to
+/// `FastSimplifier` (position-only, lower quality but faster) via the
+/// `set_simplification_backend` command.
+#[derive(Resource)]
+pub struct SimplificationBackend {
+    pub backend: Box<dyn MeshSimplifier>,
+    pub backend_name: String,
+}
+
+impl Default for SimplificationBackend {
+    fn default() -> Self {
+        Self {
+            backend: Box::new(QemSimplifier),
+            backend_name: "qem".to_string(),
+        }
+    }
+}
+
+impl SimplificationBackend {
+    /// Switch the active backend by name. Accepts `"qem"` or `"fast"`.
+    /// Unknown names fall back to `"qem"`.
+    pub fn set_by_name(&mut self, name: &str) {
+        match name {
+            "fast" => {
+                self.backend = Box::new(FastSimplifier);
+                self.backend_name = "fast".to_string();
+            }
+            _ => {
+                self.backend = Box::new(QemSimplifier);
+                self.backend_name = "qem".to_string();
+            }
         }
     }
 }

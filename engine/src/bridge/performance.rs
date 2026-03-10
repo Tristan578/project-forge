@@ -5,8 +5,7 @@ use bevy::mesh::Mesh;
 use crate::core::{
     camera::EditorCamera,
     entity_id::EntityId,
-    lod::{LodData, LodMeshes, PerformanceBudget, PerformanceMetrics},
-    mesh_simplify,
+    lod::{LodData, LodMeshes, PerformanceBudget, PerformanceMetrics, SimplificationBackend},
     pending::PendingCommands,
 };
 use crate::bridge::events;
@@ -19,10 +18,17 @@ const METRICS_COLLECTION_INTERVAL: u32 = 10;
 pub fn apply_lod_commands(
     mut commands: Commands,
     mut pending: ResMut<PendingCommands>,
+    mut backend: ResMut<SimplificationBackend>,
     mut query: Query<(Entity, &EntityId, Option<&mut LodData>)>,
     mesh_query: Query<&Mesh3d>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
+    // Process set_simplification_backend requests
+    for request in pending.set_simplification_backend_requests.drain(..) {
+        backend.set_by_name(&request.backend_name);
+        tracing::info!("Simplification backend set to '{}'", backend.backend_name);
+    }
+
     // Process set_lod requests
     for request in pending.set_lod_requests.drain(..) {
         if let Some((entity, _eid, lod_data)) = query.iter_mut().find(|(_e, eid, _)| eid.0 == request.entity_id) {
@@ -69,7 +75,7 @@ pub fn apply_lod_commands(
                     lod_meshes.levels[0] = Some(mesh_handle.clone());
 
                     for (i, &ratio) in ratios.iter().enumerate() {
-                        let simplified = mesh_simplify::simplify_mesh(&original_mesh, ratio);
+                        let simplified = backend.backend.simplify(&original_mesh, ratio);
                         let handle = meshes.add(simplified);
                         lod_meshes.levels[i + 1] = Some(handle);
                     }
@@ -171,6 +177,7 @@ pub(super) fn regenerate_missing_lod_meshes(
     mut commands: Commands,
     query: Query<(Entity, &EntityId, &LodData, &Mesh3d), Without<LodMeshes>>,
     pending: Res<PendingCommands>,
+    backend: Res<SimplificationBackend>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     for (entity, eid, lod, mesh3d) in query.iter() {
@@ -184,7 +191,6 @@ pub(super) fn regenerate_missing_lod_meshes(
             continue;
         }
 
-
         let mesh_handle = mesh3d.0.clone();
         let original_mesh_clone = meshes.get(&mesh_handle).cloned();
         if let Some(original_mesh) = original_mesh_clone {
@@ -192,7 +198,7 @@ pub(super) fn regenerate_missing_lod_meshes(
             lod_meshes.levels[0] = Some(mesh_handle);
 
             for (i, &ratio) in lod.lod_ratios.iter().enumerate() {
-                let simplified = mesh_simplify::simplify_mesh(&original_mesh, ratio);
+                let simplified = backend.backend.simplify(&original_mesh, ratio);
                 let handle = meshes.add(simplified);
                 lod_meshes.levels[i + 1] = Some(handle);
             }

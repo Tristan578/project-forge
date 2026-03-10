@@ -6,8 +6,10 @@ use serde_json::Value;
 use crate::core::pending::{
     SetLodRequest, GenerateLodsRequest, SetPerformanceBudgetRequest,
     GetPerformanceStatsRequest, OptimizeSceneRequest, SetLodDistancesRequest,
+    SetSimplificationBackendRequest,
     bridge_set_lod, bridge_generate_lods, bridge_set_performance_budget,
     bridge_get_performance_stats, bridge_optimize_scene, bridge_set_lod_distances,
+    bridge_set_simplification_backend,
 };
 use super::CommandResult;
 
@@ -20,6 +22,7 @@ pub fn dispatch(command: &str, payload: &Value) -> Option<CommandResult> {
         "get_performance_stats" => Some(handle_get_performance_stats()),
         "optimize_scene" => Some(handle_optimize_scene()),
         "set_lod_distances" => Some(handle_set_lod_distances(payload)),
+        "set_simplification_backend" => Some(handle_set_simplification_backend(payload)),
         _ => None,
     }
 }
@@ -119,6 +122,32 @@ fn handle_set_lod_distances(payload: &Value) -> CommandResult {
 
     #[cfg(target_arch = "wasm32")]
     bridge_set_lod_distances(params.distances);
+
+    Ok(())
+}
+
+#[derive(Deserialize)]
+struct SetSimplificationBackendPayload {
+    backend: String,
+}
+
+fn handle_set_simplification_backend(payload: &Value) -> CommandResult {
+    let params: SetSimplificationBackendPayload = serde_json::from_value(payload.clone())
+        .map_err(|e| format!("Invalid set_simplification_backend payload: {}", e))?;
+
+    let backend = params.backend.as_str();
+    if backend != "qem" && backend != "fast" {
+        return Err(format!(
+            "Unknown simplification backend '{}'. Valid values: 'qem', 'fast'",
+            backend
+        ));
+    }
+
+    // Only queue into the pending buffer in editor builds — in runtime builds
+    // apply_lod_commands is not registered, so the buffer would never be drained
+    // and requests would accumulate as a silent memory leak.
+    #[cfg(all(target_arch = "wasm32", not(feature = "runtime")))]
+    bridge_set_simplification_backend(params.backend);
 
     Ok(())
 }
