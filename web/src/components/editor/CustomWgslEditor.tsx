@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, type KeyboardEvent } from 'react';
 import { Code2, Play, AlertCircle, CheckCircle, Clock, ChevronDown } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 
@@ -108,7 +108,7 @@ export function CustomWgslEditor({ className = '' }: CustomWgslEditorProps) {
 
   // Auto-compile when user presses Ctrl+Enter / Cmd+Enter inside the textarea.
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    (e: KeyboardEvent<HTMLTextAreaElement>) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         handleCompile();
@@ -120,8 +120,11 @@ export function CustomWgslEditor({ className = '' }: CustomWgslEditorProps) {
   const status = customWgslSource?.compileStatus ?? null;
   const compileError = customWgslSource?.compileError ?? null;
 
-  // Indicate if local code differs from what was last compiled.
-  const isDirty = customWgslSource === null || localCode !== customWgslSource.userCode;
+  // Indicate if local editor state differs from what was last compiled (code or name).
+  const isDirty =
+    customWgslSource === null ||
+    localCode !== customWgslSource.userCode ||
+    localName !== customWgslSource.name;
 
   return (
     <div className={`flex flex-col gap-2 ${className}`}>
