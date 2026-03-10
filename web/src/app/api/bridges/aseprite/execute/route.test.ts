@@ -247,6 +247,31 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(data.metadata).toEqual({ width: 32, height: 32 });
   });
 
+  it('accepts null params and defaults to empty object', async () => {
+    const nullParamsMock = vi.fn().mockResolvedValue(mockResult);
+    vi.doMock('@/lib/auth/api-auth', () => ({
+      authenticateRequest: vi.fn().mockResolvedValue({
+        ok: true as const,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      }),
+    }));
+    vi.doMock('@/lib/bridges/bridgeManager', () => ({
+      discoverTool: vi.fn().mockResolvedValue(connectedConfig),
+    }));
+    vi.doMock('@/lib/bridges/asepriteBridge', () => ({
+      executeOperation: nullParamsMock,
+    }));
+
+    const POST = await importRoute();
+    const res = await POST(makeRequest({ operation: 'createSprite', params: null }));
+    expect(res.status).toBe(200);
+    expect(nullParamsMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ name: 'createSprite', params: {} })
+    );
+  });
+
   it('accepts missing params and defaults to empty object', async () => {
     const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
     vi.doMock('@/lib/auth/api-auth', () => ({
