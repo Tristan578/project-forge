@@ -38,7 +38,7 @@ The session start hook will auto-start the server if the binary is found. If it 
 
 - **Web UI**: http://localhost:3010
 - **API**: http://localhost:3010/api
-- **Project ID**: `01KJEE8R1XXFF0CZT1WCSTGRDP` (prefix: PF)
+- **Project ID**: `01KK974VMNC16ZAW7MW1NH3T3M` (prefix: PF)
 
 ### Required Ticket Fields
 Every ticket MUST have ALL of these before work begins:
@@ -46,7 +46,7 @@ Every ticket MUST have ALL of these before work begins:
 - **Description**: Technical context, affected files, scope (at least 20 chars beyond user story + AC)
 - **Acceptance Criteria**: Given/When/Then format — **minimum 3 scenarios** (happy path, edge case, negative/error case)
 - **Priority**: urgent, high, medium, low
-- **Team**: Engineering (`01KJFNHZC49XG9KXRYTMYEEDTS`), PM (`01KJFNJC02QK6F5NSDND7NH5MS`), or Leadership (`01KJFNK35JVPQJESS3RZM0F5HP`)
+- **Team**: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), or Leadership (`01KK9751PD79RCWY462CYQ06CW`)
 - **Subtasks**: At least 3 implementation steps (the plan)
 
 ### Workflow

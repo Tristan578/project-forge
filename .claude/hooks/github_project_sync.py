@@ -86,7 +86,7 @@ def resolve_project_id(config):
 
     project_name = config.get("allowedProjectName")
     if not project_name:
-        result = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+        result = config.get("localProjectId", "01KK974VMNC16ZAW7MW1NH3T3M")
         _resolved_cache["project"] = result
         return result
 
@@ -108,7 +108,7 @@ def resolve_project_id(config):
     except Exception as e:
         print(f"  [bootstrap] Failed to create project {project_name}: {e}", file=sys.stderr)
 
-    fallback = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    fallback = config.get("localProjectId", "01KK974VMNC16ZAW7MW1NH3T3M")
     _resolved_cache["project"] = fallback
     return fallback
 
@@ -284,7 +284,7 @@ def format_github_body(ticket):
     number = ticket.get("number", 0)
     team_id = ticket.get("teamId", "") or ""
     subtasks = ticket.get("subtasks", [])
-    project_id = ticket.get("projectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = ticket.get("projectId", "01KK974VMNC16ZAW7MW1NH3T3M")
 
     parts = [f"**Priority:** {priority}", ""]
 
