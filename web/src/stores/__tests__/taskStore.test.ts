@@ -421,7 +421,7 @@ describe('taskStore', () => {
       addTask('Check persistence');
 
       const lastCall = localStorageMock.setItem.mock.calls.find(
-        ([key]: [string]) => key === 'spawnforge-editor-tasks'
+        ([key]: [string, string]) => key === 'spawnforge-editor-tasks'
       );
       expect(lastCall).toBeDefined();
       const stored = JSON.parse(lastCall![1]);
