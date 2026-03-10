@@ -138,7 +138,7 @@ describe('claimEvent', () => {
     expect(claimEvent(b)).toBe(false);
   });
 
-  it('still returns false after releaseEvent on an unclaimed event', () => {
+  it('allows claimEvent to succeed after releaseEvent on an unclaimed event', () => {
     const id = uniqueId();
     releaseEvent(id); // no-op
     expect(claimEvent(id)).toBe(true);

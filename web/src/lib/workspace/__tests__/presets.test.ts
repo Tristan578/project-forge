@@ -301,10 +301,10 @@ describe('LAYOUT_PRESETS.presentation', () => {
 // ---------------------------------------------------------------------------
 
 describe('panelOpts integration', () => {
-  it('returns empty object for unknown panel id', () => {
-    // Apply any preset with the mock — unknown panels return {}
-    // We cannot easily test this without accessing panelOpts directly,
-    // but we can confirm that panels in PANEL_DEFINITIONS get their opts applied
+  it('applies PANEL_DEFINITIONS options for known panels', () => {
+    // Apply any preset with the mock — known panels should receive options
+    // from PANEL_DEFINITIONS via panelOpts (e.g. minWidth/minHeight).
+    // Here we confirm that scene-viewport gets its configured minWidth.
     const api = makeMockApi();
     LAYOUT_PRESETS.default.apply(api as never);
     const viewportCall = api._panelCalls.find((c) => c.id === 'scene-viewport');
