@@ -51,6 +51,7 @@ describe('taskStore', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
@@ -318,21 +319,19 @@ describe('taskStore', () => {
 
   describe('clearCompleted', () => {
     it('removes all done tasks', () => {
-      const { addTask, moveTask, clearCompleted } = useTaskStore.getState();
-      addTask('Done A');
-      addTask('Done B');
+      const { addTask, clearCompleted } = useTaskStore.getState();
+      const idDoneA = addTask('Done A');
+      const idDoneB = addTask('Done B');
       const idTodo = addTask('Still todo');
 
-      const state = useTaskStore.getState();
-      state.moveTask(state.tasks[0].id, 'done');
-      state.moveTask(state.tasks[1].id, 'done');
+      useTaskStore.getState().moveTask(idDoneA, 'done');
+      useTaskStore.getState().moveTask(idDoneB, 'done');
 
       clearCompleted();
 
       const remaining = useTaskStore.getState().tasks;
       expect(remaining).toHaveLength(1);
       expect(remaining[0].id).toBe(idTodo);
-      void moveTask; // suppress unused warning
     });
 
     it('does not affect todo or in_progress tasks', () => {
