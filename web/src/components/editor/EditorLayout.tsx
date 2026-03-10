@@ -283,7 +283,13 @@ export function EditorLayout() {
         const ws = useWorkspaceStore.getState();
         const existing = ws.api?.getPanel('taskboard');
         if (existing) {
-          existing.api.close();
+          // If panel exists but is in a background tab, activate it first.
+          // Only close if it's already the active/visible panel.
+          if (!existing.api.isActive) {
+            existing.api.setActive();
+          } else {
+            existing.api.close();
+          }
         } else {
           ws.openPanel('taskboard');
         }
