@@ -71,10 +71,15 @@ else:
 
 if [ "$DEV_MATCH" = "DEV_INTENT_DETECTED" ]; then
     # Extract a summary of what the user wants to do (first 200 chars)
-    PROMPT_SUMMARY=$(echo "$INPUT" | head -c 200)
+    PROMPT_SUMMARY=$(printf '%s' "$INPUT" | head -c 200)
 
-    cat <<EOF
-<user-prompt-submit-hook>
+    # Resolve dynamic values before the quoted heredoc (which prevents expansion)
+    _HOOK_PROJECT_ID=$(tb_get_project_id)
+    _HOOK_TEAM_ID=$(tb_get_team_id)
+
+    # Use quoted heredoc to prevent shell expansion of user input
+    printf '%s\n' "<user-prompt-submit-hook>"
+    cat <<'HOOK'
 [TASKBOARD] NO ACTIVE TICKET — development work requires tracking.
 
 You MUST find or create a ticket before writing any code. Do this NOW:
@@ -91,17 +96,19 @@ You MUST find or create a ticket before writing any code. Do this NOW:
        "title": "<imperative description of the work>",
        "description": "**User Story:**\nAs a developer, I want <goal from prompt> so that <benefit>.\n\n**Description:**\n<technical context>\n\n**Acceptance Criteria:**\n- Given <precondition>, When <action>, Then <result>\n- Given <precondition>, When <action>, Then <result>\n- Given <precondition>, When <action>, Then <result>",
        "priority": "medium",
-       "projectId": "$(tb_get_project_id)",
-       "teamId": "$(tb_get_team_id)"
+HOOK
+    printf '       "projectId": "%s",\n' "$_HOOK_PROJECT_ID"
+    printf '       "teamId": "%s"\n' "$_HOOK_TEAM_ID"
+    cat <<'HOOK'
      }
    - Then add subtasks: POST http://localhost:3010/api/tickets/{id}/subtasks
    - Then move to in_progress
 
 4. THEN proceed with the user's request.
 
-User's request context: "${PROMPT_SUMMARY}"
-</user-prompt-submit-hook>
-EOF
+HOOK
+    printf 'User'\''s request context: %s\n' "$PROMPT_SUMMARY"
+    printf '%s\n' "</user-prompt-submit-hook>"
     # Exit 0 so the prompt is NOT blocked — the AI should handle ticket creation inline
     exit 0
 fi

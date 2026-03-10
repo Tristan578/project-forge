@@ -44,7 +44,7 @@ cd engine && cargo build --target wasm32-unknown-unknown --release --features we
 
 ### TypeScript (web/, mcp-server/)
 - Strict mode. Never use `any`. Avoid `as` casts.
-- All chat handler arguments MUST be validated before use (manual validation — Zod is not installed).
+- All chat handler arguments MUST be validated before use (manual validation via `parseArgs()` pattern — Zod is not used for runtime validation).
 - Use named exports. Prefer `const` over `let`. Never use `var`.
 - Tailwind CSS for all styling. No inline styles or CSS modules.
 

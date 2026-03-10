@@ -83,10 +83,9 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies \
   -f body="Fixed in <commit_sha>. <brief explanation of the fix>"
 ```
 
-#### Reply to a PR review (top-level review):
+#### Reply to a top-level PR review (as an issue comment):
 ```bash
-gh api repos/{owner}/{repo}/pulls/{number}/reviews/{review_id}/comments \
-  -f body="Addressed — <brief explanation>"
+gh pr comment {number} --body "Addressed — <brief explanation>"
 ```
 
 #### For false positives, reply explaining why:
