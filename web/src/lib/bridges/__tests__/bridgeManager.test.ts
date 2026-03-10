@@ -20,9 +20,35 @@ vi.mock('os', () => ({
   default: { homedir: vi.fn(() => '/mock-home'), platform: vi.fn(() => 'darwin') },
 }));
 
-import * as bridgeManager from '../bridgeManager';
 import * as fs from 'fs';
 import * as childProcess from 'child_process';
+
+// Use dynamic import so each test group gets a fresh module-level cache.
+async function importBridgeManager() {
+  vi.resetModules();
+  // Re-apply mocks after module reset
+  vi.mock('server-only', () => ({}));
+  vi.mock('child_process', () => ({
+    execFile: vi.fn(),
+    default: { execFile: vi.fn() },
+  }));
+  vi.mock('fs', () => ({
+    existsSync: vi.fn(),
+    readFileSync: vi.fn(),
+    writeFileSync: vi.fn(),
+    mkdirSync: vi.fn(),
+    default: { existsSync: vi.fn(), readFileSync: vi.fn(), writeFileSync: vi.fn(), mkdirSync: vi.fn() },
+  }));
+  vi.mock('os', () => ({
+    homedir: vi.fn(() => '/mock-home'),
+    platform: vi.fn(() => 'darwin'),
+    default: { homedir: vi.fn(() => '/mock-home'), platform: vi.fn(() => 'darwin') },
+  }));
+  return await import('../bridgeManager');
+}
+
+// Static import for tests that don't need a fresh cache
+import * as bridgeManager from '../bridgeManager';
 
 describe('BridgeManager', () => {
   beforeEach(() => {
@@ -44,31 +70,32 @@ describe('BridgeManager', () => {
 
   describe('discoverTool', () => {
     it('returns connected config when binary exists on macOS', async () => {
-      const mockExecFile = vi.mocked(childProcess.execFile);
-      vi.mocked(fs.existsSync).mockReturnValue(true);
-      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+      // Use fresh module to avoid cache from other tests
+      const freshModule = await importBridgeManager();
+      const freshFs = await import('fs');
+      const freshCp = await import('child_process');
+
+      vi.mocked(freshFs.existsSync).mockReturnValue(true);
+      vi.mocked(freshCp.execFile).mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
         (cb as (err: null, stdout: string, stderr: string) => void)(null, 'Aseprite 1.3.17-arm64', '');
         return {} as ReturnType<typeof childProcess.execFile>;
       });
 
-      const config = await bridgeManager.discoverTool('aseprite');
+      const config = await freshModule.discoverTool('aseprite');
       expect(config.status).toBe('connected');
       expect(config.activeVersion).toBe('1.3.17');
     });
 
     it('returns not_found when no binary exists', async () => {
-      // Advance time past the 60s cache TTL so the previous test's cached result is expired
-      const realDateNow = Date.now;
-      Date.now = () => realDateNow() + 120_000;
-      try {
-        vi.mocked(fs.existsSync).mockReturnValue(false);
+      // Use fresh module so the discovery cache is empty — no time travel needed
+      const freshModule = await importBridgeManager();
+      const freshFs = await import('fs');
 
-        const config = await bridgeManager.discoverTool('aseprite');
-        expect(config.status).toBe('not_found');
-        expect(config.activeVersion).toBeNull();
-      } finally {
-        Date.now = realDateNow;
-      }
+      vi.mocked(freshFs.existsSync).mockReturnValue(false);
+
+      const config = await freshModule.discoverTool('aseprite');
+      expect(config.status).toBe('not_found');
+      expect(config.activeVersion).toBeNull();
     });
 
     it('rejects unknown toolId with not_found status', async () => {
