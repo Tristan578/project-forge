@@ -82,10 +82,11 @@ function AssigneeBadge({ assignee }: { assignee: TaskAssignee }) {
 interface TaskCardProps {
   task: EditorTask;
   onDragStart: (e: DragEvent<HTMLDivElement>, id: string) => void;
+  onDragEnd: () => void;
   onRemove: (id: string) => void;
 }
 
-function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
+function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false);
   const updateTask = useTaskStore((s) => s.updateTask);
 
@@ -119,11 +120,13 @@ function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
     <div
       draggable
       onDragStart={handleDragStart}
+      onDragEnd={onDragEnd}
       onClick={handleToggleExpand}
       role="button"
       aria-expanded={expanded}
       tabIndex={0}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           handleToggleExpand();
@@ -164,7 +167,7 @@ function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
                 aria-valuenow={Math.min(100, Math.max(0, task.progress ?? 0))}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-label={`${task.progress}% complete`}
+                aria-label={`${Math.min(100, Math.max(0, task.progress ?? 0))}% complete`}
               />
             </div>
           )}
@@ -305,6 +308,7 @@ interface ColumnProps {
   onDragLeave: () => void;
   onDrop: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDragStart: (e: DragEvent<HTMLDivElement>, id: string) => void;
+  onDragEnd: () => void;
   onRemove: (id: string) => void;
   onClearCompleted?: () => void;
   onAdd: (title: string, assignee: TaskAssignee) => void;
@@ -319,6 +323,7 @@ function Column({
   onDragLeave,
   onDrop,
   onDragStart,
+  onDragEnd,
   onRemove,
   onClearCompleted,
   onAdd,
@@ -416,6 +421,7 @@ function Column({
             key={task.id}
             task={task}
             onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
             onRemove={onRemove}
           />
         ))}
@@ -475,6 +481,12 @@ export function TaskboardPanel() {
     }
   }, []);
 
+  const handleDragEnd = useCallback(() => {
+    dragEnterCount.current = 0;
+    setDragOverColumn(null);
+    dragTaskId.current = null;
+  }, []);
+
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
       e.preventDefault();
@@ -526,6 +538,7 @@ export function TaskboardPanel() {
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
             onRemove={handleRemove}
             onAdd={handleAdd}
             onClearCompleted={col.id === 'done' ? clearCompleted : undefined}
