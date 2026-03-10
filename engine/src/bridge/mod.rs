@@ -389,8 +389,12 @@ impl Plugin for SelectionPlugin {
                 scene_graph::detect_parent_changed,
                 scene_graph::build_scene_graph,
             ).chain())
-            // Skeletal 2D: init skinned meshes (runs on Added/Changed detection)
-            .add_systems(Update, skeleton2d::init_skinned_meshes_2d)
+            // Skeletal 2D: init skinned meshes (runs when SkinnedMeshInitialized marker absent).
+            // [Copilot mod.rs :399] Explicitly ordered before the skinning chain so that
+            // newly-inserted SkinnedMesh2d and BoneWorldTransforms2d components are visible
+            // to apply_vertex_skinning_2d within the same frame.
+            .add_systems(Update, skeleton2d::init_skinned_meshes_2d
+                .before(skeleton2d::apply_vertex_skinning_2d))
             // Skeletal 2D runtime: animate -> IK -> compute world transforms -> skin vertices
             .add_systems(Update, (
                 skeleton2d::advance_skeleton_animation,

@@ -7,13 +7,22 @@ use crate::core::{
     pending_commands::{PendingCommands, QueryRequest},
     skeleton2d::{
         SkeletonData2d, SkeletonEnabled2d, Bone2dDef, IkConstraint2d, AttachmentData,
-        SkinnedMesh2d, BoneWorldTransforms2d, VertexWeights,
+        SkinnedMesh2d, BoneWorldTransforms2d, VertexWeights, SkinnedMeshInitialized,
     },
     skeletal_animation2d::{SkeletalAnimation2d, SkeletalAnimPlayer2d, EasingType2d, BoneKeyframe},
     history::UndoableAction,
 };
 use crate::bridge::{events, Selection, SelectionChangedEvent};
 use std::collections::HashMap;
+
+/// Tracks the Mesh and ColorMaterial handles most recently created for a skinned-mesh entity.
+/// Stored in the bridge module (not core) because it holds renderer-specific handle types.
+/// Used by `init_skinned_meshes_2d` to remove stale assets when the active skin changes.
+#[derive(Component)]
+pub(crate) struct SkinnedMeshHandles {
+    pub mesh: Handle<Mesh>,
+    pub material: Handle<ColorMaterial>,
+}
 
 // ========== Skeleton 2D Systems ==========
 
@@ -46,14 +55,18 @@ pub(super) fn apply_skeleton2d_creates(
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_bone2d_adds(
     mut pending: ResMut<PendingCommands>,
-    mut skeleton_query: Query<(&EntityId, &mut SkeletonData2d, Option<&SkeletonEnabled2d>)>,
+    mut commands: Commands,
+    mut skeleton_query: Query<(Entity, &EntityId, &mut SkeletonData2d, Option<&SkeletonEnabled2d>)>,
     mut history: ResMut<entity_factory::HistoryStack>,
 ) {
     let requests: Vec<_> = pending.add_bone2d_requests.drain(..).collect();
     for request in requests {
-        if let Some((_, mut skeleton_data, enabled)) = skeleton_query.iter_mut().find(|(eid, _, _)| eid.0 == request.entity_id) {
+        if let Some((entity, _, mut skeleton_data, enabled)) = skeleton_query.iter_mut().find(|(_, eid, _, _)| eid.0 == request.entity_id) {
             let old_skeleton = skeleton_data.clone();
             skeleton_data.bones.push(request.bone);
+
+            // Clear the init guard so vertex_bone_indices are rebuilt with the new bone list.
+            commands.entity(entity).remove::<SkinnedMeshInitialized>();
 
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
@@ -69,14 +82,20 @@ pub(super) fn apply_bone2d_adds(
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_bone2d_removes(
     mut pending: ResMut<PendingCommands>,
-    mut skeleton_query: Query<(&EntityId, &mut SkeletonData2d, Option<&SkeletonEnabled2d>)>,
+    mut commands: Commands,
+    mut skeleton_query: Query<(Entity, &EntityId, &mut SkeletonData2d, Option<&SkeletonEnabled2d>)>,
     mut history: ResMut<entity_factory::HistoryStack>,
 ) {
     let requests: Vec<_> = pending.remove_bone2d_requests.drain(..).collect();
     for request in requests {
-        if let Some((_, mut skeleton_data, enabled)) = skeleton_query.iter_mut().find(|(eid, _, _)| eid.0 == request.entity_id) {
+        if let Some((entity, _, mut skeleton_data, enabled)) = skeleton_query.iter_mut().find(|(_, eid, _, _)| eid.0 == request.entity_id) {
             let old_skeleton = skeleton_data.clone();
             skeleton_data.bones.retain(|bone| bone.name != request.bone_name);
+
+            // Clear the init guard so `init_skinned_meshes_2d` re-runs and recomputes
+            // vertex_bone_indices with the updated (shorter) bone list. Without this,
+            // the skinning system would panic on stale out-of-bounds indices.
+            commands.entity(entity).remove::<SkinnedMeshInitialized>();
 
             history.push(UndoableAction::SkeletonChange {
                 entity_id: request.entity_id.clone(),
@@ -185,12 +204,15 @@ pub(super) fn apply_skeletal_animation2d_plays(
 #[cfg(not(feature = "runtime"))]
 pub(super) fn apply_skeleton2d_skin_sets(
     mut pending: ResMut<PendingCommands>,
-    mut skeleton_query: Query<(&EntityId, &mut SkeletonData2d)>,
+    mut commands: Commands,
+    mut skeleton_query: Query<(Entity, &EntityId, &mut SkeletonData2d)>,
 ) {
     let requests: Vec<_> = pending.set_skeleton2d_skin_requests.drain(..).collect();
     for request in requests {
-        if let Some((_, mut skeleton_data)) = skeleton_query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id) {
+        if let Some((entity, _, mut skeleton_data)) = skeleton_query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id) {
             skeleton_data.active_skin = request.skin_name.clone();
+            // Remove the init guard so init_skinned_meshes_2d re-runs for the new skin.
+            commands.entity(entity).remove::<SkinnedMeshInitialized>();
             events::emit_skeleton2d_skin_changed(&request.entity_id, &request.skin_name);
         }
     }
@@ -593,8 +615,15 @@ fn skin_vertices_lbs(
                     continue;
                 }
 
-                let (bind_pos, bind_rot_deg, bind_scale) = bind_pose_transforms[bone_idx];
-                let (world_pos, world_rot_deg, world_scale) = world_transforms[bone_idx];
+                // [Sentry HIGH :597] Guard against one-frame race when a bone is removed:
+                // the SkinnedMesh2d may still hold stale indices while SkeletonData2d has
+                // already been updated and world_transforms/bind_pose_transforms are shorter.
+                let Some(&(bind_pos, bind_rot_deg, bind_scale)) = bind_pose_transforms.get(bone_idx) else {
+                    continue;
+                };
+                let Some(&(world_pos, world_rot_deg, world_scale)) = world_transforms.get(bone_idx) else {
+                    continue;
+                };
 
                 // Step 1: Inverse bind-pose — vertex to bone-local space
                 let bind_rad = bind_rot_deg.to_radians();
@@ -638,20 +667,46 @@ fn skin_vertices_lbs(
 
 /// Initialize Mesh2d + SkinnedMesh2d for entities with skeleton mesh attachments.
 ///
-/// Runs on entities that have SkeletonData2d + SkeletonEnabled2d but no SkinnedMesh2d yet.
-/// Also re-initializes when the active skin changes (detected by source_attachment mismatch).
+/// Uses `SkinnedMeshInitialized` as a guard to avoid re-running every frame when animation
+/// mutates `SkeletonData2d`. The guard is cleared when the active skin changes
+/// (detected by `source_attachment` mismatch), allowing re-initialization for the new skin.
+///
+/// Also ensures `BoneWorldTransforms2d` is inserted on ALL enabled skeletons — even those
+/// without mesh attachments — so that gizmo rendering works universally.
 pub(super) fn init_skinned_meshes_2d(
     mut commands: Commands,
-    query: Query<
-        (Entity, &SkeletonData2d, Option<&SkinnedMesh2d>),
-        (With<SkeletonEnabled2d>, Or<(Added<SkeletonEnabled2d>, Changed<SkeletonData2d>)>),
+    // Query ALL enabled skeletons so we can ensure BoneWorldTransforms2d is present.
+    all_skeletons: Query<
+        (Entity, &SkeletonData2d, Option<&BoneWorldTransforms2d>),
+        (With<SkeletonEnabled2d>, Or<(Added<SkeletonEnabled2d>, Added<SkeletonData2d>)>),
+    >,
+    // Query skeletons that need skinned-mesh init: not yet initialized, or skin changed.
+    skinned_query: Query<
+        (Entity, &SkeletonData2d, Option<&SkinnedMesh2d>, Option<&SkinnedMeshHandles>),
+        (
+            With<SkeletonEnabled2d>,
+            Without<SkinnedMeshInitialized>,
+        ),
     >,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ColorMaterial>>,
 ) {
-    for (entity, skeleton, existing_skinned) in query.iter() {
+    // Ensure BoneWorldTransforms2d is present on all newly-enabled skeletons.
+    for (entity, skeleton, existing_xforms) in all_skeletons.iter() {
+        if existing_xforms.is_none() {
+            let initial = BoneWorldTransforms2d {
+                transforms: compute_bind_pose_transforms(&skeleton.bones),
+            };
+            commands.entity(entity).insert(initial);
+        }
+    }
+
+    // Handle skinned-mesh initialization for skeletons without the guard marker.
+    for (entity, skeleton, existing_skinned, existing_handles) in skinned_query.iter() {
         // Find the first mesh attachment in the active skin
         let Some(skin) = skeleton.skins.get(&skeleton.active_skin) else {
+            // No mesh attachment — still mark as initialized so we don't loop.
+            commands.entity(entity).insert(SkinnedMeshInitialized);
             continue;
         };
 
@@ -660,6 +715,14 @@ pub(super) fn init_skinned_meshes_2d(
         for (name, attachment) in &skin.attachments {
             if let AttachmentData::Mesh { ref vertices, ref uvs, ref triangles, ref weights, .. } = attachment {
                 if !vertices.is_empty() && !triangles.is_empty() && !weights.is_empty() {
+                    // [Copilot :663] Validate weights.len() == vertices.len() before using.
+                    if weights.len() != vertices.len() {
+                        tracing::warn!(
+                            "Skin attachment '{}': weights.len() ({}) != vertices.len() ({}), skipping",
+                            name, weights.len(), vertices.len()
+                        );
+                        continue;
+                    }
                     found_mesh = Some((vertices, uvs, triangles, weights));
                     attachment_name = name.clone();
                     break;
@@ -668,16 +731,29 @@ pub(super) fn init_skinned_meshes_2d(
         }
 
         let Some((vertices, uvs, triangles, weights)) = found_mesh else {
+            // No valid mesh attachment — mark as initialized so we don't re-check every frame.
+            commands.entity(entity).insert(SkinnedMeshInitialized);
             continue;
         };
 
-        // Skip if already initialized for this attachment
+        // If already initialized for the same attachment, nothing to do.
         if let Some(existing) = existing_skinned {
             if existing.source_attachment == attachment_name {
+                commands.entity(entity).insert(SkinnedMeshInitialized);
                 continue;
             }
-            // Skin changed — remove old mesh components (will be re-created below)
-            commands.entity(entity).remove::<(SkinnedMesh2d, Mesh2d, MeshMaterial2d<ColorMaterial>)>();
+            // Skin changed — remove old mesh components. They will be replaced below.
+            // [Copilot :702] Also remove old asset handles from the Assets collections.
+            if let Some(old_handles) = existing_handles {
+                let _ = meshes.remove(&old_handles.mesh);
+                let _ = materials.remove(&old_handles.material);
+            }
+            commands.entity(entity).remove::<(
+                SkinnedMesh2d,
+                Mesh2d,
+                MeshMaterial2d<ColorMaterial>,
+                SkinnedMeshHandles,
+            )>();
         }
 
         // Build the Bevy Mesh
@@ -721,11 +797,19 @@ pub(super) fn init_skinned_meshes_2d(
             source_attachment: attachment_name,
         };
 
+        // [Copilot :702] Track the new handles for later cleanup if skin changes.
+        let tracked_handles = SkinnedMeshHandles {
+            mesh: mesh_handle.clone(),
+            material: material_handle.clone(),
+        };
+
         commands.entity(entity).insert((
             Mesh2d(mesh_handle),
             MeshMaterial2d(material_handle),
             skinned,
             world_transforms,
+            tracked_handles,
+            SkinnedMeshInitialized,
         ));
     }
 }
@@ -754,6 +838,9 @@ pub(super) fn compute_bone_world_transforms_2d(
 // ========== Refactored Vertex Skinning System ==========
 
 /// CPU vertex skinning: deform mesh vertices using corrected LBS.
+///
+/// [Copilot :776] Uses `attribute_mut` to mutate the POSITION attribute in-place rather
+/// than calling `insert_attribute`, which reallocates the underlying buffer each frame.
 pub(super) fn apply_vertex_skinning_2d(
     query: Query<(
         &SkinnedMesh2d,
@@ -772,6 +859,16 @@ pub(super) fn apply_vertex_skinning_2d(
         );
 
         if let Some(mesh) = meshes.get_mut(&mesh_handle.0) {
+            // Mutate in-place if the attribute already exists to avoid per-frame realloc.
+            if let Some(positions) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) {
+                if let bevy::mesh::VertexAttributeValues::Float32x3(ref mut verts) = positions {
+                    if verts.len() == deformed.len() {
+                        verts.copy_from_slice(&deformed);
+                        continue;
+                    }
+                }
+            }
+            // Fallback: insert (first frame or vertex count changed after re-init).
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, deformed);
         }
     }

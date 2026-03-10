@@ -104,6 +104,12 @@ pub struct IkConstraint2d {
 #[derive(Component)]
 pub struct SkeletonEnabled2d;
 
+/// Marker component inserted after `init_skinned_meshes_2d` completes for a given entity.
+/// Prevents re-initialization every frame when animation mutates `SkeletonData2d`.
+/// Removed when the active skin changes so that the init system re-runs for the new skin.
+#[derive(Component)]
+pub struct SkinnedMeshInitialized;
+
 /// Runtime component for CPU-skinned 2D meshes.
 /// Created once when a skeleton with mesh attachments is enabled.
 /// NOT serialized in scene files — derived from SkeletonData2d on load.
