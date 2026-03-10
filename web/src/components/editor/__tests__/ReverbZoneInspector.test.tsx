@@ -8,6 +8,7 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import { ReverbZoneInspector } from '../ReverbZoneInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import type { ReverbZoneData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
@@ -25,8 +26,8 @@ vi.mock('lucide-react', () => ({
   HelpCircle: (props: Record<string, unknown>) => <span data-testid="help-circle" {...props} />,
 }));
 
-const baseReverbZone = {
-  shape: { type: 'box' as const, size: [10, 5, 10] as [number, number, number] },
+const baseReverbZone: ReverbZoneData = {
+  shape: { type: 'box', size: [10, 5, 10] },
   preset: 'hall',
   wetMix: 0.5,
   decayTime: 2.0,
@@ -41,7 +42,7 @@ describe('ReverbZoneInspector', () => {
   const mockNavigateDocs = vi.fn();
 
   function setupStore({
-    reverbZone = null as typeof baseReverbZone | null,
+    reverbZone = null as ReverbZoneData | null,
     enabled = false,
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

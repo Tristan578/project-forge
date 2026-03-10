@@ -8,6 +8,7 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import { Physics2dInspector } from '../Physics2dInspector';
 import { useEditorStore } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import type { Physics2dData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
@@ -25,10 +26,10 @@ vi.mock('lucide-react', () => ({
   HelpCircle: (props: Record<string, unknown>) => <span data-testid="help-circle" {...props} />,
 }));
 
-const basePhysics2d = {
-  bodyType: 'dynamic' as const,
-  colliderShape: 'auto' as const,
-  size: [1.0, 1.0] as [number, number],
+const basePhysics2d: Physics2dData = {
+  bodyType: 'dynamic',
+  colliderShape: 'auto',
+  size: [1.0, 1.0],
   radius: 0.5,
   vertices: [],
   mass: 1.0,
@@ -39,7 +40,7 @@ const basePhysics2d = {
   lockRotation: false,
   continuousDetection: false,
   oneWayPlatform: false,
-  surfaceVelocity: [0.0, 0.0] as [number, number],
+  surfaceVelocity: [0.0, 0.0],
 };
 
 describe('Physics2dInspector', () => {
@@ -50,12 +51,12 @@ describe('Physics2dInspector', () => {
 
   function setupStore({
     primaryId = 'entity-1' as string | null,
-    physics2d = null as typeof basePhysics2d | null,
+    physics2d = null as Physics2dData | null,
     physics2dEnabled = false,
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore).mockImplementation((selector: any) => {
-      const physics2dMap: Record<string, typeof basePhysics2d> = {};
+      const physics2dMap: Record<string, Physics2dData> = {};
       const enabledMap: Record<string, boolean> = {};
       if (primaryId) {
         if (physics2d) physics2dMap[primaryId] = physics2d;

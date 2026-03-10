@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { SkeletonInspector } from '../SkeletonInspector';
 import { useEditorStore } from '@/stores/editorStore';
+import type { SkeletonData2d } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
@@ -21,16 +22,16 @@ vi.mock('lucide-react', () => ({
   Trash2: (props: Record<string, unknown>) => <span data-testid="trash-icon" {...props} />,
 }));
 
-const baseSkeleton = {
+const baseSkeleton: SkeletonData2d = {
   bones: [
     {
       name: 'root',
       parentBone: null,
-      localPosition: [0, 0] as [number, number],
+      localPosition: [0, 0],
       localRotation: 0,
-      localScale: [1, 1] as [number, number],
+      localScale: [1, 1],
       length: 1,
-      color: [1, 1, 1, 1] as [number, number, number, number],
+      color: [1, 1, 1, 1],
     },
   ],
   slots: [],
@@ -46,7 +47,7 @@ describe('SkeletonInspector', () => {
   const mockPlayAnimation = vi.fn();
 
   function setupStore({
-    skeleton = null as typeof baseSkeleton | null,
+    skeleton = null as SkeletonData2d | null,
     animations = [] as { name: string; duration: number }[],
     selectedBone = null as string | null,
   } = {}) {
@@ -213,7 +214,7 @@ describe('SkeletonInspector', () => {
       skeleton: {
         ...baseSkeleton,
         ikConstraints: [
-          { name: 'arm_ik', boneChain: ['upper_arm', 'forearm'], mix: 0.8, bendPositive: true },
+          { name: 'arm_ik', boneChain: ['upper_arm', 'forearm'], targetEntityId: 0, bendDirection: 1, mix: 0.8 },
         ],
       },
     });
