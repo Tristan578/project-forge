@@ -229,7 +229,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       usageId: data.usageId as string | undefined,
       autoPlace: p.data.autoPlace ?? !!p.data.entityId,
       targetEntityId: p.data.entityId,
-      materialSlot: p.data.materialSlot ?? 'base_color',
+      materialSlot: p.data.materialSlot,
     });
 
     return {

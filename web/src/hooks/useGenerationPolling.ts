@@ -202,10 +202,7 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
 
-        // Auto-import into scene when autoPlace is enabled (or legacy behavior without the flag)
-        if (job.autoPlace !== false) {
-          useEditorStore.getState().importGltf(base64, assetName);
-        }
+        useEditorStore.getState().importGltf(base64, assetName);
 
         updateJob(id, {
           status: 'completed',
@@ -213,7 +210,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: job.autoPlace !== false,
+            autoPlaced: true,
             targetEntityId: job.targetEntityId,
             quality: {
               fileSize: qualityMetrics.fileSize,
@@ -241,7 +238,7 @@ export function useGenerationPolling() {
 
         const slotMap: Record<string, string> = {
           albedo: 'base_color',
-          normal: 'normal',
+          normal: 'normal_map',
           metallic_roughness: 'metallic_roughness',
           emissive: 'emissive',
           ao: 'occlusion',

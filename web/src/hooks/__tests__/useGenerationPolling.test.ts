@@ -130,6 +130,7 @@ describe('useGenerationPolling', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 
@@ -834,7 +835,7 @@ describe('useGenerationPolling', () => {
         'data:image/png;base64,AAAA',
         expect.stringContaining('normal'),
         'ent-tex-target',
-        'normal',
+        'normal_map',
       );
 
       cleanup();
@@ -844,7 +845,7 @@ describe('useGenerationPolling', () => {
       const cleanup = setupTextureCompletion({
         autoPlace: true,
         targetEntityId: 'ent-tex-target',
-        materialSlot: 'normal',
+        materialSlot: 'normal_map',
       });
 
       renderHook(() => useGenerationPolling());
@@ -856,7 +857,7 @@ describe('useGenerationPolling', () => {
         'data:image/png;base64,AAAA',
         expect.stringContaining('normal'),
         'ent-tex-target',
-        'normal',
+        'normal_map',
       );
 
       expect(mockUpdateJob).toHaveBeenCalledWith('at1', expect.objectContaining({
@@ -864,7 +865,7 @@ describe('useGenerationPolling', () => {
         metadata: expect.objectContaining({
           autoPlaced: true,
           targetEntityId: 'ent-tex-target',
-          materialSlot: 'normal',
+          materialSlot: 'normal_map',
         }),
       }));
 
