@@ -460,17 +460,23 @@ struct SetCustomWgslSourcePayload {
 }
 
 /// Handle set_custom_wgsl_source command from React/MCP.
-/// Validates and queues the WGSL source update.
+///
+/// Always queues the update so the bridge system can emit a CUSTOM_WGSL_COMPILE_RESULT
+/// event with the correct compile status (ok or error). This ensures the UI's optimistic
+/// `compileStatus: 'pending'` is always resolved — even when validation fails — rather
+/// than leaving the editor stuck in a pending state.
 fn handle_set_custom_wgsl_source(payload: serde_json::Value) -> super::CommandResult {
     let data: SetCustomWgslSourcePayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid set_custom_wgsl_source payload: {}", e))?;
 
-    // Validate before queuing.
+    // Pre-validate so we can log at the command layer, but still queue the update.
+    // The bridge system will re-validate, set compile_status, and emit the result event.
     let validation = validate_wgsl_source(&data.user_code);
     if !validation.valid {
-        return Err(validation
-            .error
-            .unwrap_or_else(|| "WGSL validation failed".to_string()));
+        tracing::warn!(
+            "WGSL validation warning (will be reported via compile event): {:?}",
+            validation.error
+        );
     }
 
     let update = CustomWgslSourceUpdate {
@@ -494,7 +500,7 @@ struct ValidateWgslPayload {
 }
 
 /// Handle validate_wgsl command — synchronous, no queue needed.
-/// Returns JSON with { valid, error? }.
+/// Returns Ok(()) on valid WGSL, or Err(String) with a human-readable error message.
 fn handle_validate_wgsl(payload: serde_json::Value) -> super::CommandResult {
     let data: ValidateWgslPayload = serde_json::from_value(payload)
         .map_err(|e| format!("Invalid validate_wgsl payload: {}", e))?;

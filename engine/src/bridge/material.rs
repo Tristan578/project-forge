@@ -519,6 +519,21 @@ pub(super) fn apply_custom_wgsl_source_updates(
             .collect::<Vec<_>>()
             .join("\n");
 
+        // Guard: verify the injection placeholder exists in the template before replacing.
+        // If it is missing (e.g. template file was accidentally modified) the composed
+        // shader would be silently identical to the template, leading to confusing results.
+        if !TEMPLATE.contains(INJECTION_COMMENT) {
+            source.compile_status = "error".to_string();
+            source.compile_error = Some(
+                "Internal error: WGSL template is missing the injection placeholder".to_string(),
+            );
+            source.user_code = update.user_code;
+            source.name = update.name;
+            tracing::error!("WGSL template missing FORGE_USER_CODE_INJECTION_POINT placeholder");
+            events::emit_custom_wgsl_source_changed(&source);
+            continue;
+        }
+
         let composed = TEMPLATE.replace(INJECTION_COMMENT, &user_code_indented);
 
         // Hot-swap the Shader asset. Bevy detects asset changes and recompiles
@@ -544,8 +559,8 @@ pub(super) fn apply_custom_wgsl_source_updates(
 
 /// System that syncs time to all CustomWgslMaterial entities each frame.
 ///
-/// Also syncs user_params and user_color from ShaderEffectData when present,
-/// so per-entity parameter variation is possible even with a shared shader source.
+/// Also syncs user_color from ShaderEffectData when present, so per-entity
+/// color variation is possible even with a shared shader source.
 pub(super) fn sync_custom_wgsl_uniforms(
     time: Res<Time>,
     shader_query: Query<(
