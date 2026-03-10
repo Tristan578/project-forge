@@ -62,7 +62,7 @@ export async function checkDatabase(): Promise<ServiceHealth> {
   if (!url) {
     return {
       name: 'Database (Neon)',
-      status: 'down',
+      status: 'degraded',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
       error: 'DATABASE_URL not configured',
@@ -104,7 +104,7 @@ export async function checkAuthentication(): Promise<ServiceHealth> {
   if (!publishableKey || !secretKey) {
     return {
       name: 'Authentication (Clerk)',
-      status: 'down',
+      status: 'degraded',
       latencyMs: 0,
       lastChecked: new Date().toISOString(),
       error: 'Clerk keys not configured',

@@ -65,12 +65,17 @@ describe('GET /api/health', () => {
     expect(['healthy', 'degraded', 'down']).toContain(body.overall);
   });
 
-  it('should return 503 when overall status is down', async () => {
+  it('should return 503 when a critical service actively fails', async () => {
     vi.resetModules();
-    // No DATABASE_URL → DB is 'down' → overall is 'down' → HTTP 503
+    // DB URL configured but connection fails → DB is 'down' → HTTP 503
+    vi.stubEnv('DATABASE_URL', 'postgresql://bad-url');
+
+    const mockSql = vi.fn().mockRejectedValue(new Error('ECONNREFUSED'));
+    const mockNeon = vi.fn().mockReturnValue(mockSql);
+    vi.doMock('@neondatabase/serverless', () => ({ neon: mockNeon }));
+
     const { GET } = await import('./route');
     const res = await GET();
-    // No keys configured at all — DB is down
     expect(res.status).toBe(503);
   });
 

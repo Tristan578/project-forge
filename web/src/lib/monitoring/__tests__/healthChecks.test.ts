@@ -109,11 +109,11 @@ describe('healthChecks', () => {
   // checkDatabase
   // ---------------------------------------------------------------------------
   describe('checkDatabase', () => {
-    it('returns down when DATABASE_URL not configured', async () => {
+    it('returns degraded when DATABASE_URL not configured', async () => {
       vi.resetModules();
       const { checkDatabase } = await import('@/lib/monitoring/healthChecks');
       const result = await checkDatabase();
-      expect(result.status).toBe('down');
+      expect(result.status).toBe('degraded');
       expect(result.error).toContain('DATABASE_URL not configured');
       expect(result.name).toBe('Database (Neon)');
     });
