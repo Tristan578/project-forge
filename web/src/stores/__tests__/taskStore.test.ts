@@ -51,7 +51,6 @@ describe('taskStore', () => {
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 

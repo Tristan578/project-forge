@@ -161,7 +161,7 @@ function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
                 className="h-1 rounded-full bg-purple-500 transition-all"
                 style={{ width: `${Math.min(100, Math.max(0, task.progress))}%` }}
                 role="progressbar"
-                aria-valuenow={task.progress}
+                aria-valuenow={Math.min(100, Math.max(0, task.progress ?? 0))}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-label={`${task.progress}% complete`}
