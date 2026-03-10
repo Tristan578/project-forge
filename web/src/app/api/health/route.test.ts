@@ -98,8 +98,9 @@ describe('GET /api/health', () => {
     const res = await GET();
     const body = await res.json();
 
-    // Both critical services (DB + Auth) healthy → HTTP 200
+    // Both critical services (DB + Auth) healthy → HTTP 200 + status 'ok'
     expect(body.database).toBe('connected');
+    expect(body.status).toBe('ok');
     expect(res.status).toBe(200);
   });
 

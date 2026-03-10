@@ -31,7 +31,7 @@ export async function GET(): Promise<NextResponse> {
 
   return NextResponse.json(
     {
-      status: report.overall === 'down' ? 'error' : 'ok',
+      status: criticalStatus === 'down' ? 'error' : 'ok',
       environment: report.environment,
       commit: commit.slice(0, 8),
       branch,
