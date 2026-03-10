@@ -87,6 +87,9 @@ def resolve_project_id(config):
     project_name = config.get("allowedProjectName")
     if not project_name:
         result = config.get("localProjectId", "")
+        if not result:
+            print("[FATAL] No allowedProjectName and no localProjectId in config. Cannot resolve project.", file=sys.stderr)
+            sys.exit(1)
         _resolved_cache["project"] = result
         return result
 
@@ -110,8 +113,8 @@ def resolve_project_id(config):
 
     fallback = config.get("localProjectId")
     if not fallback:
-        print("  [WARN] No localProjectId in config and name lookup failed!", file=sys.stderr)
-        return None
+        print(f"[FATAL] Project name lookup failed for '{project_name}' and no localProjectId fallback in config.", file=sys.stderr)
+        sys.exit(1)
     print(f"  [WARN] Project name lookup failed for '{project_name}', using config fallback: {fallback}", file=sys.stderr)
     _resolved_cache["project"] = fallback
     return fallback
@@ -580,6 +583,9 @@ def push(include_done=False):
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    if not project_id:
+        print("[FATAL] resolve_project_id() returned empty/None. Aborting push.", file=sys.stderr)
+        sys.exit(1)
     target_repo = config["repo"]
 
     # HARD FILTER: Only sync tickets whose sync_repo matches this project
@@ -764,6 +770,9 @@ def pull():
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    if not project_id:
+        print("[FATAL] resolve_project_id() returned empty/None. Aborting pull.", file=sys.stderr)
+        sys.exit(1)
     target_repo = config["repo"]
 
     if not tb_available():
@@ -1046,6 +1055,9 @@ def show_status():
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    if not project_id:
+        print("[FATAL] resolve_project_id() returned empty/None. Aborting status.", file=sys.stderr)
+        sys.exit(1)
     target_repo = config["repo"]
 
     print(f"GitHub Project: {config['owner']}/{config['repo']} #{config['projectNumber']}")
