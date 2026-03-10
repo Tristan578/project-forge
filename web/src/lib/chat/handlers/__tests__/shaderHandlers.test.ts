@@ -2,24 +2,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import type { ToolHandler, ToolCallContext, ExecutionResult } from '../types';
 
-const mockGraphState = {
-  activeGraphId: 'graph-1',
-  graphs: {
-    'graph-1': {
-      id: 'graph-1',
-      name: 'Test Shader',
-      nodes: [
-        { id: 'n1', type: 'output', data: {}, position: { x: 0, y: 0 } },
-        { id: 'n2', type: 'color', data: {}, position: { x: -200, y: 0 } },
-      ],
-      edges: [],
-    },
-  },
-  createNewGraph: vi.fn((_name: string) => 'graph-new'),
-  loadGraph: vi.fn(),
-  addNode: vi.fn((_type: string, _pos: unknown, _data: unknown) => 'node-new'),
-  addEdge: vi.fn(),
-};
+function makeDefaultGraphState() {
+  return {
+    activeGraphId: 'graph-1',
+    graphs: {
+      'graph-1': {
+        id: 'graph-1',
+        name: 'Test Shader',
+        nodes: [
+          { id: 'n1', type: 'output', data: {}, position: { x: 0, y: 0 } },
+          { id: 'n2', type: 'color', data: {}, position: { x: -200, y: 0 } },
+        ],
+        edges: [],
+      },
+    } as Record<string, unknown>,
+    createNewGraph: vi.fn((_name: string) => 'graph-new'),
+    loadGraph: vi.fn(),
+    addNode: vi.fn((_type: string, _pos: unknown, _data: unknown) => 'node-new'),
+    addEdge: vi.fn(),
+  };
+}
+
+let mockGraphState = makeDefaultGraphState();
 
 vi.mock('@/stores/shaderEditorStore', () => ({
   useShaderEditorStore: {
@@ -57,6 +61,7 @@ async function invoke(
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  mockGraphState = makeDefaultGraphState();
   const mod = await import('../shaderHandlers');
   handlers = mod.shaderHandlers;
 });
@@ -94,7 +99,6 @@ describe('shaderHandlers', () => {
       const { result } = await invoke('add_shader_node', { nodeType: 'color' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('No active shader graph');
-      mockGraphState.activeGraphId = 'graph-1';
     });
 
     it('adds node with custom position', async () => {
@@ -124,7 +128,6 @@ describe('shaderHandlers', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toContain('No active shader graph');
-      mockGraphState.activeGraphId = 'graph-1';
     });
 
     it('fails when node not found', async () => {
@@ -153,7 +156,6 @@ describe('shaderHandlers', () => {
       mockGraphState.activeGraphId = '';
       const { result } = await invoke('compile_shader', {});
       expect(result.success).toBe(false);
-      mockGraphState.activeGraphId = 'graph-1';
     });
 
     it('fails for nonexistent graph', async () => {
@@ -180,7 +182,6 @@ describe('shaderHandlers', () => {
     });
 
     it('applies shader from graph with inferred type', async () => {
-      // The mock compiler returns code with dissolve_threshold
       const { result, store } = await invoke('apply_shader_to_entity', {
         entityId: 'e1', graphId: 'graph-1',
       });
@@ -194,7 +195,6 @@ describe('shaderHandlers', () => {
         entityId: 'e1',
       });
       expect(result.success).toBe(false);
-      mockGraphState.activeGraphId = 'graph-1';
     });
   });
 
@@ -215,12 +215,10 @@ describe('shaderHandlers', () => {
     });
 
     it('returns message when no graphs exist', async () => {
-      const origGraphs = mockGraphState.graphs;
-      mockGraphState.graphs = {} as typeof mockGraphState.graphs;
+      mockGraphState.graphs = {};
       const { result } = await invoke('list_shader_presets', {});
       expect(result.success).toBe(true);
       expect((result.result as string)).toContain('No shader graphs');
-      mockGraphState.graphs = origGraphs;
     });
   });
 });
