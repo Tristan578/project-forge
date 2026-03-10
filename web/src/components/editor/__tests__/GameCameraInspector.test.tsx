@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { GameCameraInspector } from '../GameCameraInspector';
 import { useEditorStore } from '@/stores/editorStore';
+import type { GameCameraData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
@@ -21,8 +22,8 @@ vi.mock('lucide-react', () => ({
   Zap: (props: Record<string, unknown>) => <span data-testid="zap-icon" {...props} />,
 }));
 
-const baseGameCamera = {
-  mode: 'thirdPersonFollow' as const,
+const baseGameCamera: GameCameraData = {
+  mode: 'thirdPersonFollow',
   targetEntity: null,
   followDistance: 5,
   followHeight: 2,
@@ -38,7 +39,7 @@ describe('GameCameraInspector', () => {
 
   function setupStore({
     primaryId = 'entity-1' as string | null,
-    primaryGameCamera = baseGameCamera as typeof baseGameCamera | null,
+    primaryGameCamera = baseGameCamera as GameCameraData | null,
     activeGameCameraId = null as string | null,
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -7,12 +7,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { Camera2dInspector } from '../Camera2dInspector';
 import { useEditorStore } from '@/stores/editorStore';
+import type { Camera2dData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
 }));
 
-const baseCamera2d = {
+const baseCamera2d: Camera2dData = {
   zoom: 1.0,
   pixelPerfect: false,
   bounds: null,
@@ -22,7 +23,7 @@ describe('Camera2dInspector', () => {
   const mockSetCamera2dData = vi.fn();
 
   function setupStore({
-    camera2dData = baseCamera2d as typeof baseCamera2d | null,
+    camera2dData = baseCamera2d as Camera2dData | null,
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore).mockImplementation((selector: any) => {

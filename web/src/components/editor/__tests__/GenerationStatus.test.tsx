@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { GenerationStatus } from '../GenerationStatus';
-import { useGenerationStore } from '@/stores/generationStore';
+import { useGenerationStore, type GenerationJob } from '@/stores/generationStore';
 
 vi.mock('@/stores/generationStore', () => ({
   useGenerationStore: vi.fn(),
@@ -20,30 +20,37 @@ vi.mock('lucide-react', () => ({
   Trash2: (props: Record<string, unknown>) => <span data-testid="trash" {...props} />,
 }));
 
-const pendingJob = {
+const pendingJob: GenerationJob = {
   id: 'job-1',
-  type: '3d-model',
+  jobId: 'provider-1',
+  type: 'model',
   prompt: 'A red cube',
-  status: 'processing' as const,
+  status: 'processing',
   progress: 50,
-  error: undefined,
+  provider: 'meshy',
+  createdAt: 0,
 };
 
-const completedJob = {
+const completedJob: GenerationJob = {
   id: 'job-2',
+  jobId: 'provider-2',
   type: 'texture',
   prompt: 'Brick wall texture',
-  status: 'completed' as const,
+  status: 'completed',
   progress: 100,
-  error: undefined,
+  provider: 'meshy',
+  createdAt: 0,
 };
 
-const failedJob = {
+const failedJob: GenerationJob = {
   id: 'job-3',
-  type: 'sound',
+  jobId: 'provider-3',
+  type: 'sfx',
   prompt: 'Explosion sound',
-  status: 'failed' as const,
+  status: 'failed',
   progress: 0,
+  provider: 'elevenlabs',
+  createdAt: 0,
   error: 'API rate limit exceeded',
 };
 
@@ -52,7 +59,7 @@ describe('GenerationStatus', () => {
   const mockRemoveJob = vi.fn();
 
   function setupStore({
-    jobs = {} as Record<string, typeof pendingJob>,
+    jobs = {} as Record<string, GenerationJob>,
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useGenerationStore).mockImplementation((selector: any) => {
@@ -95,7 +102,7 @@ describe('GenerationStatus', () => {
     setupStore({
       jobs: {
         'job-1': pendingJob,
-        'job-4': { ...pendingJob, id: 'job-4', status: 'pending' as const },
+        'job-4': { ...pendingJob, id: 'job-4', status: 'pending' },
       },
     });
     render(<GenerationStatus />);
@@ -119,7 +126,7 @@ describe('GenerationStatus', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('3d-model')).toBeDefined();
+    expect(screen.getByText('model')).toBeDefined();
   });
 
   it('shows processing status with progress', () => {
