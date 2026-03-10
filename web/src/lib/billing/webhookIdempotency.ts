@@ -13,10 +13,17 @@
 
 import 'server-only';
 import { sql, lt } from 'drizzle-orm';
-import { getDb } from '@/lib/db/client';
+import { queryWithResilience } from '@/lib/db/client';
 import { webhookEvents } from '@/lib/db/schema';
 
 const DEFAULT_TTL_HOURS = 72;
+
+/**
+ * Short TTL for in-flight claims (5 minutes). If processing crashes without
+ * calling releaseEvent(), the claim auto-expires so Stripe can redeliver.
+ * On successful processing, the TTL is extended to the full DEFAULT_TTL_HOURS.
+ */
+const IN_FLIGHT_TTL_MINUTES = 5;
 
 /**
  * Atomically claim a webhook event for processing.
@@ -31,21 +38,46 @@ const DEFAULT_TTL_HOURS = 72;
  */
 export async function claimEvent(
   eventId: string,
-  source: string,
-  ttlHours: number = DEFAULT_TTL_HOURS
+  source: string
 ): Promise<boolean> {
-  const db = getDb();
-  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+  // Use a short in-flight TTL. If processing crashes without releasing,
+  // the claim auto-expires in IN_FLIGHT_TTL_MINUTES so Stripe can redeliver.
+  const expiresAt = new Date(Date.now() + IN_FLIGHT_TTL_MINUTES * 60 * 1000);
 
   // ON CONFLICT DO NOTHING means rowCount = 0 when the row already exists.
-  const result = await db
-    .insert(webhookEvents)
-    .values({ eventId, source, expiresAt })
-    .onConflictDoNothing({ target: webhookEvents.eventId });
+  const result = await queryWithResilience(() =>
+    // Need a fresh db reference inside the retry closure
+    import('@/lib/db/client').then(({ getDb }) =>
+      getDb()
+        .insert(webhookEvents)
+        .values({ eventId, source, expiresAt })
+        .onConflictDoNothing({ target: webhookEvents.eventId })
+    )
+  );
 
   // Drizzle neon-http returns { rowCount: number } on insert
   const rowCount = (result as { rowCount?: number }).rowCount ?? 0;
   return rowCount > 0;
+}
+
+/**
+ * Extend the TTL of a claimed event after successful processing.
+ * Moves the expiry from the short in-flight window to the full TTL
+ * so the event is considered "processed" for DEFAULT_TTL_HOURS.
+ */
+export async function finalizeEvent(
+  eventId: string,
+  ttlHours: number = DEFAULT_TTL_HOURS
+): Promise<void> {
+  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+  await queryWithResilience(() =>
+    import('@/lib/db/client').then(({ getDb }) =>
+      getDb()
+        .update(webhookEvents)
+        .set({ expiresAt })
+        .where(sql`${webhookEvents.eventId} = ${eventId}`)
+    )
+  );
 }
 
 /**
@@ -55,10 +87,13 @@ export async function claimEvent(
  * redeliver. Deletes the row so the next delivery can claim it fresh.
  */
 export async function releaseEvent(eventId: string): Promise<void> {
-  const db = getDb();
-  await db
-    .delete(webhookEvents)
-    .where(sql`${webhookEvents.eventId} = ${eventId}`);
+  await queryWithResilience(() =>
+    import('@/lib/db/client').then(({ getDb }) =>
+      getDb()
+        .delete(webhookEvents)
+        .where(sql`${webhookEvents.eventId} = ${eventId}`)
+    )
+  );
 }
 
 /**
@@ -66,12 +101,15 @@ export async function releaseEvent(eventId: string): Promise<void> {
  * not expired. Returns true if a valid (non-expired) claim exists.
  */
 export async function isProcessed(eventId: string): Promise<boolean> {
-  const db = getDb();
-  const rows = await db
-    .select({ eventId: webhookEvents.eventId })
-    .from(webhookEvents)
-    .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.expiresAt} > NOW()`)
-    .limit(1);
+  const rows = await queryWithResilience(() =>
+    import('@/lib/db/client').then(({ getDb }) =>
+      getDb()
+        .select({ eventId: webhookEvents.eventId })
+        .from(webhookEvents)
+        .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.expiresAt} > NOW()`)
+        .limit(1)
+    )
+  );
   return rows.length > 0;
 }
 
@@ -82,9 +120,12 @@ export async function isProcessed(eventId: string): Promise<boolean> {
  * maintenance route — will not affect active claims.
  */
 export async function cleanupExpired(): Promise<number> {
-  const db = getDb();
-  const result = await db
-    .delete(webhookEvents)
-    .where(lt(webhookEvents.expiresAt, sql`NOW()`));
+  const result = await queryWithResilience(() =>
+    import('@/lib/db/client').then(({ getDb }) =>
+      getDb()
+        .delete(webhookEvents)
+        .where(lt(webhookEvents.expiresAt, sql`NOW()`))
+    )
+  );
   return (result as { rowCount?: number }).rowCount ?? 0;
 }
