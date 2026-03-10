@@ -18,6 +18,8 @@ function overallBannerClass(overall: HealthReport['overall']): string {
       return 'bg-yellow-500 text-black';
     case 'down':
       return 'bg-red-600 text-white';
+    default:
+      return 'bg-gray-600 text-white';
   }
 }
 
@@ -29,6 +31,8 @@ function overallLabel(overall: HealthReport['overall']): string {
       return 'Partial Service Disruption';
     case 'down':
       return 'Major Outage Detected';
+    default:
+      return 'Unknown Status';
   }
 }
 

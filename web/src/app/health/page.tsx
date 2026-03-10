@@ -1,4 +1,4 @@
-import { runAllHealthChecks } from '@/lib/monitoring/healthChecks';
+import { runAllHealthChecks, sanitizeForPublic } from '@/lib/monitoring/healthChecks';
 import { HealthDashboard } from '@/components/health/HealthDashboard';
 
 /**
@@ -7,7 +7,12 @@ import { HealthDashboard } from '@/components/health/HealthDashboard';
  */
 export default async function HealthPage() {
   const report = await runAllHealthChecks();
-  return <HealthDashboard initialReport={report} />;
+  // Sanitize before sending to client to avoid leaking internal error details
+  const sanitizedReport = {
+    ...report,
+    services: sanitizeForPublic(report.services),
+  };
+  return <HealthDashboard initialReport={sanitizedReport} />;
 }
 
 export const dynamic = 'force-dynamic';

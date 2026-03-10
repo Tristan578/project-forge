@@ -12,6 +12,11 @@ import {
  * Returns application status, environment, version, and per-service health.
  * Only critical service failures (DB, Auth) trigger HTTP 503.
  * Sensitive error details are stripped from the public response.
+ *
+ * Rate limiting: This endpoint makes real network calls (DB, Clerk, CDN).
+ * In production, upstream infrastructure (Vercel Edge, Cloudflare) provides
+ * basic rate limiting. For additional protection, add Upstash-based rate
+ * limiting when the rate-limiting infrastructure is fully deployed.
  */
 export async function GET(): Promise<NextResponse> {
   const report = await runAllHealthChecks();
@@ -25,7 +30,7 @@ export async function GET(): Promise<NextResponse> {
   const dbStatus =
     dbService?.status === 'healthy'
       ? 'connected'
-      : dbService?.error?.includes('not configured')
+      : dbService?.status === 'degraded'
         ? 'not_configured'
         : 'unavailable';
 

@@ -12,6 +12,8 @@ function statusColor(status: ServiceHealth['status']): string {
       return 'bg-yellow-500';
     case 'down':
       return 'bg-red-500';
+    default:
+      return 'bg-gray-500';
   }
 }
 
@@ -23,6 +25,8 @@ function statusLabel(status: ServiceHealth['status']): string {
       return 'Degraded';
     case 'down':
       return 'Down';
+    default:
+      return 'Unknown';
   }
 }
 
@@ -34,6 +38,8 @@ function statusTextColor(status: ServiceHealth['status']): string {
       return 'text-yellow-500';
     case 'down':
       return 'text-red-500';
+    default:
+      return 'text-gray-500';
   }
 }
 

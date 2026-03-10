@@ -400,7 +400,7 @@ describe('healthChecks', () => {
       vi.resetModules();
       const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
       const report = await runAllHealthChecks();
-      // No DATABASE_URL → DB is down → overall is down
+      // No DATABASE_URL → DB is degraded, but Stripe/AI are down → overall is down
       expect(report.overall).toBe('down');
     });
   });

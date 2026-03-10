@@ -270,8 +270,8 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
     const { latencyMs } = await timed(() =>
       withTimeout(
         fetch(pingUrl, { method: 'HEAD' }).then((res) => {
-          // 4xx/5xx except 404 indicates CDN is reachable but something is wrong
-          if (res.status >= 500) {
+          // 5xx indicates CDN server error; 4xx (except 404) indicates auth/config issue
+          if (res.status >= 500 || (res.status >= 400 && res.status \!== 404)) {
             throw new Error(`CDN returned ${res.status}`);
           }
         }),
