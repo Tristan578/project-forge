@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { FailedRefund } from '../refundQueue';
 
-// We need to stub localStorage before importing the module under test because
-// the module reads from localStorage at call time (not at import time).
+import {
+  enqueueFailedRefund,
+  getFailedRefunds,
+  removeFailedRefund,
+  processFailedRefunds,
+} from '../refundQueue';
+
 const localStorageStore: Record<string, string> = {};
 
 const mockLocalStorage = {
@@ -22,19 +27,7 @@ const mockLocalStorage = {
   key: vi.fn((index: number) => Object.keys(localStorageStore)[index] ?? null),
 };
 
-vi.stubGlobal('localStorage', mockLocalStorage);
-
-// Also stub fetch for processFailedRefunds tests
 const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
-
-// Import after stubs are in place
-import {
-  enqueueFailedRefund,
-  getFailedRefunds,
-  removeFailedRefund,
-  processFailedRefunds,
-} from '../refundQueue';
 
 const STORAGE_KEY = 'forge-failed-refunds';
 
@@ -43,6 +36,8 @@ function makeRefund(jobId: string, overrides?: Partial<FailedRefund>): FailedRef
 }
 
 beforeEach(() => {
+  vi.stubGlobal('localStorage', mockLocalStorage);
+  vi.stubGlobal('fetch', mockFetch);
   mockLocalStorage.clear();
   vi.clearAllMocks();
 });

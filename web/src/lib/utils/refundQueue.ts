@@ -20,13 +20,24 @@ export interface FailedRefund {
 const STORAGE_KEY = 'forge-failed-refunds';
 const MAX_QUEUE_SIZE = 50;
 
+function isValidRefund(item: unknown): item is FailedRefund {
+  if (typeof item !== 'object' || item === null) return false;
+  const obj = item as Record<string, unknown>;
+  return (
+    typeof obj.jobId === 'string' &&
+    typeof obj.provider === 'string' &&
+    typeof obj.amount === 'number' &&
+    typeof obj.timestamp === 'number'
+  );
+}
+
 function readQueue(): FailedRefund[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed as FailedRefund[];
+    return parsed.filter(isValidRefund);
   } catch {
     return [];
   }
