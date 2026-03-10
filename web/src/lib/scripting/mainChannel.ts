@@ -160,7 +160,13 @@ export class MainThreadChannel {
         timer,
       });
 
-      this.port.postMessage(msg);
+      try {
+        this.port.postMessage(msg);
+      } catch (err) {
+        clearTimeout(timer);
+        this.pendingRequests.delete(msg.id);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      }
     });
   }
 
