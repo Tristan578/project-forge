@@ -271,7 +271,7 @@ export async function checkEngineCdn(): Promise<ServiceHealth> {
       withTimeout(
         fetch(pingUrl, { method: 'HEAD' }).then((res) => {
           // 5xx indicates CDN server error; 4xx (except 404) indicates auth/config issue
-          if (res.status >= 500 || (res.status >= 400 && res.status \!== 404)) {
+          if (res.status >= 500 || (res.status >= 400 && res.status !== 404)) {
             throw new Error(`CDN returned ${res.status}`);
           }
         }),
