@@ -318,7 +318,7 @@ interface ColumnProps {
   isDragOver: boolean;
   onDragEnter: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDragOver: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
-  onDragLeave: () => void;
+  onDragLeave: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDrop: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDragStart: (e: DragEvent<HTMLDivElement>, id: string) => void;
   onDragEnd: () => void;
@@ -357,6 +357,13 @@ function Column({
     [onDragOver, config.id]
   );
 
+  const handleDragLeave = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      onDragLeave(e, config.id);
+    },
+    [onDragLeave, config.id]
+  );
+
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
       onDrop(e, config.id);
@@ -389,7 +396,7 @@ function Column({
       }`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
-      onDragLeave={onDragLeave}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       data-column={config.id}
       aria-label={`${config.label} column`}
@@ -479,23 +486,27 @@ export function TaskboardPanel() {
     setDragOverColumn(status);
   }, []);
 
-  const dragEnterCount = useRef(0);
+  // Per-column enter counters to avoid cross-column event imbalances
+  const dragEnterCounts = useRef<Map<TaskStatus, number>>(new Map());
 
   const handleDragEnterColumn = useCallback((_e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
-    dragEnterCount.current++;
+    const counts = dragEnterCounts.current;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
     setDragOverColumn(status);
   }, []);
 
-  const handleDragLeave = useCallback(() => {
-    dragEnterCount.current--;
-    if (dragEnterCount.current <= 0) {
-      dragEnterCount.current = 0;
-      setDragOverColumn(null);
+  const handleDragLeave = useCallback((_e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
+    const counts = dragEnterCounts.current;
+    const next = (counts.get(status) ?? 1) - 1;
+    counts.set(status, Math.max(0, next));
+    if (next <= 0) {
+      // Only clear highlight if leaving the currently highlighted column
+      setDragOverColumn((prev) => (prev === status ? null : prev));
     }
   }, []);
 
   const handleDragEnd = useCallback(() => {
-    dragEnterCount.current = 0;
+    dragEnterCounts.current.clear();
     setDragOverColumn(null);
     dragTaskId.current = null;
   }, []);
@@ -503,7 +514,7 @@ export function TaskboardPanel() {
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
       e.preventDefault();
-      dragEnterCount.current = 0;
+      dragEnterCounts.current.clear();
       setDragOverColumn(null);
       if (dragTaskId.current) {
         moveTask(dragTaskId.current, status);
