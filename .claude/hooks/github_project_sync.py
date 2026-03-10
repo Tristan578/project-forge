@@ -86,7 +86,7 @@ def resolve_project_id(config):
 
     project_name = config.get("allowedProjectName")
     if not project_name:
-        result = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+        result = config.get("localProjectId", "")
         _resolved_cache["project"] = result
         return result
 
@@ -108,7 +108,11 @@ def resolve_project_id(config):
     except Exception as e:
         print(f"  [bootstrap] Failed to create project {project_name}: {e}", file=sys.stderr)
 
-    fallback = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    fallback = config.get("localProjectId")
+    if not fallback:
+        print("  [WARN] No localProjectId in config and name lookup failed!", file=sys.stderr)
+        return None
+    print(f"  [WARN] Project name lookup failed for '{project_name}', using config fallback: {fallback}", file=sys.stderr)
     _resolved_cache["project"] = fallback
     return fallback
 
@@ -913,17 +917,22 @@ def pull():
             filtered += 1
             continue
 
-        # If no syncRepo in metadata, check projectId pattern
+        # If syncRepo matches, allow. Otherwise, projectId MUST match local PF project.
         meta_project = parsed.get("projectId", "")
-        if not sync_repo and not meta_project:
-            filtered += 1
-            continue
+        if not sync_repo:
+            if not meta_project or meta_project != project_id:
+                filtered += 1
+                continue
 
         # Check for re-link by ticketId in metadata
         if parsed.get("ticketId"):
             meta_tid = parsed["ticketId"]
             local_ticket = tb_get(f"/tickets/{meta_tid}")
             if local_ticket and meta_tid not in tmap:
+                # Only re-link if the local ticket belongs to this project
+                if local_ticket.get("projectId") != project_id:
+                    filtered += 1
+                    continue
                 entry_data = {
                     "githubItemId": item_id,
                     "lastLocalStatus": local_ticket.get("status", "todo"),
