@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { OnboardingChecklist } from '../OnboardingChecklist';
 import { useOnboardingStore } from '@/stores/onboardingStore';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore as _useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
   useOnboardingStore: vi.fn(),

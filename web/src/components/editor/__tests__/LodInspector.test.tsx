@@ -41,6 +41,7 @@ describe('LodInspector', () => {
       const state = { selectedIds, sceneGraph };
       return typeof selector === 'function' ? selector(state) : state;
     });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(usePerformanceStore).mockImplementation((selector: any) => {
       const state = { lodLevels };
       return typeof selector === 'function' ? selector(state) : state;

@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { SpriteInspector } from '../SpriteInspector';
 import { useEditorStore } from '@/stores/editorStore';
+import type { SpriteData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
@@ -28,15 +29,15 @@ const defaultSortingLayers = [
   { name: 'Foreground', order: 2, visible: true },
 ];
 
-const baseSpriteData = {
+const baseSpriteData: SpriteData = {
   textureAssetId: null,
-  colorTint: [1, 1, 1, 1] as [number, number, number, number],
+  colorTint: [1, 1, 1, 1],
   flipX: false,
   flipY: false,
   customSize: null,
   sortingLayer: 'Default',
   sortingOrder: 0,
-  anchor: 'center' as const,
+  anchor: 'center',
 };
 
 describe('SpriteInspector', () => {
@@ -45,13 +46,13 @@ describe('SpriteInspector', () => {
 
   function setupStore({
     primaryId = 'entity-1' as string | null,
-    spriteData = baseSpriteData as typeof baseSpriteData | null,
+    spriteData = baseSpriteData as SpriteData | null,
     sortingLayers = defaultSortingLayers,
     assetRegistry = {} as Record<string, { id: string; name: string; kind: string }>,
   } = {}) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(useEditorStore).mockImplementation((selector: any) => {
-      const sprites: Record<string, typeof baseSpriteData> = {};
+      const sprites: Record<string, SpriteData> = {};
       if (primaryId && spriteData) {
         sprites[primaryId] = spriteData;
       }
@@ -156,10 +157,7 @@ describe('SpriteInspector', () => {
   it('calls setSpriteData when Flip Y toggled', () => {
     setupStore();
     render(<SpriteInspector />);
-    const checkboxes = screen.getAllByRole('checkbox');
-    // Flip Y is the second flip-related checkbox
-    // checkboxes: Custom Size (index 0), Flip X (index 1), Flip Y (index 2)
-    // Actually: checkboxes order depends on DOM — find by surrounding text
+    // Find Flip Y checkbox by surrounding label text
     const flipYLabel = screen.getByText('Flip Y').closest('label');
     const flipYCheckbox = flipYLabel?.querySelector('input[type="checkbox"]') as HTMLInputElement;
     fireEvent.click(flipYCheckbox);

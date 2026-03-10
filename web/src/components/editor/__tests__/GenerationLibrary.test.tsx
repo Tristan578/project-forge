@@ -34,7 +34,7 @@ const sampleEntry = {
 
 describe('GenerationLibrary', () => {
   const mockOnClose = vi.fn();
-  const mockOnRegenerate = vi.fn();
+  const _mockOnRegenerate = vi.fn();
   const mockSetSearchQuery = vi.fn();
   const mockSetFilterType = vi.fn();
   const mockRemoveEntry = vi.fn();

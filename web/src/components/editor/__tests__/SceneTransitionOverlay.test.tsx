@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, cleanup } from '@/test/utils/componentTestUtils';
 import { SceneTransitionOverlay } from '../SceneTransitionOverlay';
 import { useEditorStore } from '@/stores/editorStore';
 

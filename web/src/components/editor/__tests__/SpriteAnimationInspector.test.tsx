@@ -98,7 +98,7 @@ describe('SpriteAnimationInspector', () => {
 
   it('shows no Animation Clips section when spriteSheet has no clips', () => {
     setupStore({
-      spriteSheet: { ...baseSpriteSheet, clips: {} },
+      spriteSheet: { ...baseSpriteSheet, clips: {} as Record<string, (typeof baseSpriteSheet.clips)[string]> },
     });
     render(<SpriteAnimationInspector />);
     expect(screen.queryByText('Animation Clips')).toBeNull();
