@@ -275,14 +275,14 @@ export function EditorLayout() {
         return;
       }
 
+      if (isInput) return;
+
       // Ctrl+Shift+T / Cmd+Shift+T: Toggle Tasks panel
       if (e.key === 't' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
         e.preventDefault();
         useWorkspaceStore.getState().openPanel('taskboard');
         return;
       }
-
-      if (isInput) return;
 
       // ? key opens shortcuts panel
       if (e.key === '?') {

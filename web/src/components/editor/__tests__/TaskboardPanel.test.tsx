@@ -103,6 +103,7 @@ describe('TaskboardPanel', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     cleanup();
   });
 

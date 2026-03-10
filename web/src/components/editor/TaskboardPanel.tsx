@@ -244,9 +244,10 @@ function AddTaskForm({ onAdd, onCancel }: AddTaskFormProps) {
       />
       <div className="mt-2 flex items-center gap-2">
         {/* Assignee toggle */}
-        <div className="flex rounded border border-zinc-700 text-[9px]">
+        <div className="flex rounded border border-zinc-700 text-[9px]" role="group" aria-label="Assignee">
           <button
             type="button"
+            aria-pressed={assignee === 'user'}
             onClick={() => setAssignee('user')}
             className={`flex items-center gap-0.5 px-1.5 py-0.5 transition-colors ${
               assignee === 'user'
@@ -259,6 +260,7 @@ function AddTaskForm({ onAdd, onCancel }: AddTaskFormProps) {
           </button>
           <button
             type="button"
+            aria-pressed={assignee === 'ai'}
             onClick={() => setAssignee('ai')}
             className={`flex items-center gap-0.5 px-1.5 py-0.5 transition-colors ${
               assignee === 'ai'
@@ -449,6 +451,7 @@ export function TaskboardPanel() {
   const handleDragStart = useCallback((e: DragEvent<HTMLDivElement>, id: string) => {
     dragTaskId.current = id;
     e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', id);
   }, []);
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
