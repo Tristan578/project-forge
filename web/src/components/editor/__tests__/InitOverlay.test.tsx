@@ -23,10 +23,11 @@ vi.mock('@/lib/initLog', () => ({
 import { useEngineStatus } from '@/hooks/useEngineStatus';
 
 const baseStatus = {
+  currentPhase: 'renderer_init' as const,
   phases: [
-    { phase: 'wasm_loading', status: 'done', duration: 1500, message: null },
-    { phase: 'renderer_init', status: 'active', duration: 0, message: null },
-    { phase: 'scene_setup', status: 'pending', duration: 0, message: null },
+    { phase: 'wasm_loading' as const, status: 'done' as const, duration: 1500, message: null },
+    { phase: 'renderer_init' as const, status: 'active' as const, duration: 0, message: null },
+    { phase: 'scene_setup' as const, status: 'pending' as const, duration: 0, message: null },
   ],
   totalElapsed: 2000,
   isTimedOut: false,
@@ -35,6 +36,7 @@ const baseStatus = {
   canRetry: false,
   isReady: false,
   retry: vi.fn(),
+  logEvent: vi.fn(),
   error: null as string | null,
 };
 

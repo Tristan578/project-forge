@@ -59,7 +59,7 @@ describe('LodInspector', () => {
   it('returns null when no entity selected', () => {
     setupStore({
       selectedIds: new Set(),
-      sceneGraph: { nodes: {}, rootIds: [] },
+      sceneGraph: { nodes: {} as Record<string, typeof meshEntity>, rootIds: [] as string[] },
     });
     const { container } = render(<LodInspector />);
     expect(container.firstChild).toBeNull();

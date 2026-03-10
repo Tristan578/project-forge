@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { JointInspector } from '../JointInspector';
 import { useEditorStore } from '@/stores/editorStore';
+import type { JointData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(),
@@ -24,12 +25,12 @@ const baseSceneGraph = {
   rootIds: ['entity-1', 'entity-2'],
 };
 
-const baseJoint = {
-  jointType: 'revolute' as const,
+const baseJoint: JointData = {
+  jointType: 'revolute',
   connectedEntityId: 'entity-2',
-  anchorSelf: [0, 0, 0] as [number, number, number],
-  anchorOther: [0, 0, 0] as [number, number, number],
-  axis: [0, 1, 0] as [number, number, number],
+  anchorSelf: [0, 0, 0],
+  anchorOther: [0, 0, 0],
+  axis: [0, 1, 0],
   limits: null,
   motor: null,
 };
@@ -41,7 +42,7 @@ describe('JointInspector', () => {
 
   function setupStore({
     primaryId = 'entity-1' as string | null,
-    primaryJoint = null as typeof baseJoint | null,
+    primaryJoint = null as JointData | null,
     physicsEnabled = true,
     sceneGraph = baseSceneGraph,
   } = {}) {
@@ -89,7 +90,7 @@ describe('JointInspector', () => {
   it('shows need another entity message when only one entity', () => {
     setupStore({
       sceneGraph: {
-        nodes: { 'entity-1': { entityId: 'entity-1', name: 'Entity 1', children: [] } },
+        nodes: { 'entity-1': { entityId: 'entity-1', name: 'Entity 1', children: [] } } as typeof baseSceneGraph.nodes,
         rootIds: ['entity-1'],
       },
     });
