@@ -1,9 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('server-only', () => ({}));
 
 describe('GET /api/health', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.resetModules();
   });
 
@@ -69,21 +77,25 @@ describe('GET /api/health', () => {
   it('should return 200 when all critical services healthy', async () => {
     vi.resetModules();
     vi.stubEnv('DATABASE_URL', 'postgresql://test');
+    vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_abc');
+    vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_abc');
 
     // Mock neon to succeed
     const mockSql = vi.fn().mockResolvedValue([{ '?column?': 1 }]);
     const mockNeon = vi.fn().mockReturnValue(mockSql);
     vi.doMock('@neondatabase/serverless', () => ({ neon: mockNeon }));
 
+    // Mock fetch for Clerk JWKS check
+    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', mockFetch);
+
     const { GET } = await import('./route');
     const res = await GET();
     const body = await res.json();
 
-    // DB healthy → overall may still be degraded due to other unconfigured services
-    // but HTTP status should reflect the actual overall
+    // Both critical services (DB + Auth) healthy → HTTP 200
     expect(body.database).toBe('connected');
-    expect(res.status).toBeGreaterThanOrEqual(200);
-    expect(res.status).toBeLessThan(600);
+    expect(res.status).toBe(200);
   });
 
   it('should report database as unavailable when DB throws', async () => {

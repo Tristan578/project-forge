@@ -47,6 +47,7 @@ describe('HealthDashboard', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     cleanup();
   });
 

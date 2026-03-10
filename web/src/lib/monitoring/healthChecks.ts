@@ -5,6 +5,7 @@
  * charge per call (Stripe, etc.) we only validate config presence.
  * For services that are safe to ping (DB, CDN) we perform real checks.
  */
+import 'server-only';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -32,10 +33,15 @@ const TIMEOUT_MS = 5_000;
  * with a "timed out" message.
  */
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms),
-  );
-  return Promise.race([promise, timeout]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
 }
 
 /**
@@ -105,8 +111,6 @@ export async function checkAuthentication(): Promise<ServiceHealth> {
     };
   }
 
-  // Extract Clerk instance ID from publishable key to build JWKS URL
-  // Format: pk_test_<base64> or pk_live_<base64>
   try {
     const jwksUrl = 'https://api.clerk.com/v1/jwks';
     const { latencyMs } = await timed(() =>
@@ -336,6 +340,9 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
 // Aggregate
 // ---------------------------------------------------------------------------
 
+/** Services whose downtime should trigger HTTP 503 */
+const CRITICAL_SERVICES = new Set(['Database (Neon)', 'Authentication (Clerk)']);
+
 /**
  * Compute overall status from a list of service results.
  * - any 'down' → overall 'down'
@@ -346,6 +353,29 @@ export function computeOverallStatus(services: ServiceHealth[]): ServiceStatus {
   if (services.some((s) => s.status === 'down')) return 'down';
   if (services.some((s) => s.status === 'degraded')) return 'degraded';
   return 'healthy';
+}
+
+/**
+ * Compute HTTP-relevant status based only on critical services.
+ * Optional services (Stripe, AI providers, etc.) being down should not cause 503.
+ */
+export function computeCriticalStatus(services: ServiceHealth[]): ServiceStatus {
+  const critical = services.filter((s) => CRITICAL_SERVICES.has(s.name));
+  if (critical.some((s) => s.status === 'down')) return 'down';
+  if (critical.some((s) => s.status === 'degraded')) return 'degraded';
+  return 'healthy';
+}
+
+/**
+ * Strip sensitive error details for public consumption.
+ * Returns service list with errors replaced by generic messages.
+ */
+export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
+  return services.map((s) => ({
+    ...s,
+    error: s.error ? `${s.name} is ${s.status}` : undefined,
+    details: undefined,
+  }));
 }
 
 /**

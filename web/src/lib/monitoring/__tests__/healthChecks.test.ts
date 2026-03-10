@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// We import the module under test after stubbing env vars
-// and mocking external deps in each test.
+vi.mock('server-only', () => ({}));
 
 describe('healthChecks', () => {
   beforeEach(() => {
@@ -11,6 +10,7 @@ describe('healthChecks', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     vi.resetModules();
   });
 
@@ -53,6 +53,55 @@ describe('healthChecks', () => {
         { name: 'B', status: 'degraded' as const, latencyMs: 1, lastChecked: '' },
       ];
       expect(computeOverallStatus(services)).toBe('down');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // computeCriticalStatus
+  // ---------------------------------------------------------------------------
+  describe('computeCriticalStatus', () => {
+    it('returns healthy when critical services are healthy regardless of optional', async () => {
+      const { computeCriticalStatus } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        { name: 'Database (Neon)', status: 'healthy' as const, latencyMs: 5, lastChecked: '' },
+        { name: 'Authentication (Clerk)', status: 'healthy' as const, latencyMs: 10, lastChecked: '' },
+        { name: 'AI Providers', status: 'down' as const, latencyMs: 0, lastChecked: '' },
+      ];
+      expect(computeCriticalStatus(services)).toBe('healthy');
+    });
+
+    it('returns down when DB is down', async () => {
+      const { computeCriticalStatus } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        { name: 'Database (Neon)', status: 'down' as const, latencyMs: 0, lastChecked: '' },
+        { name: 'AI Providers', status: 'healthy' as const, latencyMs: 0, lastChecked: '' },
+      ];
+      expect(computeCriticalStatus(services)).toBe('down');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // sanitizeForPublic
+  // ---------------------------------------------------------------------------
+  describe('sanitizeForPublic', () => {
+    it('strips error details and replaces with generic message', async () => {
+      const { sanitizeForPublic } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        { name: 'Database (Neon)', status: 'down' as const, latencyMs: 0, lastChecked: '', error: 'connection refused at 10.0.0.1', details: { url: 'postgresql://secret' } },
+      ];
+      const sanitized = sanitizeForPublic(services);
+      expect(sanitized[0].error).toBe('Database (Neon) is down');
+      expect(sanitized[0].details).toBeUndefined();
+    });
+
+    it('leaves healthy services without error unchanged', async () => {
+      const { sanitizeForPublic } = await import('@/lib/monitoring/healthChecks');
+      const services = [
+        { name: 'Engine CDN', status: 'healthy' as const, latencyMs: 12, lastChecked: '' },
+      ];
+      const sanitized = sanitizeForPublic(services);
+      expect(sanitized[0].error).toBeUndefined();
+      expect(sanitized[0].details).toBeUndefined();
     });
   });
 
