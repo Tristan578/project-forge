@@ -52,7 +52,7 @@ beforeEach(() => {
   vi.mocked(getDb).mockReturnValue({
     insert: mockInsert,
     update: mockUpdate,
-  } as ReturnType<typeof getDb>);
+  } as unknown as ReturnType<typeof getDb>);
 });
 
 describe('createJobRecord', () => {

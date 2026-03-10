@@ -3,7 +3,7 @@
  * Dedicated tests for handlers2d: sprite CRUD, tilemap, skeleton2d, physics2d.
  * Extends coverage beyond exportAsset2dHandlers.test.ts with edge cases.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createMockStore } from './handlerTestUtils';
 import { handlers2d } from '../handlers2d';
 import type { ToolCallContext, ExecutionResult } from '../types';
