@@ -3,6 +3,7 @@
  */
 
 import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type EngineMode } from '@/stores/editorStore';
+import { saveAutoSave } from '@/lib/sceneFile';
 import type { SetFn, GetFn } from './types';
 
 const TRANSFORM_DEBOUNCE_MS = 2000;
@@ -102,14 +103,8 @@ export function handleTransformEvent(
       const { json, name } = payload;
       const state = useEditorStore.getState();
       if (state.autoSaveEnabled) {
-        // Auto-save to localStorage
-        try {
-          localStorage.setItem('forge:autosave', json);
-          localStorage.setItem('forge:autosave:name', name);
-          localStorage.setItem('forge:autosave:time', new Date().toISOString());
-        } catch {
-          console.warn('[AutoSave] localStorage write failed (quota exceeded?)');
-        }
+        // Auto-save to localStorage with quota management and LRU eviction
+        saveAutoSave(json, name);
       }
       // Dispatch DOM event so SceneToolbar can trigger file download
       window.dispatchEvent(new CustomEvent('forge:scene-exported', { detail: { json, name } }));

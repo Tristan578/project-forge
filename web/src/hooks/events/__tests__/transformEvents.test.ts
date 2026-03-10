@@ -416,7 +416,7 @@ describe('handleTransformEvent', () => {
 
       expect(result).toBe(true);
       expect(warnSpy).toHaveBeenCalledWith(
-        '[AutoSave] localStorage write failed (quota exceeded?)'
+        '[AutoSave] localStorage write failed — storage quota exhausted after eviction.'
       );
 
       warnSpy.mockRestore();

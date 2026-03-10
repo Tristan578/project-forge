@@ -3,6 +3,8 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { captureException } from '@/lib/monitoring/sentry-client';
+import { safeLocalStorageSet } from '@/lib/storage/storageQuota';
+import { saveToIndexedDB } from '@/lib/storage/indexedDBFallback';
 
 interface Props {
   children: ReactNode;
@@ -46,16 +48,32 @@ export class WasmErrorBoundary extends Component<Props, State> {
     try {
       // Attempt to save current editor state
       const editorStoreData = localStorage.getItem('forge-editor-store');
-      if (editorStoreData) {
-        const timestamp = new Date().toISOString();
-        localStorage.setItem(
-          'forge-editor-crash-backup',
-          JSON.stringify({
-            timestamp,
-            state: editorStoreData,
-          })
-        );
+      if (!editorStoreData) return;
+
+      const timestamp = new Date().toISOString();
+      const backupPayload = JSON.stringify({ timestamp, state: editorStoreData });
+      const BACKUP_KEY = 'forge-editor-crash-backup';
+
+      // Try localStorage first (with LRU eviction on quota failure)
+      const result = safeLocalStorageSet(BACKUP_KEY, backupPayload);
+      if (result.success) {
+        console.info('[CrashBackup] Saved to localStorage (evicted ' + result.evicted + ' bytes).');
+        return;
       }
+
+      // Fall back to IndexedDB
+      console.warn('[CrashBackup] localStorage full — falling back to IndexedDB.');
+      saveToIndexedDB(BACKUP_KEY, backupPayload)
+        .then((ok) => {
+          if (ok) {
+            console.info('[CrashBackup] Saved to IndexedDB.');
+          } else {
+            console.error('[CrashBackup] Both localStorage and IndexedDB failed.');
+          }
+        })
+        .catch((err: unknown) => {
+          console.error('[CrashBackup] IndexedDB error:', err);
+        });
     } catch (err) {
       console.error('Failed to auto-save scene:', err);
     }

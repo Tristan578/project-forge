@@ -2,6 +2,8 @@
  * Scene file I/O utilities — download, upload, and localStorage auto-save.
  */
 
+import { safeLocalStorageSet, wouldExceedThreshold, evictOldAutoSaves } from '@/lib/storage/storageQuota';
+
 /** Maximum scene format version the web client supports. Must match engine. */
 export const CURRENT_FORMAT_VERSION = 3;
 
@@ -81,5 +83,30 @@ export function clearAutoSave(): void {
     localStorage.removeItem(AUTOSAVE_TIME_KEY);
   } catch {
     // ignore
+  }
+}
+
+/**
+ * Persist scene JSON to localStorage as the active auto-save.
+ *
+ * Before writing, checks whether the payload would push usage above 80 %.
+ * If it would, the oldest auto-save entries are evicted first.  Uses
+ * `safeLocalStorageSet` for an additional eviction pass on QuotaExceededError.
+ * Logs a warning (without importing UI code) if storage is still unavailable.
+ */
+export function saveAutoSave(json: string, name: string): void {
+  // UTF-16: each character occupies 2 bytes in storage
+  const estimatedSize = (json.length + name.length) * 2;
+
+  if (wouldExceedThreshold(estimatedSize)) {
+    evictOldAutoSaves(1);
+  }
+
+  const jsonResult = safeLocalStorageSet(AUTOSAVE_KEY, json);
+  const nameResult = safeLocalStorageSet(AUTOSAVE_NAME_KEY, name);
+  const timeResult = safeLocalStorageSet(AUTOSAVE_TIME_KEY, new Date().toISOString());
+
+  if (!jsonResult.success || !nameResult.success || !timeResult.success) {
+    console.warn('[AutoSave] localStorage write failed — storage quota exhausted after eviction.');
   }
 }
