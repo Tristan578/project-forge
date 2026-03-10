@@ -278,7 +278,7 @@ export function EditorLayout() {
       if (isInput) return;
 
       // Ctrl+Shift+T / Cmd+Shift+T: Toggle Tasks panel
-      if (e.key === 't' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+      if (e.code === 'KeyT' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
         e.preventDefault();
         useWorkspaceStore.getState().openPanel('taskboard');
         return;
