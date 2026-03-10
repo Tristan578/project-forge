@@ -2,24 +2,28 @@
 """
 github_project_sync.py - Bidirectional sync between local taskboard and GitHub Projects v2
 
+ARCHITECTURE (v3 — github_issue_number is source of truth):
+  - Local tickets have `github_issue_number` (INTEGER) and `sync_repo` (TEXT) columns.
+  - `sync_repo` MUST equal the configured repo name for a ticket to be synced.
+  - Push: only syncs tickets WHERE sync_repo = config.repo. Matches by github_issue_number.
+  - Pull: only imports issues whose SPAWNFORGE_METADATA.projectId matches, or are already linked.
+  - The JSON map file is a CACHE — the SQLite columns are the authoritative state.
+  - Title-based matching is NEVER used. Only github_issue_number links local <-> remote.
+
 Usage:
-  python3 github_project_sync.py push       # Push changed tickets to GitHub (todo + in_progress + newly done)
+  python3 github_project_sync.py push       # Push changed tickets to GitHub
   python3 github_project_sync.py push-all   # Push ALL tickets including done
-  python3 github_project_sync.py pull       # Pull GitHub Project changes to local taskboard
+  python3 github_project_sync.py pull       # Pull GitHub changes to local taskboard
   python3 github_project_sync.py status     # Show sync status
 
-Designed to be called from Claude Code hooks:
-  - Stop hook calls 'push' to sync outbound changes after each response
-  - SessionStart hook calls 'pull' to sync inbound changes at session start
-  - Skills call 'push-all' or 'pull' for manual full sync
-
-Requires: gh CLI (authenticated), taskboard API at localhost:3010
+Requires: gh CLI (authenticated), taskboard API at localhost:3010, SQLite DB
 """
 
 import hashlib
 import json
 import os
 import re
+import sqlite3
 import subprocess
 import sys
 import urllib.request
@@ -32,6 +36,10 @@ CONFIG_PATH = SCRIPT_DIR / "github-sync-config.json"
 MAP_PATH = SCRIPT_DIR / "github-project-map.json"
 TB_API = "http://localhost:3010/api"
 
+# Walk up from hooks dir to find the DB
+PROJECT_ROOT = SCRIPT_DIR.parent.parent
+DB_PATH = SCRIPT_DIR.parent / "taskboard.db"
+
 
 def load_config():
     with open(CONFIG_PATH) as f:
@@ -42,11 +50,6 @@ _resolved_cache = {}
 
 
 def resolve_team_id(config):
-    """Resolve allowedTeamName to a team ID via the taskboard API.
-
-    Creates the team if it doesn't exist. Caches the result for the
-    duration of this process to avoid repeated API calls.
-    """
     if "team" in _resolved_cache:
         return _resolved_cache["team"]
 
@@ -63,7 +66,6 @@ def resolve_team_id(config):
                 _resolved_cache["team"] = team["id"]
                 return team["id"]
 
-    # Team not found — create it
     try:
         new_team = tb_post("/teams", {"name": team_name})
         tid = new_team.get("id")
@@ -79,11 +81,6 @@ def resolve_team_id(config):
 
 
 def resolve_project_id(config):
-    """Resolve allowedProjectName to a project ID via the taskboard API.
-
-    Creates the project if it doesn't exist. Caches the result for the
-    duration of this process to avoid repeated API calls.
-    """
     if "project" in _resolved_cache:
         return _resolved_cache["project"]
 
@@ -100,7 +97,6 @@ def resolve_project_id(config):
                 _resolved_cache["project"] = proj["id"]
                 return proj["id"]
 
-    # Project not found — create it
     try:
         prefix = config.get("allowedProjectPrefix", "PF")
         new_proj = tb_post("/projects", {"name": project_name, "prefix": prefix})
@@ -135,6 +131,117 @@ def save_map(mapping):
 
 
 # ---------------------------------------------------------------------------
+# SQLite direct access — github_issue_number is the authoritative link
+# ---------------------------------------------------------------------------
+
+def db_connect():
+    if not DB_PATH.exists():
+        return None
+    conn = sqlite3.connect(str(DB_PATH))
+    _ensure_sync_columns(conn)
+    return conn
+
+
+_migration_checked = False
+
+
+def _ensure_sync_columns(conn):
+    """Auto-migrate: add github_issue_number and sync_repo if missing.
+
+    This runs on EVERY db_connect() call (cached after first check) so that
+    new developers pulling the repo get the columns automatically on first sync.
+    """
+    global _migration_checked
+    if _migration_checked:
+        return
+
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(tickets)").fetchall()
+    }
+
+    if "github_issue_number" not in columns:
+        conn.execute("ALTER TABLE tickets ADD COLUMN github_issue_number INTEGER DEFAULT NULL")
+        print("  [migrate] Added github_issue_number column to tickets table")
+
+    if "sync_repo" not in columns:
+        conn.execute("ALTER TABLE tickets ADD COLUMN sync_repo TEXT DEFAULT NULL")
+        print("  [migrate] Added sync_repo column to tickets table")
+
+    # Create indices if missing (idempotent)
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_github_issue "
+            "ON tickets(github_issue_number) WHERE github_issue_number IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tickets_sync_repo "
+            "ON tickets(sync_repo) WHERE sync_repo IS NOT NULL"
+        )
+    except Exception:
+        pass  # indices may already exist
+
+    conn.commit()
+    _migration_checked = True
+
+
+def db_get_github_issue_number(ticket_id):
+    conn = db_connect()
+    if not conn:
+        return None
+    try:
+        cur = conn.execute(
+            "SELECT github_issue_number FROM tickets WHERE id = ?", (ticket_id,)
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def db_set_github_issue_number(ticket_id, issue_number):
+    conn = db_connect()
+    if not conn:
+        return
+    try:
+        conn.execute(
+            "UPDATE tickets SET github_issue_number = ?, sync_repo = ? WHERE id = ?",
+            (issue_number, load_config()["repo"], ticket_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def db_find_by_github_issue(issue_number):
+    conn = db_connect()
+    if not conn:
+        return None
+    try:
+        cur = conn.execute(
+            "SELECT id FROM tickets WHERE github_issue_number = ?", (issue_number,)
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+    finally:
+        conn.close()
+
+
+def db_get_syncable_ticket_ids(repo_name):
+    """Return set of ticket IDs where sync_repo matches the target repo."""
+    conn = db_connect()
+    if not conn:
+        return set()
+    try:
+        cur = conn.execute(
+            "SELECT id FROM tickets WHERE sync_repo = ?", (repo_name,)
+        )
+        return {row[0] for row in cur.fetchall()}
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # V2 body format: regex constants
 # ---------------------------------------------------------------------------
 
@@ -153,7 +260,6 @@ SUBTASK_RE = re.compile(r"^[ \t]*[-*] \[([ xX])\] (.+)$", re.MULTILINE)
 # ---------------------------------------------------------------------------
 
 def compute_body_hash(ticket):
-    """SHA-256 of description+priority+teamId, first 16 hex chars."""
     desc = ticket.get("description", "") or ""
     priority = ticket.get("priority", "") or ""
     team_id = ticket.get("teamId", "") or ""
@@ -162,7 +268,6 @@ def compute_body_hash(ticket):
 
 
 def compute_subtask_hash(subtasks):
-    """SHA-256 of sorted subtask titles+completed states."""
     if not subtasks:
         return hashlib.sha256(b"").hexdigest()[:16]
     items = sorted(
@@ -173,7 +278,6 @@ def compute_subtask_hash(subtasks):
 
 
 def format_github_body(ticket):
-    """Build v2 body with subtask checkboxes + metadata block."""
     priority = ticket.get("priority", "medium") or "medium"
     desc = ticket.get("description", "") or ""
     tid = ticket.get("id", "")
@@ -200,12 +304,13 @@ def format_github_body(ticket):
     subtask_hash = compute_subtask_hash(subtasks)
 
     metadata = {
-        "version": 2,
+        "version": 3,
         "ticketId": tid,
         "number": number,
         "priority": priority,
         "teamId": team_id,
         "projectId": project_id,
+        "syncRepo": "project-forge",
         "bodyHash": body_hash,
         "subtaskHash": subtask_hash,
     }
@@ -219,16 +324,9 @@ def format_github_body(ticket):
 
 
 def parse_github_body(body):
-    """Parse v2 metadata block, fall back to v1 **Taskboard:** regex.
-
-    Returns dict with: ticketId, number, priority, teamId, description,
-    subtasks (list of {title, completed}), bodyHash, subtaskHash, version.
-    Returns None if no metadata found.
-    """
     if not body:
         return None
 
-    # Try v2 first
     m = METADATA_RE.search(body)
     if m:
         try:
@@ -236,7 +334,6 @@ def parse_github_body(body):
         except (json.JSONDecodeError, ValueError):
             meta = {}
 
-        # Extract description: everything between priority line and ## Subtasks or ---
         desc = ""
         lines = body.split("\n")
         desc_lines = []
@@ -249,12 +346,10 @@ def parse_github_body(body):
                 if line.startswith("## Subtasks") or line.strip() == "---":
                     break
                 desc_lines.append(line)
-            # If we hit the metadata block, stop
             if "<!-- SPAWNFORGE_METADATA" in line:
                 break
         desc = "\n".join(desc_lines).strip()
 
-        # Extract subtasks from checkboxes
         subtasks = []
         for sm in SUBTASK_RE.finditer(body):
             completed = sm.group(1).lower() == "x"
@@ -267,13 +362,13 @@ def parse_github_body(body):
             "priority": meta.get("priority", ""),
             "teamId": meta.get("teamId", ""),
             "projectId": meta.get("projectId", ""),
+            "syncRepo": meta.get("syncRepo", ""),
             "bodyHash": meta.get("bodyHash", ""),
             "subtaskHash": meta.get("subtaskHash", ""),
             "description": desc,
             "subtasks": subtasks,
         }
 
-    # Fall back to v1
     m = OLD_TASKBOARD_RE.search(body)
     if m:
         return {
@@ -283,6 +378,7 @@ def parse_github_body(body):
             "priority": "",
             "teamId": "",
             "projectId": "",
+            "syncRepo": "",
             "bodyHash": "",
             "subtaskHash": "",
             "description": "",
@@ -293,7 +389,6 @@ def parse_github_body(body):
 
 
 def sync_subtasks_from_github(ticket_id, gh_subtasks):
-    """Match subtasks by title, create missing, update completion via PUT."""
     local_ticket = tb_get(f"/tickets/{ticket_id}")
     if not local_ticket:
         return
@@ -307,7 +402,6 @@ def sync_subtasks_from_github(ticket_id, gh_subtasks):
         if title in local_by_title:
             local_st = local_by_title[title]
             if local_st.get("completed", False) != completed:
-                # Toggle subtask completion
                 st_id = local_st.get("id", "")
                 if st_id:
                     try:
@@ -317,7 +411,6 @@ def sync_subtasks_from_github(ticket_id, gh_subtasks):
                     except Exception:
                         pass
         else:
-            # Create missing subtask
             try:
                 tb_post(f"/tickets/{ticket_id}/subtasks", {
                     "title": title,
@@ -385,25 +478,7 @@ def gh_run(args, timeout=30):
     return result.stdout
 
 
-def gh_graphql(query, variables=None, timeout=30):
-    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
-    if variables:
-        cmd.extend(["-F", f"variables={json.dumps(variables)}"])
-    result = subprocess.run(
-        cmd,
-        capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=timeout,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"GraphQL failed: {result.stderr.strip()}")
-    data = json.loads(result.stdout)
-    if "errors" in data:
-        raise RuntimeError(f"GraphQL errors: {data['errors']}")
-    return data
-
-
 def gh_get_project_items(config):
-    """Fetch all items from the GitHub Project."""
     output = gh_run([
         "gh", "project", "item-list", str(config["projectNumber"]),
         "--owner", config["owner"], "--format", "json", "--limit", "1000",
@@ -412,15 +487,9 @@ def gh_get_project_items(config):
 
 
 def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
-    """Create a real GitHub Issue and add it to the GitHub Project.
-
-    Returns (project_item_id, issue_number).
-    Real issues appear as proper items (not drafts) on the project board.
-    """
     owner = config["owner"]
     repo = config["repo"]
 
-    # Step 1: Create a real GitHub Issue
     create_args = [
         "gh", "issue", "create",
         "--repo", f"{owner}/{repo}",
@@ -439,11 +508,9 @@ def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
     if result.returncode != 0:
         raise RuntimeError(f"Issue creation failed: {result.stderr.strip()}")
 
-    # Parse issue URL to extract issue number (output is URL like https://github.com/owner/repo/issues/123)
     issue_url = result.stdout.strip()
     issue_number = int(issue_url.rstrip("/").split("/")[-1])
 
-    # Step 2: Add the issue to the GitHub Project
     add_result = gh_run([
         "gh", "project", "item-add", str(config["projectNumber"]),
         "--owner", owner,
@@ -460,7 +527,6 @@ def gh_create_issue_and_add_to_project(config, title, body="", labels=None):
 
 
 def gh_set_status(config, item_id, local_status):
-    """Set the Status field on a GitHub Project item."""
     option_id = config["statusOptions"].get(local_status)
     if not option_id:
         return
@@ -474,7 +540,6 @@ def gh_set_status(config, item_id, local_status):
 
 
 def gh_update_issue(config, issue_number, title=None, body=None):
-    """Update a real GitHub Issue's title or body."""
     owner = config["owner"]
     repo = config["repo"]
     args = [
@@ -485,7 +550,7 @@ def gh_update_issue(config, issue_number, title=None, body=None):
         args.extend(["--title", title])
     if body:
         args.extend(["--body", body])
-    if len(args) > 5:  # only run if there's something to update
+    if len(args) > 5:
         gh_run(args)
 
 
@@ -511,8 +576,10 @@ def push(include_done=False):
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    target_repo = config["repo"]
 
-    allowed_team = resolve_team_id(config)
+    # HARD FILTER: Only sync tickets whose sync_repo matches this project
+    syncable_ids = db_get_syncable_ticket_ids(target_repo)
 
     tickets = tb_get(f"/tickets?project={project_id}")
     if tickets is None:
@@ -524,7 +591,6 @@ def push(include_done=False):
     skipped = 0
     filtered = 0
     errors = 0
-    upgrades_needed = 0
 
     for ticket in tickets:
         tid = ticket["id"]
@@ -533,95 +599,119 @@ def push(include_done=False):
         number = ticket.get("number", 0)
         display = f"PF-{number}: {title}" if number else title
 
-        # Team filter: only push tickets assigned to the allowed team
-        if allowed_team:
-            ticket_team = ticket.get("teamId") or ""
-            if ticket_team and ticket_team != allowed_team:
+        # HARD PROJECT ISOLATION: skip any ticket not marked for this repo.
+        # Auto-tag PF-project tickets that haven't been tagged yet
+        # (covers tickets created via taskboard UI or MCP before sync_repo existed).
+        if tid not in syncable_ids:
+            # Check if this ticket belongs to the PF project — if so, auto-tag it
+            ticket_project = ticket.get("projectId", "")
+            if ticket_project == project_id:
+                conn = db_connect()
+                if conn:
+                    try:
+                        conn.execute(
+                            "UPDATE tickets SET sync_repo = ? WHERE id = ? AND sync_repo IS NULL",
+                            (target_repo, tid),
+                        )
+                        conn.commit()
+                    finally:
+                        conn.close()
+                    syncable_ids.add(tid)
+                # Now it's syncable, continue processing
+            else:
                 filtered += 1
                 continue
 
         # Skip done tickets that were already synced as done
-        # Always sync newly-done tickets (status changed) or never-synced tickets
         if status == "done" and not include_done:
             if tid in tmap and tmap[tid].get("lastLocalStatus") == "done":
                 skipped += 1
                 continue
 
-        # Fetch full ticket with subtasks for body generation
+        # Check SQLite for existing github_issue_number (source of truth)
+        gh_issue_num = db_get_github_issue_number(tid)
+
+        # Fetch full ticket with subtasks
         full_ticket = tb_get(f"/tickets/{tid}")
         if full_ticket is None:
             full_ticket = ticket
-        # Ensure id is set for format_github_body
         full_ticket["id"] = tid
 
         cur_body_hash = compute_body_hash(full_ticket)
         cur_subtask_hash = compute_subtask_hash(full_ticket.get("subtasks", []))
 
-        if tid not in tmap:
-            # --- New ticket: create real GitHub Issue and add to project ---
+        if gh_issue_num is None and tid not in tmap:
+            # --- New ticket: create GitHub Issue ---
             try:
                 body = format_github_body(full_ticket)
-
-                item_id, gh_issue_number = gh_create_issue_and_add_to_project(
+                item_id, new_gh_num = gh_create_issue_and_add_to_project(
                     config, display, body
                 )
                 gh_set_status(config, item_id, status)
 
+                # IMMEDIATELY write github_issue_number back to SQLite
+                db_set_github_issue_number(tid, new_gh_num)
+
                 tmap[tid] = {
                     "githubItemId": item_id,
-                    "githubIssueNumber": gh_issue_number,
+                    "githubIssueNumber": new_gh_num,
                     "lastLocalStatus": status,
                     "lastGithubStatus": local_to_github(config, status),
                     "title": display,
                     "number": number,
                     "bodyHash": cur_body_hash,
                     "subtaskHash": cur_subtask_hash,
-                    "metadataVersion": 2,
+                    "metadataVersion": 3,
                 }
                 created += 1
-                print(f"  + {display} [{status}]")
+                print(f"  + {display} [{status}] -> #{new_gh_num}")
             except Exception as e:
                 errors += 1
                 print(f"  ! Create failed {display}: {e}", file=sys.stderr)
-        else:
-            # --- Existing ticket: check status, body, subtask, or format changes ---
+
+        elif gh_issue_num is not None:
+            # --- Existing ticket: check for changes ---
+            # Ensure map entry exists (may have been lost)
+            if tid not in tmap:
+                tmap[tid] = {
+                    "githubIssueNumber": gh_issue_num,
+                    "lastLocalStatus": "",
+                    "lastGithubStatus": "",
+                    "title": display,
+                    "number": number,
+                    "bodyHash": "",
+                    "subtaskHash": "",
+                    "metadataVersion": 2,
+                }
+
             entry = tmap[tid]
+            # Sync github issue number from DB if map is stale
+            if not entry.get("githubIssueNumber"):
+                entry["githubIssueNumber"] = gh_issue_num
+
             status_changed = entry.get("lastLocalStatus") != status
             body_changed = entry.get("bodyHash") != cur_body_hash
             subtask_changed = entry.get("subtaskHash") != cur_subtask_hash
-            needs_v2_upgrade = entry.get("metadataVersion") != 2
+            needs_upgrade = entry.get("metadataVersion", 0) < 3
 
-            if not (status_changed or body_changed or subtask_changed or needs_v2_upgrade):
+            if not (status_changed or body_changed or subtask_changed or needs_upgrade):
                 skipped += 1
                 continue
 
-            # Rate limit guard for format upgrades
-            if needs_v2_upgrade and not (status_changed or body_changed or subtask_changed):
-                upgrades_needed += 1
-                if not include_done and upgrades_needed > 10:
-                    continue  # defer bulk upgrades to push-all
-
             try:
-                # Rebuild body in v2 format
                 body = format_github_body(full_ticket)
-                gh_issue_num = entry.get("githubIssueNumber")
-                if gh_issue_num:
-                    gh_update_issue(config, gh_issue_num, body=body)
-                else:
-                    # Legacy draft/project item without issue number — skip body update
-                    # Body updates require a real GitHub Issue number.
-                    # New tickets use real issues; legacy items will get their
-                    # githubIssueNumber populated when pull() re-links them.
-                    pass
+                gh_update_issue(config, gh_issue_num, body=body)
 
                 if status_changed:
-                    gh_set_status(config, entry["githubItemId"], status)
+                    item_id = entry.get("githubItemId")
+                    if item_id:
+                        gh_set_status(config, item_id, status)
 
                 entry["lastLocalStatus"] = status
                 entry["lastGithubStatus"] = local_to_github(config, status)
                 entry["bodyHash"] = cur_body_hash
                 entry["subtaskHash"] = cur_subtask_hash
-                entry["metadataVersion"] = 2
+                entry["metadataVersion"] = 3
                 updated += 1
 
                 reasons = []
@@ -631,21 +721,24 @@ def push(include_done=False):
                     reasons.append("body")
                 if subtask_changed:
                     reasons.append("subtasks")
-                if needs_v2_upgrade:
-                    reasons.append("v2 upgrade")
                 print(f"  ~ {display} [{', '.join(reasons)}]")
             except Exception as e:
                 errors += 1
                 print(f"  ! Update failed {display}: {e}", file=sys.stderr)
 
-    if upgrades_needed > 10 and not include_done:
-        print(f"  [!] {upgrades_needed} tickets need v2 format upgrade — run push-all to upgrade all")
+        else:
+            # tid in tmap but no github_issue_number in DB — legacy entry
+            # Re-populate DB from map if possible
+            map_num = tmap.get(tid, {}).get("githubIssueNumber")
+            if map_num:
+                db_set_github_issue_number(tid, map_num)
+            skipped += 1
 
     mapping["tickets"] = tmap
     save_map(mapping)
 
     if filtered:
-        print(f"  [filter] {filtered} tickets skipped (wrong team)")
+        print(f"  [filter] {filtered} tickets skipped (wrong sync_repo)")
 
     if created or updated or errors:
         parts = []
@@ -667,6 +760,7 @@ def pull():
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    target_repo = config["repo"]
 
     if not tb_available():
         print("[SYNC] Taskboard API unavailable — skipping pull")
@@ -678,12 +772,22 @@ def pull():
         print(f"[SYNC] GitHub fetch failed: {e}", file=sys.stderr)
         return
 
-    allowed_team = resolve_team_id(config)
-
     items = gh_data.get("items", [])
 
     # Build reverse map: GitHub item ID → local ticket ID
-    reverse = {e["githubItemId"]: tid for tid, e in tmap.items()}
+    reverse_item = {e["githubItemId"]: tid for tid, e in tmap.items() if e.get("githubItemId")}
+    # Build reverse map: GitHub issue number → local ticket ID (from SQLite)
+    reverse_issue = {}
+    conn = db_connect()
+    if conn:
+        try:
+            for row in conn.execute(
+                "SELECT id, github_issue_number FROM tickets WHERE github_issue_number IS NOT NULL AND sync_repo = ?",
+                (target_repo,),
+            ):
+                reverse_issue[row[1]] = row[0]
+        finally:
+            conn.close()
 
     created = 0
     updated = 0
@@ -697,7 +801,6 @@ def pull():
         gh_status = item.get("status", "") or ""
         title = item.get("title", "")
 
-        # Prefer content title for issues/PRs
         content = item.get("content") or {}
         if content.get("title"):
             title = content["title"]
@@ -709,26 +812,34 @@ def pull():
         local_status = github_to_local(config, gh_status)
         body = content.get("body", "") if content else ""
         parsed = parse_github_body(body)
+        gh_issue_num = content.get("number") if content else None
 
-        if item_id in reverse:
-            # --- Tracked item: check status + body + subtask changes ---
-            tid = reverse[item_id]
-            entry = tmap[tid]
+        # --- Priority 1: Match by github_issue_number (authoritative) ---
+        if gh_issue_num and gh_issue_num in reverse_issue:
+            tid = reverse_issue[gh_issue_num]
+            entry = tmap.get(tid, {})
             any_change = False
 
-            # Status change
             if entry.get("lastGithubStatus") != gh_status:
                 try:
                     tb_post(f"/tickets/{tid}/move", {"status": local_status})
-                    entry["lastLocalStatus"] = local_status
-                    entry["lastGithubStatus"] = gh_status
                     any_change = True
                 except Exception as e:
                     errors += 1
-                    print(f"  ! Local status update failed {title}: {e}", file=sys.stderr)
+                    print(f"  ! Status update failed {title}: {e}", file=sys.stderr)
 
-            if parsed and parsed.get("version") == 2:
-                # Body hash change — update local description/priority
+            # Ensure map entry is current
+            if tid not in tmap:
+                tmap[tid] = {}
+            tmap[tid].update({
+                "githubItemId": item_id,
+                "githubIssueNumber": gh_issue_num,
+                "lastLocalStatus": local_status if any_change else entry.get("lastLocalStatus", local_status),
+                "lastGithubStatus": gh_status,
+                "title": title,
+            })
+
+            if parsed and parsed.get("version", 0) >= 2:
                 remote_body_hash = parsed.get("bodyHash", "")
                 if remote_body_hash and entry.get("bodyHash") != remote_body_hash:
                     update_fields = {}
@@ -741,17 +852,16 @@ def pull():
                             tb_put(f"/tickets/{tid}", update_fields)
                         except Exception:
                             pass
-                    entry["bodyHash"] = remote_body_hash
+                    tmap[tid]["bodyHash"] = remote_body_hash
                     any_change = True
 
-                # Subtask hash change — sync subtasks
                 remote_subtask_hash = parsed.get("subtaskHash", "")
                 if remote_subtask_hash and entry.get("subtaskHash") != remote_subtask_hash:
                     try:
                         sync_subtasks_from_github(tid, parsed.get("subtasks", []))
                     except Exception:
                         pass
-                    entry["subtaskHash"] = remote_subtask_hash
+                    tmap[tid]["subtaskHash"] = remote_subtask_hash
                     any_change = True
 
             if any_change:
@@ -759,133 +869,151 @@ def pull():
                 print(f"  ~ {title} -> {local_status}")
             else:
                 skipped += 1
-        else:
-            # --- Untracked item: try re-link by ULID, then import ---
-            content_type = content.get("type", "") if content else ""
-            # Accept Issues, DraftIssues, and items with no content type
-            # Skip PRs and other content types we don't manage
-            if content_type not in ("Issue", "DraftIssue", ""):
+            continue
+
+        # --- Priority 2: Match by map item ID (legacy compat) ---
+        if item_id in reverse_item:
+            tid = reverse_item[item_id]
+            entry = tmap[tid]
+            any_change = False
+
+            if entry.get("lastGithubStatus") != gh_status:
+                try:
+                    tb_post(f"/tickets/{tid}/move", {"status": local_status})
+                    entry["lastLocalStatus"] = local_status
+                    entry["lastGithubStatus"] = gh_status
+                    any_change = True
+                except Exception as e:
+                    errors += 1
+
+            # Backfill github_issue_number into SQLite if missing
+            if gh_issue_num and not db_get_github_issue_number(tid):
+                db_set_github_issue_number(tid, gh_issue_num)
+                entry["githubIssueNumber"] = gh_issue_num
+
+            if any_change:
+                updated += 1
+            else:
                 skipped += 1
+            continue
+
+        # --- Priority 3: Untracked item — strict filtering before import ---
+        content_type = content.get("type", "") if content else ""
+        if content_type not in ("Issue", "DraftIssue", ""):
+            skipped += 1
+            continue
+
+        # HARD FILTER: Only import if metadata confirms this is a SpawnForge ticket
+        if not parsed:
+            filtered += 1
+            continue
+
+        sync_repo = parsed.get("syncRepo", "")
+        if sync_repo and sync_repo != target_repo:
+            filtered += 1
+            continue
+
+        # If no syncRepo in metadata, check projectId pattern
+        meta_project = parsed.get("projectId", "")
+        if not sync_repo and not meta_project:
+            filtered += 1
+            continue
+
+        # Check for re-link by ticketId in metadata
+        if parsed.get("ticketId"):
+            meta_tid = parsed["ticketId"]
+            local_ticket = tb_get(f"/tickets/{meta_tid}")
+            if local_ticket and meta_tid not in tmap:
+                entry_data = {
+                    "githubItemId": item_id,
+                    "lastLocalStatus": local_ticket.get("status", "todo"),
+                    "lastGithubStatus": gh_status,
+                    "title": title,
+                    "number": local_ticket.get("number", 0),
+                    "bodyHash": parsed.get("bodyHash", ""),
+                    "subtaskHash": parsed.get("subtaskHash", ""),
+                    "metadataVersion": parsed.get("version", 2),
+                }
+                if gh_issue_num:
+                    entry_data["githubIssueNumber"] = gh_issue_num
+                    db_set_github_issue_number(meta_tid, gh_issue_num)
+                tmap[meta_tid] = entry_data
+
+                if local_ticket.get("status") != local_status:
+                    try:
+                        tb_post(f"/tickets/{meta_tid}/move", {"status": local_status})
+                        tmap[meta_tid]["lastLocalStatus"] = local_status
+                    except Exception:
+                        pass
+                relinked += 1
+                print(f"  * Re-linked {title} by ULID")
                 continue
 
-            # Team filter: only import items that belong to the allowed team
-            # Items with v2 metadata carry a teamId — reject if it doesn't match
-            # Items without metadata are also rejected (could be from another project)
-            if allowed_team:
-                item_team = parsed.get("teamId", "") if parsed else ""
-                if item_team and item_team != allowed_team:
-                    filtered += 1
-                    continue
-                # No metadata at all = unknown origin, skip to prevent cross-project import
-                if not parsed:
-                    filtered += 1
-                    continue
+        # --- Create new local ticket ---
+        clean_title = title
+        if title.startswith("PF-") and ": " in title:
+            clean_title = title.split(": ", 1)[1]
 
-            # Extract GitHub issue number from content if available
-            gh_issue_num = content.get("number") if content else None
+        priority = parsed.get("priority") or "medium"
+        description = parsed.get("description") or body
+        team_id = parsed.get("teamId")
 
-            # Check if metadata contains a ticketId we can re-link
-            if parsed and parsed.get("ticketId"):
-                meta_tid = parsed["ticketId"]
-                # Verify this ticket exists locally
-                local_ticket = tb_get(f"/tickets/{meta_tid}")
-                if local_ticket and meta_tid not in tmap:
-                    # Re-link without creating duplicate
-                    entry_data = {
-                        "githubItemId": item_id,
-                        "lastLocalStatus": local_ticket.get("status", "todo"),
-                        "lastGithubStatus": gh_status,
-                        "title": title,
-                        "number": local_ticket.get("number", 0),
-                        "bodyHash": parsed.get("bodyHash", ""),
-                        "subtaskHash": parsed.get("subtaskHash", ""),
-                        "metadataVersion": parsed.get("version", 2),
-                    }
-                    if gh_issue_num:
-                        entry_data["githubIssueNumber"] = gh_issue_num
-                    tmap[meta_tid] = entry_data
-                    # Sync status if different
-                    if local_ticket.get("status") != local_status:
+        try:
+            create_data = {
+                "title": clean_title,
+                "description": description,
+                "priority": priority,
+                "projectId": project_id,
+            }
+            if team_id:
+                create_data["teamId"] = team_id
+
+            new_ticket = tb_post("/tickets", create_data)
+            new_tid = new_ticket.get("id", "")
+            new_num = new_ticket.get("number", 0)
+
+            if new_tid:
+                if local_status != "todo":
+                    tb_post(f"/tickets/{new_tid}/move", {"status": local_status})
+
+                # Write github_issue_number to SQLite immediately
+                if gh_issue_num:
+                    db_set_github_issue_number(new_tid, gh_issue_num)
+
+                if parsed.get("subtasks"):
+                    for st in parsed["subtasks"]:
                         try:
-                            tb_post(f"/tickets/{meta_tid}/move", {"status": local_status})
-                            tmap[meta_tid]["lastLocalStatus"] = local_status
+                            tb_post(f"/tickets/{new_tid}/subtasks", {
+                                "title": st.get("title", ""),
+                                "completed": st.get("completed", False),
+                            })
                         except Exception:
                             pass
-                    relinked += 1
-                    print(f"  * Re-linked {title} by ULID")
-                    continue
 
-            # Strip "PF-XX: " prefix if present
-            clean_title = title
-            if title.startswith("PF-") and ": " in title:
-                clean_title = title.split(": ", 1)[1]
-
-            # Extract priority and description from parsed body if available
-            priority = "medium"
-            description = body
-            team_id = None
-            if parsed:
-                if parsed.get("priority"):
-                    priority = parsed["priority"]
-                if parsed.get("description"):
-                    description = parsed["description"]
-                if parsed.get("teamId"):
-                    team_id = parsed["teamId"]
-
-            try:
-                create_data = {
-                    "title": clean_title,
-                    "description": description,
-                    "priority": priority,
-                    "projectId": project_id,
+                new_entry = {
+                    "githubItemId": item_id,
+                    "lastLocalStatus": local_status,
+                    "lastGithubStatus": gh_status,
+                    "title": title,
+                    "number": new_num,
+                    "bodyHash": parsed.get("bodyHash", ""),
+                    "subtaskHash": parsed.get("subtaskHash", ""),
+                    "metadataVersion": parsed.get("version", 1),
                 }
-                if team_id:
-                    create_data["teamId"] = team_id
-
-                new_ticket = tb_post("/tickets", create_data)
-
-                new_tid = new_ticket.get("id", "")
-                new_num = new_ticket.get("number", 0)
-                if new_tid:
-                    # Move to correct status if not todo
-                    if local_status != "todo":
-                        tb_post(f"/tickets/{new_tid}/move", {"status": local_status})
-
-                    # Create subtasks if parsed from body
-                    if parsed and parsed.get("subtasks"):
-                        for st in parsed["subtasks"]:
-                            try:
-                                tb_post(f"/tickets/{new_tid}/subtasks", {
-                                    "title": st.get("title", ""),
-                                    "completed": st.get("completed", False),
-                                })
-                            except Exception:
-                                pass
-
-                    new_entry = {
-                        "githubItemId": item_id,
-                        "lastLocalStatus": local_status,
-                        "lastGithubStatus": gh_status,
-                        "title": title,
-                        "number": new_num,
-                        "bodyHash": parsed.get("bodyHash", "") if parsed else "",
-                        "subtaskHash": parsed.get("subtaskHash", "") if parsed else "",
-                        "metadataVersion": parsed.get("version", 1) if parsed else 1,
-                    }
-                    if gh_issue_num:
-                        new_entry["githubIssueNumber"] = gh_issue_num
-                    tmap[new_tid] = new_entry
-                    created += 1
-                    print(f"  + PF-{new_num}: {clean_title} [{local_status}]")
-            except Exception as e:
-                errors += 1
-                print(f"  ! Create local failed {title}: {e}", file=sys.stderr)
+                if gh_issue_num:
+                    new_entry["githubIssueNumber"] = gh_issue_num
+                tmap[new_tid] = new_entry
+                created += 1
+                print(f"  + PF-{new_num}: {clean_title} [{local_status}]")
+        except Exception as e:
+            errors += 1
+            print(f"  ! Create local failed {title}: {e}", file=sys.stderr)
 
     mapping["tickets"] = tmap
     save_map(mapping)
 
     if filtered:
-        print(f"  [filter] {filtered} items skipped (wrong team / no metadata)")
+        print(f"  [filter] {filtered} items skipped (wrong project / no metadata)")
 
     if created or updated or relinked or errors:
         parts = []
@@ -901,7 +1029,7 @@ def pull():
 
 
 # ---------------------------------------------------------------------------
-# STATUS: show sync state
+# STATUS
 # ---------------------------------------------------------------------------
 
 def show_status():
@@ -909,21 +1037,26 @@ def show_status():
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    target_repo = config["repo"]
 
     print(f"GitHub Project: {config['owner']}/{config['repo']} #{config['projectNumber']}")
     print(f"Last sync: {mapping.get('lastSync') or 'never'}")
-    print(f"Tracked tickets: {len(tmap)}")
+    print(f"Tracked tickets (map): {len(tmap)}")
+
+    syncable = db_get_syncable_ticket_ids(target_repo)
+    print(f"Syncable tickets (DB sync_repo={target_repo}): {len(syncable)}")
+
+    conn = db_connect()
+    if conn:
+        cur = conn.execute("SELECT COUNT(*) FROM tickets WHERE github_issue_number IS NOT NULL")
+        linked = cur.fetchone()[0]
+        cur = conn.execute("SELECT COUNT(*) FROM tickets")
+        total = cur.fetchone()[0]
+        conn.close()
+        print(f"Linked to GitHub issues: {linked}/{total}")
 
     tickets = tb_get(f"/tickets?project={project_id}")
     if tickets:
-        tracked = sum(1 for t in tickets if t["id"] in tmap)
-        untracked_active = sum(
-            1 for t in tickets
-            if t["id"] not in tmap and t.get("status") != "done"
-        )
-        print(f"Local tickets: {len(tickets)} total, {tracked} tracked, {untracked_active} untracked active")
-
-        # Pending changes (local status differs from last-synced status)
         pending = []
         for t in tickets:
             tid = t["id"]
@@ -939,30 +1072,17 @@ def show_status():
                 print(p)
         else:
             print("No pending outbound changes")
-    else:
-        print("Taskboard API unavailable")
 
 
 # ---------------------------------------------------------------------------
-# Main
+# MIGRATE DRAFTS (legacy compat)
 # ---------------------------------------------------------------------------
 
 def migrate_drafts():
-    """Convert legacy draft items to real GitHub Issues.
-
-    For each mapping entry that lacks a githubIssueNumber:
-    1. Create a real GitHub Issue with the ticket body
-    2. Add it to the project (gets a new PVTI_ item ID)
-    3. Set the correct status
-    4. Remove the old draft from the project
-    5. Update the mapping with the new item ID and issue number
-    """
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
-    project_id = resolve_project_id(config)
 
-    # Find entries missing githubIssueNumber
     legacy = {tid: e for tid, e in tmap.items() if not e.get("githubIssueNumber")}
     total = len(legacy)
     if total == 0:
@@ -980,27 +1100,20 @@ def migrate_drafts():
         title = entry.get("title", "Untitled")
         status = entry.get("lastLocalStatus", "todo")
 
-        # Fetch full ticket for body
         full_ticket = tb_get(f"/tickets/{tid}")
         if not full_ticket:
             skipped += 1
-            print(f"  - {title} (local ticket not found, skipping)")
             continue
 
         full_ticket["id"] = tid
 
         try:
             body = format_github_body(full_ticket)
-
-            # Create real issue + add to project
             new_item_id, gh_issue_number = gh_create_issue_and_add_to_project(
                 config, title, body
             )
-
-            # Set status on the new project item
             gh_set_status(config, new_item_id, status)
 
-            # Remove the old draft from the project
             if old_item_id:
                 try:
                     gh_run([
@@ -1010,31 +1123,35 @@ def migrate_drafts():
                         "--id", old_item_id,
                     ])
                 except Exception:
-                    pass  # draft removal is best-effort
+                    pass
 
-            # Update mapping
             entry["githubItemId"] = new_item_id
             entry["githubIssueNumber"] = gh_issue_number
             entry["bodyHash"] = compute_body_hash(full_ticket)
             entry["subtaskHash"] = compute_subtask_hash(full_ticket.get("subtasks", []))
-            entry["metadataVersion"] = 2
+            entry["metadataVersion"] = 3
+
+            # Write to SQLite
+            db_set_github_issue_number(tid, gh_issue_number)
 
             migrated += 1
-            print(f"  ✓ {title} -> Issue #{gh_issue_number}")
+            print(f"  -> {title} -> Issue #{gh_issue_number}")
         except Exception as e:
             errors += 1
             print(f"  ! {title}: {e}", file=sys.stderr)
 
-        # Save after each item in case of interruption
         if migrated % 5 == 0:
             mapping["tickets"] = tmap
             save_map(mapping)
 
     mapping["tickets"] = tmap
     save_map(mapping)
-
     print(f"[MIGRATE] Done: {migrated} migrated, {skipped} skipped, {errors} errors")
 
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
 
 COMMANDS = {
     "push": lambda: push(include_done=False),

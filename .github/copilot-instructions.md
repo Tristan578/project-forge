@@ -63,6 +63,12 @@ Project ID: `01KJEE8R1XXFF0CZT1WCSTGRDP`
 
 See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync details.
 
+### Sync Architecture (Non-Negotiable)
+- `github_issue_number` (SQLite column) is the SOLE link between local tickets and GitHub Issues. NEVER match by title.
+- `sync_repo` (SQLite column) controls which repo a ticket syncs to. Only `sync_repo = 'project-forge'` tickets are synced.
+- The JSON map file is a cache. SQLite columns are authoritative.
+- Tickets from other local projects are NEVER synced (they have `sync_repo = NULL`).
+
 ## Security
 
 - All chat input passes through `sanitizeChatInput()` in `web/src/lib/chat/sanitizer.ts`. Never bypass.
