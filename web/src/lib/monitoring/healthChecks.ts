@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { sql } from 'drizzle-orm';
+
 export interface HealthCheckResult {
   status: 'ok' | 'degraded' | 'down';
   latencyMs?: number;
@@ -19,7 +21,7 @@ export async function checkDbHealth(): Promise<HealthCheckResult> {
     const db = getDb();
 
     // Lightweight connectivity probe — execute a trivial SQL expression.
-    await db.execute('SELECT 1' as Parameters<typeof db.execute>[0]);
+    await db.execute(sql`SELECT 1`);
 
     const latencyMs = Date.now() - start;
 
