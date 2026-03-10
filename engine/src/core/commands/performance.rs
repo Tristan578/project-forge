@@ -143,7 +143,10 @@ fn handle_set_simplification_backend(payload: &Value) -> CommandResult {
         ));
     }
 
-    #[cfg(target_arch = "wasm32")]
+    // Only queue into the pending buffer in editor builds — in runtime builds
+    // apply_lod_commands is not registered, so the buffer would never be drained
+    // and requests would accumulate as a silent memory leak.
+    #[cfg(all(target_arch = "wasm32", not(feature = "runtime")))]
     bridge_set_simplification_backend(params.backend);
 
     Ok(())

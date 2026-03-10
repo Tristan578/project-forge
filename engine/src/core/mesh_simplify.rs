@@ -31,8 +31,8 @@ pub trait MeshSimplifier: Send + Sync {
 
 /// Attribute-preserving edge-collapse simplifier using Quadric Error Metrics.
 ///
-/// UVs, normals, vertex colors, and tangents are linearly interpolated at
-/// each collapse point, so simplified meshes retain valid texture mapping.
+/// UVs, normals, and vertex colors are linearly interpolated at each collapse
+/// point, so simplified meshes retain valid texture mapping.
 pub struct QemSimplifier;
 
 impl MeshSimplifier for QemSimplifier {
@@ -47,9 +47,9 @@ impl MeshSimplifier for QemSimplifier {
 
 // ─── Fast Simplifier (position-only, maximum speed) ──────────────────────────
 
-/// Fast sloppy simplifier — operates on positions only, assigns flat normals
-/// and planar UVs. Fastest option for very large meshes where texture fidelity
-/// is less important (e.g., LOD3 / shadow meshes).
+/// Fast sloppy simplifier — operates on positions only, recomputes smooth
+/// normals, and assigns planar UVs. Fastest option for very large meshes where
+/// texture fidelity is less important (e.g., LOD3 / shadow meshes).
 pub struct FastSimplifier;
 
 impl MeshSimplifier for FastSimplifier {
@@ -481,8 +481,13 @@ fn qem_simplify_with_attrs(
         let actual_v2 = resolve(&mut remap, collapse.v2);
         if actual_v1 == actual_v2 { continue; }
 
+        // Recompute the interpolation parameter from the current resolved
+        // positions, since earlier collapses may have moved actual_v1/actual_v2
+        // from where they were when this entry was pushed onto the heap.
+        let combined_q = quadrics[actual_v1].add(&quadrics[actual_v2]);
+        let fresh_t = combined_q.optimal_t(pos[actual_v1], pos[actual_v2]);
         pos[actual_v1] = collapse.optimal;
-        attrs.interpolate(actual_v1, actual_v2, collapse.t);
+        attrs.interpolate(actual_v1, actual_v2, fresh_t);
 
         remap[actual_v2] = actual_v1;
         quadrics[actual_v1] = quadrics[actual_v1].add(&quadrics[actual_v2]);

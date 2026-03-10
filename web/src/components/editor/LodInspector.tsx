@@ -207,7 +207,10 @@ export function LodInspector() {
         <label className="text-xs text-gray-400 block mb-1">Simplification Algorithm</label>
         <select
           value={backend}
-          onChange={(e) => handleBackendChange(e.target.value as 'qem' | 'fast')}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === 'qem' || v === 'fast') handleBackendChange(v);
+          }}
           className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm"
         >
           <option value="qem">QEM — attribute-preserving (recommended)</option>
