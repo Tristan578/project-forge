@@ -10,30 +10,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useTaskStore, type EditorTask, type TaskStatus } from '../taskStore';
 
-// ---- Mock localStorage ----
-const localStorageMock = (() => {
-  let store: Record<string, string> = {};
-  return {
-    getItem: vi.fn((key: string) => store[key] ?? null),
-    setItem: vi.fn((key: string, value: string) => {
-      store[key] = value;
-    }),
-    removeItem: vi.fn((key: string) => {
-      delete store[key];
-    }),
-    clear: vi.fn(() => {
-      store = {};
-    }),
-  };
-})();
-
 // ---- Mock crypto.randomUUID ----
 let uuidCounter = 0;
 
 // Helper: reset store to empty state before each test
 function resetStore() {
   useTaskStore.setState({ tasks: [] });
-  localStorageMock.clear();
+  localStorage.clear();
   uuidCounter = 0;
 }
 
@@ -42,7 +25,6 @@ describe('taskStore', () => {
     vi.stubGlobal('crypto', {
       randomUUID: () => `test-uuid-${++uuidCounter}`,
     });
-    vi.stubGlobal('localStorage', localStorageMock);
     vi.useFakeTimers();
     resetStore();
     vi.clearAllMocks();
@@ -51,6 +33,7 @@ describe('taskStore', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   // ---- Initial state ----
@@ -406,27 +389,23 @@ describe('taskStore', () => {
   // ---- Persistence ----
 
   describe('Persistence', () => {
-    it('calls localStorage.setItem when tasks change', () => {
+    it('persists task data to localStorage', async () => {
+      // Clear any existing persisted data
+      localStorage.removeItem('spawnforge-editor-tasks');
+
       const { addTask } = useTaskStore.getState();
       addTask('Persisted task');
 
-      expect(localStorageMock.setItem).toHaveBeenCalledWith(
-        'spawnforge-editor-tasks',
-        expect.any(String)
-      );
-    });
+      // zustand persist v5 may write asynchronously — flush microtasks
+      await vi.advanceTimersByTimeAsync(0);
+      // Also flush real microtasks
+      await new Promise<void>((r) => { queueMicrotask(r); });
 
-    it('persisted data contains task state', () => {
-      const { addTask } = useTaskStore.getState();
-      addTask('Check persistence');
-
-      const lastCall = localStorageMock.setItem.mock.calls.find(
-        ([key]: [string, string]) => key === 'spawnforge-editor-tasks'
-      );
-      expect(lastCall).toBeDefined();
-      const stored = JSON.parse(lastCall![1]);
+      const raw = localStorage.getItem('spawnforge-editor-tasks');
+      expect(raw).not.toBeNull();
+      const stored = JSON.parse(raw!);
       expect(stored.state.tasks).toHaveLength(1);
-      expect(stored.state.tasks[0].title).toBe('Check persistence');
+      expect(stored.state.tasks[0].title).toBe('Persisted task');
     });
   });
 });
