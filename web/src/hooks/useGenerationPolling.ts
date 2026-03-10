@@ -22,6 +22,8 @@ import { useEditorStore } from '@/stores/editorStore';
 import { postProcess, inferSfxCategory } from '@/lib/generate/postProcess';
 import { analyzeModelQuality } from '@/lib/generate/modelQuality';
 import { detectGridDimensions, sliceSheet, buildSpriteSheetData } from '@/lib/sprites/sheetImporter';
+import { retryWithBackoff } from '@/lib/utils/retryWithBackoff';
+import { enqueueFailedRefund, processFailedRefunds } from '@/lib/utils/refundQueue';
 
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_COUNT = 100; // 5 minutes
@@ -41,6 +43,13 @@ export function useGenerationPolling() {
   const updateJob = useGenerationStore((s) => s.updateJob);
   const pollCountsRef = useRef<Record<string, number>>({});
   const timersRef = useRef<Record<string, NodeJS.Timeout>>({});
+
+  // On mount: drain any refunds that failed in a previous session
+  useEffect(() => {
+    processFailedRefunds().catch((err) => {
+      console.error('processFailedRefunds error:', err);
+    });
+  }, []);
 
   useEffect(() => {
     const activeJobs = Object.values(jobs).filter(
@@ -393,14 +402,27 @@ export function useGenerationPolling() {
   async function triggerRefund(id: string) {
     const job = useGenerationStore.getState().jobs[id];
     if (!job?.usageId) return;
+
     try {
-      await fetch('/api/generate/refund', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ usageId: job.usageId }),
-      });
+      await retryWithBackoff(
+        () =>
+          fetch('/api/generate/refund', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usageId: job.usageId }),
+          }).then((res) => {
+            if (!res.ok) throw new Error(`Refund API error: ${res.status}`);
+          }),
+        { maxAttempts: 3, baseDelayMs: 500 },
+      );
     } catch (err) {
-      console.error('Token refund failed:', err);
+      console.error('Token refund failed after retries — queuing for next session:', err);
+      enqueueFailedRefund({
+        jobId: job.usageId,
+        provider: job.type,
+        amount: 0,
+        timestamp: Date.now(),
+      });
     }
   }
 
