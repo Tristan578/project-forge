@@ -10,6 +10,8 @@ import type { TokenPackage } from '@/lib/tokens/pricing';
 import {
   claimEvent,
   releaseEvent,
+} from '@/lib/billing/webhookIdempotency';
+import {
   handleSubscriptionCreated,
   handleSubscriptionUpdated,
   handleSubscriptionDeleted,
@@ -64,7 +66,7 @@ export async function POST(req: Request) {
   // Idempotency: atomically claim the event so only one concurrent
   // delivery processes it. If claimEvent returns false, another request
   // already owns this event ID.
-  if (!claimEvent(event.id)) {
+  if (!(await claimEvent(event.id, 'stripe'))) {
     return NextResponse.json({ received: true, duplicate: true });
   }
 
@@ -72,7 +74,7 @@ export async function POST(req: Request) {
     await processEvent(event);
   } catch (err) {
     // Release the claim so Stripe can retry on transient failures.
-    releaseEvent(event.id);
+    await releaseEvent(event.id);
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
   }

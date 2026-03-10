@@ -500,9 +500,11 @@ export const generationJobs = pgTable(
 
 // --- Webhook Idempotency ---
 
-export const processedWebhookEvents = pgTable('processed_webhook_events', {
+export const webhookEvents = pgTable('webhook_events', {
   eventId: text('event_id').primaryKey(),
+  source: text('source').notNull(), // 'stripe' | 'clerk'
   processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
 // --- Types ---
