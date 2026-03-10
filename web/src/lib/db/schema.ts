@@ -501,6 +501,9 @@ export const generationJobs = pgTable(
 // --- Webhook Idempotency ---
 
 export const webhookEvents = pgTable('webhook_events', {
+  // PK is eventId only (not composite with source). Stripe and Clerk both
+  // generate globally unique IDs (evt_* / evt_*), so cross-source collisions
+  // are not a practical concern. The source column is for filtering/auditing.
   eventId: text('event_id').primaryKey(),
   source: text('source').notNull(), // 'stripe' | 'clerk'
   processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),

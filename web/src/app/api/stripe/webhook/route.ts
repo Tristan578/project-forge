@@ -74,7 +74,7 @@ export async function POST(req: Request) {
     await processEvent(event);
   } catch (err) {
     // Release the claim so Stripe can retry on transient failures.
-    await releaseEvent(event.id);
+    await releaseEvent(event.id, 'stripe');
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
   }

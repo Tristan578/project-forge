@@ -116,7 +116,7 @@ describe('webhookIdempotency', () => {
   // ----------------------------------------------------------------
   describe('releaseEvent', () => {
     it('deletes the event row from the database', async () => {
-      await releaseEvent('evt_release');
+      await releaseEvent('evt_release', 'stripe');
 
       expect(mockDelete).toHaveBeenCalled();
       expect(mockDeleteWhere).toHaveBeenCalled();
@@ -125,7 +125,7 @@ describe('webhookIdempotency', () => {
     it('does not throw when delete finds no matching row (rowCount = 0)', async () => {
       mockDeleteWhere.mockResolvedValueOnce({ rowCount: 0 });
 
-      await expect(releaseEvent('evt_not_found')).resolves.toBeUndefined();
+      await expect(releaseEvent('evt_not_found', 'stripe')).resolves.toBeUndefined();
     });
   });
 
@@ -136,7 +136,7 @@ describe('webhookIdempotency', () => {
     it('returns false when no row exists for the event', async () => {
       mockSelectLimit.mockResolvedValueOnce([]);
 
-      const result = await isProcessed('evt_unknown');
+      const result = await isProcessed('evt_unknown', 'stripe');
 
       expect(result).toBe(false);
     });
@@ -144,7 +144,7 @@ describe('webhookIdempotency', () => {
     it('returns true when a non-expired row exists', async () => {
       mockSelectLimit.mockResolvedValueOnce([{ eventId: 'evt_known' }]);
 
-      const result = await isProcessed('evt_known');
+      const result = await isProcessed('evt_known', 'stripe');
 
       expect(result).toBe(true);
     });

@@ -54,23 +54,23 @@ export async function claimEvent(
  * Call this when processing fails and Stripe should be allowed to
  * redeliver. Deletes the row so the next delivery can claim it fresh.
  */
-export async function releaseEvent(eventId: string): Promise<void> {
+export async function releaseEvent(eventId: string, source: string): Promise<void> {
   const db = getDb();
   await db
     .delete(webhookEvents)
-    .where(sql`${webhookEvents.eventId} = ${eventId}`);
+    .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.source} = ${source}`);
 }
 
 /**
  * Check whether an event has already been processed and the claim has
  * not expired. Returns true if a valid (non-expired) claim exists.
  */
-export async function isProcessed(eventId: string): Promise<boolean> {
+export async function isProcessed(eventId: string, source: string): Promise<boolean> {
   const db = getDb();
   const rows = await db
     .select({ eventId: webhookEvents.eventId })
     .from(webhookEvents)
-    .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.expiresAt} > NOW()`)
+    .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.source} = ${source} AND ${webhookEvents.expiresAt} > NOW()`)
     .limit(1);
   return rows.length > 0;
 }
