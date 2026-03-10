@@ -6,14 +6,14 @@
  * delivery of the same Stripe/Clerk webhook event.
  *
  * All operations are idempotent and safe for concurrent invocations:
- * - claimEvent uses INSERT … ON CONFLICT DO NOTHING + rowCount check
+ * - claimEvent uses INSERT ... ON CONFLICT DO NOTHING + rowCount check
  * - releaseEvent deletes the row (allows retry on transient failure)
  * - cleanupExpired runs a DELETE WHERE expiresAt < NOW()
  */
 
 import 'server-only';
 import { sql, lt } from 'drizzle-orm';
-import { queryWithResilience } from '@/lib/db/client';
+import { getDb, queryWithResilience } from '@/lib/db/client';
 import { webhookEvents } from '@/lib/db/schema';
 
 const DEFAULT_TTL_HOURS = 72;
@@ -32,7 +32,7 @@ const IN_FLIGHT_TTL_MINUTES = 5;
  * delivery). Returns false if another request already claimed it, meaning
  * the event is a duplicate and should be skipped.
  *
- * Uses INSERT … ON CONFLICT DO NOTHING — the DB atomically guarantees
+ * Uses INSERT ... ON CONFLICT DO NOTHING — the DB atomically guarantees
  * exactly-once claiming across concurrent function invocations and across
  * cold starts (unlike an in-memory Set which is lost on restart).
  */
@@ -46,13 +46,10 @@ export async function claimEvent(
 
   // ON CONFLICT DO NOTHING means rowCount = 0 when the row already exists.
   const result = await queryWithResilience(() =>
-    // Need a fresh db reference inside the retry closure
-    import('@/lib/db/client').then(({ getDb }) =>
-      getDb()
-        .insert(webhookEvents)
-        .values({ eventId, source, expiresAt })
-        .onConflictDoNothing({ target: webhookEvents.eventId })
-    )
+    getDb()
+      .insert(webhookEvents)
+      .values({ eventId, source, expiresAt })
+      .onConflictDoNothing({ target: webhookEvents.eventId })
   );
 
   // Drizzle neon-http returns { rowCount: number } on insert
@@ -71,12 +68,10 @@ export async function finalizeEvent(
 ): Promise<void> {
   const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
   await queryWithResilience(() =>
-    import('@/lib/db/client').then(({ getDb }) =>
-      getDb()
-        .update(webhookEvents)
-        .set({ expiresAt })
-        .where(sql`${webhookEvents.eventId} = ${eventId}`)
-    )
+    getDb()
+      .update(webhookEvents)
+      .set({ expiresAt })
+      .where(sql`${webhookEvents.eventId} = ${eventId}`)
   );
 }
 
@@ -88,11 +83,9 @@ export async function finalizeEvent(
  */
 export async function releaseEvent(eventId: string): Promise<void> {
   await queryWithResilience(() =>
-    import('@/lib/db/client').then(({ getDb }) =>
-      getDb()
-        .delete(webhookEvents)
-        .where(sql`${webhookEvents.eventId} = ${eventId}`)
-    )
+    getDb()
+      .delete(webhookEvents)
+      .where(sql`${webhookEvents.eventId} = ${eventId}`)
   );
 }
 
@@ -102,13 +95,11 @@ export async function releaseEvent(eventId: string): Promise<void> {
  */
 export async function isProcessed(eventId: string): Promise<boolean> {
   const rows = await queryWithResilience(() =>
-    import('@/lib/db/client').then(({ getDb }) =>
-      getDb()
-        .select({ eventId: webhookEvents.eventId })
-        .from(webhookEvents)
-        .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.expiresAt} > NOW()`)
-        .limit(1)
-    )
+    getDb()
+      .select({ eventId: webhookEvents.eventId })
+      .from(webhookEvents)
+      .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.expiresAt} > NOW()`)
+      .limit(1)
   );
   return rows.length > 0;
 }
@@ -121,11 +112,9 @@ export async function isProcessed(eventId: string): Promise<boolean> {
  */
 export async function cleanupExpired(): Promise<number> {
   const result = await queryWithResilience(() =>
-    import('@/lib/db/client').then(({ getDb }) =>
-      getDb()
-        .delete(webhookEvents)
-        .where(lt(webhookEvents.expiresAt, sql`NOW()`))
-    )
+    getDb()
+      .delete(webhookEvents)
+      .where(lt(webhookEvents.expiresAt, sql`NOW()`))
   );
   return (result as { rowCount?: number }).rowCount ?? 0;
 }
