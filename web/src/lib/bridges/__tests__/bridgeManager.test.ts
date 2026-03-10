@@ -57,11 +57,18 @@ describe('BridgeManager', () => {
     });
 
     it('returns not_found when no binary exists', async () => {
-      vi.mocked(fs.existsSync).mockReturnValue(false);
+      // Advance time past the 60s cache TTL so the previous test's cached result is expired
+      const realDateNow = Date.now;
+      Date.now = () => realDateNow() + 120_000;
+      try {
+        vi.mocked(fs.existsSync).mockReturnValue(false);
 
-      const config = await bridgeManager.discoverTool('aseprite');
-      expect(config.status).toBe('not_found');
-      expect(config.activeVersion).toBeNull();
+        const config = await bridgeManager.discoverTool('aseprite');
+        expect(config.status).toBe('not_found');
+        expect(config.activeVersion).toBeNull();
+      } finally {
+        Date.now = realDateNow;
+      }
     });
 
     it('rejects unknown toolId with not_found status', async () => {
