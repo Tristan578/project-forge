@@ -7,7 +7,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useTaskStore, type EditorTask, type TaskStatus } from '../taskStore';
 
 // ---- Mock crypto.randomUUID ----
@@ -45,8 +45,13 @@ function resetStore() {
 
 describe('taskStore', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     resetStore();
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   // ---- Initial state ----
@@ -180,7 +185,7 @@ describe('taskStore', () => {
       const originalUpdatedAt = useTaskStore.getState().tasks[0].updatedAt;
 
       // Ensure time moves forward
-      await new Promise((r) => setTimeout(r, 2));
+      vi.advanceTimersByTime(2);
       updateTask(id, { title: 'Changed' });
 
       const task = useTaskStore.getState().tasks.find((t) => t.id === id);
@@ -371,7 +376,7 @@ describe('taskStore', () => {
       const id = addTask('Task');
       const originalCreatedAt = useTaskStore.getState().tasks[0].createdAt;
 
-      await new Promise((r) => setTimeout(r, 2));
+      vi.advanceTimersByTime(2);
       updateTask(id, { title: 'Updated title' });
 
       const task = useTaskStore.getState().tasks.find((t) => t.id === id);
