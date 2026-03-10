@@ -125,23 +125,27 @@ describe('ApiKeyManager', () => {
     });
   });
 
-  it('shows error banner when fetch fails', async () => {
-    global.fetch = vi.fn().mockImplementation((url: string) => {
+  it('shows error banner when generate key fails', async () => {
+    // Initial load succeeds, but POST to generate a key fails
+    global.fetch = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
       if (url === '/api/keys') {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ providers: [] }) });
       }
-      if (url === '/api/keys/api-key') {
+      if (url === '/api/keys/api-key' && (!opts || opts.method !== 'POST')) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ keys: [] }) });
       }
-      if (url === '/api/keys/api-key' && !url.includes('?')) {
+      if (url === '/api/keys/api-key' && opts?.method === 'POST') {
         return Promise.resolve({ ok: false, text: () => Promise.resolve('Server error') });
       }
-      return Promise.resolve({ ok: false, text: () => Promise.resolve('Error') });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
     });
     render(<ApiKeyManager />);
-    // Wait for initial load then generate a key to trigger error
     await waitFor(() => {
       expect(screen.getByText('Generate API Key')).toBeDefined();
+    });
+    fireEvent.click(screen.getByText('Generate API Key'));
+    await waitFor(() => {
+      expect(screen.getByText(/error|failed|Server error/i)).toBeDefined();
     });
   });
 });

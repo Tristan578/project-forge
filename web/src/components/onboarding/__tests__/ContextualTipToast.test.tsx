@@ -53,10 +53,11 @@ describe('ContextualTipToast', () => {
 
   it('does not render action button when no actionLabel', () => {
     render(<ContextualTipToast tip={baseTip} onDismiss={mockOnDismiss} />);
-    expect(screen.queryByRole('button', { name: undefined })).toBeDefined();
-    // No action button should appear
+    // Verify no action label text is rendered
+    expect(screen.queryByText('Try it')).toBeNull();
+    // Only the dismiss button should be present
     const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(1); // only dismiss button
+    expect(buttons).toHaveLength(1);
   });
 
   it('renders action button when actionLabel and onAction provided', () => {

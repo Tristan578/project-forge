@@ -88,13 +88,13 @@ describe('SettingsPanel', () => {
   });
 
   it('calls onClose when backdrop clicked', () => {
-    render(<SettingsPanel onClose={mockOnClose} />);
-    // Click the outer backdrop div
-    const backdrop = document.querySelector('.fixed.inset-0.z-\\[60\\]');
-    if (backdrop) {
-      fireEvent.click(backdrop);
-      expect(mockOnClose).toHaveBeenCalled();
-    }
+    const { container } = render(<SettingsPanel onClose={mockOnClose} />);
+    // The SettingsPanel renders a dialog with a backdrop as its parent container
+    const dialog = screen.getByRole('dialog');
+    const backdrop = dialog.parentElement ?? container.firstElementChild;
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop!);
+    expect(mockOnClose).toHaveBeenCalled();
   });
 
   it('calls onClose when Escape key pressed', () => {

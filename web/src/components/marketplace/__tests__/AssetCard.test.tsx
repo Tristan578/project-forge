@@ -7,14 +7,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { AssetCard } from '../AssetCard';
 
-vi.mock('./AssetDetailModal', () => ({
-  AssetDetailModal: ({ assetId, onClose }: { assetId: string; onClose: () => void }) => (
-    <div data-testid="asset-detail-modal" data-asset-id={assetId}>
-      <button onClick={onClose}>Close</button>
-    </div>
-  ),
-}));
-
 vi.mock('../AssetDetailModal', () => ({
   AssetDetailModal: ({ assetId, onClose }: { assetId: string; onClose: () => void }) => (
     <div data-testid="asset-detail-modal" data-asset-id={assetId}>

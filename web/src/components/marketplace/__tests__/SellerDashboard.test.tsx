@@ -8,14 +8,6 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import { waitFor } from '@testing-library/react';
 import { SellerDashboard } from '../SellerDashboard';
 
-vi.mock('./AssetUploadDialog', () => ({
-  AssetUploadDialog: ({ onClose }: { onClose: () => void; onSuccess: () => void }) => (
-    <div data-testid="asset-upload-dialog">
-      <button onClick={onClose}>Close Upload</button>
-    </div>
-  ),
-}));
-
 vi.mock('../AssetUploadDialog', () => ({
   AssetUploadDialog: ({ onClose }: { onClose: () => void; onSuccess: () => void }) => (
     <div data-testid="asset-upload-dialog">
