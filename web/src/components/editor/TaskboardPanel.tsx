@@ -298,6 +298,7 @@ interface ColumnProps {
   config: ColumnConfig;
   tasks: EditorTask[];
   isDragOver: boolean;
+  onDragEnter: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDragOver: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDragLeave: () => void;
   onDrop: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
@@ -311,6 +312,7 @@ function Column({
   config,
   tasks,
   isDragOver,
+  onDragEnter,
   onDragOver,
   onDragLeave,
   onDrop,
@@ -320,6 +322,13 @@ function Column({
   onAdd,
 }: ColumnProps) {
   const [showForm, setShowForm] = useState(false);
+
+  const handleDragEnter = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      onDragEnter(e, config.id);
+    },
+    [onDragEnter, config.id]
+  );
 
   const handleDragOver = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
@@ -358,6 +367,7 @@ function Column({
           ? 'border-blue-500/50 bg-blue-950/20'
           : 'border-transparent'
       }`}
+      onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={onDragLeave}
       onDrop={handleDrop}
@@ -447,13 +457,25 @@ export function TaskboardPanel() {
     setDragOverColumn(status);
   }, []);
 
+  const dragEnterCount = useRef(0);
+
+  const handleDragEnterColumn = useCallback((_e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
+    dragEnterCount.current++;
+    setDragOverColumn(status);
+  }, []);
+
   const handleDragLeave = useCallback(() => {
-    setDragOverColumn(null);
+    dragEnterCount.current--;
+    if (dragEnterCount.current <= 0) {
+      dragEnterCount.current = 0;
+      setDragOverColumn(null);
+    }
   }, []);
 
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
       e.preventDefault();
+      dragEnterCount.current = 0;
       setDragOverColumn(null);
       if (dragTaskId.current) {
         moveTask(dragTaskId.current, status);
@@ -497,6 +519,7 @@ export function TaskboardPanel() {
             tasks={byStatus(col.id)}
             isDragOver={dragOverColumn === col.id}
             onDragOver={handleDragOver}
+            onDragEnter={handleDragEnterColumn}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onDragStart={handleDragStart}
