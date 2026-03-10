@@ -165,7 +165,18 @@ export class EditorPage {
   }
 
   /** Get the editor store state */
+  /** Wait until __EDITOR_STORE is available (guards against hydration race). */
+  async waitForEditorStore(timeout = 10_000) {
+    await this.page.waitForFunction(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      () => !!(window as any).__EDITOR_STORE,
+      { timeout }
+    );
+  }
+
   async getStoreState<T>(selector: string): Promise<T> {
+    // Ensure store is available before reading — prevents race after loadPage()
+    await this.waitForEditorStore();
     return this.page.evaluate((sel: string) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;

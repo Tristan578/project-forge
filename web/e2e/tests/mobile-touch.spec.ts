@@ -307,6 +307,7 @@ test.describe('Virtual Joystick Store Config @ui', () => {
 
     const autoDetect = await editor.getStoreState<boolean | null>('mobileTouchConfig.autoDetect');
 
+    expect(autoDetect).not.toBeNull();
     expect(typeof autoDetect).toBe('boolean');
   });
 
@@ -315,6 +316,7 @@ test.describe('Virtual Joystick Store Config @ui', () => {
 
     const preset = await editor.getStoreState<string | null>('mobileTouchConfig.preset');
 
+    expect(preset).not.toBeNull();
     expect(typeof preset).toBe('string');
     expect(preset!.length).toBeGreaterThan(0);
   });
@@ -324,6 +326,7 @@ test.describe('Virtual Joystick Store Config @ui', () => {
 
     const buttons = await editor.getStoreState<unknown[] | null>('mobileTouchConfig.buttons');
 
+    expect(buttons).not.toBeNull();
     expect(Array.isArray(buttons)).toBe(true);
   });
 });
