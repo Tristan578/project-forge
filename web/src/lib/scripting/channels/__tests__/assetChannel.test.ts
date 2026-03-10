@@ -14,6 +14,11 @@ function makeSignal(): AbortSignal {
 
 const noProgress = vi.fn();
 
+/** Extract the RequestInit from the second argument of a vi.fn() call. */
+function getCallInit(mockFn: ReturnType<typeof vi.fn>, callIndex = 0): RequestInit {
+  return (mockFn.mock.calls[callIndex] as [string, RequestInit])[1];
+}
+
 describe('createAssetHandler', () => {
   describe('loadImage', () => {
     it('calls /api/assets/load with type image', async () => {
@@ -35,9 +40,7 @@ describe('createAssetHandler', () => {
         }),
       );
 
-      const callBody = JSON.parse(
-        (fetchJson.mock.calls[0][1] as RequestInit).body as string,
-      );
+      const callBody = JSON.parse(getCallInit(fetchJson).body as string);
       expect(callBody).toEqual({
         type: 'image',
         url: 'https://example.com/tex.png',
@@ -70,7 +73,7 @@ describe('createAssetHandler', () => {
 
       await handler('loadImage', { url: 'https://x.com/a.png' }, noProgress, signal);
 
-      expect((fetchJson.mock.calls[0][1] as RequestInit).signal).toBe(signal);
+      expect(getCallInit(fetchJson).signal).toBe(signal);
     });
   });
 
@@ -86,9 +89,7 @@ describe('createAssetHandler', () => {
         makeSignal(),
       );
 
-      const callBody = JSON.parse(
-        (fetchJson.mock.calls[0][1] as RequestInit).body as string,
-      );
+      const callBody = JSON.parse(getCallInit(fetchJson).body as string);
       expect(callBody).toEqual({
         type: 'model',
         url: 'https://example.com/scene.glb',
@@ -134,7 +135,7 @@ describe('createAssetHandler', () => {
 
       await handler('loadModel', { url: 'https://x.com/m.glb' }, noProgress, signal);
 
-      expect((fetchJson.mock.calls[0][1] as RequestInit).signal).toBe(signal);
+      expect(getCallInit(fetchJson).signal).toBe(signal);
     });
   });
 
