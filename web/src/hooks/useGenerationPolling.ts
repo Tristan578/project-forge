@@ -202,7 +202,10 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
 
-        useEditorStore.getState().importGltf(base64, assetName);
+        const shouldPlace = job.autoPlace !== false;
+        if (shouldPlace) {
+          useEditorStore.getState().importGltf(base64, assetName);
+        }
 
         updateJob(id, {
           status: 'completed',
@@ -210,7 +213,7 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
-            autoPlaced: true,
+            autoPlaced: shouldPlace,
             targetEntityId: job.targetEntityId,
             quality: {
               fileSize: qualityMetrics.fileSize,
