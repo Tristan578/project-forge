@@ -275,6 +275,13 @@ export function EditorLayout() {
         return;
       }
 
+      // Ctrl+T / Cmd+T: Toggle Tasks panel
+      if (e.key === 't' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+        e.preventDefault();
+        useWorkspaceStore.getState().openPanel('taskboard');
+        return;
+      }
+
       if (isInput) return;
 
       // ? key opens shortcuts panel
