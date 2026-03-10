@@ -43,6 +43,30 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await expect(canvas).toBeVisible({ timeout: 10000 });
   });
 
+  test('small mobile viewport (320×568) shows canvas', async ({ page, editor }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await editor.loadPage();
+
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible({ timeout: 10000 });
+  });
+
+  test('tablet landscape viewport (1024×768) shows canvas', async ({ page, editor }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await editor.loadPage();
+
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible({ timeout: 10000 });
+  });
+
+  test('full desktop viewport (1440×900) shows canvas', async ({ page, editor }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await editor.loadPage();
+
+    const canvas = page.locator('canvas').first();
+    await expect(canvas).toBeVisible({ timeout: 10000 });
+  });
+
   test('canvas is visible after switching from mobile to desktop viewport', async ({ page, editor }) => {
     // Start at mobile
     await page.setViewportSize({ width: 375, height: 667 });
@@ -79,7 +103,7 @@ test.describe('Mobile Sidebar Collapse @ui', () => {
     await editor.loadPage();
 
     // In compact mode the sidebar is not rendered or has zero width
-    const sidebar = page.locator('[class*="sidebar"]').first();
+    const sidebar = page.locator('aside[aria-label="Editor tools"]').first();
     const sidebarVisible = await sidebar.isVisible().catch(() => false);
 
     if (sidebarVisible) {
@@ -94,7 +118,7 @@ test.describe('Mobile Sidebar Collapse @ui', () => {
     await page.setViewportSize({ width: 768, height: 1024 });
     await editor.loadPage();
 
-    const sidebar = page.locator('[class*="sidebar"]').first();
+    const sidebar = page.locator('aside[aria-label="Editor tools"]').first();
     const sidebarVisible = await sidebar.isVisible().catch(() => false);
 
     if (sidebarVisible) {
@@ -112,7 +136,7 @@ test.describe('Mobile Sidebar Collapse @ui', () => {
     await expect(canvas).toBeVisible({ timeout: 10000 });
 
     // At >= 1024px sidebar may be present
-    const sidebar = page.locator('[class*="sidebar"]').first();
+    const sidebar = page.locator('aside[aria-label="Editor tools"]').first();
     const sidebarCount = await sidebar.count();
     if (sidebarCount > 0) {
       const box = await sidebar.boundingBox();
@@ -145,8 +169,9 @@ test.describe('Mobile Toolbar @ui', () => {
 
     const box = await mobileToolbar.boundingBox();
     expect(box).not.toBeNull();
-    // Should cover close to the full viewport width
-    expect(box!.width).toBeGreaterThan(700);
+    // Should cover close to the full viewport width (within 80px tolerance for margins)
+    const viewportWidth = page.viewportSize()!.width;
+    expect(box!.width).toBeGreaterThan(viewportWidth - 80);
   });
 
   test('mobile toolbar is anchored to bottom of viewport', async ({ page, editor }) => {
@@ -158,8 +183,9 @@ test.describe('Mobile Toolbar @ui', () => {
 
     const box = await mobileToolbar.boundingBox();
     expect(box).not.toBeNull();
-    // Bottom edge should reach near the viewport bottom
-    expect(box!.y + box!.height).toBeGreaterThanOrEqual(590);
+    // Bottom edge should reach near the viewport bottom (within 20px tolerance)
+    const viewportHeight = page.viewportSize()!.height;
+    expect(box!.y + box!.height).toBeGreaterThanOrEqual(viewportHeight - 20);
   });
 
   test('gizmo tool buttons are present in mobile toolbar', async ({ page, editor }) => {
@@ -197,17 +223,14 @@ test.describe('Touch Target Sizes @ui', () => {
     await editor.loadPage();
 
     // WCAG 2.5.5 requires 44×44 CSS pixels for touch targets.
-    // MobileToolbar buttons are h-10 w-10 = 40×40px rendered size, but
-    // the surrounding container adds padding (px-2), so we check the
-    // bounding box of each button is at least 40px on each axis.
     const moveBtn = page.locator('button[title="Move"]');
     await expect(moveBtn).toBeVisible({ timeout: 5000 });
 
     const box = await moveBtn.boundingBox();
     expect(box).not.toBeNull();
-    // Touch targets should be at least 40×40px (within WCAG AA guidance)
-    expect(box!.width).toBeGreaterThanOrEqual(40);
-    expect(box!.height).toBeGreaterThanOrEqual(40);
+    // WCAG 2.5.5 Level AAA requires 44×44 CSS px touch targets
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 
   test('hierarchy toggle button meets minimum touch target size', async ({ page, editor }) => {
@@ -254,100 +277,52 @@ test.describe('Touch Target Sizes @ui', () => {
 // Virtual Joystick Store Configuration
 // ---------------------------------------------------------------------------
 test.describe('Virtual Joystick Store Config @ui', () => {
-  test('mobileTouchConfig exists in store with enabled flag', async ({ page, editor }) => {
+  test('mobileTouchConfig exists in store with enabled flag', async ({ editor }) => {
     await editor.loadPage();
 
-    await page.waitForFunction(
-      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 },
-    );
-
-    const touchConfig = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().mobileTouchConfig ?? null;
-    });
+    const touchConfig = await editor.getStoreState<Record<string, unknown> | null>('mobileTouchConfig');
 
     expect(touchConfig).not.toBeNull();
     expect(typeof touchConfig!.enabled).toBe('boolean');
   });
 
-  test('mobileTouchConfig has joystick config with valid position', async ({ page, editor }) => {
+  test('mobileTouchConfig has joystick config when preset includes joystick', async ({ editor }) => {
     await editor.loadPage();
 
-    await page.waitForFunction(
-      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 },
-    );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const joystick = await editor.getStoreState<any>('mobileTouchConfig.joystick');
 
-    const joystick = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().mobileTouchConfig?.joystick ?? null;
-    });
-
+    // Joystick may be null for presets that don't include one (e.g. buttons-only).
+    // When present, validate its shape.
     if (joystick !== null) {
       expect(['bottom-left', 'bottom-right']).toContain(joystick.position);
       expect(typeof joystick.size).toBe('number');
       expect(joystick.size).toBeGreaterThan(0);
       expect(typeof joystick.opacity).toBe('number');
     }
-    // joystick may be null (disabled preset) — that is valid
   });
 
-  test('mobileTouchConfig has autoDetect boolean', async ({ page, editor }) => {
+  test('mobileTouchConfig has autoDetect boolean', async ({ editor }) => {
     await editor.loadPage();
 
-    await page.waitForFunction(
-      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 },
-    );
-
-    const autoDetect = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().mobileTouchConfig?.autoDetect ?? null;
-    });
+    const autoDetect = await editor.getStoreState<boolean | null>('mobileTouchConfig.autoDetect');
 
     expect(typeof autoDetect).toBe('boolean');
   });
 
-  test('mobileTouchConfig has valid preset string', async ({ page, editor }) => {
+  test('mobileTouchConfig has valid preset string', async ({ editor }) => {
     await editor.loadPage();
 
-    await page.waitForFunction(
-      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 },
-    );
-
-    const preset = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().mobileTouchConfig?.preset ?? null;
-    });
+    const preset = await editor.getStoreState<string | null>('mobileTouchConfig.preset');
 
     expect(typeof preset).toBe('string');
     expect(preset!.length).toBeGreaterThan(0);
   });
 
-  test('mobileTouchConfig.buttons is an array', async ({ page, editor }) => {
+  test('mobileTouchConfig.buttons is an array', async ({ editor }) => {
     await editor.loadPage();
 
-    await page.waitForFunction(
-      () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 },
-    );
-
-    const buttons = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().mobileTouchConfig?.buttons ?? null;
-    });
+    const buttons = await editor.getStoreState<unknown[] | null>('mobileTouchConfig.buttons');
 
     expect(Array.isArray(buttons)).toBe(true);
   });
