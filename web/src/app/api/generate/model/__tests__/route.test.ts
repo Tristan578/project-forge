@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { rateLimit } from '@/lib/rateLimit';
+import type { MeshyClient } from '@/lib/generate/meshyClient';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', () => {
@@ -136,7 +137,6 @@ describe('POST /api/generate/model', () => {
     it('returns 422 when prompt exceeds 500 characters', async () => {
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'a'.repeat(501), mode: 'text-to-3d' }));
-      const body = await res.json();
 
       expect(res.status).toBe(422);
     });
@@ -260,13 +260,13 @@ describe('POST /api/generate/model', () => {
   describe('Meshy API errors', () => {
     it('returns 500 when Meshy client throws', async () => {
       const { MeshyClient } = await import('@/lib/generate/meshyClient');
-      vi.mocked(MeshyClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(MeshyClient).mockImplementationOnce(function (this: MeshyClient) {
         this.createTextTo3D = vi.fn().mockRejectedValue(new Error('Meshy API error (500): Server down'));
         this.createImageTo3D = vi.fn();
         this.getTaskStatus = vi.fn();
         this.createTextToTexture = vi.fn();
         this.getTextureStatus = vi.fn();
-      });
+      } as never);
 
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'sword', mode: 'text-to-3d' }));
@@ -278,13 +278,13 @@ describe('POST /api/generate/model', () => {
 
     it('returns "Provider error" for non-Error thrown objects', async () => {
       const { MeshyClient } = await import('@/lib/generate/meshyClient');
-      vi.mocked(MeshyClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(MeshyClient).mockImplementationOnce(function (this: MeshyClient) {
         this.createTextTo3D = vi.fn().mockRejectedValue('string error');
         this.createImageTo3D = vi.fn();
         this.getTaskStatus = vi.fn();
         this.createTextToTexture = vi.fn();
         this.getTextureStatus = vi.fn();
-      });
+      } as never);
 
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'gem', mode: 'text-to-3d' }));

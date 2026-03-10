@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { rateLimit } from '@/lib/rateLimit';
+import type { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', () => {
@@ -136,7 +137,6 @@ describe('POST /api/generate/sfx', () => {
     it('returns 422 when prompt exceeds 500 characters', async () => {
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'z'.repeat(501), durationSeconds: 5 }));
-      const body = await res.json();
 
       expect(res.status).toBe(422);
     });
@@ -251,12 +251,12 @@ describe('POST /api/generate/sfx', () => {
   describe('ElevenLabs API errors', () => {
     it('returns 500 when ElevenLabs client throws', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn().mockRejectedValue(
           new Error('ElevenLabs SFX API error (500): Server error')
         );
         this.generateVoice = vi.fn();
-      });
+      } as never);
 
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'crash', durationSeconds: 2 }));
@@ -268,10 +268,10 @@ describe('POST /api/generate/sfx', () => {
 
     it('returns "Provider error" for non-Error thrown objects', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn().mockRejectedValue('something went wrong');
         this.generateVoice = vi.fn();
-      });
+      } as never);
 
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'laser', durationSeconds: 1 }));

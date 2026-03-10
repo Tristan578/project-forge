@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { rateLimit } from '@/lib/rateLimit';
+import type { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', () => {
@@ -23,7 +24,7 @@ vi.mock('@/lib/tokens/pricing', () => ({
   getTokenCost: vi.fn().mockReturnValue(75),
 }));
 vi.mock('@/lib/generate/elevenlabsClient', () => {
-  const ElevenLabsClient = vi.fn(function (this: Record<string, unknown>) {
+  const ElevenLabsClient = vi.fn(function (this: ElevenLabsClient) {
     this.generateSfx = vi.fn();
     this.generateVoice = vi.fn().mockResolvedValue({
       audioBase64: 'voiceaudio==',
@@ -136,7 +137,6 @@ describe('POST /api/generate/voice', () => {
     it('returns 422 when text exceeds 1000 characters', async () => {
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ text: 'x'.repeat(1001) }));
-      const body = await res.json();
 
       expect(res.status).toBe(422);
     });
@@ -160,10 +160,10 @@ describe('POST /api/generate/voice', () => {
     it('maps "friendly" voiceStyle to numeric style 0.3', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 1 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Hello friend', voiceStyle: 'friendly' }));
@@ -176,10 +176,10 @@ describe('POST /api/generate/voice', () => {
     it('maps "calm" voiceStyle to 0.2', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 1 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Relax', voiceStyle: 'calm' }));
@@ -192,10 +192,10 @@ describe('POST /api/generate/voice', () => {
     it('maps "excited" voiceStyle to 1.0', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 1 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Woohoo!', voiceStyle: 'excited' }));
@@ -208,10 +208,10 @@ describe('POST /api/generate/voice', () => {
     it('maps "sinister" voiceStyle to 0.7', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 1 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Muhahaha', voiceStyle: 'sinister' }));
@@ -224,10 +224,10 @@ describe('POST /api/generate/voice', () => {
     it('maps "neutral" voiceStyle to 0', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 1 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Hello', voiceStyle: 'neutral' }));
@@ -240,10 +240,10 @@ describe('POST /api/generate/voice', () => {
     it('falls back to 0 for unknown voiceStyle strings', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 1 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Test', voiceStyle: 'unknown-style' }));
@@ -256,10 +256,10 @@ describe('POST /api/generate/voice', () => {
     it('passes numeric style directly when voiceStyle is absent', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 1 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Hello', style: 0.6 }));
@@ -336,10 +336,10 @@ describe('POST /api/generate/voice', () => {
     it('passes voiceId to ElevenLabs client', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
       const mockGenerateVoice = vi.fn().mockResolvedValue({ audioBase64: 'x==', durationSeconds: 2 });
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = mockGenerateVoice;
-      });
+      } as never);
 
       const { POST } = await import('../route');
       await POST(makeRequest({ text: 'Test', voiceId: 'CustomVoiceABC' }));
@@ -353,12 +353,12 @@ describe('POST /api/generate/voice', () => {
   describe('ElevenLabs API errors', () => {
     it('returns 500 when ElevenLabs TTS throws', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = vi.fn().mockRejectedValue(
           new Error('ElevenLabs TTS API error (500): Internal error')
         );
-      });
+      } as never);
 
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ text: 'Hello' }));
@@ -370,10 +370,10 @@ describe('POST /api/generate/voice', () => {
 
     it('returns "Provider error" for non-Error thrown objects', async () => {
       const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
-      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: Record<string, unknown>) {
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
         this.generateSfx = vi.fn();
         this.generateVoice = vi.fn().mockRejectedValue('unexpected error');
-      });
+      } as never);
 
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ text: 'Hi there' }));
