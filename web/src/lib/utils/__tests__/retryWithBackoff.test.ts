@@ -60,9 +60,7 @@ describe('retryWithBackoff', () => {
     const delays: number[] = [];
     stubSleep(delays);
 
-    let callCount = 0;
     const fn = vi.fn().mockImplementation(async () => {
-      callCount++;
       throw new Error('fail');
     });
 

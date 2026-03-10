@@ -31,7 +31,7 @@ vi.stubGlobal('fetch', mockFetch);
 // Import after stubs are in place
 import {
   enqueueFailedRefund,
-  dequeueFailedRefunds,
+  getFailedRefunds,
   removeFailedRefund,
   processFailedRefunds,
 } from '../refundQueue';
@@ -54,7 +54,7 @@ afterEach(() => {
 describe('enqueueFailedRefund', () => {
   it('adds an entry to an empty queue', () => {
     enqueueFailedRefund(makeRefund('job-1'));
-    const queue = dequeueFailedRefunds();
+    const queue = getFailedRefunds();
     expect(queue).toHaveLength(1);
     expect(queue[0].jobId).toBe('job-1');
   });
@@ -62,7 +62,7 @@ describe('enqueueFailedRefund', () => {
   it('appends to an existing queue', () => {
     enqueueFailedRefund(makeRefund('job-1'));
     enqueueFailedRefund(makeRefund('job-2'));
-    const queue = dequeueFailedRefunds();
+    const queue = getFailedRefunds();
     expect(queue).toHaveLength(2);
     expect(queue[1].jobId).toBe('job-2');
   });
@@ -76,7 +76,7 @@ describe('enqueueFailedRefund', () => {
     // Adding one more should evict job-0
     enqueueFailedRefund(makeRefund('job-overflow'));
 
-    const queue = dequeueFailedRefunds();
+    const queue = getFailedRefunds();
     expect(queue).toHaveLength(50);
     expect(queue.find((r) => r.jobId === 'job-0')).toBeUndefined();
     expect(queue[queue.length - 1].jobId).toBe('job-overflow');
@@ -85,23 +85,23 @@ describe('enqueueFailedRefund', () => {
   it('handles corrupted localStorage gracefully', () => {
     localStorageStore[STORAGE_KEY] = 'not-valid-json{{';
     expect(() => enqueueFailedRefund(makeRefund('job-1'))).not.toThrow();
-    const queue = dequeueFailedRefunds();
+    const queue = getFailedRefunds();
     // Corrupted data is treated as empty; the new entry is the only one
     expect(queue).toHaveLength(1);
   });
 });
 
-describe('dequeueFailedRefunds', () => {
+describe('getFailedRefunds', () => {
   it('returns an empty array when nothing is queued', () => {
-    expect(dequeueFailedRefunds()).toEqual([]);
+    expect(getFailedRefunds()).toEqual([]);
   });
 
   it('returns all queued entries without removing them', () => {
     enqueueFailedRefund(makeRefund('job-1'));
     enqueueFailedRefund(makeRefund('job-2'));
-    expect(dequeueFailedRefunds()).toHaveLength(2);
+    expect(getFailedRefunds()).toHaveLength(2);
     // Calling again still returns them
-    expect(dequeueFailedRefunds()).toHaveLength(2);
+    expect(getFailedRefunds()).toHaveLength(2);
   });
 });
 
@@ -110,7 +110,7 @@ describe('removeFailedRefund', () => {
     enqueueFailedRefund(makeRefund('job-1'));
     enqueueFailedRefund(makeRefund('job-2'));
     removeFailedRefund('job-1');
-    const queue = dequeueFailedRefunds();
+    const queue = getFailedRefunds();
     expect(queue).toHaveLength(1);
     expect(queue[0].jobId).toBe('job-2');
   });
@@ -118,7 +118,7 @@ describe('removeFailedRefund', () => {
   it('does nothing if the jobId is not in the queue', () => {
     enqueueFailedRefund(makeRefund('job-1'));
     removeFailedRefund('nonexistent');
-    expect(dequeueFailedRefunds()).toHaveLength(1);
+    expect(getFailedRefunds()).toHaveLength(1);
   });
 });
 
@@ -155,7 +155,7 @@ describe('processFailedRefunds', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(dequeueFailedRefunds()).toHaveLength(0);
+    expect(getFailedRefunds()).toHaveLength(0);
   });
 
   it('keeps failed entries in the queue when the API call fails', async () => {
@@ -169,7 +169,7 @@ describe('processFailedRefunds', () => {
     await promise;
 
     // Both entries should still be in the queue
-    expect(dequeueFailedRefunds()).toHaveLength(2);
+    expect(getFailedRefunds()).toHaveLength(2);
   });
 
   it('removes successful entries and keeps failed ones', async () => {
@@ -184,7 +184,7 @@ describe('processFailedRefunds', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    const queue = dequeueFailedRefunds();
+    const queue = getFailedRefunds();
     expect(queue).toHaveLength(1);
     expect(queue[0].jobId).toBe('job-2');
   });

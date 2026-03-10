@@ -22,7 +22,7 @@ export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   options?: RetryOptions,
 ): Promise<T> {
-  const maxAttempts = options?.maxAttempts ?? 3;
+  const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
   const baseDelayMs = options?.baseDelayMs ?? 500;
   const maxDelayMs = options?.maxDelayMs ?? 5000;
   const jitter = options?.jitter ?? true;

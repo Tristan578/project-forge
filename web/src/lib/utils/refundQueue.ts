@@ -40,10 +40,10 @@ function writeQueue(entries: FailedRefund[]): void {
   }
 }
 
-/** Add a failed refund to the persistent queue. Evicts the oldest entry when
- *  the queue would exceed MAX_QUEUE_SIZE (FIFO). */
+/** Add a failed refund to the persistent queue. Deduplicates by jobId.
+ *  Evicts the oldest entry when the queue would exceed MAX_QUEUE_SIZE (FIFO). */
 export function enqueueFailedRefund(refund: FailedRefund): void {
-  const queue = readQueue();
+  const queue = readQueue().filter((r) => r.jobId !== refund.jobId);
   queue.push(refund);
   // Evict oldest entries if we exceed the cap
   const trimmed = queue.length > MAX_QUEUE_SIZE ? queue.slice(queue.length - MAX_QUEUE_SIZE) : queue;
@@ -51,7 +51,7 @@ export function enqueueFailedRefund(refund: FailedRefund): void {
 }
 
 /** Return all queued failed refunds without removing them. */
-export function dequeueFailedRefunds(): FailedRefund[] {
+export function getFailedRefunds(): FailedRefund[] {
   return readQueue();
 }
 
@@ -72,24 +72,23 @@ export async function processFailedRefunds(): Promise<void> {
   const queue = readQueue();
   if (queue.length === 0) return;
 
-  await Promise.allSettled(
-    queue.map(async (refund) => {
-      try {
-        await retryWithBackoff(
-          () =>
-            fetch('/api/generate/refund', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ usageId: refund.jobId }),
-            }).then((res) => {
-              if (!res.ok) throw new Error(`Refund failed: ${res.status}`);
-            }),
-          { maxAttempts: 2, baseDelayMs: 300 },
-        );
-        removeFailedRefund(refund.jobId);
-      } catch {
-        // Leave in queue for next session
-      }
-    }),
-  );
+  // Process sequentially to avoid concurrent localStorage read-modify-write races
+  for (const refund of queue) {
+    try {
+      await retryWithBackoff(
+        () =>
+          fetch('/api/generate/refund', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usageId: refund.jobId }),
+          }).then((res) => {
+            if (!res.ok) throw new Error(`Refund failed: ${res.status}`);
+          }),
+        { maxAttempts: 2, baseDelayMs: 300 },
+      );
+      removeFailedRefund(refund.jobId);
+    } catch {
+      // Leave in queue for next session
+    }
+  }
 }
