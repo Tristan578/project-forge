@@ -93,9 +93,23 @@ export async function processFailedRefunds(): Promise<void> {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usageId: refund.jobId }),
           }).then((res) => {
-            if (!res.ok) throw new Error(`Refund failed: ${res.status}`);
+            if (!res.ok) {
+              const err = new Error(`Refund failed: ${res.status}`);
+              // Attach status for isRetryable filter
+              (err as Error & { status: number }).status = res.status;
+              throw err;
+            }
           }),
-        { maxAttempts: 2, baseDelayMs: 300 },
+        {
+          maxAttempts: 2,
+          baseDelayMs: 300,
+          // Only retry on 5xx server errors and network failures.
+          // 4xx (auth, rate-limit, bad request) are not retryable.
+          isRetryable: (err) => {
+            const status = (err as Error & { status?: number }).status;
+            return status === undefined || status >= 500;
+          },
+        },
       );
       removeFailedRefund(refund.jobId);
     } catch {

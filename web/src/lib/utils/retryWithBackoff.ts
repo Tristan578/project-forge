@@ -16,6 +16,8 @@ export interface RetryOptions {
   maxDelayMs?: number;
   /** Apply ±25% random jitter to the delay. Default: true */
   jitter?: boolean;
+  /** Optional filter — return false to abort retries for non-transient errors. */
+  isRetryable?: (error: unknown) => boolean;
 }
 
 export async function retryWithBackoff<T>(
@@ -34,6 +36,11 @@ export async function retryWithBackoff<T>(
       return await fn();
     } catch (err) {
       lastError = err;
+
+      // Bail immediately on non-retryable errors (e.g. 4xx HTTP responses)
+      if (options?.isRetryable && !options.isRetryable(err)) {
+        throw err;
+      }
 
       // Do not sleep after the last attempt — just fall through to throw
       if (attempt < maxAttempts - 1) {
