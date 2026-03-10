@@ -27,6 +27,9 @@ export interface GenerationJob {
   usageId?: string;          // Token usage ID for refund on failure
   metadata?: Record<string, unknown>;  // Type-specific data
   dbId?: string;             // Database record ID (for syncing)
+  autoPlace?: boolean;       // Auto-import and attach to entity on completion
+  targetEntityId?: string;   // Entity to attach result to (e.g. place model as child, assign texture)
+  materialSlot?: string;     // Material texture slot for texture generation (e.g. 'base_color', 'normal')
 }
 
 interface GenerationState {
