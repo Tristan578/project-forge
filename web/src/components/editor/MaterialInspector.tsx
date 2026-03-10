@@ -9,6 +9,7 @@ import { MATERIAL_PRESETS, ALL_CATEGORIES, getPresetById, saveCustomMaterial, ty
 import { GenerateTextureDialog } from './GenerateTextureDialog';
 import { InfoTooltip } from '@/components/ui/InfoTooltip';
 import { linearToHex, hexToLinear } from '@/lib/colorUtils';
+import { CustomWgslEditor } from './CustomWgslEditor';
 
 interface SliderRowProps {
   label: string;
@@ -362,10 +363,15 @@ export const MaterialInspector = memo(function MaterialInspector() {
               <option value="lava_flow">Lava / Flow</option>
               <option value="toon">Toon</option>
               <option value="fresnel_glow">Fresnel Glow</option>
+              <option value="custom_wgsl">Custom WGSL (WebGPU)</option>
             </select>
           </div>
 
-          {shaderType !== 'none' && primaryShaderEffect && (
+          {shaderType === 'custom_wgsl' && (
+            <CustomWgslEditor className="mt-2" />
+          )}
+
+          {shaderType !== 'none' && shaderType !== 'custom_wgsl' && primaryShaderEffect && (
             <>
               {/* Common params */}
               <div className="flex items-center gap-2">

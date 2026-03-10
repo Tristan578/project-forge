@@ -3,12 +3,13 @@
  */
 
 import { StateCreator } from 'zustand';
-import type { MaterialData, ShaderEffectData } from './types';
+import type { CustomWgslSource, MaterialData, ShaderEffectData } from './types';
 
 export interface MaterialSlice {
   // State
   primaryMaterial: MaterialData | null;
   primaryShaderEffect: ShaderEffectData | null;
+  customWgslSource: CustomWgslSource | null;
 
   // Actions
   setPrimaryMaterial: (material: MaterialData) => void;
@@ -16,6 +17,9 @@ export interface MaterialSlice {
   setPrimaryShaderEffect: (data: ShaderEffectData | null) => void;
   updateShaderEffect: (entityId: string, data: Partial<ShaderEffectData> & { shaderType: string }) => void;
   removeShaderEffect: (entityId: string) => void;
+  setCustomWgslSource: (source: CustomWgslSource | null) => void;
+  updateCustomWgslSource: (userCode: string, name: string) => void;
+  validateWgsl: (code: string) => void;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -32,6 +36,7 @@ export const createMaterialSlice: StateCreator<
 > = (set) => ({
   primaryMaterial: null,
   primaryShaderEffect: null,
+  customWgslSource: null,
 
   setPrimaryMaterial: (material) => set({ primaryMaterial: material }),
 
@@ -61,6 +66,26 @@ export const createMaterialSlice: StateCreator<
   removeShaderEffect: (entityId) => {
     if (dispatchCommand) {
       dispatchCommand('remove_custom_shader', { entityId });
+    }
+  },
+
+  setCustomWgslSource: (source) => set({ customWgslSource: source }),
+
+  updateCustomWgslSource: (userCode, name) => {
+    // Optimistically set pending status.
+    set((state) => ({
+      customWgslSource: state.customWgslSource
+        ? { ...state.customWgslSource, userCode, name, compileStatus: 'pending', compileError: null }
+        : { userCode, name, compileStatus: 'pending', compileError: null },
+    }));
+    if (dispatchCommand) {
+      dispatchCommand('set_custom_wgsl_source', { userCode, name });
+    }
+  },
+
+  validateWgsl: (code) => {
+    if (dispatchCommand) {
+      dispatchCommand('validate_wgsl', { code });
     }
   },
 });

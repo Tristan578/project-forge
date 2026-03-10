@@ -5,6 +5,7 @@ use crate::core::{
     asset_manager::{AssetRef, AssetRegistry},
     audio::{AudioBusConfig, AudioData},
     csg::CsgMeshData,
+    custom_wgsl::CustomWgslSource,
     entity_factory,
     entity_id::{EntityId, EntityName, EntityVisible},
     environment::EnvironmentSettings,
@@ -39,6 +40,7 @@ pub(super) fn apply_scene_export(
     asset_registry: Res<AssetRegistry>,
     post_processing_settings: Res<PostProcessingSettings>,
     bus_config: Res<AudioBusConfig>,
+    custom_wgsl_source: Res<CustomWgslSource>,
     entity_query: Query<(
         Entity,
         &EntityId,
@@ -57,8 +59,7 @@ pub(super) fn apply_scene_export(
     particle_export_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_lod_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&LodData>)>,
     csg_procedural_joint_query: Query<(&EntityId, Option<&CsgMeshData>, Option<&ProceduralMeshData>, Option<&JointData>, Option<&GameComponents>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
-    child_of_query: Query<&ChildOf>,
-    eid_query: Query<&EntityId>,
+    child_eid_query: Query<(Option<&ChildOf>, &EntityId)>,
 ) {
     if pending.scene_export_requests.is_empty() {
         return;
@@ -82,8 +83,10 @@ pub(super) fn apply_scene_export(
         });
 
         // Resolve parent_id via ChildOf
-        let parent_id = child_of_query.get(entity).ok().and_then(|child_of| {
-            eid_query.get(child_of.parent()).ok().map(|parent_eid| parent_eid.0.clone())
+        let parent_id = child_eid_query.get(entity).ok().and_then(|(child_of_opt, _)| {
+            child_of_opt.and_then(|child_of| {
+                child_eid_query.get(child_of.parent()).ok().map(|(_, parent_eid)| parent_eid.0.clone())
+            })
         });
 
         // Look up script data separately
@@ -144,6 +147,13 @@ pub(super) fn apply_scene_export(
         snapshots.push(snap);
     }
 
+    // Only include custom WGSL if user has set non-default code.
+    let wgsl_source = if custom_wgsl_source.user_code != "return base_color;" {
+        Some(custom_wgsl_source.clone())
+    } else {
+        None
+    };
+
     let scene_file = scene_file::build_scene_file(
         &scene_name.0,
         &env,
@@ -154,6 +164,7 @@ pub(super) fn apply_scene_export(
         &bus_config,
         snapshots,
         None,
+        wgsl_source,
     );
 
     match serde_json::to_string(&scene_file) {
@@ -180,6 +191,7 @@ pub(super) fn apply_scene_load(
     mut asset_registry: ResMut<AssetRegistry>,
     mut post_processing_settings: ResMut<PostProcessingSettings>,
     mut bus_config: ResMut<AudioBusConfig>,
+    mut custom_wgsl_source: ResMut<CustomWgslSource>,
     existing_entities: Query<Entity, (With<EntityId>, Without<entity_factory::Undeletable>)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -291,6 +303,21 @@ pub(super) fn apply_scene_load(
 
     // 9.6. Restore audio bus config
     *bus_config = scene_file.audio_buses;
+
+    // 9.7. Restore custom WGSL source if present
+    if let Some(wgsl) = scene_file.custom_wgsl_source {
+        *custom_wgsl_source = wgsl;
+        // Queue a hot-swap via PendingCommands so the shader asset is updated next frame.
+        pending.custom_wgsl_source_updates.push(
+            crate::core::pending_commands::CustomWgslSourceUpdate {
+                user_code: custom_wgsl_source.user_code.clone(),
+                name: custom_wgsl_source.name.clone(),
+            }
+        );
+    } else {
+        // Reset to default passthrough on new/cleared scene.
+        *custom_wgsl_source = CustomWgslSource::default();
+    }
 
     // 10. Emit events
     events::emit_scene_loaded(&scene_name.0);

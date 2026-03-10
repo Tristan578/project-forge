@@ -653,6 +653,44 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "set_custom_wgsl_source",
+      "description": "Set the scene-global custom WGSL shader source code. All entities with shaderType='custom_wgsl' use this code. WebGPU only — WebGL2 falls back to standard PBR. The userCode is a WGSL function body receiving base_color, world_pos, world_normal, uv, time, user_params_0..3, user_color and must return vec4<f32>.",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "userCode": {
+            "type": "string",
+            "description": "WGSL function body. Must return vec4<f32>. Do NOT include @group/@binding, fn fragment, fn vertex, textureStore, or atomicStore."
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable shader name (optional, defaults to 'Custom WGSL')"
+          }
+        },
+        "required": ["userCode"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "validate_wgsl",
+      "description": "Validate WGSL source code against heuristic rules without applying it. Returns success if valid, or an error message describing the problem.",
+      "category": "materials",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "WGSL code string to validate"
+          }
+        },
+        "required": ["code"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "update_light",
       "description": "Update light properties on a light entity",
       "category": "lighting",

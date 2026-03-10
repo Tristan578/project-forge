@@ -812,3 +812,8 @@ pub fn emit_performance_stats(
         mesh_memory_bytes,
     });
 }
+
+/// Emit a custom WGSL source changed event.
+pub fn emit_custom_wgsl_source_changed(source: &crate::core::custom_wgsl::CustomWgslSource) {
+    emit_event("CUSTOM_WGSL_SOURCE_CHANGED", source);
+}

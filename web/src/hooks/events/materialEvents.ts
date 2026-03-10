@@ -106,6 +106,12 @@ export function handleMaterialEvent(
       return true;
     }
 
+    case 'CUSTOM_WGSL_SOURCE_CHANGED': {
+      const payload = data as unknown as import('@/stores/slices/types').CustomWgslSource;
+      useEditorStore.getState().setCustomWgslSource(payload);
+      return true;
+    }
+
     default:
       return false;
   }

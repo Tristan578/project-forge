@@ -17,7 +17,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
 - **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
-- **MCP Server** — 306 commands across 37 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 308 commands across 37 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
@@ -39,6 +39,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Procedural Mesh Generation** — Extrude 2D shapes, lathe profiles, array entities, and combine meshes
 - **Polygon Modeling** — Edit mode with vertex/edge/face selection, extrude, subdivide, and normal recalculation
 - **Custom Shader Effects** — 6 built-in visual effects (Dissolve, Hologram, Force Field, Lava/Flow, Toon, Fresnel Glow)
+- **Custom WGSL Shaders** — Write arbitrary WGSL fragment shader code directly in the editor. 8 built-in templates (Passthrough, Color Tint, Wave Distortion, Rim Light, Grayscale, Pulsing Glow, UV Scroll, Scanlines), real-time compile status, error display, Ctrl+Enter compile shortcut, and scene persistence
 - **Post-Processing** — Bloom, chromatic aberration, color grading, CAS sharpening, SSAO (WebGPU), depth of field, and motion blur
 - **LOD System** — Level-of-detail component with distance thresholds, performance budget tracking
 
@@ -80,7 +81,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Architecture
 
 ```
-MCP Server (306 commands, 37 categories)       AI agents + LLM tool use
+MCP Server (308 commands, 37 categories)       AI agents + LLM tool use
     |  JSON commands
 React Shell (Next.js 16, Zustand, Tailwind)    Visual editor UI
     |  JSON events via wasm-bindgen
@@ -177,7 +178,7 @@ project-forge/
 │   ├── public/              # Static assets + WASM binaries (generated)
 │   └── package.json
 ├── mcp-server/              # MCP command manifest + tools
-│   ├── manifest/commands.json  # 306 commands across 37 categories
+│   ├── manifest/commands.json  # 308 commands across 37 categories
 │   └── src/
 ├── docs/                    # User-facing documentation (human + AI readable)
 │   ├── getting-started/     # Installation, first scene, editor overview

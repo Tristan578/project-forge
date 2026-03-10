@@ -483,3 +483,104 @@ pub(super) fn emit_shader_on_selection(
         }
     }
 }
+
+/// System that applies custom WGSL source updates by hot-swapping the Shader asset.
+///
+/// Hot-swapping the Shader asset at CUSTOM_WGSL_SHADER_HANDLE triggers Bevy's
+/// pipeline recompilation for all `CustomWgslMaterial` instances automatically.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_custom_wgsl_source_updates(
+    mut pending: ResMut<PendingCommands>,
+    mut source: ResMut<crate::core::custom_wgsl::CustomWgslSource>,
+    mut shaders: ResMut<Assets<bevy::shader::Shader>>,
+) {
+    use crate::core::custom_wgsl::{validate_wgsl_source, CUSTOM_WGSL_SHADER_HANDLE};
+
+    const TEMPLATE: &str = include_str!("../shaders/custom_wgsl_template.wgsl");
+    const INJECTION_COMMENT: &str = "    // FORGE_USER_CODE_INJECTION_POINT\n    return base_color;";
+
+    for update in pending.custom_wgsl_source_updates.drain(..) {
+        // Validate again in the ECS system for safety.
+        let validation = validate_wgsl_source(&update.user_code);
+        if !validation.valid {
+            source.compile_status = "error".to_string();
+            source.compile_error = validation.error;
+            source.user_code = update.user_code;
+            source.name = update.name;
+            events::emit_custom_wgsl_source_changed(&source);
+            continue;
+        }
+
+        // Inject user code into the template, replacing the placeholder.
+        let user_code_indented = update
+            .user_code
+            .lines()
+            .map(|line| format!("    {}", line))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Guard: verify the injection placeholder exists in the template before replacing.
+        // If it is missing (e.g. template file was accidentally modified) the composed
+        // shader would be silently identical to the template, leading to confusing results.
+        if !TEMPLATE.contains(INJECTION_COMMENT) {
+            source.compile_status = "error".to_string();
+            source.compile_error = Some(
+                "Internal error: WGSL template is missing the injection placeholder".to_string(),
+            );
+            source.user_code = update.user_code;
+            source.name = update.name;
+            tracing::error!("WGSL template missing FORGE_USER_CODE_INJECTION_POINT placeholder");
+            events::emit_custom_wgsl_source_changed(&source);
+            continue;
+        }
+
+        let composed = TEMPLATE.replace(INJECTION_COMMENT, &user_code_indented);
+
+        // Hot-swap the Shader asset. Bevy detects asset changes and recompiles
+        // render pipelines for all materials using CUSTOM_WGSL_SHADER_HANDLE.
+        if let Err(err) = shaders.insert(
+            CUSTOM_WGSL_SHADER_HANDLE.id(),
+            bevy::shader::Shader::from_wgsl(composed, "shaders/custom_wgsl_user.wgsl"),
+        ) {
+            source.compile_status = "error".to_string();
+            source.compile_error = Some(format!("Shader asset insert failed: {err}"));
+            tracing::error!("Failed to hot-swap custom WGSL shader: {err}");
+        } else {
+            source.compile_status = "ok".to_string();
+            source.compile_error = None;
+            tracing::info!("Custom WGSL shader hot-swapped: {}", update.name);
+        }
+
+        source.user_code = update.user_code;
+        source.name = update.name;
+        events::emit_custom_wgsl_source_changed(&source);
+    }
+}
+
+/// System that syncs time to all CustomWgslMaterial entities each frame.
+///
+/// Also syncs user_color from ShaderEffectData when present, so per-entity
+/// color variation is possible even with a shared shader source.
+pub(super) fn sync_custom_wgsl_uniforms(
+    time: Res<Time>,
+    shader_query: Query<(
+        Option<&ShaderEffectData>,
+        &MeshMaterial3d<crate::core::custom_wgsl::CustomWgslMaterial>,
+    )>,
+    mut custom_materials: ResMut<Assets<crate::core::custom_wgsl::CustomWgslMaterial>>,
+) {
+    let t = time.elapsed_secs();
+    for (shader_data, handle) in shader_query.iter() {
+        if let Some(mat) = custom_materials.get_mut(handle) {
+            mat.extension.time = t;
+            if let Some(data) = shader_data {
+                mat.extension.user_color = Vec4::new(
+                    data.custom_color[0],
+                    data.custom_color[1],
+                    data.custom_color[2],
+                    data.custom_color[3],
+                );
+            }
+        }
+    }
+}
