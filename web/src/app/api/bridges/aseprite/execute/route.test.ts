@@ -1,12 +1,12 @@
 // @vitest-environment node
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextResponse } from 'next/server';
+import type { BridgeToolConfig, BridgeResult } from '@/lib/bridges/types';
+
 vi.mock('server-only', () => ({}));
 vi.mock('@/lib/bridges/luaTemplates', () => ({
   ALLOWED_TEMPLATES: new Set(['createSprite', 'createAnimation', 'editSprite', 'applyPalette', 'exportSheet']),
 }));
-
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
-import type { BridgeToolConfig, BridgeResult } from '@/lib/bridges/types';
 
 // Each test gets a fresh route module to avoid the module-level cache
 async function importRoute() {
@@ -247,7 +247,7 @@ describe('POST /api/bridges/aseprite/execute', () => {
     expect(data.metadata).toEqual({ width: 32, height: 32 });
   });
 
-  it('accepts null params and defaults to empty object', async () => {
+  it('accepts missing params and defaults to empty object', async () => {
     const executeOperationMock = vi.fn().mockResolvedValue(mockResult);
     vi.doMock('@/lib/auth/api-auth', () => ({
       authenticateRequest: vi.fn().mockResolvedValue({

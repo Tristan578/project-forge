@@ -1,6 +1,4 @@
 // @vitest-environment node
-vi.mock('server-only', () => ({}));
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextResponse } from 'next/server';
 import { GET } from './route';
@@ -8,6 +6,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
 import type { BridgeToolConfig } from '@/lib/bridges/types';
 
+vi.mock('server-only', () => ({}));
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/bridges/bridgeManager');
 
