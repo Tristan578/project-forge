@@ -85,6 +85,8 @@ test.describe('Navigation & Routing @ui', () => {
     });
 
     test('pricing page Sign In button navigates to sign-in', async ({ page }) => {
+      test.skip(!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, 'Clerk not configured');
+
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
 
@@ -111,9 +113,11 @@ test.describe('Navigation & Routing @ui', () => {
       // Next.js returns 404 for unknown routes, or 200 with a custom not-found page
       expect([200, 404]).toContain(status);
 
-      // Page should render a not-found indicator regardless of status code
-      const bodyText = await page.textContent('body');
-      expect(bodyText!.length).toBeGreaterThan(0);
+      // Page should render recognisable not-found content
+      const bodyText = (await page.textContent('body')) ?? '';
+      const hasNotFoundContent =
+        /not\s*found|404|page.*doesn.?t\s*exist/i.test(bodyText);
+      expect(hasNotFoundContent).toBe(true);
     });
   });
 
