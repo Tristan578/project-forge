@@ -39,9 +39,10 @@ const AUTOSAVE_GROUPS: ReadonlyArray<{
  * Estimate localStorage usage by summing all key+value lengths as UTF-16
  * (each character = 2 bytes).
  *
- * Total capacity is estimated by probing: we attempt to write increasing
- * chunks until QuotaExceededError, then binary-search for the true limit.
- * Falls back to 5 MB (common browser default) if probing is unavailable.
+ * Total capacity is probed via binary search up to 5 MB (common browser
+ * default). The probe writes increasing chunks until QuotaExceededError to
+ * determine available free space, capped at 5 MB.
+ * Falls back to 5 MB if probing is unavailable.
  */
 export function estimateLocalStorageUsage(): StorageEstimate {
   let usedBytes = 0;
@@ -84,8 +85,9 @@ function getCachedCapacity(currentUsedBytes: number): number {
 
 /**
  * Probe total localStorage capacity.
- * Writes a test key with increasing sizes until QuotaExceededError,
- * then returns estimated total = used + free.
+ * Binary-searches for available free space up to 5 MB (DEFAULT_TOTAL).
+ * The probe is capped at this ceiling — browsers with larger quotas will
+ * still report at most ~5 MB.  Returns estimated total = used + free.
  */
 function probeLocalStorageCapacity(currentUsedBytes: number): number {
   const PROBE_KEY = '__forge_quota_probe__';

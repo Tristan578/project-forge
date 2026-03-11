@@ -95,8 +95,12 @@ export function clearAutoSave(): void {
  * Logs a warning (without importing UI code) if storage is still unavailable.
  */
 export function saveAutoSave(json: string, name: string): void {
-  // UTF-16: each character occupies 2 bytes in storage
-  const estimatedSize = (json.length + name.length) * 2;
+  // UTF-16: each character occupies 2 bytes in storage.
+  // Account for all 3 key names, the timestamp value (~24 chars for ISO string),
+  // and the json + name values.
+  const ISO_TIMESTAMP_LENGTH = 24; // e.g. "2026-03-10T12:00:00.000Z"
+  const keyNamesLength = AUTOSAVE_KEY.length + AUTOSAVE_NAME_KEY.length + AUTOSAVE_TIME_KEY.length;
+  const estimatedSize = (json.length + name.length + ISO_TIMESTAMP_LENGTH + keyNamesLength) * 2;
 
   if (wouldExceedThreshold(estimatedSize)) {
     evictOldAutoSaves(1);

@@ -33,11 +33,10 @@ export class WasmErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Save scene state to localStorage for recovery
+    // Save scene state to localStorage (or IndexedDB fallback).
+    // autoSaveScene sets hasIndexedDBBackup directly on IDB success,
+    // eliminating the race with a separate async check.
     this.autoSaveScene();
-
-    // Check IndexedDB for backup (async — updates state when resolved)
-    this.checkIndexedDBBackup();
 
     captureException(error, {
       boundary: 'WasmErrorBoundary',
@@ -48,51 +47,47 @@ export class WasmErrorBoundary extends Component<Props, State> {
     this.setState({ errorInfo });
   }
 
-  private checkIndexedDBBackup() {
-    loadFromIndexedDB('forge-editor-crash-backup')
-      .then((data) => {
-        if (data) {
-          this.setState({ hasIndexedDBBackup: true });
-        }
-      })
-      .catch(() => {
-        // Ignore — best-effort check
-      });
-  }
-
   private autoSaveScene() {
+    // Isolate localStorage read into its own try/catch so the IndexedDB
+    // fallback path still runs if localStorage throws SecurityError.
+    let editorStoreData: string | null = null;
     try {
-      // Attempt to save current editor state
-      const editorStoreData = localStorage.getItem('forge-editor-store');
-      if (!editorStoreData) return;
+      editorStoreData = localStorage.getItem('forge-editor-store');
+    } catch (err) {
+      console.error('[CrashBackup] localStorage read failed:', err);
+    }
+    if (!editorStoreData) return;
 
-      const timestamp = new Date().toISOString();
-      const backupPayload = JSON.stringify({ timestamp, state: editorStoreData });
-      const BACKUP_KEY = 'forge-editor-crash-backup';
+    const timestamp = new Date().toISOString();
+    const backupPayload = JSON.stringify({ timestamp, state: editorStoreData });
+    const BACKUP_KEY = 'forge-editor-crash-backup';
 
+    try {
       // Try localStorage first (with LRU eviction on quota failure)
       const result = safeLocalStorageSet(BACKUP_KEY, backupPayload);
       if (result.success) {
         console.info('[CrashBackup] Saved to localStorage (evicted ' + result.evicted + ' bytes).');
         return;
       }
-
-      // Fall back to IndexedDB
-      console.warn('[CrashBackup] localStorage full — falling back to IndexedDB.');
-      saveToIndexedDB(BACKUP_KEY, backupPayload)
-        .then((ok) => {
-          if (ok) {
-            console.info('[CrashBackup] Saved to IndexedDB.');
-          } else {
-            console.error('[CrashBackup] Both localStorage and IndexedDB failed.');
-          }
-        })
-        .catch((err: unknown) => {
-          console.error('[CrashBackup] IndexedDB error:', err);
-        });
     } catch (err) {
-      console.error('Failed to auto-save scene:', err);
+      console.error('[CrashBackup] localStorage write failed:', err);
     }
+
+    // Fall back to IndexedDB
+    console.warn('[CrashBackup] localStorage full — falling back to IndexedDB.');
+    saveToIndexedDB(BACKUP_KEY, backupPayload)
+      .then((ok) => {
+        if (ok) {
+          // Set hasIndexedDBBackup directly here — no separate async check needed
+          this.setState({ hasIndexedDBBackup: true });
+          console.info('[CrashBackup] Saved to IndexedDB.');
+        } else {
+          console.error('[CrashBackup] Both localStorage and IndexedDB failed.');
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('[CrashBackup] IndexedDB error:', err);
+      });
   }
 
   private handleReload = () => {
@@ -101,24 +96,31 @@ export class WasmErrorBoundary extends Component<Props, State> {
   };
 
   private handleRestore = () => {
-    const restoreFromPayload = (payload: string) => {
+    /** Attempt to restore editor state from a backup payload. Returns true on success. */
+    const restoreFromPayload = (payload: string): boolean => {
       try {
         const parsed = JSON.parse(payload) as Record<string, unknown>;
         if (typeof parsed.state === 'string') {
           localStorage.setItem('forge-editor-store', parsed.state);
+          return true;
         }
       } catch (err) {
-        console.error('Failed to parse backup payload:', err);
+        console.error('Failed to restore backup payload:', err);
       }
+      return false;
     };
 
     try {
       // Try localStorage first
       const backupData = localStorage.getItem('forge-editor-crash-backup');
       if (backupData) {
-        restoreFromPayload(backupData);
-        localStorage.removeItem('forge-editor-crash-backup');
-        window.location.reload();
+        if (restoreFromPayload(backupData)) {
+          localStorage.removeItem('forge-editor-crash-backup');
+          window.location.reload();
+        } else {
+          // Restore failed (e.g. quota still exceeded) — preserve backup
+          console.error('[CrashBackup] Restore into localStorage failed; preserving backup.');
+        }
         return;
       }
     } catch (err) {
@@ -129,17 +131,18 @@ export class WasmErrorBoundary extends Component<Props, State> {
     loadFromIndexedDB('forge-editor-crash-backup')
       .then((data) => {
         if (data) {
-          restoreFromPayload(data);
-          return deleteFromIndexedDB('forge-editor-crash-backup');
+          if (restoreFromPayload(data)) {
+            return deleteFromIndexedDB('forge-editor-crash-backup').then(() => {
+              window.location.reload();
+            });
+          }
+          // Restore failed — preserve the IndexedDB backup
+          console.error('[CrashBackup] Restore from IndexedDB payload failed; preserving backup.');
         }
         return undefined;
       })
-      .then(() => {
-        window.location.reload();
-      })
       .catch((err: unknown) => {
         console.error('Failed to restore from IndexedDB:', err);
-        window.location.reload();
       });
   };
 
