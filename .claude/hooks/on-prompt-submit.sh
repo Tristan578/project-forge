@@ -3,8 +3,8 @@
 # on-prompt-submit.sh — UserPromptSubmit hook (all AI tools)
 # ============================================================================
 # Fires before the AI processes each user prompt.
-# Enforces ticket-first development: blocks code-writing requests that
-# don't have an active ticket.
+# Enforces ticket-first development: when development work is detected without
+# an active ticket, instructs the AI to find or create one before proceeding.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/taskboard-state.sh"
@@ -70,19 +70,47 @@ else:
 " 2>/dev/null)
 
 if [ "$DEV_MATCH" = "DEV_INTENT_DETECTED" ]; then
-    cat <<'EOF'
-[TASKBOARD] NO ACTIVE TICKET — development work requires a ticket.
+    # Extract a summary of what the user wants to do (first 200 chars)
+    PROMPT_SUMMARY=$(printf '%s' "$INPUT" | head -c 200)
 
-Before writing any code, you MUST:
-  1. Check the board:  Review suggested work from session startup
-  2. Pick a ticket:    Select an existing todo/in_progress ticket
-  3. Or create one:    With user story, acceptance criteria, priority, team, subtasks
-  4. Set it active:    Move to in_progress before beginning work
+    # Resolve dynamic values before the quoted heredoc (which prevents expansion)
+    _HOOK_PROJECT_ID=$(tb_get_project_id)
+    _HOOK_TEAM_ID=$(tb_get_team_id)
 
-This ensures all contributors can track progress via the shared GitHub Project board.
-Planning before development is mandatory for this project.
-EOF
-    exit 1
+    # Use quoted heredoc to prevent shell expansion of user input
+    printf '%s\n' "<user-prompt-submit-hook>"
+    cat <<'HOOK'
+[TASKBOARD] NO ACTIVE TICKET — development work requires tracking.
+
+You MUST find or create a ticket before writing any code. Do this NOW:
+
+1. SEARCH the taskboard for an existing ticket matching this work:
+   curl -s 'http://localhost:3010/api/tickets?limit=50' | Search for keywords from the user's request
+
+2. IF a matching ticket exists:
+   - Move it to in_progress via: POST http://localhost:3010/api/tickets/{id}/move with {"status": "in_progress"}
+
+3. IF no matching ticket exists, CREATE one with ALL required fields:
+   - POST http://localhost:3010/api/tickets with:
+     {
+       "title": "<imperative description of the work>",
+       "description": "**User Story:**\nAs a developer, I want <goal from prompt> so that <benefit>.\n\n**Description:**\n<technical context>\n\n**Acceptance Criteria:**\n- Given <precondition>, When <action>, Then <result>\n- Given <precondition>, When <action>, Then <result>\n- Given <precondition>, When <action>, Then <result>",
+       "priority": "medium",
+HOOK
+    printf '       "projectId": "%s",\n' "$_HOOK_PROJECT_ID"
+    printf '       "teamId": "%s"\n' "$_HOOK_TEAM_ID"
+    cat <<'HOOK'
+     }
+   - Then add subtasks: POST http://localhost:3010/api/tickets/{id}/subtasks
+   - Then move to in_progress
+
+4. THEN proceed with the user's request.
+
+HOOK
+    printf 'User'\''s request context: %s\n' "$PROMPT_SUMMARY"
+    printf '%s\n' "</user-prompt-submit-hook>"
+    # Exit 0 so the prompt is NOT blocked — the AI should handle ticket creation inline
+    exit 0
 fi
 
 exit 0

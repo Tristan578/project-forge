@@ -433,7 +433,7 @@ taskboard start --port 3010 --db .claude/taskboard.db
 
 - **Web UI:** http://localhost:3010
 - **API:** http://localhost:3010/api
-- **Project ID:** `01KJEE8R1XXFF0CZT1WCSTGRDP` (prefix: PF)
+- **Project ID:** `01KK974VMNC16ZAW7MW1NH3T3M` (prefix: PF)
 - **Database:** `.claude/taskboard.db` (SQLite, 186+ tickets)
 
 Tools with hook support auto-start the taskboard on session start. The database is committed to the repo so all contributors share the same ticket state.

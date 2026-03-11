@@ -98,7 +98,7 @@ Before writing ANY code:
 2. Pick an existing ticket OR create a new one with ALL required fields
 3. Move the ticket to `in_progress`
 
-Project ID: `01KJEE8R1XXFF0CZT1WCSTGRDP`
+Project ID: `01KK974VMNC16ZAW7MW1NH3T3M`
 
 ## Worktree Commit Safety
 
