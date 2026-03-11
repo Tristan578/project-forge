@@ -143,6 +143,7 @@ describe('handleSubscriptionCreated', () => {
     const user = makeDbUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0 });
     const updateChain = makeUpdateChain();
     const insertChain = makeInsertChain();
+    // First select: findUserByStripeCustomer; second: getTotalBalance
     wireDb([[user], [{ monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 }]], () => updateChain, () => insertChain);
 
     await handleSubscriptionCreated('cus_abc', 'sub_new', 'hobbyist');
@@ -201,6 +202,7 @@ describe('handleSubscriptionUpdated', () => {
 
     await handleSubscriptionUpdated('cus_abc', 'sub_abc', 'creator', 'past_due');
 
+    // Only subscription ID update should run, not tier update
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
       stripeSubscriptionId: 'sub_abc',
     }));
@@ -225,6 +227,7 @@ describe('handleSubscriptionUpdated', () => {
     await handleSubscriptionUpdated('cus_abc', 'sub_abc', 'hobbyist', 'active');
 
     expect(updateUserTier).toHaveBeenCalledWith('user-1', 'hobbyist');
+    // Only the subscription ID update ran — no token adjustments
     expect(updateChain.set).toHaveBeenCalledTimes(1);
   });
 
@@ -245,6 +248,7 @@ describe('handleSubscriptionUpdated', () => {
     await handleSubscriptionUpdated('cus_abc', 'sub_abc', 'creator', 'active');
 
     expect(updateUserTier).toHaveBeenCalledWith('user-1', 'creator');
+    // upgrade: difference = 1000 - 300 = 700
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
       monthlyTokensUsed: 0,
     }));
@@ -330,6 +334,7 @@ describe('handleSubscriptionDeleted', () => {
 
     await handleSubscriptionDeleted('cus_abc', 'sub_pro');
 
+    // Remaining = 3000 - 1000 = 2000 -> negative adjustment
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       amount: -2000,
     }));
@@ -382,6 +387,7 @@ describe('handleInvoicePaid', () => {
 
     await handleInvoicePaid('cus_abc', 'inv_renewal', 'sub_abc');
 
+    // Rollover: min(300 - 100, 300) = 200
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
       addonTokens: expect.anything(),
     }));
@@ -391,6 +397,7 @@ describe('handleInvoicePaid', () => {
       source: 'renewal_rollover:hobbyist',
       referenceId: 'inv_renewal',
     }));
+    // Monthly grant
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'monthly_grant',
       amount: 300,
@@ -403,7 +410,7 @@ describe('handleInvoicePaid', () => {
     const user = makeDbUser({
       tier: 'hobbyist',
       monthlyTokens: 300,
-      monthlyTokensUsed: 300,
+      monthlyTokensUsed: 300, // fully used
       stripeSubscriptionId: 'sub_abc',
     });
     const updateChain = makeUpdateChain();
@@ -419,6 +426,7 @@ describe('handleInvoicePaid', () => {
 
     await handleInvoicePaid('cus_abc', 'inv_renewal', 'sub_abc');
 
+    // No rollover transaction should be inserted
     const insertCalls = (insertChain.values as ReturnType<typeof vi.fn>).mock.calls;
     const rolloverCall = insertCalls.find((c: unknown[]) => {
       const v = c[0] as Record<string, unknown>;
@@ -430,7 +438,7 @@ describe('handleInvoicePaid', () => {
   it('caps rollover at the tier monthly allocation', async () => {
     const user = makeDbUser({
       tier: 'hobbyist',
-      monthlyTokens: 600,
+      monthlyTokens: 600, // more than allocation due to upgrade
       monthlyTokensUsed: 100,
       stripeSubscriptionId: 'sub_abc',
     });
@@ -448,6 +456,7 @@ describe('handleInvoicePaid', () => {
 
     await handleInvoicePaid('cus_abc', 'inv_renewal', 'sub_abc');
 
+    // Remaining = 600 - 100 = 500, but cap is 300 (hobbyist)
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'rollover',
       amount: 300,
@@ -562,6 +571,7 @@ describe('getTotalBalance (via transaction audit)', () => {
 
     await handleSubscriptionDeleted('cus_balance', 'sub_1');
 
+    // Balance = (300 - 100) + 50 + 10 = 260
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       balanceAfter: 260,
     }));
@@ -570,6 +580,7 @@ describe('getTotalBalance (via transaction audit)', () => {
   it('returns 0 balance when user record not found during balance check', async () => {
     const user = makeDbUser();
     const insertChain = makeInsertChain();
+    // findUserByStripeCustomer returns user; getTotalBalance returns empty
     wireDb(
       [[user], []],
       () => makeUpdateChain(),
