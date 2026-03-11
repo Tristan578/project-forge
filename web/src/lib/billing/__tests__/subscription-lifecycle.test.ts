@@ -1,8 +1,11 @@
 /**
  * Tests for subscription lifecycle management.
  *
- * Covers: idempotency guard, subscription CRUD, tier transitions,
+ * Covers: subscription CRUD, tier transitions,
  * invoice paid/failed handling, and token grant/rollover logic.
+ *
+ * Note: claimEvent/releaseEvent were moved to webhookIdempotency.ts (PF-313)
+ * and are tested in webhookIdempotency.test.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -100,10 +103,6 @@ function wireDb(selectRows: unknown[][], updateFn?: () => ReturnType<typeof make
   (mockDbChain.update as ReturnType<typeof vi.fn>).mockImplementation(() => updateFn ? updateFn() : makeUpdateChain());
   (mockDbChain.insert as ReturnType<typeof vi.fn>).mockImplementation(() => insertFn ? insertFn() : makeInsertChain());
 }
-
-// ---------------------------------------------------------------------------
-// Note: claimEvent / releaseEvent tests are in webhookIdempotency.test.ts
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // findUserByStripeCustomer
@@ -255,7 +254,7 @@ describe('handleSubscriptionUpdated', () => {
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'adjustment',
-      amount: 700, // 1000 - 300
+      amount: 700,
       source: 'upgrade:hobbyist->creator',
     }));
   });
@@ -279,7 +278,7 @@ describe('handleSubscriptionUpdated', () => {
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'adjustment',
-      amount: -700, // 300 - 1000 (negative for downgrade)
+      amount: -700,
       source: 'downgrade:creator->hobbyist',
     }));
   });
@@ -335,7 +334,7 @@ describe('handleSubscriptionDeleted', () => {
 
     await handleSubscriptionDeleted('cus_abc', 'sub_pro');
 
-    // Remaining = 3000 - 1000 = 2000 → negative adjustment
+    // Remaining = 3000 - 1000 = 2000 -> negative adjustment
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       amount: -2000,
     }));
@@ -390,7 +389,7 @@ describe('handleInvoicePaid', () => {
 
     // Rollover: min(300 - 100, 300) = 200
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
-      addonTokens: expect.anything(), // SQL expression
+      addonTokens: expect.anything(),
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'rollover',
@@ -460,7 +459,7 @@ describe('handleInvoicePaid', () => {
     // Remaining = 600 - 100 = 500, but cap is 300 (hobbyist)
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'rollover',
-      amount: 300, // capped at tier allocation
+      amount: 300,
     }));
   });
 
@@ -534,7 +533,7 @@ describe('handleInvoicePaymentFailed', () => {
     }));
   });
 
-  it('does NOT change the user tier (grace period — Stripe handles cancellation)', async () => {
+  it('does NOT change the user tier (grace period)', async () => {
     const user = makeDbUser({ tier: 'pro' });
     wireDb(
       [[user], [{ monthlyTokens: 3000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 }]],
@@ -549,7 +548,7 @@ describe('handleInvoicePaymentFailed', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getTotalBalance (tested indirectly via balanceAfter in transactions)
+// getTotalBalance (tested indirectly via transaction audit)
 // ---------------------------------------------------------------------------
 
 describe('getTotalBalance (via transaction audit)', () => {
@@ -595,5 +594,3 @@ describe('getTotalBalance (via transaction audit)', () => {
     }));
   });
 });
-
-// claimEvent memory-safety tests are in webhookIdempotency.test.ts
