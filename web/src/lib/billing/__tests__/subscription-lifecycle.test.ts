@@ -62,8 +62,6 @@ vi.mock('@/lib/tokens/pricing', () => ({
 // ---------------------------------------------------------------------------
 
 import {
-  claimEvent,
-  releaseEvent,
   findUserByStripeCustomer,
   handleSubscriptionCreated,
   handleSubscriptionUpdated,
@@ -104,46 +102,8 @@ function wireDb(selectRows: unknown[][], updateFn?: () => ReturnType<typeof make
 }
 
 // ---------------------------------------------------------------------------
-// claimEvent / releaseEvent
+// Note: claimEvent / releaseEvent tests are in webhookIdempotency.test.ts
 // ---------------------------------------------------------------------------
-
-describe('claimEvent', () => {
-  // Reset the module-level processedEvents set between tests by using unique IDs
-  let counter = 0;
-  const uniqueId = () => `evt_claim_${counter++}_${Date.now()}`;
-
-  it('returns true the first time an event is claimed', () => {
-    expect(claimEvent(uniqueId())).toBe(true);
-  });
-
-  it('returns false when the same event is claimed twice', () => {
-    const id = uniqueId();
-    claimEvent(id);
-    expect(claimEvent(id)).toBe(false);
-  });
-
-  it('allows re-claiming after releaseEvent', () => {
-    const id = uniqueId();
-    claimEvent(id);
-    releaseEvent(id);
-    expect(claimEvent(id)).toBe(true);
-  });
-
-  it('handles multiple distinct events independently', () => {
-    const a = uniqueId();
-    const b = uniqueId();
-    expect(claimEvent(a)).toBe(true);
-    expect(claimEvent(b)).toBe(true);
-    expect(claimEvent(a)).toBe(false);
-    expect(claimEvent(b)).toBe(false);
-  });
-
-  it('allows claimEvent to succeed after releaseEvent on an unclaimed event', () => {
-    const id = uniqueId();
-    releaseEvent(id); // no-op
-    expect(claimEvent(id)).toBe(true);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // findUserByStripeCustomer
@@ -636,16 +596,4 @@ describe('getTotalBalance (via transaction audit)', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// claimEvent memory-safety (overflow eviction)
-// ---------------------------------------------------------------------------
-
-describe('claimEvent memory safety', () => {
-  it('does not throw when more than 10,000 events are claimed', () => {
-    // Use distinct IDs to avoid collisions with earlier tests
-    for (let i = 0; i < 10_002; i++) {
-      claimEvent(`overflow_safety_evt_${i}_${Date.now()}`);
-    }
-    // Passes if no error is thrown
-  });
-});
+// claimEvent memory-safety tests are in webhookIdempotency.test.ts
