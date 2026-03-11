@@ -178,6 +178,41 @@ describe('webhookIdempotency', () => {
   });
 
   // ----------------------------------------------------------------
+  // TTL safety net: expired events are re-claimable
+  // ----------------------------------------------------------------
+  describe('TTL expiry and re-claim', () => {
+    it('allows re-claiming an event after its row is deleted (simulating TTL expiry)', async () => {
+      // First delivery: INSERT succeeds, claim granted
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
+      const firstClaim = await claimEvent('evt_expired', 'stripe');
+      expect(firstClaim).toBe(true);
+
+      // Simulate TTL expiry: cleanupExpired deletes the row
+      mockDeleteReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
+      const deletedCount = await cleanupExpired();
+      expect(deletedCount).toBe(1);
+
+      // Second delivery (Stripe retry after expiry): INSERT succeeds again
+      // because the row was deleted by cleanupExpired
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
+      const secondClaim = await claimEvent('evt_expired', 'stripe');
+      expect(secondClaim).toBe(true);
+    });
+
+    it('rejects duplicate claim before TTL expires', async () => {
+      // First delivery succeeds
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_inflight' }]);
+      const firstClaim = await claimEvent('evt_inflight', 'stripe');
+      expect(firstClaim).toBe(true);
+
+      // Second delivery while row still exists: ON CONFLICT DO NOTHING returns empty
+      mockInsertReturning.mockResolvedValueOnce([]);
+      const secondClaim = await claimEvent('evt_inflight', 'stripe');
+      expect(secondClaim).toBe(false);
+    });
+  });
+
+  // ----------------------------------------------------------------
   // cleanupExpired
   // ----------------------------------------------------------------
   describe('cleanupExpired', () => {
