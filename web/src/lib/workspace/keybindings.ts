@@ -52,6 +52,7 @@ export const DEFAULT_BINDINGS: KeyBinding[] = [
   { action: 'toggle-chat', label: 'Toggle AI chat', category: 'Panels', defaultKey: 'Ctrl+K', customKey: null },
   { action: 'open-docs', label: 'Open docs', category: 'Panels', defaultKey: 'F1', customKey: null },
   { action: 'show-shortcuts', label: 'Show shortcuts', category: 'Panels', defaultKey: '?', customKey: null },
+  { action: 'toggle-taskboard', label: 'Toggle taskboard', category: 'Panels', defaultKey: 'Alt+T', customKey: null },
 ];
 
 /** Get the effective key for a binding (custom or default). */
