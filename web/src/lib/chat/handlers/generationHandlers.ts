@@ -208,9 +208,16 @@ export const generationHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
 
-    // Treat empty string materialSlot as undefined
-    const materialSlot = p.data.materialSlot && p.data.materialSlot.length > 0
-      ? p.data.materialSlot
+    const VALID_MATERIAL_SLOTS = ['base_color', 'normal_map', 'metallic_roughness', 'emissive', 'occlusion'] as const;
+    type MaterialSlot = typeof VALID_MATERIAL_SLOTS[number];
+
+    // Treat empty string materialSlot as undefined; reject unrecognised slot IDs
+    const rawSlot = p.data.materialSlot;
+    if (rawSlot && rawSlot.length > 0 && !(VALID_MATERIAL_SLOTS as readonly string[]).includes(rawSlot)) {
+      return { success: false, error: `Invalid materialSlot "${rawSlot}". Must be one of: ${VALID_MATERIAL_SLOTS.join(', ')}` };
+    }
+    const materialSlot: MaterialSlot | undefined = rawSlot && rawSlot.length > 0
+      ? rawSlot as MaterialSlot
       : undefined;
 
     const result = await generateFetch('/api/generate/texture', {

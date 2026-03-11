@@ -186,6 +186,23 @@ export function useGenerationPolling() {
         // Download GLB and import
         if (!data.resultUrl) throw new Error('No result URL');
 
+        const shouldPlace = job.autoPlace !== false;
+
+        // Skip expensive download + analysis when autoPlace is disabled
+        if (!shouldPlace) {
+          updateJob(id, {
+            status: 'completed',
+            resultUrl: data.resultUrl,
+            metadata: {
+              ...job.metadata,
+              ...ppResult.metadata,
+              autoPlaced: false,
+              targetEntityId: job.targetEntityId,
+            },
+          });
+          return;
+        }
+
         const blob = await downloadBinary(data.resultUrl);
 
         // Run model quality analysis on the raw GLB
@@ -202,7 +219,6 @@ export function useGenerationPolling() {
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
 
-        const shouldPlace = job.autoPlace !== false;
         if (shouldPlace) {
           useEditorStore.getState().importGltf(base64, assetName);
         }

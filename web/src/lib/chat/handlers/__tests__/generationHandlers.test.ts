@@ -165,6 +165,30 @@ describe('generationHandlers', () => {
       const { result } = await invoke('generate_3d_model', {});
       expect(result.success).toBe(false);
     });
+
+    it('defaults autoPlace to true when not specified', async () => {
+      mockFetchSuccess();
+      await invoke('generate_3d_model', { prompt: 'a sword' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: true,
+      }));
+    });
+
+    it('respects explicit autoPlace: false', async () => {
+      mockFetchSuccess();
+      await invoke('generate_3d_model', { prompt: 'a sword', autoPlace: false });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: false,
+      }));
+    });
+
+    it('passes targetEntityId from entityId param', async () => {
+      mockFetchSuccess();
+      await invoke('generate_3d_model', { prompt: 'a sword', entityId: 'ent-1' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        targetEntityId: 'ent-1',
+      }));
+    });
   });
 
   // =========================================================================
@@ -228,6 +252,48 @@ describe('generationHandlers', () => {
       const { result } = await invoke('generate_texture', { prompt: 'test' });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Quota exceeded');
+    });
+
+    it('normalizes empty materialSlot to undefined', async () => {
+      mockFetchSuccess();
+      await invoke('generate_texture', { prompt: 'rock', entityId: 'ent-1', materialSlot: '' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        materialSlot: undefined,
+      }));
+    });
+
+    it('accepts valid materialSlot', async () => {
+      mockFetchSuccess();
+      await invoke('generate_texture', { prompt: 'rock', entityId: 'ent-1', materialSlot: 'normal_map' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        materialSlot: 'normal_map',
+      }));
+    });
+
+    it('rejects invalid materialSlot', async () => {
+      const { result } = await invoke('generate_texture', {
+        prompt: 'rock',
+        entityId: 'ent-1',
+        materialSlot: 'diffuse',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid materialSlot');
+    });
+
+    it('defaults autoPlace to true when entityId is set', async () => {
+      mockFetchSuccess();
+      await invoke('generate_texture', { prompt: 'rock', entityId: 'ent-1' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: true,
+      }));
+    });
+
+    it('defaults autoPlace to false when no entityId', async () => {
+      mockFetchSuccess();
+      await invoke('generate_texture', { prompt: 'rock' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: false,
+      }));
     });
   });
 
@@ -397,6 +463,37 @@ describe('generationHandlers', () => {
       const body = JSON.parse(mockFetch.mock.calls[0][1].body);
       expect(body.durationSeconds).toBe(30);
       expect(body.instrumental).toBe(true);
+    });
+
+    it('passes autoPlace and targetEntityId to trackJob on async path', async () => {
+      mockFetchSuccess({ audioBase64: undefined });
+      await invoke('generate_music', {
+        prompt: 'boss theme',
+        targetEntityId: 'ent-2',
+        autoPlace: true,
+      });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        type: 'music',
+        autoPlace: true,
+        targetEntityId: 'ent-2',
+      }));
+    });
+
+    it('autoPlace defaults to true when targetEntityId is set (async)', async () => {
+      mockFetchSuccess({ audioBase64: undefined });
+      await invoke('generate_music', { prompt: 'ambient', targetEntityId: 'ent-3' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: true,
+        targetEntityId: 'ent-3',
+      }));
+    });
+
+    it('autoPlace defaults to false when no entity (async)', async () => {
+      mockFetchSuccess({ audioBase64: undefined });
+      await invoke('generate_music', { prompt: 'ambient loop' });
+      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
+        autoPlace: false,
+      }));
     });
   });
 
