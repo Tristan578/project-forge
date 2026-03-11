@@ -411,9 +411,20 @@ export function useGenerationPolling() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usageId: job.usageId }),
           }).then((res) => {
-            if (!res.ok) throw new Error(`Refund API error: ${res.status}`);
+            if (!res.ok) {
+              const err = new Error(`Refund API error: ${res.status}`);
+              (err as Error & { status: number }).status = res.status;
+              throw err;
+            }
           }),
-        { maxAttempts: 3, baseDelayMs: 500 },
+        {
+          maxAttempts: 3,
+          baseDelayMs: 500,
+          isRetryable: (err) => {
+            const status = (err as Error & { status?: number }).status;
+            return status === undefined || status >= 500;
+          },
+        },
       );
     } catch (err) {
       console.error('Token refund failed after retries — queuing for next session:', err);
