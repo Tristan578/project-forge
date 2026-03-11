@@ -8,6 +8,7 @@ import type { ToolHandler, ExecutionResult } from './types';
 import { parseArgs } from './types';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
+import { trackJob, makeJobId } from './generationHandlers';
 
 const VALID_PALETTE_IDS = Object.keys(PALETTES) as PaletteId[];
 const VALID_SIZES = [16, 32, 64, 128] as const;
@@ -25,6 +26,9 @@ const generatePixelArtSchema = z.object({
   style: z.enum(VALID_STYLES).optional().default('character'),
   dithering: z.enum(VALID_DITHERING).optional().default('none'),
   ditheringIntensity: z.number().min(0).max(1).optional().default(0),
+  entityId: z.string().min(1).optional(),
+  targetEntityId: z.string().min(1).optional(),
+  autoPlace: z.boolean().optional(),
 });
 
 const setPaletteSchema = z.object({
@@ -42,7 +46,7 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
   const p = parseArgs(generatePixelArtSchema, args);
   if (p.error) return p.error;
 
-  const { prompt, targetSize, palette, style, dithering, ditheringIntensity } = p.data;
+  const { prompt, targetSize, palette, style, dithering, ditheringIntensity, entityId, targetEntityId, autoPlace } = p.data;
 
   try {
     const response = await fetch('/api/generate/pixel-art', {
@@ -56,7 +60,21 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
       return { success: false, error: data.error ?? 'Generation failed' };
     }
 
-    const data = await response.json();
+    const data = await response.json() as { jobId: string; provider: string; usageId?: string; tokenCost?: number; palette?: string };
+
+    const pixelTargetId = targetEntityId ?? entityId;
+    trackJob({
+      jobId: makeJobId(),
+      providerJobId: data.jobId,
+      type: 'pixel-art',
+      prompt,
+      provider: data.provider ?? 'dalle3',
+      entityId: pixelTargetId,
+      usageId: data.usageId,
+      autoPlace: autoPlace ?? !!pixelTargetId,
+      targetEntityId: pixelTargetId,
+    });
+
     return {
       success: true,
       result: { jobId: data.jobId, provider: data.provider, usageId: data.usageId, tokenCost: data.tokenCost },
