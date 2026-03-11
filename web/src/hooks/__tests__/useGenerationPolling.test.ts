@@ -122,6 +122,8 @@ function mockFetchResponse(data: Record<string, unknown>, ok = true) {
 }
 
 describe('useGenerationPolling', () => {
+  const OriginalFileReader = globalThis.FileReader;
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();

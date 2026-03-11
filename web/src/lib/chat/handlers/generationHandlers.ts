@@ -190,6 +190,11 @@ export const generationHandlers: Record<string, ToolHandler> = {
     }), args);
     if (p.error) return p.error;
 
+    // Treat empty string materialSlot as undefined
+    const materialSlot = p.data.materialSlot && p.data.materialSlot.length > 0
+      ? p.data.materialSlot
+      : undefined;
+
     const result = await generateFetch('/api/generate/texture', {
       prompt: enrichPrompt(p.data.prompt, 'texture', ctx.store),
       entityId: p.data.entityId,
@@ -377,6 +382,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       entityId: z.string().optional(),
       durationSeconds: z.number().optional(),
       instrumental: z.boolean().optional(),
+      autoPlace: z.boolean().optional(),
+      targetEntityId: z.string().optional(),
     }), args);
     if (p.error) return p.error;
 
@@ -389,11 +396,13 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const { data } = result;
 
     // Music API may return audioBase64 (sync) or jobId (async)
+    const musicEntityId = p.data.targetEntityId ?? p.data.entityId;
+    const musicAutoPlace = p.data.autoPlace ?? !!musicEntityId;
     if (data.audioBase64) {
       const assetName = `music-${p.data.prompt.slice(0, 20)}`;
       ctx.store.importAudio(data.audioBase64 as string, assetName);
-      if (p.data.entityId) {
-        ctx.store.setAudio(p.data.entityId, {
+      if (musicEntityId && musicAutoPlace) {
+        ctx.store.setAudio(musicEntityId, {
           assetId: assetName,
           volume: 0.7,
           pitch: 1.0,
@@ -422,6 +431,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? 'suno',
       entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
+      autoPlace: musicAutoPlace,
+      targetEntityId: musicEntityId,
     });
 
     return {
