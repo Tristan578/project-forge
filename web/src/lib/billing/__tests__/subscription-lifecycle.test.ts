@@ -1,16 +1,8 @@
 /**
  * Tests for subscription lifecycle management.
  *
-<<<<<<< HEAD
- * Covers: subscription CRUD, tier transitions,
- * invoice paid/failed handling, and token grant/rollover logic.
- *
- * Note: claimEvent/releaseEvent were moved to webhookIdempotency.ts (PF-313)
- * and are tested in webhookIdempotency.test.ts.
-=======
  * Covers: idempotency guard, subscription CRUD, tier transitions,
  * invoice paid/failed handling, and token grant/rollover logic.
->>>>>>> origin/main
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -70,11 +62,8 @@ vi.mock('@/lib/tokens/pricing', () => ({
 // ---------------------------------------------------------------------------
 
 import {
-<<<<<<< HEAD
-=======
   claimEvent,
   releaseEvent,
->>>>>>> origin/main
   findUserByStripeCustomer,
   handleSubscriptionCreated,
   handleSubscriptionUpdated,
@@ -115,8 +104,6 @@ function wireDb(selectRows: unknown[][], updateFn?: () => ReturnType<typeof make
 }
 
 // ---------------------------------------------------------------------------
-<<<<<<< HEAD
-=======
 // claimEvent / releaseEvent
 // ---------------------------------------------------------------------------
 
@@ -159,7 +146,6 @@ describe('claimEvent', () => {
 });
 
 // ---------------------------------------------------------------------------
->>>>>>> origin/main
 // findUserByStripeCustomer
 // ---------------------------------------------------------------------------
 
@@ -198,10 +184,7 @@ describe('handleSubscriptionCreated', () => {
     const user = makeDbUser({ tier: 'starter', monthlyTokens: 50, monthlyTokensUsed: 0 });
     const updateChain = makeUpdateChain();
     const insertChain = makeInsertChain();
-<<<<<<< HEAD
-=======
     // First select: findUserByStripeCustomer; second: getTotalBalance
->>>>>>> origin/main
     wireDb([[user], [{ monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 }]], () => updateChain, () => insertChain);
 
     await handleSubscriptionCreated('cus_abc', 'sub_new', 'hobbyist');
@@ -260,10 +243,7 @@ describe('handleSubscriptionUpdated', () => {
 
     await handleSubscriptionUpdated('cus_abc', 'sub_abc', 'creator', 'past_due');
 
-<<<<<<< HEAD
-=======
     // Only subscription ID update should run, not tier update
->>>>>>> origin/main
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
       stripeSubscriptionId: 'sub_abc',
     }));
@@ -288,10 +268,7 @@ describe('handleSubscriptionUpdated', () => {
     await handleSubscriptionUpdated('cus_abc', 'sub_abc', 'hobbyist', 'active');
 
     expect(updateUserTier).toHaveBeenCalledWith('user-1', 'hobbyist');
-<<<<<<< HEAD
-=======
     // Only the subscription ID update ran — no token adjustments
->>>>>>> origin/main
     expect(updateChain.set).toHaveBeenCalledTimes(1);
   });
 
@@ -312,20 +289,13 @@ describe('handleSubscriptionUpdated', () => {
     await handleSubscriptionUpdated('cus_abc', 'sub_abc', 'creator', 'active');
 
     expect(updateUserTier).toHaveBeenCalledWith('user-1', 'creator');
-<<<<<<< HEAD
-=======
     // upgrade: difference = 1000 - 300 = 700
->>>>>>> origin/main
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
       monthlyTokensUsed: 0,
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'adjustment',
-<<<<<<< HEAD
-      amount: 700,
-=======
       amount: 700, // 1000 - 300
->>>>>>> origin/main
       source: 'upgrade:hobbyist->creator',
     }));
   });
@@ -349,11 +319,7 @@ describe('handleSubscriptionUpdated', () => {
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'adjustment',
-<<<<<<< HEAD
-      amount: -700,
-=======
       amount: -700, // 300 - 1000 (negative for downgrade)
->>>>>>> origin/main
       source: 'downgrade:creator->hobbyist',
     }));
   });
@@ -409,10 +375,7 @@ describe('handleSubscriptionDeleted', () => {
 
     await handleSubscriptionDeleted('cus_abc', 'sub_pro');
 
-<<<<<<< HEAD
-=======
     // Remaining = 3000 - 1000 = 2000 → negative adjustment
->>>>>>> origin/main
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       amount: -2000,
     }));
@@ -465,14 +428,9 @@ describe('handleInvoicePaid', () => {
 
     await handleInvoicePaid('cus_abc', 'inv_renewal', 'sub_abc');
 
-<<<<<<< HEAD
-    expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
-      addonTokens: expect.anything(),
-=======
     // Rollover: min(300 - 100, 300) = 200
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
       addonTokens: expect.anything(), // SQL expression
->>>>>>> origin/main
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'rollover',
@@ -480,10 +438,7 @@ describe('handleInvoicePaid', () => {
       source: 'renewal_rollover:hobbyist',
       referenceId: 'inv_renewal',
     }));
-<<<<<<< HEAD
-=======
     // Monthly grant
->>>>>>> origin/main
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'monthly_grant',
       amount: 300,
@@ -496,11 +451,7 @@ describe('handleInvoicePaid', () => {
     const user = makeDbUser({
       tier: 'hobbyist',
       monthlyTokens: 300,
-<<<<<<< HEAD
-      monthlyTokensUsed: 300,
-=======
       monthlyTokensUsed: 300, // fully used
->>>>>>> origin/main
       stripeSubscriptionId: 'sub_abc',
     });
     const updateChain = makeUpdateChain();
@@ -516,10 +467,7 @@ describe('handleInvoicePaid', () => {
 
     await handleInvoicePaid('cus_abc', 'inv_renewal', 'sub_abc');
 
-<<<<<<< HEAD
-=======
     // No rollover transaction should be inserted
->>>>>>> origin/main
     const insertCalls = (insertChain.values as ReturnType<typeof vi.fn>).mock.calls;
     const rolloverCall = insertCalls.find((c: unknown[]) => {
       const v = c[0] as Record<string, unknown>;
@@ -531,11 +479,7 @@ describe('handleInvoicePaid', () => {
   it('caps rollover at the tier monthly allocation', async () => {
     const user = makeDbUser({
       tier: 'hobbyist',
-<<<<<<< HEAD
-      monthlyTokens: 600,
-=======
       monthlyTokens: 600, // more than allocation due to upgrade
->>>>>>> origin/main
       monthlyTokensUsed: 100,
       stripeSubscriptionId: 'sub_abc',
     });
@@ -553,16 +497,10 @@ describe('handleInvoicePaid', () => {
 
     await handleInvoicePaid('cus_abc', 'inv_renewal', 'sub_abc');
 
-<<<<<<< HEAD
-    expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
-      transactionType: 'rollover',
-      amount: 300,
-=======
     // Remaining = 600 - 100 = 500, but cap is 300 (hobbyist)
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'rollover',
       amount: 300, // capped at tier allocation
->>>>>>> origin/main
     }));
   });
 
@@ -636,11 +574,7 @@ describe('handleInvoicePaymentFailed', () => {
     }));
   });
 
-<<<<<<< HEAD
-  it('does NOT change the user tier (grace period)', async () => {
-=======
   it('does NOT change the user tier (grace period — Stripe handles cancellation)', async () => {
->>>>>>> origin/main
     const user = makeDbUser({ tier: 'pro' });
     wireDb(
       [[user], [{ monthlyTokens: 3000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 }]],
@@ -655,11 +589,7 @@ describe('handleInvoicePaymentFailed', () => {
 });
 
 // ---------------------------------------------------------------------------
-<<<<<<< HEAD
-// getTotalBalance (tested indirectly via transaction audit)
-=======
 // getTotalBalance (tested indirectly via balanceAfter in transactions)
->>>>>>> origin/main
 // ---------------------------------------------------------------------------
 
 describe('getTotalBalance (via transaction audit)', () => {
@@ -682,10 +612,7 @@ describe('getTotalBalance (via transaction audit)', () => {
 
     await handleSubscriptionDeleted('cus_balance', 'sub_1');
 
-<<<<<<< HEAD
-=======
     // Balance = (300 - 100) + 50 + 10 = 260
->>>>>>> origin/main
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       balanceAfter: 260,
     }));
@@ -694,10 +621,7 @@ describe('getTotalBalance (via transaction audit)', () => {
   it('returns 0 balance when user record not found during balance check', async () => {
     const user = makeDbUser();
     const insertChain = makeInsertChain();
-<<<<<<< HEAD
-=======
     // findUserByStripeCustomer returns user; getTotalBalance returns empty
->>>>>>> origin/main
     wireDb(
       [[user], []],
       () => makeUpdateChain(),
@@ -711,8 +635,6 @@ describe('getTotalBalance (via transaction audit)', () => {
     }));
   });
 });
-<<<<<<< HEAD
-=======
 
 // ---------------------------------------------------------------------------
 // claimEvent memory-safety (overflow eviction)
@@ -727,4 +649,3 @@ describe('claimEvent memory safety', () => {
     // Passes if no error is thrown
   });
 });
->>>>>>> origin/main

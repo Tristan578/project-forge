@@ -268,8 +268,10 @@ def db_find_by_title(title, repo_name):
         conn.close()
 
 
-def db_find_by_title_any_project(title):
-    """Find ANY ticket with this title, regardless of sync_repo.
+def db_find_by_title_scoped(title, repo_name):
+    """Find a ticket with this title scoped to the target repo OR untagged.
+    Never crosses project boundaries — only matches tickets that belong to
+    the same repo or have no sync_repo set (untagged orphans).
     Returns (ticket_id, github_issue_number) or (None, None).
     """
     conn = db_connect()
@@ -278,8 +280,9 @@ def db_find_by_title_any_project(title):
     try:
         cur = conn.execute(
             "SELECT id, github_issue_number FROM tickets "
-            "WHERE title = ? ORDER BY number ASC LIMIT 1",
-            (title,),
+            "WHERE title = ? AND (sync_repo = ? OR sync_repo IS NULL OR sync_repo = '') "
+            "ORDER BY number ASC LIMIT 1",
+            (title, repo_name),
         )
         row = cur.fetchone()
         return (row[0], row[1]) if row else (None, None)
@@ -1031,12 +1034,18 @@ def pull():
         if title.startswith("PF-") and ": " in title:
             clean_title = title.split(": ", 1)[1]
 
-        existing_tid, existing_gh = db_find_by_title_any_project(clean_title)
-        if existing_tid:
-            # A local ticket already exists — link it instead of creating a dup
+        existing_tid, existing_gh = db_find_by_title_scoped(clean_title, target_repo)
+        # Only relink if the existing ticket has no GH issue yet, or already
+        # points to the same GH issue.  If it points to a DIFFERENT issue,
+        # this is a genuine different ticket with the same title — skip dedup.
+        can_relink = (
+            existing_tid
+            and not (existing_gh and gh_issue_num and existing_gh != gh_issue_num)
+        )
+        if can_relink:
             if gh_issue_num and not existing_gh:
                 db_set_github_issue_number(existing_tid, gh_issue_num)
-            # Ensure sync_repo is set
+            # Ensure sync_repo is set (tag untagged orphans)
             conn = db_connect()
             if conn:
                 try:
