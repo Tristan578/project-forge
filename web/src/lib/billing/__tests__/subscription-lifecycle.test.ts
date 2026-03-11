@@ -1,8 +1,11 @@
 /**
  * Tests for subscription lifecycle management.
  *
- * Covers: idempotency guard, subscription CRUD, tier transitions,
+ * Covers: subscription CRUD, tier transitions,
  * invoice paid/failed handling, and token grant/rollover logic.
+ *
+ * Note: claimEvent/releaseEvent were moved to webhookIdempotency.ts (PF-313)
+ * and are tested in webhookIdempotency.test.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -62,8 +65,6 @@ vi.mock('@/lib/tokens/pricing', () => ({
 // ---------------------------------------------------------------------------
 
 import {
-  claimEvent,
-  releaseEvent,
   findUserByStripeCustomer,
   handleSubscriptionCreated,
   handleSubscriptionUpdated,
@@ -102,48 +103,6 @@ function wireDb(selectRows: unknown[][], updateFn?: () => ReturnType<typeof make
   (mockDbChain.update as ReturnType<typeof vi.fn>).mockImplementation(() => updateFn ? updateFn() : makeUpdateChain());
   (mockDbChain.insert as ReturnType<typeof vi.fn>).mockImplementation(() => insertFn ? insertFn() : makeInsertChain());
 }
-
-// ---------------------------------------------------------------------------
-// claimEvent / releaseEvent
-// ---------------------------------------------------------------------------
-
-describe('claimEvent', () => {
-  // Reset the module-level processedEvents set between tests by using unique IDs
-  let counter = 0;
-  const uniqueId = () => `evt_claim_${counter++}_${Date.now()}`;
-
-  it('returns true the first time an event is claimed', () => {
-    expect(claimEvent(uniqueId())).toBe(true);
-  });
-
-  it('returns false when the same event is claimed twice', () => {
-    const id = uniqueId();
-    claimEvent(id);
-    expect(claimEvent(id)).toBe(false);
-  });
-
-  it('allows re-claiming after releaseEvent', () => {
-    const id = uniqueId();
-    claimEvent(id);
-    releaseEvent(id);
-    expect(claimEvent(id)).toBe(true);
-  });
-
-  it('handles multiple distinct events independently', () => {
-    const a = uniqueId();
-    const b = uniqueId();
-    expect(claimEvent(a)).toBe(true);
-    expect(claimEvent(b)).toBe(true);
-    expect(claimEvent(a)).toBe(false);
-    expect(claimEvent(b)).toBe(false);
-  });
-
-  it('allows claimEvent to succeed after releaseEvent on an unclaimed event', () => {
-    const id = uniqueId();
-    releaseEvent(id); // no-op
-    expect(claimEvent(id)).toBe(true);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // findUserByStripeCustomer
@@ -295,7 +254,7 @@ describe('handleSubscriptionUpdated', () => {
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'adjustment',
-      amount: 700, // 1000 - 300
+      amount: 700,
       source: 'upgrade:hobbyist->creator',
     }));
   });
@@ -319,7 +278,7 @@ describe('handleSubscriptionUpdated', () => {
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'adjustment',
-      amount: -700, // 300 - 1000 (negative for downgrade)
+      amount: -700,
       source: 'downgrade:creator->hobbyist',
     }));
   });
@@ -375,7 +334,7 @@ describe('handleSubscriptionDeleted', () => {
 
     await handleSubscriptionDeleted('cus_abc', 'sub_pro');
 
-    // Remaining = 3000 - 1000 = 2000 → negative adjustment
+    // Remaining = 3000 - 1000 = 2000 -> negative adjustment
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       amount: -2000,
     }));
@@ -430,7 +389,7 @@ describe('handleInvoicePaid', () => {
 
     // Rollover: min(300 - 100, 300) = 200
     expect(updateChain.set).toHaveBeenCalledWith(expect.objectContaining({
-      addonTokens: expect.anything(), // SQL expression
+      addonTokens: expect.anything(),
     }));
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'rollover',
@@ -500,7 +459,7 @@ describe('handleInvoicePaid', () => {
     // Remaining = 600 - 100 = 500, but cap is 300 (hobbyist)
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       transactionType: 'rollover',
-      amount: 300, // capped at tier allocation
+      amount: 300,
     }));
   });
 
@@ -574,7 +533,7 @@ describe('handleInvoicePaymentFailed', () => {
     }));
   });
 
-  it('does NOT change the user tier (grace period — Stripe handles cancellation)', async () => {
+  it('does NOT change the user tier (grace period)', async () => {
     const user = makeDbUser({ tier: 'pro' });
     wireDb(
       [[user], [{ monthlyTokens: 3000, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 }]],
@@ -589,7 +548,7 @@ describe('handleInvoicePaymentFailed', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getTotalBalance (tested indirectly via balanceAfter in transactions)
+// getTotalBalance (tested indirectly via transaction audit)
 // ---------------------------------------------------------------------------
 
 describe('getTotalBalance (via transaction audit)', () => {
@@ -633,19 +592,5 @@ describe('getTotalBalance (via transaction audit)', () => {
     expect(insertChain.values).toHaveBeenCalledWith(expect.objectContaining({
       balanceAfter: 0,
     }));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// claimEvent memory-safety (overflow eviction)
-// ---------------------------------------------------------------------------
-
-describe('claimEvent memory safety', () => {
-  it('does not throw when more than 10,000 events are claimed', () => {
-    // Use distinct IDs to avoid collisions with earlier tests
-    for (let i = 0; i < 10_002; i++) {
-      claimEvent(`overflow_safety_evt_${i}_${Date.now()}`);
-    }
-    // Passes if no error is thrown
   });
 });
