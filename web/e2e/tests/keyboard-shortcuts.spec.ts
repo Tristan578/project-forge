@@ -91,16 +91,12 @@ test.describe('Keyboard Shortcuts @ui', () => {
     });
     expect(storeExists).toBe(true);
 
-    // No unexpected errors (filter out known CI noise)
+    // No unexpected errors — filter specific known noise patterns only
     const realErrors = errors.filter(
       (e) =>
-        !e.includes('favicon') &&
-        !e.includes('404') &&
-        !e.includes('api/tokens') &&
-        !e.includes('hydration') &&
-        !e.includes('NEXT_') &&
-        !e.includes('webpack') &&
-        !e.includes('Failed to load resource')
+        !e.includes('favicon.ico') &&
+        !e.includes('/api/tokens') &&
+        !e.includes('Failed to load resource: the server responded with a status of 404')
     );
     expect(realErrors.length).toBe(0);
   });
