@@ -2,6 +2,8 @@
  * Scene file I/O utilities — download, upload, and localStorage auto-save.
  */
 
+import { safeLocalStorageSet, wouldExceedThreshold, evictOldAutoSaves } from '@/lib/storage/storageQuota';
+
 /** Maximum scene format version the web client supports. Must match engine. */
 export const CURRENT_FORMAT_VERSION = 3;
 
@@ -81,5 +83,36 @@ export function clearAutoSave(): void {
     localStorage.removeItem(AUTOSAVE_TIME_KEY);
   } catch {
     // ignore
+  }
+}
+
+/**
+ * Persist scene JSON to localStorage as the active auto-save.
+ *
+ * Before writing, checks whether the payload would push usage above 80 %.
+ * If it would, the oldest auto-save entries are evicted first.  Uses
+ * `safeLocalStorageSet` for an additional eviction pass on QuotaExceededError.
+ * Logs a warning (without importing UI code) if storage is still unavailable.
+ */
+export function saveAutoSave(json: string, name: string): void {
+  // UTF-16: each character occupies 2 bytes in storage.
+  // Account for all 3 key names, the timestamp value (~24 chars for ISO string),
+  // and the json + name values.
+  const ISO_TIMESTAMP_LENGTH = 24; // e.g. "2026-03-10T12:00:00.000Z"
+  const keyNamesLength = AUTOSAVE_KEY.length + AUTOSAVE_NAME_KEY.length + AUTOSAVE_TIME_KEY.length;
+  const estimatedSize = (json.length + name.length + ISO_TIMESTAMP_LENGTH + keyNamesLength) * 2;
+
+  if (wouldExceedThreshold(estimatedSize)) {
+    evictOldAutoSaves(1);
+  }
+
+  // Protect all three autosave keys from being evicted while writing the triplet
+  const autosaveKeys = new Set([AUTOSAVE_KEY, AUTOSAVE_NAME_KEY, AUTOSAVE_TIME_KEY]);
+  const jsonResult = safeLocalStorageSet(AUTOSAVE_KEY, json, autosaveKeys);
+  const nameResult = safeLocalStorageSet(AUTOSAVE_NAME_KEY, name, autosaveKeys);
+  const timeResult = safeLocalStorageSet(AUTOSAVE_TIME_KEY, new Date().toISOString(), autosaveKeys);
+
+  if (!jsonResult.success || !nameResult.success || !timeResult.success) {
+    console.warn('[AutoSave] localStorage write failed after eviction attempt.');
   }
 }

@@ -3,6 +3,8 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { captureException } from '@/lib/monitoring/sentry-client';
+import { safeLocalStorageSet } from '@/lib/storage/storageQuota';
+import { saveToIndexedDB, loadFromIndexedDB, deleteFromIndexedDB } from '@/lib/storage/indexedDBFallback';
 
 interface Props {
   children: ReactNode;
@@ -12,6 +14,7 @@ interface State {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
+  hasIndexedDBBackup: boolean;
 }
 
 /**
@@ -21,7 +24,7 @@ interface State {
 export class WasmErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null, errorInfo: null, hasIndexedDBBackup: false };
   }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
@@ -30,7 +33,9 @@ export class WasmErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // Save scene state to localStorage for recovery
+    // Save scene state to localStorage (or IndexedDB fallback).
+    // autoSaveScene sets hasIndexedDBBackup directly on IDB success,
+    // eliminating the race with a separate async check.
     this.autoSaveScene();
 
     captureException(error, {
@@ -43,22 +48,46 @@ export class WasmErrorBoundary extends Component<Props, State> {
   }
 
   private autoSaveScene() {
+    // Isolate localStorage read into its own try/catch so the IndexedDB
+    // fallback path still runs if localStorage throws SecurityError.
+    let editorStoreData: string | null = null;
     try {
-      // Attempt to save current editor state
-      const editorStoreData = localStorage.getItem('forge-editor-store');
-      if (editorStoreData) {
-        const timestamp = new Date().toISOString();
-        localStorage.setItem(
-          'forge-editor-crash-backup',
-          JSON.stringify({
-            timestamp,
-            state: editorStoreData,
-          })
-        );
+      editorStoreData = localStorage.getItem('forge-editor-store');
+    } catch (err) {
+      console.error('[CrashBackup] localStorage read failed:', err);
+    }
+    if (!editorStoreData) return;
+
+    const timestamp = new Date().toISOString();
+    const backupPayload = JSON.stringify({ timestamp, state: editorStoreData });
+    const BACKUP_KEY = 'forge-editor-crash-backup';
+
+    try {
+      // Try localStorage first (with LRU eviction on quota failure)
+      const result = safeLocalStorageSet(BACKUP_KEY, backupPayload);
+      if (result.success) {
+        console.info('[CrashBackup] Saved to localStorage (evicted ' + result.evicted + ' bytes).');
+        return;
       }
     } catch (err) {
-      console.error('Failed to auto-save scene:', err);
+      console.error('[CrashBackup] localStorage write failed:', err);
     }
+
+    // Fall back to IndexedDB
+    console.warn('[CrashBackup] localStorage write failed — falling back to IndexedDB.');
+    saveToIndexedDB(BACKUP_KEY, backupPayload)
+      .then((ok) => {
+        if (ok) {
+          // Set hasIndexedDBBackup directly here — no separate async check needed
+          this.setState({ hasIndexedDBBackup: true });
+          console.info('[CrashBackup] Saved to IndexedDB.');
+        } else {
+          console.error('[CrashBackup] Both localStorage and IndexedDB failed.');
+        }
+      })
+      .catch((err: unknown) => {
+        console.error('[CrashBackup] IndexedDB error:', err);
+      });
   }
 
   private handleReload = () => {
@@ -67,25 +96,74 @@ export class WasmErrorBoundary extends Component<Props, State> {
   };
 
   private handleRestore = () => {
+    /** Attempt to restore editor state from a backup payload. Returns true on success. */
+    const restoreFromPayload = (payload: string): boolean => {
+      try {
+        const parsed = JSON.parse(payload) as Record<string, unknown>;
+        if (typeof parsed.state === 'string') {
+          // Protect autosave keys from eviction during restore — the editor
+          // store is the priority, but we want to preserve autosave data in
+          // case the user also has unsaved scene changes.
+          const protectedKeys = new Set([
+            'forge:autosave',
+            'forge:autosave:name',
+            'forge:autosave:time',
+            'forge-autosave-',
+          ]);
+          const result = safeLocalStorageSet('forge-editor-store', parsed.state, protectedKeys);
+          return result.success;
+        }
+      } catch (err) {
+        console.error('Failed to restore backup payload:', err);
+      }
+      return false;
+    };
+
     try {
-      // Load crash backup
+      // Try localStorage first
       const backupData = localStorage.getItem('forge-editor-crash-backup');
       if (backupData) {
-        const backup = JSON.parse(backupData);
-        localStorage.setItem('forge-editor-store', backup.state);
-        localStorage.removeItem('forge-editor-crash-backup');
+        if (restoreFromPayload(backupData)) {
+          localStorage.removeItem('forge-editor-crash-backup');
+          window.location.reload();
+        } else {
+          // Restore failed (e.g. quota still exceeded) — preserve backup
+          console.error('[CrashBackup] Restore into localStorage failed; preserving backup.');
+        }
+        return;
       }
     } catch (err) {
-      console.error('Failed to restore backup:', err);
+      console.error('Failed to restore from localStorage:', err);
     }
 
-    // Reload page
-    window.location.reload();
+    // Fall back to IndexedDB
+    loadFromIndexedDB('forge-editor-crash-backup')
+      .then((data) => {
+        if (data) {
+          if (restoreFromPayload(data)) {
+            return deleteFromIndexedDB('forge-editor-crash-backup').then(() => {
+              window.location.reload();
+            });
+          }
+          // Restore failed — preserve the IndexedDB backup
+          console.error('[CrashBackup] Restore from IndexedDB payload failed; preserving backup.');
+        }
+        return undefined;
+      })
+      .catch((err: unknown) => {
+        console.error('Failed to restore from IndexedDB:', err);
+      });
   };
 
   render() {
     if (this.state.hasError) {
-      const hasBackup = !!localStorage.getItem('forge-editor-crash-backup');
+      let hasLocalStorageBackup = false;
+      try {
+        hasLocalStorageBackup = !!localStorage.getItem('forge-editor-crash-backup');
+      } catch {
+        // localStorage may throw SecurityError in restricted contexts — default to false
+      }
+      const hasBackup = hasLocalStorageBackup || this.state.hasIndexedDBBackup;
 
       return (
         <div className="flex h-screen w-full items-center justify-center bg-gray-900 p-4">
