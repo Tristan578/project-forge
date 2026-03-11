@@ -195,6 +195,23 @@ export function useGenerationPolling() {
         // Download GLB and import
         if (!data.resultUrl) throw new Error('No result URL');
 
+        const shouldPlace = job.autoPlace !== false;
+
+        // Skip expensive download + analysis when autoPlace is disabled
+        if (!shouldPlace) {
+          updateJob(id, {
+            status: 'completed',
+            resultUrl: data.resultUrl,
+            metadata: {
+              ...job.metadata,
+              ...ppResult.metadata,
+              autoPlaced: false,
+              targetEntityId: job.targetEntityId,
+            },
+          });
+          return;
+        }
+
         const blob = await downloadBinary(data.resultUrl);
 
         // Run model quality analysis on the raw GLB
@@ -210,7 +227,10 @@ export function useGenerationPolling() {
         const base64 = await blobToBase64(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Generated_${job.prompt.slice(0, 20)}`;
-        useEditorStore.getState().importGltf(base64, assetName);
+
+        if (shouldPlace) {
+          useEditorStore.getState().importGltf(base64, assetName);
+        }
 
         updateJob(id, {
           status: 'completed',
@@ -218,6 +238,8 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
+            autoPlaced: shouldPlace,
+            targetEntityId: job.targetEntityId,
             quality: {
               fileSize: qualityMetrics.fileSize,
               sizeCategory: qualityMetrics.sizeCategory,
@@ -232,32 +254,46 @@ export function useGenerationPolling() {
         // Download PBR maps and apply to entity
         if (!data.maps) throw new Error('No texture maps');
 
-        const entityId = job.entityId;
-        if (!entityId) {
-          updateJob(id, { status: 'completed' });
+        // Use targetEntityId (from autoPlace) or fall back to legacy entityId
+        const entityId = job.targetEntityId ?? job.entityId;
+        if (!entityId || job.autoPlace === false) {
+          updateJob(id, {
+            status: 'completed',
+            metadata: { ...job.metadata, ...ppResult.metadata },
+          });
           return;
         }
 
         const slotMap: Record<string, string> = {
           albedo: 'base_color',
-          normal: 'normal',
+          normal: 'normal_map',
           metallic_roughness: 'metallic_roughness',
           emissive: 'emissive',
           ao: 'occlusion',
         };
 
+        // If a specific materialSlot was requested, only apply that map
+        const targetSlot = job.materialSlot;
         for (const [mapType, url] of Object.entries(data.maps)) {
+          const slot = slotMap[mapType];
+          if (!slot) continue;
+          // When materialSlot is specified, only apply the matching slot
+          if (targetSlot && slot !== targetSlot) continue;
+
           const blob = await downloadBinary(url);
           const base64 = await blobToBase64(blob);
-          const slot = slotMap[mapType];
-          if (slot) {
-            useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot);
-          }
+          useEditorStore.getState().loadTexture(base64, `${mapType}_${entityId}`, entityId, slot);
         }
 
         updateJob(id, {
           status: 'completed',
-          metadata: { ...job.metadata, ...ppResult.metadata },
+          metadata: {
+            ...job.metadata,
+            ...ppResult.metadata,
+            autoPlaced: true,
+            targetEntityId: entityId,
+            materialSlot: targetSlot,
+          },
         });
       } else if (type === 'skybox') {
         // Download equirectangular image and apply as scene skybox
@@ -285,10 +321,10 @@ export function useGenerationPolling() {
         store.importAudio(base64, assetName);
 
         // Attach looping music audio to target entity
-        // Note: importAudio uses the name as the asset ID in the engine's asset registry,
-        // so assetName IS the correct identifier to reference this asset.
-        if (job.entityId) {
-          store.setAudio(job.entityId, {
+        // Use targetEntityId (from autoPlace) or fall back to legacy entityId
+        const entityId = job.targetEntityId ?? job.entityId;
+        if (entityId && job.autoPlace !== false) {
+          store.setAudio(entityId, {
             assetId: assetName,
             volume: 0.7,
             pitch: 1.0,
@@ -305,7 +341,12 @@ export function useGenerationPolling() {
         updateJob(id, {
           status: 'completed',
           resultUrl: data.resultUrl,
-          metadata: { ...job.metadata, ...ppResult.metadata },
+          metadata: {
+            ...job.metadata,
+            ...ppResult.metadata,
+            autoPlaced: !!entityId && job.autoPlace !== false,
+            targetEntityId: entityId,
+          },
         });
       } else if (type === 'pixel-art') {
         // Download pixel art result image and store as asset
@@ -315,16 +356,23 @@ export function useGenerationPolling() {
         const base64 = await blobToBase64(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `PixelArt_${job.prompt.slice(0, 20)}`;
-        const entityId = job.entityId;
+        const entityId = job.targetEntityId ?? job.entityId;
+        const slot = job.materialSlot ?? 'base_color';
 
-        if (entityId) {
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
+        if (entityId && job.autoPlace !== false) {
+          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
         }
 
         updateJob(id, {
           status: 'completed',
           resultUrl: data.resultUrl,
-          metadata: { ...job.metadata, ...ppResult.metadata },
+          metadata: {
+            ...job.metadata,
+            ...ppResult.metadata,
+            autoPlaced: !!entityId && job.autoPlace !== false,
+            targetEntityId: entityId,
+            materialSlot: slot,
+          },
         });
       } else if (type === 'sprite_sheet') {
         // Download sprite sheet, slice into frames, and set sprite sheet data
@@ -334,9 +382,10 @@ export function useGenerationPolling() {
         const base64 = await blobToBase64(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `SpriteSheet_${job.prompt.slice(0, 20)}`;
-        const entityId = job.entityId;
+        const entityId = job.targetEntityId ?? job.entityId;
+        const shouldPlace = !!entityId && job.autoPlace !== false;
 
-        if (entityId) {
+        if (shouldPlace) {
           useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
         }
 
@@ -350,7 +399,7 @@ export function useGenerationPolling() {
           assetName,
         );
 
-        if (entityId) {
+        if (shouldPlace) {
           useEditorStore.getState().setSpriteSheet(entityId, sheetData);
         }
 
@@ -360,6 +409,8 @@ export function useGenerationPolling() {
           metadata: {
             ...job.metadata,
             ...ppResult.metadata,
+            autoPlaced: shouldPlace,
+            targetEntityId: entityId,
             spriteSheet: {
               columns: grid.columns,
               rows: grid.rows,
@@ -377,17 +428,24 @@ export function useGenerationPolling() {
         const base64 = await blobToBase64(blob);
 
         const assetName = (ppResult.metadata.assetName as string) ?? `Sprite_${job.prompt.slice(0, 20)}`;
-        const entityId = job.entityId;
+        const entityId = job.targetEntityId ?? job.entityId;
+        const slot = job.materialSlot ?? 'base_color';
 
-        if (entityId) {
-          // Apply as base_color texture on the target entity
-          useEditorStore.getState().loadTexture(base64, assetName, entityId, 'base_color');
+        if (entityId && job.autoPlace !== false) {
+          // Apply as texture on the target entity
+          useEditorStore.getState().loadTexture(base64, assetName, entityId, slot);
         }
 
         updateJob(id, {
           status: 'completed',
           resultUrl: data.resultUrl,
-          metadata: { ...job.metadata, ...ppResult.metadata },
+          metadata: {
+            ...job.metadata,
+            ...ppResult.metadata,
+            autoPlaced: !!entityId && job.autoPlace !== false,
+            targetEntityId: entityId,
+            materialSlot: slot,
+          },
         });
       }
     } catch (err) {

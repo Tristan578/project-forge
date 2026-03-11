@@ -25,6 +25,9 @@ function trackJob(opts: {
   provider: string;
   entityId?: string;
   usageId?: string;
+  autoPlace?: boolean;
+  targetEntityId?: string;
+  materialSlot?: string;
 }) {
   useGenerationStore.getState().addJob({
     id: opts.jobId,
@@ -37,6 +40,9 @@ function trackJob(opts: {
     createdAt: Date.now(),
     entityId: opts.entityId,
     usageId: opts.usageId,
+    autoPlace: opts.autoPlace,
+    targetEntityId: opts.targetEntityId,
+    materialSlot: opts.materialSlot,
   });
 }
 
@@ -113,6 +119,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       quality: z.string().optional(),
       artStyle: z.string().optional(),
       negativePrompt: z.string().optional(),
+      entityId: z.string().optional(),
+      autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
 
@@ -133,6 +141,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'meshy',
       usageId: data.usageId as string | undefined,
+      entityId: p.data.entityId,
+      autoPlace: p.data.autoPlace ?? true,
+      targetEntityId: p.data.entityId,
     });
 
     return {
@@ -148,6 +159,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({
       imageBase64: z.string().min(1),
       prompt: z.string().optional(),
+      entityId: z.string().optional(),
+      autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
 
@@ -169,6 +182,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt ?? 'image-to-3d',
       provider: (data.provider as string) ?? 'meshy',
       usageId: data.usageId as string | undefined,
+      entityId: p.data.entityId,
+      autoPlace: p.data.autoPlace ?? true,
+      targetEntityId: p.data.entityId,
     });
 
     return {
@@ -187,8 +203,22 @@ export const generationHandlers: Record<string, ToolHandler> = {
       resolution: z.string().optional(),
       style: z.string().optional(),
       tiling: z.boolean().optional(),
+      materialSlot: z.string().optional(),
+      autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
+
+    const VALID_MATERIAL_SLOTS = ['base_color', 'normal_map', 'metallic_roughness', 'emissive', 'occlusion'] as const;
+    type MaterialSlot = typeof VALID_MATERIAL_SLOTS[number];
+
+    // Treat empty string materialSlot as undefined; reject unrecognised slot IDs
+    const rawSlot = p.data.materialSlot;
+    if (rawSlot && rawSlot.length > 0 && !(VALID_MATERIAL_SLOTS as readonly string[]).includes(rawSlot)) {
+      return { success: false, error: `Invalid materialSlot "${rawSlot}". Must be one of: ${VALID_MATERIAL_SLOTS.join(', ')}` };
+    }
+    const materialSlot: MaterialSlot | undefined = rawSlot && rawSlot.length > 0
+      ? rawSlot as MaterialSlot
+      : undefined;
 
     const result = await generateFetch('/api/generate/texture', {
       prompt: enrichPrompt(p.data.prompt, 'texture', ctx.store),
@@ -209,6 +239,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? 'meshy',
       entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
+      autoPlace: p.data.autoPlace ?? !!p.data.entityId,
+      targetEntityId: p.data.entityId,
+      materialSlot,
     });
 
     return {
@@ -377,6 +410,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       entityId: z.string().optional(),
       durationSeconds: z.number().optional(),
       instrumental: z.boolean().optional(),
+      autoPlace: z.boolean().optional(),
+      targetEntityId: z.string().optional(),
     }), args);
     if (p.error) return p.error;
 
@@ -389,11 +424,13 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const { data } = result;
 
     // Music API may return audioBase64 (sync) or jobId (async)
+    const musicEntityId = p.data.targetEntityId ?? p.data.entityId;
+    const musicAutoPlace = p.data.autoPlace ?? !!musicEntityId;
     if (data.audioBase64) {
       const assetName = `music-${p.data.prompt.slice(0, 20)}`;
       ctx.store.importAudio(data.audioBase64 as string, assetName);
-      if (p.data.entityId) {
-        ctx.store.setAudio(p.data.entityId, {
+      if (musicEntityId && musicAutoPlace) {
+        ctx.store.setAudio(musicEntityId, {
           assetId: assetName,
           volume: 0.7,
           pitch: 1.0,
@@ -422,6 +459,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? 'suno',
       entityId: p.data.entityId,
       usageId: data.usageId as string | undefined,
+      autoPlace: musicAutoPlace,
+      targetEntityId: musicEntityId,
     });
 
     return {
@@ -439,6 +478,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       style: z.string().optional(),
       size: z.string().optional(),
       removeBackground: z.boolean().optional(),
+      entityId: z.string().optional(),
+      autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
 
@@ -459,6 +500,9 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
+      entityId: p.data.entityId,
+      autoPlace: p.data.autoPlace ?? !!p.data.entityId,
+      targetEntityId: p.data.entityId,
     });
 
     return {

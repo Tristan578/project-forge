@@ -5268,6 +5268,14 @@
           "negativePrompt": {
             "type": "string",
             "description": "What to avoid in generation"
+          },
+          "autoPlace": {
+            "type": "boolean",
+            "description": "Automatically place the generated model in the scene when complete (default true)"
+          },
+          "targetEntityId": {
+            "type": "string",
+            "description": "Entity ID to associate the generated model with"
           }
         },
         "required": [
@@ -5335,11 +5343,25 @@
           "tiling": {
             "type": "boolean",
             "description": "Generate seamless tiling textures"
+          },
+          "autoPlace": {
+            "type": "boolean",
+            "description": "Automatically apply the texture to the target entity when complete (default true when entityId is set)"
+          },
+          "materialSlot": {
+            "type": "string",
+            "enum": [
+              "base_color",
+              "normal_map",
+              "metallic_roughness",
+              "emissive",
+              "occlusion"
+            ],
+            "description": "Specific material slot to apply the texture to (applies all slots when omitted)"
           }
         },
         "required": [
-          "prompt",
-          "entityId"
+          "prompt"
         ]
       },
       "tokenCost": 80,
@@ -5496,6 +5518,14 @@
           "entityId": {
             "type": "string",
             "description": "Optional: auto-attach to entity audio"
+          },
+          "autoPlace": {
+            "type": "boolean",
+            "description": "Automatically attach the generated music to the target entity when complete (default true when entityId/targetEntityId is set)"
+          },
+          "targetEntityId": {
+            "type": "string",
+            "description": "Entity ID to attach the generated music to (takes precedence over entityId)"
           }
         },
         "required": [
