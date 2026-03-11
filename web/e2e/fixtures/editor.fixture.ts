@@ -164,7 +164,6 @@ export class EditorPage {
     await this.page.keyboard.press(keys);
   }
 
-  /** Get the editor store state */
   /** Wait until __EDITOR_STORE is available (guards against hydration race). */
   async waitForEditorStore(timeout = 10_000) {
     await this.page.waitForFunction(

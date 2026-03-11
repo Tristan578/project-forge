@@ -131,19 +131,16 @@ test.describe('Mobile Sidebar Collapse @ui', () => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await editor.loadPage();
 
-    // In condensed/full mode sidebar should be visible
     const canvas = page.locator('canvas').first();
     await expect(canvas).toBeVisible({ timeout: 10000 });
 
-    // At >= 1024px sidebar may be present
+    // At >= 1024px (condensed/full mode) sidebar should be rendered and visible
     const sidebar = page.locator('aside[aria-label="Editor tools"]').first();
-    const sidebarCount = await sidebar.count();
-    if (sidebarCount > 0) {
-      const box = await sidebar.boundingBox();
-      if (box) {
-        expect(box.width).toBeGreaterThan(10);
-      }
-    }
+    await expect(sidebar).toBeVisible({ timeout: 5000 });
+
+    const box = await sidebar.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThan(10);
   });
 });
 
@@ -242,8 +239,8 @@ test.describe('Touch Target Sizes @ui', () => {
 
     const box = await hierarchyToggle.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(40);
-    expect(box!.height).toBeGreaterThanOrEqual(40);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 
   test('inspector toggle button meets minimum touch target size', async ({ page, editor }) => {
@@ -255,8 +252,8 @@ test.describe('Touch Target Sizes @ui', () => {
 
     const box = await inspectorToggle.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(40);
-    expect(box!.height).toBeGreaterThanOrEqual(40);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 
   test('rotate gizmo button meets minimum touch target size', async ({ page, editor }) => {
@@ -268,8 +265,8 @@ test.describe('Touch Target Sizes @ui', () => {
 
     const box = await rotateBtn.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeGreaterThanOrEqual(40);
-    expect(box!.height).toBeGreaterThanOrEqual(40);
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
   });
 });
 
