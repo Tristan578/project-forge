@@ -41,6 +41,7 @@ describe('POST /api/stripe/webhook', () => {
 
     vi.mocked(idempotency.claimEvent).mockResolvedValue(true);
     vi.mocked(idempotency.releaseEvent).mockResolvedValue(undefined);
+    vi.mocked(idempotency.finalizeEvent).mockResolvedValue(undefined);
   });
 
   afterEach(() => {

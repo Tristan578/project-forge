@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Required mocks BEFORE module import
 vi.mock('server-only', () => ({}));
 
-// We'll capture the mock insert/delete/select chains
+// We'll capture the mock insert/delete/select/update chains
 const mockInsertReturn = { rowCount: 1 };
 const mockDeleteReturn = { rowCount: 1 };
 const mockSelectRows: { eventId: string }[] = [];
@@ -24,18 +24,25 @@ const mockSelectWhere = vi.fn().mockReturnValue({ limit: mockSelectLimit });
 const mockSelectFrom = vi.fn().mockReturnValue({ where: mockSelectWhere });
 const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
 
+const mockUpdateWhere = vi.fn().mockResolvedValue({ rowCount: 1 });
+const mockUpdateSet = vi.fn().mockReturnValue({ where: mockUpdateWhere });
+const mockUpdate = vi.fn().mockReturnValue({ set: mockUpdateSet });
+
 const mockDb = {
   insert: mockInsert,
   delete: mockDelete,
   select: mockSelect,
+  update: mockUpdate,
 };
 
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => mockDb),
+  // Pass-through: queryWithResilience just calls the operation directly in tests
+  queryWithResilience: vi.fn(<T>(op: () => Promise<T>) => op()),
 }));
 
 // Import AFTER mocks are set up
-import { claimEvent, releaseEvent, isProcessed, cleanupExpired } from '../webhookIdempotency';
+import { claimEvent, releaseEvent, isProcessed, cleanupExpired, finalizeEvent } from '../webhookIdempotency';
 
 describe('webhookIdempotency', () => {
   beforeEach(() => {
@@ -44,6 +51,7 @@ describe('webhookIdempotency', () => {
     mockOnConflictDoNothing.mockResolvedValue({ rowCount: 1 });
     mockDeleteWhere.mockResolvedValue({ rowCount: 1 });
     mockSelectLimit.mockResolvedValue([]);
+    mockUpdateWhere.mockResolvedValue({ rowCount: 1 });
   });
 
   // ----------------------------------------------------------------
@@ -70,7 +78,7 @@ describe('webhookIdempotency', () => {
       expect(result).toBe(false);
     });
 
-    it('uses the default TTL of 72 hours', async () => {
+    it('uses a short in-flight TTL of 5 minutes', async () => {
       const before = Date.now();
       mockOnConflictDoNothing.mockResolvedValueOnce({ rowCount: 1 });
 
@@ -79,24 +87,9 @@ describe('webhookIdempotency', () => {
       const insertedValues = mockInsertValues.mock.calls[0][0] as { expiresAt: Date };
       const after = Date.now();
 
-      const expectedMinMs = before + 72 * 60 * 60 * 1000;
-      const expectedMaxMs = after + 72 * 60 * 60 * 1000;
-
-      expect(insertedValues.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
-      expect(insertedValues.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
-    });
-
-    it('accepts a custom TTL', async () => {
-      const before = Date.now();
-      mockOnConflictDoNothing.mockResolvedValueOnce({ rowCount: 1 });
-
-      await claimEvent('evt_custom_ttl', 'clerk', 24);
-
-      const insertedValues = mockInsertValues.mock.calls[0][0] as { expiresAt: Date };
-      const after = Date.now();
-
-      const expectedMinMs = before + 24 * 60 * 60 * 1000;
-      const expectedMaxMs = after + 24 * 60 * 60 * 1000;
+      // 5 minutes in-flight TTL
+      const expectedMinMs = before + 5 * 60 * 1000;
+      const expectedMaxMs = after + 5 * 60 * 1000;
 
       expect(insertedValues.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
       expect(insertedValues.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
@@ -108,6 +101,41 @@ describe('webhookIdempotency', () => {
       const result = await claimEvent('evt_no_rowcount', 'stripe');
 
       expect(result).toBe(false);
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // finalizeEvent
+  // ----------------------------------------------------------------
+  describe('finalizeEvent', () => {
+    it('extends the TTL to 72 hours by default', async () => {
+      const before = Date.now();
+
+      await finalizeEvent('evt_finalize');
+
+      const setArg = mockUpdateSet.mock.calls[0][0] as { expiresAt: Date };
+      const after = Date.now();
+
+      const expectedMinMs = before + 72 * 60 * 60 * 1000;
+      const expectedMaxMs = after + 72 * 60 * 60 * 1000;
+
+      expect(setArg.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
+      expect(setArg.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
+    });
+
+    it('accepts a custom TTL', async () => {
+      const before = Date.now();
+
+      await finalizeEvent('evt_custom', 24);
+
+      const setArg = mockUpdateSet.mock.calls[0][0] as { expiresAt: Date };
+      const after = Date.now();
+
+      const expectedMinMs = before + 24 * 60 * 60 * 1000;
+      const expectedMaxMs = after + 24 * 60 * 60 * 1000;
+
+      expect(setArg.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
+      expect(setArg.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
     });
   });
 

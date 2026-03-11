@@ -1,4 +1,5 @@
 import 'server-only';
+import { isTransientError } from './withRetry';
 
 export type CircuitState = 'closed' | 'open' | 'half-open';
 
@@ -49,7 +50,12 @@ export class CircuitBreaker {
       this._onSuccess();
       return result;
     } catch (error) {
-      this._onFailure();
+      // Only count transient errors (connection, timeout) toward the failure
+      // threshold. Non-transient errors (auth, syntax, constraints) should not
+      // trip the circuit breaker.
+      if (isTransientError(error)) {
+        this._onFailure();
+      }
       throw error;
     }
   }

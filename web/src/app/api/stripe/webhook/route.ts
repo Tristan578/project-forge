@@ -10,6 +10,7 @@ import type { TokenPackage } from '@/lib/tokens/pricing';
 import {
   claimEvent,
   releaseEvent,
+  finalizeEvent,
 } from '@/lib/billing/webhookIdempotency';
 import {
   handleSubscriptionCreated,
@@ -73,12 +74,37 @@ export async function POST(req: Request) {
   try {
     await processEvent(event);
   } catch (err) {
+<<<<<<< HEAD
     // Release the claim so Stripe can retry on transient failures.
     await releaseEvent(event.id, 'stripe');
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
     // Return 500 so Stripe retries the webhook delivery.
     return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
+=======
+    // Processing failed — release the claim so Stripe can redeliver.
+    // If releaseEvent itself fails, the short in-flight TTL (5 min)
+    // will auto-expire the claim, allowing Stripe to retry.
+    try {
+      await releaseEvent(event.id);
+    } catch (releaseErr) {
+      console.error(`[stripe-webhook] Failed to release claim for ${event.id}:`, releaseErr);
+    }
+    captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
+    console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
+    return NextResponse.json({ received: true });
+  }
+
+  // Processing succeeded — extend the claim TTL to the full 72h window
+  // so this event is considered "processed" and duplicates are rejected.
+  // If finalization fails, do NOT release the claim: the event was already
+  // processed, and releasing would allow duplicate processing on redeliver.
+  try {
+    await finalizeEvent(event.id);
+  } catch (err) {
+    console.error(`[stripe-webhook] Failed to finalize claim for ${event.id}:`, err);
+    captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id, phase: 'finalize' });
+>>>>>>> origin/main
   }
 
   return NextResponse.json({ received: true });

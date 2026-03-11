@@ -506,7 +506,7 @@ export const webhookEvents = pgTable('webhook_events', {
   // are not a practical concern. The source column is for filtering/auditing.
   eventId: text('event_id').primaryKey(),
   source: text('source').notNull(), // 'stripe' | 'clerk'
-  processedAt: timestamp('processed_at', { withTimezone: true }).notNull().defaultNow(),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }).notNull().defaultNow(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
