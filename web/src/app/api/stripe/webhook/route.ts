@@ -78,13 +78,14 @@ export async function POST(req: Request) {
     // If releaseEvent itself fails, the short in-flight TTL (5 min)
     // will auto-expire the claim, allowing Stripe to retry.
     try {
-      await releaseEvent(event.id);
+      await releaseEvent(event.id, 'stripe');
     } catch (releaseErr) {
       console.error(`[stripe-webhook] Failed to release claim for ${event.id}:`, releaseErr);
     }
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
-    return NextResponse.json({ received: true });
+    // Return 500 so Stripe retries the webhook delivery.
+    return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
   }
 
   // Processing succeeded — extend the claim TTL to the full 72h window

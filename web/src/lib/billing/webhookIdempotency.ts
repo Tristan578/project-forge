@@ -12,7 +12,7 @@
  */
 
 import 'server-only';
-import { sql, lt } from 'drizzle-orm';
+import { sql, lt, eq, and, gt } from 'drizzle-orm';
 import { getDb, queryWithResilience } from '@/lib/db/client';
 import { webhookEvents } from '@/lib/db/schema';
 
@@ -71,7 +71,7 @@ export async function finalizeEvent(
     getDb()
       .update(webhookEvents)
       .set({ expiresAt })
-      .where(sql`${webhookEvents.eventId} = ${eventId}`)
+      .where(eq(webhookEvents.eventId, eventId))
   );
 }
 
@@ -81,11 +81,11 @@ export async function finalizeEvent(
  * Call this when processing fails and Stripe should be allowed to
  * redeliver. Deletes the row so the next delivery can claim it fresh.
  */
-export async function releaseEvent(eventId: string): Promise<void> {
+export async function releaseEvent(eventId: string, source: string): Promise<void> {
   await queryWithResilience(() =>
     getDb()
       .delete(webhookEvents)
-      .where(sql`${webhookEvents.eventId} = ${eventId}`)
+      .where(and(eq(webhookEvents.eventId, eventId), eq(webhookEvents.source, source)))
   );
 }
 
@@ -93,12 +93,12 @@ export async function releaseEvent(eventId: string): Promise<void> {
  * Check whether an event has already been processed and the claim has
  * not expired. Returns true if a valid (non-expired) claim exists.
  */
-export async function isProcessed(eventId: string): Promise<boolean> {
+export async function isProcessed(eventId: string, source: string): Promise<boolean> {
   const rows = await queryWithResilience(() =>
     getDb()
       .select({ eventId: webhookEvents.eventId })
       .from(webhookEvents)
-      .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.expiresAt} > NOW()`)
+      .where(and(eq(webhookEvents.eventId, eventId), eq(webhookEvents.source, source), gt(webhookEvents.expiresAt, sql`NOW()`)))
       .limit(1)
   );
   return rows.length > 0;

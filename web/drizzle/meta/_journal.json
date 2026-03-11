@@ -8,6 +8,13 @@
       "when": 1772987200479,
       "tag": "0000_large_mephisto",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773073600000,
+      "tag": "0001_rename_webhook_events",
+      "breakpoints": true
     }
   ]
 }

@@ -45,7 +45,7 @@ export function isTransientError(error: unknown): boolean {
     return true;
   }
 
-  // HTTP 503/502/429 style errors
+  // Node errno-style socket error codes (ECONNREFUSED, ECONNRESET, ETIMEDOUT)
   const code = (error as NodeJS.ErrnoException).code;
   if (code === 'ECONNREFUSED' || code === 'ECONNRESET' || code === 'ETIMEDOUT') {
     return true;

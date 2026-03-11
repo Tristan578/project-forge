@@ -153,9 +153,9 @@ describe('POST /api/stripe/webhook', () => {
     });
     const res = await POST(req);
 
-    expect(res.status).toBe(200); // Stripe needs 2xx
+    expect(res.status).toBe(500); // Return 500 so Stripe retries
     expect(captureException).toHaveBeenCalled();
     // The claim should be released so Stripe can retry
-    expect(idempotency.releaseEvent).toHaveBeenCalledWith('evt_err');
+    expect(idempotency.releaseEvent).toHaveBeenCalledWith('evt_err', 'stripe');
   });
 });

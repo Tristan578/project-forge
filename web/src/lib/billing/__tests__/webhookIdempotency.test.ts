@@ -7,23 +7,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Required mocks BEFORE module import
 vi.mock('server-only', () => ({}));
 
-// We'll capture the mock insert/delete/select/update chains
-const mockInsertReturn = { rowCount: 1 };
-const mockDeleteReturn = { rowCount: 1 };
+// We'll capture the mock insert/delete/select/update chains.
+// The implementation uses .returning() which must be in the chain.
 const mockSelectRows: { eventId: string }[] = [];
 
-const mockOnConflictDoNothing = vi.fn().mockResolvedValue(mockInsertReturn);
+// Insert chain: insert().values().onConflictDoNothing().returning()
+const mockInsertReturning = vi.fn().mockResolvedValue([{ eventId: 'evt_new' }]);
+const mockOnConflictDoNothing = vi.fn().mockReturnValue({ returning: mockInsertReturning });
 const mockInsertValues = vi.fn().mockReturnValue({ onConflictDoNothing: mockOnConflictDoNothing });
 const mockInsert = vi.fn().mockReturnValue({ values: mockInsertValues });
 
-const mockDeleteWhere = vi.fn().mockResolvedValue(mockDeleteReturn);
+// Delete chain: delete().where().returning() (for cleanupExpired) or delete().where() (for releaseEvent)
+const mockDeleteReturning = vi.fn().mockResolvedValue([]);
+const mockDeleteWhere = vi.fn().mockReturnValue({ returning: mockDeleteReturning });
 const mockDelete = vi.fn().mockReturnValue({ where: mockDeleteWhere });
 
+// Select chain: select().from().where().limit()
 const mockSelectLimit = vi.fn().mockResolvedValue(mockSelectRows);
 const mockSelectWhere = vi.fn().mockReturnValue({ limit: mockSelectLimit });
 const mockSelectFrom = vi.fn().mockReturnValue({ where: mockSelectWhere });
 const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
 
+// Update chain: update().set().where()
 const mockUpdateWhere = vi.fn().mockResolvedValue({ rowCount: 1 });
 const mockUpdateSet = vi.fn().mockReturnValue({ where: mockUpdateWhere });
 const mockUpdate = vi.fn().mockReturnValue({ set: mockUpdateSet });
@@ -48,8 +53,10 @@ describe('webhookIdempotency', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Reset mock return values to defaults
-    mockOnConflictDoNothing.mockResolvedValue({ rowCount: 1 });
-    mockDeleteWhere.mockResolvedValue({ rowCount: 1 });
+    mockInsertReturning.mockResolvedValue([{ eventId: 'evt_default' }]);
+    mockOnConflictDoNothing.mockReturnValue({ returning: mockInsertReturning });
+    mockDeleteReturning.mockResolvedValue([]);
+    mockDeleteWhere.mockReturnValue({ returning: mockDeleteReturning });
     mockSelectLimit.mockResolvedValue([]);
     mockUpdateWhere.mockResolvedValue({ rowCount: 1 });
   });
@@ -58,8 +65,8 @@ describe('webhookIdempotency', () => {
   // claimEvent
   // ----------------------------------------------------------------
   describe('claimEvent', () => {
-    it('returns true when the event is new (rowCount = 1)', async () => {
-      mockOnConflictDoNothing.mockResolvedValueOnce({ rowCount: 1 });
+    it('returns true when the event is new (returning has rows)', async () => {
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_new' }]);
 
       const result = await claimEvent('evt_new', 'stripe');
 
@@ -70,8 +77,8 @@ describe('webhookIdempotency', () => {
       );
     });
 
-    it('returns false when the event is a duplicate (rowCount = 0)', async () => {
-      mockOnConflictDoNothing.mockResolvedValueOnce({ rowCount: 0 });
+    it('returns false when the event is a duplicate (returning is empty)', async () => {
+      mockInsertReturning.mockResolvedValueOnce([]);
 
       const result = await claimEvent('evt_dup', 'stripe');
 
@@ -80,7 +87,7 @@ describe('webhookIdempotency', () => {
 
     it('uses a short in-flight TTL of 5 minutes', async () => {
       const before = Date.now();
-      mockOnConflictDoNothing.mockResolvedValueOnce({ rowCount: 1 });
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_ttl' }]);
 
       await claimEvent('evt_ttl', 'stripe');
 
@@ -93,14 +100,6 @@ describe('webhookIdempotency', () => {
 
       expect(insertedValues.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
       expect(insertedValues.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
-    });
-
-    it('handles undefined rowCount gracefully (treats as 0)', async () => {
-      mockOnConflictDoNothing.mockResolvedValueOnce({});
-
-      const result = await claimEvent('evt_no_rowcount', 'stripe');
-
-      expect(result).toBe(false);
     });
   });
 
@@ -144,7 +143,7 @@ describe('webhookIdempotency', () => {
   // ----------------------------------------------------------------
   describe('releaseEvent', () => {
     it('deletes the event row from the database', async () => {
-      await releaseEvent('evt_release');
+      await releaseEvent('evt_release', 'stripe');
 
       expect(mockDelete).toHaveBeenCalled();
       expect(mockDeleteWhere).toHaveBeenCalled();
@@ -153,7 +152,7 @@ describe('webhookIdempotency', () => {
     it('does not throw when delete finds no matching row (rowCount = 0)', async () => {
       mockDeleteWhere.mockResolvedValueOnce({ rowCount: 0 });
 
-      await expect(releaseEvent('evt_not_found')).resolves.toBeUndefined();
+      await expect(releaseEvent('evt_not_found', 'stripe')).resolves.toBeUndefined();
     });
   });
 
@@ -164,7 +163,7 @@ describe('webhookIdempotency', () => {
     it('returns false when no row exists for the event', async () => {
       mockSelectLimit.mockResolvedValueOnce([]);
 
-      const result = await isProcessed('evt_unknown');
+      const result = await isProcessed('evt_unknown', 'stripe');
 
       expect(result).toBe(false);
     });
@@ -172,9 +171,44 @@ describe('webhookIdempotency', () => {
     it('returns true when a non-expired row exists', async () => {
       mockSelectLimit.mockResolvedValueOnce([{ eventId: 'evt_known' }]);
 
-      const result = await isProcessed('evt_known');
+      const result = await isProcessed('evt_known', 'stripe');
 
       expect(result).toBe(true);
+    });
+  });
+
+  // ----------------------------------------------------------------
+  // TTL safety net: expired events are re-claimable
+  // ----------------------------------------------------------------
+  describe('TTL expiry and re-claim', () => {
+    it('allows re-claiming an event after its row is deleted (simulating TTL expiry)', async () => {
+      // First delivery: INSERT succeeds, claim granted
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
+      const firstClaim = await claimEvent('evt_expired', 'stripe');
+      expect(firstClaim).toBe(true);
+
+      // Simulate TTL expiry: cleanupExpired deletes the row
+      mockDeleteReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
+      const deletedCount = await cleanupExpired();
+      expect(deletedCount).toBe(1);
+
+      // Second delivery (Stripe retry after expiry): INSERT succeeds again
+      // because the row was deleted by cleanupExpired
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_expired' }]);
+      const secondClaim = await claimEvent('evt_expired', 'stripe');
+      expect(secondClaim).toBe(true);
+    });
+
+    it('rejects duplicate claim before TTL expires', async () => {
+      // First delivery succeeds
+      mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_inflight' }]);
+      const firstClaim = await claimEvent('evt_inflight', 'stripe');
+      expect(firstClaim).toBe(true);
+
+      // Second delivery while row still exists: ON CONFLICT DO NOTHING returns empty
+      mockInsertReturning.mockResolvedValueOnce([]);
+      const secondClaim = await claimEvent('evt_inflight', 'stripe');
+      expect(secondClaim).toBe(false);
     });
   });
 
@@ -183,7 +217,10 @@ describe('webhookIdempotency', () => {
   // ----------------------------------------------------------------
   describe('cleanupExpired', () => {
     it('deletes expired rows and returns the count', async () => {
-      mockDeleteWhere.mockResolvedValueOnce({ rowCount: 5 });
+      mockDeleteReturning.mockResolvedValueOnce([
+        { eventId: 'e1' }, { eventId: 'e2' }, { eventId: 'e3' },
+        { eventId: 'e4' }, { eventId: 'e5' },
+      ]);
 
       const count = await cleanupExpired();
 
@@ -193,15 +230,7 @@ describe('webhookIdempotency', () => {
     });
 
     it('returns 0 when no expired rows exist', async () => {
-      mockDeleteWhere.mockResolvedValueOnce({ rowCount: 0 });
-
-      const count = await cleanupExpired();
-
-      expect(count).toBe(0);
-    });
-
-    it('handles undefined rowCount gracefully', async () => {
-      mockDeleteWhere.mockResolvedValueOnce({});
+      mockDeleteReturning.mockResolvedValueOnce([]);
 
       const count = await cleanupExpired();
 
