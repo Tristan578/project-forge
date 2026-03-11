@@ -67,8 +67,12 @@ function createIDBMock(shouldFail = false) {
   }
 
   function makeTransaction(storeName: string): IDBTransaction {
+    // Pre-create the store so it exists when objectStore() is called
+    getOrCreateStore(storeName);
     const tx = {
-      objectStore: (_name: string) => makeStore(storeName),
+      // Route to the store name the caller requested — this validates that
+      // production code passes STORE_NAME ('crash-backups') and not the DB name.
+      objectStore: (name: string) => makeStore(name),
       oncomplete: null as (() => void) | null,
       onerror: null as (() => void) | null,
     };
@@ -76,14 +80,15 @@ function createIDBMock(shouldFail = false) {
     return tx as unknown as IDBTransaction;
   }
 
-  function makeDB(dbName: string): IDBDatabase {
+  function makeDB(_dbName: string): IDBDatabase {
     return {
       objectStoreNames: {
         contains: () => true,
       },
-      transaction: (_name: string, _mode: string) => makeTransaction(dbName),
+      // Pass the requested store name through so makeTransaction pre-creates it
+      transaction: (name: string, _mode: string) => makeTransaction(name),
       close: vi.fn(),
-      createObjectStore: (_name: string) => makeStore(_name),
+      createObjectStore: (name: string) => makeStore(name),
     } as unknown as IDBDatabase;
   }
 

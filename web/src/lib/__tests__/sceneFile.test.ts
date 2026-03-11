@@ -1,5 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { CURRENT_FORMAT_VERSION, readSceneFile, getAutoSave, clearAutoSave } from '../sceneFile';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { CURRENT_FORMAT_VERSION, readSceneFile, getAutoSave, clearAutoSave, saveAutoSave } from '../sceneFile';
+
+// ---------------------------------------------------------------------------
+// Allow selective spying on storageQuota helpers used by saveAutoSave
+// ---------------------------------------------------------------------------
+vi.mock('@/lib/storage/storageQuota', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/storage/storageQuota')>();
+  return { ...actual };
+});
 
 describe('CURRENT_FORMAT_VERSION', () => {
   it('should be a positive number', () => {
@@ -100,5 +108,89 @@ describe('getAutoSave and clearAutoSave', () => {
 
     expect(getAutoSave()).toBeNull();
     expect(() => clearAutoSave()).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// saveAutoSave tests
+// ---------------------------------------------------------------------------
+
+describe('saveAutoSave', () => {
+  let mockStore: Record<string, string>;
+
+  function makeLocalStorageMock(
+    overrideSetItem?: (key: string, val: string) => void,
+  ) {
+    return {
+      getItem: (key: string) => mockStore[key] ?? null,
+      setItem: overrideSetItem ?? ((key: string, val: string) => { mockStore[key] = val; }),
+      removeItem: (key: string) => { delete mockStore[key]; },
+      get length() { return Object.keys(mockStore).length; },
+      key: (i: number) => Object.keys(mockStore)[i] ?? null,
+    };
+  }
+
+  beforeEach(() => {
+    mockStore = {};
+    vi.stubGlobal('localStorage', makeLocalStorageMock());
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('writes json, name, and timestamp to localStorage on successful write', () => {
+    saveAutoSave('{"scene":true}', 'MyScene');
+
+    expect(mockStore['forge:autosave']).toBe('{"scene":true}');
+    expect(mockStore['forge:autosave:name']).toBe('MyScene');
+    expect(typeof mockStore['forge:autosave:time']).toBe('string');
+    // Timestamp should be a parseable ISO date
+    expect(new Date(mockStore['forge:autosave:time']).getFullYear()).toBeGreaterThan(2000);
+  });
+
+  it('calls evictOldAutoSaves when storage would exceed threshold, then writes successfully', async () => {
+    // Force wouldExceedThreshold to return true to exercise the eviction branch
+    const storageQuota = await import('@/lib/storage/storageQuota');
+    const thresholdSpy = vi.spyOn(storageQuota, 'wouldExceedThreshold').mockReturnValue(true);
+    const evictSpy = vi.spyOn(storageQuota, 'evictOldAutoSaves').mockReturnValue(0);
+
+    saveAutoSave('{"scene":"new"}', 'NewScene');
+
+    expect(thresholdSpy).toHaveBeenCalled();
+    expect(evictSpy).toHaveBeenCalledWith(1);
+    // Data should still be written
+    expect(mockStore['forge:autosave']).toBe('{"scene":"new"}');
+    expect(mockStore['forge:autosave:name']).toBe('NewScene');
+  });
+
+  it('logs a warning but does not throw when localStorage remains full after quota eviction', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    // Make setItem always throw QuotaExceededError (name must match isQuotaError)
+    vi.stubGlobal('localStorage', makeLocalStorageMock(() => {
+      const err = new DOMException('QuotaExceededError', 'QuotaExceededError');
+      throw err;
+    }));
+
+    expect(() => saveAutoSave('{"scene":true}', 'Test')).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('localStorage write failed'),
+    );
+  });
+
+  it('does not throw and warns when a non-quota error blocks all writes', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    // Make setItem always throw a generic (non-quota) error
+    vi.stubGlobal('localStorage', makeLocalStorageMock(() => {
+      throw new Error('SecurityError: access denied');
+    }));
+
+    expect(() => saveAutoSave('{"scene":true}', 'Test')).not.toThrow();
+    // saveAutoSave warns when any of its three writes fail
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('localStorage write failed'),
+    );
   });
 });

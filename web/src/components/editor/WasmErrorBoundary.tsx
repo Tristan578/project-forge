@@ -101,8 +101,10 @@ export class WasmErrorBoundary extends Component<Props, State> {
       try {
         const parsed = JSON.parse(payload) as Record<string, unknown>;
         if (typeof parsed.state === 'string') {
-          localStorage.setItem('forge-editor-store', parsed.state);
-          return true;
+          // Use safeLocalStorageSet so IndexedDB-backed recovery still works
+          // when localStorage remains quota-exceeded at restore time.
+          const result = safeLocalStorageSet('forge-editor-store', parsed.state);
+          return result.success;
         }
       } catch (err) {
         console.error('Failed to restore backup payload:', err);
