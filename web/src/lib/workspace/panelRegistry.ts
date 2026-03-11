@@ -113,6 +113,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minHeight: 150,
     renderer: 'always',
   },
+  taskboard: {
+    id: 'taskboard',
+    title: 'Tasks',
+    component: 'taskboard',
+    minWidth: 200,
+    minHeight: 150,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */

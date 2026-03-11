@@ -65,5 +65,5 @@ cd web && npx playwright test
 ## Taskboard
 
 - API: http://localhost:3010/api
-- Project ID: 01KJEE8R1XXFF0CZT1WCSTGRDP
+- Project ID: 01KK974VMNC16ZAW7MW1NH3T3M
 - Always create a ticket before starting work

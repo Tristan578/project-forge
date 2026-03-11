@@ -4,7 +4,7 @@ description: Taskboard management workflow. View, create, update, and manage tic
 
 # Taskboard / Kanban
 
-The taskboard is the single source of truth for all project work. It uses an MCP server connected to Claude Code at `http://localhost:3010/api` (Project ID: `01KJEE8R1XXFF0CZT1WCSTGRDP`).
+The taskboard is the single source of truth for all project work. It uses an MCP server connected to Claude Code at `http://localhost:3010/api` (Project ID: `01KK974VMNC16ZAW7MW1NH3T3M`).
 
 ## Ticket Format
 

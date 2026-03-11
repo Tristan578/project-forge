@@ -43,8 +43,8 @@ cd engine && cargo build --target wasm32-unknown-unknown --release --features we
 - Prefer `Result<T, E>` over panics. Feature flags: `webgl2` and `webgpu`.
 
 ### TypeScript (web/, mcp-server/)
-- Strict mode. Never use `any`. Avoid `as` casts — use Zod schemas for runtime validation.
-- All chat handler arguments MUST be validated with Zod schemas before use.
+- Strict mode. Never use `any`. Avoid `as` casts.
+- All chat handler arguments MUST be validated before use (manual validation via `parseArgs()` pattern — Zod is not used for runtime validation).
 - Use named exports. Prefer `const` over `let`. Never use `var`.
 - Tailwind CSS for all styling. No inline styles or CSS modules.
 
@@ -57,9 +57,9 @@ Before writing ANY code:
 2. Pick an existing ticket OR create a new one with ALL required fields
 3. Move the ticket to `in_progress`
 
-Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria (3+ Given/When/Then scenarios), Priority, Team (Engineering: `01KJFNHZC49XG9KXRYTMYEEDTS`), Subtasks (3+).
+Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria (3+ Given/When/Then scenarios), Priority, Team (Engineering: `01KK9751NZ4HM7VQM0AQ5WGME3`), Subtasks (3+).
 
-Project ID: `01KJEE8R1XXFF0CZT1WCSTGRDP`
+Project ID: `01KK974VMNC16ZAW7MW1NH3T3M`
 
 See `AGENTS.md` for full taskboard setup, workflow, and GitHub Project sync details.
 

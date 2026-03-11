@@ -28,7 +28,7 @@ Place in: `../taskboard/`, `~/.local/bin/`, `/usr/local/bin/`, or PATH.
 - **Description**: Technical context, affected files, scope (at least 20 chars beyond user story + AC)
 - **Acceptance Criteria**: Given/When/Then format — **minimum 3 scenarios** (happy path, edge case, negative/error case)
 - **Priority**: urgent, high, medium, low
-- **Team**: Engineering (`01KJFNHZC49XG9KXRYTMYEEDTS`), PM (`01KJFNJC02QK6F5NSDND7NH5MS`), Leadership (`01KJFNK35JVPQJESS3RZM0F5HP`)
+- **Team**: Engineering (`01KK9751NZ4HM7VQM0AQ5WGME3`), PM (`01KK9751P7GKQYG9TZ96XXQCFN`), Leadership (`01KK9751PD79RCWY462CYQ06CW`)
 - **Subtasks**: At least 3 implementation steps
 
 ## GitHub Project Sync (v3 Architecture)

@@ -2,9 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { POST } from './route';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import * as lifecycle from '@/lib/billing/subscription-lifecycle';
+import * as idempotency from '@/lib/billing/webhookIdempotency';
 
+vi.mock('server-only', () => ({}));
 vi.mock('@/lib/monitoring/sentry-server');
 vi.mock('@/lib/billing/subscription-lifecycle');
+vi.mock('@/lib/billing/webhookIdempotency');
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn().mockReturnValue({}),
 }));
@@ -26,25 +29,25 @@ vi.mock('stripe', () => {
 });
 
 describe('POST /api/stripe/webhook', () => {
-  const env = process.env;
-
   beforeEach(() => {
     vi.clearAllMocks();
-    process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
-    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_mock';
-    process.env.STRIPE_PRICE_STARTER = 'price_starter_mock';
-    process.env.STRIPE_PRICE_CREATOR = 'price_creator_mock';
-    process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
+    vi.stubEnv('STRIPE_SECRET_KEY', 'sk_test_mock');
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', 'whsec_mock');
+    vi.stubEnv('STRIPE_PRICE_STARTER', 'price_starter_mock');
+    vi.stubEnv('STRIPE_PRICE_CREATOR', 'price_creator_mock');
+    vi.stubEnv('STRIPE_PRICE_STUDIO', 'price_studio_mock');
 
-    vi.mocked(lifecycle.claimEvent).mockReturnValue(true);
+    vi.mocked(idempotency.claimEvent).mockResolvedValue(true);
+    vi.mocked(idempotency.releaseEvent).mockResolvedValue(undefined);
+    vi.mocked(idempotency.finalizeEvent).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
-    process.env = env;
+    vi.unstubAllEnvs();
   });
 
   it('returns 500 if WEBHOOK_SECRET is missing', async () => {
-    delete process.env.STRIPE_WEBHOOK_SECRET;
+    vi.stubEnv('STRIPE_WEBHOOK_SECRET', '');
     const req = new Request('http://localhost/api/stripe/webhook', { method: 'POST' });
     const res = await POST(req);
     expect(res.status).toBe(500);
@@ -68,7 +71,7 @@ describe('POST /api/stripe/webhook', () => {
 
   it('skips duplicate events (idempotency)', async () => {
     mockConstructEvent.mockReturnValue({ id: 'evt_123', type: 'customer.subscription.created' });
-    vi.mocked(lifecycle.claimEvent).mockReturnValue(false);
+    vi.mocked(idempotency.claimEvent).mockResolvedValue(false);
 
     const req = new Request('http://localhost/api/stripe/webhook', {
       method: 'POST',
@@ -104,7 +107,7 @@ describe('POST /api/stripe/webhook', () => {
 
     expect(res.status).toBe(200);
     expect(lifecycle.handleSubscriptionCreated).toHaveBeenCalledWith('cus_123', 'sub_123', 'creator');
-    expect(lifecycle.claimEvent).toHaveBeenCalledWith('evt_create');
+    expect(idempotency.claimEvent).toHaveBeenCalledWith('evt_create', 'stripe');
   });
 
   it('processes customer.subscription.updated', async () => {
@@ -153,6 +156,6 @@ describe('POST /api/stripe/webhook', () => {
     expect(res.status).toBe(200); // Stripe needs 2xx
     expect(captureException).toHaveBeenCalled();
     // The claim should be released so Stripe can retry
-    expect(lifecycle.releaseEvent).toHaveBeenCalledWith('evt_err');
+    expect(idempotency.releaseEvent).toHaveBeenCalledWith('evt_err');
   });
 });
