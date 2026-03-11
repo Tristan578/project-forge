@@ -654,7 +654,7 @@
     },
     {
       "name": "set_custom_wgsl_source",
-      "description": "Set the scene-global custom WGSL shader source code. All entities with shaderType='custom_wgsl' use this code. WebGPU only — WebGL2 falls back to standard PBR. The userCode is a WGSL function body receiving base_color, world_pos, world_normal, uv, time, user_params_0..3, user_color and must return vec4<f32>.",
+      "description": "Set the scene-global custom WGSL shader source code. All entities with shaderType='custom_wgsl' use this code. WebGPU only \u2014 WebGL2 falls back to standard PBR. The userCode is a WGSL function body receiving base_color, world_pos, world_normal, uv, time, user_params_0..3, user_color and must return vec4<f32>.",
       "category": "materials",
       "parameters": {
         "type": "object",
@@ -668,7 +668,9 @@
             "description": "Human-readable shader name (optional, defaults to 'Custom WGSL')"
           }
         },
-        "required": ["userCode"]
+        "required": [
+          "userCode"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -685,7 +687,9 @@
             "description": "WGSL code string to validate"
           }
         },
-        "required": ["code"]
+        "required": [
+          "code"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
@@ -5299,6 +5303,18 @@
           "prompt": {
             "type": "string",
             "description": "Optional text description"
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to replace with the generated model"
+          },
+          "targetEntityId": {
+            "type": "string",
+            "description": "Entity ID to replace with the generated model (takes precedence over entityId)"
+          },
+          "autoPlace": {
+            "type": "boolean",
+            "description": "Automatically place the generated model in the scene when complete (default true)"
           }
         },
         "required": [
@@ -5571,6 +5587,18 @@
           "removeBackground": {
             "type": "boolean",
             "description": "Remove background after generation"
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to attach the sprite to"
+          },
+          "targetEntityId": {
+            "type": "string",
+            "description": "Entity ID to attach the sprite to (takes precedence over entityId)"
+          },
+          "autoPlace": {
+            "type": "boolean",
+            "description": "Automatically attach the generated sprite to the target entity when complete (default true when entityId/targetEntityId is set)"
           }
         },
         "required": [
@@ -5845,7 +5873,12 @@
           },
           "targetSize": {
             "type": "number",
-            "enum": [16, 32, 64, 128],
+            "enum": [
+              16,
+              32,
+              64,
+              128
+            ],
             "description": "Target sprite size in pixels (default: 32)"
           },
           "palette": {
@@ -5854,20 +5887,44 @@
           },
           "style": {
             "type": "string",
-            "enum": ["character", "prop", "tile", "icon", "environment"],
+            "enum": [
+              "character",
+              "prop",
+              "tile",
+              "icon",
+              "environment"
+            ],
             "description": "Pixel art style preset"
           },
           "dithering": {
             "type": "string",
-            "enum": ["none", "bayer4x4", "bayer8x8"],
+            "enum": [
+              "none",
+              "bayer4x4",
+              "bayer8x8"
+            ],
             "description": "Dithering algorithm (default: none)"
           },
           "ditheringIntensity": {
             "type": "number",
             "description": "Dithering intensity 0-1 (default: 0)"
+          },
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to attach the pixel art sprite to"
+          },
+          "targetEntityId": {
+            "type": "string",
+            "description": "Entity ID to attach the pixel art sprite to (takes precedence over entityId)"
+          },
+          "autoPlace": {
+            "type": "boolean",
+            "description": "Automatically attach the generated pixel art to the target entity when complete (default true when entityId/targetEntityId is set)"
           }
         },
-        "required": ["prompt"]
+        "required": [
+          "prompt"
+        ]
       },
       "tokenCost": 10,
       "requiredScope": "generation:write"
@@ -5885,11 +5942,15 @@
           },
           "colors": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Hex color array (required when palette is 'custom')"
           }
         },
-        "required": ["palette"]
+        "required": [
+          "palette"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "generation:write"
@@ -5907,7 +5968,11 @@
           },
           "dithering": {
             "type": "string",
-            "enum": ["none", "bayer4x4", "bayer8x8"],
+            "enum": [
+              "none",
+              "bayer4x4",
+              "bayer8x8"
+            ],
             "description": "Dithering algorithm (default: none)"
           },
           "ditheringIntensity": {
@@ -5915,7 +5980,9 @@
             "description": "Dithering intensity 0-1 (default: 0.5)"
           }
         },
-        "required": ["colorCount"]
+        "required": [
+          "colorCount"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "generation:write"
@@ -8304,7 +8371,12 @@
           },
           "sorting_layer": {
             "type": "string",
-            "enum": ["Background", "Default", "Foreground", "UI"],
+            "enum": [
+              "Background",
+              "Default",
+              "Foreground",
+              "UI"
+            ],
             "description": "Sorting layer for draw order"
           },
           "sorting_order": {
@@ -10385,7 +10457,10 @@
         "properties": {
           "backend": {
             "type": "string",
-            "enum": ["qem", "fast"],
+            "enum": [
+              "qem",
+              "fast"
+            ],
             "description": "Simplification backend: 'qem' (attribute-preserving, default) or 'fast' (position-only)"
           }
         },

@@ -17,7 +17,7 @@ function makeJobId(): string {
 }
 
 /** Track an async generation job in the generation store. */
-function trackJob(opts: {
+export function trackJob(opts: {
   jobId: string;
   providerJobId: string;
   type: GenerationType;
@@ -120,6 +120,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       artStyle: z.string().optional(),
       negativePrompt: z.string().optional(),
       entityId: z.string().optional(),
+      targetEntityId: z.string().optional(),
       autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
@@ -133,6 +134,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
+    const modelTargetId = p.data.targetEntityId ?? p.data.entityId;
     const localId = makeJobId();
     trackJob({
       jobId: localId,
@@ -143,7 +145,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       usageId: data.usageId as string | undefined,
       entityId: p.data.entityId,
       autoPlace: p.data.autoPlace ?? true,
-      targetEntityId: p.data.entityId,
+      targetEntityId: modelTargetId,
     });
 
     return {
@@ -160,6 +162,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       imageBase64: z.string().min(1),
       prompt: z.string().optional(),
       entityId: z.string().optional(),
+      targetEntityId: z.string().optional(),
       autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
@@ -174,6 +177,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
+    const imageTargetId = p.data.targetEntityId ?? p.data.entityId;
     const localId = makeJobId();
     trackJob({
       jobId: localId,
@@ -184,7 +188,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       usageId: data.usageId as string | undefined,
       entityId: p.data.entityId,
       autoPlace: p.data.autoPlace ?? true,
-      targetEntityId: p.data.entityId,
+      targetEntityId: imageTargetId,
     });
 
     return {
@@ -203,7 +207,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       resolution: z.string().optional(),
       style: z.string().optional(),
       tiling: z.boolean().optional(),
-      materialSlot: z.string().optional(),
+      materialSlot: z.string().min(1).optional(),
       autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
@@ -479,6 +483,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       size: z.string().optional(),
       removeBackground: z.boolean().optional(),
       entityId: z.string().optional(),
+      targetEntityId: z.string().optional(),
       autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
@@ -492,6 +497,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
     if (!result.ok) return { success: false, error: result.error };
     const { data } = result;
 
+    const spriteTargetId = p.data.targetEntityId ?? p.data.entityId;
     const localId = makeJobId();
     trackJob({
       jobId: localId,
@@ -501,8 +507,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
       entityId: p.data.entityId,
-      autoPlace: p.data.autoPlace ?? !!p.data.entityId,
-      targetEntityId: p.data.entityId,
+      autoPlace: p.data.autoPlace ?? !!spriteTargetId,
+      targetEntityId: spriteTargetId,
     });
 
     return {
