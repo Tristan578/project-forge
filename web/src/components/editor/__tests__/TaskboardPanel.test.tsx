@@ -7,11 +7,17 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { TaskboardPanel } from '../TaskboardPanel';
 import { useTaskStore } from '@/stores/taskStore';
 import type { EditorTask } from '@/stores/taskStore';
+
+// ---- Mock crypto.randomUUID ----
+let uuidCounter = 0;
+vi.stubGlobal('crypto', {
+  randomUUID: () => `mock-uuid-${++uuidCounter}`,
+});
 
 // ---- Mock localStorage ----
 const localStorageMock = (() => {
@@ -30,8 +36,7 @@ const localStorageMock = (() => {
   };
 })();
 
-// ---- Mock crypto.randomUUID ----
-let uuidCounter = 0;
+vi.stubGlobal('localStorage', localStorageMock);
 
 // ---- Lucide icon mocks ----
 vi.mock('lucide-react', () => ({
@@ -93,16 +98,15 @@ function resetStore(tasks: EditorTask[] = []) {
 
 describe('TaskboardPanel', () => {
   beforeEach(() => {
-    vi.stubGlobal('crypto', {
-      randomUUID: () => `mock-uuid-${++uuidCounter}`,
-    });
-    vi.stubGlobal('localStorage', localStorageMock);
     resetStore();
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     cleanup();
+  });
+
+  afterAll(() => {
     vi.unstubAllGlobals();
   });
 
