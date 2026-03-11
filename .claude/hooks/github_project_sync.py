@@ -1421,22 +1421,28 @@ def close_orphan_issues():
 
     print(f"  Will close {len(to_close)} duplicate issues")
 
+    import time
     closed = 0
     errors = 0
     for dup_num, canonical_num, title in to_close:
         try:
-            # Add comment explaining the closure
+            # Close without comment to avoid rate limits on addComment
             gh_run([
                 "gh", "issue", "close", str(dup_num),
                 "--repo", f"{owner}/{repo}",
-                "--comment", f"Closing as duplicate of #{canonical_num}",
             ])
             closed += 1
             if closed % 10 == 0:
                 print(f"  ... closed {closed}/{len(to_close)}")
+                sys.stdout.flush()
+            # Rate limit: ~1 req/sec to stay under GitHub secondary limits
+            time.sleep(1.0)
         except Exception as e:
             errors += 1
             print(f"  ! Close #{dup_num} failed: {e}", file=sys.stderr)
+            # If rate limited, back off more
+            if "too quickly" in str(e) or "rate" in str(e).lower():
+                time.sleep(10.0)
 
     print(f"[CLOSE-ORPHANS] Closed {closed} duplicates, {errors} errors")
 
