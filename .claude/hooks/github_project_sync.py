@@ -1038,9 +1038,11 @@ def pull():
         # Only relink if the existing ticket has no GH issue yet, or already
         # points to the same GH issue.  If it points to a DIFFERENT issue,
         # this is a genuine different ticket with the same title — skip dedup.
+        # Also reject drafts (gh_issue_num=None) trying to claim a ticket
+        # that already has a GH issue link.
         can_relink = (
             existing_tid
-            and not (existing_gh and gh_issue_num and existing_gh != gh_issue_num)
+            and (not existing_gh or (gh_issue_num and existing_gh == gh_issue_num))
         )
         if can_relink:
             if gh_issue_num and not existing_gh:
