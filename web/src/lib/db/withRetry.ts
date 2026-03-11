@@ -80,11 +80,8 @@ export async function withRetry<T>(
   options: RetryOptions = {}
 ): Promise<T> {
   const opts: Required<RetryOptions> = { ...DEFAULT_OPTIONS, ...options };
-<<<<<<< HEAD
-=======
   // Guard against 0 or negative maxAttempts which would skip the loop
   // entirely and throw undefined.
->>>>>>> origin/main
   opts.maxAttempts = Math.max(1, opts.maxAttempts);
   let lastError: unknown;
 
