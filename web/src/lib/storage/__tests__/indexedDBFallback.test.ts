@@ -229,6 +229,194 @@ describe('indexedDBFallback', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Store name validation — ensures production code uses STORE_NAME not DB_NAME
+  // -------------------------------------------------------------------------
+
+  describe('store name validation', () => {
+    it('passes the correct store name (crash-backups) to objectStore(), not the DB name (forge-backup)', async () => {
+      const observedStoreNames: string[] = [];
+
+      // Build a mock that records every store name passed to objectStore()
+      function createCapturingIDBMock() {
+        const stores: Record<string, Record<string | number, unknown>> = {};
+
+        function makeRequest<T>(resolve: () => T): IDBRequest {
+          const req = {
+            result: undefined as unknown,
+            error: null as DOMException | null,
+            onsuccess: null as ((ev: Event) => void) | null,
+            onerror: null as ((ev: Event) => void) | null,
+          };
+          queueMicrotask(() => {
+            req.result = resolve() as unknown;
+            req.onsuccess?.({} as Event);
+          });
+          return req as unknown as IDBRequest;
+        }
+
+        function makeStore(storeName: string): IDBObjectStore {
+          observedStoreNames.push(storeName);
+          if (!stores[storeName]) stores[storeName] = {};
+          const s = stores[storeName];
+          return {
+            put(value: unknown, key?: IDBValidKey): IDBRequest {
+              return makeRequest(() => {
+                if (key !== undefined) s[key as string | number] = value;
+                return key;
+              });
+            },
+            get(key: IDBValidKey): IDBRequest {
+              return makeRequest(() => s[key as string | number]);
+            },
+            delete(key: IDBValidKey): IDBRequest {
+              return makeRequest(() => { delete s[key as string | number]; return undefined; });
+            },
+          } as unknown as IDBObjectStore;
+        }
+
+        function makeTransaction(storeName: string): IDBTransaction {
+          if (!stores[storeName]) stores[storeName] = {};
+          const tx = {
+            objectStore: (name: string) => makeStore(name),
+            oncomplete: null as (() => void) | null,
+            onerror: null as (() => void) | null,
+            onabort: null as (() => void) | null,
+          };
+          queueMicrotask(() => tx.oncomplete?.());
+          return tx as unknown as IDBTransaction;
+        }
+
+        function makeDB(): IDBDatabase {
+          return {
+            objectStoreNames: { contains: () => true },
+            transaction: (name: string, _mode: string) => makeTransaction(name),
+            close: vi.fn(),
+            createObjectStore: (name: string) => makeStore(name),
+          } as unknown as IDBDatabase;
+        }
+
+        function open(): IDBOpenDBRequest {
+          const req = {
+            result: undefined as unknown,
+            error: null as DOMException | null,
+            onsuccess: null as ((ev: Event) => void) | null,
+            onerror: null as ((ev: Event) => void) | null,
+            onupgradeneeded: null as ((ev: IDBVersionChangeEvent) => void) | null,
+          };
+          queueMicrotask(() => {
+            req.result = makeDB() as unknown;
+            req.onupgradeneeded?.({ target: req } as unknown as IDBVersionChangeEvent);
+            req.onsuccess?.({} as Event);
+          });
+          return req as unknown as IDBOpenDBRequest;
+        }
+
+        return { open };
+      }
+
+      const capturingMock = createCapturingIDBMock();
+      Object.defineProperty(global, 'indexedDB', {
+        value: { open: capturingMock.open },
+        writable: true,
+        configurable: true,
+      });
+
+      await saveToIndexedDB('test-key', 'test-value');
+
+      // The transaction must use STORE_NAME ('crash-backups'), NOT the DB name ('forge-backup')
+      expect(observedStoreNames).toContain('crash-backups');
+      expect(observedStoreNames).not.toContain('forge-backup');
+    });
+
+    it('uses the same store name for load operations', async () => {
+      const observedStoreNames: string[] = [];
+
+      function createCapturingIDBMock() {
+        const stores: Record<string, Record<string | number, unknown>> = {};
+
+        function makeRequest<T>(fn: () => T): IDBRequest {
+          const req = {
+            result: undefined as unknown,
+            error: null as DOMException | null,
+            onsuccess: null as ((ev: Event) => void) | null,
+            onerror: null as ((ev: Event) => void) | null,
+          };
+          queueMicrotask(() => { req.result = fn() as unknown; req.onsuccess?.({} as Event); });
+          return req as unknown as IDBRequest;
+        }
+
+        function makeStore(storeName: string): IDBObjectStore {
+          observedStoreNames.push(storeName);
+          if (!stores[storeName]) stores[storeName] = {};
+          const s = stores[storeName];
+          return {
+            put(value: unknown, key?: IDBValidKey): IDBRequest {
+              return makeRequest(() => { if (key !== undefined) s[key as string] = value; return key; });
+            },
+            get(key: IDBValidKey): IDBRequest {
+              return makeRequest(() => s[key as string]);
+            },
+            delete(key: IDBValidKey): IDBRequest {
+              return makeRequest(() => { delete s[key as string]; return undefined; });
+            },
+          } as unknown as IDBObjectStore;
+        }
+
+        function makeTransaction(storeName: string): IDBTransaction {
+          if (!stores[storeName]) stores[storeName] = {};
+          const tx = {
+            objectStore: (name: string) => makeStore(name),
+            oncomplete: null as (() => void) | null,
+            onerror: null as (() => void) | null,
+            onabort: null as (() => void) | null,
+          };
+          queueMicrotask(() => tx.oncomplete?.());
+          return tx as unknown as IDBTransaction;
+        }
+
+        function makeDB(): IDBDatabase {
+          return {
+            objectStoreNames: { contains: () => true },
+            transaction: (name: string, _mode: string) => makeTransaction(name),
+            close: vi.fn(),
+            createObjectStore: (name: string) => makeStore(name),
+          } as unknown as IDBDatabase;
+        }
+
+        function open(): IDBOpenDBRequest {
+          const req = {
+            result: undefined as unknown,
+            error: null as DOMException | null,
+            onsuccess: null as ((ev: Event) => void) | null,
+            onerror: null as ((ev: Event) => void) | null,
+            onupgradeneeded: null as ((ev: IDBVersionChangeEvent) => void) | null,
+          };
+          queueMicrotask(() => {
+            req.result = makeDB() as unknown;
+            req.onupgradeneeded?.({ target: req } as unknown as IDBVersionChangeEvent);
+            req.onsuccess?.({} as Event);
+          });
+          return req as unknown as IDBOpenDBRequest;
+        }
+
+        return { open };
+      }
+
+      const capturingMock = createCapturingIDBMock();
+      Object.defineProperty(global, 'indexedDB', {
+        value: { open: capturingMock.open },
+        writable: true,
+        configurable: true,
+      });
+
+      await loadFromIndexedDB('any-key');
+
+      expect(observedStoreNames).toContain('crash-backups');
+      expect(observedStoreNames).not.toContain('forge-backup');
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Save → Load → Delete lifecycle
   // -------------------------------------------------------------------------
 
