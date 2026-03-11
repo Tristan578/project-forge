@@ -20,7 +20,7 @@ describe('CircuitBreaker', () => {
     vi.useRealTimers();
   });
 
-  // ── Closed state ──────────────────────────────────────────────────────────
+  // -- Closed state --
 
   it('starts in closed state', () => {
     const cb = makeBreaker();
@@ -46,7 +46,7 @@ describe('CircuitBreaker', () => {
     expect(cb.getState()).toBe('closed');
   });
 
-  // ── Closed → Open transition ──────────────────────────────────────────────
+  // -- Closed -> Open transition --
 
   it('transitions to open after threshold failures', async () => {
     const cb = makeBreaker({ failureThreshold: 3 });
@@ -81,7 +81,7 @@ describe('CircuitBreaker', () => {
     expect(cb.getStats().consecutiveFailures).toBe(0);
   });
 
-  // ── Open state ────────────────────────────────────────────────────────────
+  // -- Open state --
 
   it('throws CircuitBreakerOpenError immediately when open', async () => {
     const cb = makeBreaker({ failureThreshold: 1 });
@@ -101,7 +101,7 @@ describe('CircuitBreaker', () => {
     expect(error).toBeInstanceOf(CircuitBreakerOpenError);
   });
 
-  // ── Open → Half-Open transition ───────────────────────────────────────────
+  // -- Open -> Half-Open transition --
 
   it('transitions to half-open after the open timeout', async () => {
     const cb = makeBreaker({ failureThreshold: 1, openTimeoutMs: 5_000 });
@@ -120,7 +120,7 @@ describe('CircuitBreaker', () => {
     expect(cb.getState()).toBe('open');
   });
 
-  // ── Half-Open → Closed on success ─────────────────────────────────────────
+  // -- Half-Open -> Closed on success --
 
   it('closes the circuit when the probe succeeds in half-open state', async () => {
     const cb = makeBreaker({ failureThreshold: 1, openTimeoutMs: 1_000 });
@@ -147,7 +147,7 @@ describe('CircuitBreaker', () => {
     expect(stats.consecutiveFailures).toBe(0);
   });
 
-  // ── Half-Open → Open on failure ───────────────────────────────────────────
+  // -- Half-Open -> Open on failure --
 
   it('reopens the circuit when the probe fails in half-open state', async () => {
     const cb = makeBreaker({ failureThreshold: 1, openTimeoutMs: 1_000 });
@@ -183,7 +183,7 @@ describe('CircuitBreaker', () => {
     expect(cb.getState()).toBe('half-open');
   });
 
-  // ── getStats ──────────────────────────────────────────────────────────────
+  // -- getStats --
 
   it('getStats reports correct state and failure count', async () => {
     const cb = makeBreaker({ failureThreshold: 3 });
@@ -202,7 +202,7 @@ describe('CircuitBreaker', () => {
     expect(stats.lastOpenedAt).toBeGreaterThanOrEqual(before);
   });
 
-  // ── reset ─────────────────────────────────────────────────────────────────
+  // -- reset --
 
   it('reset() restores closed state and clears counters', async () => {
     const cb = makeBreaker({ failureThreshold: 1 });
