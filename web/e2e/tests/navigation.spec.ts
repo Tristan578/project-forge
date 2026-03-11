@@ -5,10 +5,25 @@ import { test, expect } from '@playwright/test';
  * Verifies page routing, redirects, link navigation, and URL behavior
  * across the application.
  *
- * Clerk keys are configured in CI. Sign-in navigation tests verify the
- * URL change via waitForURL (not waitForLoadState, which doesn't wait
- * for Next.js client-side navigation to complete).
+ * CI runs without Clerk keys by default. Sign-in navigation tests are
+ * skipped unless valid Clerk keys (sk_/pk_ prefixes) are configured.
+ * URL assertions use waitForURL (not waitForLoadState, which resolves
+ * immediately on the current page and does not wait for Next.js
+ * client-side navigation to complete).
  */
+
+/**
+ * Returns true when both Clerk keys are present and have valid format
+ * prefixes — mirrors the validation logic in proxy.ts which requires
+ * CLERK_SECRET_KEY starting with "sk_" AND
+ * NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY starting with "pk_".
+ */
+function isClerkConfigured(): boolean {
+  const secretKey = process.env.CLERK_SECRET_KEY ?? '';
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
+  return secretKey.startsWith('sk_') && publishableKey.startsWith('pk_');
+}
+
 test.describe('Navigation & Routing @ui', () => {
   test.describe('Public Route Access', () => {
     test('/pricing loads without redirect', async ({ page }) => {
@@ -53,9 +68,10 @@ test.describe('Navigation & Routing @ui', () => {
       const response = await page.goto('/', { waitUntil: 'domcontentloaded' });
 
       // Root may redirect (302/307) or render a landing page (200).
-      // 500 is only acceptable when Clerk auth middleware is not configured.
+      // 500 is only acceptable when BOTH Clerk keys are absent or do not
+      // have valid sk_/pk_ prefixes (matching proxy.ts validation logic).
       const status = response?.status() ?? 0;
-      const clerkConfigured = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+      const clerkConfigured = isClerkConfigured();
 
       if (clerkConfigured) {
         expect([200, 302, 307]).toContain(status);
@@ -117,14 +133,33 @@ test.describe('Navigation & Routing @ui', () => {
       const response = await page.goto('/this-route-does-not-exist-xyz');
       const status = response?.status() ?? 0;
 
-      // Next.js returns 404 for unknown routes, or 200 with a custom not-found page
-      expect([200, 404]).toContain(status);
+      // When Clerk middleware is active, unknown routes that are not in
+      // the public route list redirect to sign-in rather than showing a
+      // 404 page. When Clerk is absent, Next.js returns 404 or a custom
+      // not-found page (200).
+      if (isClerkConfigured()) {
+        // Accept any valid HTTP response — Clerk may redirect to sign-in
+        expect([200, 302, 307, 404]).toContain(status);
 
-      // Page should render recognisable not-found content
-      const bodyText = (await page.textContent('body')) ?? '';
-      const hasNotFoundContent =
-        /not\s*found|404|page.*doesn.?t\s*exist/i.test(bodyText);
-      expect(hasNotFoundContent).toBe(true);
+        const finalUrl = page.url();
+        const redirectedToSignIn = finalUrl.includes('sign-in');
+
+        if (!redirectedToSignIn) {
+          // Route was served without a Clerk redirect — must show not-found content
+          const bodyText = (await page.textContent('body')) ?? '';
+          const hasNotFoundContent =
+            /not\s*found|404|page.*doesn.?t\s*exist/i.test(bodyText);
+          expect(hasNotFoundContent).toBe(true);
+        }
+      } else {
+        // No Clerk middleware — Next.js returns 404 or 200 with not-found page
+        expect([200, 404]).toContain(status);
+
+        const bodyText = (await page.textContent('body')) ?? '';
+        const hasNotFoundContent =
+          /not\s*found|404|page.*doesn.?t\s*exist/i.test(bodyText);
+        expect(hasNotFoundContent).toBe(true);
+      }
     });
   });
 
