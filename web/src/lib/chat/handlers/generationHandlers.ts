@@ -12,7 +12,7 @@ import { enrichPrompt, enrichSfxPrompt, enrichMusicPrompt, enrichVoiceStyle } fr
 import { inferSfxCategory, getSpatialDefaults } from '@/lib/generate/postProcess';
 
 /** Generate a unique ID for client-side job tracking. */
-function makeJobId(): string {
+export function makeJobId(): string {
   return `gen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
@@ -119,8 +119,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       quality: z.string().optional(),
       artStyle: z.string().optional(),
       negativePrompt: z.string().optional(),
-      entityId: z.string().optional(),
-      targetEntityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
+      targetEntityId: z.string().min(1).optional(),
       autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
@@ -143,7 +143,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'meshy',
       usageId: data.usageId as string | undefined,
-      entityId: p.data.entityId,
+      entityId: modelTargetId,
       autoPlace: p.data.autoPlace ?? true,
       targetEntityId: modelTargetId,
     });
@@ -161,8 +161,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({
       imageBase64: z.string().min(1),
       prompt: z.string().optional(),
-      entityId: z.string().optional(),
-      targetEntityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
+      targetEntityId: z.string().min(1).optional(),
       autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
@@ -186,7 +186,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt ?? 'image-to-3d',
       provider: (data.provider as string) ?? 'meshy',
       usageId: data.usageId as string | undefined,
-      entityId: p.data.entityId,
+      entityId: imageTargetId,
       autoPlace: p.data.autoPlace ?? true,
       targetEntityId: imageTargetId,
     });
@@ -203,7 +203,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
   generate_texture: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       prompt: z.string().min(1),
-      entityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
       resolution: z.string().optional(),
       style: z.string().optional(),
       tiling: z.boolean().optional(),
@@ -215,14 +215,12 @@ export const generationHandlers: Record<string, ToolHandler> = {
     const VALID_MATERIAL_SLOTS = ['base_color', 'normal_map', 'metallic_roughness', 'emissive', 'occlusion'] as const;
     type MaterialSlot = typeof VALID_MATERIAL_SLOTS[number];
 
-    // Treat empty string materialSlot as undefined; reject unrecognised slot IDs
+    // Reject unrecognised slot IDs (empty strings already rejected by .min(1) schema)
     const rawSlot = p.data.materialSlot;
-    if (rawSlot && rawSlot.length > 0 && !(VALID_MATERIAL_SLOTS as readonly string[]).includes(rawSlot)) {
+    if (rawSlot && !(VALID_MATERIAL_SLOTS as readonly string[]).includes(rawSlot)) {
       return { success: false, error: `Invalid materialSlot "${rawSlot}". Must be one of: ${VALID_MATERIAL_SLOTS.join(', ')}` };
     }
-    const materialSlot: MaterialSlot | undefined = rawSlot && rawSlot.length > 0
-      ? rawSlot as MaterialSlot
-      : undefined;
+    const materialSlot: MaterialSlot | undefined = rawSlot as MaterialSlot | undefined;
 
     const result = await generateFetch('/api/generate/texture', {
       prompt: enrichPrompt(p.data.prompt, 'texture', ctx.store),
@@ -260,7 +258,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
   generate_pbr_maps: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       prompt: z.string().min(1),
-      entityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
       maps: z.unknown().optional(),
     }), args);
     if (p.error) return p.error;
@@ -296,7 +294,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
   generate_sfx: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       prompt: z.string().min(1),
-      entityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
       durationSeconds: z.number().optional(),
     }), args);
     if (p.error) return p.error;
@@ -337,7 +335,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
   generate_voice: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       text: z.string().min(1),
-      entityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
       speaker: z.string().optional(),
       voiceStyle: z.string().optional(),
     }), args);
@@ -411,11 +409,11 @@ export const generationHandlers: Record<string, ToolHandler> = {
   generate_music: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({
       prompt: z.string().min(1),
-      entityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
       durationSeconds: z.number().optional(),
       instrumental: z.boolean().optional(),
       autoPlace: z.boolean().optional(),
-      targetEntityId: z.string().optional(),
+      targetEntityId: z.string().min(1).optional(),
     }), args);
     if (p.error) return p.error;
 
@@ -482,8 +480,8 @@ export const generationHandlers: Record<string, ToolHandler> = {
       style: z.string().optional(),
       size: z.string().optional(),
       removeBackground: z.boolean().optional(),
-      entityId: z.string().optional(),
-      targetEntityId: z.string().optional(),
+      entityId: z.string().min(1).optional(),
+      targetEntityId: z.string().min(1).optional(),
       autoPlace: z.boolean().optional(),
     }), args);
     if (p.error) return p.error;
@@ -506,7 +504,7 @@ export const generationHandlers: Record<string, ToolHandler> = {
       prompt: p.data.prompt,
       provider: (data.provider as string) ?? 'dalle3',
       usageId: data.usageId as string | undefined,
-      entityId: p.data.entityId,
+      entityId: spriteTargetId,
       autoPlace: p.data.autoPlace ?? !!spriteTargetId,
       targetEntityId: spriteTargetId,
     });

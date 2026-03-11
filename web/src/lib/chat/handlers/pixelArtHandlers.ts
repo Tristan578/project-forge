@@ -8,7 +8,7 @@ import type { ToolHandler, ExecutionResult } from './types';
 import { parseArgs } from './types';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
-import { trackJob } from './generationHandlers';
+import { trackJob, makeJobId } from './generationHandlers';
 
 const VALID_PALETTE_IDS = Object.keys(PALETTES) as PaletteId[];
 const VALID_SIZES = [16, 32, 64, 128] as const;
@@ -26,8 +26,8 @@ const generatePixelArtSchema = z.object({
   style: z.enum(VALID_STYLES).optional().default('character'),
   dithering: z.enum(VALID_DITHERING).optional().default('none'),
   ditheringIntensity: z.number().min(0).max(1).optional().default(0),
-  entityId: z.string().optional(),
-  targetEntityId: z.string().optional(),
+  entityId: z.string().min(1).optional(),
+  targetEntityId: z.string().min(1).optional(),
   autoPlace: z.boolean().optional(),
 });
 
@@ -64,12 +64,12 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
 
     const pixelTargetId = targetEntityId ?? entityId;
     trackJob({
-      jobId: `gen-${data.jobId}`,
+      jobId: makeJobId(),
       providerJobId: data.jobId,
       type: 'pixel-art',
       prompt,
       provider: data.provider ?? 'dalle3',
-      entityId,
+      entityId: pixelTargetId,
       usageId: data.usageId,
       autoPlace: autoPlace ?? !!pixelTargetId,
       targetEntityId: pixelTargetId,
