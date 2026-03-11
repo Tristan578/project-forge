@@ -268,22 +268,38 @@ def db_find_by_title(title, repo_name):
         conn.close()
 
 
-def db_find_by_title_scoped(title, repo_name):
+def db_find_by_title_scoped(title, repo_name, project_id=None):
     """Find a ticket with this title scoped to the target repo OR untagged.
     Never crosses project boundaries — only matches tickets that belong to
     the same repo or have no sync_repo set (untagged orphans).
+
+    When project_id is provided, the untagged-orphan branch of the OR clause
+    is further constrained to that project so tickets from other projects are
+    not matched.
+
     Returns (ticket_id, github_issue_number) or (None, None).
     """
     conn = db_connect()
     if not conn:
         return None, None
     try:
-        cur = conn.execute(
-            "SELECT id, github_issue_number FROM tickets "
-            "WHERE title = ? AND (sync_repo = ? OR sync_repo IS NULL OR sync_repo = '') "
-            "ORDER BY number ASC LIMIT 1",
-            (title, repo_name),
-        )
+        if project_id:
+            cur = conn.execute(
+                "SELECT id, github_issue_number FROM tickets "
+                "WHERE title = ? AND ("
+                "  sync_repo = ? "
+                "  OR ((sync_repo IS NULL OR sync_repo = '') AND project_id = ?)"
+                ") "
+                "ORDER BY number ASC LIMIT 1",
+                (title, repo_name, project_id),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT id, github_issue_number FROM tickets "
+                "WHERE title = ? AND (sync_repo = ? OR sync_repo IS NULL OR sync_repo = '') "
+                "ORDER BY number ASC LIMIT 1",
+                (title, repo_name),
+            )
         row = cur.fetchone()
         return (row[0], row[1]) if row else (None, None)
     finally:
@@ -1035,7 +1051,7 @@ def pull():
         if title.startswith("PF-") and ": " in title:
             clean_title = title.split(": ", 1)[1]
 
-        existing_tid, existing_gh = db_find_by_title_scoped(clean_title, target_repo)
+        existing_tid, existing_gh = db_find_by_title_scoped(clean_title, target_repo, project_id)
         # Only relink if the existing ticket has no GH issue yet, or already
         # points to the same GH issue.  If it points to a DIFFERENT issue,
         # this is a genuine different ticket with the same title — skip dedup.
@@ -1308,12 +1324,25 @@ def dedup_local():
         return
 
     try:
+        # Resolve project_id: prefer tickets already tagged to this repo, fall
+        # back to resolve_project_id() so dedup works even on a fresh DB.
+        pid_row = conn.execute(
+            "SELECT project_id FROM tickets WHERE sync_repo = ? LIMIT 1",
+            (target_repo,),
+        ).fetchone()
+        resolved_project_id = pid_row[0] if pid_row else None
+        if not resolved_project_id:
+            resolved_project_id = resolve_project_id(config)
+        if not resolved_project_id:
+            print("[DEDUP] Cannot determine project_id — no tagged tickets and resolve_project_id() returned None. Skipping.")
+            return
+
         # Find all titles with duplicates (across ALL sync_repo values, not just target)
         cur = conn.execute(
             "SELECT title, COUNT(*) as cnt FROM tickets "
-            "WHERE project_id = (SELECT project_id FROM tickets WHERE sync_repo = ? LIMIT 1) "
+            "WHERE project_id = ? "
             "GROUP BY title HAVING cnt > 1",
-            (target_repo,),
+            (resolved_project_id,),
         )
         dup_titles = [(row[0], row[1]) for row in cur.fetchall()]
 
@@ -1415,10 +1444,14 @@ def close_orphan_issues():
 
     print(f"  Found {len(all_issues)} open issues")
 
-    # Group by title
+    # Group by title — only consider issues with PF- prefixed titles to avoid
+    # accidentally closing unrelated issues that happen to share a title.
+    PF_TITLE_RE = re.compile(r"^PF-\d+: ")
     by_title = {}
     for issue in all_issues:
         title = issue.get("title", "")
+        if not PF_TITLE_RE.match(title):
+            continue
         if title not in by_title:
             by_title[title] = []
         by_title[title].append(issue)
