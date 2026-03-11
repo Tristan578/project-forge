@@ -86,7 +86,10 @@ def resolve_project_id(config):
 
     project_name = config.get("allowedProjectName")
     if not project_name:
-        result = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+        result = config.get("localProjectId", "")
+        if not result:
+            print("[FATAL] No allowedProjectName and no localProjectId in config. Cannot resolve project.", file=sys.stderr)
+            sys.exit(1)
         _resolved_cache["project"] = result
         return result
 
@@ -108,7 +111,11 @@ def resolve_project_id(config):
     except Exception as e:
         print(f"  [bootstrap] Failed to create project {project_name}: {e}", file=sys.stderr)
 
-    fallback = config.get("localProjectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    fallback = config.get("localProjectId")
+    if not fallback:
+        print(f"[FATAL] Project name lookup failed for '{project_name}' and no localProjectId fallback in config.", file=sys.stderr)
+        sys.exit(1)
+    print(f"  [WARN] Project name lookup failed for '{project_name}', using config fallback: {fallback}", file=sys.stderr)
     _resolved_cache["project"] = fallback
     return fallback
 
@@ -576,6 +583,9 @@ def push(include_done=False):
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    if not project_id:
+        print("[FATAL] resolve_project_id() returned empty/None. Aborting push.", file=sys.stderr)
+        sys.exit(1)
     target_repo = config["repo"]
 
     # HARD FILTER: Only sync tickets whose sync_repo matches this project
@@ -760,6 +770,9 @@ def pull():
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    if not project_id:
+        print("[FATAL] resolve_project_id() returned empty/None. Aborting pull.", file=sys.stderr)
+        sys.exit(1)
     target_repo = config["repo"]
 
     if not tb_available():
@@ -913,17 +926,22 @@ def pull():
             filtered += 1
             continue
 
-        # If no syncRepo in metadata, check projectId pattern
+        # If syncRepo matches, allow. Otherwise, projectId MUST match local PF project.
         meta_project = parsed.get("projectId", "")
-        if not sync_repo and not meta_project:
-            filtered += 1
-            continue
+        if not sync_repo:
+            if not meta_project or meta_project != project_id:
+                filtered += 1
+                continue
 
         # Check for re-link by ticketId in metadata
         if parsed.get("ticketId"):
             meta_tid = parsed["ticketId"]
             local_ticket = tb_get(f"/tickets/{meta_tid}")
             if local_ticket and meta_tid not in tmap:
+                # Only re-link if the local ticket belongs to this project
+                if local_ticket.get("projectId") != project_id:
+                    filtered += 1
+                    continue
                 entry_data = {
                     "githubItemId": item_id,
                     "lastLocalStatus": local_ticket.get("status", "todo"),
@@ -1037,6 +1055,9 @@ def show_status():
     mapping = load_map()
     tmap = mapping.get("tickets", {})
     project_id = resolve_project_id(config)
+    if not project_id:
+        print("[FATAL] resolve_project_id() returned empty/None. Aborting status.", file=sys.stderr)
+        sys.exit(1)
     target_repo = config["repo"]
 
     print(f"GitHub Project: {config['owner']}/{config['repo']} #{config['projectNumber']}")

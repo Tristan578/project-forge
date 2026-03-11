@@ -277,13 +277,19 @@ export function EditorLayout() {
 
       if (isInput) return;
 
-      // Ctrl+Shift+T / Cmd+Shift+T: Toggle Tasks panel
-      if (e.code === 'KeyT' && (e.ctrlKey || e.metaKey) && e.shiftKey) {
+      // Alt+T: Toggle Tasks panel (avoid Ctrl+Shift+T — browser-reserved for reopen tab)
+      if (e.code === 'KeyT' && e.altKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         const ws = useWorkspaceStore.getState();
         const existing = ws.api?.getPanel('taskboard');
         if (existing) {
-          ws.api?.removePanel(existing);
+          // If panel exists but is in a background tab, activate it first.
+          // Only close if it's already the active/visible panel.
+          if (!existing.api.isActive) {
+            existing.api.setActive();
+          } else {
+            existing.api.close();
+          }
         } else {
           ws.openPanel('taskboard');
         }

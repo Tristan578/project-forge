@@ -31,7 +31,7 @@ interface TaskState {
    * Add a new task and return its generated ID.
    */
   addTask: (title: string, description?: string, assignee?: TaskAssignee) => string;
-  updateTask: (id: string, updates: Partial<Omit<EditorTask, 'id' | 'createdAt'>>) => void;
+  updateTask: (id: string, updates: Partial<Omit<EditorTask, 'id' | 'createdAt' | 'updatedAt'>>) => void;
   moveTask: (id: string, status: TaskStatus) => void;
   removeTask: (id: string) => void;
   clearCompleted: () => void;
@@ -59,7 +59,6 @@ export const useTaskStore = create<TaskState>()(
       },
 
       updateTask: (id, updates) => {
-        if (!get().tasks.some((t) => t.id === id)) return;
         set((s) => ({
           tasks: s.tasks.map((t) =>
             t.id === id ? { ...t, ...updates, updatedAt: Date.now() } : t

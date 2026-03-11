@@ -82,12 +82,21 @@ function AssigneeBadge({ assignee }: { assignee: TaskAssignee }) {
 interface TaskCardProps {
   task: EditorTask;
   onDragStart: (e: DragEvent<HTMLDivElement>, id: string) => void;
+  onDragEnd: () => void;
   onRemove: (id: string) => void;
 }
 
-function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
+function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false);
   const updateTask = useTaskStore((s) => s.updateTask);
+
+  // Buffer description locally to avoid persisting to store on every keystroke
+  const [localDesc, setLocalDesc] = useState(task.description ?? '');
+  const [prevDesc, setPrevDesc] = useState(task.description ?? '');
+  if ((task.description ?? '') !== prevDesc) {
+    setPrevDesc(task.description ?? '');
+    setLocalDesc(task.description ?? '');
+  }
 
   const handleToggleExpand = useCallback(() => {
     setExpanded((prev) => !prev);
@@ -110,20 +119,26 @@ function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
 
   const handleDescriptionChange = useCallback(
     (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      updateTask(task.id, { description: e.target.value });
+      setLocalDesc(e.target.value);
     },
-    [updateTask, task.id]
+    []
   );
+
+  const handleDescriptionBlur = useCallback(() => {
+    updateTask(task.id, { description: localDesc });
+  }, [updateTask, task.id, localDesc]);
 
   return (
     <div
       draggable
       onDragStart={handleDragStart}
+      onDragEnd={onDragEnd}
       onClick={handleToggleExpand}
       role="button"
       aria-expanded={expanded}
       tabIndex={0}
       onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           handleToggleExpand();
@@ -164,7 +179,7 @@ function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
                 aria-valuenow={Math.min(100, Math.max(0, task.progress ?? 0))}
                 aria-valuemin={0}
                 aria-valuemax={100}
-                aria-label={`${task.progress}% complete`}
+                aria-label={`${Math.min(100, Math.max(0, task.progress ?? 0))}% complete`}
               />
             </div>
           )}
@@ -178,8 +193,9 @@ function TaskCard({ task, onDragStart, onRemove }: TaskCardProps) {
           onClick={(e) => e.stopPropagation()}
         >
           <textarea
-            value={task.description ?? ''}
+            value={localDesc}
             onChange={handleDescriptionChange}
+            onBlur={handleDescriptionBlur}
             placeholder="Add description…"
             rows={3}
             className="w-full resize-none rounded bg-zinc-900/50 px-2 py-1 text-[10px] text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-600"
@@ -302,9 +318,10 @@ interface ColumnProps {
   isDragOver: boolean;
   onDragEnter: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDragOver: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
-  onDragLeave: () => void;
+  onDragLeave: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDrop: (e: DragEvent<HTMLDivElement>, status: TaskStatus) => void;
   onDragStart: (e: DragEvent<HTMLDivElement>, id: string) => void;
+  onDragEnd: () => void;
   onRemove: (id: string) => void;
   onClearCompleted?: () => void;
   onAdd: (title: string, assignee: TaskAssignee) => void;
@@ -319,6 +336,7 @@ function Column({
   onDragLeave,
   onDrop,
   onDragStart,
+  onDragEnd,
   onRemove,
   onClearCompleted,
   onAdd,
@@ -337,6 +355,13 @@ function Column({
       onDragOver(e, config.id);
     },
     [onDragOver, config.id]
+  );
+
+  const handleDragLeave = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      onDragLeave(e, config.id);
+    },
+    [onDragLeave, config.id]
   );
 
   const handleDrop = useCallback(
@@ -371,7 +396,7 @@ function Column({
       }`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
-      onDragLeave={onDragLeave}
+      onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       data-column={config.id}
       aria-label={`${config.label} column`}
@@ -416,6 +441,7 @@ function Column({
             key={task.id}
             task={task}
             onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
             onRemove={onRemove}
           />
         ))}
@@ -460,25 +486,35 @@ export function TaskboardPanel() {
     setDragOverColumn(status);
   }, []);
 
-  const dragEnterCount = useRef(0);
+  // Per-column enter counters to avoid cross-column event imbalances
+  const dragEnterCounts = useRef<Map<TaskStatus, number>>(new Map());
 
   const handleDragEnterColumn = useCallback((_e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
-    dragEnterCount.current++;
+    const counts = dragEnterCounts.current;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
     setDragOverColumn(status);
   }, []);
 
-  const handleDragLeave = useCallback(() => {
-    dragEnterCount.current--;
-    if (dragEnterCount.current <= 0) {
-      dragEnterCount.current = 0;
-      setDragOverColumn(null);
+  const handleDragLeave = useCallback((_e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
+    const counts = dragEnterCounts.current;
+    const next = (counts.get(status) ?? 1) - 1;
+    counts.set(status, Math.max(0, next));
+    if (next <= 0) {
+      // Only clear highlight if leaving the currently highlighted column
+      setDragOverColumn((prev) => (prev === status ? null : prev));
     }
+  }, []);
+
+  const handleDragEnd = useCallback(() => {
+    dragEnterCounts.current.clear();
+    setDragOverColumn(null);
+    dragTaskId.current = null;
   }, []);
 
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>, status: TaskStatus) => {
       e.preventDefault();
-      dragEnterCount.current = 0;
+      dragEnterCounts.current.clear();
       setDragOverColumn(null);
       if (dragTaskId.current) {
         moveTask(dragTaskId.current, status);
@@ -526,6 +562,7 @@ export function TaskboardPanel() {
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
             onRemove={handleRemove}
             onAdd={handleAdd}
             onClearCompleted={col.id === 'done' ? clearCompleted : undefined}
