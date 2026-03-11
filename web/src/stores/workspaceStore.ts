@@ -171,7 +171,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       });
     }
     // Left panels
-    else if (['scene-hierarchy', 'script-explorer'].includes(panelId)) {
+    else if (['scene-hierarchy', 'script-explorer', 'taskboard'].includes(panelId)) {
       const hierarchy = api.getPanel('scene-hierarchy');
       const target = hierarchy ?? viewport;
       if (hierarchy) {
