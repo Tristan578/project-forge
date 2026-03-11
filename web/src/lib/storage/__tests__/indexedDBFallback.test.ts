@@ -255,6 +255,7 @@ describe('indexedDBFallback', () => {
         }
 
         function makeStore(storeName: string): IDBObjectStore {
+          observedStoreNames.push(storeName);
           if (!stores[storeName]) stores[storeName] = {};
           const s = stores[storeName];
           return {
@@ -274,7 +275,6 @@ describe('indexedDBFallback', () => {
         }
 
         function makeTransaction(storeName: string): IDBTransaction {
-          observedStoreNames.push(storeName);
           if (!stores[storeName]) stores[storeName] = {};
           const tx = {
             objectStore: (name: string) => makeStore(name),
@@ -346,6 +346,7 @@ describe('indexedDBFallback', () => {
         }
 
         function makeStore(storeName: string): IDBObjectStore {
+          observedStoreNames.push(storeName);
           if (!stores[storeName]) stores[storeName] = {};
           const s = stores[storeName];
           return {
@@ -362,7 +363,6 @@ describe('indexedDBFallback', () => {
         }
 
         function makeTransaction(storeName: string): IDBTransaction {
-          observedStoreNames.push(storeName);
           if (!stores[storeName]) stores[storeName] = {};
           const tx = {
             objectStore: (name: string) => makeStore(name),
