@@ -291,7 +291,7 @@ def format_github_body(ticket):
     number = ticket.get("number", 0)
     team_id = ticket.get("teamId", "") or ""
     subtasks = ticket.get("subtasks", [])
-    project_id = ticket.get("projectId", "01KJEE8R1XXFF0CZT1WCSTGRDP")
+    project_id = ticket.get("projectId", "01KK974VMNC16ZAW7MW1NH3T3M")
 
     parts = [f"**Priority:** {priority}", ""]
 

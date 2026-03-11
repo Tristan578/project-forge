@@ -4,7 +4,7 @@
 
 These rules are enforced across ALL AI tools. Violations break the shared workflow.
 
-1. **No code without a ticket.** Check taskboard at http://localhost:3010 first. Create or pick a ticket, move to `in_progress`, then code. Project ID: `01KJEE8R1XXFF0CZT1WCSTGRDP`.
+1. **No code without a ticket.** Check taskboard at http://localhost:3010 first. Create or pick a ticket, move to `in_progress`, then code. Project ID: `01KK974VMNC16ZAW7MW1NH3T3M`.
 2. **Worktree commit safety.** When in a git worktree, commit after every logical chunk (each test, feature, bug fix). Rate limits and crashes kill agents — uncommitted work is permanently lost.
 3. **CI must pass.** All PRs require passing CI before merge. Never skip checks or force-merge.
 4. **Zero ESLint warnings.** `npx eslint --max-warnings 0` is enforced in CI.
@@ -69,7 +69,7 @@ cd web && npx playwright test
 
 See `AGENTS.md` for full taskboard setup, required ticket fields, GitHub Project sync, and workflow details.
 
-Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria (3+ GWT scenarios), Priority, Team (Engineering: `01KJFNHZC49XG9KXRYTMYEEDTS`), Subtasks (3+).
+Required ticket fields: User Story, Description (20+ chars), Acceptance Criteria (3+ GWT scenarios), Priority, Team (Engineering: `01KK9751NZ4HM7VQM0AQ5WGME3`), Subtasks (3+).
 
 ### Sync Architecture (Non-Negotiable)
 - `github_issue_number` (SQLite column) is the SOLE link between local tickets and GitHub Issues. NEVER match by title.

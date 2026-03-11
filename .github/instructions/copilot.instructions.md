@@ -139,7 +139,7 @@ All work MUST be tracked on the local taskboard (tcarac/taskboard at http://loca
 - **Automatic**: SessionStart pulls, Stop pushes (`.github/hooks/hooks.json`)
 - **Manual**: `/sync-push` or `/sync-pull` prompts
 - **Scripts**: `.claude/hooks/github_project_sync.py` (push/pull/status)
-- **Project ID**: `01KJEE8R1XXFF0CZT1WCSTGRDP`
+- **Project ID**: `01KK974VMNC16ZAW7MW1NH3T3M`
 - **Skills**: `.github/skills/` and `.agents/skills/` (kanban, sync-push, sync-pull)
 
 ## Outstanding Work (from evaluation)
