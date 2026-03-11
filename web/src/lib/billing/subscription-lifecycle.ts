@@ -19,49 +19,6 @@ import type { Tier } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
 import { updateUserTier } from '@/lib/auth/user-service';
 
-// In-memory set of processed webhook event IDs. In production, this would
-// be a persistent store (Redis / DB table), but for a single-instance
-// deployment this prevents duplicate processing during the process lifetime.
-const processedEvents = new Set<string>();
-
-/**
- * Atomically claim a webhook event for processing (idempotency guard).
- *
- * Returns true if this caller successfully claimed the event (first time
- * seen). Returns false if the event was already claimed by a prior
- * delivery. This is atomic — the check and mark happen in a single
- * synchronous call, eliminating the TOCTOU race between a separate
- * `isEventProcessed()` and `markEventProcessed()`.
- *
- * On processing failure, call `releaseEvent()` so Stripe retries succeed.
- */
-export function claimEvent(eventId: string): boolean {
-  if (processedEvents.has(eventId)) {
-    return false;
-  }
-  processedEvents.add(eventId);
-
-  // Prevent unbounded memory growth -- keep only the most recent 10,000 IDs.
-  // Stripe rarely re-delivers after the initial retry window.
-  if (processedEvents.size > 10_000) {
-    const iterator = processedEvents.values();
-    const first = iterator.next().value;
-    if (first !== undefined) {
-      processedEvents.delete(first);
-    }
-  }
-
-  return true;
-}
-
-/**
- * Release a previously claimed event so it can be retried.
- * Call this when processing fails and Stripe should be allowed to redeliver.
- */
-export function releaseEvent(eventId: string): void {
-  processedEvents.delete(eventId);
-}
-
 /**
  * Helper: look up a user by their Stripe customer ID.
  * Returns null if no user is found (graceful handling for orphan events).

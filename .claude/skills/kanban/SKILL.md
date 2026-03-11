@@ -8,7 +8,7 @@ description: "Taskboard management skill. Use this to view, create, update, and 
 You manage project work via the **taskboard MCP server** (22 tools). The taskboard is the single source of truth for all project work.
 
 **Web UI:** http://localhost:3010
-**Project:** Project Forge (prefix: PF, ID: `01KJEE8R1XXFF0CZT1WCSTGRDP`)
+**Project:** Project Forge (prefix: PF, ID: `01KK974VMNC16ZAW7MW1NH3T3M`)
 
 ## MCP Tools Available
 
@@ -60,9 +60,9 @@ As a [persona], I want [specific goal] so that [measurable benefit].
 
 | Team | ID | Assign When |
 |------|----|-------------|
-| SpawnForge PM | `01KJFNJC02QK6F5NSDND7NH5MS` | Spec writing, planning, audits, documentation |
-| SpawnForge Engineering | `01KJFNHZC49XG9KXRYTMYEEDTS` | Implementation, bug fixes, tests, code changes |
-| SpawnForge Leadership | `01KJFNK35JVPQJESS3RZM0F5HP` | Manual tasks requiring user action (approvals, external work) |
+| SpawnForge PM | `01KK9751P7GKQYG9TZ96XXQCFN` | Spec writing, planning, audits, documentation |
+| SpawnForge Engineering | `01KK9751NZ4HM7VQM0AQ5WGME3` | Implementation, bug fixes, tests, code changes |
+| SpawnForge Leadership | `01KK9751PD79RCWY462CYQ06CW` | Manual tasks requiring user action (approvals, external work) |
 
 ## Workflow Protocol
 
@@ -117,7 +117,7 @@ Use MCP tool: get_board
 ### Create a well-formed ticket
 ```
 Use MCP tool: create_ticket
-  project: "01KJEE8R1XXFF0CZT1WCSTGRDP"
+  project: "01KK974VMNC16ZAW7MW1NH3T3M"
   title: "Fix X in Y"
   priority: "high"
   description: <full template with user story + description + acceptance criteria>

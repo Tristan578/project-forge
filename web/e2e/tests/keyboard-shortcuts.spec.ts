@@ -91,9 +91,16 @@ test.describe('Keyboard Shortcuts @ui', () => {
     });
     expect(storeExists).toBe(true);
 
-    // No unexpected errors
+    // No unexpected errors — only filter well-known benign noise patterns.
+    // Patterns are intentionally specific to avoid masking real failures.
+    const KNOWN_NOISE = [
+      /favicon\.ico/i,
+      /\/api\/tokens/i,
+      /Failed to load resource.*favicon\.ico/i,
+      /Failed to load resource.*\/api\/tokens/i,
+    ];
     const realErrors = errors.filter(
-      (e) => !e.includes('favicon') && !e.includes('404') && !e.includes('api/tokens')
+      (e) => !KNOWN_NOISE.some((pattern) => pattern.test(e))
     );
     expect(realErrors.length).toBe(0);
   });
