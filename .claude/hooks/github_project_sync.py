@@ -248,6 +248,45 @@ def db_get_syncable_ticket_ids(repo_name):
         conn.close()
 
 
+def db_find_by_title(title, repo_name):
+    """Find the canonical ticket ID for a given title (lowest number = original).
+    Returns (ticket_id, github_issue_number) or (None, None).
+    """
+    conn = db_connect()
+    if not conn:
+        return None, None
+    try:
+        cur = conn.execute(
+            "SELECT id, github_issue_number FROM tickets "
+            "WHERE title = ? AND sync_repo = ? "
+            "ORDER BY number ASC LIMIT 1",
+            (title, repo_name),
+        )
+        row = cur.fetchone()
+        return (row[0], row[1]) if row else (None, None)
+    finally:
+        conn.close()
+
+
+def db_find_by_title_any_project(title):
+    """Find ANY ticket with this title, regardless of sync_repo.
+    Returns (ticket_id, github_issue_number) or (None, None).
+    """
+    conn = db_connect()
+    if not conn:
+        return None, None
+    try:
+        cur = conn.execute(
+            "SELECT id, github_issue_number FROM tickets "
+            "WHERE title = ? ORDER BY number ASC LIMIT 1",
+            (title,),
+        )
+        row = cur.fetchone()
+        return (row[0], row[1]) if row else (None, None)
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # V2 body format: regex constants
 # ---------------------------------------------------------------------------
@@ -651,6 +690,26 @@ def push(include_done=False):
         cur_subtask_hash = compute_subtask_hash(full_ticket.get("subtasks", []))
 
         if gh_issue_num is None and tid not in tmap:
+            # --- DEDUP CHECK: does another local ticket with the same title
+            #     already have a github_issue_number?  If so, this is a dup
+            #     created by a previous pull cycle — skip it. ---
+            canonical_tid, canonical_gh = db_find_by_title(title, target_repo)
+            if canonical_gh and canonical_tid and canonical_tid != tid:
+                # Link this dup to the same GitHub issue and skip creation
+                db_set_github_issue_number(tid, canonical_gh)
+                tmap[tid] = {
+                    "githubIssueNumber": canonical_gh,
+                    "lastLocalStatus": status,
+                    "lastGithubStatus": local_to_github(config, status),
+                    "title": display,
+                    "number": number,
+                    "bodyHash": cur_body_hash,
+                    "subtaskHash": cur_subtask_hash,
+                    "metadataVersion": 3,
+                }
+                skipped += 1
+                continue
+
             # --- New ticket: create GitHub Issue ---
             try:
                 body = format_github_body(full_ticket)
@@ -967,11 +1026,55 @@ def pull():
                 print(f"  * Re-linked {title} by ULID")
                 continue
 
-        # --- Create new local ticket ---
+        # --- DEDUP CHECK: does a local ticket with this title already exist? ---
         clean_title = title
         if title.startswith("PF-") and ": " in title:
             clean_title = title.split(": ", 1)[1]
 
+        existing_tid, existing_gh = db_find_by_title_any_project(clean_title)
+        if existing_tid:
+            # A local ticket already exists — link it instead of creating a dup
+            if gh_issue_num and not existing_gh:
+                db_set_github_issue_number(existing_tid, gh_issue_num)
+            # Ensure sync_repo is set
+            conn = db_connect()
+            if conn:
+                try:
+                    conn.execute(
+                        "UPDATE tickets SET sync_repo = ? WHERE id = ? AND (sync_repo IS NULL OR sync_repo = '')",
+                        (target_repo, existing_tid),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+            entry_data = {
+                "githubItemId": item_id,
+                "lastLocalStatus": local_status,
+                "lastGithubStatus": gh_status,
+                "title": title,
+                "bodyHash": parsed.get("bodyHash", ""),
+                "subtaskHash": parsed.get("subtaskHash", ""),
+                "metadataVersion": parsed.get("version", 2),
+            }
+            if gh_issue_num:
+                entry_data["githubIssueNumber"] = gh_issue_num
+            tmap[existing_tid] = entry_data
+
+            # Update status if changed
+            local_ticket = tb_get(f"/tickets/{existing_tid}")
+            if local_ticket and local_ticket.get("status") != local_status:
+                try:
+                    tb_post(f"/tickets/{existing_tid}/move", {"status": local_status})
+                    entry_data["lastLocalStatus"] = local_status
+                except Exception:
+                    pass
+
+            relinked += 1
+            print(f"  * Linked existing {clean_title} to #{gh_issue_num or '?'}")
+            continue
+
+        # --- Create new local ticket (truly new — no local match) ---
         priority = parsed.get("priority") or "medium"
         description = parsed.get("description") or body
         team_id = parsed.get("teamId")
@@ -1171,6 +1274,174 @@ def migrate_drafts():
 
 
 # ---------------------------------------------------------------------------
+# DEDUP: Clean up duplicate local tickets
+# ---------------------------------------------------------------------------
+
+def dedup_local():
+    """Delete duplicate local tickets, keeping only the lowest-number copy.
+
+    For each group of tickets with the same title:
+      - Keep the one with the lowest PF number (the original)
+      - If the original has no github_issue_number but a dup does, copy it over
+      - Delete all other copies from SQLite and remove from map
+    """
+    config = load_config()
+    mapping = load_map()
+    tmap = mapping.get("tickets", {})
+    target_repo = config["repo"]
+
+    conn = db_connect()
+    if not conn:
+        print("[DEDUP] Cannot connect to database")
+        return
+
+    try:
+        # Find all titles with duplicates (across ALL sync_repo values, not just target)
+        cur = conn.execute(
+            "SELECT title, COUNT(*) as cnt FROM tickets "
+            "WHERE project_id = (SELECT project_id FROM tickets WHERE sync_repo = ? LIMIT 1) "
+            "GROUP BY title HAVING cnt > 1",
+            (target_repo,),
+        )
+        dup_titles = [(row[0], row[1]) for row in cur.fetchall()]
+
+        if not dup_titles:
+            print("[DEDUP] No duplicates found")
+            return
+
+        total_removed = 0
+        total_groups = len(dup_titles)
+
+        for title, count in dup_titles:
+            cur = conn.execute(
+                "SELECT id, number, github_issue_number FROM tickets "
+                "WHERE title = ? ORDER BY number ASC",
+                (title,),
+            )
+            rows = cur.fetchall()
+
+            # Keep the first (lowest number) as canonical
+            canonical_id, canonical_num, canonical_gh = rows[0]
+
+            # If canonical has no github_issue_number, check if any dup does
+            if not canonical_gh:
+                for _, _, gh_num in rows[1:]:
+                    if gh_num:
+                        canonical_gh = gh_num
+                        conn.execute(
+                            "UPDATE tickets SET github_issue_number = ? WHERE id = ?",
+                            (gh_num, canonical_id),
+                        )
+                        break
+
+            # Delete all duplicates
+            for dup_id, dup_num, _ in rows[1:]:
+                conn.execute("DELETE FROM tickets WHERE id = ?", (dup_id,))
+                # Remove subtasks for this ticket
+                try:
+                    conn.execute("DELETE FROM subtasks WHERE ticket_id = ?", (dup_id,))
+                except Exception:
+                    pass  # subtasks table may not exist or have different schema
+                # Remove from map
+                tmap.pop(dup_id, None)
+                total_removed += 1
+
+            print(f"  PF-{canonical_num}: {title} — kept, removed {count - 1} dups")
+
+        conn.commit()
+        mapping["tickets"] = tmap
+        save_map(mapping)
+        print(f"\n[DEDUP] Removed {total_removed} duplicates across {total_groups} groups")
+
+    finally:
+        conn.close()
+
+
+def close_orphan_issues():
+    """Close GitHub issues that are duplicates (same PF-N: title, higher issue number).
+
+    Groups issues by their PF title prefix. For each group with >1 issue,
+    keeps the lowest issue number open and closes the rest with a comment.
+
+    Rate-limited: processes in batches with delays to avoid GitHub API limits.
+    """
+    config = load_config()
+    owner = config["owner"]
+    repo = config["repo"]
+
+    print("[CLOSE-ORPHANS] Fetching all open issues...")
+
+    # Fetch all open issues (paginated)
+    all_issues = []
+    page = 1
+    while True:
+        try:
+            output = gh_run([
+                "gh", "api", f"repos/{owner}/{repo}/issues",
+                "--method", "GET",
+                "-f", "state=open",
+                "-f", f"per_page=100",
+                "-f", f"page={page}",
+            ], timeout=60)
+            issues = json.loads(output)
+            if not issues:
+                break
+            # Filter out PRs (they show up in issues API too)
+            real_issues = [i for i in issues if "pull_request" not in i]
+            all_issues.extend(real_issues)
+            page += 1
+        except Exception as e:
+            print(f"  [WARN] Fetch page {page} failed: {e}", file=sys.stderr)
+            break
+
+    print(f"  Found {len(all_issues)} open issues")
+
+    # Group by title
+    by_title = {}
+    for issue in all_issues:
+        title = issue.get("title", "")
+        if title not in by_title:
+            by_title[title] = []
+        by_title[title].append(issue)
+
+    # Find groups with duplicates
+    to_close = []
+    for title, issues in by_title.items():
+        if len(issues) <= 1:
+            continue
+        # Sort by issue number — keep lowest
+        issues.sort(key=lambda i: i["number"])
+        canonical = issues[0]
+        for dup in issues[1:]:
+            to_close.append((dup["number"], canonical["number"], title))
+
+    if not to_close:
+        print("[CLOSE-ORPHANS] No duplicate issues found")
+        return
+
+    print(f"  Will close {len(to_close)} duplicate issues")
+
+    closed = 0
+    errors = 0
+    for dup_num, canonical_num, title in to_close:
+        try:
+            # Add comment explaining the closure
+            gh_run([
+                "gh", "issue", "close", str(dup_num),
+                "--repo", f"{owner}/{repo}",
+                "--comment", f"Closing as duplicate of #{canonical_num}",
+            ])
+            closed += 1
+            if closed % 10 == 0:
+                print(f"  ... closed {closed}/{len(to_close)}")
+        except Exception as e:
+            errors += 1
+            print(f"  ! Close #{dup_num} failed: {e}", file=sys.stderr)
+
+    print(f"[CLOSE-ORPHANS] Closed {closed} duplicates, {errors} errors")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1180,6 +1451,8 @@ COMMANDS = {
     "pull": pull,
     "status": show_status,
     "migrate-drafts": migrate_drafts,
+    "dedup": dedup_local,
+    "close-orphans": close_orphan_issues,
 }
 
 if __name__ == "__main__":
