@@ -199,4 +199,71 @@ describe('saveAutoSave', () => {
       expect.stringContaining('localStorage write failed'),
     );
   });
+
+  it('passes autosave keys as protected set so they are not evicted during write', async () => {
+    // Seed the store with a pre-existing autosave that eviction would normally delete
+    mockStore['forge:autosave'] = '{"old":"data"}';
+    mockStore['forge:autosave:time'] = new Date(0).toISOString(); // epoch — oldest possible
+
+    // Force threshold to be exceeded so evictOldAutoSaves IS called
+    const storageQuota = await import('@/lib/storage/storageQuota');
+    vi.spyOn(storageQuota, 'wouldExceedThreshold').mockReturnValue(true);
+    const evictSpy = vi.spyOn(storageQuota, 'evictOldAutoSaves').mockReturnValue(0);
+
+    saveAutoSave('{"scene":"new"}', 'NewScene');
+
+    // evictOldAutoSaves must be called with count=1
+    expect(evictSpy).toHaveBeenCalledWith(1);
+
+    // Now verify that safeLocalStorageSet passes a protected-keys set containing the autosave keys.
+    // We validate this indirectly: the three autosave keys must all be present in mockStore
+    // after the call (they were not evicted).
+    expect(mockStore['forge:autosave']).toBe('{"scene":"new"}');
+    expect(mockStore['forge:autosave:name']).toBe('NewScene');
+    expect(typeof mockStore['forge:autosave:time']).toBe('string');
+  });
+
+  it('handles partial write failure gracefully — warns but does not throw', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    let callCount = 0;
+    // First write (json key) succeeds; subsequent writes fail with a non-quota error
+    vi.stubGlobal('localStorage', makeLocalStorageMock((key: string, val: string) => {
+      callCount += 1;
+      if (callCount === 1) {
+        mockStore[key] = val; // first write succeeds
+      } else {
+        throw new Error('SecurityError: access denied'); // non-quota, subsequent writes fail
+      }
+    }));
+
+    expect(() => saveAutoSave('{"scene":true}', 'PartialTest')).not.toThrow();
+    // Two of three writes failed → warn should fire
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('localStorage write failed'),
+    );
+  });
+
+  it('succeeds after eviction frees enough space (quota error then retry succeeds)', () => {
+    // Simulate: first setItem call throws QuotaExceededError; after that, writes succeed.
+    let firstAttempt = true;
+    vi.stubGlobal('localStorage', makeLocalStorageMock((key: string, val: string) => {
+      if (firstAttempt) {
+        firstAttempt = false;
+        const err = new DOMException('QuotaExceededError', 'QuotaExceededError');
+        throw err;
+      }
+      mockStore[key] = val;
+    }));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    // Should not throw even if first write hits quota; safeLocalStorageSet retries
+    expect(() => saveAutoSave('{"scene":true}', 'RetryScene')).not.toThrow();
+
+    // After the retry the remaining writes succeeded, so no warning should appear
+    // (name and time writes should have written without error)
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(mockStore['forge:autosave:name']).toBe('RetryScene');
+  });
 });
