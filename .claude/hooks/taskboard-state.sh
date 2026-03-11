@@ -13,7 +13,8 @@ _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 TB_DB="$_TB_PROJECT_ROOT/.claude/taskboard.db"
 TB_API="http://localhost:3010/api"
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
-export PROJECT_ID="01KJEE8R1XXFF0CZT1WCSTGRDP"
+export PROJECT_ID="01KK974VMNC16ZAW7MW1NH3T3M"
+export TEAM_ENGINEERING_ID="01KK9751NZ4HM7VQM0AQ5WGME3"
 
 # Known locations for the taskboard binary
 TB_BIN=""
@@ -120,6 +121,16 @@ tb_set_active_ticket() {
 # Clear the active ticket
 tb_clear_active_ticket() {
     rm -f "$TB_STATE_FILE"
+}
+
+# Get the current project ID (for use in hook messages)
+tb_get_project_id() {
+    echo "$PROJECT_ID"
+}
+
+# Get the engineering team ID (for use in hook messages)
+tb_get_team_id() {
+    echo "$TEAM_ENGINEERING_ID"
 }
 
 # ---------------------------------------------------------------------------
