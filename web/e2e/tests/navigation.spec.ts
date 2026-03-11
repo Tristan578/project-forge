@@ -108,7 +108,7 @@ test.describe('Navigation & Routing @ui', () => {
     });
 
     test('pricing page Sign In button navigates to sign-in', async ({ page }) => {
-      test.skip(!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY, 'Clerk not configured');
+      test.skip(!isClerkConfigured(), 'Clerk not configured — requires both sk_ and pk_ keys');
 
       await page.goto('/pricing');
       await page.waitForLoadState('domcontentloaded');
@@ -129,7 +129,7 @@ test.describe('Navigation & Routing @ui', () => {
   });
 
   test.describe('404 Handling', () => {
-    test('non-existent route shows not-found content', async ({ page }) => {
+    test('non-existent route shows not-found or redirects to sign-in', async ({ page }) => {
       const response = await page.goto('/this-route-does-not-exist-xyz');
       const status = response?.status() ?? 0;
 
@@ -137,6 +137,10 @@ test.describe('Navigation & Routing @ui', () => {
       // the public route list redirect to sign-in rather than showing a
       // 404 page. When Clerk is absent, Next.js returns 404 or a custom
       // not-found page (200).
+      // Note: 302/307 redirects are accepted here only when Clerk is
+      // configured — the middleware legitimately redirects protected
+      // unknown routes to /sign-in. Without Clerk, no redirects are
+      // expected for non-existent routes.
       if (isClerkConfigured()) {
         // Accept any valid HTTP response — Clerk may redirect to sign-in
         expect([200, 302, 307, 404]).toContain(status);
