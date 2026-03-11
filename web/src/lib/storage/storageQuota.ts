@@ -15,7 +15,9 @@ export interface StorageEstimate {
 const AUTOSAVE_KEY_PATTERNS = [
   'forge:autosave',
   'forge-autosave-',
-  'forge-editor-crash-backup',
+  // NOTE: 'forge-editor-crash-backup' is intentionally excluded — it must
+  // never be evicted by quota management.  Only WasmErrorBoundary's own
+  // recovery flow may delete it.
 ];
 
 /**
