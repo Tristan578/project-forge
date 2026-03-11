@@ -6,7 +6,7 @@
  * delivery of the same Stripe/Clerk webhook event.
  *
  * All operations are idempotent and safe for concurrent invocations:
- * - claimEvent uses INSERT ... ON CONFLICT DO NOTHING + rowCount check
+ * - claimEvent uses INSERT ... ON CONFLICT DO NOTHING + .returning() check
  * - releaseEvent deletes the row (allows retry on transient failure)
  * - cleanupExpired runs a DELETE WHERE expiresAt < NOW()
  */
@@ -44,17 +44,17 @@ export async function claimEvent(
   // the claim auto-expires in IN_FLIGHT_TTL_MINUTES so Stripe can redeliver.
   const expiresAt = new Date(Date.now() + IN_FLIGHT_TTL_MINUTES * 60 * 1000);
 
-  // ON CONFLICT DO NOTHING means rowCount = 0 when the row already exists.
-  const result = await queryWithResilience(() =>
+  // ON CONFLICT DO NOTHING + .returning() — if the row already exists,
+  // the insert is skipped and the returned array is empty.
+  const rows = await queryWithResilience(() =>
     getDb()
       .insert(webhookEvents)
       .values({ eventId, source, expiresAt })
       .onConflictDoNothing({ target: webhookEvents.eventId })
+      .returning({ eventId: webhookEvents.eventId })
   );
 
-  // Drizzle neon-http returns { rowCount: number } on insert
-  const rowCount = (result as { rowCount?: number }).rowCount ?? 0;
-  return rowCount > 0;
+  return rows.length > 0;
 }
 
 /**
@@ -111,10 +111,11 @@ export async function isProcessed(eventId: string): Promise<boolean> {
  * maintenance route — will not affect active claims.
  */
 export async function cleanupExpired(): Promise<number> {
-  const result = await queryWithResilience(() =>
+  const rows = await queryWithResilience(() =>
     getDb()
       .delete(webhookEvents)
       .where(lt(webhookEvents.expiresAt, sql`NOW()`))
+      .returning({ eventId: webhookEvents.eventId })
   );
-  return (result as { rowCount?: number }).rowCount ?? 0;
+  return rows.length;
 }
