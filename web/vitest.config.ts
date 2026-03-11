@@ -24,12 +24,12 @@ export default defineConfig({
         'src/app/**/page.tsx',
       ],
       // Ratcheted up per sprint — see docs/coverage-plan.md
-      // Final target: 55/45/50/55
+      // Tier-1 target: 55/45/50/55
       thresholds: {
-        statements: 50,
-        branches: 42,
-        functions: 42,
-        lines: 51,
+        statements: 55,
+        branches: 45,
+        functions: 50,
+        lines: 55,
       },
     },
   },
