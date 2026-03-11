@@ -74,7 +74,7 @@ export class WasmErrorBoundary extends Component<Props, State> {
     }
 
     // Fall back to IndexedDB
-    console.warn('[CrashBackup] localStorage full — falling back to IndexedDB.');
+    console.warn('[CrashBackup] localStorage write failed — falling back to IndexedDB.');
     saveToIndexedDB(BACKUP_KEY, backupPayload)
       .then((ok) => {
         if (ok) {
@@ -101,9 +101,16 @@ export class WasmErrorBoundary extends Component<Props, State> {
       try {
         const parsed = JSON.parse(payload) as Record<string, unknown>;
         if (typeof parsed.state === 'string') {
-          // Use safeLocalStorageSet so IndexedDB-backed recovery still works
-          // when localStorage remains quota-exceeded at restore time.
-          const result = safeLocalStorageSet('forge-editor-store', parsed.state);
+          // Protect autosave keys from eviction during restore — the editor
+          // store is the priority, but we want to preserve autosave data in
+          // case the user also has unsaved scene changes.
+          const protectedKeys = new Set([
+            'forge:autosave',
+            'forge:autosave:name',
+            'forge:autosave:time',
+            'forge-autosave-',
+          ]);
+          const result = safeLocalStorageSet('forge-editor-store', parsed.state, protectedKeys);
           return result.success;
         }
       } catch (err) {
@@ -150,7 +157,13 @@ export class WasmErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
-      const hasBackup = !!localStorage.getItem('forge-editor-crash-backup') || this.state.hasIndexedDBBackup;
+      let hasLocalStorageBackup = false;
+      try {
+        hasLocalStorageBackup = !!localStorage.getItem('forge-editor-crash-backup');
+      } catch {
+        // localStorage may throw SecurityError in restricted contexts — default to false
+      }
+      const hasBackup = hasLocalStorageBackup || this.state.hasIndexedDBBackup;
 
       return (
         <div className="flex h-screen w-full items-center justify-center bg-gray-900 p-4">

@@ -200,7 +200,8 @@ function collectAutoSaveEntries(): AutoSaveEntry[] {
           'timestamp' in parsed &&
           typeof (parsed as Record<string, unknown>).timestamp === 'string'
         ) {
-          timestamp = new Date((parsed as Record<string, string>).timestamp).getTime();
+          const ts = new Date((parsed as Record<string, string>).timestamp).getTime();
+          timestamp = isNaN(ts) ? 0 : ts;
         }
       } catch {
         // Non-JSON values: use 0 so they're evicted first

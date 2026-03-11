@@ -31,8 +31,10 @@ function buildStore(quotaBytes = 100_000) {
       key(index: number) { return Object.keys(data)[index] ?? null; },
       getItem(key: string) { return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null; },
       setItem(key: string, value: string) {
-        const existing = data[key] ?? '';
-        const delta = (value.length - existing.length) * 2;
+        const existing = data[key] ?? null;
+        const keyDelta = existing === null ? key.length * 2 : 0;
+        const valueDelta = (value.length - (existing?.length ?? 0)) * 2;
+        const delta = keyDelta + valueDelta;
         if (bytes() + delta > quotaBytes) {
           // DOMException.name must be set explicitly (message is the first arg)
           throw new DOMException('QuotaExceededError', 'QuotaExceededError');

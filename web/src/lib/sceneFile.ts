@@ -113,6 +113,6 @@ export function saveAutoSave(json: string, name: string): void {
   const timeResult = safeLocalStorageSet(AUTOSAVE_TIME_KEY, new Date().toISOString(), autosaveKeys);
 
   if (!jsonResult.success || !nameResult.success || !timeResult.success) {
-    console.warn('[AutoSave] localStorage write failed — storage quota exhausted after eviction.');
+    console.warn('[AutoSave] localStorage write failed after eviction attempt.');
   }
 }

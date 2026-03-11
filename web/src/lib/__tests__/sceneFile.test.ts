@@ -65,6 +65,11 @@ describe('getAutoSave and clearAutoSave', () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
   it('should return null when no autosave exists', () => {
     expect(getAutoSave()).toBeNull();
   });
@@ -136,6 +141,7 @@ describe('saveAutoSave', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
