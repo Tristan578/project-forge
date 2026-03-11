@@ -1,61 +1,105 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+/**
+ * Tests for subscription-lifecycle handler functions.
+ *
+ * The in-memory claimEvent/releaseEvent guards were removed when the
+ * idempotency layer was promoted to webhookIdempotency.ts (DB-backed).
+ * These tests cover the remaining business logic.
+ */
 
-// These are the only pure (non-DB) functions in subscription-lifecycle
-let claimEvent: typeof import('../subscription-lifecycle').claimEvent;
-let releaseEvent: typeof import('../subscription-lifecycle').releaseEvent;
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-describe('subscription-lifecycle idempotency', () => {
-  beforeEach(async () => {
-    // Reset module state to get a fresh processedEvents Set
-    vi.resetModules();
-    const mod = await import('../subscription-lifecycle');
-    claimEvent = mod.claimEvent;
-    releaseEvent = mod.releaseEvent;
+vi.mock('server-only', () => ({}));
+
+// Mock DB insert / update / select chains
+const mockInsertValues = vi.fn().mockResolvedValue({});
+const mockInsert = vi.fn().mockReturnValue({ values: mockInsertValues });
+
+const mockUpdateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
+const mockUpdate = vi.fn().mockReturnValue({ set: mockUpdateSet });
+
+const mockSelectWhere = vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) });
+const mockSelectFrom = vi.fn().mockReturnValue({ where: mockSelectWhere });
+const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
+
+const mockDb = { insert: mockInsert, update: mockUpdate, select: mockSelect };
+
+vi.mock('@/lib/db/client', () => ({
+  getDb: vi.fn(() => mockDb),
+}));
+
+vi.mock('@/lib/auth/user-service', () => ({
+  updateUserTier: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/lib/tokens/pricing', () => ({
+  TIER_MONTHLY_TOKENS: {
+    starter: 10000,
+    hobbyist: 50000,
+    creator: 150000,
+    pro: 500000,
+  },
+}));
+
+import {
+  findUserByStripeCustomer,
+  handleSubscriptionDeleted,
+} from '../subscription-lifecycle';
+
+const mockUser = {
+  id: 'user_abc',
+  tier: 'creator',
+  stripeCustomerId: 'cus_abc',
+  stripeSubscriptionId: 'sub_abc',
+  monthlyTokens: 150000,
+  monthlyTokensUsed: 30000,
+  addonTokens: 5000,
+  earnedCredits: 0,
+};
+
+describe('subscription-lifecycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Default: user found by customer ID
+    mockSelectWhere.mockReturnValue({
+      limit: vi.fn().mockResolvedValue([mockUser]),
+    });
+    mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
   });
 
-  it('should claim an unprocessed event and return true', () => {
-    expect(claimEvent('evt_123')).toBe(true);
+  describe('findUserByStripeCustomer', () => {
+    it('returns the user when found', async () => {
+      const user = await findUserByStripeCustomer('cus_abc');
+      expect(user).toMatchObject({ id: 'user_abc' });
+    });
+
+    it('returns null when user is not found', async () => {
+      mockSelectWhere.mockReturnValueOnce({
+        limit: vi.fn().mockResolvedValue([]),
+      });
+      const user = await findUserByStripeCustomer('cus_unknown');
+      expect(user).toBeNull();
+    });
   });
 
-  it('should reject a duplicate claim (already processed)', () => {
-    claimEvent('evt_456');
-    expect(claimEvent('evt_456')).toBe(false);
-  });
+  describe('handleSubscriptionDeleted', () => {
+    it('does nothing when user is not found', async () => {
+      mockSelectWhere.mockReturnValueOnce({
+        limit: vi.fn().mockResolvedValue([]),
+      });
+      await expect(
+        handleSubscriptionDeleted('cus_gone', 'sub_gone')
+      ).resolves.toBeUndefined();
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
 
-  it('should handle multiple events independently', () => {
-    expect(claimEvent('evt_a')).toBe(true);
-    expect(claimEvent('evt_b')).toBe(true);
-    // Already claimed
-    expect(claimEvent('evt_a')).toBe(false);
-    expect(claimEvent('evt_b')).toBe(false);
-    // New event still claimable
-    expect(claimEvent('evt_c')).toBe(true);
-  });
+    it('resets tier to starter and zeroes monthly tokens when user is found', async () => {
+      const { updateUserTier } = await import('@/lib/auth/user-service');
 
-  it('should be idempotent (claiming twice returns false on second attempt)', () => {
-    expect(claimEvent('evt_same')).toBe(true);
-    expect(claimEvent('evt_same')).toBe(false);
-  });
+      await handleSubscriptionDeleted('cus_abc', 'sub_abc');
 
-  it('should allow reclaiming after releaseEvent', () => {
-    expect(claimEvent('evt_retry')).toBe(true);
-    releaseEvent('evt_retry');
-    expect(claimEvent('evt_retry')).toBe(true);
-  });
-
-  it('releaseEvent is safe to call on unclaimed events', () => {
-    // Should not throw
-    releaseEvent('evt_never_claimed');
-  });
-
-  it('should evict oldest event when exceeding 10,000 limit', () => {
-    // Claim 10,001 events — the first should be evicted
-    for (let i = 0; i <= 10_000; i++) {
-      claimEvent(`evt_${i}`);
-    }
-    // The very first event should have been evicted, so it's claimable again
-    expect(claimEvent('evt_0')).toBe(true);
-    // The most recent should still be claimed
-    expect(claimEvent('evt_10000')).toBe(false);
+      expect(updateUserTier).toHaveBeenCalledWith('user_abc', 'starter');
+      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockInsert).toHaveBeenCalled(); // credit_transactions audit
+    });
   });
 });
