@@ -77,6 +77,8 @@ export async function POST(req: Request) {
     await releaseEvent(event.id, 'stripe');
     captureException(err, { route: '/api/stripe/webhook', eventType: event.type, eventId: event.id });
     console.error(`[stripe-webhook] Error processing ${event.type} (${event.id}):`, err);
+    // Return 500 so Stripe retries the webhook delivery.
+    return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
   }
 
   return NextResponse.json({ received: true });

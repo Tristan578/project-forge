@@ -6,13 +6,13 @@
  * delivery of the same Stripe/Clerk webhook event.
  *
  * All operations are idempotent and safe for concurrent invocations:
- * - claimEvent uses INSERT … ON CONFLICT DO NOTHING + rowCount check
+ * - claimEvent uses INSERT ... ON CONFLICT DO NOTHING + .returning() check
  * - releaseEvent deletes the row (allows retry on transient failure)
  * - cleanupExpired runs a DELETE WHERE expiresAt < NOW()
  */
 
 import 'server-only';
-import { sql, lt } from 'drizzle-orm';
+import { sql, lt, eq, and, gt } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
 import { webhookEvents } from '@/lib/db/schema';
 
@@ -25,7 +25,7 @@ const DEFAULT_TTL_HOURS = 72;
  * delivery). Returns false if another request already claimed it, meaning
  * the event is a duplicate and should be skipped.
  *
- * Uses INSERT … ON CONFLICT DO NOTHING — the DB atomically guarantees
+ * Uses INSERT ... ON CONFLICT DO NOTHING -- the DB atomically guarantees
  * exactly-once claiming across concurrent function invocations and across
  * cold starts (unlike an in-memory Set which is lost on restart).
  */
@@ -37,15 +37,14 @@ export async function claimEvent(
   const db = getDb();
   const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
 
-  // ON CONFLICT DO NOTHING means rowCount = 0 when the row already exists.
-  const result = await db
+  // ON CONFLICT DO NOTHING means zero rows returned when the row already exists.
+  const rows = await db
     .insert(webhookEvents)
     .values({ eventId, source, expiresAt })
-    .onConflictDoNothing({ target: webhookEvents.eventId });
+    .onConflictDoNothing({ target: webhookEvents.eventId })
+    .returning({ eventId: webhookEvents.eventId });
 
-  // Drizzle neon-http returns { rowCount: number } on insert
-  const rowCount = (result as { rowCount?: number }).rowCount ?? 0;
-  return rowCount > 0;
+  return rows.length > 0;
 }
 
 /**
@@ -58,7 +57,7 @@ export async function releaseEvent(eventId: string, source: string): Promise<voi
   const db = getDb();
   await db
     .delete(webhookEvents)
-    .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.source} = ${source}`);
+    .where(and(eq(webhookEvents.eventId, eventId), eq(webhookEvents.source, source)));
 }
 
 /**
@@ -70,7 +69,7 @@ export async function isProcessed(eventId: string, source: string): Promise<bool
   const rows = await db
     .select({ eventId: webhookEvents.eventId })
     .from(webhookEvents)
-    .where(sql`${webhookEvents.eventId} = ${eventId} AND ${webhookEvents.source} = ${source} AND ${webhookEvents.expiresAt} > NOW()`)
+    .where(and(eq(webhookEvents.eventId, eventId), eq(webhookEvents.source, source), gt(webhookEvents.expiresAt, sql`NOW()`)))
     .limit(1);
   return rows.length > 0;
 }
@@ -79,12 +78,13 @@ export async function isProcessed(eventId: string, source: string): Promise<bool
  * Delete all rows where expiresAt < NOW().
  *
  * Returns the number of rows deleted. Safe to call from a cron job or
- * maintenance route — will not affect active claims.
+ * maintenance route -- will not affect active claims.
  */
 export async function cleanupExpired(): Promise<number> {
   const db = getDb();
-  const result = await db
+  const deleted = await db
     .delete(webhookEvents)
-    .where(lt(webhookEvents.expiresAt, sql`NOW()`));
-  return (result as { rowCount?: number }).rowCount ?? 0;
+    .where(lt(webhookEvents.expiresAt, sql`NOW()`))
+    .returning({ eventId: webhookEvents.eventId });
+  return deleted.length;
 }
