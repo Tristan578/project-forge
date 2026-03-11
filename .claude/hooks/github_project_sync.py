@@ -698,8 +698,9 @@ def push(include_done=False):
             #     created by a previous pull cycle — skip it. ---
             canonical_tid, canonical_gh = db_find_by_title(title, target_repo)
             if canonical_gh and canonical_tid and canonical_tid != tid:
-                # Link this dup to the same GitHub issue and skip creation
-                db_set_github_issue_number(tid, canonical_gh)
+                # This is a dup — skip creating a new issue.
+                # Do NOT set github_issue_number on the dup (UNIQUE constraint).
+                # Just record the mapping so we can track it.
                 tmap[tid] = {
                     "githubIssueNumber": canonical_gh,
                     "lastLocalStatus": status,
@@ -1334,18 +1335,16 @@ def dedup_local():
             # Keep the first (lowest number) as canonical
             canonical_id, canonical_num, canonical_gh = rows[0]
 
-            # If canonical has no github_issue_number, check if any dup does
+            # Find if any dup has a github_issue_number we should inherit
+            inherit_gh = None
             if not canonical_gh:
                 for _, _, gh_num in rows[1:]:
                     if gh_num:
-                        canonical_gh = gh_num
-                        conn.execute(
-                            "UPDATE tickets SET github_issue_number = ? WHERE id = ?",
-                            (gh_num, canonical_id),
-                        )
+                        inherit_gh = gh_num
                         break
 
-            # Delete all duplicates
+            # Delete all duplicates FIRST (before updating canonical,
+            # to avoid UNIQUE constraint violation on github_issue_number)
             for dup_id, dup_num, _ in rows[1:]:
                 conn.execute("DELETE FROM tickets WHERE id = ?", (dup_id,))
                 # Remove subtasks for this ticket
@@ -1356,6 +1355,14 @@ def dedup_local():
                 # Remove from map
                 tmap.pop(dup_id, None)
                 total_removed += 1
+
+            # Now safe to inherit github_issue_number (dups are deleted)
+            if inherit_gh:
+                canonical_gh = inherit_gh
+                conn.execute(
+                    "UPDATE tickets SET github_issue_number = ? WHERE id = ?",
+                    (inherit_gh, canonical_id),
+                )
 
             print(f"  PF-{canonical_num}: {title} — kept, removed {count - 1} dups")
 
@@ -1369,10 +1376,11 @@ def dedup_local():
 
 
 def close_orphan_issues():
-    """Close GitHub issues that are duplicates (same PF-N: title, higher issue number).
+    """Close GitHub issues that are duplicates (same title, higher issue number).
 
-    Groups issues by their PF title prefix. For each group with >1 issue,
-    keeps the lowest issue number open and closes the rest with a comment.
+    Groups issues by full title. For each group with >1 issue,
+    keeps the lowest issue number open and closes the rest (without comment,
+    to minimize API calls and rate limit impact).
 
     Rate-limited: processes in batches with delays to avoid GitHub API limits.
     """
