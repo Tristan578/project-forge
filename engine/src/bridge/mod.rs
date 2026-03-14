@@ -363,6 +363,7 @@ impl Plugin for SelectionPlugin {
             // Shader sync systems (always-active)
             .add_systems(Update, material::sync_extended_material_data)
             .add_systems(Update, material::sync_custom_wgsl_uniforms)
+            .add_systems(Update, material::sync_forge_shader_time)
             // Sprite rendering pipeline (always-active): spawn sprites, sync SpriteData -> Bevy Sprite
             .add_systems(Update, sprite::apply_spawn_sprite_requests)
             .add_systems(Update, sprite::apply_sprite_data_updates)
