@@ -695,6 +695,79 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "register_custom_shader",
+      "description": "Register a named WGSL function body into one of the 8 mega-shader slots (0-7). The function receives (color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) and must return vec4<f32>. The slot is activated per-entity via apply_custom_shader. Triggers shader hot-reload on all entities using that slot.",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "number",
+            "description": "Slot index 0-7 (0-based)"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for this shader slot"
+          },
+          "wgslCode": {
+            "type": "string",
+            "description": "WGSL function body. Must return vec4<f32>. Do NOT include fn signature, @group/@binding, or entry-point declarations."
+          },
+          "paramNames": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Optional parameter name hints (up to 16 values)"
+          }
+        },
+        "required": ["slot", "name", "wgslCode"]
+      },
+      "tokenCost": 1,
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "apply_custom_shader",
+      "description": "Apply a registered mega-shader slot (1-8, 1-indexed) to an entity, optionally passing float parameter values. The entity must have a mesh. Slot must have been registered with register_custom_shader first.",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Target entity ID"
+          },
+          "slot": {
+            "type": "number",
+            "description": "Slot number 1-8 (1-indexed, matches the WGSL dispatch case)"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": { "type": "number" },
+            "description": "Optional named float parameters (up to 16 values)"
+          }
+        },
+        "required": ["entityId", "slot"]
+      },
+      "tokenCost": 1,
+      "requiredScope": "shaders:write"
+    },
+    {
+      "name": "remove_custom_shader_slot",
+      "description": "Remove a registered shader slot (0-7, 0-based) from the mega-shader registry. Entities that were using this slot will fall back to passthrough. Triggers shader hot-reload.",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "slot": {
+            "type": "number",
+            "description": "Slot index 0-7 to clear"
+          }
+        },
+        "required": ["slot"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:write"
+    },
+    {
       "name": "update_light",
       "description": "Update light properties on a light entity",
       "category": "lighting",

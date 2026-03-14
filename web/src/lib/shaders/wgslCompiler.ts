@@ -13,6 +13,79 @@ interface CompilerContext {
 }
 
 /**
+ * Result of compiling a node graph to a mega-shader slot function body.
+ */
+export interface MegaShaderCompileResult {
+  /** WGSL function body (without the fn signature wrapper). */
+  functionBody: string;
+  error?: string;
+}
+
+/**
+ * Compile a shader graph to a WGSL function body suitable for the mega-shader registry.
+ *
+ * The output can be passed directly to `register_custom_shader` as `wgslCode`.
+ * The body operates on the `color` input (PBR-lit) and must return `vec4<f32>`.
+ *
+ * Available variables inside the body:
+ *   color: vec4<f32>   — PBR lit fragment color
+ *   uv: vec2<f32>      — texture coordinates
+ *   time: f32          — elapsed seconds
+ *   params: array<f32, 16> — float parameters
+ */
+export function compileToMegaShaderSlot(graph: ShaderGraph): MegaShaderCompileResult {
+  try {
+    const ctx: CompilerContext = {
+      varCounter: 0,
+      statements: [],
+      varMap: new Map(),
+    };
+
+    // Seed the variable map with slot function inputs.
+    // Graph nodes that reference vertex attributes can use these names.
+    ctx.varMap.set('__slot_color', 'color');
+    ctx.varMap.set('__slot_uv', 'uv');
+    ctx.varMap.set('__slot_time', 'time');
+
+    const outputNode = graph.nodes.find((n) => n.type === 'pbr_output');
+    if (!outputNode) {
+      return { functionBody: '', error: 'No PBR Output node found.' };
+    }
+
+    const sortedNodes = topologicalSort(graph);
+    if (!sortedNodes) {
+      return { functionBody: '', error: 'Cyclic dependency detected.' };
+    }
+
+    for (const node of sortedNodes) {
+      if (node.type === 'pbr_output') continue;
+      generateNodeCode(node, graph.edges, ctx);
+    }
+
+    // For the mega-shader slot the output is always the final color.
+    // Find what is connected to the base_color input of the output node.
+    const baseColorEdge = graph.edges.find(
+      (e) => e.target === outputNode.id && e.targetHandle === 'base_color',
+    );
+    const finalColor = baseColorEdge
+      ? (ctx.varMap.get(`${baseColorEdge.source}:${baseColorEdge.sourceHandle}`) ?? 'color')
+      : 'color';
+
+    const body = [
+      ...ctx.statements,
+      `return ${finalColor};`,
+    ].map((s) => `  ${s}`).join('\n');
+
+    return { functionBody: body };
+  } catch (err) {
+    return {
+      functionBody: '',
+      error: err instanceof Error ? err.message : 'Compilation failed',
+    };
+  }
+}
+
+/**
  * Compile a shader graph to WGSL fragment shader code.
  */
 export function compileToWgsl(graph: ShaderGraph): { code: string; error?: string } {
