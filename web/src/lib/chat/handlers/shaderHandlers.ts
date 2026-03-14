@@ -177,8 +177,8 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       return { success: false, error: `Mega-shader compilation failed: ${slotResult.error}` };
     }
 
-    // Use slot 0 (0-indexed) — the next available slot would require async registry query.
-    // For deterministic behaviour we use a fixed slot derived from the graph name hash.
+    // Pick a deterministic slot derived from the graph name hash (0-indexed).
+    // This avoids needing an async registry query for the next available slot.
     const slot = Math.abs(hashString(graph.name)) % CUSTOM_SHADER_SLOT_COUNT;
 
     ctx.dispatchCommand('register_custom_shader', {
@@ -250,7 +250,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     if (Object.keys(params).length > MAX_PARAMS) {
       return {
         success: false,
-        result: `Too many params (${Object.keys(params).length}) — mega-shader supports at most ${MAX_PARAMS}`,
+        error: `Too many params (${Object.keys(params).length}) — mega-shader supports at most ${MAX_PARAMS}`,
       };
     }
 
