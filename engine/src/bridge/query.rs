@@ -261,6 +261,12 @@ pub(super) fn process_query_requests(
             QueryRequest::Skeleton2dState { .. } => {
                 // Skeleton 2D state handled separately
             }
+            QueryRequest::SpriteSheetState { .. } => {
+                // Handled by sprite::handle_sprite_sheet_state_queries
+            }
+            QueryRequest::SpriteAnimatorState { .. } => {
+                // Handled by sprite::handle_sprite_animator_state_queries
+            }
         }
     }
 }

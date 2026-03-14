@@ -954,6 +954,24 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_sorting_layers" => Some(handle_set_sorting_layers(payload.clone())),
         "set_tileset" => Some(handle_set_tileset(payload.clone())),
         "remove_tileset" => Some(handle_remove_tileset(payload.clone())),
+        "get_sprite_sheet_state" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            Some(super::handle_query(QueryRequest::SpriteSheetState { entity_id }))
+        }
+        "get_sprite_animator_state" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            Some(super::handle_query(QueryRequest::SpriteAnimatorState { entity_id }))
+        }
+        "paint_tile" => Some(handle_paint_tile(payload.clone())),
+        "erase_tile" => Some(handle_erase_tile(payload.clone())),
+        "fill_tiles" => Some(handle_fill_tiles(payload.clone())),
+        "set_grid_2d" => Some(handle_set_grid_2d(payload.clone())),
         _ => None,
     }
 }
@@ -993,6 +1011,129 @@ fn handle_remove_tilemap_data(payload: serde_json::Value) -> super::CommandResul
         .to_string();
 
     if queue_tilemap_data_removal_from_bridge(TilemapDataRemoval { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle paint_tile command.
+/// Payload: { entityId, layer, x, y, tileIndex }
+fn handle_paint_tile(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let layer = payload.get("layer")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing layer")? as usize;
+
+    let x = payload.get("x")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing x")? as usize;
+
+    let y = payload.get("y")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing y")? as usize;
+
+    let tile_index = payload.get("tileIndex")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing tileIndex")? as u32;
+
+    if queue_paint_tile_from_bridge(PaintTileRequest { entity_id, layer, x, y, tile_index }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle erase_tile command.
+/// Payload: { entityId, layer, x, y }
+fn handle_erase_tile(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let layer = payload.get("layer")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing layer")? as usize;
+
+    let x = payload.get("x")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing x")? as usize;
+
+    let y = payload.get("y")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing y")? as usize;
+
+    if queue_erase_tile_from_bridge(EraseTileRequest { entity_id, layer, x, y }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle fill_tiles command (batch tile placement).
+/// Payload: { entityId, layer, tiles: [{ x, y, tileIndex }] }
+fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let layer = payload.get("layer")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing layer")? as usize;
+
+    let tiles = payload.get("tiles")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing tiles array")?
+        .iter()
+        .filter_map(|item| {
+            let x = item.get("x")?.as_u64()? as usize;
+            let y = item.get("y")?.as_u64()? as usize;
+            let tile_index = item.get("tileIndex")?.as_u64()? as u32;
+            Some(TilePlacement { x, y, tile_index })
+        })
+        .collect();
+
+    if queue_fill_tiles_from_bridge(FillTilesRequest { entity_id, layer, tiles }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_grid_2d command.
+/// Payload: { visible, cellSize, color: [r, g, b, a] }
+fn handle_set_grid_2d(payload: serde_json::Value) -> super::CommandResult {
+    let visible = payload.get("visible")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let cell_size = payload.get("cellSize")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(32.0) as f32;
+
+    let color = payload.get("color")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            if arr.len() == 4 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                    arr[3].as_f64()? as f32,
+                ])
+            } else {
+                None
+            }
+        })
+        .unwrap_or([0.3, 0.3, 0.3, 0.5]);
+
+    if queue_set_grid_2d_from_bridge(SetGrid2dRequest { visible, cell_size, color }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

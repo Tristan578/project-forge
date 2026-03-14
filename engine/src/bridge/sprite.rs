@@ -30,7 +30,7 @@ use crate::core::{
         SpriteData, SpriteEnabled, SpriteSheetData, TransitionCondition,
         z_from_sorting, z_from_sorting_with_config,
     },
-    tilemap::{TilemapData, TilemapEnabled, TilemapOrigin},
+    tilemap::{TilemapData, TilemapEnabled, TilemapOrigin, Grid2dConfig},
     tileset::TilesetData,
 };
 use super::{events, Selection, SelectionChangedEvent};
@@ -1007,6 +1007,308 @@ pub(super) fn sync_tilemap_rendering(
                     ));
                 }
             }
+        }
+    }
+}
+
+// ========== Tile Paint / Erase / Fill Systems ==========
+
+/// System that applies pending paint_tile requests: sets a single tile in a TilemapData layer.
+pub(super) fn apply_paint_tile_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut TilemapData)>,
+) {
+    for request in pending.paint_tile_requests.drain(..) {
+        let found = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id);
+        let Some((_, mut tilemap_data)) = found else { continue };
+
+        let map_w = tilemap_data.map_size[0] as usize;
+        let map_h = tilemap_data.map_size[1] as usize;
+
+        if request.layer >= tilemap_data.layers.len() {
+            continue;
+        }
+        if request.x >= map_w || request.y >= map_h {
+            continue;
+        }
+
+        let tile_index = request.y * map_w + request.x;
+        if tile_index < tilemap_data.layers[request.layer].tiles.len() {
+            tilemap_data.layers[request.layer].tiles[tile_index] = Some(request.tile_index);
+        }
+    }
+}
+
+/// System that applies pending erase_tile requests: clears a single tile in a TilemapData layer.
+pub(super) fn apply_erase_tile_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut TilemapData)>,
+) {
+    for request in pending.erase_tile_requests.drain(..) {
+        let found = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id);
+        let Some((_, mut tilemap_data)) = found else { continue };
+
+        let map_w = tilemap_data.map_size[0] as usize;
+        let map_h = tilemap_data.map_size[1] as usize;
+
+        if request.layer >= tilemap_data.layers.len() {
+            continue;
+        }
+        if request.x >= map_w || request.y >= map_h {
+            continue;
+        }
+
+        let tile_index = request.y * map_w + request.x;
+        if tile_index < tilemap_data.layers[request.layer].tiles.len() {
+            tilemap_data.layers[request.layer].tiles[tile_index] = None;
+        }
+    }
+}
+
+/// System that applies pending fill_tiles requests: batch-sets tiles in a TilemapData layer.
+pub(super) fn apply_fill_tiles_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(&EntityId, &mut TilemapData)>,
+) {
+    for request in pending.fill_tiles_requests.drain(..) {
+        let found = query.iter_mut().find(|(eid, _)| eid.0 == request.entity_id);
+        let Some((_, mut tilemap_data)) = found else { continue };
+
+        let map_w = tilemap_data.map_size[0] as usize;
+        let map_h = tilemap_data.map_size[1] as usize;
+        let layer_count = tilemap_data.layers.len();
+
+        if request.layer >= layer_count {
+            continue;
+        }
+
+        for placement in &request.tiles {
+            if placement.x >= map_w || placement.y >= map_h {
+                continue;
+            }
+            let tile_index = placement.y * map_w + placement.x;
+            if tile_index < tilemap_data.layers[request.layer].tiles.len() {
+                tilemap_data.layers[request.layer].tiles[tile_index] = Some(placement.tile_index);
+            }
+        }
+    }
+}
+
+// ========== Animated Tiles System ==========
+
+/// System that advances tile animation frames.
+/// This is a placeholder — TilemapData stores static tile indices for now.
+/// If TileMetadata with animation data is added in the future, this system
+/// would be expanded to advance per-tile frame indices based on elapsed time.
+pub(super) fn animate_tilemap_tiles(
+    _time: Res<Time>,
+    _query: Query<(&EntityId, &mut TilemapData), With<TilemapEnabled>>,
+) {
+    // Currently TilemapLayer.tiles stores direct atlas indices (Option<u32>).
+    // Animated tiles would require a separate AnimatedTileData component or
+    // a TilemapLayer.animated_tiles HashMap<(x,y), AnimatedTileState>.
+    // This system exists as the registration hook; the body is a no-op until
+    // that data structure is added.
+}
+
+// ========== Grid 2D System ==========
+
+/// System that processes pending set_grid_2d requests and updates the Grid2dConfig resource.
+pub(super) fn apply_set_grid_2d_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut grid_config: ResMut<Grid2dConfig>,
+) {
+    for request in pending.set_grid_2d_requests.drain(..) {
+        grid_config.visible = request.visible;
+        grid_config.cell_size = request.cell_size;
+        grid_config.color = request.color;
+    }
+}
+
+/// System that renders the 2D editor grid using Bevy gizmos.
+/// Only runs in editor mode (not in runtime builds).
+#[cfg(not(feature = "runtime"))]
+pub(super) fn render_2d_grid(
+    grid_config: Res<Grid2dConfig>,
+    camera_query: Query<(&Camera2dData, &Transform), With<Managed2dCamera>>,
+    mut gizmos: Gizmos,
+) {
+    if !grid_config.visible {
+        return;
+    }
+
+    let Ok((camera_data, cam_transform)) = camera_query.single() else {
+        return;
+    };
+
+    let cell = grid_config.cell_size.max(1.0);
+    let [r, g, b, a] = grid_config.color;
+    let color = Color::linear_rgba(r, g, b, a);
+
+    // Calculate visible area based on camera zoom and position
+    // Default viewport size approximation: 1280x720 logical pixels
+    let viewport_w = 1280.0;
+    let viewport_h = 720.0;
+    let scale = 1.0 / camera_data.zoom.max(0.01);
+    let half_w = viewport_w * scale / 2.0;
+    let half_h = viewport_h * scale / 2.0;
+
+    let cx = cam_transform.translation.x;
+    let cy = cam_transform.translation.y;
+
+    let left = cx - half_w;
+    let right = cx + half_w;
+    let bottom = cy - half_h;
+    let top = cy + half_h;
+
+    // Snap grid start to cell boundary
+    let start_x = (left / cell).floor() * cell;
+    let start_y = (bottom / cell).floor() * cell;
+
+    // Draw vertical lines
+    let mut x = start_x;
+    while x <= right {
+        gizmos.line_2d(Vec2::new(x, bottom), Vec2::new(x, top), color);
+        x += cell;
+    }
+
+    // Draw horizontal lines
+    let mut y = start_y;
+    while y <= top {
+        gizmos.line_2d(Vec2::new(left, y), Vec2::new(right, y), color);
+        y += cell;
+    }
+}
+
+/// System that handles sprite sheet state queries.
+pub(super) fn handle_sprite_sheet_state_queries(
+    mut pending: ResMut<PendingCommands>,
+    query: Query<(&EntityId, Option<&SpriteSheetData>)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
+        if matches!(req, QueryRequest::SpriteSheetState { .. }) {
+            Some(req.clone())
+        } else {
+            None
+        }
+    }).collect();
+
+    for request in requests {
+        if let QueryRequest::SpriteSheetState { entity_id } = &request {
+            for (eid, sheet_data) in query.iter() {
+                if eid.0 == *entity_id {
+                    #[derive(serde::Serialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct SpriteSheetStateResponse {
+                        entity_id: String,
+                        has_sprite_sheet: bool,
+                        asset_id: Option<String>,
+                        total_frames: usize,
+                        clip_names: Vec<String>,
+                    }
+
+                    let response = if let Some(sheet) = sheet_data {
+                        let total_frames = match &sheet.slice_mode {
+                            SliceMode::Grid { columns, rows, .. } => (*columns * *rows) as usize,
+                            SliceMode::Manual { regions } => regions.len(),
+                        };
+                        SpriteSheetStateResponse {
+                            entity_id: entity_id.clone(),
+                            has_sprite_sheet: true,
+                            asset_id: Some(sheet.asset_id.clone()),
+                            total_frames,
+                            clip_names: sheet.clips.keys().cloned().collect(),
+                        }
+                    } else {
+                        SpriteSheetStateResponse {
+                            entity_id: entity_id.clone(),
+                            has_sprite_sheet: false,
+                            asset_id: None,
+                            total_frames: 0,
+                            clip_names: vec![],
+                        }
+                    };
+
+                    super::events::emit_event("QUERY_SPRITE_SHEET_STATE", &response);
+                    break;
+                }
+            }
+            pending.query_requests.retain(|r| !matches!(r, QueryRequest::SpriteSheetState { entity_id: ref eid } if eid == entity_id));
+        }
+    }
+}
+
+/// System that handles sprite animator state queries.
+pub(super) fn handle_sprite_animator_state_queries(
+    mut pending: ResMut<PendingCommands>,
+    query: Query<(&EntityId, Option<&SpriteAnimatorData>, Option<&AnimationStateMachineData>)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let requests: Vec<QueryRequest> = pending.query_requests.iter().filter_map(|req| {
+        if matches!(req, QueryRequest::SpriteAnimatorState { .. }) {
+            Some(req.clone())
+        } else {
+            None
+        }
+    }).collect();
+
+    for request in requests {
+        if let QueryRequest::SpriteAnimatorState { entity_id } = &request {
+            for (eid, animator_data, state_machine) in query.iter() {
+                if eid.0 == *entity_id {
+                    #[derive(serde::Serialize)]
+                    #[serde(rename_all = "camelCase")]
+                    struct SpriteAnimatorStateResponse {
+                        entity_id: String,
+                        has_animator: bool,
+                        current_clip: Option<String>,
+                        frame_index: usize,
+                        playing: bool,
+                        speed: f32,
+                        current_state: Option<String>,
+                        available_states: Vec<String>,
+                    }
+
+                    let response = if let Some(animator) = animator_data {
+                        let (current_state, available_states) = if let Some(sm) = state_machine {
+                            (
+                                Some(sm.current_state.clone()),
+                                sm.states.keys().cloned().collect(),
+                            )
+                        } else {
+                            (None, vec![])
+                        };
+                        SpriteAnimatorStateResponse {
+                            entity_id: entity_id.clone(),
+                            has_animator: true,
+                            current_clip: animator.current_clip.clone(),
+                            frame_index: animator.frame_index,
+                            playing: animator.playing,
+                            speed: animator.speed,
+                            current_state,
+                            available_states,
+                        }
+                    } else {
+                        SpriteAnimatorStateResponse {
+                            entity_id: entity_id.clone(),
+                            has_animator: false,
+                            current_clip: None,
+                            frame_index: 0,
+                            playing: false,
+                            speed: 1.0,
+                            current_state: None,
+                            available_states: vec![],
+                        }
+                    };
+
+                    super::events::emit_event("QUERY_SPRITE_ANIMATOR_STATE", &response);
+                    break;
+                }
+            }
+            pending.query_requests.retain(|r| !matches!(r, QueryRequest::SpriteAnimatorState { entity_id: ref eid } if eid == entity_id));
         }
     }
 }

@@ -252,6 +252,10 @@ pub struct PendingCommands {
     pub tilemap_data_updates: Vec<TilemapDataUpdate>,
     pub tilemap_data_removals: Vec<TilemapDataRemoval>,
     pub add_mesh_attachment2d_requests: Vec<AddMeshAttachment2dRequest>,
+    pub paint_tile_requests: Vec<PaintTileRequest>,
+    pub erase_tile_requests: Vec<EraseTileRequest>,
+    pub fill_tiles_requests: Vec<FillTilesRequest>,
+    pub set_grid_2d_requests: Vec<SetGrid2dRequest>,
     // scene domain
     pub scene_export_requests: Vec<SceneExportRequest>,
     pub scene_load_requests: Vec<SceneLoadRequest>,

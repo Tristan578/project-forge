@@ -275,6 +275,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<QualitySettings>()
             .init_resource::<SkyboxHandles>()
             .init_resource::<core::project_type::ProjectType>()
+            .init_resource::<core::tilemap::Grid2dConfig>()
             .init_resource::<core::lod::PerformanceMetrics>()
             .init_resource::<core::lod::SimplificationBackend>()
             .init_resource::<core::custom_wgsl::CustomShaderRegistry>()
@@ -389,6 +390,19 @@ impl Plugin for SelectionPlugin {
             // Sorting layers (always-active): update SortingLayerConfig resource
             .add_systems(Update, sprite::apply_set_sorting_layers)
             .add_systems(Update, sprite::sync_sprite_z_with_sorting_config)
+            // Tile paint/erase/fill (always-active)
+            .add_systems(Update, (
+                sprite::apply_paint_tile_requests,
+                sprite::apply_erase_tile_requests,
+                sprite::apply_fill_tiles_requests,
+            ))
+            // Animated tiles (always-active)
+            .add_systems(Update, sprite::animate_tilemap_tiles)
+            // Grid 2D config (always-active)
+            .add_systems(Update, sprite::apply_set_grid_2d_requests)
+            // Sprite sheet and animator state queries (always-active)
+            .add_systems(Update, sprite::handle_sprite_sheet_state_queries)
+            .add_systems(Update, sprite::handle_sprite_animator_state_queries)
             // 2D camera systems (always-active): project type + Camera2d management
             .add_systems(Update, sprite::apply_project_type_changes)
             .add_systems(Update, sprite::apply_camera_2d_updates)
@@ -554,6 +568,7 @@ impl Plugin for SelectionPlugin {
                     performance::apply_lod_commands,
                     performance::apply_performance_budget_commands,
                 ))
+                .add_systems(Update, sprite::render_2d_grid)
                 .add_systems(PostUpdate, (
                     core_systems::emit_scene_graph_updates,
                     core_systems::emit_history_updates,
