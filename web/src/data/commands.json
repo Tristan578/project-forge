@@ -9981,6 +9981,84 @@
       "requiredScope": "scene:write"
     },
     {
+      "name": "add_skeleton2d_mesh_attachment",
+      "description": "Add a mesh attachment with vertex weights to a skeleton skin for vertex skinning",
+      "category": "skeleton2d",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Target skeleton entity"
+          },
+          "skinName": {
+            "type": "string",
+            "description": "Name of the skin to add attachment to"
+          },
+          "attachmentName": {
+            "type": "string",
+            "description": "Name for the new attachment"
+          },
+          "vertices": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Array of [x, y] vertex positions"
+          },
+          "uvs": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": { "type": "number" },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "description": "Array of [u, v] texture coordinates"
+          },
+          "triangles": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Triangle index array"
+          },
+          "weights": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "bones": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Bone names influencing this vertex"
+                },
+                "weights": {
+                  "type": "array",
+                  "items": { "type": "number" },
+                  "description": "Normalized weight per bone (sum = 1.0)"
+                }
+              },
+              "required": ["bones", "weights"]
+            },
+            "description": "Array of { bones: string[], weights: number[] } per vertex"
+          }
+        },
+        "required": [
+          "entityId",
+          "skinName",
+          "attachmentName",
+          "vertices",
+          "uvs",
+          "triangles",
+          "weights"
+        ]
+      },
+      "tokenCost": 30,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "enter_edit_mode",
       "description": "Enter polygon edit mode for an entity",
       "category": "modeling",

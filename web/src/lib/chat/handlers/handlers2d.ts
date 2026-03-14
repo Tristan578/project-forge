@@ -1439,6 +1439,58 @@ const skeleton2dHandlers: Record<string, ToolHandler> = {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to auto-weight skeleton 2D' };
     }
   },
+
+  add_skeleton2d_mesh_attachment: async (args, ctx): Promise<ExecutionResult> => {
+    try {
+      const zVertexWeights = z.object({
+        bones: z.array(z.string()),
+        weights: z.array(z.number()),
+      });
+      const p = parseArgs(
+        z.object({
+          entityId: zEntityId,
+          skinName: z.string().min(1),
+          attachmentName: z.string().min(1),
+          vertices: z.array(zVec2),
+          uvs: z.array(zVec2),
+          triangles: z.array(z.number().int().nonnegative()),
+          weights: z.array(zVertexWeights),
+        }),
+        args,
+      );
+      if (p.error) return p.error;
+      const { entityId, skinName, attachmentName, vertices, uvs, triangles, weights } = p.data;
+
+      if (vertices.length !== weights.length) {
+        return {
+          success: false,
+          error: `vertices.length (${vertices.length}) must equal weights.length (${weights.length})`,
+        };
+      }
+
+      ctx.dispatchCommand('add_skeleton2d_mesh_attachment', {
+        entityId,
+        skinName,
+        attachmentName,
+        vertices,
+        uvs,
+        triangles,
+        weights,
+      });
+
+      return {
+        success: true,
+        result: {
+          message: `Added mesh attachment "${attachmentName}" to skin "${skinName}" on entity ${entityId}`,
+        },
+      };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Failed to add skeleton 2D mesh attachment',
+      };
+    }
+  },
 };
 
 // ---------------------------------------------------------------------------
