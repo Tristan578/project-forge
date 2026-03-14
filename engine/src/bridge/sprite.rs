@@ -1197,18 +1197,20 @@ pub(super) fn handle_sprite_sheet_state_queries(
 
     for request in requests {
         if let QueryRequest::SpriteSheetState { entity_id } = &request {
+            #[derive(serde::Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SpriteSheetStateResponse {
+                entity_id: String,
+                has_sprite_sheet: bool,
+                asset_id: Option<String>,
+                total_frames: usize,
+                clip_names: Vec<String>,
+            }
+
+            let mut found = false;
             for (eid, sheet_data) in query.iter() {
                 if eid.0 == *entity_id {
-                    #[derive(serde::Serialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct SpriteSheetStateResponse {
-                        entity_id: String,
-                        has_sprite_sheet: bool,
-                        asset_id: Option<String>,
-                        total_frames: usize,
-                        clip_names: Vec<String>,
-                    }
-
+                    found = true;
                     let response = if let Some(sheet) = sheet_data {
                         let total_frames = match &sheet.slice_mode {
                             SliceMode::Grid { columns, rows, .. } => (*columns * *rows) as usize,
@@ -1235,6 +1237,20 @@ pub(super) fn handle_sprite_sheet_state_queries(
                     break;
                 }
             }
+
+            if !found {
+                // Emit a not-found response so the client-side promise resolves
+                // instead of hanging indefinitely.
+                let response = SpriteSheetStateResponse {
+                    entity_id: entity_id.clone(),
+                    has_sprite_sheet: false,
+                    asset_id: None,
+                    total_frames: 0,
+                    clip_names: vec![],
+                };
+                super::events::emit_event("QUERY_SPRITE_SHEET_STATE", &response);
+            }
+
             pending.query_requests.retain(|r| !matches!(r, QueryRequest::SpriteSheetState { entity_id: ref eid } if eid == entity_id));
         }
     }
@@ -1257,21 +1273,23 @@ pub(super) fn handle_sprite_animator_state_queries(
 
     for request in requests {
         if let QueryRequest::SpriteAnimatorState { entity_id } = &request {
+            #[derive(serde::Serialize)]
+            #[serde(rename_all = "camelCase")]
+            struct SpriteAnimatorStateResponse {
+                entity_id: String,
+                has_animator: bool,
+                current_clip: Option<String>,
+                frame_index: usize,
+                playing: bool,
+                speed: f32,
+                current_state: Option<String>,
+                available_states: Vec<String>,
+            }
+
+            let mut found = false;
             for (eid, animator_data, state_machine) in query.iter() {
                 if eid.0 == *entity_id {
-                    #[derive(serde::Serialize)]
-                    #[serde(rename_all = "camelCase")]
-                    struct SpriteAnimatorStateResponse {
-                        entity_id: String,
-                        has_animator: bool,
-                        current_clip: Option<String>,
-                        frame_index: usize,
-                        playing: bool,
-                        speed: f32,
-                        current_state: Option<String>,
-                        available_states: Vec<String>,
-                    }
-
+                    found = true;
                     let response = if let Some(animator) = animator_data {
                         let (current_state, available_states) = if let Some(sm) = state_machine {
                             (
@@ -1308,6 +1326,21 @@ pub(super) fn handle_sprite_animator_state_queries(
                     break;
                 }
             }
+
+            if !found {
+                let response = SpriteAnimatorStateResponse {
+                    entity_id: entity_id.clone(),
+                    has_animator: false,
+                    current_clip: None,
+                    frame_index: 0,
+                    playing: false,
+                    speed: 1.0,
+                    current_state: None,
+                    available_states: vec![],
+                };
+                super::events::emit_event("QUERY_SPRITE_ANIMATOR_STATE", &response);
+            }
+
             pending.query_requests.retain(|r| !matches!(r, QueryRequest::SpriteAnimatorState { entity_id: ref eid } if eid == entity_id));
         }
     }
