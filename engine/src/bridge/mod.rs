@@ -277,6 +277,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<core::project_type::ProjectType>()
             .init_resource::<core::lod::PerformanceMetrics>()
             .init_resource::<core::lod::SimplificationBackend>()
+            .init_resource::<core::custom_wgsl::CustomShaderRegistry>()
             .add_message::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
@@ -441,6 +442,10 @@ impl Plugin for SelectionPlugin {
                     core_systems::apply_selection_requests,
                 ).in_set(EditorApplySet))
                 .add_systems(Update, material::apply_custom_wgsl_source_updates.in_set(EditorApplySet))
+                .add_systems(Update, material::apply_register_custom_shader_requests.in_set(EditorApplySet))
+                .add_systems(Update, material::apply_apply_custom_shader_requests.in_set(EditorApplySet))
+                .add_systems(Update, material::apply_remove_custom_shader_slot_requests.in_set(EditorApplySet))
+                .add_systems(Update, material::restitch_custom_shaders.in_set(EditorApplySet))
                 .add_systems(Update, (
                     core_systems::apply_pending_visibility,
                     core_systems::apply_pending_clear_selection,

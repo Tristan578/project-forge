@@ -204,3 +204,61 @@ impl PendingCommands {
 pub fn queue_custom_wgsl_source_update_from_bridge(update: CustomWgslSourceUpdate) -> bool {
     super::with_pending(|pc| pc.queue_custom_wgsl_source_update(update)).is_some()
 }
+
+// === Mega-shader Registry Request Structs ===
+
+/// Request to register a named WGSL function into a registry slot.
+#[derive(Debug, Clone)]
+pub struct RegisterCustomShaderRequest {
+    /// Slot index 0–7.
+    pub slot: usize,
+    pub name: String,
+    pub wgsl_code: String,
+    pub param_names: Vec<String>,
+}
+
+/// Request to apply a registered custom shader slot to an entity.
+#[derive(Debug, Clone)]
+pub struct ApplyCustomShaderRequest {
+    pub entity_id: String,
+    /// Slot index 1–8 (1-indexed for the WGSL dispatch switch).
+    pub slot: u32,
+    /// Up to 16 parameter values in slot order.
+    pub params: Vec<f32>,
+}
+
+/// Request to remove a slot from the registry.
+#[derive(Debug, Clone)]
+pub struct RemoveCustomShaderRequest {
+    pub slot: usize,
+}
+
+// === Mega-shader Queue Methods ===
+
+impl PendingCommands {
+    pub fn queue_register_custom_shader(&mut self, req: RegisterCustomShaderRequest) {
+        self.register_custom_shader_requests.push(req);
+    }
+
+    pub fn queue_apply_custom_shader(&mut self, req: ApplyCustomShaderRequest) {
+        self.apply_custom_shader_requests.push(req);
+    }
+
+    pub fn queue_remove_custom_shader_slot(&mut self, req: RemoveCustomShaderRequest) {
+        self.remove_custom_shader_requests.push(req);
+    }
+}
+
+// === Mega-shader Bridge Functions ===
+
+pub fn queue_register_custom_shader_from_bridge(req: RegisterCustomShaderRequest) -> bool {
+    super::with_pending(|pc| pc.queue_register_custom_shader(req)).is_some()
+}
+
+pub fn queue_apply_custom_shader_from_bridge(req: ApplyCustomShaderRequest) -> bool {
+    super::with_pending(|pc| pc.queue_apply_custom_shader(req)).is_some()
+}
+
+pub fn queue_remove_custom_shader_slot_from_bridge(req: RemoveCustomShaderRequest) -> bool {
+    super::with_pending(|pc| pc.queue_remove_custom_shader_slot(req)).is_some()
+}
