@@ -39,6 +39,12 @@ struct ForgeShaderUniforms {
     distortion_strength: f32,
     toon_bands: u32,
     fresnel_power: f32,
+    // Mega-shader fields
+    custom_slot: u32,
+    custom_params_0: vec4<f32>,
+    custom_params_1: vec4<f32>,
+    custom_params_2: vec4<f32>,
+    custom_params_3: vec4<f32>,
 }
 
 @group(2) @binding(100)
@@ -80,6 +86,18 @@ fn fbm_noise(p: vec2<f32>, octaves: i32) -> f32 {
 
     return value;
 }
+
+// --- Mega-shader slot functions ---
+// FORGE_CUSTOM_SLOT_INJECTION_START
+fn custom_shader_1(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+fn custom_shader_2(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+fn custom_shader_3(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+fn custom_shader_4(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+fn custom_shader_5(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+fn custom_shader_6(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+fn custom_shader_7(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+fn custom_shader_8(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> { return color; }
+// FORGE_CUSTOM_SLOT_INJECTION_END
 
 // --- MaterialExtension fragment hook ---
 
@@ -178,6 +196,36 @@ fn fragment(
             let fresnel = pow(1.0 - abs(dot(pbr_input.N, view_dir)), forge_uniforms.fresnel_power);
             let glow = forge_uniforms.custom_color.rgb * fresnel * forge_uniforms.emission_strength;
             out.color = vec4(out.color.rgb + glow, out.color.a);
+            return out;
+        }
+
+        // --- Mega-shader custom slot dispatch ---
+        // (custom_shader_1..8 are defined above via FORGE_CUSTOM_SLOT_INJECTION)
+
+        if (forge_uniforms.custom_slot > 0u) {
+            // Build flat params array from the four packed vec4s.
+            let p0 = forge_uniforms.custom_params_0;
+            let p1 = forge_uniforms.custom_params_1;
+            let p2 = forge_uniforms.custom_params_2;
+            let p3 = forge_uniforms.custom_params_3;
+            let params = array<f32, 16>(
+                p0.x, p0.y, p0.z, p0.w,
+                p1.x, p1.y, p1.z, p1.w,
+                p2.x, p2.y, p2.z, p2.w,
+                p3.x, p3.y, p3.z, p3.w,
+            );
+            let t = in.world_position.w;
+            switch (forge_uniforms.custom_slot) {
+                case 1u: { out.color = custom_shader_1(out.color, in.uv, t, params); }
+                case 2u: { out.color = custom_shader_2(out.color, in.uv, t, params); }
+                case 3u: { out.color = custom_shader_3(out.color, in.uv, t, params); }
+                case 4u: { out.color = custom_shader_4(out.color, in.uv, t, params); }
+                case 5u: { out.color = custom_shader_5(out.color, in.uv, t, params); }
+                case 6u: { out.color = custom_shader_6(out.color, in.uv, t, params); }
+                case 7u: { out.color = custom_shader_7(out.color, in.uv, t, params); }
+                case 8u: { out.color = custom_shader_8(out.color, in.uv, t, params); }
+                default: {}
+            }
             return out;
         }
 

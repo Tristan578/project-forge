@@ -152,6 +152,9 @@ pub struct PendingCommands {
     pub update_skybox_requests: Vec<UpdateSkyboxRequest>,
     pub custom_skybox_requests: Vec<SetCustomSkyboxRequest>,
     pub custom_wgsl_source_updates: Vec<CustomWgslSourceUpdate>,
+    pub register_custom_shader_requests: Vec<RegisterCustomShaderRequest>,
+    pub apply_custom_shader_requests: Vec<ApplyCustomShaderRequest>,
+    pub remove_custom_shader_requests: Vec<RemoveCustomShaderRequest>,
     // physics domain
     pub physics_updates: Vec<PhysicsUpdate>,
     pub physics_toggles: Vec<PhysicsToggle>,
