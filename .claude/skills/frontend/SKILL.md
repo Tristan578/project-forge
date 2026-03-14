@@ -147,14 +147,36 @@ export const createMySlice: StateCreator<EditorStore, [], [], MySlice> = (set) =
 - **Turbopack**: Default for builds. Dev uses `--webpack` for compatibility.
 - **Root layout**: Has `export const dynamic = "force-dynamic"` for CI without Clerk keys.
 
+## Validation Tools
+
+Run these after making frontend changes:
+
+```bash
+# Quick check (lint + tsc + vitest)
+bash .claude/tools/validate-frontend.sh quick
+
+# Lint only
+bash .claude/tools/validate-frontend.sh lint
+
+# TypeScript only
+bash .claude/tools/validate-frontend.sh tsc
+
+# Unit tests only
+bash .claude/tools/validate-frontend.sh test
+
+# Full check (includes E2E if WASM build exists)
+bash .claude/tools/validate-frontend.sh full
+
+# Full project validation
+bash .claude/tools/validate-all.sh
+```
+
 ## Quality Bar
 
 Before declaring frontend work complete:
-1. `npx eslint --max-warnings 0 .` — zero warnings
-2. `npx tsc --noEmit` — zero errors
-3. `npx vitest run [relevant test file]` — all pass
-4. Test file exists for new store slices and event handlers
-5. Component renders correctly at all 3 breakpoints (compact/condensed/full)
-6. Keyboard navigation works on all new interactive elements
-7. No `any` types without `@ts-expect-error` justification
-8. Color scheme uses `zinc-*` consistently
+1. `bash .claude/tools/validate-frontend.sh quick` — zero warnings, zero type errors, all tests pass
+2. Test file exists for new store slices and event handlers
+3. Component renders correctly at all 3 breakpoints (compact/condensed/full)
+4. Keyboard navigation works on all new interactive elements
+5. No `any` types without `@ts-expect-error` justification
+6. Color scheme uses `zinc-*` consistently

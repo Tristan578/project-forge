@@ -173,11 +173,32 @@ await expect(editor.inspector).toBeVisible();
 - **Take screenshots on failure** — configured in playwright.config.ts
 - **Isolate state** — each test starts with a fresh scene
 
+## Validation Tools
+
+Run these to verify test health:
+
+```bash
+# Test inventory (file counts by type)
+bash .claude/tools/validate-tests.sh count
+
+# Coverage report with threshold comparison
+bash .claude/tools/validate-tests.sh coverage
+
+# Full test validation
+bash .claude/tools/validate-tests.sh full
+
+# Quick frontend validation (lint + tsc + vitest)
+bash .claude/tools/validate-frontend.sh quick
+
+# Full project validation
+bash .claude/tools/validate-all.sh
+```
+
 ## Quality Bar
 
 Before declaring test work complete:
-1. `npx vitest run` — all tests pass (zero failures)
-2. `npx vitest run --coverage` — coverage meets or exceeds current thresholds
+1. `bash .claude/tools/validate-frontend.sh quick` — all tests pass (zero failures)
+2. `bash .claude/tools/validate-tests.sh coverage` — coverage meets or exceeds current thresholds
 3. No `it.skip` or `it.todo` without a ticket number
 4. Test file naming matches source: `myFile.ts` → `__tests__/myFile.test.ts`
 5. Each test has a descriptive name that reads as a specification

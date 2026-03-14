@@ -115,12 +115,29 @@ Add the dispatch arm in the domain's `dispatch()` function. This is how AI-Human
 - `Assets::insert` returns `Result` in Bevy 0.18 — must handle or `let _ =`
 - `runtime` feature gates system *registrations* in bridge/mod.rs, NOT function definitions
 
+## Validation Tools
+
+Run these after making engine changes:
+
+```bash
+# Quick check (architecture + bridge isolation + unsafe audit)
+bash .claude/tools/validate-rust.sh check
+
+# Full check (includes cargo check --target wasm32-unknown-unknown)
+bash .claude/tools/validate-rust.sh full
+
+# Architecture boundaries only
+python3 .claude/skills/arch-validator/check_arch.py
+
+# Full project validation
+bash .claude/tools/validate-all.sh
+```
+
 ## Quality Bar
 
 Before declaring Rust work complete:
-1. `cargo check --target wasm32-unknown-unknown` passes with zero warnings
-2. Run `python3 .claude/skills/arch-validator/check_arch.py` — zero violations
-3. All new public types have `#[derive(Clone, Debug)]` minimum
-4. Every command has a corresponding MCP manifest entry
-5. Undo/redo works for user-facing state changes
-6. Selection events emit correctly when component data changes
+1. `bash .claude/tools/validate-rust.sh check` — zero violations
+2. All new public types have `#[derive(Clone, Debug)]` minimum
+3. Every command has a corresponding MCP manifest entry
+4. Undo/redo works for user-facing state changes
+5. Selection events emit correctly when component data changes

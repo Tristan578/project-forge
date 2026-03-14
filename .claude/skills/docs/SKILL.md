@@ -99,13 +99,28 @@ Every document should be scannable in 30 seconds, complete in 5 minutes, and pre
 3. **Stale docs are worse than no docs**: They teach users and agents wrong things
 4. **Date every document**: Use `> **Last updated:** YYYY-MM-DD` at the top
 
+## Validation Tools
+
+Run these after documentation changes:
+
+```bash
+# Documentation integrity check (required files, rules, manifest sync, version refs)
+bash .claude/tools/validate-docs.sh
+
+# MCP manifest sync check
+bash .claude/tools/validate-mcp.sh sync
+
+# Full project validation
+bash .claude/tools/validate-all.sh
+```
+
 ## Quality Bar
 
 Before declaring documentation work complete:
-1. Every claim verified against actual code
-2. All code examples tested or verified compilable
-3. Version numbers match Cargo.toml / package.json
-4. Grammar and spelling checked
-5. Scannable in 30 seconds (headers, tables, bullet points)
-6. No orphaned references to removed features
-7. MCP manifests in sync (mcp-server and web/src/data)
+1. `bash .claude/tools/validate-docs.sh` — all checks pass
+2. Every claim verified against actual code
+3. All code examples tested or verified compilable
+4. Version numbers match Cargo.toml / package.json
+5. Grammar and spelling checked
+6. Scannable in 30 seconds (headers, tables, bullet points)
+7. No orphaned references to removed features

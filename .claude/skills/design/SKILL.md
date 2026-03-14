@@ -171,6 +171,21 @@ What else was evaluated and why was it rejected?
 | Any new `unsafe` in WASM | Can crash the browser tab | Safe Rust alternatives |
 | Thread-local mutable statics | Race conditions in WASM | ECS resources |
 
+## Validation Tools
+
+Run these after creating design specs:
+
+```bash
+# Documentation integrity (ensures docs structure is valid)
+bash .claude/tools/validate-docs.sh
+
+# Architecture boundary check (verify existing code matches your assumptions)
+bash .claude/tools/validate-rust.sh check
+
+# Full project validation
+bash .claude/tools/validate-all.sh
+```
+
 ## Quality Bar
 
 Before approving a design:

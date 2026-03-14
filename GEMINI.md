@@ -20,6 +20,7 @@ These rules are enforced across ALL AI tools. Violations break the shared workfl
 - Hooks: `.gemini/settings.json` (auto-start, sync, lint, ticket enforcement)
 - Skills (Gemini CLI): `.agents/skills/` — kanban, sync-push, sync-pull
 - Skills (Antigravity): `.agent/skills/` — kanban, sync-push, sync-pull
+- Domain skills: `.claude/skills/` — rust-engine, frontend, mcp-commands, testing, docs, design
 - Rules (Antigravity): `.agent/rules/taskboard-sync.md`
 - Full project constitution: `.claude/CLAUDE.md`
 - Architecture rules: `.claude/rules/*.md`
@@ -77,6 +78,34 @@ All hooks live in `.claude/hooks/`:
 | `on-stop.sh` | Worktree safety commit + GitHub push | After response |
 | `post-edit-lint.sh` | ESLint on changed files | After file edit |
 | `worktree-safety-commit.sh` | Auto-commit uncommitted work in worktrees | Called by on-stop |
+
+## Domain Skills
+
+Specialized development patterns in `.claude/skills/`:
+
+| Skill | Use When |
+|-------|----------|
+| `rust-engine/SKILL.md` | Writing engine/ code (ECS, commands, bridge) |
+| `frontend/SKILL.md` | Writing web/ code (React, Zustand, Tailwind) |
+| `mcp-commands/SKILL.md` | Adding MCP commands or chat handlers |
+| `testing/SKILL.md` | Writing tests, improving coverage |
+| `docs/SKILL.md` | Updating documentation, README, known-limitations |
+| `design/SKILL.md` | Designing features, architecture decisions |
+
+Read the relevant skill file before working in that domain.
+
+## Validation Tools
+
+Runnable scripts in `.claude/tools/`:
+
+```bash
+bash .claude/tools/validate-rust.sh check      # After engine changes
+bash .claude/tools/validate-frontend.sh quick   # After frontend changes
+bash .claude/tools/validate-mcp.sh full         # After MCP changes
+bash .claude/tools/validate-tests.sh coverage   # Test coverage report
+bash .claude/tools/validate-docs.sh             # Documentation integrity
+bash .claude/tools/validate-all.sh              # Run everything
+```
 
 ## Detailed Reference
 

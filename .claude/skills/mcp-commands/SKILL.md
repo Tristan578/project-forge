@@ -122,12 +122,32 @@ For complex multi-step operations, use compound tools (`web/src/lib/chat/handler
 - `setup_character` — entity + physics + scripts + game components
 - These are the AI's "macros" — one natural language request maps to many commands
 
+## Validation Tools
+
+Run these after MCP changes:
+
+```bash
+# Full MCP check (manifest sync + command count + tests + parity audit)
+bash .claude/tools/validate-mcp.sh full
+
+# Manifest sync check only
+bash .claude/tools/validate-mcp.sh sync
+
+# MCP server tests only
+bash .claude/tools/validate-mcp.sh test
+
+# AI parity audit only
+bash .claude/tools/validate-mcp.sh audit
+
+# Full project validation
+bash .claude/tools/validate-all.sh
+```
+
 ## Quality Bar
 
 Before declaring MCP work complete:
-1. `commands.json` updated in BOTH locations (mcp-server AND web/src/data)
-2. `cd mcp-server && npx vitest run` — manifest tests pass
-3. Chat handler test exists with arg validation and dispatch verification
-4. ToolCallCard has a display label
-5. Command description is specific enough for AI to use correctly without examples
-6. If adding a new category, update `validCategories` in `mcp-server/src/manifest.test.ts`
+1. `bash .claude/tools/validate-mcp.sh full` — manifests in sync, tests pass
+2. Chat handler test exists with arg validation and dispatch verification
+3. ToolCallCard has a display label
+4. Command description is specific enough for AI to use correctly without examples
+5. If adding a new category, update `validCategories` in `mcp-server/src/manifest.test.ts`
