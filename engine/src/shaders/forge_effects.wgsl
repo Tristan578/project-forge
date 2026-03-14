@@ -127,8 +127,8 @@ fn fragment(
 
         // --- Effect branching ---
 
-        if (forge_uniforms.shader_type == 0u) {
-            // Passthrough - return PBR output unchanged
+        if (forge_uniforms.shader_type == 0u && forge_uniforms.custom_slot == 0u) {
+            // Passthrough - return PBR output unchanged (no built-in effect, no custom slot)
             return out;
         }
 
