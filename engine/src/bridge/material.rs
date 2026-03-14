@@ -748,3 +748,18 @@ pub(super) fn sync_custom_wgsl_uniforms(
         }
     }
 }
+
+/// Sync elapsed time to all ForgeMaterial instances each frame so that
+/// built-in effects and custom mega-shader slots can animate.
+pub(super) fn sync_forge_shader_time(
+    time: Res<Time>,
+    query: Query<&MeshMaterial3d<ForgeMaterial>>,
+    mut materials: ResMut<Assets<ForgeMaterial>>,
+) {
+    let t = time.elapsed_secs();
+    for handle in query.iter() {
+        if let Some(mat) = materials.get_mut(handle) {
+            mat.extension.time = t;
+        }
+    }
+}

@@ -170,6 +170,11 @@ pub struct ForgeShaderExtension {
     pub custom_params_2: Vec4,
     #[uniform(100)]
     pub custom_params_3: Vec4,
+
+    /// Elapsed time in seconds, synced from `Time` each frame.
+    /// Used by both built-in effects and custom mega-shader slots.
+    #[uniform(100)]
+    pub time: f32,
 }
 
 impl Default for ForgeShaderExtension {
@@ -206,6 +211,7 @@ impl From<&ShaderEffectData> for ForgeShaderExtension {
             custom_params_1: Vec4::ZERO,
             custom_params_2: Vec4::ZERO,
             custom_params_3: Vec4::ZERO,
+            time: 0.0,
         }
     }
 }

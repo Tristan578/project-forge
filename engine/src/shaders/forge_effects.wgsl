@@ -45,6 +45,8 @@ struct ForgeShaderUniforms {
     custom_params_1: vec4<f32>,
     custom_params_2: vec4<f32>,
     custom_params_3: vec4<f32>,
+    // Elapsed time in seconds, synced from Bevy Time resource each frame.
+    time: f32,
 }
 
 @group(2) @binding(100)
@@ -120,8 +122,8 @@ fn fragment(
         out.color = apply_pbr_lighting(pbr_input);
         out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 
-        // Get current time from globals
-        let t = in.world_position.w; // time is passed via world_position.w in Bevy PBR
+        // Get current time from the uniform (synced from Bevy Time each frame)
+        let t = forge_uniforms.time;
 
         // --- Effect branching ---
 
@@ -214,7 +216,7 @@ fn fragment(
                 p2.x, p2.y, p2.z, p2.w,
                 p3.x, p3.y, p3.z, p3.w,
             );
-            let t = in.world_position.w;
+            let t = forge_uniforms.time;
             switch (forge_uniforms.custom_slot) {
                 case 1u: { out.color = custom_shader_1(out.color, in.uv, t, params); }
                 case 2u: { out.color = custom_shader_2(out.color, in.uv, t, params); }
