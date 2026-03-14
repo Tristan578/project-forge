@@ -14,6 +14,24 @@ const VALID_SHADER_TYPES = ['none', 'dissolve', 'hologram', 'force_field', 'lava
 
 const CUSTOM_SHADER_SLOT_COUNT = 8;
 
+// Track which graph name occupies each slot (0-indexed) so hash collisions
+// are detected and resolved by probing the next available slot.
+const slotOccupants = new Map<number, string>();
+
+function findAvailableSlot(graphName: string): number | null {
+  const preferred = Math.abs(hashString(graphName)) % CUSTOM_SHADER_SLOT_COUNT;
+  // If this graph already owns a slot, reuse it.
+  for (const [slot, name] of slotOccupants) {
+    if (name === graphName) return slot;
+  }
+  // Linear probe for an open slot starting at the preferred index.
+  for (let i = 0; i < CUSTOM_SHADER_SLOT_COUNT; i++) {
+    const candidate = (preferred + i) % CUSTOM_SHADER_SLOT_COUNT;
+    if (!slotOccupants.has(candidate)) return candidate;
+  }
+  return null; // All 8 slots occupied
+}
+
 export const shaderHandlers: Record<string, ToolHandler> = {
   create_shader_graph: async (args) => {
     const p = parseArgs(z.object({ name: z.string().optional() }), args);
@@ -177,9 +195,11 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       return { success: false, error: `Mega-shader compilation failed: ${slotResult.error}` };
     }
 
-    // Pick a deterministic slot derived from the graph name hash (0-indexed).
-    // This avoids needing an async registry query for the next available slot.
-    const slot = Math.abs(hashString(graph.name)) % CUSTOM_SHADER_SLOT_COUNT;
+    const slot = findAvailableSlot(graph.name);
+    if (slot === null) {
+      return { success: false, error: 'All 8 custom shader slots are occupied. Remove an existing custom shader first.' };
+    }
+    slotOccupants.set(slot, graph.name);
 
     ctx.dispatchCommand('register_custom_shader', {
       slot,
@@ -276,6 +296,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
 
     ctx.dispatchCommand('remove_custom_shader_slot', { slot: p.data.slot });
+    slotOccupants.delete(p.data.slot);
 
     return {
       success: true,
