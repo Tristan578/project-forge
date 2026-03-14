@@ -38,7 +38,6 @@ secrets.json
 !.windsurf/workflows/
 specs/
 ARCHITECTURE.md
-TESTING.md
 project_board.json
 
 # ----- Rust / Cargo -----
