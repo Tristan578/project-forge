@@ -23,7 +23,7 @@
 - **No `.github/hooks/`** — no hooks for Copilot coding agent sessions
 - **No `.github/workflows/*.md`** — no GitHub Agentic Workflows (gh-aw)
 - **No MCP server config** for Copilot coding agent (our MCP server could be leveraged)
-- **Copilot instructions are stale** — references Bevy 0.16 (now 0.18), 329 MCP commands (now 306)
+- **Copilot instructions are stale** — references Bevy 0.16 (now 0.18), stale MCP command counts (now 322)
 
 ---
 
@@ -321,15 +321,15 @@ Scan for documentation that may be out of date.
 - Any TODO/FIXME/HACK comments added in the last week
 ```
 
-**Value**: We already have stale data in copilot instructions (Bevy 0.16 → 0.18, 329 → 306 commands). This catches drift before it compounds.
+**Value**: We already have stale data in copilot instructions (now fixed: Bevy 0.18, 322 commands). This catches drift before it compounds.
 
 ---
 
 ## Phase 4: Enhance Existing Configuration
 
 ### 4a. Fix stale copilot instructions
-- Update `.github/copilot-instructions.md`: Bevy 0.16 → 0.18
-- Update `.github/instructions/copilot.instructions.md`: 329 → 306 MCP commands, Bevy 0.16 → 0.18
+- Update `.github/copilot-instructions.md`: verify Bevy 0.18 and 322 MCP commands
+- Update `.github/instructions/copilot.instructions.md`: verify 322 MCP commands, Bevy 0.18
 - Add coverage thresholds reference
 
 ### 4b. Consolidate copilot instructions

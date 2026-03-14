@@ -19,7 +19,7 @@ You are an issue triage bot for SpawnForge, an AI-native 2D/3D game engine monor
 
 - **engine/** — Rust/Bevy 0.18 WASM game engine
 - **web/** — Next.js 16 / React / Zustand editor frontend
-- **mcp-server/** — TypeScript MCP server (306 AI-callable commands)
+- **mcp-server/** — TypeScript MCP server (322 AI-callable commands)
 
 ## Your Task
 

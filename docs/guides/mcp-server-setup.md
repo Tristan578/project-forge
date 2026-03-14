@@ -198,7 +198,7 @@ Eight high-level tools that chain multiple commands in sequence:
 | `describe_scene` | Return a natural-language description of the current scene |
 | `analyze_gameplay` | Evaluate gameplay balance and configuration |
 
-Use `list_doc_topics` or `search_docs` to discover the full set of 329 commands by category.
+Use `list_doc_topics` or `search_docs` to discover the full set of 322 commands by category.
 
 ## Available Resources
 
@@ -297,7 +297,7 @@ If a command times out, the error message will name the specific command. Retry 
 
 ## Command Reference
 
-For a complete list of all 329 commands with full parameter schemas, see:
+For a complete list of all 322 commands with full parameter schemas, see:
 
 - [Command Reference](../reference/commands.md)
 - Use the `search_docs` tool to find commands by keyword

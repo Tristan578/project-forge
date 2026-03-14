@@ -38,7 +38,7 @@ You maintain and create documentation across:
 - `.github/instructions/copilot.instructions.md` has `applyTo: "**"` for file-scoped context
 - `.github/instructions/review.instructions.md` guides PR reviews
 - Keep version numbers, command counts, and paths accurate
-- Cross-reference: engine uses Bevy 0.18, MCP server exposes 306 commands, wasm-bindgen pinned to 0.2.108
+- Cross-reference: engine uses Bevy 0.18, MCP server exposes 322 commands, wasm-bindgen pinned to 0.2.108
 
 ### User-Facing Docs
 - Markdown files in `docs/content/` are served by `web/src/app/api/docs/route.ts`
