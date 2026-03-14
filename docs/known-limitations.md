@@ -23,7 +23,7 @@ The 2D engine has two tiers of readiness:
 
 | Feature | Phase | What works | What's missing | Ticket |
 |---------|-------|------------|----------------|--------|
-| 2D Skeletal Animation | 2D-5 | Bone hierarchy animation (keyframe interpolation with 5 easing modes, 2-bone analytical IK solver, Gizmos bone rendering), `SkeletonData2d` with bones/slots/skins/IK, inspector UI, 11 MCP commands. Vertex skinning algorithm (LBS with bind-pose inverse) fully implemented in `skin_vertices_lbs`. | **No mesh attachment creation** — `AttachmentData::Mesh` with vertex/weight data cannot be created via UI or MCP command. The skinning pipeline runs but finds no mesh data. | PF-330 |
+| 2D Skeletal Animation | 2D-5 | Bone hierarchy animation (keyframe interpolation with 5 easing modes, 2-bone analytical IK solver, Gizmos bone rendering), `SkeletonData2d` with bones/slots/skins/IK, inspector UI, 11 MCP commands. Vertex skinning algorithm (LBS with bind-pose inverse) fully implemented in `skin_vertices_lbs`. Mesh attachments can be created via `add_skeleton2d_mesh_attachment` MCP command + chat handler. | **No UI for mesh attachment creation** — mesh attachments must be created via MCP command or chat; there is no visual editor panel for defining vertex/weight data. | PF-330 |
 
 **Workaround:** For skeletal animation, use sprite animation state machines instead.
 
@@ -53,9 +53,8 @@ Working:
 - Audio occlusion (per-entity low-pass filtering)
 - Music stem layering
 
-Limitation:
-- **Occlusion uses binary detection** — automatic raycasting dispatches in the play-tick loop but only produces on/off state. Graduated occlusion amount (distance-based attenuation) is not yet wired up, despite `updateOcclusionAmount(amount: 0-1)` existing in the audio manager.
-- **Ticket:** PF-329: "Graduated audio occlusion via physics raycasting"
+Remaining limitation:
+- **Occlusion raycasting is physics-based only** — graduated distance-based attenuation is implemented (`handlePhysicsEvent` computes occlusion amount 0–1 and calls `audioManager.updateOcclusionAmount`), but occlusion requires physics colliders between source and listener. Scenes without collision geometry get no occlusion effect.
 
 ## Shader Application (Phase 23 + PF-331)
 

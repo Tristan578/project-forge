@@ -10,6 +10,9 @@ interface CompilerContext {
   varCounter: number;
   statements: string[];
   varMap: Map<string, string>; // nodeId:outputId -> wgsl var name
+  /** When true, generates code for a mega-shader slot function body.
+   *  Replaces `in.uv` → `uv`, `globals.time` → `time`, etc. */
+  slotMode: boolean;
 }
 
 /**
@@ -39,6 +42,7 @@ export function compileToMegaShaderSlot(graph: ShaderGraph): MegaShaderCompileRe
       varCounter: 0,
       statements: [],
       varMap: new Map(),
+      slotMode: true,
     };
 
     // Seed the variable map with slot function inputs.
@@ -94,6 +98,7 @@ export function compileToWgsl(graph: ShaderGraph): { code: string; error?: strin
       varCounter: 0,
       statements: [],
       varMap: new Map(),
+      slotMode: false,
     };
 
     // Find the output node
@@ -205,10 +210,10 @@ function generateNodeCode(node: ShaderNode, edges: ShaderEdge[], ctx: CompilerCo
       ctx.varMap.set(`${node.id}:normal`, 'in.world_normal');
       break;
     case 'vertex_uv':
-      ctx.varMap.set(`${node.id}:uv`, 'in.uv');
+      ctx.varMap.set(`${node.id}:uv`, ctx.slotMode ? 'uv' : 'in.uv');
       break;
     case 'time':
-      ctx.varMap.set(`${node.id}:time`, 'globals.time');
+      ctx.varMap.set(`${node.id}:time`, ctx.slotMode ? 'time' : 'globals.time');
       break;
     case 'camera_position':
       ctx.varMap.set(`${node.id}:position`, 'view.world_position.xyz');
@@ -333,10 +338,15 @@ function emitFunctionCall(
   ctx.varMap.set(`${node.id}:${outputId}`, varName);
 }
 
+/** Returns the correct UV fallback depending on compilation mode. */
+function defaultUv(ctx: CompilerContext): string {
+  return ctx.slotMode ? 'uv' : 'in.uv';
+}
+
 function emitTextureSample(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
   // Use mesh UVs when the UV input is unconnected (synthetic default is vec2<f32>(0.0, 0.0))
-  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : defaultUv(ctx);
   // Sample from the material's base color texture using Bevy's PBR bindings
   ctx.statements.push(`let ${varName} = textureSample(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, ${uv});`);
   ctx.varMap.set(`${node.id}:color`, varName);
@@ -353,7 +363,7 @@ function emitVoronoiTexture(node: ShaderNode, inputs: Record<string, string>, ct
   const distVar = `var_${ctx.varCounter++}`;
   const colorVar = `var_${ctx.varCounter++}`;
   const cellVar = `vor_cell_${ctx.varCounter}`;
-  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : defaultUv(ctx);
   const scale = inputs.scale || '5.0';
 
   // Voronoi cellular noise: find nearest cell center using hash-based random offsets
@@ -452,7 +462,7 @@ function emitFresnel(node: ShaderNode, inputs: Record<string, string>, ctx: Comp
 function emitNormalMap(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
   // Use mesh UVs when the UV input is unconnected (synthetic default is vec2<f32>(0.0, 0.0))
-  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : defaultUv(ctx);
   const strength = inputs.strength || '1.0';
 
   // Sample normal map texture and transform from tangent space to world space

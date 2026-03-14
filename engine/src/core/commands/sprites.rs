@@ -1087,17 +1087,19 @@ fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
         .and_then(|v| v.as_u64())
         .ok_or("Missing layer")? as usize;
 
-    let tiles = payload.get("tiles")
+    let raw_tiles = payload.get("tiles")
         .and_then(|v| v.as_array())
-        .ok_or("Missing tiles array")?
-        .iter()
-        .filter_map(|item| {
-            let x = item.get("x")?.as_u64()? as usize;
-            let y = item.get("y")?.as_u64()? as usize;
-            let tile_index = item.get("tileIndex")?.as_u64()? as u32;
-            Some(TilePlacement { x, y, tile_index })
-        })
-        .collect();
+        .ok_or("Missing tiles array")?;
+    let mut tiles = Vec::with_capacity(raw_tiles.len());
+    for (i, item) in raw_tiles.iter().enumerate() {
+        let x = item.get("x").and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("tiles[{}]: missing or invalid 'x'", i))? as usize;
+        let y = item.get("y").and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("tiles[{}]: missing or invalid 'y'", i))? as usize;
+        let tile_index = item.get("tileIndex").and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("tiles[{}]: missing or invalid 'tileIndex'", i))? as u32;
+        tiles.push(TilePlacement { x, y, tile_index });
+    }
 
     if queue_fill_tiles_from_bridge(FillTilesRequest { entity_id, layer, tiles }) {
         Ok(())

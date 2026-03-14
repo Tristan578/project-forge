@@ -583,8 +583,10 @@ struct ApplyCustomShaderPayload {
     /// 1-indexed slot (matches WGSL dispatch switch case 1u..8u).
     slot: u32,
     /// Named parameter values.  Keys are parameter names; values are floats.
+    /// Uses BTreeMap for deterministic alphabetical ordering (HashMap iteration
+    /// order is nondeterministic, which would produce random param[] positions).
     #[serde(default)]
-    params: std::collections::HashMap<String, f32>,
+    params: std::collections::BTreeMap<String, f32>,
 }
 
 /// Handle apply_custom_shader command.
@@ -601,8 +603,14 @@ fn handle_apply_custom_shader(payload: serde_json::Value) -> super::CommandResul
     }
 
     // Flatten params map into a positional Vec<f32> (up to 16 values).
-    // Ordering is by insertion order; extra keys are silently ignored.
-    let params: Vec<f32> = data.params.values().copied().take(16).collect();
+    // BTreeMap guarantees alphabetical key ordering for deterministic param positions.
+    if data.params.len() > 16 {
+        return Err(format!(
+            "Too many params ({}) — mega-shader supports at most 16",
+            data.params.len()
+        ));
+    }
+    let params: Vec<f32> = data.params.values().copied().collect();
 
     let req = ApplyCustomShaderRequest {
         entity_id: data.entity_id.clone(),
