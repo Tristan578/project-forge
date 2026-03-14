@@ -36,6 +36,24 @@ pub enum TilemapOrigin {
 #[derive(Component)]
 pub struct TilemapEnabled;
 
+/// Resource for configuring the 2D editor grid overlay.
+#[derive(Resource, Clone, Debug)]
+pub struct Grid2dConfig {
+    pub visible: bool,
+    pub cell_size: f32,
+    pub color: [f32; 4],
+}
+
+impl Default for Grid2dConfig {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            cell_size: 32.0,
+            color: [0.3, 0.3, 0.3, 0.5],
+        }
+    }
+}
+
 impl Default for TilemapData {
     fn default() -> Self {
         Self {

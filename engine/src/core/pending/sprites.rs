@@ -121,6 +121,46 @@ pub struct TilemapDataRemoval {
     pub entity_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct PaintTileRequest {
+    pub entity_id: String,
+    pub layer: usize,
+    pub x: usize,
+    pub y: usize,
+    pub tile_index: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct EraseTileRequest {
+    pub entity_id: String,
+    pub layer: usize,
+    pub x: usize,
+    pub y: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct TilePlacement {
+    pub x: usize,
+    pub y: usize,
+    pub tile_index: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct FillTilesRequest {
+    pub entity_id: String,
+    pub layer: usize,
+    pub tiles: Vec<TilePlacement>,
+}
+
+// === Grid 2D Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct SetGrid2dRequest {
+    pub visible: bool,
+    pub cell_size: f32,
+    pub color: [f32; 4],
+}
+
 
 // === Skeleton 2D Mesh Attachment Request Structs ===
 
@@ -205,6 +245,22 @@ impl PendingCommands {
     pub fn queue_tilemap_data_removal(&mut self, removal: TilemapDataRemoval) {
         self.tilemap_data_removals.push(removal);
     }
+
+    pub fn queue_paint_tile(&mut self, request: PaintTileRequest) {
+        self.paint_tile_requests.push(request);
+    }
+
+    pub fn queue_erase_tile(&mut self, request: EraseTileRequest) {
+        self.erase_tile_requests.push(request);
+    }
+
+    pub fn queue_fill_tiles(&mut self, request: FillTilesRequest) {
+        self.fill_tiles_requests.push(request);
+    }
+
+    pub fn queue_set_grid_2d(&mut self, request: SetGrid2dRequest) {
+        self.set_grid_2d_requests.push(request);
+    }
 }
 
 // === Bridge Functions ===
@@ -275,4 +331,20 @@ pub fn queue_tilemap_data_removal_from_bridge(removal: TilemapDataRemoval) -> bo
 
 pub fn queue_add_mesh_attachment2d_from_bridge(request: AddMeshAttachment2dRequest) -> bool {
     super::with_pending(|pc| pc.queue_add_mesh_attachment2d(request)).is_some()
+}
+
+pub fn queue_paint_tile_from_bridge(request: PaintTileRequest) -> bool {
+    super::with_pending(|pc| pc.queue_paint_tile(request)).is_some()
+}
+
+pub fn queue_erase_tile_from_bridge(request: EraseTileRequest) -> bool {
+    super::with_pending(|pc| pc.queue_erase_tile(request)).is_some()
+}
+
+pub fn queue_fill_tiles_from_bridge(request: FillTilesRequest) -> bool {
+    super::with_pending(|pc| pc.queue_fill_tiles(request)).is_some()
+}
+
+pub fn queue_set_grid_2d_from_bridge(request: SetGrid2dRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_grid_2d(request)).is_some()
 }
