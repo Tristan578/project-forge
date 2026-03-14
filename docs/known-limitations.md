@@ -57,11 +57,22 @@ Limitation:
 - **Occlusion uses binary detection** — automatic raycasting dispatches in the play-tick loop but only produces on/off state. Graduated occlusion amount (distance-based attenuation) is not yet wired up, despite `updateOcclusionAmount(amount: 0-1)` existing in the audio manager.
 - **Ticket:** PF-329: "Graduated audio occlusion via physics raycasting"
 
-## Shader Application (Phase 23)
+## Shader Application (Phase 23 + PF-331)
 
-**Status: 7 built-in effects work, arbitrary custom WGSL does not**
+**Status: 7 built-in effects + 8 mega-shader slots for arbitrary custom WGSL**
 
-The shader node graph editor compiles to WGSL, and compiled shaders can be applied to entities when they map to one of the 7 built-in effects (dissolve, hologram, force_field, lava_flow, toon, fresnel_glow). The `apply_shader_to_entity` handler infers the effect type from the compiled code. You can also apply effects directly by passing `shaderType`.
+The shader node graph editor compiles to WGSL. Compiled shaders can be applied to entities in two ways:
 
-Limitation:
-- **Arbitrary custom WGSL shaders** (those that don't match a built-in effect) cannot be applied. This requires Bevy's dynamic material pipeline, which has fundamental constraints on WASM targets. This is not a simple implementation gap — it's a Bevy-level architectural limitation.
+1. **Built-in effects** — when compiled WGSL matches one of the 7 named effects (dissolve, hologram, force_field, lava_flow, toon, fresnel_glow, none), `apply_shader_to_entity` maps to that effect directly via `shaderType`. You can also set the type explicitly.
+
+2. **Mega-shader slots** — arbitrary custom WGSL is supported via the `CustomShaderRegistry` (8 independent named slots, 0–7). Slot functions receive `(color, uv, time, params: array<f32, 16>)` and return a `vec4<f32>`. The engine hot-swaps the `forge_effects.wgsl` asset at runtime when a slot is registered.
+
+   - `register_custom_shader` — uploads a WGSL function body to a slot (0–7)
+   - `apply_custom_shader` — attaches a slot (1–8, 1-indexed) to an entity
+   - `remove_custom_shader_slot` — clears a slot from the registry
+   - `apply_shader_to_entity` with a graph ID automatically falls back to the mega-shader path when the compiled WGSL does not match a built-in effect.
+
+Remaining limitations:
+- **Slot count is fixed at 8** — this is determined at WGSL compile time by the switch dispatch in the fragment shader. Increasing it requires a WASM rebuild.
+- **No texture-sampler parameters** — custom slot functions receive only `array<f32, 16>` floats and the per-fragment `color`/`uv`/`time` inputs. Binding additional textures per-slot is not currently supported.
+- **Hot-swap latency** — shader asset replacement takes effect on the next frame after the Bevy `restitch_custom_shaders` system runs.
