@@ -112,6 +112,7 @@ Specialized development patterns in `.claude/skills/`:
 | `testing/SKILL.md` | Writing tests, improving coverage |
 | `docs/SKILL.md` | Updating documentation, README, known-limitations |
 | `design/SKILL.md` | Designing features, architecture decisions |
+| `developer-experience/SKILL.md` | DX audits, DoQ/DoD enforcement, onboarding |
 
 ## Validation Tools
 
@@ -132,6 +133,9 @@ bash .claude/tools/validate-tests.sh coverage
 
 # Documentation integrity
 bash .claude/tools/validate-docs.sh
+
+# DX audit (cross-IDE consistency, doc freshness)
+bash .claude/tools/dx-audit.sh
 
 # Run everything
 bash .claude/tools/validate-all.sh

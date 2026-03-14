@@ -151,6 +151,7 @@ Specialized development patterns live in `.claude/skills/`. Read the relevant sk
 | Testing | `.claude/skills/testing/SKILL.md` | Writing tests, improving coverage (target: 100%) |
 | Documentation | `.claude/skills/docs/SKILL.md` | Updating docs, README, known-limitations |
 | Design | `.claude/skills/design/SKILL.md` | Designing features, architecture decisions |
+| Developer Experience | `.claude/skills/developer-experience/SKILL.md` | DX audits, DoQ/DoD, onboarding, cross-IDE consistency |
 
 ## Validation Tools
 
@@ -162,5 +163,6 @@ bash .claude/tools/validate-frontend.sh quick   # ESLint + TypeScript + vitest
 bash .claude/tools/validate-mcp.sh full         # Manifest sync + MCP tests + parity audit
 bash .claude/tools/validate-tests.sh coverage   # Test coverage report
 bash .claude/tools/validate-docs.sh             # Documentation integrity check
+bash .claude/tools/dx-audit.sh                  # DX audit (cross-IDE, docs, tools)
 bash .claude/tools/validate-all.sh              # Run all validators
 ```
