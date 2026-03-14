@@ -9,21 +9,19 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 
 ## Features
 
-> **Status key:** Features marked **(UI only)** have inspector panels and store state but no engine integration yet — interactions update the UI but don't affect the WASM rendering engine. See [Known Limitations](docs/known-limitations.md) for architectural constraints.
-
 ### AI & Automation
 - **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want ("build a platformer level") and the AI spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
 - **Compound AI Actions** — 8 high-level tools (`create_scene_from_description`, `setup_character`, `arrange_entities`, etc.) that batch dozens of operations into single AI calls
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
 - **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
-- **MCP Server** — 308 commands across 37 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 322 commands across 37 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
 
 ### 3D Engine
-- **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 24) with automatic WebGL2 fallback for older browsers
+- **WebGPU Rendering** — Primary rendering via WebGPU (wgpu 27) with automatic WebGL2 fallback for older browsers
 - **PBR Materials** — Physically-based rendering with metallic/roughness workflow, UV transforms, clearcoat, transmission/IOR, parallax mapping, texture support, alpha modes, and 56 material presets across 9 categories
 - **Shader Node Editor** — Visual WGSL shader creation with 30+ node types, live material preview, and save/load
 - **Quality Presets** — Low/Medium/High/Ultra rendering presets that batch-configure MSAA, shadows, bloom, sharpening, and particle density
@@ -43,21 +41,19 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Post-Processing** — Bloom, chromatic aberration, color grading, CAS sharpening, SSAO (WebGPU), depth of field, and motion blur
 - **LOD System** — Level-of-detail component with distance thresholds, performance budget tracking
 
-### 2D Engine (UI only)
-> The 2D subsystem has full inspector UIs and Zustand state management, but no Bevy engine integration yet. Interactions update the editor UI; rendering and simulation require engine-side implementation.
-
-- **2D Project Type** — Dedicated 2D mode with orthographic camera, sorting layers, and sprite-specific tools **(UI only)**
-- **Sprite System** — Import PNG/WebP sprites, SpriteInspector, sorting layers (Background/Default/Foreground/UI) **(UI only)**
-- **Sprite Animation** — Sprite sheet slicing, animation clips, state machines with parameter-driven transitions **(UI only)**
-- **Tilemap System** — Multi-layer tilemaps, paint/erase/fill/rectangle tools, tile palette **(UI only)**
-- **2D Physics** — Inspector for 6 collider shapes, 4 joint types, one-way platforms, surface velocity **(UI only)**
-- **Skeletal 2D Animation** — Bone hierarchy, skins, IK constraints, blend trees, keyframe animation **(UI only)**
+### 2D Engine
+- **2D Project Type** — Dedicated 2D mode with orthographic camera, sorting layers, and sprite-specific tools
+- **Sprite System** — Import PNG/WebP sprites, SpriteInspector, sorting layers (Background/Default/Foreground/UI), Bevy Sprite rendering
+- **Sprite Animation** — Sprite sheet slicing via TextureAtlas, animation clips, state machines with parameter-driven transitions
+- **Tilemap System** — Multi-layer tilemaps, paint/erase/fill/rectangle tools, tile palette, hash-based change detection
+- **2D Physics** — Rapier2D integration with 6 collider shapes, 4 joint types, one-way platforms, surface velocity
+- **Skeletal 2D Animation** — Bone hierarchy, skins, IK constraints, blend trees, vertex skinning, keyframe animation
 - **AI Sprite Generation** — Generate pixel art characters, tilesets, and sprite sheets via DALL-E 3 and SDXL
 
 ### Editor
 - **Dockable Workspace** — Movable, resizable panels with preset layouts and persistent user customization
 - **3D/2D Scene Editor** — Transform gizmos, multi-select, snapping, scene hierarchy, and domain-specific inspector panels
-- **Game Templates** — 11 starter templates (5 3D + 6 2D): platformer, runner, shooter, puzzle, explorer, top-down RPG, shoot-em-up, fighting, metroidvania
+- **Game Templates** — 5 starter templates: platformer, runner, shooter, puzzle, explorer
 - **Game Cameras** — 6 camera modes (ThirdPerson, FirstPerson, SideScroller, TopDown, Fixed, Orbital) with auto-activation in Play mode
 - **Dialogue System** — Visual node editor with 5 node types (text, choice, condition, action, end), typewriter display, branching, and `forge.dialogue` script API
 - **Scene Transitions** — Fade, wipe, and instant transitions between scenes with `forge.scene.load` API
@@ -75,13 +71,13 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Game Export** — ZIP export with texture compression, custom loading screens, PWA generation
 - **Guided Onboarding** — Welcome wizard, interactive tutorials, context-sensitive tips
 - **In-Editor Documentation** — Browsable docs panel with BM25 search, help buttons on inspectors, F1 shortcut
-- **Pre-Built Game Components** — 13 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
+- **Pre-Built Game Components** — 12 drag-and-drop behaviors (CharacterController, Health, Collectible, Projectile, etc.)
 - **Responsive Layout** — Adaptive UI with compact (mobile), condensed (laptop), and full desktop modes
 
 ## Architecture
 
 ```
-MCP Server (308 commands, 37 categories)       AI agents + LLM tool use
+MCP Server (322 commands, 37 categories)       AI agents + LLM tool use
     |  JSON commands
 React Shell (Next.js 16, Zustand, Tailwind)    Visual editor UI
     |  JSON events via wasm-bindgen
@@ -178,7 +174,7 @@ project-forge/
 │   ├── public/              # Static assets + WASM binaries (generated)
 │   └── package.json
 ├── mcp-server/              # MCP command manifest + tools
-│   ├── manifest/commands.json  # 308 commands across 37 categories
+│   ├── manifest/commands.json  # 322 commands across 37 categories
 │   └── src/
 ├── docs/                    # User-facing documentation (human + AI readable)
 │   ├── getting-started/     # Installation, first scene, editor overview
@@ -203,7 +199,7 @@ project-forge/
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
-| `cd web && npx vitest run` | Run web tests (~4100+ tests) |
+| `cd web && npx vitest run` | Run web tests (~4700+ tests) |
 | `cd mcp-server && npx vitest run` | Run MCP server tests |
 
 ### Key conventions
