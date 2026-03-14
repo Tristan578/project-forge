@@ -53,7 +53,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ### Editor
 - **Dockable Workspace** — Movable, resizable panels with preset layouts and persistent user customization
 - **3D/2D Scene Editor** — Transform gizmos, multi-select, snapping, scene hierarchy, and domain-specific inspector panels
-- **Game Templates** — 5 starter templates: platformer, runner, shooter, puzzle, explorer
+- **Game Templates** — 11 starter templates (5 3D + 6 2D): platformer, runner, shooter, puzzle, explorer, top-down RPG, shoot-em-up, fighting, metroidvania, 2D platformer, 2D puzzle
 - **Game Cameras** — 6 camera modes (ThirdPerson, FirstPerson, SideScroller, TopDown, Fixed, Orbital) with auto-activation in Play mode
 - **Dialogue System** — Visual node editor with 5 node types (text, choice, condition, action, end), typewriter display, branching, and `forge.dialogue` script API
 - **Scene Transitions** — Fade, wipe, and instant transitions between scenes with `forge.scene.load` API
