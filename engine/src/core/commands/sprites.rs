@@ -748,6 +748,110 @@ fn handle_remove_animation_state_machine(payload: serde_json::Value) -> super::C
     }
 }
 
+/// Handle add_skeleton2d_mesh_attachment command.
+/// Payload: { entityId, skinName, attachmentName, vertices, uvs, triangles, weights }
+fn handle_add_mesh_attachment_2d(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let skin_name = payload.get("skinName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing skinName")?
+        .to_string();
+
+    let attachment_name = payload.get("attachmentName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing attachmentName")?
+        .to_string();
+
+    let vertices: Vec<[f32; 2]> = payload.get("vertices")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing vertices")?
+        .iter()
+        .map(|v| -> Result<[f32; 2], String> {
+            let arr = v.as_array().ok_or("vertices: expected array")?;
+            if arr.len() < 2 {
+                return Err("vertices: each element must have 2 components".to_string());
+            }
+            let x = arr[0].as_f64().ok_or("vertices: invalid number")? as f32;
+            let y = arr[1].as_f64().ok_or("vertices: invalid number")? as f32;
+            Ok([x, y])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let uvs: Vec<[f32; 2]> = payload.get("uvs")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing uvs")?
+        .iter()
+        .map(|v| -> Result<[f32; 2], String> {
+            let arr = v.as_array().ok_or("uvs: expected array")?;
+            if arr.len() < 2 {
+                return Err("uvs: each element must have 2 components".to_string());
+            }
+            let u = arr[0].as_f64().ok_or("uvs: invalid number")? as f32;
+            let v_coord = arr[1].as_f64().ok_or("uvs: invalid number")? as f32;
+            Ok([u, v_coord])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let triangles: Vec<u16> = payload.get("triangles")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing triangles")?
+        .iter()
+        .map(|v| -> Result<u16, String> {
+            let n = v.as_u64().ok_or("triangles: expected integer")?;
+            u16::try_from(n).map_err(|_| "triangles: index out of u16 range".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let weights: Vec<crate::core::skeleton2d::VertexWeights> = payload.get("weights")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing weights")?
+        .iter()
+        .map(|w| -> Result<crate::core::skeleton2d::VertexWeights, String> {
+            let bones: Vec<String> = w.get("bones")
+                .and_then(|b| b.as_array())
+                .ok_or("weights: missing bones array")?
+                .iter()
+                .map(|b| b.as_str().ok_or("weights: bone name must be string".to_string()).map(|s| s.to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let weight_values: Vec<f32> = w.get("weights")
+                .and_then(|wv| wv.as_array())
+                .ok_or("weights: missing weights array")?
+                .iter()
+                .map(|wv| -> Result<f32, String> {
+                    wv.as_f64().ok_or("weights: weight must be number".to_string()).map(|f| f as f32)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(crate::core::skeleton2d::VertexWeights { bones, weights: weight_values })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if vertices.len() != weights.len() {
+        return Err(format!(
+            "vertices.length ({}) must equal weights.length ({})",
+            vertices.len(),
+            weights.len()
+        ));
+    }
+
+    if queue_add_mesh_attachment2d_from_bridge(AddMeshAttachment2dRequest {
+        entity_id,
+        skin_name,
+        attachment_name,
+        vertices,
+        uvs,
+        triangles,
+        weights,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
     match command {
         "spawn_sprite" => Some(handle_spawn_sprite(payload.clone())),
@@ -787,6 +891,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
             Some(super::handle_query(QueryRequest::Skeleton2dState { entity_id }))
         }
         "auto_weight_skeleton2d" => Some(handle_auto_weight_skeleton2d(payload.clone())),
+        "add_skeleton2d_mesh_attachment" => Some(handle_add_mesh_attachment_2d(payload.clone())),
         "set_tilemap_data" => Some(handle_set_tilemap_data(payload.clone())),
         "remove_tilemap_data" => Some(handle_remove_tilemap_data(payload.clone())),
         _ => None,

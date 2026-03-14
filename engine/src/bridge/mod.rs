@@ -532,6 +532,7 @@ impl Plugin for SelectionPlugin {
                     skeleton2d::apply_ik_chain2d_creates,
                     skeleton2d::handle_skeleton2d_query,
                     skeleton2d::apply_auto_weight_skeleton2d,
+                    skeleton2d::apply_add_mesh_attachment_requests,
                 ))
                 .add_systems(Update, skeleton2d::render_skeleton_bones)
                 .add_systems(Update, (
