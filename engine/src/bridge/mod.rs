@@ -33,7 +33,7 @@ use crate::core::{
     audio::AudioBusConfig,
     camera::CameraControlPlugin,
     commands::CommandResponse,
-    engine_mode::{EngineMode, SceneSnapshot},
+    engine_mode::{EngineMode, PlaySystemSet, SceneSnapshot},
     entity_factory,
     environment::{EnvironmentPlugin, SkyboxHandles},
     history::HistoryStack,
@@ -278,6 +278,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<core::lod::PerformanceMetrics>()
             .init_resource::<core::lod::SimplificationBackend>()
             .init_resource::<core::custom_wgsl::CustomShaderRegistry>()
+            .init_resource::<core::sprite::SortingLayerConfig>()
             .add_message::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
@@ -382,10 +383,19 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, sprite::apply_tilemap_data_updates)
             .add_systems(Update, sprite::apply_tilemap_data_removals)
             .add_systems(Update, sprite::sync_tilemap_rendering)
+            // Tileset CRUD (always-active): set/remove TilesetData on entities
+            .add_systems(Update, sprite::apply_set_tileset_requests)
+            .add_systems(Update, sprite::apply_remove_tileset_requests)
+            // Sorting layers (always-active): update SortingLayerConfig resource
+            .add_systems(Update, sprite::apply_set_sorting_layers)
+            .add_systems(Update, sprite::sync_sprite_z_with_sorting_config)
             // 2D camera systems (always-active): project type + Camera2d management
             .add_systems(Update, sprite::apply_project_type_changes)
             .add_systems(Update, sprite::apply_camera_2d_updates)
             .add_systems(Update, sprite::sync_camera_2d_rendering)
+            // 2D play-mode systems: camera bounds clamping + pixel-perfect snapping
+            .add_systems(Update, sprite::clamp_camera_2d_bounds.in_set(PlaySystemSet))
+            .add_systems(Update, sprite::apply_pixel_perfect_snapping.in_set(PlaySystemSet))
             .add_systems(PostUpdate, (
                 scene_graph::detect_entity_added,
                 scene_graph::detect_entity_removed,

@@ -852,6 +852,63 @@ fn handle_add_mesh_attachment_2d(payload: serde_json::Value) -> super::CommandRe
     }
 }
 
+/// Handle set_sorting_layers command.
+/// Payload: { layers: ["Background", "Default", "Foreground", "UI", ...] }
+fn handle_set_sorting_layers(payload: serde_json::Value) -> super::CommandResult {
+    let layers = payload.get("layers")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .ok_or("Missing layers array")?;
+
+    if queue_set_sorting_layers_from_bridge(SetSortingLayersRequest { layers }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_tileset command.
+/// Payload: { entityId, assetId, tileSize, gridSize, spacing, margin, tiles }
+fn handle_set_tileset(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let mut obj = payload;
+    if let Some(map) = obj.as_object_mut() {
+        map.remove("entityId");
+    }
+    let tileset_data: crate::core::tileset::TilesetData =
+        serde_json::from_value(obj)
+            .map_err(|e| format!("Invalid tileset data: {}", e))?;
+
+    if queue_set_tileset_from_bridge(SetTilesetRequest { entity_id, tileset_data }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_tileset command.
+/// Payload: { entityId }
+fn handle_remove_tileset(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_remove_tileset_from_bridge(RemoveTilesetRequest { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
     match command {
         "spawn_sprite" => Some(handle_spawn_sprite(payload.clone())),
@@ -894,6 +951,9 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "add_skeleton2d_mesh_attachment" => Some(handle_add_mesh_attachment_2d(payload.clone())),
         "set_tilemap_data" => Some(handle_set_tilemap_data(payload.clone())),
         "remove_tilemap_data" => Some(handle_remove_tilemap_data(payload.clone())),
+        "set_sorting_layers" => Some(handle_set_sorting_layers(payload.clone())),
+        "set_tileset" => Some(handle_set_tileset(payload.clone())),
+        "remove_tileset" => Some(handle_remove_tileset(payload.clone())),
         _ => None,
     }
 }

@@ -26,9 +26,9 @@ use crate::core::{
     project_type::ProjectType,
     sprite::{
         AnimParam, AnimationStateMachineData, FloatOp, FrameDuration, SliceMode,
-        SpriteAnchor, SpriteAnimationTimer, SpriteAnimatorData,
+        SortingLayerConfig, SpriteAnchor, SpriteAnimationTimer, SpriteAnimatorData,
         SpriteData, SpriteEnabled, SpriteSheetData, TransitionCondition,
-        z_from_sorting,
+        z_from_sorting, z_from_sorting_with_config,
     },
     tilemap::{TilemapData, TilemapEnabled, TilemapOrigin},
     tileset::TilesetData,
@@ -1033,5 +1033,98 @@ pub(super) fn emit_tilemap_on_selection(
         if let Ok((entity_id, tilemap_data)) = query.get(primary) {
             events::emit_tilemap_changed(&entity_id.0, Some(tilemap_data));
         }
+    }
+}
+
+// ========== Sorting Layer Systems ==========
+
+/// System that processes pending set_sorting_layers requests from the bridge.
+/// Updates the SortingLayerConfig resource.
+pub(super) fn apply_set_sorting_layers(
+    mut pending: ResMut<PendingCommands>,
+    mut config: ResMut<SortingLayerConfig>,
+) {
+    for request in pending.set_sorting_layers_requests.drain(..) {
+        config.layers = request.layers;
+    }
+}
+
+// ========== Tileset CRUD Systems ==========
+
+/// System that processes pending set_tileset requests from the bridge.
+/// Inserts or updates TilesetData on matching entities.
+pub(super) fn apply_set_tileset_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut query: Query<(Entity, &EntityId, Option<&mut TilesetData>)>,
+    mut commands: Commands,
+) {
+    for request in pending.set_tileset_requests.drain(..) {
+        let found = query.iter_mut().find(|(_, eid, _)| eid.0 == request.entity_id);
+        let Some((entity, _, existing)) = found else { continue };
+
+        if let Some(mut existing_data) = existing {
+            *existing_data = request.tileset_data;
+        } else {
+            commands.entity(entity).insert(request.tileset_data);
+        }
+    }
+}
+
+/// System that processes pending remove_tileset requests from the bridge.
+/// Removes TilesetData from matching entities.
+pub(super) fn apply_remove_tileset_requests(
+    mut pending: ResMut<PendingCommands>,
+    query: Query<(Entity, &EntityId)>,
+    mut commands: Commands,
+) {
+    for request in pending.remove_tileset_requests.drain(..) {
+        let found = query.iter().find(|(_, eid)| eid.0 == request.entity_id);
+        let Some((entity, _)) = found else { continue };
+
+        commands.entity(entity).remove::<TilesetData>();
+    }
+}
+
+// ========== Camera 2D Play-Mode Systems ==========
+
+/// System that clamps camera 2D translation within configured bounds during play mode.
+/// Runs in PlaySystemSet only.
+pub(super) fn clamp_camera_2d_bounds(
+    mut query: Query<(&Camera2dData, &mut Transform), With<Managed2dCamera>>,
+) {
+    for (cam, mut transform) in query.iter_mut() {
+        if let Some(bounds) = &cam.bounds {
+            transform.translation.x = transform.translation.x.clamp(bounds.min_x, bounds.max_x);
+            transform.translation.y = transform.translation.y.clamp(bounds.min_y, bounds.max_y);
+        }
+    }
+}
+
+/// System that snaps sprite positions to whole pixel values when pixel_perfect is enabled.
+/// Runs in PlaySystemSet only.
+pub(super) fn apply_pixel_perfect_snapping(
+    camera_query: Query<&Camera2dData, With<Managed2dCamera>>,
+    mut sprite_query: Query<&mut Transform, With<SpriteData>>,
+) {
+    let pixel_perfect = camera_query.iter().any(|c| c.pixel_perfect);
+    if pixel_perfect {
+        for mut transform in sprite_query.iter_mut() {
+            transform.translation.x = transform.translation.x.round();
+            transform.translation.y = transform.translation.y.round();
+        }
+    }
+}
+
+/// System that syncs SpriteData Z with SortingLayerConfig during play mode.
+/// Re-runs z_from_sorting whenever the config changes.
+pub(super) fn sync_sprite_z_with_sorting_config(
+    config: Res<SortingLayerConfig>,
+    mut query: Query<(&SpriteData, &mut Transform)>,
+) {
+    if !config.is_changed() {
+        return;
+    }
+    for (sprite_data, mut transform) in query.iter_mut() {
+        transform.translation.z = z_from_sorting_with_config(sprite_data, Some(&config));
     }
 }
