@@ -88,6 +88,26 @@ pub struct SpawnSpriteRequest {
     pub sorting_order: Option<i32>,
 }
 
+// === Sorting Layers Request ===
+
+#[derive(Debug, Clone)]
+pub struct SetSortingLayersRequest {
+    pub layers: Vec<String>,
+}
+
+// === Tileset CRUD Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct SetTilesetRequest {
+    pub entity_id: String,
+    pub tileset_data: crate::core::tileset::TilesetData,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoveTilesetRequest {
+    pub entity_id: String,
+}
+
 // === Tilemap Request Structs ===
 
 #[derive(Debug, Clone)]
@@ -166,6 +186,18 @@ impl PendingCommands {
         self.spawn_sprite_requests.push(request);
     }
 
+    pub fn queue_set_sorting_layers(&mut self, request: SetSortingLayersRequest) {
+        self.set_sorting_layers_requests.push(request);
+    }
+
+    pub fn queue_set_tileset(&mut self, request: SetTilesetRequest) {
+        self.set_tileset_requests.push(request);
+    }
+
+    pub fn queue_remove_tileset(&mut self, request: RemoveTilesetRequest) {
+        self.remove_tileset_requests.push(request);
+    }
+
     pub fn queue_tilemap_data_update(&mut self, update: TilemapDataUpdate) {
         self.tilemap_data_updates.push(update);
     }
@@ -219,6 +251,18 @@ pub fn queue_animation_state_machine_removal_from_bridge(removal: AnimationState
 
 pub fn queue_spawn_sprite_from_bridge(request: SpawnSpriteRequest) -> bool {
     super::with_pending(|pc| pc.queue_spawn_sprite(request)).is_some()
+}
+
+pub fn queue_set_sorting_layers_from_bridge(request: SetSortingLayersRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_sorting_layers(request)).is_some()
+}
+
+pub fn queue_set_tileset_from_bridge(request: SetTilesetRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_tileset(request)).is_some()
+}
+
+pub fn queue_remove_tileset_from_bridge(request: RemoveTilesetRequest) -> bool {
+    super::with_pending(|pc| pc.queue_remove_tileset(request)).is_some()
 }
 
 pub fn queue_tilemap_data_update_from_bridge(update: TilemapDataUpdate) -> bool {
