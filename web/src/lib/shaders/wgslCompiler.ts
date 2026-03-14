@@ -13,6 +13,8 @@ interface CompilerContext {
   /** When true, generates code for a mega-shader slot function body.
    *  Replaces `in.uv` → `uv`, `globals.time` → `time`, etc. */
   slotMode: boolean;
+  /** Errors collected during compilation (e.g. unsupported nodes in slot mode). */
+  errors: string[];
 }
 
 /**
@@ -43,6 +45,7 @@ export function compileToMegaShaderSlot(graph: ShaderGraph): MegaShaderCompileRe
       statements: [],
       varMap: new Map(),
       slotMode: true,
+      errors: [],
     };
 
     // Seed the variable map with slot function inputs.
@@ -64,6 +67,10 @@ export function compileToMegaShaderSlot(graph: ShaderGraph): MegaShaderCompileRe
     for (const node of sortedNodes) {
       if (node.type === 'pbr_output') continue;
       generateNodeCode(node, graph.edges, ctx);
+    }
+
+    if (ctx.errors.length > 0) {
+      return { functionBody: '', error: ctx.errors.join('; ') };
     }
 
     // For the mega-shader slot the output is always the final color.
@@ -99,6 +106,7 @@ export function compileToWgsl(graph: ShaderGraph): { code: string; error?: strin
       statements: [],
       varMap: new Map(),
       slotMode: false,
+      errors: [],
     };
 
     // Find the output node
@@ -204,9 +212,17 @@ function generateNodeCode(node: ShaderNode, edges: ShaderEdge[], ctx: CompilerCo
   switch (node.type) {
     // Input nodes
     case 'vertex_position':
+      if (ctx.slotMode) {
+        ctx.errors.push('vertex_position node is not available in mega-shader slot mode (only color, uv, time, and params are accessible)');
+        return;
+      }
       ctx.varMap.set(`${node.id}:position`, 'in.world_position.xyz');
       break;
     case 'vertex_normal':
+      if (ctx.slotMode) {
+        ctx.errors.push('vertex_normal node is not available in mega-shader slot mode (only color, uv, time, and params are accessible)');
+        return;
+      }
       ctx.varMap.set(`${node.id}:normal`, 'in.world_normal');
       break;
     case 'vertex_uv':
@@ -216,6 +232,10 @@ function generateNodeCode(node: ShaderNode, edges: ShaderEdge[], ctx: CompilerCo
       ctx.varMap.set(`${node.id}:time`, ctx.slotMode ? 'time' : 'globals.time');
       break;
     case 'camera_position':
+      if (ctx.slotMode) {
+        ctx.errors.push('camera_position node is not available in mega-shader slot mode (only color, uv, time, and params are accessible)');
+        return;
+      }
       ctx.varMap.set(`${node.id}:position`, 'view.world_position.xyz');
       break;
 
@@ -310,9 +330,17 @@ function generateNodeCode(node: ShaderNode, edges: ShaderEdge[], ctx: CompilerCo
 
     // Lighting nodes
     case 'fresnel':
+      if (ctx.slotMode) {
+        ctx.errors.push('fresnel node is not available in mega-shader slot mode (requires world normal and view direction)');
+        return;
+      }
       emitFresnel(node, inputs, ctx);
       break;
     case 'normal_map':
+      if (ctx.slotMode) {
+        ctx.errors.push('normal_map node is not available in mega-shader slot mode (requires tangent-space data)');
+        return;
+      }
       emitNormalMap(node, inputs, ctx);
       break;
   }
