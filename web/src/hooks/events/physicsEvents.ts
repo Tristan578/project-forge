@@ -69,10 +69,21 @@ export function handlePhysicsEvent(
       const payload = data as unknown as { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number };
       // Handle audio occlusion raycasts
       if (payload.requestId.startsWith(OCCLUSION_RAYCAST_PREFIX)) {
-        const entityId = payload.requestId.slice(OCCLUSION_RAYCAST_PREFIX.length);
-        // If hitEntity is not the audio source entity, something is blocking the line
-        const occluded = payload.hitEntity !== null && payload.hitEntity !== entityId;
-        audioManager.updateOcclusionState(entityId, occluded);
+        // requestId format: "audio_occlusion:<entityId>:<totalDistance>"
+        const rest = payload.requestId.slice(OCCLUSION_RAYCAST_PREFIX.length);
+        const lastColon = rest.lastIndexOf(':');
+        const entityId = lastColon >= 0 ? rest.slice(0, lastColon) : rest;
+        const totalDistance = lastColon >= 0 ? parseFloat(rest.slice(lastColon + 1)) : 0;
+        // Graduated occlusion: amount = 1 - (hitDistance / totalDistance)
+        // No hit or hit self = fully clear (amount 0)
+        const isBlocked = payload.hitEntity !== null && payload.hitEntity !== entityId;
+        let amount = 0;
+        if (isBlocked && totalDistance > 0) {
+          amount = 1.0 - payload.distance / totalDistance;
+          if (amount < 0) amount = 0;
+          if (amount > 1) amount = 1;
+        }
+        audioManager.updateOcclusionAmount(entityId, amount);
         return true;
       }
       // Forward to script raycast callback
