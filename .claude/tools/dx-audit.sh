@@ -76,7 +76,8 @@ section "Validation Script Health"
 
 TOOLS_DIR="$PROJECT_ROOT/.claude/tools"
 if [ -d "$TOOLS_DIR" ]; then
-  for script in "$TOOLS_DIR"/validate-*.sh; do
+  for script in "$TOOLS_DIR"/*.sh; do
+    [ -f "$script" ] || continue
     name=$(basename "$script")
     if [ -x "$script" ]; then
       pass "$name is executable"
