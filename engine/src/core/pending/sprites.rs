@@ -102,9 +102,26 @@ pub struct TilemapDataRemoval {
 }
 
 
+// === Skeleton 2D Mesh Attachment Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct AddMeshAttachment2dRequest {
+    pub entity_id: String,
+    pub skin_name: String,
+    pub attachment_name: String,
+    pub vertices: Vec<[f32; 2]>,
+    pub uvs: Vec<[f32; 2]>,
+    pub triangles: Vec<u16>,
+    pub weights: Vec<crate::core::skeleton2d::VertexWeights>,
+}
+
 // === Queue Methods ===
 
 impl PendingCommands {
+    pub fn queue_add_mesh_attachment2d(&mut self, request: AddMeshAttachment2dRequest) {
+        self.add_mesh_attachment2d_requests.push(request);
+    }
+
     pub fn queue_set_project_type(&mut self, request: SetProjectTypeRequest) {
         self.set_project_type_requests.push(request);
     }
@@ -210,4 +227,8 @@ pub fn queue_tilemap_data_update_from_bridge(update: TilemapDataUpdate) -> bool 
 
 pub fn queue_tilemap_data_removal_from_bridge(removal: TilemapDataRemoval) -> bool {
     super::with_pending(|pc| pc.queue_tilemap_data_removal(removal)).is_some()
+}
+
+pub fn queue_add_mesh_attachment2d_from_bridge(request: AddMeshAttachment2dRequest) -> bool {
+    super::with_pending(|pc| pc.queue_add_mesh_attachment2d(request)).is_some()
 }

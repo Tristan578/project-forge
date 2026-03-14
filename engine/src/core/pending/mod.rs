@@ -245,6 +245,7 @@ pub struct PendingCommands {
     pub spawn_sprite_requests: Vec<SpawnSpriteRequest>,
     pub tilemap_data_updates: Vec<TilemapDataUpdate>,
     pub tilemap_data_removals: Vec<TilemapDataRemoval>,
+    pub add_mesh_attachment2d_requests: Vec<AddMeshAttachment2dRequest>,
     // scene domain
     pub scene_export_requests: Vec<SceneExportRequest>,
     pub scene_load_requests: Vec<SceneLoadRequest>,
