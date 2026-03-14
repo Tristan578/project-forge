@@ -70,4 +70,5 @@ if [ "$ISSUES" -eq 0 ]; then
   echo "=== Documentation validation passed ==="
 else
   echo "=== Documentation validation: $ISSUES issue(s) found ==="
+  exit 1
 fi
