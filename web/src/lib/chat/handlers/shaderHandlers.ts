@@ -235,6 +235,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
   },
 
   apply_custom_shader: async (args, ctx) => {
+    const MAX_PARAMS = 16;
     const p = parseArgs(
       z.object({
         entityId: zEntityId,
@@ -245,10 +246,18 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     );
     if (p.error) return p.error;
 
+    const params = p.data.params ?? {};
+    if (Object.keys(params).length > MAX_PARAMS) {
+      return {
+        success: false,
+        result: `Too many params (${Object.keys(params).length}) — mega-shader supports at most ${MAX_PARAMS}`,
+      };
+    }
+
     ctx.dispatchCommand('apply_custom_shader', {
       entityId: p.data.entityId,
       slot: p.data.slot,
-      params: p.data.params ?? {},
+      params,
     });
 
     return {

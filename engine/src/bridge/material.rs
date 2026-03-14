@@ -594,7 +594,7 @@ pub(super) fn apply_apply_custom_shader_requests(
     entity_query: Query<(Entity, &EntityId, Option<&ShaderEffectData>)>,
     ext_mat_query: Query<(Entity, &EntityId, &MeshMaterial3d<ForgeMaterial>)>,
     std_mat_query: Query<(Entity, &EntityId, &MeshMaterial3d<StandardMaterial>, &MaterialData)>,
-    std_materials: ResMut<Assets<StandardMaterial>>,
+    std_materials: Res<Assets<StandardMaterial>>,
     mut ext_materials: ResMut<Assets<ForgeMaterial>>,
     mut commands: Commands,
 ) {
@@ -615,6 +615,9 @@ pub(super) fn apply_apply_custom_shader_requests(
         // Ensure entity has a ForgeMaterial (upgrade from StandardMaterial if needed).
         if let Ok((_, _, ext_handle)) = ext_mat_query.get(entity) {
             if let Some(ext_mat) = ext_materials.get_mut(ext_handle) {
+                // Reset shader_type to 0 so built-in effect early-returns are skipped,
+                // allowing the custom_slot dispatch block to execute.
+                ext_mat.extension.shader_type = 0;
                 ext_mat.extension.custom_slot = req.slot;
                 ext_mat.extension.custom_params_0 = p0;
                 ext_mat.extension.custom_params_1 = p1;
