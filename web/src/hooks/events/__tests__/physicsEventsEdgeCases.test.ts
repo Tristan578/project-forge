@@ -22,7 +22,7 @@ vi.mock('@/lib/scripting/useScriptRunner', () => ({
 
 vi.mock('@/lib/audio/audioManager', () => ({
   audioManager: {
-    updateOcclusionState: vi.fn(),
+    updateOcclusionAmount: vi.fn(),
   },
 }));
 
@@ -177,7 +177,7 @@ describe('handlePhysicsEvent — edge cases', () => {
         mockSetGet.get
       );
 
-      expect(audioManager.updateOcclusionState).not.toHaveBeenCalled();
+      expect(audioManager.updateOcclusionAmount).not.toHaveBeenCalled();
     });
 
     it('does not call script callback for occlusion requestId', () => {
@@ -186,7 +186,7 @@ describe('handlePhysicsEvent — edge cases', () => {
 
       handlePhysicsEvent(
         'RAYCAST_RESULT',
-        { requestId: 'audio_occlusion:some-entity', hitEntity: 'wall', point: [0, 0, 0], distance: 1.0 },
+        { requestId: 'audio_occlusion:some-entity:10', hitEntity: 'wall', point: [0, 0, 0], distance: 1.0 },
         mockSetGet.set,
         mockSetGet.get
       );
@@ -194,48 +194,50 @@ describe('handlePhysicsEvent — edge cases', () => {
       expect(mockRaycastCb).not.toHaveBeenCalled();
     });
 
-    it('extracts entityId correctly from occlusion prefix', () => {
+    it('extracts entityId and computes graduated amount from occlusion prefix', () => {
+      // totalDistance=10, hitDistance=3 → amount = 1 - 3/10 = 0.7
       handlePhysicsEvent(
         'RAYCAST_RESULT',
-        { requestId: 'audio_occlusion:sound-source-42', hitEntity: 'obstacle', point: [0, 0, 0], distance: 3.0 },
+        { requestId: 'audio_occlusion:sound-source-42:10', hitEntity: 'obstacle', point: [0, 0, 0], distance: 3.0 },
         mockSetGet.set,
         mockSetGet.get
       );
 
-      expect(audioManager.updateOcclusionState).toHaveBeenCalledWith('sound-source-42', true);
+      expect(audioManager.updateOcclusionAmount).toHaveBeenCalledWith('sound-source-42', 0.7);
     });
 
-    it('marks as NOT occluded when hitEntity is null (open air)', () => {
+    it('returns amount 0 when hitEntity is null (open air)', () => {
       handlePhysicsEvent(
         'RAYCAST_RESULT',
-        { requestId: 'audio_occlusion:speaker-1', hitEntity: null, point: [0, 0, 0], distance: 0 },
+        { requestId: 'audio_occlusion:speaker-1:5', hitEntity: null, point: [0, 0, 0], distance: 0 },
         mockSetGet.set,
         mockSetGet.get
       );
 
-      expect(audioManager.updateOcclusionState).toHaveBeenCalledWith('speaker-1', false);
+      expect(audioManager.updateOcclusionAmount).toHaveBeenCalledWith('speaker-1', 0);
     });
 
-    it('marks as NOT occluded when hitEntity matches the audio source entity', () => {
+    it('returns amount 0 when hitEntity matches the audio source entity', () => {
       handlePhysicsEvent(
         'RAYCAST_RESULT',
-        { requestId: 'audio_occlusion:audio-entity-7', hitEntity: 'audio-entity-7', point: [0, 0, 0], distance: 0.1 },
+        { requestId: 'audio_occlusion:audio-entity-7:5', hitEntity: 'audio-entity-7', point: [0, 0, 0], distance: 0.1 },
         mockSetGet.set,
         mockSetGet.get
       );
 
-      expect(audioManager.updateOcclusionState).toHaveBeenCalledWith('audio-entity-7', false);
+      expect(audioManager.updateOcclusionAmount).toHaveBeenCalledWith('audio-entity-7', 0);
     });
 
-    it('marks as occluded when hitEntity is a different entity (wall between listener and source)', () => {
+    it('computes graduated amount when hitEntity is a different entity', () => {
+      // totalDistance=10, hitDistance=7.07 → amount = 1 - 7.07/10 = 0.293
       handlePhysicsEvent(
         'RAYCAST_RESULT',
-        { requestId: 'audio_occlusion:ambient-sound', hitEntity: 'concrete-wall', point: [5, 0, 5], distance: 7.07 },
+        { requestId: 'audio_occlusion:ambient-sound:10', hitEntity: 'concrete-wall', point: [5, 0, 5], distance: 7.07 },
         mockSetGet.set,
         mockSetGet.get
       );
 
-      expect(audioManager.updateOcclusionState).toHaveBeenCalledWith('ambient-sound', true);
+      expect(audioManager.updateOcclusionAmount).toHaveBeenCalledWith('ambient-sound', expect.closeTo(0.293, 2));
     });
 
     it('passes full payload to script callback for script raycast', () => {
@@ -264,7 +266,8 @@ describe('handlePhysicsEvent — edge cases', () => {
       (window as unknown as Record<string, unknown>).__scriptRaycastCallback = mockRaycastCb;
 
       const ray1 = { requestId: 'ray-a', hitEntity: 'ground', point: [0, -1, 0], distance: 1.0 };
-      const ray2 = { requestId: 'audio_occlusion:ent-1', hitEntity: 'wall', point: [3, 0, 3], distance: 4.24 };
+      // totalDistance=10, hitDistance=4.24 → amount = 1 - 4.24/10 = 0.576
+      const ray2 = { requestId: 'audio_occlusion:ent-1:10', hitEntity: 'wall', point: [3, 0, 3], distance: 4.24 };
       const ray3 = { requestId: 'ray-b', hitEntity: null, point: [0, 0, 0], distance: 0 };
 
       handlePhysicsEvent('RAYCAST_RESULT', ray1, mockSetGet.set, mockSetGet.get);
@@ -276,9 +279,9 @@ describe('handlePhysicsEvent — edge cases', () => {
       expect(mockRaycastCb.mock.calls[0][0]).toEqual(ray1);
       expect(mockRaycastCb.mock.calls[1][0]).toEqual(ray3);
 
-      // Occlusion updated only for the occlusion ray
-      expect(audioManager.updateOcclusionState).toHaveBeenCalledTimes(1);
-      expect(audioManager.updateOcclusionState).toHaveBeenCalledWith('ent-1', true);
+      // Occlusion updated only for the occlusion ray with graduated amount
+      expect(audioManager.updateOcclusionAmount).toHaveBeenCalledTimes(1);
+      expect(audioManager.updateOcclusionAmount).toHaveBeenCalledWith('ent-1', expect.closeTo(0.576, 2));
     });
 
     it('returns true for RAYCAST_RESULT even without script callback', () => {
@@ -295,7 +298,7 @@ describe('handlePhysicsEvent — edge cases', () => {
     });
 
     it('handles zero-length requestId after occlusion prefix gracefully', () => {
-      // Edge case: 'audio_occlusion:' with empty entity id
+      // Edge case: 'audio_occlusion:' with empty entity id and no totalDistance
       handlePhysicsEvent(
         'RAYCAST_RESULT',
         { requestId: 'audio_occlusion:', hitEntity: 'something', point: [0, 0, 0], distance: 1.0 },
@@ -303,9 +306,8 @@ describe('handlePhysicsEvent — edge cases', () => {
         mockSetGet.get
       );
 
-      // Should call updateOcclusionState with empty string as entityId
-      // and occluded=true (hitEntity 'something' !== '')
-      expect(audioManager.updateOcclusionState).toHaveBeenCalledWith('', true);
+      // totalDistance=0 so amount stays 0 even though hitEntity differs
+      expect(audioManager.updateOcclusionAmount).toHaveBeenCalledWith('', 0);
     });
   });
 
