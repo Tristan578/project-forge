@@ -437,7 +437,7 @@ describe('shaderHandlers', () => {
   describe('apply_shader_to_entity (mega-shader fallback)', () => {
     it('falls back to mega-shader when WGSL does not match built-in', async () => {
       mockCompileToWgsl.mockReturnValueOnce({ code: '// custom fx with no known keywords', error: null });
-      mockCompileToMegaShaderSlot.mockReturnValueOnce({ functionBody: '  return color * 0.5;' });
+      mockCompileToMegaShaderSlot.mockReturnValueOnce({ functionBody: '  return color * 0.5;', error: undefined });
       const dispatchCommand = vi.fn();
       const store = createMockStore({});
       const result = await handlers['apply_shader_to_entity'](
