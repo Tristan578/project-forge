@@ -31,6 +31,16 @@ export async function POST(request: NextRequest) {
   const descResult = optionalString(parsed.body.description, 'Description', { maxLength: 5000 });
   if (!descResult.ok) return descResult.response;
 
+  // Thumbnail is an optional base64 data URL (max 200 KB to prevent abuse).
+  const thumbnailRaw = parsed.body.thumbnail;
+  let thumbnail: string | null = null;
+  if (typeof thumbnailRaw === 'string' && thumbnailRaw.startsWith('data:image/')) {
+    const MAX_THUMBNAIL_BYTES = 200 * 1024;
+    if (thumbnailRaw.length <= MAX_THUMBNAIL_BYTES) {
+      thumbnail = thumbnailRaw;
+    }
+  }
+
   // Content moderation check on title and description
   const titleMod = moderateContent(titleResult.value);
   if (titleMod.severity === 'block') {
@@ -99,6 +109,7 @@ export async function POST(request: NextRequest) {
         status: 'published',
         version: newVersion,
         cdnUrl: gameUrl,
+        thumbnail,
         updatedAt: new Date(),
       })
       .where(eq(publishedGames.id, gameDbId));
@@ -125,6 +136,7 @@ export async function POST(request: NextRequest) {
       description: descResult.value ?? null,
       status: 'published',
       cdnUrl: gameUrl,
+      thumbnail,
     })
     .returning();
 

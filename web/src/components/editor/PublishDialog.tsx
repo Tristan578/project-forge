@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 import { X, Globe, Loader2, Check, AlertCircle, Copy, Tag } from 'lucide-react';
 import { usePublishStore } from '@/stores/publishStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { captureCanvasThumbnail } from '@/lib/thumbnail/captureCanvas';
 
 interface PublishDialogProps {
   isOpen: boolean;
@@ -76,7 +77,8 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
 
   const handlePublish = useCallback(async () => {
     if (!projectId || !title || !slug) return;
-    const result = await publishGame(projectId, title, slug, description, tags);
+    const thumbnail = await captureCanvasThumbnail('game-canvas');
+    const result = await publishGame(projectId, title, slug, description, tags, thumbnail);
     if (result) {
       setPublishedUrl(result.url);
     }
