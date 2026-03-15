@@ -10,9 +10,10 @@ import { shaderHandlers } from '../shaderHandlers';
 // ---------------------------------------------------------------------------
 
 // vi.hoisted runs before vi.mock hoisting, making these available in mock factories
-const { mockShaderEditorStore, mockCompileToWgsl } = vi.hoisted(() => ({
-  mockShaderEditorStore: { getState: vi.fn() },
+const { mockShaderEditorStore, mockCompileToWgsl, mockCompileToMegaShaderSlot } = vi.hoisted(() => ({
+  mockShaderEditorStore: { getState: vi.fn(() => ({ setCompilationError: vi.fn() })) },
   mockCompileToWgsl: vi.fn(),
+  mockCompileToMegaShaderSlot: vi.fn(() => ({ functionBody: '  return color;', error: undefined })),
 }));
 
 vi.mock('@/stores/shaderEditorStore', () => ({
@@ -53,6 +54,7 @@ vi.mock('@/lib/shaders/shaderNodeTypes', () => ({
 
 vi.mock('@/lib/shaders/wgslCompiler', () => ({
   compileToWgsl: (...args: unknown[]) => mockCompileToWgsl(...args),
+  compileToMegaShaderSlot: (...args: unknown[]) => mockCompileToMegaShaderSlot(...args),
 }));
 
 vi.mock('@/lib/materialPresets', () => ({
@@ -1456,6 +1458,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: null,
         graphs: {},
+        setCompilationError: vi.fn(),
       });
 
       const store = createMockStore();
@@ -1543,6 +1546,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({ code: '@fragment fn main() -> vec4f { return vec4f(1.0); }' });
 
@@ -1567,6 +1571,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-2': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({ code: '// compiled code' });
 
@@ -1583,6 +1588,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: null,
         graphs: {},
+        setCompilationError: vi.fn(),
       });
 
       const store = createMockStore();
@@ -1598,6 +1604,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: {},
+        setCompilationError: vi.fn(),
       });
 
       const store = createMockStore();
@@ -1619,6 +1626,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({ code: '', error: 'No PBR Output node found.' });
 
@@ -1688,6 +1696,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({
         code: 'var dissolve_threshold: f32;',
@@ -1713,6 +1722,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({
         code: 'var scan_line_frequency: f32;',
@@ -1737,6 +1747,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({
         code: 'var toon_bands: i32 = 4;',
@@ -1761,6 +1772,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({
         code: 'let fresnel_power = 2.0;',
@@ -1785,6 +1797,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({
         code: 'var force_field_intensity: f32;',
@@ -1809,6 +1822,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({
         code: 'var scroll_speed: f32 = 1.0; var distortion: f32 = 0.5;',
@@ -1833,9 +1847,14 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({
         code: 'fn main() { return; }',
+      });
+      mockCompileToMegaShaderSlot.mockReturnValueOnce({
+        functionBody: '',
+        error: 'No valid shader function body',
       });
 
       const store = createMockStore();
@@ -1844,13 +1863,14 @@ describe('shaderHandlers', () => {
         { store, dispatchCommand: vi.fn() }
       );
       expect(result.success).toBe(false);
-      expect(result.error).toContain('could not be mapped');
+      expect(result.error).toContain('Mega-shader compilation failed');
     });
 
     it('returns error when no shader graph is specified and none is active', async () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: null,
         graphs: {},
+        setCompilationError: vi.fn(),
       });
 
       const store = createMockStore();
@@ -1866,6 +1886,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: null,
         graphs: {},
+        setCompilationError: vi.fn(),
       });
 
       const store = createMockStore();
@@ -1887,6 +1908,7 @@ describe('shaderHandlers', () => {
       mockShaderEditorStore.getState.mockReturnValue({
         activeGraphId: 'graph-1',
         graphs: { 'graph-1': graph },
+        setCompilationError: vi.fn(),
       });
       mockCompileToWgsl.mockReturnValue({ code: '', error: 'Cyclic dependency detected' });
 
@@ -1934,6 +1956,7 @@ describe('shaderHandlers', () => {
     it('returns message when no graphs exist', async () => {
       mockShaderEditorStore.getState.mockReturnValue({
         graphs: {},
+        setCompilationError: vi.fn(),
       });
 
       const store = createMockStore();
