@@ -3,6 +3,7 @@
 import { useCallback, useRef, memo, useState, useEffect } from 'react';
 import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown, Loader2 } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
+import { showError } from '@/lib/toast';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
 import { GenerateModelDialog } from './GenerateModelDialog';
 import { GenerateTextureDialog } from './GenerateTextureDialog';
@@ -19,7 +20,10 @@ function fileToBase64(file: File): Promise<string> {
       const base64 = result.split(',')[1];
       resolve(base64);
     };
-    reader.onerror = reject;
+    reader.onerror = () => {
+      showError(`Failed to read file "${file.name}". The file may be corrupted or inaccessible.`);
+      reject(new Error(`FileReader error for "${file.name}"`));
+    };
     reader.readAsDataURL(file);
   });
 }
