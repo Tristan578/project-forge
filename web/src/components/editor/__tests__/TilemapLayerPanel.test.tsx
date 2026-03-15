@@ -9,7 +9,7 @@ import { TilemapLayerPanel } from '../TilemapLayerPanel';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

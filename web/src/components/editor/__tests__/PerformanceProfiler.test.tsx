@@ -9,7 +9,7 @@ import { PerformanceProfiler } from '../PerformanceProfiler';
 import { usePerformanceStore } from '@/stores/performanceStore';
 
 vi.mock('@/stores/performanceStore', () => ({
-  usePerformanceStore: vi.fn(),
+  usePerformanceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

@@ -10,7 +10,7 @@ import { BillingTab } from '../BillingTab';
 import { useUserStore } from '@/stores/userStore';
 
 vi.mock('@/stores/userStore', () => ({
-  useUserStore: vi.fn(),
+  useUserStore: vi.fn(() => ({})),
 }));
 
 vi.mock('next/navigation', () => ({

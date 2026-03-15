@@ -9,7 +9,7 @@ import { ConversationList } from '../ConversationList';
 import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: vi.fn(),
+  useChatStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

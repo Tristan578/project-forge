@@ -11,7 +11,7 @@ import { SceneHierarchy } from '../SceneHierarchy';
 import { useEditorStore, type SceneGraph } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/hooks/useEngine', () => ({

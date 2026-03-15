@@ -3,7 +3,7 @@ import { render, cleanup } from '@/test/utils/componentTestUtils';
 import { CanvasArea } from '../CanvasArea';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/chatStore', () => ({

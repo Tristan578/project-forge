@@ -11,7 +11,7 @@ import { ScriptEditorPanel } from '../ScriptEditorPanel';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('next/dynamic', () => ({

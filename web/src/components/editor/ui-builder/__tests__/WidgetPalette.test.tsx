@@ -9,7 +9,7 @@ import { WidgetPalette } from '../WidgetPalette';
 import { useUIBuilderStore } from '@/stores/uiBuilderStore';
 
 vi.mock('@/stores/uiBuilderStore', () => ({
-  useUIBuilderStore: vi.fn(),
+  useUIBuilderStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

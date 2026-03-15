@@ -11,11 +11,11 @@ import { TutorialOverlay } from '../TutorialOverlay';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
-  useOnboardingStore: vi.fn(),
+  useOnboardingStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: Object.assign(vi.fn(), { subscribe: vi.fn(() => vi.fn()) }),
+  useEditorStore: Object.assign(vi.fn(() => ({})), { subscribe: vi.fn(() => vi.fn()) }),
 }));
 
 vi.mock('@/data/tutorials', () => ({

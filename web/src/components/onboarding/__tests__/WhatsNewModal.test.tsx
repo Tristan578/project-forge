@@ -9,7 +9,7 @@ import { WhatsNewModal } from '../WhatsNewModal';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
-  useOnboardingStore: vi.fn(),
+  useOnboardingStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

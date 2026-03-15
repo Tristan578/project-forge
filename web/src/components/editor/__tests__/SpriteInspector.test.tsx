@@ -10,7 +10,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import type { SpriteData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('../PixelArtEditor', () => ({

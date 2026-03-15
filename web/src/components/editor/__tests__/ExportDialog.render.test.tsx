@@ -3,7 +3,7 @@ import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { ExportDialog } from '../ExportDialog';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', async () => {

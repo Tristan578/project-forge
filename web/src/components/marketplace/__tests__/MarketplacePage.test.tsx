@@ -12,7 +12,7 @@ import { MarketplacePage } from '../MarketplacePage';
 import { useMarketplaceStore } from '@/stores/marketplaceStore';
 
 vi.mock('@/stores/marketplaceStore', () => ({
-  useMarketplaceStore: vi.fn(),
+  useMarketplaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('../AssetCard', () => ({

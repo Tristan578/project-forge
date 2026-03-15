@@ -3,7 +3,7 @@ import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { AudioInspector } from '../AudioInspector';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({

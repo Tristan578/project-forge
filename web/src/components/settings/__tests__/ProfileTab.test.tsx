@@ -9,7 +9,7 @@ import { ProfileTab } from '../ProfileTab';
 import { useUserStore } from '@/stores/userStore';
 
 vi.mock('@/stores/userStore', () => ({
-  useUserStore: vi.fn(),
+  useUserStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@clerk/nextjs', () => ({

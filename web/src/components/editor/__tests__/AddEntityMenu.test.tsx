@@ -4,7 +4,7 @@ import { AddEntityMenu } from '../AddEntityMenu';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 describe('AddEntityMenu', () => {

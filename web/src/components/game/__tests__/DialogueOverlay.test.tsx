@@ -10,11 +10,11 @@ import { useDialogueStore } from '@/stores/dialogueStore';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/dialogueStore', () => ({
-  useDialogueStore: vi.fn(),
+  useDialogueStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

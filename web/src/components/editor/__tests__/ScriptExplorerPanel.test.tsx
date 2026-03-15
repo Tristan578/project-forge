@@ -13,11 +13,11 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { loadScripts, saveScript } from '@/stores/scriptLibraryStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/scriptLibraryStore', () => ({

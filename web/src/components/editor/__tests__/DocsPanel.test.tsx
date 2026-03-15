@@ -13,7 +13,7 @@ import { loadDocsIndex, getCategories, getDocsByCategory, getDocByPath } from '@
 import { searchDocs } from '@/lib/docs/docsSearch';
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/docs/docsIndex', () => ({
