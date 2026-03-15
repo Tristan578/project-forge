@@ -216,7 +216,6 @@ fn fragment(
                 p2.x, p2.y, p2.z, p2.w,
                 p3.x, p3.y, p3.z, p3.w,
             );
-            let t = forge_uniforms.time;
             switch (forge_uniforms.custom_slot) {
                 case 1u: { out.color = custom_shader_1(out.color, in.uv, t, params); }
                 case 2u: { out.color = custom_shader_2(out.color, in.uv, t, params); }
