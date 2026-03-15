@@ -86,3 +86,4 @@ export function trackFeatureUsed(feature: string) {
 export function trackEditorPanelOpened(panel: string) {
   track('editor_panel_opened', { panel, env });
 }
+
