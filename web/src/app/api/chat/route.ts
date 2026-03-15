@@ -1,4 +1,6 @@
 import { NextRequest } from 'next/server';
+import { readdir, readFile } from 'fs/promises';
+import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
@@ -12,6 +14,82 @@ import {
 } from '@/lib/chat/sanitizer';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { buildDocContext } from '@/lib/chat/docContext';
+import type { DocEntry } from '@/lib/docs/docsIndex';
+
+// ---------------------------------------------------------------------------
+// Docs loading (server-side, filesystem)
+// ---------------------------------------------------------------------------
+
+const DOCS_ROOT = path.join(process.cwd(), '..', 'docs');
+let cachedDocsEntries: DocEntry[] | null = null;
+
+function extractTitle(content: string): string {
+  const match = content.match(/^#\s+(.+)$/m);
+  return match ? match[1].trim() : 'Untitled';
+}
+
+function extractSections(content: string): Array<{ heading: string; content: string }> {
+  const sections: Array<{ heading: string; content: string }> = [];
+  const lines = content.split('\n');
+  let currentHeading = '';
+  let currentContent: string[] = [];
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^#{2,3}\s+(.+)$/);
+    if (headingMatch) {
+      if (currentHeading) {
+        sections.push({ heading: currentHeading, content: currentContent.join('\n').trim() });
+      }
+      currentHeading = headingMatch[1].trim();
+      currentContent = [];
+    } else {
+      currentContent.push(line);
+    }
+  }
+  if (currentHeading) {
+    sections.push({ heading: currentHeading, content: currentContent.join('\n').trim() });
+  }
+  return sections;
+}
+
+async function loadDocsRecursive(dir: string, basePath: string = ''): Promise<DocEntry[]> {
+  const entries: DocEntry[] = [];
+  try {
+    const items = await readdir(dir, { withFileTypes: true });
+    for (const item of items) {
+      const fullPath = path.join(dir, item.name);
+      if (item.isDirectory() && !item.name.startsWith('_') && !item.name.startsWith('.')) {
+        const subEntries = await loadDocsRecursive(fullPath, basePath ? `${basePath}/${item.name}` : item.name);
+        entries.push(...subEntries);
+      } else if (item.isFile() && item.name.endsWith('.md')) {
+        const content = await readFile(fullPath, 'utf-8');
+        const docPath = basePath
+          ? `${basePath}/${item.name.replace('.md', '')}`
+          : item.name.replace('.md', '');
+        const category = basePath.split('/')[0] || 'root';
+        entries.push({
+          path: docPath,
+          title: extractTitle(content),
+          content,
+          category,
+          sections: extractSections(content),
+        });
+      }
+    }
+  } catch {
+    // docs directory missing or unreadable — silently skip
+  }
+  return entries;
+}
+
+async function getDocsEntries(): Promise<DocEntry[]> {
+  if (cachedDocsEntries) return cachedDocsEntries;
+  cachedDocsEntries = await loadDocsRecursive(DOCS_ROOT);
+  return cachedDocsEntries;
+}
+
+// ---------------------------------------------------------------------------
 
 const SYSTEM_PROMPT = `You are an expert game creation assistant for SpawnForge, an AI-powered 3D game engine that runs in the browser. You help users create games by orchestrating scene setup, materials, physics, scripting, audio, and more through MCP commands.
 
@@ -290,6 +368,25 @@ export async function POST(request: NextRequest) {
             type: 'text' as const,
             text: sceneContext,
           });
+        }
+
+        // Inject relevant documentation when the user appears to be asking a how-to question
+        const lastUserMessage = [...messages]
+          .reverse()
+          .find((m) => m.role === 'user' && typeof m.content === 'string');
+        if (lastUserMessage && typeof lastUserMessage.content === 'string') {
+          try {
+            const docsEntries = await getDocsEntries();
+            const docCtx = buildDocContext(lastUserMessage.content, docsEntries);
+            if (docCtx) {
+              systemBlocks.push({
+                type: 'text' as const,
+                text: docCtx,
+              });
+            }
+          } catch {
+            // Doc context is best-effort — never block the chat request
+          }
         }
 
         // Add cache_control to the last tool definition for tool caching
