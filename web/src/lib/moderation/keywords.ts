@@ -39,7 +39,6 @@ export const DEFAULT_BLOCKED_KEYWORDS: string[] = [
   'lose weight fast',
   'limited offer',
   'act now',
-  'guaranteed',
   // Harmful content
   'suicide',
   'self-harm',
