@@ -20,7 +20,7 @@ interface PublishState {
 
   // Actions
   fetchPublications: () => Promise<void>;
-  publishGame: (projectId: string, title: string, slug: string, description?: string, tags?: string[]) => Promise<PublishedGameInfo | null>;
+  publishGame: (projectId: string, title: string, slug: string, description?: string, tags?: string[], thumbnail?: string | null) => Promise<PublishedGameInfo | null>;
   unpublishGame: (id: string) => Promise<boolean>;
   checkSlug: (slug: string) => Promise<boolean>;
 }
@@ -41,13 +41,13 @@ export const usePublishStore = create<PublishState>((set, get) => ({
     }
   },
 
-  publishGame: async (projectId, title, slug, description, tags) => {
+  publishGame: async (projectId, title, slug, description, tags, thumbnail) => {
     set({ isPublishing: true, publishError: null });
     try {
       const res = await fetch('/api/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, title, slug, description, tags }),
+        body: JSON.stringify({ projectId, title, slug, description, tags, thumbnail }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Publish failed' }));
