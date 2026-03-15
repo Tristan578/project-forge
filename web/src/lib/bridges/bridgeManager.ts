@@ -9,7 +9,7 @@ const CONFIG_DIR = join(homedir(), '.spawnforge');
 const CONFIG_FILE = join(CONFIG_DIR, 'bridges.json');
 
 /** Allowlist of known tool IDs — rejects arbitrary toolId values. */
-const ALLOWED_TOOL_IDS = new Set(['aseprite']);
+const ALLOWED_TOOL_IDS = new Set(['aseprite', 'fmod']);
 
 /** Validate that a path is a safe absolute path (no traversal, no special chars). */
 function isSafePath(p: string): boolean {
@@ -29,6 +29,14 @@ const TOOL_DEFAULTS: Record<string, { name: string; paths: PlatformPaths }> = {
       linux: '/usr/bin/aseprite',
     },
   },
+  fmod: {
+    name: 'FMOD Studio',
+    paths: {
+      darwin: '/Applications/FMOD Studio/FMOD Studio.app/Contents/MacOS/FMOD Studio',
+      win32: 'C:\\Program Files (x86)\\FMOD SoundSystem\\FMOD Studio\\fmodstudio.exe',
+      linux: '/opt/fmodstudio/fmodstudio',
+    },
+  },
 };
 
 /** Additional search paths per platform (checked if default is missing). */
@@ -36,6 +44,16 @@ const EXTRA_SEARCH_PATHS: Record<string, Record<string, string[]>> = {
   aseprite: {
     win32: ['C:\\Program Files (x86)\\Aseprite\\aseprite.exe'],
     linux: ['/usr/local/bin/aseprite', join(homedir(), '.local/bin/aseprite')],
+  },
+  fmod: {
+    win32: [
+      'C:\\Program Files\\FMOD SoundSystem\\FMOD Studio\\fmodstudio.exe',
+      'C:\\Program Files (x86)\\FMOD Studio\\fmodstudio.exe',
+    ],
+    linux: [
+      '/usr/bin/fmodstudio',
+      '/usr/local/bin/fmodstudio',
+    ],
   },
 };
 
