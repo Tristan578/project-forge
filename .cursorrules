@@ -100,6 +100,47 @@ bash .claude/hooks/on-stop.sh           # after work
 GitHub Actions (`.github/workflows/ci.yml`) runs on every PR:
 - Lint, TypeScript, Web tests, MCP tests, WASM build, Next.js build, E2E, Security audit, CodeQL
 
+## Domain Skills
+
+Specialized development patterns in `.claude/skills/`:
+
+| Skill | Use When |
+|-------|----------|
+| `rust-engine/SKILL.md` | Writing engine/ code (ECS, commands, bridge) |
+| `frontend/SKILL.md` | Writing web/ code (React, Zustand, Tailwind) |
+| `mcp-commands/SKILL.md` | Adding MCP commands or chat handlers |
+| `testing/SKILL.md` | Writing tests, improving coverage |
+| `docs/SKILL.md` | Updating documentation, README, known-limitations |
+| `design/SKILL.md` | Designing features, architecture decisions |
+| `developer-experience/SKILL.md` | DX audits, DoQ/DoD enforcement, onboarding |
+
+## Validation Tools
+
+Runnable scripts in `.claude/tools/`:
+
+```bash
+# After engine changes
+bash .claude/tools/validate-rust.sh check
+
+# After frontend changes (lint + tsc + vitest)
+bash .claude/tools/validate-frontend.sh quick
+
+# After MCP changes (manifest sync + tests)
+bash .claude/tools/validate-mcp.sh full
+
+# Test inventory and coverage
+bash .claude/tools/validate-tests.sh coverage
+
+# Documentation integrity
+bash .claude/tools/validate-docs.sh
+
+# DX audit (cross-IDE consistency, doc freshness)
+bash .claude/tools/dx-audit.sh
+
+# Run everything
+bash .claude/tools/validate-all.sh
+```
+
 ## Detailed Reference
 
 - `.claude/CLAUDE.md` — Full project constitution

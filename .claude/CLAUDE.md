@@ -170,7 +170,7 @@ Key rules:
 |-------|------|--------|---------|
 | 1-2 | Foundation | DONE | |
 | 3 | Rendering & Materials | DONE | |
-| 4-A | MCP Server (143 commands) | DONE | |
+| 4-A | MCP Server (322 commands, 37 categories) | DONE | Initial 143, expanded across subsequent phases |
 | 4-B | AI Chat Panel | DONE | ChatPanel, ChatInput (image upload, voice, model selection), entity @-mentions, thinking mode, approval mode, batch undo, feedback, conversation persistence, streaming |
 | 5-A | Play/Edit Mode | DONE | |
 | 5-B | Input System | DONE | |
@@ -271,14 +271,33 @@ When adding a **new ECS component**, update these domain-scoped files:
 
 | File | Contents |
 |------|----------|
-| `rules/bevy-api.md` | Bevy 0.16 migration, ECS limits, library-specific APIs (rapier, hanabi, panorbit) |
+| `rules/bevy-api.md` | Bevy 0.18 API patterns, 0.16→0.18 migration notes, ECS limits, library APIs (rapier, hanabi, panorbit) |
 | `rules/entity-snapshot.md` | EntityType, EntitySnapshot exhaustiveness, history, selection events |
 | `rules/web-quality.md` | ESLint rules, React patterns, Next.js constraints, README update guide |
 | `rules/library-apis.md` | csgrs, noise, serde-wasm-bindgen, terrain, texture pipeline, particles |
 | `rules/file-map.md` | Engine structure, web structure, communication pattern |
 
 ## Agent Skills
+
+### Orchestration
 - `/planner` — Architect flow, creates specs in `specs/`
-- `/builder` — Implements specs into code
-- `/cycle` — Plan -> Build -> Verify loop
-- Arch Validator: `python .claude/skills/arch-validator/check_arch.py`
+- `/builder` — Implements specs into code, dispatches to domain skills
+- `/cycle` — Plan -> Build -> Verify -> Update Context loop
+- `/developer-experience` — DX audits, DoQ/DoD enforcement, cross-IDE consistency
+
+### Domain Skills
+- `/rust-engine` — Bevy 0.18 ECS, commands, bridge, WASM patterns
+- `/frontend` — React 19, Next.js 16, Zustand 5, Tailwind 4 patterns
+- `/mcp-commands` — MCP manifest, chat handlers, AI parity
+- `/testing` — Test patterns, coverage targets, anti-patterns
+- `/docs` — Documentation types, freshness rules, writing standards
+- `/design` — Architecture decisions, performance budgets, spec format
+
+### Validation Tools (`.claude/tools/`)
+- `validate-rust.sh` — Architecture boundaries, bridge isolation, unsafe audit
+- `validate-frontend.sh` — ESLint, TypeScript, vitest
+- `validate-mcp.sh` — Manifest sync, MCP tests, AI parity audit
+- `validate-tests.sh` — Test inventory, coverage report
+- `validate-docs.sh` — Documentation integrity, version refs
+- `dx-audit.sh` — Cross-IDE consistency, tool health, onboarding check
+- `validate-all.sh` — Run all validators

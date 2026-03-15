@@ -733,7 +733,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const rootId = ctx.store.primaryId;
     if (!rootId) return { success: false, error: 'Failed to create level root' };
     nameToId[levelName] = rootId;
-    ctx.store.updateTransform(rootId, 'scale', [0.01, 0.01, 0.01]);
+    ctx.store.updateTransform(rootId, 'scale', [1, 1, 1]);
     results.push({ action: `create root "${levelName}"`, success: true, entityId: rootId });
 
     if (ground) {
@@ -966,11 +966,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
 
       if (cameraFollow) {
-        const scriptSource = `const OFFSET = [${cameraOffset[0]}, ${cameraOffset[1]}, ${cameraOffset[2]}];
-forge.onUpdate((dt) => {
-  const pos = forge.transform.getPosition();
-  forge.camera.setTarget(pos[0] + OFFSET[0], pos[1] + OFFSET[1], pos[2] + OFFSET[2]);
-});`;
+        // Use forge.camera.setTarget with entity ID (not coordinates)
+        // The game camera system handles follow offset natively
+        const scriptSource = `forge.camera.setTarget("${charId}");`;
         ctx.store.setScript(charId, scriptSource, true);
       }
 
