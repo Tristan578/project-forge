@@ -931,7 +931,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const health = args.health as Record<string, unknown> | undefined | null;
     const inputPreset = (args.inputPreset as string) ?? 'platformer';
     const cameraFollow = (args.cameraFollow as boolean) ?? true;
-    const cameraOffset = (args.cameraOffset as [number, number, number]) ?? [0, 5, -10];
+    const _cameraOffset = (args.cameraOffset as [number, number, number]) ?? [0, 5, -10];
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
     const nameToId: Record<string, string> = {};
