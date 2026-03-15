@@ -31,7 +31,11 @@ export default defineConfig({
     },
     {
       name: 'firefox',
-      use: { ...devices['Desktop Firefox'] },
+      use: {
+        ...devices['Desktop Firefox'],
+        // Override global launchOptions — --disable-gpu and --no-sandbox are Chromium-only
+        launchOptions: { args: [] },
+      },
     },
     {
       name: 'webkit',
