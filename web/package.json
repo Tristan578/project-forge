@@ -26,6 +26,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1004.0",
     "@clerk/nextjs": "^6.39.0",
     "@clerk/themes": "^2.4.57",
+    "@google/generative-ai": "^0.24.1",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
     "@sentry/nextjs": "^10.42.0",
