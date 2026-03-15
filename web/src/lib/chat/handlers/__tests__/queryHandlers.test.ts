@@ -1158,6 +1158,121 @@ describe('list_script_templates', () => {
 });
 
 // ---------------------------------------------------------------------------
+// query_play_state
+// ---------------------------------------------------------------------------
+
+describe('query_play_state', () => {
+  it('returns error when engine is in edit mode', async () => {
+    const { result } = await invokeHandler(queryHandlers, 'query_play_state', {}, { engineMode: 'edit' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Play or Paused');
+    expect(result.error).toContain('edit');
+  });
+
+  it('returns error when engine mode is not set (defaults to edit)', async () => {
+    const { result } = await invokeHandler(queryHandlers, 'query_play_state');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Play or Paused');
+  });
+
+  it('returns entity list and engineMode when in play mode', async () => {
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      {
+        engineMode: 'play',
+        sceneGraph: {
+          nodes: {
+            ent1: { entityId: 'ent1', name: 'Player', parentId: null, children: [], components: [], visible: true },
+            ent2: { entityId: 'ent2', name: 'Enemy', parentId: null, children: [], components: [], visible: false },
+          },
+          rootIds: ['ent1', 'ent2'],
+        },
+      }
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { entities: unknown[]; entityCount: number; engineMode: string };
+    expect(data.engineMode).toBe('play');
+    expect(data.entityCount).toBe(2);
+    expect(data.entities).toHaveLength(2);
+  });
+
+  it('returns entity list when in paused mode', async () => {
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      {
+        engineMode: 'paused',
+        sceneGraph: {
+          nodes: {
+            cube1: { entityId: 'cube1', name: 'Cube', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['cube1'],
+        },
+      }
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { engineMode: string; entityCount: number };
+    expect(data.engineMode).toBe('paused');
+    expect(data.entityCount).toBe(1);
+  });
+
+  it('entity entries contain id, name, and visible fields', async () => {
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      {
+        engineMode: 'play',
+        sceneGraph: {
+          nodes: {
+            p1: { entityId: 'p1', name: 'Hero', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['p1'],
+        },
+      }
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { entities: { id: string; name: string; visible: boolean }[] };
+    expect(data.entities[0]).toMatchObject({ id: 'p1', name: 'Hero', visible: true });
+  });
+
+  it('returns empty entity list when scene has no entities in play mode', async () => {
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      {
+        engineMode: 'play',
+        sceneGraph: { nodes: {}, rootIds: [] },
+      }
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { entities: unknown[]; entityCount: number };
+    expect(data.entities).toEqual([]);
+    expect(data.entityCount).toBe(0);
+  });
+
+  it('entityCount matches entities array length', async () => {
+    const nodes: Record<string, unknown> = {};
+    for (let i = 0; i < 4; i++) {
+      nodes[`e${i}`] = { entityId: `e${i}`, name: `Obj${i}`, parentId: null, children: [], components: [], visible: true };
+    }
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      { engineMode: 'play', sceneGraph: { nodes, rootIds: [] } }
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { entities: unknown[]; entityCount: number };
+    expect(data.entityCount).toBe(data.entities.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // get_animation_graph
 // ---------------------------------------------------------------------------
 
