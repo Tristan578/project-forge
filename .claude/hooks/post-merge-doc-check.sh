@@ -48,7 +48,11 @@ while IFS= read -r -d '' DOC_FILE; do
     REL_FILE="$(echo "$REL_FILE" | xargs)"
     [ -z "$REL_FILE" ] && continue
 
-    if echo "$CHANGED_FILES" | grep -qF "$REL_FILE"; then
+    # FIX (PF-456): Use grep -qxF (exact full-line match) instead of grep -qF
+    # (substring match). grep -qF "src/lib/auth.ts" falsely matches lines
+    # containing "src/lib/auth.test.ts" because the path is a substring.
+    # grep -xF requires the ENTIRE line to equal the pattern exactly.
+    if echo "$CHANGED_FILES" | grep -qxF "$REL_FILE"; then
       echo -e "${YELLOW}DOC UPDATE NEEDED${NC}: $DOC_RELATIVE ($REL_FILE was modified)"
       STALE_COUNT=$((STALE_COUNT + 1))
       break
