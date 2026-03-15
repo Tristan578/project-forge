@@ -20,6 +20,7 @@ function makeDefaultGraphState() {
     loadGraph: vi.fn(),
     addNode: vi.fn((_type: string, _pos: unknown, _data: unknown) => 'node-new'),
     addEdge: vi.fn(),
+    setCompilationError: vi.fn((_error: string | null) => undefined),
   };
 }
 
@@ -170,6 +171,18 @@ describe('shaderHandlers', () => {
       const { result } = await invoke('compile_shader', { graphId: 'nonexistent' });
       expect(result.success).toBe(false);
     });
+
+    it('sets compilationError on invalid graph', async () => {
+      mockCompileToWgsl.mockReturnValueOnce({ code: '', error: 'No PBR Output node found.' });
+      await invoke('compile_shader', {});
+      expect(mockGraphState.setCompilationError).toHaveBeenCalledWith('No PBR Output node found.');
+    });
+
+    it('clears compilationError on successful compilation', async () => {
+      mockCompileToWgsl.mockReturnValueOnce({ code: '// valid wgsl', error: null });
+      await invoke('compile_shader', {});
+      expect(mockGraphState.setCompilationError).toHaveBeenCalledWith(null);
+    });
   });
 
   describe('apply_shader_to_entity', () => {
@@ -203,6 +216,23 @@ describe('shaderHandlers', () => {
         entityId: 'e1',
       });
       expect(result.success).toBe(false);
+    });
+
+    it('sets compilationError and returns error result when WGSL compilation fails', async () => {
+      mockCompileToWgsl.mockReturnValueOnce({ code: '', error: 'Cyclic dependency detected.' });
+      const { result } = await invoke('apply_shader_to_entity', {
+        entityId: 'e1', graphId: 'graph-1',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Compilation failed');
+      expect(result.error).toContain('Cyclic dependency detected.');
+      expect(mockGraphState.setCompilationError).toHaveBeenCalledWith('Cyclic dependency detected.');
+    });
+
+    it('clears compilationError on successful inferred-type apply', async () => {
+      mockCompileToWgsl.mockReturnValueOnce({ code: '// code with dissolve_threshold', error: null });
+      await invoke('apply_shader_to_entity', { entityId: 'e1', graphId: 'graph-1' });
+      expect(mockGraphState.setCompilationError).toHaveBeenCalledWith(null);
     });
   });
 
