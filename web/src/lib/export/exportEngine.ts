@@ -13,6 +13,7 @@ export interface ExportOptions {
   includeDebug: boolean;
   preset?: ExportPreset;
   customLoadingScreen?: LoadingScreenConfig;
+  orientationLock?: 'landscape' | 'portrait' | 'none';
 }
 
 export async function exportGame(options: ExportOptions): Promise<Blob> {
@@ -53,6 +54,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
       resolution: options.resolution,
       bgColor: options.bgColor,
       includeDebug: options.includeDebug,
+      orientationLock: options.orientationLock,
     };
 
     return await exportAsZip(sceneData, store.allScripts, zipOptions);
@@ -73,6 +75,7 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     uiData: uiDataJson,
     mobileTouchConfig: mobileTouchConfigJson,
     embeddedWasm: Object.keys(embeddedWasm).length > 0 ? embeddedWasm : undefined,
+    orientationLock: options.orientationLock,
   });
 
   return new Blob([html], { type: 'text/html' });

@@ -21,6 +21,7 @@ export interface ZipExportOptions {
   resolution: GameTemplateOptions['resolution'];
   bgColor: string;
   includeDebug: boolean;
+  orientationLock?: 'landscape' | 'portrait' | 'none';
 }
 
 interface ZipEntry {
@@ -141,6 +142,7 @@ export async function exportAsZip(
     hasWebGPU,
     hasWebGL2,
     embedBridge: isEmbed ? generatePostMessageBridge() : undefined,
+    orientationLock: options.orientationLock,
   });
 
   entries.push({
@@ -186,8 +188,9 @@ function generateZipIndexHtml(options: {
   hasWebGPU: boolean;
   hasWebGL2: boolean;
   embedBridge?: string;
+  orientationLock?: 'landscape' | 'portrait' | 'none';
 }): string {
-  const { title, bgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge } = options;
+  const { title, bgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock } = options;
 
   const debugScript = includeDebug
     ? `
@@ -310,6 +313,12 @@ function generateZipIndexHtml(options: {
 
       // Initialize engine with canvas
       wasm.init_engine('game-canvas');
+
+      // Orientation lock
+      ${orientationLock && orientationLock !== 'none'
+        ? `if (screen.orientation && screen.orientation.lock) { screen.orientation.lock('${orientationLock}').catch(function() {}); }`
+        : '// No orientation lock requested'
+      }
 
       // Load scene data
       wasm.handle_command('load_scene', JSON.stringify(window.__forgeSceneData));
