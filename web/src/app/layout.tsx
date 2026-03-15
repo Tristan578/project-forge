@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 // Prevent static prerendering — all pages require auth (ClerkProvider)
@@ -40,6 +41,7 @@ export default function RootLayout({
       >
         {children}
         <SpeedInsights />
+        <Toaster theme="dark" position="bottom-right" richColors />
       </body>
     </html>
   );

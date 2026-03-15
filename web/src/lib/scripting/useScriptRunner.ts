@@ -11,6 +11,7 @@ import {
   createAnimationHandler,
 } from '@/lib/scripting/channels';
 import type { AsyncRequest } from '@/lib/scripting/asyncTypes';
+import { showError } from '@/lib/toast';
 
 // Commands allowed from user scripts (maps to forge.* API surface)
 const SCRIPT_ALLOWED_COMMANDS = new Set([
@@ -442,6 +443,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         if (!watchdogRef.current) {
           watchdogRef.current = setTimeout(() => {
             console.error('[ScriptRunner] Worker timeout — possible infinite loop. Terminating.');
+            showError('Script timed out — possible infinite loop detected. Play mode stopped.');
             addScriptLog({
               entityId: '',
               level: 'error',

@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
 import { captureException, setTag } from '@/lib/monitoring/sentry-client';
+import { showError } from '@/lib/toast';
 
 export type WasmModule = {
   init_engine: (canvasId: string) => void;
@@ -196,6 +197,10 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           backend: detectWebGPU() ? 'webgpu' : 'webgl2',
           cdnBase: ENGINE_CDN_BASE || '(same-origin)',
         });
+        // Skip toast for intentional CI skip — not a real failure
+        if (!loadError.message.includes('__SKIP_ENGINE')) {
+          showError('Engine failed to load. Please refresh the page.');
+        }
         setError(loadError);
         onErrorRef.current?.(loadError);
         initializedRef.current = false;
