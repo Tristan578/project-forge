@@ -15,6 +15,7 @@ export function TutorialOverlay() {
   const activeTutorialId = useOnboardingStore((s) => s.activeTutorial);
   const tutorialStep = useOnboardingStore((s) => s.tutorialStep);
   const advanceTutorial = useOnboardingStore((s) => s.advanceTutorial);
+  const retreatTutorial = useOnboardingStore((s) => s.retreatTutorial);
   const skipTutorial = useOnboardingStore((s) => s.skipTutorial);
   const completeTutorial = useOnboardingStore((s) => s.completeTutorial);
 
@@ -64,6 +65,34 @@ export function TutorialOverlay() {
   const handleSkip = useCallback(() => {
     skipTutorial();
   }, [skipTutorial]);
+
+  // Keyboard navigation: Escape closes, ArrowRight/ArrowLeft navigates steps
+  useEffect(() => {
+    if (!activeTutorialId) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      switch (e.key) {
+        case 'Escape':
+          skipTutorial();
+          break;
+        case 'ArrowRight':
+          if (isLastStep) {
+            completeTutorial();
+          } else if (!currentStep?.actionRequired) {
+            advanceTutorial();
+          }
+          break;
+        case 'ArrowLeft':
+          if (tutorialStep > 0) {
+            retreatTutorial();
+          }
+          break;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeTutorialId, isLastStep, currentStep, tutorialStep, skipTutorial, completeTutorial, advanceTutorial, retreatTutorial]);
 
   // Update highlight position via DOM query
   useEffect(() => {
