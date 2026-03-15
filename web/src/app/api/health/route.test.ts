@@ -41,19 +41,19 @@ describe('GET /api/health', () => {
     expect(body.branch).toBe('unknown');
   });
 
-  it('should include services array with 8 entries', async () => {
+  it('should include services array with 12 entries', async () => {
     const { GET } = await import('./route');
     const res = await GET();
     const body = await res.json();
 
     expect(body.services).toBeInstanceOf(Array);
-    expect(body.services).toHaveLength(8);
+    expect(body.services).toHaveLength(12);
     for (const service of body.services) {
       expect(service).toHaveProperty('name');
       expect(service).toHaveProperty('status');
       expect(service).toHaveProperty('latencyMs');
       expect(service).toHaveProperty('lastChecked');
-      expect(['healthy', 'degraded', 'down']).toContain(service.status);
+      expect(['up', 'degraded', 'down']).toContain(service.status);
     }
   });
 

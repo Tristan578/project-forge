@@ -73,14 +73,14 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: web
-        # --pool=threads: avoids fork-pool open-handle hang (vitest#3077)
+        # Uses pool: 'forks' from vitest.config.ts (threads mode breaks vi.mock/Proxy).
         # Coverage thresholds enforced via vitest.config.ts (statements/branches/functions/lines).
         # Timeout safety net: vitest hangs after test completion due to jsdom/coverage
-        # open handles (known issue). Exit 124 = timeout killed a hung process after
-        # tests already completed successfully — treat as warning, not failure.
+        # open handles (known issue vitest#3077). Exit 124 = timeout killed a hung
+        # process after tests already completed successfully — treat as warning, not failure.
         run: |
           set +e
-          timeout 600 npx vitest run --pool=threads --coverage
+          timeout 600 npx vitest run --coverage
           EXIT_CODE=$?
           set -e
           if [ $EXIT_CODE -eq 124 ]; then
