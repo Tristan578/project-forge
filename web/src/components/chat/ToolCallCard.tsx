@@ -284,6 +284,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_skeleton2d: 'Get Skeleton',
   import_skeleton_json: 'Import Skeleton JSON',
   auto_weight_skeleton2d: 'Auto-Weight Skeleton',
+  query_play_state: 'Query Play State',
   // Security
   get_security_status: 'Get Security Status',
   validate_project_security: 'Validate Project Security',

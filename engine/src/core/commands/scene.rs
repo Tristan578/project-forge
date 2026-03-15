@@ -39,6 +39,7 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         }
         "list_script_templates" => Some(super::handle_query(QueryRequest::ScriptTemplates)),
         "apply_script_template" => Some(handle_apply_script_template(payload.clone())),
+        "query_play_state" => Some(super::handle_query(QueryRequest::PlayState)),
         _ => None,
     }
 }

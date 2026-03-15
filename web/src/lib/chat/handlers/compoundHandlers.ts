@@ -365,9 +365,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           typeCounts,
           sceneName: ctx.store.sceneName,
           engineMode: ctx.store.engineMode,
-          hasPhysics: Object.keys(ctx.store.physicsEnabled).length > 0,
+          hasPhysics: ctx.store.physicsEnabled,
           hasScripts: Object.keys(ctx.store.allScripts).length > 0,
-          summary: `Scene contains ${nodes.length} entities. Physics: ${Object.keys(ctx.store.physicsEnabled).length > 0 ? 'enabled' : 'disabled'}. Scripts: ${Object.keys(ctx.store.allScripts).length} active.`,
+          summary: `Scene contains ${nodes.length} entities. Physics: ${ctx.store.physicsEnabled ? 'enabled' : 'disabled'}. Scripts: ${Object.keys(ctx.store.allScripts).length} active.`,
         },
       };
     }
@@ -460,7 +460,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     if (analysis.entityRoles.some((e) => e.role === 'player')) analysis.mechanics.push('player_character');
     if (ctx.store.inputBindings.length > 0) analysis.mechanics.push('input_system');
-    if (Object.keys(ctx.store.physicsEnabled).length > 0) analysis.mechanics.push('physics');
+    if (ctx.store.physicsEnabled) analysis.mechanics.push('physics');
     if (Object.keys(ctx.store.allScripts).length > 0) analysis.mechanics.push('scripting');
     if (analysis.entityRoles.some((e) => e.role === 'collectible')) analysis.mechanics.push('collectibles');
     if (analysis.entityRoles.some((e) => e.role === 'checkpoint')) analysis.mechanics.push('checkpoints');
@@ -589,7 +589,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
             totalLength += len;
           }
 
-          const targetDist = (i / (entityIds.length - 1)) * totalLength;
+          const targetDist = entityIds.length <= 1 ? 0 : (i / (entityIds.length - 1)) * totalLength;
           let accumulatedDist = 0;
           let segmentIndex = 0;
           for (let j = 0; j < segmentLengths.length; j++) {
@@ -600,7 +600,8 @@ export const compoundHandlers: Record<string, ToolHandler> = {
             accumulatedDist += segmentLengths[j];
           }
 
-          const localT = (targetDist - accumulatedDist) / segmentLengths[segmentIndex];
+          const segLen = segmentLengths[segmentIndex] || 1;
+          const localT = (targetDist - accumulatedDist) / segLen;
           const p1 = pathPoints[segmentIndex];
           const p2 = pathPoints[segmentIndex + 1];
           newPosition = [
@@ -732,7 +733,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const rootId = ctx.store.primaryId;
     if (!rootId) return { success: false, error: 'Failed to create level root' };
     nameToId[levelName] = rootId;
-    ctx.store.updateTransform(rootId, 'scale', [0.01, 0.01, 0.01]);
+    ctx.store.updateTransform(rootId, 'scale', [1, 1, 1]);
     results.push({ action: `create root "${levelName}"`, success: true, entityId: rootId });
 
     if (ground) {
@@ -930,7 +931,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     const health = args.health as Record<string, unknown> | undefined | null;
     const inputPreset = (args.inputPreset as string) ?? 'platformer';
     const cameraFollow = (args.cameraFollow as boolean) ?? true;
-    const cameraOffset = (args.cameraOffset as [number, number, number]) ?? [0, 5, -10];
+    const _cameraOffset = (args.cameraOffset as [number, number, number]) ?? [0, 5, -10];
 
     const results: Array<{ action: string; success: boolean; entityId?: string; error?: string }> = [];
     const nameToId: Record<string, string> = {};
@@ -965,11 +966,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       ctx.store.setInputPreset(inputPreset as 'fps' | 'platformer' | 'topdown' | 'racing');
 
       if (cameraFollow) {
-        const scriptSource = `const OFFSET = [${cameraOffset[0]}, ${cameraOffset[1]}, ${cameraOffset[2]}];
-forge.onUpdate((dt) => {
-  const pos = forge.transform.getPosition();
-  forge.camera.setTarget(pos[0] + OFFSET[0], pos[1] + OFFSET[1], pos[2] + OFFSET[2]);
-});`;
+        // Use forge.camera.setTarget with entity ID (not coordinates)
+        // The game camera system handles follow offset natively
+        const scriptSource = `forge.camera.setTarget("${charId}");`;
         ctx.store.setScript(charId, scriptSource, true);
       }
 

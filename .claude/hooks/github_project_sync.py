@@ -533,12 +533,12 @@ def tb_put(path, data):
 # GitHub helpers (via gh CLI)
 # ---------------------------------------------------------------------------
 
-def gh_run(args, timeout=30):
+def gh_run(args, timeout=30, check=True):
     result = subprocess.run(
         args, capture_output=True, text=True, encoding="utf-8",
         errors="replace", timeout=timeout,
     )
-    if result.returncode != 0:
+    if check and result.returncode != 0:
         raise RuntimeError(f"gh failed: {result.stderr.strip()}")
     return result.stdout
 
@@ -602,6 +602,21 @@ def gh_set_status(config, item_id, local_status):
         "--field-id", config["statusFieldId"],
         "--single-select-option-id", option_id,
     ])
+
+
+def gh_sync_issue_state(config, issue_number, local_status, prev_status=None):
+    """Close GitHub issue when ticket moves to done, reopen only if moving back from done."""
+    owner = config["owner"]
+    repo = config["repo"]
+    repo_arg = f"{owner}/{repo}"
+    if local_status == "done":
+        gh_run(["gh", "issue", "close", str(issue_number), "--repo", repo_arg,
+                "--reason", "completed"], check=False)
+    elif prev_status == "done":
+        # Only reopen if the ticket was previously done — avoids overriding
+        # manual GitHub issue closures for tickets that were never done locally
+        gh_run(["gh", "issue", "reopen", str(issue_number), "--repo", repo_arg],
+               check=False)
 
 
 def gh_update_issue(config, issue_number, title=None, body=None):
@@ -737,6 +752,9 @@ def push(include_done=False):
                     config, display, body
                 )
                 gh_set_status(config, item_id, status)
+                # Close the issue immediately if created as done
+                if status == "done":
+                    gh_sync_issue_state(config, new_gh_num, status)
 
                 # IMMEDIATELY write github_issue_number back to SQLite
                 db_set_github_issue_number(tid, new_gh_num)
@@ -795,6 +813,9 @@ def push(include_done=False):
                     item_id = entry.get("githubItemId")
                     if item_id:
                         gh_set_status(config, item_id, status)
+                    # Close/reopen the GitHub issue to match local status
+                    gh_sync_issue_state(config, gh_issue_num, status,
+                                        prev_status=entry.get("lastLocalStatus"))
 
                 entry["lastLocalStatus"] = status
                 entry["lastGithubStatus"] = local_to_github(config, status)

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { estimateMessageTokens } from '../lib/chat/tokenCounter';
+import { showError } from '@/lib/toast';
 
 export interface ToolCallStatus {
   id: string;
@@ -473,7 +474,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (err instanceof Error && err.name === 'AbortError') {
         // User cancelled
       } else {
-        set({ error: err instanceof Error ? err.message : 'Chat request failed' });
+        const errorMessage = err instanceof Error ? err.message : 'Chat request failed';
+        set({ error: errorMessage });
+        showError(`AI chat error: ${errorMessage}`);
       }
     } finally {
       set({ isStreaming: false, abortController: null, loopIteration: 0 });

@@ -8138,6 +8138,17 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "query_play_state",
+      "description": "Query current game state during play mode. Returns entity names, visibility, and engine mode for AI debugging. Only available in Play or Paused mode.",
+      "category": "query",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "create_dialogue_tree",
       "description": "Create a new dialogue tree with an initial text node",
       "category": "dialogue",
