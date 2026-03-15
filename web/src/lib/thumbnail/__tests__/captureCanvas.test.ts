@@ -8,7 +8,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { captureCanvasThumbnail } from '../captureCanvas';
 
 // A stub 2d context that satisfies the drawImage call.
