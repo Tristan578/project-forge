@@ -9,7 +9,7 @@ import { WelcomeWizard } from '../WelcomeWizard';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
-  useOnboardingStore: vi.fn(),
+  useOnboardingStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

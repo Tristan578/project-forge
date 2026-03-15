@@ -9,7 +9,7 @@ import { PanelsMenu } from '../PanelsMenu';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/workspace/panelRegistry', () => ({

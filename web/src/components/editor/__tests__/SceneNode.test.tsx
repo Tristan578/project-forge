@@ -5,7 +5,7 @@ import type { SceneNode as SceneNodeData } from '@/stores/slices/types';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 describe('SceneNode', () => {

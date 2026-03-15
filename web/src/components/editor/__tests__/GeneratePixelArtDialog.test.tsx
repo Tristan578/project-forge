@@ -12,11 +12,11 @@ import { useGenerationStore } from '@/stores/generationStore';
 import { useUserStore } from '@/stores/userStore';
 
 vi.mock('@/stores/generationStore', () => ({
-  useGenerationStore: vi.fn(),
+  useGenerationStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/userStore', () => ({
-  useUserStore: vi.fn(),
+  useUserStore: vi.fn(() => ({})),
 }));
 
 const mockAddJob = vi.fn();

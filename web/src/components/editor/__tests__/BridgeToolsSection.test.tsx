@@ -9,7 +9,7 @@ import { BridgeToolsSection } from '../BridgeToolsSection';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 const mockFetch = vi.fn();

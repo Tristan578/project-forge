@@ -13,15 +13,15 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useShaderEditorStore } from '@/stores/shaderEditorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/shaderEditorStore', () => ({
-  useShaderEditorStore: vi.fn(),
+  useShaderEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/materialPresets', () => ({

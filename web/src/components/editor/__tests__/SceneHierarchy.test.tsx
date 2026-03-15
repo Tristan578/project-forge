@@ -4,7 +4,7 @@ import { SceneHierarchy, flattenVisibleNodes } from '../SceneHierarchy';
 import type { SceneGraph } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', async () => {

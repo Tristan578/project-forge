@@ -14,7 +14,7 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 // ── Store mock ─────────────────────────────────────────────────────────────
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 // ── dockview-react mock ────────────────────────────────────────────────────

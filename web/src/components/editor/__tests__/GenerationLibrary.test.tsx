@@ -9,7 +9,7 @@ import { GenerationLibrary } from '../GenerationLibrary';
 import { useGenerationHistoryStore } from '@/stores/generationHistoryStore';
 
 vi.mock('@/stores/generationHistoryStore', () => ({
-  useGenerationHistoryStore: vi.fn(),
+  useGenerationHistoryStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

@@ -12,7 +12,7 @@ import { ShaderEditorPanel } from '../ShaderEditorPanel';
 import { useShaderEditorStore } from '@/stores/shaderEditorStore';
 
 vi.mock('@/stores/shaderEditorStore', () => ({
-  useShaderEditorStore: vi.fn(),
+  useShaderEditorStore: vi.fn(() => ({})),
 }));
 
 // Mock @xyflow/react to avoid DOM/ResizeObserver issues in jsdom

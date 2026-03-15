@@ -9,7 +9,7 @@ import { GenerationStatus } from '../GenerationStatus';
 import { useGenerationStore, type GenerationJob } from '@/stores/generationStore';
 
 vi.mock('@/stores/generationStore', () => ({
-  useGenerationStore: vi.fn(),
+  useGenerationStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

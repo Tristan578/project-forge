@@ -4,7 +4,7 @@ import { Sidebar } from '../Sidebar';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/chatStore', () => ({

@@ -10,11 +10,11 @@ import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
 
 vi.mock('@/stores/userStore', () => ({
-  useUserStore: vi.fn(),
+  useUserStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/generationStore', () => ({
-  useGenerationStore: vi.fn(),
+  useGenerationStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({
