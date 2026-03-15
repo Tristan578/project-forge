@@ -137,9 +137,11 @@ export const shaderHandlers: Record<string, ToolHandler> = {
 
     const result = compileToWgsl(graph);
     if (result.error) {
+      store.setCompilationError(result.error);
       return { success: false, error: result.error };
     }
 
+    store.setCompilationError(null);
     return {
       success: true,
       result: `Compiled shader graph "${graph.name}" successfully. WGSL code:\n${result.code}`,
@@ -176,12 +178,14 @@ export const shaderHandlers: Record<string, ToolHandler> = {
 
     const wgslResult = compileToWgsl(graph);
     if (wgslResult.error) {
+      store.setCompilationError(wgslResult.error);
       return { success: false, error: `Compilation failed: ${wgslResult.error}` };
     }
 
     const inferred = inferShaderEffect(wgslResult.code ?? '');
     if (inferred) {
       // Map to a built-in effect (backward-compatible path).
+      store.setCompilationError(null);
       ctx.store.updateShaderEffect(p.data.entityId, { shaderType: inferred });
       return {
         success: true,
@@ -192,6 +196,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     // No built-in match — compile to mega-shader slot and register.
     const slotResult = compileToMegaShaderSlot(graph);
     if (slotResult.error) {
+      store.setCompilationError(slotResult.error);
       return { success: false, error: `Mega-shader compilation failed: ${slotResult.error}` };
     }
 
@@ -214,6 +219,7 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       params: {},
     });
 
+    store.setCompilationError(null);
     return {
       success: true,
       result: `Compiled shader graph "${graph.name}" as mega-shader slot ${slot} and applied to entity ${p.data.entityId}`,
