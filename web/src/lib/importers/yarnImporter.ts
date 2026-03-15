@@ -351,7 +351,10 @@ function convertSequentialSegment(
   chain: DialogueNode[],
   patches: Array<(m: Map<string, string>) => void>,
 ): void {
-  for (const item of items) {
+  let i = 0;
+  while (i < items.length) {
+    const item = items[i];
+
     switch (item.kind) {
       case 'text': {
         const node: TextNode = {
@@ -362,6 +365,7 @@ function convertSequentialSegment(
           next: null,
         };
         chain.push(node);
+        i++;
         break;
       }
 
@@ -387,15 +391,21 @@ function convertSequentialSegment(
           };
           chain.push(node);
         }
+        i++;
         break;
       }
 
       case 'jump': {
-        // A jump ends the current segment; patch the preceding node to link forward.
         const target = item.target;
 
-        // If the previous node already has a next pointer, add a transparent
-        // TextNode to carry the jump target.
+        // Empty jump target => treat as EndNode
+        if (!target) {
+          const endNode: EndNode = { id: nextId('node'), type: 'end' };
+          chain.push(endNode);
+          return;
+        }
+
+        // A jump ends the current segment; add a transparent carrier node.
         const jumpCarrier: TextNode = {
           id: nextId('node'),
           type: 'text',
@@ -419,23 +429,133 @@ function convertSequentialSegment(
       }
 
       case 'if': {
-        const cond: Condition = buildConditionFromExpr(item.condition);
-        const condNode: ConditionNode = {
-          id: nextId('node'),
-          type: 'condition',
-          condition: cond,
-          onTrue: null,
-          onFalse: null,
-        };
-        chain.push(condNode);
+        // Collect the entire if/elseif/else/endif block and convert it
+        // into a chain of ConditionNodes with proper onTrue/onFalse wiring.
+        i = convertIfBlock(items, i, chain, patches);
         break;
       }
 
-      // elseif / else / endif: structural — no SpawnForge equivalent; skip
+      // Stray elseif/else/endif outside an if-block — skip gracefully
       case 'elseif':
       case 'else':
       case 'endif':
+        i++;
         break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// If / elseif / else / endif block converter
+// ---------------------------------------------------------------------------
+
+/**
+ * Collect lines from an <<if>> through its matching <<endif>> and produce
+ * a chain of ConditionNodes with proper onTrue/onFalse branches.
+ *
+ * Returns the index of the first item AFTER the <<endif>>.
+ */
+function convertIfBlock(
+  items: YarnLine[],
+  startIdx: number,
+  chain: DialogueNode[],
+  patches: Array<(m: Map<string, string>) => void>,
+): number {
+  type Branch = { condition: string | null; body: YarnLine[] };
+  const branches: Branch[] = [];
+
+  let i = startIdx;
+  const ifItem = items[i];
+  if (ifItem.kind !== 'if') return i + 1;
+
+  let currentBranch: Branch = { condition: ifItem.condition, body: [] };
+  branches.push(currentBranch);
+  i++;
+
+  let depth = 1;
+  while (i < items.length && depth > 0) {
+    const line = items[i];
+    if (line.kind === 'if') {
+      depth++;
+      currentBranch.body.push(line);
+      i++;
+    } else if (line.kind === 'endif') {
+      depth--;
+      if (depth === 0) {
+        i++;
+        break;
+      }
+      currentBranch.body.push(line);
+      i++;
+    } else if (depth === 1 && line.kind === 'elseif') {
+      currentBranch = { condition: line.condition, body: [] };
+      branches.push(currentBranch);
+      i++;
+    } else if (depth === 1 && line.kind === 'else') {
+      currentBranch = { condition: null, body: [] };
+      branches.push(currentBranch);
+      i++;
+    } else {
+      currentBranch.body.push(line);
+      i++;
+    }
+  }
+
+  buildConditionChain(branches, 0, chain, patches);
+  return i;
+}
+
+/**
+ * Recursively build ConditionNodes from a list of if/elseif/else branches.
+ */
+function buildConditionChain(
+  branches: Array<{ condition: string | null; body: YarnLine[] }>,
+  branchIdx: number,
+  chain: DialogueNode[],
+  patches: Array<(m: Map<string, string>) => void>,
+): void {
+  if (branchIdx >= branches.length) return;
+
+  const branch = branches[branchIdx];
+
+  // Else branch (no condition): convert body directly into the chain
+  if (branch.condition === null) {
+    const subChain: DialogueNode[] = [];
+    convertSequentialSegment(branch.body, subChain, patches);
+    for (const n of subChain) chain.push(n);
+    return;
+  }
+
+  // Conditional branch: create a ConditionNode
+  const cond = buildConditionFromExpr(branch.condition);
+  const condNode: ConditionNode = {
+    id: nextId('node'),
+    type: 'condition',
+    condition: cond,
+    onTrue: null,
+    onFalse: null,
+  };
+  chain.push(condNode);
+
+  // Build onTrue sub-chain from the branch body
+  const trueChain: DialogueNode[] = [];
+  convertSequentialSegment(branch.body, trueChain, patches);
+
+  if (trueChain.length > 0) {
+    linkChain(trueChain);
+    condNode.onTrue = trueChain[0].id;
+    for (const n of trueChain) chain.push(n);
+  }
+
+  // Build onFalse from remaining branches (elseif / else)
+  if (branchIdx + 1 < branches.length) {
+    const falseChain: DialogueNode[] = [];
+    buildConditionChain(branches, branchIdx + 1, falseChain, patches);
+
+    if (falseChain.length > 0) {
+      linkChain(falseChain);
+      condNode.onFalse = falseChain[0].id;
+      for (const n of falseChain) chain.push(n);
     }
   }
 }

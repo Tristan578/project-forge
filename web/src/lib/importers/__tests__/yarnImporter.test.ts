@@ -190,6 +190,91 @@ describe('parseYarnFile - conditionals', () => {
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode;
     expect(condNode.condition.type).toBe('less');
   });
+
+  it('creates onFalse branch for <<else>>', () => {
+    const body = `<<if $flag == true>>
+You have the flag.
+<<else>>
+You do not have the flag.
+<<endif>>`;
+    const input = makeYarn(nodeBlock('Start', body));
+    const tree = parseYarnFile(input);
+
+    const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
+    expect(condNode).toBeDefined();
+    expect(condNode!.onTrue).not.toBeNull();
+    expect(condNode!.onFalse).not.toBeNull();
+
+    const trueNode = tree.nodes.find((n) => n.id === condNode!.onTrue) as TextNode;
+    expect(trueNode).toBeDefined();
+    expect(trueNode.text).toBe('You have the flag.');
+
+    const falseNode = tree.nodes.find((n) => n.id === condNode!.onFalse) as TextNode;
+    expect(falseNode).toBeDefined();
+    expect(falseNode.text).toBe('You do not have the flag.');
+  });
+
+  it('creates chained ConditionNodes for <<elseif>>', () => {
+    const body = `<<if $score > 90>>
+Excellent!
+<<elseif $score > 50>>
+Not bad.
+<<else>>
+Try harder.
+<<endif>>`;
+    const input = makeYarn(nodeBlock('Start', body));
+    const tree = parseYarnFile(input);
+
+    const firstCond = tree.nodes.find((n) => n.type === 'condition') as ConditionNode;
+    expect(firstCond).toBeDefined();
+    expect(firstCond.condition.type).toBe('greater');
+    expect(firstCond.onTrue).not.toBeNull();
+    expect(firstCond.onFalse).not.toBeNull();
+
+    const excellentNode = tree.nodes.find((n) => n.id === firstCond.onTrue) as TextNode;
+    expect(excellentNode.text).toBe('Excellent!');
+
+    const secondCond = tree.nodes.find((n) => n.id === firstCond.onFalse) as ConditionNode;
+    expect(secondCond).toBeDefined();
+    expect(secondCond.type).toBe('condition');
+    expect(secondCond.onTrue).not.toBeNull();
+    expect(secondCond.onFalse).not.toBeNull();
+
+    const notBadNode = tree.nodes.find((n) => n.id === secondCond.onTrue) as TextNode;
+    expect(notBadNode.text).toBe('Not bad.');
+
+    const tryHarderNode = tree.nodes.find((n) => n.id === secondCond.onFalse) as TextNode;
+    expect(tryHarderNode.text).toBe('Try harder.');
+  });
+
+  it('handles if/else with no elseif', () => {
+    const body = `<<if $alive == true>>
+Still here.
+<<else>>
+Game over.
+<<endif>>`;
+    const input = makeYarn(nodeBlock('Start', body));
+    const tree = parseYarnFile(input);
+
+    const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode;
+    expect(condNode.onTrue).not.toBeNull();
+    expect(condNode.onFalse).not.toBeNull();
+
+    const falseNode = tree.nodes.find((n) => n.id === condNode.onFalse) as TextNode;
+    expect(falseNode.text).toBe('Game over.');
+  });
+
+  it('handles if without else (onFalse remains null)', () => {
+    const body = `<<if $flag == true>>
+Flag is set.
+<<endif>>`;
+    const input = makeYarn(nodeBlock('Start', body));
+    const tree = parseYarnFile(input);
+
+    const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode;
+    expect(condNode.onTrue).not.toBeNull();
+    expect(condNode.onFalse).toBeNull();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -278,6 +363,38 @@ describe('parseYarnFile - multi-node files', () => {
     expect(actionNode!.actions.length).toBeGreaterThan(0);
     expect(actionNode!.actions[0].type).toBe('trigger_event');
     expect((actionNode!.actions[0] as { type: string; eventName: string }).eventName).toContain('playsound');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Empty jump nodes
+// ---------------------------------------------------------------------------
+
+describe('parseYarnFile - empty jump nodes', () => {
+  it('treats <<jump>> with no target as EndNode', () => {
+    const input = makeYarn(nodeBlock('Start', 'Hello.\n<<jump >>'));
+    const tree = parseYarnFile(input);
+
+    const endNode = tree.nodes.find((n) => n.type === 'end') as EndNode | undefined;
+    expect(endNode).toBeDefined();
+  });
+
+  it('treats <<jump>> with empty string target as EndNode', () => {
+    const input = makeYarn(nodeBlock('Start', 'Hello.\n<<jump>>'));
+    const tree = parseYarnFile(input);
+
+    const endNode = tree.nodes.find((n) => n.type === 'end') as EndNode | undefined;
+    expect(endNode).toBeDefined();
+  });
+
+  it('does not create empty TextNode carrier for jump with no target', () => {
+    const input = makeYarn(nodeBlock('Start', 'Hello.\n<<jump >>'));
+    const tree = parseYarnFile(input);
+
+    const emptyCarrier = tree.nodes.find(
+      (n) => n.type === 'text' && (n as TextNode).text === '' && (n as TextNode).next === null,
+    );
+    expect(emptyCarrier).toBeUndefined();
   });
 });
 
