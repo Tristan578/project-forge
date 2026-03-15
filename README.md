@@ -3,6 +3,10 @@
 [![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml)
 [![CD](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml/badge.svg)](https://github.com/Tristan578/project-forge/actions/workflows/cd.yml)
 
+## Status
+
+![CI](https://github.com/Tristan578/project-forge/actions/workflows/ci.yml/badge.svg) ![Vercel](https://img.shields.io/badge/Vercel-deployed-brightgreen?logo=vercel) ![Cloudflare](https://img.shields.io/badge/CDN-Cloudflare_R2-orange?logo=cloudflare) ![Anthropic](https://img.shields.io/badge/AI-Claude_API-blueviolet?logo=anthropic) ![Google AI](https://img.shields.io/badge/Embeddings-Gemini-blue?logo=google) ![Sentry](https://img.shields.io/badge/Monitoring-Sentry-purple?logo=sentry)
+
 An open-source, AI-native 2D/3D game engine for the browser. Every capability — scene creation, materials, physics, scripting, audio, particles, tilemaps, animation, export — is exposed as a JSON command, making the entire editor fully controllable by LLMs and autonomous agents via the [Model Context Protocol](https://modelcontextprotocol.io/). Build games by conversation, by code, or by hand.
 
 Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a React-based visual editor.
