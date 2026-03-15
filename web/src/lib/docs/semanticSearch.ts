@@ -21,7 +21,7 @@ export interface SearchResult {
   similarity: number;
 }
 
-const EMBEDDING_MODEL = 'text-embedding-004';
+const EMBEDDING_MODEL = 'gemini-embedding-2-preview';
 const DEFAULT_TOP_K = 5;
 
 /** Compute cosine similarity between two equal-length vectors */
