@@ -16,12 +16,15 @@ use crate::core::pending_commands::{
     queue_set_skybox_from_bridge, queue_remove_skybox_from_bridge,
     queue_update_skybox_from_bridge, queue_custom_skybox_from_bridge,
     queue_custom_wgsl_source_update_from_bridge,
+    queue_register_custom_shader_from_bridge, queue_apply_custom_shader_from_bridge,
+    queue_remove_custom_shader_slot_from_bridge,
     MaterialUpdate, LightUpdate, AmbientLightUpdate, EnvironmentUpdate,
     PostProcessingUpdate, ShaderUpdate, ShaderRemoval,
     SetSkyboxRequest, UpdateSkyboxRequest, SetCustomSkyboxRequest,
     CustomWgslSourceUpdate, QueryRequest,
+    RegisterCustomShaderRequest, ApplyCustomShaderRequest, RemoveCustomShaderRequest,
 };
-use crate::core::custom_wgsl::validate_wgsl_source;
+use crate::core::custom_wgsl::{validate_wgsl_source, CUSTOM_SHADER_SLOT_COUNT};
 
 /// Material and lighting command dispatcher.
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
@@ -52,6 +55,10 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_custom_skybox" => Some(handle_set_custom_skybox(payload.clone())),
         "set_custom_wgsl_source" => Some(handle_set_custom_wgsl_source(payload.clone())),
         "validate_wgsl" => Some(handle_validate_wgsl(payload.clone())),
+        // Mega-shader commands
+        "register_custom_shader" => Some(handle_register_custom_shader(payload.clone())),
+        "apply_custom_shader" => Some(handle_apply_custom_shader(payload.clone())),
+        "remove_custom_shader_slot" => Some(handle_remove_custom_shader_slot(payload.clone())),
         _ => None,
     }
 }
@@ -512,5 +519,144 @@ fn handle_validate_wgsl(payload: serde_json::Value) -> super::CommandResult {
         Err(validation
             .error
             .unwrap_or_else(|| "WGSL validation failed".to_string()))
+    }
+}
+
+// === Mega-shader Command Handlers ===
+
+/// Payload for register_custom_shader command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RegisterCustomShaderPayload {
+    /// Slot index 0–7 (0-based).
+    slot: usize,
+    name: String,
+    /// WGSL function body (not the full function signature).
+    wgsl_code: String,
+    #[serde(default)]
+    param_names: Vec<String>,
+}
+
+/// Handle register_custom_shader command.
+/// Validates WGSL, then queues a registration request.
+fn handle_register_custom_shader(payload: serde_json::Value) -> super::CommandResult {
+    let data: RegisterCustomShaderPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid register_custom_shader payload: {}", e))?;
+
+    if data.slot >= CUSTOM_SHADER_SLOT_COUNT {
+        return Err(format!(
+            "Slot {} out of range (valid: 0–{})",
+            data.slot,
+            CUSTOM_SHADER_SLOT_COUNT - 1
+        ));
+    }
+
+    // Validate the user's WGSL body before queuing.
+    let validation = validate_wgsl_source(&data.wgsl_code);
+    if !validation.valid {
+        return Err(format!(
+            "WGSL validation failed: {}",
+            validation.error.unwrap_or_else(|| "unknown error".to_string())
+        ));
+    }
+
+    let req = RegisterCustomShaderRequest {
+        slot: data.slot,
+        name: data.name.clone(),
+        wgsl_code: data.wgsl_code,
+        param_names: data.param_names,
+    };
+
+    if queue_register_custom_shader_from_bridge(req) {
+        tracing::info!("Queued register_custom_shader for slot {} ({})", data.slot, data.name);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for apply_custom_shader command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyCustomShaderPayload {
+    entity_id: String,
+    /// 1-indexed slot (matches WGSL dispatch switch case 1u..8u).
+    slot: u32,
+    /// Named parameter values.  Keys are parameter names; values are floats.
+    /// Uses BTreeMap for deterministic alphabetical ordering (HashMap iteration
+    /// order is nondeterministic, which would produce random param[] positions).
+    #[serde(default)]
+    params: std::collections::BTreeMap<String, f32>,
+}
+
+/// Handle apply_custom_shader command.
+fn handle_apply_custom_shader(payload: serde_json::Value) -> super::CommandResult {
+    let data: ApplyCustomShaderPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid apply_custom_shader payload: {}", e))?;
+
+    if data.slot == 0 || data.slot > CUSTOM_SHADER_SLOT_COUNT as u32 {
+        return Err(format!(
+            "Slot {} out of range (valid: 1–{})",
+            data.slot,
+            CUSTOM_SHADER_SLOT_COUNT
+        ));
+    }
+
+    // Flatten params map into a positional Vec<f32> (up to 16 values).
+    // BTreeMap guarantees alphabetical key ordering for deterministic param positions.
+    if data.params.len() > 16 {
+        return Err(format!(
+            "Too many params ({}) — mega-shader supports at most 16",
+            data.params.len()
+        ));
+    }
+    let params: Vec<f32> = data.params.values().copied().collect();
+
+    let req = ApplyCustomShaderRequest {
+        entity_id: data.entity_id.clone(),
+        slot: data.slot,
+        params,
+    };
+
+    if queue_apply_custom_shader_from_bridge(req) {
+        tracing::info!(
+            "Queued apply_custom_shader slot {} for entity {}",
+            data.slot,
+            data.entity_id
+        );
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Payload for remove_custom_shader_slot command.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoveCustomShaderSlotPayload {
+    /// Slot index 0–7 (0-based).
+    slot: usize,
+}
+
+/// Handle remove_custom_shader_slot command.
+fn handle_remove_custom_shader_slot(payload: serde_json::Value) -> super::CommandResult {
+    let data: RemoveCustomShaderSlotPayload = serde_json::from_value(payload)
+        .map_err(|e| format!("Invalid remove_custom_shader_slot payload: {}", e))?;
+
+    if data.slot >= CUSTOM_SHADER_SLOT_COUNT {
+        return Err(format!(
+            "Slot {} out of range (valid: 0–{})",
+            data.slot,
+            CUSTOM_SHADER_SLOT_COUNT - 1
+        ));
+    }
+
+    let req = RemoveCustomShaderRequest { slot: data.slot };
+
+    if queue_remove_custom_shader_slot_from_bridge(req) {
+        tracing::info!("Queued remove_custom_shader_slot for slot {}", data.slot);
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
     }
 }

@@ -813,3 +813,130 @@ describe('handlers2d sprite animation edge cases', () => {
     });
   });
 });
+
+// ===========================================================================
+// add_skeleton2d_mesh_attachment
+// ===========================================================================
+
+/** Minimal valid payload for add_skeleton2d_mesh_attachment. */
+const minimalMeshAttachmentArgs = {
+  entityId: 'skel-1',
+  skinName: 'default',
+  attachmentName: 'body_mesh',
+  vertices: [[0, 0], [10, 0], [5, 10]] as [number, number][],
+  uvs: [[0, 0], [1, 0], [0.5, 1]] as [number, number][],
+  triangles: [0, 1, 2],
+  weights: [
+    { bones: ['root'], weights: [1.0] },
+    { bones: ['root'], weights: [1.0] },
+    { bones: ['root'], weights: [1.0] },
+  ],
+};
+
+describe('handlers2d add_skeleton2d_mesh_attachment', () => {
+  it('dispatches the command with all required fields', async () => {
+    const { result, dispatch } = await invoke('add_skeleton2d_mesh_attachment', minimalMeshAttachmentArgs);
+    expect(result.success).toBe(true);
+    expect(dispatch).toHaveBeenCalledWith('add_skeleton2d_mesh_attachment', expect.objectContaining({
+      entityId: 'skel-1',
+      skinName: 'default',
+      attachmentName: 'body_mesh',
+    }));
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes vertices, uvs, triangles, and weights verbatim to dispatch', async () => {
+    const { dispatch } = await invoke('add_skeleton2d_mesh_attachment', minimalMeshAttachmentArgs);
+    const payload = dispatch.mock.calls[0][1] as Record<string, unknown>;
+    expect(payload.vertices).toEqual([[0, 0], [10, 0], [5, 10]]);
+    expect(payload.uvs).toEqual([[0, 0], [1, 0], [0.5, 1]]);
+    expect(payload.triangles).toEqual([0, 1, 2]);
+    expect(payload.weights).toEqual([
+      { bones: ['root'], weights: [1.0] },
+      { bones: ['root'], weights: [1.0] },
+      { bones: ['root'], weights: [1.0] },
+    ]);
+  });
+
+  it('returns success message containing entity/skin/attachment names', async () => {
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', minimalMeshAttachmentArgs);
+    expect(result.success).toBe(true);
+    const msg = (result.result as { message: string }).message;
+    expect(msg).toContain('skel-1');
+    expect(msg).toContain('default');
+    expect(msg).toContain('body_mesh');
+  });
+
+  it('fails when vertices.length !== weights.length', async () => {
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', {
+      ...minimalMeshAttachmentArgs,
+      weights: [{ bones: ['root'], weights: [1.0] }], // only 1 entry vs 3 vertices
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('vertices.length');
+    expect(result.error).toContain('weights.length');
+  });
+
+  it('fails when entityId is missing', async () => {
+    const { entityId: _, ...withoutEntity } = minimalMeshAttachmentArgs;
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', withoutEntity);
+    expect(result.success).toBe(false);
+  });
+
+  it('fails when skinName is missing', async () => {
+    const { skinName: _, ...withoutSkin } = minimalMeshAttachmentArgs;
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', withoutSkin);
+    expect(result.success).toBe(false);
+  });
+
+  it('fails when attachmentName is missing', async () => {
+    const { attachmentName: _, ...withoutAttachment } = minimalMeshAttachmentArgs;
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', withoutAttachment);
+    expect(result.success).toBe(false);
+  });
+
+  it('fails when vertices are missing', async () => {
+    const { vertices: _, ...withoutVertices } = minimalMeshAttachmentArgs;
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', withoutVertices);
+    expect(result.success).toBe(false);
+  });
+
+  it('fails when uvs are missing', async () => {
+    const { uvs: _, ...withoutUvs } = minimalMeshAttachmentArgs;
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', withoutUvs);
+    expect(result.success).toBe(false);
+  });
+
+  it('fails when triangles are missing', async () => {
+    const { triangles: _, ...withoutTriangles } = minimalMeshAttachmentArgs;
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', withoutTriangles);
+    expect(result.success).toBe(false);
+  });
+
+  it('fails when weights are missing', async () => {
+    const { weights: _, ...withoutWeights } = minimalMeshAttachmentArgs;
+    const { result } = await invoke('add_skeleton2d_mesh_attachment', withoutWeights);
+    expect(result.success).toBe(false);
+  });
+
+  it('supports multi-bone weights per vertex', async () => {
+    const { dispatch } = await invoke('add_skeleton2d_mesh_attachment', {
+      ...minimalMeshAttachmentArgs,
+      weights: [
+        { bones: ['root', 'arm'], weights: [0.6, 0.4] },
+        { bones: ['root', 'arm'], weights: [0.3, 0.7] },
+        { bones: ['root'], weights: [1.0] },
+      ],
+    });
+    expect(dispatch).toHaveBeenCalledWith('add_skeleton2d_mesh_attachment', expect.objectContaining({
+      weights: expect.arrayContaining([
+        expect.objectContaining({ bones: ['root', 'arm'], weights: [0.6, 0.4] }),
+      ]),
+    }));
+  });
+
+  it('does not call setSkeleton2d on the store', async () => {
+    const { store } = await invoke('add_skeleton2d_mesh_attachment', minimalMeshAttachmentArgs);
+    expect(store.setSkeleton2d).not.toHaveBeenCalled();
+  });
+});

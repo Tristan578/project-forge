@@ -88,6 +88,26 @@ pub struct SpawnSpriteRequest {
     pub sorting_order: Option<i32>,
 }
 
+// === Sorting Layers Request ===
+
+#[derive(Debug, Clone)]
+pub struct SetSortingLayersRequest {
+    pub layers: Vec<String>,
+}
+
+// === Tileset CRUD Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct SetTilesetRequest {
+    pub entity_id: String,
+    pub tileset_data: crate::core::tileset::TilesetData,
+}
+
+#[derive(Debug, Clone)]
+pub struct RemoveTilesetRequest {
+    pub entity_id: String,
+}
+
 // === Tilemap Request Structs ===
 
 #[derive(Debug, Clone)]
@@ -101,10 +121,67 @@ pub struct TilemapDataRemoval {
     pub entity_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct PaintTileRequest {
+    pub entity_id: String,
+    pub layer: usize,
+    pub x: usize,
+    pub y: usize,
+    pub tile_index: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct EraseTileRequest {
+    pub entity_id: String,
+    pub layer: usize,
+    pub x: usize,
+    pub y: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct TilePlacement {
+    pub x: usize,
+    pub y: usize,
+    pub tile_index: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct FillTilesRequest {
+    pub entity_id: String,
+    pub layer: usize,
+    pub tiles: Vec<TilePlacement>,
+}
+
+// === Grid 2D Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct SetGrid2dRequest {
+    pub visible: bool,
+    pub cell_size: f32,
+    pub color: [f32; 4],
+}
+
+
+// === Skeleton 2D Mesh Attachment Request Structs ===
+
+#[derive(Debug, Clone)]
+pub struct AddMeshAttachment2dRequest {
+    pub entity_id: String,
+    pub skin_name: String,
+    pub attachment_name: String,
+    pub vertices: Vec<[f32; 2]>,
+    pub uvs: Vec<[f32; 2]>,
+    pub triangles: Vec<u16>,
+    pub weights: Vec<crate::core::skeleton2d::VertexWeights>,
+}
 
 // === Queue Methods ===
 
 impl PendingCommands {
+    pub fn queue_add_mesh_attachment2d(&mut self, request: AddMeshAttachment2dRequest) {
+        self.add_mesh_attachment2d_requests.push(request);
+    }
+
     pub fn queue_set_project_type(&mut self, request: SetProjectTypeRequest) {
         self.set_project_type_requests.push(request);
     }
@@ -149,12 +226,40 @@ impl PendingCommands {
         self.spawn_sprite_requests.push(request);
     }
 
+    pub fn queue_set_sorting_layers(&mut self, request: SetSortingLayersRequest) {
+        self.set_sorting_layers_requests.push(request);
+    }
+
+    pub fn queue_set_tileset(&mut self, request: SetTilesetRequest) {
+        self.set_tileset_requests.push(request);
+    }
+
+    pub fn queue_remove_tileset(&mut self, request: RemoveTilesetRequest) {
+        self.remove_tileset_requests.push(request);
+    }
+
     pub fn queue_tilemap_data_update(&mut self, update: TilemapDataUpdate) {
         self.tilemap_data_updates.push(update);
     }
 
     pub fn queue_tilemap_data_removal(&mut self, removal: TilemapDataRemoval) {
         self.tilemap_data_removals.push(removal);
+    }
+
+    pub fn queue_paint_tile(&mut self, request: PaintTileRequest) {
+        self.paint_tile_requests.push(request);
+    }
+
+    pub fn queue_erase_tile(&mut self, request: EraseTileRequest) {
+        self.erase_tile_requests.push(request);
+    }
+
+    pub fn queue_fill_tiles(&mut self, request: FillTilesRequest) {
+        self.fill_tiles_requests.push(request);
+    }
+
+    pub fn queue_set_grid_2d(&mut self, request: SetGrid2dRequest) {
+        self.set_grid_2d_requests.push(request);
     }
 }
 
@@ -204,10 +309,42 @@ pub fn queue_spawn_sprite_from_bridge(request: SpawnSpriteRequest) -> bool {
     super::with_pending(|pc| pc.queue_spawn_sprite(request)).is_some()
 }
 
+pub fn queue_set_sorting_layers_from_bridge(request: SetSortingLayersRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_sorting_layers(request)).is_some()
+}
+
+pub fn queue_set_tileset_from_bridge(request: SetTilesetRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_tileset(request)).is_some()
+}
+
+pub fn queue_remove_tileset_from_bridge(request: RemoveTilesetRequest) -> bool {
+    super::with_pending(|pc| pc.queue_remove_tileset(request)).is_some()
+}
+
 pub fn queue_tilemap_data_update_from_bridge(update: TilemapDataUpdate) -> bool {
     super::with_pending(|pc| pc.queue_tilemap_data_update(update)).is_some()
 }
 
 pub fn queue_tilemap_data_removal_from_bridge(removal: TilemapDataRemoval) -> bool {
     super::with_pending(|pc| pc.queue_tilemap_data_removal(removal)).is_some()
+}
+
+pub fn queue_add_mesh_attachment2d_from_bridge(request: AddMeshAttachment2dRequest) -> bool {
+    super::with_pending(|pc| pc.queue_add_mesh_attachment2d(request)).is_some()
+}
+
+pub fn queue_paint_tile_from_bridge(request: PaintTileRequest) -> bool {
+    super::with_pending(|pc| pc.queue_paint_tile(request)).is_some()
+}
+
+pub fn queue_erase_tile_from_bridge(request: EraseTileRequest) -> bool {
+    super::with_pending(|pc| pc.queue_erase_tile(request)).is_some()
+}
+
+pub fn queue_fill_tiles_from_bridge(request: FillTilesRequest) -> bool {
+    super::with_pending(|pc| pc.queue_fill_tiles(request)).is_some()
+}
+
+pub fn queue_set_grid_2d_from_bridge(request: SetGrid2dRequest) -> bool {
+    super::with_pending(|pc| pc.queue_set_grid_2d(request)).is_some()
 }

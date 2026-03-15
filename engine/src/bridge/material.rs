@@ -557,6 +557,170 @@ pub(super) fn apply_custom_wgsl_source_updates(
     }
 }
 
+// === Mega-shader bridge systems ============================================
+
+/// System that processes `register_custom_shader` requests.
+///
+/// Inserts the WGSL body into `CustomShaderRegistry` and marks it dirty so
+/// `restitch_custom_shaders` regenerates the combined shader on the same frame.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_register_custom_shader_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut registry: ResMut<crate::core::custom_wgsl::CustomShaderRegistry>,
+) {
+    use crate::core::custom_wgsl::CustomShaderSlot;
+
+    for req in pending.register_custom_shader_requests.drain(..) {
+        let slot_data = CustomShaderSlot {
+            name: req.name.clone(),
+            wgsl_function_body: req.wgsl_code,
+            param_names: req.param_names,
+            compiled: false,
+        };
+        match registry.register(req.slot, slot_data) {
+            Ok(()) => tracing::info!("Registered custom shader slot {} ({})", req.slot, req.name),
+            Err(e) => tracing::error!("Failed to register custom shader slot {}: {}", req.slot, e),
+        }
+    }
+}
+
+/// System that processes `apply_custom_shader` requests.
+///
+/// Sets `custom_slot` and `custom_params` on the entity's `ForgeShaderExtension`
+/// so the mega-shader dispatch switch picks up the right slot function.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_apply_custom_shader_requests(
+    mut pending: ResMut<PendingCommands>,
+    entity_query: Query<(Entity, &EntityId, Option<&ShaderEffectData>)>,
+    ext_mat_query: Query<(Entity, &EntityId, &MeshMaterial3d<ForgeMaterial>)>,
+    std_mat_query: Query<(Entity, &EntityId, &MeshMaterial3d<StandardMaterial>, &MaterialData)>,
+    std_materials: Res<Assets<StandardMaterial>>,
+    mut ext_materials: ResMut<Assets<ForgeMaterial>>,
+    mut commands: Commands,
+) {
+    for req in pending.apply_custom_shader_requests.drain(..) {
+        let found = entity_query.iter().find(|(_, eid, _)| eid.0 == req.entity_id);
+        let Some((entity, _, _old_shader)) = found else { continue; };
+
+        // Pack params into four Vec4s.
+        let mut flat = [0.0f32; 16];
+        for (i, v) in req.params.iter().enumerate().take(16) {
+            flat[i] = *v;
+        }
+        let p0 = bevy::math::Vec4::new(flat[0], flat[1], flat[2], flat[3]);
+        let p1 = bevy::math::Vec4::new(flat[4], flat[5], flat[6], flat[7]);
+        let p2 = bevy::math::Vec4::new(flat[8], flat[9], flat[10], flat[11]);
+        let p3 = bevy::math::Vec4::new(flat[12], flat[13], flat[14], flat[15]);
+
+        // Ensure entity has a ForgeMaterial (upgrade from StandardMaterial if needed).
+        if let Ok((_, _, ext_handle)) = ext_mat_query.get(entity) {
+            if let Some(ext_mat) = ext_materials.get_mut(ext_handle) {
+                // Reset shader_type to 0 so built-in effect early-returns are skipped,
+                // allowing the custom_slot dispatch block to execute.
+                ext_mat.extension.shader_type = 0;
+                ext_mat.extension.custom_slot = req.slot;
+                ext_mat.extension.custom_params_0 = p0;
+                ext_mat.extension.custom_params_1 = p1;
+                ext_mat.extension.custom_params_2 = p2;
+                ext_mat.extension.custom_params_3 = p3;
+            }
+        } else if let Ok((_, _, std_handle, _mat_data)) = std_mat_query.get(entity) {
+            if let Some(std_mat) = std_materials.get(std_handle.0.id()) {
+                let base = std_mat.clone();
+                let mut extension = ForgeShaderExtension::default();
+                extension.custom_slot = req.slot;
+                extension.custom_params_0 = p0;
+                extension.custom_params_1 = p1;
+                extension.custom_params_2 = p2;
+                extension.custom_params_3 = p3;
+                let ext_mat = ForgeMaterial { base, extension };
+                let ext_handle = ext_materials.add(ext_mat);
+                commands.entity(entity)
+                    .remove::<MeshMaterial3d<StandardMaterial>>()
+                    .insert(MeshMaterial3d(ext_handle));
+            }
+        }
+
+        tracing::info!(
+            "Applied custom shader slot {} to entity {}",
+            req.slot, req.entity_id
+        );
+    }
+}
+
+/// System that processes `remove_custom_shader_slot` requests.
+///
+/// Clears the slot from `CustomShaderRegistry` and marks it dirty.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_remove_custom_shader_slot_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut registry: ResMut<crate::core::custom_wgsl::CustomShaderRegistry>,
+) {
+    for req in pending.remove_custom_shader_requests.drain(..) {
+        registry.remove(req.slot);
+        tracing::info!("Removed custom shader slot {}", req.slot);
+    }
+}
+
+/// System that re-stitches the forge_effects shader when `CustomShaderRegistry` is dirty.
+///
+/// Regenerates all 8 slot function bodies, replaces the injection block in the
+/// base shader template, and hot-swaps the shader asset at `FORGE_EFFECTS_SHADER_HANDLE`.
+/// Bevy's asset system then triggers pipeline recompilation automatically.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn restitch_custom_shaders(
+    mut registry: ResMut<crate::core::custom_wgsl::CustomShaderRegistry>,
+    mut shaders: ResMut<Assets<bevy::shader::Shader>>,
+) {
+    use crate::core::shader_effects::FORGE_EFFECTS_SHADER_HANDLE_PUB;
+
+    if !registry.dirty {
+        return;
+    }
+    registry.dirty = false;
+
+    const BASE: &str = include_str!("../shaders/forge_effects.wgsl");
+    const INJECT_START: &str = "// FORGE_CUSTOM_SLOT_INJECTION_START\n";
+    const INJECT_END: &str = "// FORGE_CUSTOM_SLOT_INJECTION_END";
+
+    // Find the injection block boundaries.
+    let start_pos = match BASE.find(INJECT_START) {
+        Some(p) => p + INJECT_START.len(),
+        None => {
+            tracing::error!("forge_effects.wgsl is missing FORGE_CUSTOM_SLOT_INJECTION_START marker");
+            return;
+        }
+    };
+    let end_pos = match BASE.find(INJECT_END) {
+        Some(p) => p,
+        None => {
+            tracing::error!("forge_effects.wgsl is missing FORGE_CUSTOM_SLOT_INJECTION_END marker");
+            return;
+        }
+    };
+
+    let prefix = &BASE[..start_pos];
+    let suffix = &BASE[end_pos..]; // includes the END comment itself
+
+    let slot_functions = registry.build_combined_wgsl();
+    let composed = format!("{prefix}{slot_functions}{suffix}");
+
+    if let Err(err) = shaders.insert(
+        FORGE_EFFECTS_SHADER_HANDLE_PUB.id(),
+        bevy::shader::Shader::from_wgsl(composed, "shaders/forge_effects_composed.wgsl"),
+    ) {
+        tracing::error!("Failed to restitch mega-shader: {err}");
+    } else {
+        tracing::info!("Mega-shader restitched successfully");
+        // Mark all registered slots as compiled.
+        for slot in registry.slots.iter_mut().flatten() {
+            slot.compiled = true;
+        }
+    }
+}
+
+// === End mega-shader systems ===============================================
+
 /// System that syncs time to all CustomWgslMaterial entities each frame.
 ///
 /// Also syncs user_color from ShaderEffectData when present, so per-entity
@@ -581,6 +745,21 @@ pub(super) fn sync_custom_wgsl_uniforms(
                     data.custom_color[3],
                 );
             }
+        }
+    }
+}
+
+/// Sync elapsed time to all ForgeMaterial instances each frame so that
+/// built-in effects and custom mega-shader slots can animate.
+pub(super) fn sync_forge_shader_time(
+    time: Res<Time>,
+    query: Query<&MeshMaterial3d<ForgeMaterial>>,
+    mut materials: ResMut<Assets<ForgeMaterial>>,
+) {
+    let t = time.elapsed_secs();
+    for handle in query.iter() {
+        if let Some(mat) = materials.get_mut(handle) {
+            mat.extension.time = t;
         }
     }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compileToWgsl } from './wgslCompiler';
+import { compileToWgsl, compileToMegaShaderSlot } from './wgslCompiler';
 import type { ShaderGraph } from '@/stores/shaderEditorStore';
 
 /** Helper to create a ShaderGraph with required id/name fields */
@@ -729,5 +729,141 @@ describe('wgslCompiler', () => {
     expect(result.code).toContain('in.world_normal');
     expect(result.code).toContain('view.world_position.xyz');
     expect(result.code).toContain('pbr_input.material.metallic');
+  });
+});
+
+// ─── compileToMegaShaderSlot ─────────────────────────────────────────────────
+
+describe('compileToMegaShaderSlot', () => {
+  it('returns error when no PBR Output node exists', () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'add', position: { x: 0, y: 0 }, data: {} },
+      ],
+      edges: [],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('No PBR Output node found');
+    expect(result.functionBody).toBe('');
+  });
+
+  it('returns error on cyclic dependency', () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'add', position: { x: 0, y: 0 }, data: {} },
+        { id: '2', type: 'multiply', position: { x: 100, y: 0 }, data: {} },
+        { id: '3', type: 'pbr_output', position: { x: 200, y: 0 }, data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: '1', sourceHandle: 'result', target: '2', targetHandle: 'a' },
+        { id: 'e2', source: '2', sourceHandle: 'result', target: '1', targetHandle: 'a' },
+      ],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('Cyclic');
+    expect(result.functionBody).toBe('');
+  });
+
+  it('produces function body (not a @fragment entry point) for a minimal graph', () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'pbr_output', position: { x: 0, y: 0 }, data: {} },
+      ],
+      edges: [],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeUndefined();
+    // Must NOT contain a fragment entry point — this is a function body only
+    expect(result.functionBody).not.toContain('@fragment');
+    expect(result.functionBody).not.toContain('fn fragment');
+    // Must end with a return statement
+    expect(result.functionBody.trim()).toMatch(/return .+;$/);
+  });
+
+  it('body uses slot function inputs: color, uv, time', () => {
+    // A graph that routes color → output should reference the `color` variable
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'multiply', position: { x: 0, y: 0 }, data: {} },
+        { id: '2', type: 'pbr_output', position: { x: 200, y: 0 }, data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: '1', sourceHandle: 'result', target: '2', targetHandle: 'base_color' },
+      ],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeUndefined();
+    // The body should contain WGSL statements
+    expect(result.functionBody.length).toBeGreaterThan(0);
+    // Should end with a return statement pointing to some variable
+    expect(result.functionBody.trim()).toMatch(/return \w+;$/);
+  });
+
+  it('returns `color` passthrough when output node has no base_color connection', () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'pbr_output', position: { x: 0, y: 0 }, data: {} },
+      ],
+      edges: [],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeUndefined();
+    // With no connections the final color falls back to the input `color`
+    expect(result.functionBody).toContain('return color;');
+  });
+
+  it('generates indented statements with leading spaces', () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'add', position: { x: 0, y: 0 }, data: {} },
+        { id: '2', type: 'pbr_output', position: { x: 200, y: 0 }, data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: '1', sourceHandle: 'result', target: '2', targetHandle: 'base_color' },
+      ],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeUndefined();
+    // All lines should start with at least 2 spaces (indentation)
+    const lines = result.functionBody.split('\n').filter((l) => l.trim().length > 0);
+    for (const line of lines) {
+      expect(line).toMatch(/^  /);
+    }
+  });
+
+  it('compiles a graph using time node (slot input variable)', () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'time', position: { x: 0, y: 0 }, data: {} },
+        { id: '2', type: 'sin', position: { x: 100, y: 0 }, data: {} },
+        { id: '3', type: 'pbr_output', position: { x: 200, y: 0 }, data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: '1', sourceHandle: 'time', target: '2', targetHandle: 'value' },
+        { id: 'e2', source: '2', sourceHandle: 'result', target: '3', targetHandle: 'base_color' },
+      ],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeUndefined();
+    expect(result.functionBody).toContain('sin(');
+  });
+
+  it('does not produce @vertex or struct declarations in body', () => {
+    const graph = makeGraph({
+      nodes: [
+        { id: '1', type: 'color_constant', position: { x: 0, y: 0 }, data: { color: [0.2, 0.4, 0.6, 1.0] } },
+        { id: '2', type: 'pbr_output', position: { x: 200, y: 0 }, data: {} },
+      ],
+      edges: [
+        { id: 'e1', source: '1', sourceHandle: 'color', target: '2', targetHandle: 'base_color' },
+      ],
+    });
+    const result = compileToMegaShaderSlot(graph);
+    expect(result.error).toBeUndefined();
+    expect(result.functionBody).not.toContain('@vertex');
+    expect(result.functionBody).not.toContain('struct ');
+    expect(result.functionBody).not.toContain('fn ');
   });
 });

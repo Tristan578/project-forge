@@ -748,6 +748,167 @@ fn handle_remove_animation_state_machine(payload: serde_json::Value) -> super::C
     }
 }
 
+/// Handle add_skeleton2d_mesh_attachment command.
+/// Payload: { entityId, skinName, attachmentName, vertices, uvs, triangles, weights }
+fn handle_add_mesh_attachment_2d(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let skin_name = payload.get("skinName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing skinName")?
+        .to_string();
+
+    let attachment_name = payload.get("attachmentName")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing attachmentName")?
+        .to_string();
+
+    let vertices: Vec<[f32; 2]> = payload.get("vertices")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing vertices")?
+        .iter()
+        .map(|v| -> Result<[f32; 2], String> {
+            let arr = v.as_array().ok_or("vertices: expected array")?;
+            if arr.len() < 2 {
+                return Err("vertices: each element must have 2 components".to_string());
+            }
+            let x = arr[0].as_f64().ok_or("vertices: invalid number")? as f32;
+            let y = arr[1].as_f64().ok_or("vertices: invalid number")? as f32;
+            Ok([x, y])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let uvs: Vec<[f32; 2]> = payload.get("uvs")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing uvs")?
+        .iter()
+        .map(|v| -> Result<[f32; 2], String> {
+            let arr = v.as_array().ok_or("uvs: expected array")?;
+            if arr.len() < 2 {
+                return Err("uvs: each element must have 2 components".to_string());
+            }
+            let u = arr[0].as_f64().ok_or("uvs: invalid number")? as f32;
+            let v_coord = arr[1].as_f64().ok_or("uvs: invalid number")? as f32;
+            Ok([u, v_coord])
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let triangles: Vec<u16> = payload.get("triangles")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing triangles")?
+        .iter()
+        .map(|v| -> Result<u16, String> {
+            let n = v.as_u64().ok_or("triangles: expected integer")?;
+            u16::try_from(n).map_err(|_| "triangles: index out of u16 range".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let weights: Vec<crate::core::skeleton2d::VertexWeights> = payload.get("weights")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing weights")?
+        .iter()
+        .map(|w| -> Result<crate::core::skeleton2d::VertexWeights, String> {
+            let bones: Vec<String> = w.get("bones")
+                .and_then(|b| b.as_array())
+                .ok_or("weights: missing bones array")?
+                .iter()
+                .map(|b| b.as_str().ok_or("weights: bone name must be string".to_string()).map(|s| s.to_string()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let weight_values: Vec<f32> = w.get("weights")
+                .and_then(|wv| wv.as_array())
+                .ok_or("weights: missing weights array")?
+                .iter()
+                .map(|wv| -> Result<f32, String> {
+                    wv.as_f64().ok_or("weights: weight must be number".to_string()).map(|f| f as f32)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(crate::core::skeleton2d::VertexWeights { bones, weights: weight_values })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if vertices.len() != weights.len() {
+        return Err(format!(
+            "vertices.length ({}) must equal weights.length ({})",
+            vertices.len(),
+            weights.len()
+        ));
+    }
+
+    if queue_add_mesh_attachment2d_from_bridge(AddMeshAttachment2dRequest {
+        entity_id,
+        skin_name,
+        attachment_name,
+        vertices,
+        uvs,
+        triangles,
+        weights,
+    }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_sorting_layers command.
+/// Payload: { layers: ["Background", "Default", "Foreground", "UI", ...] }
+fn handle_set_sorting_layers(payload: serde_json::Value) -> super::CommandResult {
+    let layers = payload.get("layers")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .ok_or("Missing layers array")?;
+
+    if queue_set_sorting_layers_from_bridge(SetSortingLayersRequest { layers }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_tileset command.
+/// Payload: { entityId, assetId, tileSize, gridSize, spacing, margin, tiles }
+fn handle_set_tileset(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let mut obj = payload;
+    if let Some(map) = obj.as_object_mut() {
+        map.remove("entityId");
+    }
+    let tileset_data: crate::core::tileset::TilesetData =
+        serde_json::from_value(obj)
+            .map_err(|e| format!("Invalid tileset data: {}", e))?;
+
+    if queue_set_tileset_from_bridge(SetTilesetRequest { entity_id, tileset_data }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle remove_tileset command.
+/// Payload: { entityId }
+fn handle_remove_tileset(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    if queue_remove_tileset_from_bridge(RemoveTilesetRequest { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
 pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::CommandResult> {
     match command {
         "spawn_sprite" => Some(handle_spawn_sprite(payload.clone())),
@@ -787,8 +948,30 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
             Some(super::handle_query(QueryRequest::Skeleton2dState { entity_id }))
         }
         "auto_weight_skeleton2d" => Some(handle_auto_weight_skeleton2d(payload.clone())),
+        "add_skeleton2d_mesh_attachment" => Some(handle_add_mesh_attachment_2d(payload.clone())),
         "set_tilemap_data" => Some(handle_set_tilemap_data(payload.clone())),
         "remove_tilemap_data" => Some(handle_remove_tilemap_data(payload.clone())),
+        "set_sorting_layers" => Some(handle_set_sorting_layers(payload.clone())),
+        "set_tileset" => Some(handle_set_tileset(payload.clone())),
+        "remove_tileset" => Some(handle_remove_tileset(payload.clone())),
+        "get_sprite_sheet_state" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            Some(super::handle_query(QueryRequest::SpriteSheetState { entity_id }))
+        }
+        "get_sprite_animator_state" => {
+            let entity_id = payload.get("entityId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_default();
+            Some(super::handle_query(QueryRequest::SpriteAnimatorState { entity_id }))
+        }
+        "paint_tile" => Some(handle_paint_tile(payload.clone())),
+        "erase_tile" => Some(handle_erase_tile(payload.clone())),
+        "fill_tiles" => Some(handle_fill_tiles(payload.clone())),
+        "set_grid_2d" => Some(handle_set_grid_2d(payload.clone())),
         _ => None,
     }
 }
@@ -828,6 +1011,131 @@ fn handle_remove_tilemap_data(payload: serde_json::Value) -> super::CommandResul
         .to_string();
 
     if queue_tilemap_data_removal_from_bridge(TilemapDataRemoval { entity_id }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle paint_tile command.
+/// Payload: { entityId, layer, x, y, tileIndex }
+fn handle_paint_tile(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let layer = payload.get("layer")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing layer")? as usize;
+
+    let x = payload.get("x")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing x")? as usize;
+
+    let y = payload.get("y")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing y")? as usize;
+
+    let tile_index = payload.get("tileIndex")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing tileIndex")? as u32;
+
+    if queue_paint_tile_from_bridge(PaintTileRequest { entity_id, layer, x, y, tile_index }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle erase_tile command.
+/// Payload: { entityId, layer, x, y }
+fn handle_erase_tile(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let layer = payload.get("layer")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing layer")? as usize;
+
+    let x = payload.get("x")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing x")? as usize;
+
+    let y = payload.get("y")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing y")? as usize;
+
+    if queue_erase_tile_from_bridge(EraseTileRequest { entity_id, layer, x, y }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle fill_tiles command (batch tile placement).
+/// Payload: { entityId, layer, tiles: [{ x, y, tileIndex }] }
+fn handle_fill_tiles(payload: serde_json::Value) -> super::CommandResult {
+    let entity_id = payload.get("entityId")
+        .and_then(|v| v.as_str())
+        .ok_or("Missing entityId")?
+        .to_string();
+
+    let layer = payload.get("layer")
+        .and_then(|v| v.as_u64())
+        .ok_or("Missing layer")? as usize;
+
+    let raw_tiles = payload.get("tiles")
+        .and_then(|v| v.as_array())
+        .ok_or("Missing tiles array")?;
+    let mut tiles = Vec::with_capacity(raw_tiles.len());
+    for (i, item) in raw_tiles.iter().enumerate() {
+        let x = item.get("x").and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("tiles[{}]: missing or invalid 'x'", i))? as usize;
+        let y = item.get("y").and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("tiles[{}]: missing or invalid 'y'", i))? as usize;
+        let tile_index = item.get("tileIndex").and_then(|v| v.as_u64())
+            .ok_or_else(|| format!("tiles[{}]: missing or invalid 'tileIndex'", i))? as u32;
+        tiles.push(TilePlacement { x, y, tile_index });
+    }
+
+    if queue_fill_tiles_from_bridge(FillTilesRequest { entity_id, layer, tiles }) {
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle set_grid_2d command.
+/// Payload: { visible, cellSize, color: [r, g, b, a] }
+fn handle_set_grid_2d(payload: serde_json::Value) -> super::CommandResult {
+    let visible = payload.get("visible")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let cell_size = payload.get("cellSize")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(32.0) as f32;
+
+    let color = payload.get("color")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            if arr.len() == 4 {
+                Some([
+                    arr[0].as_f64()? as f32,
+                    arr[1].as_f64()? as f32,
+                    arr[2].as_f64()? as f32,
+                    arr[3].as_f64()? as f32,
+                ])
+            } else {
+                None
+            }
+        })
+        .unwrap_or([0.3, 0.3, 0.3, 0.5]);
+
+    if queue_set_grid_2d_from_bridge(SetGrid2dRequest { visible, cell_size, color }) {
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())

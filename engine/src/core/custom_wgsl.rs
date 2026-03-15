@@ -6,6 +6,11 @@
 //! (not per-instance), a single shader asset handle is shared. The user's
 //! code is injected into a template and the Shader asset is hot-swapped at
 //! the fixed handle, triggering automatic recompilation.
+//!
+//! The mega-shader registry extends this with 8 independent slots, each
+//! holding a named WGSL function. Entities opt in via `custom_slot` (1-8)
+//! on their `ForgeShaderExtension`. The combined shader is regenerated
+//! whenever a slot is registered or removed.
 
 use bevy::asset::uuid_handle;
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
@@ -16,6 +21,9 @@ use serde::{Deserialize, Serialize};
 
 /// Maximum WGSL source code length in bytes (64KB).
 pub const MAX_WGSL_SOURCE_LENGTH: usize = 65_536;
+
+/// Number of independent custom shader slots.
+pub const CUSTOM_SHADER_SLOT_COUNT: usize = 8;
 
 /// Stable handle for the custom WGSL shader asset.
 /// Using a UUID handle avoids `embedded_asset!` macro issues on Windows.
@@ -63,6 +71,97 @@ impl Default for CustomWgslSource {
         }
     }
 }
+
+// ─── Mega-shader registry ───────────────────────────────────────────────────
+
+/// One named WGSL slot in the mega-shader registry.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomShaderSlot {
+    /// Human-readable name shown in the ShaderInspector.
+    pub name: String,
+    /// WGSL function body.  The bridge wraps this into
+    /// `fn custom_shader_N(color, uv, time, params) -> vec4<f32>`.
+    pub wgsl_function_body: String,
+    /// Optional parameter name hints (up to 16 floats).
+    pub param_names: Vec<String>,
+    /// Whether the last injection/hot-swap succeeded.
+    pub compiled: bool,
+}
+
+/// Registry of up to 8 independent custom WGSL shader slots.
+///
+/// Stored as a Bevy resource. When any slot changes the bridge's
+/// `restitch_custom_shaders` system regenerates the combined WGSL
+/// and hot-swaps the shader asset.
+#[derive(Resource, Default)]
+pub struct CustomShaderRegistry {
+    pub slots: [Option<CustomShaderSlot>; CUSTOM_SHADER_SLOT_COUNT],
+    /// Set to true by command handlers; cleared by the restitch system.
+    pub dirty: bool,
+}
+
+impl CustomShaderRegistry {
+    /// Register or replace a slot (0-indexed, range 0–7).
+    pub fn register(&mut self, slot: usize, data: CustomShaderSlot) -> Result<(), String> {
+        if slot >= CUSTOM_SHADER_SLOT_COUNT {
+            return Err(format!("Slot {slot} out of range (max {})", CUSTOM_SHADER_SLOT_COUNT - 1));
+        }
+        self.slots[slot] = Some(data);
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Clear a slot.
+    pub fn remove(&mut self, slot: usize) {
+        if slot < CUSTOM_SHADER_SLOT_COUNT {
+            self.slots[slot] = None;
+            self.dirty = true;
+        }
+    }
+
+    /// Get a reference to a slot.
+    pub fn get(&self, slot: usize) -> Option<&CustomShaderSlot> {
+        self.slots.get(slot)?.as_ref()
+    }
+
+    /// Return the index of the first empty slot, or None if all 8 are occupied.
+    pub fn next_available_slot(&self) -> Option<usize> {
+        self.slots.iter().position(|s| s.is_none())
+    }
+
+    /// Build the combined WGSL containing one function per registered slot.
+    /// Unregistered slots get a passthrough stub.
+    pub fn build_combined_wgsl(&self) -> String {
+        let mut functions = String::new();
+        for i in 0..CUSTOM_SHADER_SLOT_COUNT {
+            let fn_name = format!("custom_shader_{}", i + 1);
+            match &self.slots[i] {
+                Some(slot) => {
+                    // Indent the user body by 4 spaces
+                    let indented = slot
+                        .wgsl_function_body
+                        .lines()
+                        .map(|l| format!("    {l}"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    functions.push_str(&format!(
+                        "fn {fn_name}(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> {{\n{indented}\n}}\n\n"
+                    ));
+                }
+                None => {
+                    // Stub: pass-through
+                    functions.push_str(&format!(
+                        "fn {fn_name}(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> {{\n    return color;\n}}\n\n"
+                    ));
+                }
+            }
+        }
+        functions
+    }
+}
+
+// ─── WGSL validation ────────────────────────────────────────────────────────
 
 /// Validation result for WGSL source code (lightweight heuristic checks).
 pub struct WgslValidation {
@@ -216,5 +315,8 @@ impl Plugin for CustomWgslPlugin {
 
         // Insert the default resource (passthrough, no user code yet).
         app.insert_resource(CustomWgslSource::default());
+
+        // Insert the mega-shader registry (empty, all stubs).
+        app.init_resource::<CustomShaderRegistry>();
     }
 }

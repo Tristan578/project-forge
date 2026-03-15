@@ -57,8 +57,28 @@ pub(super) fn process_query_requests(
 ) {
     use crate::core::pending_commands::QueryRequest;
 
-    let requests: Vec<QueryRequest> = pending.query_requests.drain(..).collect();
-    for request in requests {
+    // Take only the requests this system handles; leave the rest for dedicated handlers
+    // (sprite, terrain, quality, reverb zone, etc.) that run as separate systems.
+    let mut handled = Vec::new();
+    let mut remaining = Vec::new();
+    for request in pending.query_requests.drain(..) {
+        match &request {
+            QueryRequest::SpriteSheetState { .. }
+            | QueryRequest::SpriteAnimatorState { .. }
+            | QueryRequest::TerrainState { .. }
+            | QueryRequest::QualitySettings
+            | QueryRequest::ReverbZoneState { .. }
+            | QueryRequest::ListJoints => {
+                remaining.push(request);
+            }
+            _ => {
+                handled.push(request);
+            }
+        }
+    }
+    pending.query_requests = remaining;
+
+    for request in handled {
         match request {
             QueryRequest::SceneGraph => {
                 // Emit the cached scene graph
@@ -260,6 +280,12 @@ pub(super) fn process_query_requests(
             }
             QueryRequest::Skeleton2dState { .. } => {
                 // Skeleton 2D state handled separately
+            }
+            QueryRequest::SpriteSheetState { .. } => {
+                // Handled by sprite::handle_sprite_sheet_state_queries
+            }
+            QueryRequest::SpriteAnimatorState { .. } => {
+                // Handled by sprite::handle_sprite_animator_state_queries
             }
         }
     }
