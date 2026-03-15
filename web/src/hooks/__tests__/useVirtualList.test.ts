@@ -189,7 +189,6 @@ describe('useVirtualList', () => {
     // Manually attach a mock element to the ref
     const mockDiv = document.createElement('div');
     Object.defineProperty(mockDiv, 'clientHeight', { value: 500 });
-    // @ts-expect-error - assigning to ref
     result.current.containerRef.current = mockDiv;
 
     // Re-render to trigger the effect
