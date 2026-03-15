@@ -10,6 +10,90 @@ interface CompilerContext {
   varCounter: number;
   statements: string[];
   varMap: Map<string, string>; // nodeId:outputId -> wgsl var name
+  /** When true, generates code for a mega-shader slot function body.
+   *  Replaces `in.uv` → `uv`, `globals.time` → `time`, etc. */
+  slotMode: boolean;
+  /** Errors collected during compilation (e.g. unsupported nodes in slot mode). */
+  errors: string[];
+}
+
+/**
+ * Result of compiling a node graph to a mega-shader slot function body.
+ */
+export interface MegaShaderCompileResult {
+  /** WGSL function body (without the fn signature wrapper). */
+  functionBody: string;
+  error?: string;
+}
+
+/**
+ * Compile a shader graph to a WGSL function body suitable for the mega-shader registry.
+ *
+ * The output can be passed directly to `register_custom_shader` as `wgslCode`.
+ * The body operates on the `color` input (PBR-lit) and must return `vec4<f32>`.
+ *
+ * Available variables inside the body:
+ *   color: vec4<f32>   — PBR lit fragment color
+ *   uv: vec2<f32>      — texture coordinates
+ *   time: f32          — elapsed seconds
+ *   params: array<f32, 16> — float parameters
+ */
+export function compileToMegaShaderSlot(graph: ShaderGraph): MegaShaderCompileResult {
+  try {
+    const ctx: CompilerContext = {
+      varCounter: 0,
+      statements: [],
+      varMap: new Map(),
+      slotMode: true,
+      errors: [],
+    };
+
+    // Seed the variable map with slot function inputs.
+    // Graph nodes that reference vertex attributes can use these names.
+    ctx.varMap.set('__slot_color', 'color');
+    ctx.varMap.set('__slot_uv', 'uv');
+    ctx.varMap.set('__slot_time', 'time');
+
+    const outputNode = graph.nodes.find((n) => n.type === 'pbr_output');
+    if (!outputNode) {
+      return { functionBody: '', error: 'No PBR Output node found.' };
+    }
+
+    const sortedNodes = topologicalSort(graph);
+    if (!sortedNodes) {
+      return { functionBody: '', error: 'Cyclic dependency detected.' };
+    }
+
+    for (const node of sortedNodes) {
+      if (node.type === 'pbr_output') continue;
+      generateNodeCode(node, graph.edges, ctx);
+    }
+
+    if (ctx.errors.length > 0) {
+      return { functionBody: '', error: ctx.errors.join('; ') };
+    }
+
+    // For the mega-shader slot the output is always the final color.
+    // Find what is connected to the base_color input of the output node.
+    const baseColorEdge = graph.edges.find(
+      (e) => e.target === outputNode.id && e.targetHandle === 'base_color',
+    );
+    const finalColor = baseColorEdge
+      ? (ctx.varMap.get(`${baseColorEdge.source}:${baseColorEdge.sourceHandle}`) ?? 'color')
+      : 'color';
+
+    const body = [
+      ...ctx.statements,
+      `return ${finalColor};`,
+    ].map((s) => `  ${s}`).join('\n');
+
+    return { functionBody: body };
+  } catch (err) {
+    return {
+      functionBody: '',
+      error: err instanceof Error ? err.message : 'Compilation failed',
+    };
+  }
 }
 
 /**
@@ -21,6 +105,8 @@ export function compileToWgsl(graph: ShaderGraph): { code: string; error?: strin
       varCounter: 0,
       statements: [],
       varMap: new Map(),
+      slotMode: false,
+      errors: [],
     };
 
     // Find the output node
@@ -126,18 +212,30 @@ function generateNodeCode(node: ShaderNode, edges: ShaderEdge[], ctx: CompilerCo
   switch (node.type) {
     // Input nodes
     case 'vertex_position':
+      if (ctx.slotMode) {
+        ctx.errors.push('vertex_position node is not available in mega-shader slot mode (only color, uv, time, and params are accessible)');
+        return;
+      }
       ctx.varMap.set(`${node.id}:position`, 'in.world_position.xyz');
       break;
     case 'vertex_normal':
+      if (ctx.slotMode) {
+        ctx.errors.push('vertex_normal node is not available in mega-shader slot mode (only color, uv, time, and params are accessible)');
+        return;
+      }
       ctx.varMap.set(`${node.id}:normal`, 'in.world_normal');
       break;
     case 'vertex_uv':
-      ctx.varMap.set(`${node.id}:uv`, 'in.uv');
+      ctx.varMap.set(`${node.id}:uv`, ctx.slotMode ? 'uv' : 'in.uv');
       break;
     case 'time':
-      ctx.varMap.set(`${node.id}:time`, 'globals.time');
+      ctx.varMap.set(`${node.id}:time`, ctx.slotMode ? 'time' : 'globals.time');
       break;
     case 'camera_position':
+      if (ctx.slotMode) {
+        ctx.errors.push('camera_position node is not available in mega-shader slot mode (only color, uv, time, and params are accessible)');
+        return;
+      }
       ctx.varMap.set(`${node.id}:position`, 'view.world_position.xyz');
       break;
 
@@ -232,9 +330,17 @@ function generateNodeCode(node: ShaderNode, edges: ShaderEdge[], ctx: CompilerCo
 
     // Lighting nodes
     case 'fresnel':
+      if (ctx.slotMode) {
+        ctx.errors.push('fresnel node is not available in mega-shader slot mode (requires world normal and view direction)');
+        return;
+      }
       emitFresnel(node, inputs, ctx);
       break;
     case 'normal_map':
+      if (ctx.slotMode) {
+        ctx.errors.push('normal_map node is not available in mega-shader slot mode (requires tangent-space data)');
+        return;
+      }
       emitNormalMap(node, inputs, ctx);
       break;
   }
@@ -260,10 +366,15 @@ function emitFunctionCall(
   ctx.varMap.set(`${node.id}:${outputId}`, varName);
 }
 
+/** Returns the correct UV fallback depending on compilation mode. */
+function defaultUv(ctx: CompilerContext): string {
+  return ctx.slotMode ? 'uv' : 'in.uv';
+}
+
 function emitTextureSample(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
   // Use mesh UVs when the UV input is unconnected (synthetic default is vec2<f32>(0.0, 0.0))
-  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : defaultUv(ctx);
   // Sample from the material's base color texture using Bevy's PBR bindings
   ctx.statements.push(`let ${varName} = textureSample(pbr_bindings::base_color_texture, pbr_bindings::base_color_sampler, ${uv});`);
   ctx.varMap.set(`${node.id}:color`, varName);
@@ -280,7 +391,7 @@ function emitVoronoiTexture(node: ShaderNode, inputs: Record<string, string>, ct
   const distVar = `var_${ctx.varCounter++}`;
   const colorVar = `var_${ctx.varCounter++}`;
   const cellVar = `vor_cell_${ctx.varCounter}`;
-  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : defaultUv(ctx);
   const scale = inputs.scale || '5.0';
 
   // Voronoi cellular noise: find nearest cell center using hash-based random offsets
@@ -379,7 +490,7 @@ function emitFresnel(node: ShaderNode, inputs: Record<string, string>, ctx: Comp
 function emitNormalMap(node: ShaderNode, inputs: Record<string, string>, ctx: CompilerContext): void {
   const varName = `var_${ctx.varCounter++}`;
   // Use mesh UVs when the UV input is unconnected (synthetic default is vec2<f32>(0.0, 0.0))
-  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : 'in.uv';
+  const uv = inputs.uv && !inputs.uv.includes('vec2<f32>(0.0') ? inputs.uv : defaultUv(ctx);
   const strength = inputs.strength || '1.0';
 
   // Sample normal map texture and transform from tangent space to world space

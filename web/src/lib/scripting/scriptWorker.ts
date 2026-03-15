@@ -365,13 +365,11 @@ function buildForgeApi(scriptEntityId: string) {
         const state = physics2dVelocities[eid];
         return state?.angularVelocity ?? null;
       },
-      raycast: async (_originX: number, _originY: number, _dirX: number, _dirY: number, _maxDistance?: number) => {
-        // TODO: Implement raycast2d with request/response pattern when engine supports it
-        return Promise.resolve(null);
+      raycast: async (originX: number, originY: number, dirX: number, dirY: number, maxDistance?: number) => {
+        return asyncRequest('physics', 'raycast2d', { originX, originY, dirX, dirY, maxDistance: maxDistance ?? 100 });
       },
-      isGrounded: async (_eid: string, _distance?: number) => {
-        // TODO: Implement isGrounded when raycast2d is available
-        return Promise.resolve(false);
+      isGrounded: async (eid: string, distance?: number) => {
+        return asyncRequest('physics', 'isGrounded', { entityId: eid, distance: distance ?? 0.1 });
       },
       setGravity: (x: number, y: number) => {
         pendingCommands.push({ cmd: 'set_gravity2d', gravityX: x, gravityY: y });
@@ -436,9 +434,11 @@ function buildForgeApi(scriptEntityId: string) {
       setClipSpeed: (eid: string, clipName: string, speed: number) => {
         pendingCommands.push({ cmd: 'set_clip_speed', entityId: eid, clipName, speed });
       },
-      listClips: (_eid: string) => {
-        // In worker, we don't have access to animation registry — return empty
-        return [] as string[];
+      listClips: async (entityId: string) => {
+        return asyncRequest('animation', 'listClips', { entityId });
+      },
+      getClipDuration: async (entityId: string, clipName: string) => {
+        return asyncRequest('animation', 'getClipDuration', { entityId, clipName });
       },
     },
     tilemap: {
@@ -575,9 +575,40 @@ function buildForgeApi(scriptEntityId: string) {
       loadSnapshot: (name: string, durationMs?: number) => {
         pendingCommands.push({ cmd: 'audio_load_snapshot', name, ...(durationMs !== undefined && { durationMs }) });
       },
-      detectLoopPoints: (assetId: string) => {
-        pendingCommands.push({ cmd: 'audio_detect_loop_points', assetId });
-        return []; // Results returned async via main thread
+      detectLoopPoints: async (assetId: string) => {
+        return asyncRequest('audio', 'detectLoopPoints', { assetId });
+      },
+      getWaveform: async (assetId: string) => {
+        return asyncRequest('audio', 'getWaveform', { assetId });
+      },
+    },
+
+    // --- AI asset generation ---
+    ai: {
+      generateTexture: async (prompt: string, onProgress?: (p: number) => void) => {
+        return asyncRequest('ai', 'generateTexture', { prompt }, onProgress ? (prog) => onProgress(prog.percent) : undefined);
+      },
+      generateModel: async (prompt: string, onProgress?: (p: number) => void) => {
+        return asyncRequest('ai', 'generateModel', { prompt }, onProgress ? (prog) => onProgress(prog.percent) : undefined);
+      },
+      generateSound: async (prompt: string, onProgress?: (p: number) => void) => {
+        return asyncRequest('ai', 'generateSound', { prompt }, onProgress ? (prog) => onProgress(prog.percent) : undefined);
+      },
+      generateVoice: async (text: string, onProgress?: (p: number) => void) => {
+        return asyncRequest('ai', 'generateVoice', { prompt: text }, onProgress ? (prog) => onProgress(prog.percent) : undefined);
+      },
+      generateMusic: async (prompt: string, onProgress?: (p: number) => void) => {
+        return asyncRequest('ai', 'generateMusic', { prompt }, onProgress ? (prog) => onProgress(prog.percent) : undefined);
+      },
+    },
+
+    // --- Asset loading ---
+    asset: {
+      loadImage: async (url: string) => {
+        return asyncRequest('asset', 'loadImage', { url });
+      },
+      loadModel: async (url: string) => {
+        return asyncRequest('asset', 'loadModel', { url });
       },
     },
 

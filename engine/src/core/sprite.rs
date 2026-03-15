@@ -4,6 +4,14 @@ use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Resource holding the runtime sorting layer configuration.
+/// Populated via the `set_sorting_layers` command.
+/// Layers are ordered from index 0 (back) to N-1 (front).
+#[derive(Resource, Default, Clone)]
+pub struct SortingLayerConfig {
+    pub layers: Vec<String>,
+}
+
 /// Sprite data component for 2D entities.
 #[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct SpriteData {
@@ -60,15 +68,42 @@ pub struct SpriteEnabled;
 
 /// Calculate Z-position from sorting layer and order.
 /// Used to convert 2D layering into 3D Z depth for rendering.
+///
+/// If `config` is provided and non-empty, the layer index in that list is used
+/// (each layer spans 100 Z units). Falls back to hardcoded layers otherwise.
 pub fn z_from_sorting(data: &SpriteData) -> f32 {
-    let layer_base = match data.sorting_layer.as_str() {
+    z_from_sorting_with_config(data, None)
+}
+
+/// Calculate Z-position with an optional runtime SortingLayerConfig.
+pub fn z_from_sorting_with_config(data: &SpriteData, config: Option<&SortingLayerConfig>) -> f32 {
+    let layer_base = if let Some(cfg) = config {
+        if !cfg.layers.is_empty() {
+            // Look up in the configured layers list
+            if let Some(idx) = cfg.layers.iter().position(|l| l == &data.sorting_layer) {
+                idx as f32 * 100.0
+            } else {
+                // Unknown layer: place after all configured layers
+                cfg.layers.len() as f32 * 100.0
+            }
+        } else {
+            z_layer_base_hardcoded(&data.sorting_layer)
+        }
+    } else {
+        z_layer_base_hardcoded(&data.sorting_layer)
+    };
+    layer_base + (data.sorting_order as f32 * 0.01)
+}
+
+/// Hardcoded fallback layer Z bases.
+fn z_layer_base_hardcoded(layer: &str) -> f32 {
+    match layer {
         "Background" => 0.0,
         "Default" => 100.0,
         "Foreground" => 200.0,
         "UI" => 300.0,
         _ => 100.0,
-    };
-    layer_base + (data.sorting_order as f32 * 0.01)
+    }
 }
 
 // ========== Sprite Sheet & Animation ==========

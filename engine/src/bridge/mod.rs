@@ -33,7 +33,7 @@ use crate::core::{
     audio::AudioBusConfig,
     camera::CameraControlPlugin,
     commands::CommandResponse,
-    engine_mode::{EngineMode, SceneSnapshot},
+    engine_mode::{EngineMode, PlaySystemSet, SceneSnapshot},
     entity_factory,
     environment::{EnvironmentPlugin, SkyboxHandles},
     history::HistoryStack,
@@ -275,8 +275,11 @@ impl Plugin for SelectionPlugin {
             .init_resource::<QualitySettings>()
             .init_resource::<SkyboxHandles>()
             .init_resource::<core::project_type::ProjectType>()
+            .init_resource::<core::tilemap::Grid2dConfig>()
             .init_resource::<core::lod::PerformanceMetrics>()
             .init_resource::<core::lod::SimplificationBackend>()
+            .init_resource::<core::custom_wgsl::CustomShaderRegistry>()
+            .init_resource::<core::sprite::SortingLayerConfig>()
             .add_message::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
@@ -360,6 +363,7 @@ impl Plugin for SelectionPlugin {
             // Shader sync systems (always-active)
             .add_systems(Update, material::sync_extended_material_data)
             .add_systems(Update, material::sync_custom_wgsl_uniforms)
+            .add_systems(Update, material::sync_forge_shader_time)
             // Sprite rendering pipeline (always-active): spawn sprites, sync SpriteData -> Bevy Sprite
             .add_systems(Update, sprite::apply_spawn_sprite_requests)
             .add_systems(Update, sprite::apply_sprite_data_updates)
@@ -381,10 +385,32 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, sprite::apply_tilemap_data_updates)
             .add_systems(Update, sprite::apply_tilemap_data_removals)
             .add_systems(Update, sprite::sync_tilemap_rendering)
+            // Tileset CRUD (always-active): set/remove TilesetData on entities
+            .add_systems(Update, sprite::apply_set_tileset_requests)
+            .add_systems(Update, sprite::apply_remove_tileset_requests)
+            // Sorting layers (always-active): update SortingLayerConfig resource
+            .add_systems(Update, sprite::apply_set_sorting_layers)
+            .add_systems(Update, sprite::sync_sprite_z_with_sorting_config)
+            // Tile paint/erase/fill (always-active)
+            .add_systems(Update, (
+                sprite::apply_paint_tile_requests,
+                sprite::apply_erase_tile_requests,
+                sprite::apply_fill_tiles_requests,
+            ))
+            // Animated tiles (always-active)
+            .add_systems(Update, sprite::animate_tilemap_tiles)
+            // Grid 2D config (always-active)
+            .add_systems(Update, sprite::apply_set_grid_2d_requests)
+            // Sprite sheet and animator state queries (always-active)
+            .add_systems(Update, sprite::handle_sprite_sheet_state_queries)
+            .add_systems(Update, sprite::handle_sprite_animator_state_queries)
             // 2D camera systems (always-active): project type + Camera2d management
             .add_systems(Update, sprite::apply_project_type_changes)
             .add_systems(Update, sprite::apply_camera_2d_updates)
             .add_systems(Update, sprite::sync_camera_2d_rendering)
+            // 2D play-mode systems: camera bounds clamping + pixel-perfect snapping
+            .add_systems(Update, sprite::clamp_camera_2d_bounds.in_set(PlaySystemSet))
+            .add_systems(Update, sprite::apply_pixel_perfect_snapping.in_set(PlaySystemSet))
             .add_systems(PostUpdate, (
                 scene_graph::detect_entity_added,
                 scene_graph::detect_entity_removed,
@@ -441,6 +467,10 @@ impl Plugin for SelectionPlugin {
                     core_systems::apply_selection_requests,
                 ).in_set(EditorApplySet))
                 .add_systems(Update, material::apply_custom_wgsl_source_updates.in_set(EditorApplySet))
+                .add_systems(Update, material::apply_register_custom_shader_requests.in_set(EditorApplySet))
+                .add_systems(Update, material::apply_apply_custom_shader_requests.in_set(EditorApplySet))
+                .add_systems(Update, material::apply_remove_custom_shader_slot_requests.in_set(EditorApplySet))
+                .add_systems(Update, material::restitch_custom_shaders.in_set(EditorApplySet))
                 .add_systems(Update, (
                     core_systems::apply_pending_visibility,
                     core_systems::apply_pending_clear_selection,
@@ -532,12 +562,14 @@ impl Plugin for SelectionPlugin {
                     skeleton2d::apply_ik_chain2d_creates,
                     skeleton2d::handle_skeleton2d_query,
                     skeleton2d::apply_auto_weight_skeleton2d,
+                    skeleton2d::apply_add_mesh_attachment_requests,
                 ))
                 .add_systems(Update, skeleton2d::render_skeleton_bones)
                 .add_systems(Update, (
                     performance::apply_lod_commands,
                     performance::apply_performance_budget_commands,
                 ))
+                .add_systems(Update, sprite::render_2d_grid)
                 .add_systems(PostUpdate, (
                     core_systems::emit_scene_graph_updates,
                     core_systems::emit_history_updates,

@@ -39,11 +39,19 @@ vi.mock('@/lib/shaders/shaderNodeTypes', () => ({
   } as Record<string, { label: string }>,
 }));
 
+const mockCompileToWgsl = vi.fn((_graph: unknown) => ({
+  code: '// compiled wgsl code with dissolve_threshold',
+  error: null as string | null,
+}));
+
+const mockCompileToMegaShaderSlot = vi.fn((_graph: unknown) => ({
+  functionBody: '  return color;',
+  error: undefined as string | undefined,
+}));
+
 vi.mock('@/lib/shaders/wgslCompiler', () => ({
-  compileToWgsl: vi.fn((_graph: unknown) => ({
-    code: '// compiled wgsl code with dissolve_threshold',
-    error: null,
-  })),
+  get compileToWgsl() { return mockCompileToWgsl; },
+  get compileToMegaShaderSlot() { return mockCompileToMegaShaderSlot; },
 }));
 
 type Handlers = Record<string, ToolHandler>;
@@ -219,6 +227,242 @@ describe('shaderHandlers', () => {
       const { result } = await invoke('list_shader_presets', {});
       expect(result.success).toBe(true);
       expect((result.result as string)).toContain('No shader graphs');
+    });
+  });
+
+  describe('register_custom_shader', () => {
+    it('dispatches register command with valid slot and code', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['register_custom_shader'](
+        { slot: 0, name: 'MyFx', wgslCode: 'return color;' },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('register_custom_shader', expect.objectContaining({
+        slot: 0,
+        name: 'MyFx',
+        wgslCode: 'return color;',
+        paramNames: [],
+      }));
+    });
+
+    it('accepts slot 7 (max valid)', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['register_custom_shader'](
+        { slot: 7, name: 'Last', wgslCode: 'return color;' },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts optional paramNames array', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['register_custom_shader'](
+        { slot: 2, name: 'Glow', wgslCode: 'return color;', paramNames: ['intensity', 'radius'] },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('register_custom_shader', expect.objectContaining({
+        paramNames: ['intensity', 'radius'],
+      }));
+    });
+
+    it('rejects slot out of range (slot 8)', async () => {
+      const store = createMockStore({});
+      const result = await handlers['register_custom_shader'](
+        { slot: 8, name: 'Bad', wgslCode: 'return color;' },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects negative slot', async () => {
+      const store = createMockStore({});
+      const result = await handlers['register_custom_shader'](
+        { slot: -1, name: 'Bad', wgslCode: 'return color;' },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects empty wgslCode', async () => {
+      const store = createMockStore({});
+      const result = await handlers['register_custom_shader'](
+        { slot: 0, name: 'Bad', wgslCode: '' },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects empty name', async () => {
+      const store = createMockStore({});
+      const result = await handlers['register_custom_shader'](
+        { slot: 0, name: '', wgslCode: 'return color;' },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('apply_custom_shader', () => {
+    it('dispatches apply command with valid slot', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['apply_custom_shader'](
+        { entityId: 'e1', slot: 1 },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('apply_custom_shader', expect.objectContaining({
+        entityId: 'e1',
+        slot: 1,
+        params: {},
+      }));
+    });
+
+    it('accepts slot 8 (max valid)', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['apply_custom_shader'](
+        { entityId: 'e1', slot: 8 },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('forwards optional params map', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['apply_custom_shader'](
+        { entityId: 'e1', slot: 3, params: { intensity: 0.5, radius: 2.0 } },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('apply_custom_shader', expect.objectContaining({
+        params: { intensity: 0.5, radius: 2.0 },
+      }));
+    });
+
+    it('rejects slot 0 (1-indexed API)', async () => {
+      const store = createMockStore({});
+      const result = await handlers['apply_custom_shader'](
+        { entityId: 'e1', slot: 0 },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects slot 9 (above max)', async () => {
+      const store = createMockStore({});
+      const result = await handlers['apply_custom_shader'](
+        { entityId: 'e1', slot: 9 },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects missing entityId', async () => {
+      const store = createMockStore({});
+      const result = await handlers['apply_custom_shader'](
+        { slot: 1 },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('remove_custom_shader_slot', () => {
+    it('dispatches remove command for valid slot', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['remove_custom_shader_slot'](
+        { slot: 3 },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('remove_custom_shader_slot', { slot: 3 });
+    });
+
+    it('accepts slot 0 (first)', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['remove_custom_shader_slot'](
+        { slot: 0 },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts slot 7 (last)', async () => {
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['remove_custom_shader_slot'](
+        { slot: 7 },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects slot 8 (out of range)', async () => {
+      const store = createMockStore({});
+      const result = await handlers['remove_custom_shader_slot'](
+        { slot: 8 },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects negative slot', async () => {
+      const store = createMockStore({});
+      const result = await handlers['remove_custom_shader_slot'](
+        { slot: -1 },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects missing slot argument', async () => {
+      const store = createMockStore({});
+      const result = await handlers['remove_custom_shader_slot'](
+        {},
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('apply_shader_to_entity (mega-shader fallback)', () => {
+    it('falls back to mega-shader when WGSL does not match built-in', async () => {
+      mockCompileToWgsl.mockReturnValueOnce({ code: '// custom fx with no known keywords', error: null });
+      mockCompileToMegaShaderSlot.mockReturnValueOnce({ functionBody: '  return color * 0.5;', error: undefined });
+      const dispatchCommand = vi.fn();
+      const store = createMockStore({});
+      const result = await handlers['apply_shader_to_entity'](
+        { entityId: 'e1', graphId: 'graph-1' },
+        { store, dispatchCommand },
+      );
+      expect(result.success).toBe(true);
+      expect(dispatchCommand).toHaveBeenCalledWith('register_custom_shader', expect.objectContaining({
+        wgslCode: '  return color * 0.5;',
+      }));
+      expect(dispatchCommand).toHaveBeenCalledWith('apply_custom_shader', expect.objectContaining({
+        entityId: 'e1',
+      }));
+    });
+
+    it('reports error when mega-shader compilation fails', async () => {
+      mockCompileToWgsl.mockReturnValueOnce({ code: '// unknown', error: null });
+      mockCompileToMegaShaderSlot.mockReturnValueOnce({ functionBody: '', error: 'Cyclic dependency' });
+      const store = createMockStore({});
+      const result = await handlers['apply_shader_to_entity'](
+        { entityId: 'e1', graphId: 'graph-1' },
+        { store, dispatchCommand: vi.fn() },
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Mega-shader compilation failed');
     });
   });
 });

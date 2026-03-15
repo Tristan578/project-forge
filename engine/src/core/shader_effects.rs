@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 /// Stable handle for the forge effects shader, registered manually to avoid
 /// `embedded_asset!` panicking on Windows due to backslash path separators.
 const FORGE_EFFECTS_SHADER_HANDLE: Handle<Shader> = uuid_handle!("f09eeffc-e750-4001-a000-000000000001");
+/// Public re-export so bridge systems can hot-swap the shader via this handle.
+pub const FORGE_EFFECTS_SHADER_HANDLE_PUB: Handle<Shader> = FORGE_EFFECTS_SHADER_HANDLE;
 
 // --- Default helper functions for serde ---
 fn default_custom_color() -> [f32; 4] { [0.0, 1.0, 1.0, 1.0] } // Cyan
@@ -121,6 +123,9 @@ impl ShaderEffectData {
 
 /// GPU extension struct for the unified uniform block.
 /// All fields share binding 100 and are grouped into a single UBO by Bevy.
+///
+/// `custom_slot`: 0 = use built-in `shader_type`, 1–8 = invoke `custom_shader_N`.
+/// `custom_params`: 16 f32 values forwarded to the custom slot function.
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 pub struct ForgeShaderExtension {
     #[uniform(100)]
@@ -150,6 +155,26 @@ pub struct ForgeShaderExtension {
     pub toon_bands: u32,
     #[uniform(100)]
     pub fresnel_power: f32,
+
+    // ── Mega-shader fields ──────────────────────────────────────────────────
+    /// 0 = use built-in shader_type; 1–8 = dispatch to custom_shader_N.
+    #[uniform(100)]
+    pub custom_slot: u32,
+    /// 16 floats forwarded to the custom slot function as `params`.
+    /// Packed as four Vec4s to satisfy GPU alignment rules.
+    #[uniform(100)]
+    pub custom_params_0: Vec4,
+    #[uniform(100)]
+    pub custom_params_1: Vec4,
+    #[uniform(100)]
+    pub custom_params_2: Vec4,
+    #[uniform(100)]
+    pub custom_params_3: Vec4,
+
+    /// Elapsed time in seconds, synced from `Time` each frame.
+    /// Used by both built-in effects and custom mega-shader slots.
+    #[uniform(100)]
+    pub time: f32,
 }
 
 impl Default for ForgeShaderExtension {
@@ -179,6 +204,14 @@ impl From<&ShaderEffectData> for ForgeShaderExtension {
             distortion_strength: data.distortion_strength,
             toon_bands: data.toon_bands,
             fresnel_power: data.fresnel_power,
+            // Mega-shader fields default to 0 (disabled) when converting
+            // from a basic ShaderEffectData (which has no custom_slot).
+            custom_slot: 0,
+            custom_params_0: Vec4::ZERO,
+            custom_params_1: Vec4::ZERO,
+            custom_params_2: Vec4::ZERO,
+            custom_params_3: Vec4::ZERO,
+            time: 0.0,
         }
     }
 }

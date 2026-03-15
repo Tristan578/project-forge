@@ -217,8 +217,8 @@ declare namespace forge {
     function setBlendWeight(entityId: string, clipName: string, weight: number): void;
     /** Set playback speed for a specific clip */
     function setClipSpeed(entityId: string, clipName: string, speed: number): void;
-    /** List available clip names */
-    function listClips(entityId: string): string[];
+    /** List available clip names (async — requires engine query) */
+    function listClips(entityId: string): Promise<string[]>;
   }
 
   namespace ui {

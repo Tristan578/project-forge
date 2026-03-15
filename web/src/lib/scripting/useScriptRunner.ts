@@ -502,7 +502,7 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
               if (dist < 0.01) continue; // Too close, skip
               try {
                 wasmModule.handle_command('raycast_query', {
-                  requestId: `audio_occlusion:${eid}`,
+                  requestId: `audio_occlusion:${eid}:${dist}`,
                   origin: listenerPos,
                   direction: [dx / dist, dy / dist, dz / dist],
                   maxDistance: dist,

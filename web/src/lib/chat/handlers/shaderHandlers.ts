@@ -8,9 +8,29 @@ import type { ToolHandler } from './types';
 import { zEntityId, parseArgs } from './types';
 import { useShaderEditorStore } from '@/stores/shaderEditorStore';
 import { SHADER_NODE_DEFINITIONS } from '@/lib/shaders/shaderNodeTypes';
-import { compileToWgsl } from '@/lib/shaders/wgslCompiler';
+import { compileToWgsl, compileToMegaShaderSlot } from '@/lib/shaders/wgslCompiler';
 
 const VALID_SHADER_TYPES = ['none', 'dissolve', 'hologram', 'force_field', 'lava_flow', 'toon', 'fresnel_glow'] as const;
+
+const CUSTOM_SHADER_SLOT_COUNT = 8;
+
+// Track which graph name occupies each slot (0-indexed) so hash collisions
+// are detected and resolved by probing the next available slot.
+const slotOccupants = new Map<number, string>();
+
+function findAvailableSlot(graphName: string): number | null {
+  const preferred = Math.abs(hashString(graphName)) % CUSTOM_SHADER_SLOT_COUNT;
+  // If this graph already owns a slot, reuse it.
+  for (const [slot, name] of slotOccupants) {
+    if (name === graphName) return slot;
+  }
+  // Linear probe for an open slot starting at the preferred index.
+  for (let i = 0; i < CUSTOM_SHADER_SLOT_COUNT; i++) {
+    const candidate = (preferred + i) % CUSTOM_SHADER_SLOT_COUNT;
+    if (!slotOccupants.has(candidate)) return candidate;
+  }
+  return null; // All 8 slots occupied
+}
 
 export const shaderHandlers: Record<string, ToolHandler> = {
   create_shader_graph: async (args) => {
@@ -154,24 +174,49 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       return { success: false, error: `Shader graph not found: ${targetGraphId}` };
     }
 
-    const result = compileToWgsl(graph);
-    if (result.error) {
-      return { success: false, error: `Compilation failed: ${result.error}` };
+    const wgslResult = compileToWgsl(graph);
+    if (wgslResult.error) {
+      return { success: false, error: `Compilation failed: ${wgslResult.error}` };
     }
 
-    const inferred = inferShaderEffect(result.code ?? '');
-    if (!inferred) {
+    const inferred = inferShaderEffect(wgslResult.code ?? '');
+    if (inferred) {
+      // Map to a built-in effect (backward-compatible path).
+      ctx.store.updateShaderEffect(p.data.entityId, { shaderType: inferred });
       return {
-        success: false,
-        error: `Shader graph "${graph.name}" compiled successfully but could not be mapped to a built-in effect. Supported effects: ${VALID_SHADER_TYPES.filter(t => t !== 'none').join(', ')}. You can also pass shaderType directly.`,
+        success: true,
+        result: `Applied "${inferred}" shader effect from graph "${graph.name}" to entity ${p.data.entityId}`,
       };
     }
 
-    ctx.store.updateShaderEffect(p.data.entityId, { shaderType: inferred });
+    // No built-in match — compile to mega-shader slot and register.
+    const slotResult = compileToMegaShaderSlot(graph);
+    if (slotResult.error) {
+      return { success: false, error: `Mega-shader compilation failed: ${slotResult.error}` };
+    }
+
+    const slot = findAvailableSlot(graph.name);
+    if (slot === null) {
+      return { success: false, error: 'All 8 custom shader slots are occupied. Remove an existing custom shader first.' };
+    }
+    slotOccupants.set(slot, graph.name);
+
+    ctx.dispatchCommand('register_custom_shader', {
+      slot,
+      name: graph.name,
+      wgslCode: slotResult.functionBody,
+      paramNames: [],
+    });
+
+    ctx.dispatchCommand('apply_custom_shader', {
+      entityId: p.data.entityId,
+      slot: slot + 1, // 1-indexed for WGSL dispatch
+      params: {},
+    });
 
     return {
       success: true,
-      result: `Applied "${inferred}" shader effect from graph "${graph.name}" to entity ${p.data.entityId}`,
+      result: `Compiled shader graph "${graph.name}" as mega-shader slot ${slot} and applied to entity ${p.data.entityId}`,
     };
   },
 
@@ -180,6 +225,83 @@ export const shaderHandlers: Record<string, ToolHandler> = {
     if (p.error) return p.error;
     ctx.store.removeShaderEffect(p.data.entityId);
     return { success: true, result: `Removed shader effect from entity ${p.data.entityId}` };
+  },
+
+  // ── Mega-shader commands ──────────────────────────────────────────────
+
+  register_custom_shader: async (args, ctx) => {
+    const p = parseArgs(
+      z.object({
+        slot: z.number().int().min(0).max(CUSTOM_SHADER_SLOT_COUNT - 1),
+        name: z.string().min(1),
+        wgslCode: z.string().min(1),
+        paramNames: z.array(z.string()).max(16).optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    ctx.dispatchCommand('register_custom_shader', {
+      slot: p.data.slot,
+      name: p.data.name,
+      wgslCode: p.data.wgslCode,
+      paramNames: p.data.paramNames ?? [],
+    });
+
+    return {
+      success: true,
+      result: `Registered custom shader "${p.data.name}" in slot ${p.data.slot}`,
+    };
+  },
+
+  apply_custom_shader: async (args, ctx) => {
+    const MAX_PARAMS = 16;
+    const p = parseArgs(
+      z.object({
+        entityId: zEntityId,
+        slot: z.number().int().min(1).max(CUSTOM_SHADER_SLOT_COUNT),
+        params: z.record(z.string(), z.number()).optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    const params = p.data.params ?? {};
+    if (Object.keys(params).length > MAX_PARAMS) {
+      return {
+        success: false,
+        error: `Too many params (${Object.keys(params).length}) — mega-shader supports at most ${MAX_PARAMS}`,
+      };
+    }
+
+    ctx.dispatchCommand('apply_custom_shader', {
+      entityId: p.data.entityId,
+      slot: p.data.slot,
+      params,
+    });
+
+    return {
+      success: true,
+      result: `Applied custom shader slot ${p.data.slot} to entity ${p.data.entityId}`,
+    };
+  },
+
+  remove_custom_shader_slot: async (args, ctx) => {
+    const p = parseArgs(
+      z.object({
+        slot: z.number().int().min(0).max(CUSTOM_SHADER_SLOT_COUNT - 1),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+
+    ctx.dispatchCommand('remove_custom_shader_slot', { slot: p.data.slot });
+    slotOccupants.delete(p.data.slot);
+
+    return {
+      success: true,
+      result: `Removed custom shader slot ${p.data.slot}`,
+    };
   },
 
   list_shader_presets: async () => {
@@ -213,4 +335,16 @@ function inferShaderEffect(wgslCode: string): string | null {
   if (code.includes('toon_bands') || code.includes('toon')) return 'toon';
   if (code.includes('fresnel_power') || code.includes('fresnel')) return 'fresnel_glow';
   return null;
+}
+
+/**
+ * Simple deterministic string hash (djb2-like) for slot assignment.
+ * Returns a non-negative integer in the range [0, 2^31).
+ */
+function hashString(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) {
+    h = (((h << 5) + h) ^ s.charCodeAt(i)) >>> 0;
+  }
+  return h & 0x7fffffff;
 }

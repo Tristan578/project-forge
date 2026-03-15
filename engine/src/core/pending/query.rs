@@ -35,6 +35,8 @@ pub enum QueryRequest {
     Camera2dState,
     ProjectType,
     Skeleton2dState { entity_id: String },
+    SpriteSheetState { entity_id: String },
+    SpriteAnimatorState { entity_id: String },
 }
 
 // === Queue Methods ===

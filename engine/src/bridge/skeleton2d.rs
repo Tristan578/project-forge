@@ -376,6 +376,62 @@ fn compute_linear_weights(
         .collect()
 }
 
+/// Apply pending add_skeleton2d_mesh_attachment requests.
+///
+/// Inserts or replaces an `AttachmentData::Mesh` entry in the named skin of a skeleton entity.
+/// Removes `SkinnedMeshInitialized` so that `init_skinned_meshes_2d` re-runs with the new mesh.
+#[cfg(not(feature = "runtime"))]
+pub(super) fn apply_add_mesh_attachment_requests(
+    mut pending: ResMut<PendingCommands>,
+    mut commands: Commands,
+    mut skeleton_query: Query<(Entity, &EntityId, &mut SkeletonData2d, Option<&SkeletonEnabled2d>)>,
+) {
+    let requests: Vec<_> = pending.add_mesh_attachment2d_requests.drain(..).collect();
+    for request in requests {
+        let Some((entity, _, mut skeleton, enabled)) = skeleton_query
+            .iter_mut()
+            .find(|(_, eid, _, _)| eid.0 == request.entity_id)
+        else {
+            tracing::warn!(
+                "add_mesh_attachment: entity not found: {}",
+                request.entity_id
+            );
+            continue;
+        };
+
+        // Ensure the target skin exists; create it if not.
+        let skin = skeleton
+            .skins
+            .entry(request.skin_name.clone())
+            .or_insert_with(|| crate::core::skeleton2d::SkinData {
+                name: request.skin_name.clone(),
+                attachments: HashMap::new(),
+            });
+
+        skin.attachments.insert(
+            request.attachment_name.clone(),
+            AttachmentData::Mesh {
+                texture_id: String::new(),
+                vertices: request.vertices,
+                uvs: request.uvs,
+                triangles: request.triangles,
+                weights: request.weights,
+            },
+        );
+
+        // Force re-init so skinned mesh buffers are rebuilt with the new attachment.
+        commands.entity(entity).remove::<SkinnedMeshInitialized>();
+
+        events::emit_skeleton2d_updated(&request.entity_id, &skeleton, enabled.is_some());
+        tracing::info!(
+            "Added mesh attachment '{}' to skin '{}' on entity {}",
+            request.attachment_name,
+            request.skin_name,
+            request.entity_id
+        );
+    }
+}
+
 // ========== Runtime Systems ==========
 
 /// Advance skeletal animation playback, interpolating bone transforms from keyframes.
