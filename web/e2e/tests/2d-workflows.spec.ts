@@ -295,8 +295,8 @@ test.describe('2D Workflows @ui', () => {
       if (state.setSelection) {
         state.setSelection([entityId], entityId, 'TestPhysics2d');
       }
-      if (state.setPhysics2dData) {
-        state.setPhysics2dData(entityId, {
+      if (state.setPhysics2d) {
+        state.setPhysics2d(entityId, {
           bodyType: 'dynamic',
           colliderShape: 'box',
           colliderSize: [1.0, 1.0],
@@ -310,7 +310,7 @@ test.describe('2D Workflows @ui', () => {
           fixedRotation: false,
           oneWayPlatform: false,
           surfaceVelocity: [0, 0],
-        });
+        }, true);
       }
     });
 
@@ -391,8 +391,8 @@ test.describe('2D Workflows @ui', () => {
         state.setSelection([entityId], entityId, 'TestSkeleton');
       }
       // Add skeleton data so SkeletonInspector becomes visible
-      if (state.setSkeletonData2d) {
-        state.setSkeletonData2d(entityId, {
+      if (state.setSkeleton2d) {
+        state.setSkeleton2d(entityId, {
           bones: [],
           skins: [],
           defaultSkin: null,
