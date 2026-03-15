@@ -110,12 +110,199 @@ describe('SpriteClient', () => {
     } as Response);
 
     const result = await client.getReplicateStatus('task_123');
-    
+
     expect(result.status).toBe('succeeded');
     expect(result.output).toContain('https://result.url');
     expect(fetch).toHaveBeenCalledWith(
       expect.objectContaining({ href: expect.stringContaining('task_123') }),
       expect.anything()
     );
+  });
+
+  it('getReplicateStatus throws on API failure', async () => {
+    const client = new SpriteClient(mockApiKey, 'sdxl');
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: () => Promise.resolve('Internal Server Error'),
+    } as Response);
+
+    await expect(client.getReplicateStatus('task_123'))
+      .rejects.toThrow('Replicate status error (500)');
+  });
+
+  describe('generateTileset', () => {
+    it('calls Replicate with tileset prompt', async () => {
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'tile_123', status: 'starting' }),
+      } as Response);
+
+      const result = await client.generateTileset({
+        prompt: 'dungeon floor',
+        tileSize: 32,
+        gridSize: '8x8',
+      });
+
+      expect(result.taskId).toBe('tile_123');
+      expect(result.status).toBe('starting');
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.input.width).toBe(512);
+      expect(body.input.height).toBe(512);
+      expect(body.input.prompt).toContain('tileset');
+      expect(body.input.prompt).toContain('dungeon floor');
+    });
+
+    it('throws on API failure', async () => {
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: () => Promise.resolve('Service Unavailable'),
+      } as Response);
+
+      await expect(client.generateTileset({ prompt: 'test', tileSize: 16, gridSize: '4x4' }))
+        .rejects.toThrow('Replicate API error (503)');
+    });
+  });
+
+  describe('removeBackground', () => {
+    it('calls remove.bg API and returns base64 result', async () => {
+      const mockBlob = new Blob(['png-data'], { type: 'image/png' });
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        blob: () => Promise.resolve(mockBlob),
+      } as Response);
+
+      const client = new SpriteClient(mockApiKey, 'removebg');
+      const result = await client.removeBackground('https://example.com/image.png');
+
+      // FileReader in jsdom converts blob to data URL
+      expect(result.resultUrl).toContain('data:');
+      expect(fetch).toHaveBeenCalledWith(
+        'https://api.remove.bg/v1.0/removebg',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({ 'X-Api-Key': mockApiKey }),
+        })
+      );
+    });
+
+    it('throws on API failure', async () => {
+      const client = new SpriteClient(mockApiKey, 'removebg');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 402,
+        text: () => Promise.resolve('Insufficient credits'),
+      } as Response);
+
+      await expect(client.removeBackground('https://example.com/image.png'))
+        .rejects.toThrow('remove.bg API error (402)');
+    });
+  });
+
+  describe('generateSpriteSheet', () => {
+    it('clamps frame count to max dimension', async () => {
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ id: 'sheet_456', status: 'starting' }),
+      } as Response);
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      // 256px frames, max 1024/256 = 4 frames. Requesting 8 should clamp.
+      await client.generateSpriteSheet({
+        prompt: 'running',
+        frameCount: 8,
+        size: '256x256',
+      });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('reduced from 8 to 4')
+      );
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.input.width).toBe(1024); // 256 * 4
+      warnSpy.mockRestore();
+    });
+
+    it('throws on API failure', async () => {
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 429,
+        text: () => Promise.resolve('Rate limited'),
+      } as Response);
+
+      await expect(client.generateSpriteSheet({
+        prompt: 'running',
+        frameCount: 4,
+        size: '64x64',
+      })).rejects.toThrow('Replicate API error (429)');
+    });
+  });
+
+  describe('generateSprite style variations', () => {
+    it('enhances prompt with hand-drawn style', async () => {
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://img.url' }] }),
+      } as Response);
+
+      await client.generateSprite({ prompt: 'cat', size: '512x512', style: 'hand-drawn' });
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.prompt).toContain('hand-drawn');
+    });
+
+    it('enhances prompt with vector style', async () => {
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://img.url' }] }),
+      } as Response);
+
+      await client.generateSprite({ prompt: 'cat', size: '512x512', style: 'vector' });
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.prompt).toContain('vector art');
+    });
+
+    it('enhances prompt with realistic style', async () => {
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://img.url' }] }),
+      } as Response);
+
+      await client.generateSprite({ prompt: 'cat', size: '512x512', style: 'realistic' });
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.prompt).toContain('realistic');
+    });
+
+    it('uses default enhancement when no style is specified', async () => {
+      const client = new SpriteClient(mockApiKey, 'dalle3');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ url: 'https://img.url' }] }),
+      } as Response);
+
+      await client.generateSprite({ prompt: 'cat', size: '512x512' });
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.prompt).toContain('game sprite');
+      expect(body.prompt).toContain('transparent background');
+    });
+
+    it('uses Replicate error path on failure', async () => {
+      const client = new SpriteClient(mockApiKey, 'sdxl');
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: () => Promise.resolve('Internal error'),
+      } as Response);
+
+      await expect(client.generateSprite({ prompt: 'test', size: '512x512' }))
+        .rejects.toThrow('Replicate API error (500)');
+    });
   });
 });

@@ -6,6 +6,8 @@
  * invoice paid/failed, checkout completed), and error recovery.
  */
 
+vi.mock('server-only', () => ({}));
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ---------------------------------------------------------------------------

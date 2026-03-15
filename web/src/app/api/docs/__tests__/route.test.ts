@@ -4,6 +4,8 @@
  * @vitest-environment node
  */
 
+vi.mock('server-only', () => ({}));
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock fs/promises before importing the route
