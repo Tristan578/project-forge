@@ -103,7 +103,7 @@ jobs:
         id: wasm
         run: |
           WASM_PATH="/engine-pkg-webgl2/forge_engine_bg.wasm"
-          RESPONSE=$(curl --silent --head \
+          RESPONSE=$(curl --silent --head --output /dev/null \
             --write-out "%{http_code}|%{content_type}" \
             --max-time 10 \
             "$TARGET_URL$WASM_PATH")
