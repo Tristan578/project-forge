@@ -14,7 +14,8 @@ export type FmodOperation = (typeof FMOD_OPERATIONS)[number];
 
 /** Validate that a path is a safe absolute path (no traversal, no null bytes). */
 export function isSafePath(p: string): boolean {
-  if (!p || p.includes('\0') || p.includes('..')) return false;
+  if (!p || p.includes('\0')) return false;
+  if (p.split(/[/\\]/).includes('..')) return false;
   return p.startsWith('/') || /^[A-Za-z]:\\/.test(p);
 }
 
