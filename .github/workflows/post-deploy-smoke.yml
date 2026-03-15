@@ -9,6 +9,14 @@ on:
         default: 'https://spawnforge.ai'
         type: string
 
+  workflow_call:
+    inputs:
+      target_url:
+        description: 'Base URL to smoke-test (no trailing slash)'
+        required: false
+        default: 'https://spawnforge.ai'
+        type: string
+
   workflow_run:
     workflows: [CD]
     types: [completed]
@@ -27,8 +35,8 @@ jobs:
       contents: read
 
     env:
-      # Prefer manual input; fall back to production URL when triggered via workflow_run.
-      TARGET_URL: ${{ inputs.target_url || 'https://spawnforge.ai' }}
+      # Prefer explicit input (workflow_dispatch / workflow_call); then DEPLOY_URL var; then production.
+      TARGET_URL: ${{ inputs.target_url || vars.DEPLOY_URL || 'https://spawnforge.ai' }}
 
     steps:
       - name: Resolve target URL
