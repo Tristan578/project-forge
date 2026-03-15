@@ -55,6 +55,8 @@ export const users = pgTable('users', {
   stripeSubscriptionId: text('stripe_subscription_id'),
   billingCycleStart: timestamp('billing_cycle_start', { withTimezone: true }),
 
+  banned: integer('banned').notNull().default(0),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
