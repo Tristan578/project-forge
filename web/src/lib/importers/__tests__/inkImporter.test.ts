@@ -239,6 +239,21 @@ describe('parseInkJson - nested content', () => {
     expect(condNode!.onFalse).not.toBeNull();
   });
 
+  it('sets startNodeId to the ConditionNode when a conditional starts the story', () => {
+    const input = makeInk([
+      {
+        b: [
+          ['^True branch', '\n', 'end'],
+          ['^False branch', '\n', 'end'],
+        ],
+      },
+    ]);
+    const tree = parseInkJson(input);
+    const startNode = tree.nodes.find((n) => n.id === tree.startNodeId);
+    expect(startNode).toBeDefined();
+    expect(startNode!.type).toBe('condition');
+  });
+
   it('handles conditional with only true branch', () => {
     const input = makeInk([
       { b: [['^Only if true', '\n', 'end']] },

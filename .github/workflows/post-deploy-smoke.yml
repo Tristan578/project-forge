@@ -9,6 +9,14 @@ on:
         default: 'https://spawnforge.ai'
         type: string
 
+  workflow_call:
+    inputs:
+      target_url:
+        description: 'Base URL to smoke-test (no trailing slash)'
+        required: false
+        default: 'https://spawnforge.ai'
+        type: string
+
   workflow_run:
     workflows: [CD]
     types: [completed]
@@ -18,17 +26,17 @@ jobs:
   smoke:
     name: Smoke Tests
     runs-on: ubuntu-latest
-    # For workflow_run triggers, only run when the CD workflow succeeded.
-    # workflow_dispatch always runs (condition evaluates true when inputs are present).
+    # Run for: workflow_dispatch (manual), workflow_call (from CD), or workflow_run (when CD succeeded).
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'workflow_call' ||
       github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
 
     env:
-      # Prefer manual input; fall back to production URL when triggered via workflow_run.
-      TARGET_URL: ${{ inputs.target_url || 'https://spawnforge.ai' }}
+      # Prefer explicit input (workflow_dispatch / workflow_call); then DEPLOY_URL var; then production.
+      TARGET_URL: ${{ inputs.target_url || vars.DEPLOY_URL || 'https://spawnforge.ai' }}
 
     steps:
       - name: Resolve target URL
@@ -103,7 +111,7 @@ jobs:
         id: wasm
         run: |
           WASM_PATH="/engine-pkg-webgl2/forge_engine_bg.wasm"
-          RESPONSE=$(curl --silent --head \
+          RESPONSE=$(curl --silent --head --output /dev/null \
             --write-out "%{http_code}|%{content_type}" \
             --max-time 10 \
             "$TARGET_URL$WASM_PATH")

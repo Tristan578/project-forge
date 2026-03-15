@@ -183,7 +183,7 @@ function makeAutoLayerProject(): unknown {
             __pxTotalOffsetY: 0,
             visible: true,
             intGridCsv: [],
-            gridTiles: [],  // AutoLayer stores nothing here
+            gridTiles: [],
             autoLayerTiles: [
               { px: [0, 0], src: [0, 0], t: 5, f: 0 },
               { px: [16, 0], src: [16, 0], t: 6, f: 0 },
@@ -565,8 +565,6 @@ describe('parseLdtkProject — AutoLayer tiles', () => {
 
   it('reads tiles from autoLayerTiles, not gridTiles', () => {
     const tiles = result.levels[0].tilemapData!.layers[0].tiles;
-    // autoLayerTiles has 3 entries at (0,0)->5, (1,0)->6, (0,1)->10
-    // gridTiles is empty, so if reading from gridTiles all would be null
     expect(tiles[0]).toBe(5);
     expect(tiles[1]).toBe(6);
     expect(tiles[2]).toBeNull();
