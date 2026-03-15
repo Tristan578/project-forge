@@ -119,5 +119,44 @@ describe('pixelArtClient', () => {
       const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
       expect(body.prompt).toContain('pixel art');
     });
+
+    it('should throw on Replicate API error', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 503,
+        text: () => Promise.resolve('Service down'),
+      } as Response);
+
+      const client = new PixelArtClient('test-key', 'replicate');
+      await expect(client.generate({
+        prompt: 'test',
+        style: 'prop',
+        size: 1024,
+      })).rejects.toThrow('Replicate API error 503');
+    });
+
+    it('getReplicateStatus returns status and output', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ status: 'succeeded', output: ['https://output.url'] }),
+      } as Response);
+
+      const client = new PixelArtClient('test-key', 'replicate');
+      const result = await client.getReplicateStatus('pred-abc');
+
+      expect(result.status).toBe('succeeded');
+      expect(result.output).toEqual(['https://output.url']);
+    });
+
+    it('getReplicateStatus throws on error', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: false,
+        status: 404,
+      } as Response);
+
+      const client = new PixelArtClient('test-key', 'replicate');
+      await expect(client.getReplicateStatus('pred-bad'))
+        .rejects.toThrow('Replicate status error 404');
+    });
   });
 });

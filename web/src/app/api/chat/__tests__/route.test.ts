@@ -5,6 +5,8 @@
  * message validation, prompt injection, API key resolution, streaming response,
  * and error recovery with token refunds.
  */
+vi.mock('server-only', () => ({}));
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { makeUser } from '@/test/utils/apiTestUtils';

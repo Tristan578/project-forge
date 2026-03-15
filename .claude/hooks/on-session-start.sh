@@ -140,4 +140,14 @@ cat <<'EOF'
 EOF
 echo "═══════════════════════════════════════════════════════════════"
 
+# ── Step 5: Lightweight DX audit (non-blocking) ─────────────────────────
+
+DX_SCRIPT="$SCRIPT_DIR/../tools/dx-audit.sh"
+if [ -x "$DX_SCRIPT" ]; then
+    if ! bash "$DX_SCRIPT" > /dev/null 2>&1; then
+        echo ""
+        echo "!! DX AUDIT found issues — run 'bash .claude/tools/dx-audit.sh' for details"
+    fi
+fi
+
 exit 0

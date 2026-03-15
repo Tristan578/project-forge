@@ -130,6 +130,32 @@ All hooks live in `.claude/hooks/` and are shared across all AI tools:
 | Full constitution | `.claude/CLAUDE.md` |
 | Cross-tool instructions | `AGENTS.md` |
 
+## Domain Skills
+
+Specialized development patterns in `.claude/skills/`:
+
+| Skill | Use When |
+|-------|----------|
+| `rust-engine/SKILL.md` | Writing engine/ code (ECS, commands, bridge) |
+| `frontend/SKILL.md` | Writing web/ code (React, Zustand, Tailwind) |
+| `mcp-commands/SKILL.md` | Adding MCP commands or chat handlers |
+| `testing/SKILL.md` | Writing tests, improving coverage |
+| `docs/SKILL.md` | Updating documentation |
+| `design/SKILL.md` | Designing features, architecture decisions |
+| `developer-experience/SKILL.md` | DX audits, DoQ/DoD, onboarding |
+
+## Validation Tools
+
+```bash
+bash .claude/tools/validate-rust.sh check      # After engine changes
+bash .claude/tools/validate-frontend.sh quick   # After frontend changes
+bash .claude/tools/validate-mcp.sh full         # After MCP changes
+bash .claude/tools/validate-tests.sh coverage   # Test coverage
+bash .claude/tools/validate-docs.sh             # Doc integrity
+bash .claude/tools/dx-audit.sh                  # DX audit
+bash .claude/tools/validate-all.sh              # Everything
+```
+
 ## Detailed Reference
 
 For full architecture rules, ECS patterns, and library APIs, see:

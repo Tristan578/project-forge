@@ -40,6 +40,8 @@ vi.mock('../handlers/animationParticleHandlers', () => ({ animationParticleHandl
 vi.mock('../handlers/gameplayHandlers', () => ({ gameplayHandlers: {} }));
 vi.mock('../handlers/assetHandlers', () => ({ assetHandlers: {} }));
 vi.mock('../handlers/audioLegacyHandlers', () => ({ audioLegacyHandlers: {} }));
+vi.mock('../handlers/pixelArtHandlers', () => ({ pixelArtHandlers: {} }));
+vi.mock('../handlers/compoundHandlers', () => ({ compoundHandlers: {} }));
 
 // ── Mock legacy executor ──────────────────────────────────────────────────────
 vi.mock('../executor.legacy', () => ({
@@ -91,8 +93,8 @@ describe('executor: legacy fallback dispatch', () => {
 
   it('passes an empty args object to legacy executor correctly', async () => {
     const store = makeStore();
-    await executeToolCall('describe_scene', {}, store);
-    expect(mocks.legacyExecute).toHaveBeenCalledWith('describe_scene', {}, store);
+    await executeToolCall('unknown_tool_xyz', {}, store);
+    expect(mocks.legacyExecute).toHaveBeenCalledWith('unknown_tool_xyz', {}, store);
   });
 
   it('forwards an arbitrary args object unchanged', async () => {

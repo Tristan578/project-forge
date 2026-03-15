@@ -4,6 +4,8 @@
  * Covers: rate limiting, pagination, search filtering, tag filtering,
  * sort modes, tag enrichment, DB errors.
  */
+vi.mock('server-only', () => ({}));
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 

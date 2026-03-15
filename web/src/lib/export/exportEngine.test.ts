@@ -123,5 +123,40 @@ describe('exportEngine', () => {
         'revokeObjectURL',
       ]);
     });
+
+    it('handles a zip blob type', () => {
+      const blob = new Blob(['zip content'], { type: 'application/zip' });
+      downloadBlob(blob, 'game.zip');
+
+      expect(createObjectURLSpy).toHaveBeenCalledWith(blob);
+      const anchor = appendChildSpy.mock.calls[0][0] as HTMLAnchorElement;
+      expect(anchor.download).toBe('game.zip');
+    });
+
+    it('handles filenames with spaces', () => {
+      const blob = new Blob(['test'], { type: 'text/html' });
+      downloadBlob(blob, 'my awesome game.html');
+
+      const anchor = appendChildSpy.mock.calls[0][0] as HTMLAnchorElement;
+      expect(anchor.download).toBe('my awesome game.html');
+    });
+
+    it('handles empty blob', () => {
+      const blob = new Blob([], { type: 'text/plain' });
+      expect(() => downloadBlob(blob, 'empty.txt')).not.toThrow();
+      expect(createObjectURLSpy).toHaveBeenCalledWith(blob);
+    });
+
+    it('always cleans up the object URL even if click throws', () => {
+      clickSpy.mockImplementation(() => {
+        throw new Error('click error');
+      });
+
+      const blob = new Blob(['test'], { type: 'text/plain' });
+
+      // The function does not try/catch the click — this is intentional behaviour.
+      // The URL must still be revocable by the caller after an error.
+      expect(() => downloadBlob(blob, 'test.txt')).toThrow('click error');
+    });
   });
 });

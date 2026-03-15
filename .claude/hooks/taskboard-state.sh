@@ -129,9 +129,11 @@ tb_get_project_id() {
 }
 
 # Get the engineering team ID (for use in hook messages)
-tb_get_team_id() {
+tb_get_engineering_team_id() {
     echo "$TEAM_ENGINEERING_ID"
 }
+# Backward compat alias
+tb_get_team_id() { tb_get_engineering_team_id; }
 
 # ---------------------------------------------------------------------------
 # Board summary

@@ -45,7 +45,7 @@
 - `db/` — Drizzle + Neon client
 
 ### MCP Server (`mcp-server/`)
-- `manifest/commands.json` — 306 commands across 37 categories
+- `manifest/commands.json` — 322 commands across 37 categories
 - `src/docs/` — Doc loader, BM25 search
 
 ## Communication Pattern

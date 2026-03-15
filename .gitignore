@@ -21,6 +21,7 @@ secrets.json
 !.claude/skills/
 !.claude/agents/
 !.claude/hooks/
+!.claude/tools/
 !.claude/settings.json
 !.claude/TASKBOARD_SETUP.md
 # Always ignore local settings, DB, and WAL files
@@ -38,7 +39,6 @@ secrets.json
 !.windsurf/workflows/
 specs/
 ARCHITECTURE.md
-TESTING.md
 project_board.json
 
 # ----- Rust / Cargo -----
