@@ -72,10 +72,11 @@ export function welcomeEmail(userName: string): { subject: string; html: string 
 }
 
 export function subscriptionConfirmation(tier: string): { subject: string; html: string } {
-  const subject = `Your SpawnForge ${tier} subscription is active`;
+  const safeTier = escapeHtml(tier);
+  const subject = `Your SpawnForge ${safeTier} subscription is active`;
   const html = baseLayout(`
     ${h1("Subscription Confirmed")}
-    ${p(`Your ${highlight(tier)} plan is now active.`)}
+    ${p(`Your ${highlight(safeTier)} plan is now active.`)}
     ${p("You now have access to all features included in your plan. Your billing cycle starts today and will renew automatically each month.")}
     ${p("You can manage your subscription at any time from your account settings.")}
     ${p("Thank you for supporting SpawnForge!")}
