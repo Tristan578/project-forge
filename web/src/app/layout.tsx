@@ -5,7 +5,6 @@ import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics } from "@vercel/analytics/next";
 import type { BeforeSendEvent } from "@vercel/analytics";
-import { Toaster } from "sonner";
 import "./globals.css";
 
 // Prevent static prerendering — all pages require auth (ClerkProvider)
@@ -58,7 +57,6 @@ export default function RootLayout({
         {children}
         <Analytics mode={analyticsMode} beforeSend={analyticsBeforeSend} />
         <SpeedInsights />
-        <Toaster theme="dark" position="bottom-right" richColors />
       </body>
     </html>
   );
