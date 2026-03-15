@@ -202,7 +202,7 @@ export function ChatInput() {
           {images.map((img, i) => (
             <div key={i} className="group relative flex-shrink-0">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img} alt="Preview" className="h-12 w-12 rounded border border-zinc-700 object-cover" />
+              <img src={img} alt="Preview" width={48} height={48} className="h-12 w-12 rounded border border-zinc-700 object-cover" />
               <button
                 onClick={() => removeImage(i)}
                 className="absolute -right-1 -top-1 hidden h-4 w-4 items-center justify-center rounded-full bg-zinc-700 text-zinc-300 group-hover:flex"

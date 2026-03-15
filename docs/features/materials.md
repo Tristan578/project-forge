@@ -1,3 +1,9 @@
+---
+lastVerified: 2026-03-15
+relatedCommands: [update_material, set_material_preset, update_material_extended, set_material_texture, set_material_library_preset]
+relatedFiles: [web/src/stores/slices/materialSlice.ts, engine/src/core/commands/material.rs, engine/src/bridge/material.rs, engine/src/core/material.rs]
+---
+
 # Materials
 
 Control the appearance of mesh entities with PBR (Physically Based Rendering) materials.
