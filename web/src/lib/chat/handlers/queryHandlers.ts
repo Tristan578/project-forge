@@ -281,6 +281,11 @@ export const queryHandlers: Record<string, ToolHandler> = {
         entities,
         entityCount: entities.length,
         engineMode: store.engineMode,
+        // Note: transforms reflect the last engine→Zustand sync tick, not real-time
+        // ECS values. Full real-time transforms require the async channel protocol
+        // wired to chat handlers (future work: PF-392).
+        dataSource: 'store_last_sync' as const,
+        syncTimestamp: Date.now(),
       },
     };
   },
