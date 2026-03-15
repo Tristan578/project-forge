@@ -18,6 +18,7 @@ describe('shaderEditorStore', () => {
       activeGraphId: null,
       graphs: {},
       selectedNodeIds: [],
+      compilationError: null,
     });
   });
 
@@ -528,6 +529,46 @@ describe('shaderEditorStore', () => {
       const state = useShaderEditorStore.getState();
       expect(state.graphs[id1].nodes).toHaveLength(1);
       expect(state.graphs[id2].nodes).toHaveLength(1);
+    });
+  });
+
+  // ── PF-390: compilationError surface ─────────────────────────────────────
+  describe('compilationError', () => {
+    it('starts as null', () => {
+      expect(useShaderEditorStore.getState().compilationError).toBeNull();
+    });
+
+    it('setCompilationError stores the message', () => {
+      const { setCompilationError } = useShaderEditorStore.getState();
+      setCompilationError('No PBR Output node found.');
+      expect(useShaderEditorStore.getState().compilationError).toBe('No PBR Output node found.');
+    });
+
+    it('setCompilationError(null) clears the error', () => {
+      useShaderEditorStore.setState({ compilationError: 'some error' });
+      useShaderEditorStore.getState().setCompilationError(null);
+      expect(useShaderEditorStore.getState().compilationError).toBeNull();
+    });
+
+    it('setCompilationError overwrites a previous error', () => {
+      const { setCompilationError } = useShaderEditorStore.getState();
+      setCompilationError('First error');
+      setCompilationError('Second error');
+      expect(useShaderEditorStore.getState().compilationError).toBe('Second error');
+    });
+
+    it('is not cleared by createNewGraph', () => {
+      useShaderEditorStore.setState({ compilationError: 'stale error' });
+      useShaderEditorStore.getState().createNewGraph('NewGraph');
+      expect(useShaderEditorStore.getState().compilationError).toBe('stale error');
+    });
+
+    it('persists across addNode calls', () => {
+      const store = useShaderEditorStore.getState();
+      store.createNewGraph('Test');
+      store.setCompilationError('Cyclic dependency detected.');
+      store.addNode('vertex_uv', { x: 0, y: 0 }, {});
+      expect(useShaderEditorStore.getState().compilationError).toBe('Cyclic dependency detected.');
     });
   });
 });
