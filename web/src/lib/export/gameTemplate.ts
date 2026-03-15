@@ -17,10 +17,11 @@ export interface GameTemplateOptions {
   uiData?: string;         // JSON-encoded GameUIData
   mobileTouchConfig?: string;  // JSON-encoded MobileTouchConfig
   embeddedWasm?: Record<string, EmbeddedWasmData>;  // Inlined WASM for single-HTML portability
+  orientationLock?: 'landscape' | 'portrait' | 'none';  // Screen orientation lock for mobile
 }
 
 export function generateGameHTML(options: GameTemplateOptions): string {
-  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig, embeddedWasm } = options;
+  const { title, bgColor, resolution, sceneData, scriptBundle, includeDebug, uiData, mobileTouchConfig, embeddedWasm, orientationLock } = options;
 
   const canvasStyle = resolution === 'responsive'
     ? 'width: 100vw; height: 100vh;'
@@ -110,6 +111,12 @@ export function generateGameHTML(options: GameTemplateOptions): string {
         var _isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         if (_isMobile && ${touchConfig?.autoReduceQuality ? 'true' : 'false'}) {
           handle_command('set_quality', JSON.stringify({ preset: 'low' }));
+        }
+
+        // Orientation lock
+        ${orientationLock && orientationLock !== 'none'
+          ? `if (screen.orientation && screen.orientation.lock) { screen.orientation.lock('${orientationLock}').catch(function() {}); }`
+          : '// No orientation lock requested'
         }
 
         // Load scene
