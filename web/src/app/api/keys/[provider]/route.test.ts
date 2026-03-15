@@ -1,3 +1,5 @@
+vi.mock('server-only', () => ({}));
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';

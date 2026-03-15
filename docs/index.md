@@ -46,7 +46,7 @@ Detailed guides for every editor capability:
 - [Dialogue System](./features/dialogue-system.md) — dialogue trees, branching conversations, conditions & actions
 - [Game Cameras](./features/game-cameras.md) — 6 camera modes (third-person, first-person, side-scroller, top-down, fixed, orbital)
 - [Scene Transitions](./features/scene-transitions.md) — fade, wipe, instant transitions between scenes
-- [Game Templates](./features/game-templates.md) — 5 starter templates for quick prototyping
+- [Game Templates](./features/game-templates.md) — 11 starter templates (5 3D + 6 2D) for quick prototyping
 - [Physics Joints](./features/physics-joints.md) — fixed, revolute, spherical, prismatic, rope, spring joints
 
 ### Advanced
@@ -57,6 +57,13 @@ Detailed guides for every editor capability:
 - [Cloud Publishing](./features/cloud-publishing.md) — publish games to shareable URLs
 - [Prefabs](./features/prefabs.md) — reusable entity templates, import/export
 - [Multi-Scene](./features/multi-scene.md) — multiple scenes per project, scene switching
+
+### 2D Engine
+- [Sprites & Camera 2D](./features/sprites.md) — sprite rendering, sorting layers, orthographic camera
+- [Sprite Animation](./features/sprite-animation.md) — sprite sheets, animation clips, state machines
+- [Tilemaps](./features/tilemaps.md) — multi-layer tilemaps, paint/erase/fill tools, tile palette
+- [2D Physics](./features/physics-2d.md) — Rapier2D rigid bodies, colliders, joints, forces
+- [Skeletal 2D Animation](./features/skeletal-2d.md) — bones, IK, vertex skinning, blend trees
 
 ### Assets & Files
 - [Asset Pipeline](./features/asset-pipeline.md) — import glTF, textures, audio
@@ -78,7 +85,7 @@ End-to-end game building guides:
 
 ## Reference
 
-- [Command Reference](./reference/commands.md) — all 329 MCP commands with parameters
+- [Command Reference](./reference/commands.md) — all 322 MCP commands with parameters
 - [Script API](./reference/script-api.md) — complete forge.* TypeScript API
 - [Entity Types](./reference/entity-types.md) — all entity types and components
-- [Known Limitations](./known-limitations.md) — features that are UI-only or partially implemented
+- [Known Limitations](./known-limitations.md) — genuine technical constraints and remaining gaps

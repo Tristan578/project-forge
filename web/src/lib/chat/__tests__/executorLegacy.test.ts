@@ -1,16 +1,25 @@
 /**
- * Comprehensive unit tests for executor.legacy — the 8 compound AI actions.
+ * Comprehensive unit tests for the 8 compound AI actions.
  *
  * Each action is tested for:
  *  - Happy-path store mutations
  *  - Edge cases (empty inputs, optional fields, fallback defaults)
  *  - Error containment (unknown tools return { success: false })
  *  - Partial-success semantics where applicable
+ *
+ * Note: compound handlers are now registered in executor.ts via compoundHandlers.
+ * Tests import executeToolCall from executor.ts (the registry dispatcher).
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { executeToolCall } from '../executor.legacy';
 import type { EditorState, SceneNode } from '@/stores/editorStore';
+
+// ── Mock getCommandDispatcher (required by executor.ts wrapper) ───────────────
+vi.mock('@/stores/editorStore', () => ({
+  getCommandDispatcher: vi.fn(() => vi.fn()),
+}));
+
+import { executeToolCall } from '../executor';
 
 // ── Store factory ─────────────────────────────────────────────────────────────
 

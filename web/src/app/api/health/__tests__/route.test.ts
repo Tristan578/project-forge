@@ -4,6 +4,8 @@
  * Covers: response format, status fields, environment handling,
  * DB connected/unavailable/not_configured states.
  */
+vi.mock('server-only', () => ({}));
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('GET /api/health', () => {

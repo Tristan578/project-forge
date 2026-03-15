@@ -4,6 +4,8 @@
  * Covers: rate limiting, asset listing, search, category filtering,
  * price filtering, sort modes, pagination, avgRating conversion, DB errors.
  */
+vi.mock('server-only', () => ({}));
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
