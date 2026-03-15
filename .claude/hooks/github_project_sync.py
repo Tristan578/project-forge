@@ -604,16 +604,17 @@ def gh_set_status(config, item_id, local_status):
     ])
 
 
-def gh_sync_issue_state(config, issue_number, local_status):
-    """Close GitHub issue when ticket moves to done, reopen if moved back."""
+def gh_sync_issue_state(config, issue_number, local_status, prev_status=None):
+    """Close GitHub issue when ticket moves to done, reopen only if moving back from done."""
     owner = config["owner"]
     repo = config["repo"]
     repo_arg = f"{owner}/{repo}"
     if local_status == "done":
         gh_run(["gh", "issue", "close", str(issue_number), "--repo", repo_arg,
                 "--reason", "completed"], check=False)
-    else:
-        # Reopen if ticket moved back from done to todo/in_progress
+    elif prev_status == "done":
+        # Only reopen if the ticket was previously done — avoids overriding
+        # manual GitHub issue closures for tickets that were never done locally
         gh_run(["gh", "issue", "reopen", str(issue_number), "--repo", repo_arg],
                check=False)
 
@@ -813,7 +814,8 @@ def push(include_done=False):
                     if item_id:
                         gh_set_status(config, item_id, status)
                     # Close/reopen the GitHub issue to match local status
-                    gh_sync_issue_state(config, gh_issue_num, status)
+                    gh_sync_issue_state(config, gh_issue_num, status,
+                                        prev_status=entry.get("lastLocalStatus"))
 
                 entry["lastLocalStatus"] = status
                 entry["lastGithubStatus"] = local_to_github(config, status)
