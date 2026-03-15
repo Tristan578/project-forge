@@ -120,7 +120,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                 tabIndex={0}
                 onClick={() => handleSwitch(scene.id)}
                 onKeyDown={(e) => handleKeyDown(e, scene.id)}
-                className={`flex cursor-pointer items-center gap-2 rounded px-3 py-2 text-sm transition-colors outline-none focus-visible:ring-1 focus-visible:ring-blue-500 ${
+                className={`group flex cursor-pointer items-center gap-2 rounded px-3 py-2 text-sm transition-colors outline-none focus-visible:ring-1 focus-visible:ring-blue-500 ${
                   isActive
                     ? 'bg-blue-600/20 text-zinc-100'
                     : 'text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100'
