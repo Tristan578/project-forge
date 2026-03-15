@@ -63,8 +63,10 @@ interface LdtkLayerInstance {
   __gridSize: number;
   /** IntGrid cell values (1 = first registered value, 0 = empty). Present for IntGrid layers. */
   intGridCsv: number[];
-  /** Tile data for Tiles and AutoLayer layers. */
+  /** Tile data for Tiles layers (and IntGrid layers with auto-tile rules). */
   gridTiles: LdtkGridTile[];
+  /** Tile data for AutoLayer layers (auto-rule generated tiles). */
+  autoLayerTiles: LdtkGridTile[];
   /** Entity instances for Entity layers. */
   entityInstances: LdtkEntityInstance[];
   visible: boolean;
@@ -234,14 +236,20 @@ function convertIntGridLayer(layer: LdtkLayerInstance): TilemapLayer {
 
 /**
  * Convert a Tiles or AutoLayer instance to a TilemapLayer.
- * gridTiles are placed into the flat array by computing the cell index from
- * the pixel position divided by the grid size.
+ * Tiles layers store tile data in `gridTiles`, while AutoLayer layers store
+ * tile data in `autoLayerTiles`. The correct source is selected based on
+ * the layer's `__type`.
  */
 function convertTilesLayer(layer: LdtkLayerInstance): TilemapLayer {
   const cellCount = layer.__cWid * layer.__cHei;
   const tiles: (number | null)[] = new Array(cellCount).fill(null);
 
-  for (const gt of layer.gridTiles) {
+  const tileSource =
+    layer.__type === 'AutoLayer'
+      ? (layer.autoLayerTiles ?? layer.gridTiles)
+      : layer.gridTiles;
+
+  for (const gt of tileSource) {
     const cellX = Math.floor(gt.px[0] / layer.__gridSize);
     const cellY = Math.floor(gt.px[1] / layer.__gridSize);
     if (cellX >= 0 && cellX < layer.__cWid && cellY >= 0 && cellY < layer.__cHei) {
