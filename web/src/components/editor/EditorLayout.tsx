@@ -1,25 +1,27 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
 import { X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CanvasArea } from './CanvasArea';
 import { SceneHierarchy } from './SceneHierarchy';
 import { InspectorPanel } from './InspectorPanel';
-import { ScriptEditorPanel } from './ScriptEditorPanel';
-import { UIBuilderPanel } from './UIBuilderPanel';
-import { ShaderEditorPanel } from './ShaderEditorPanel';
 import { PlayControls } from './PlayControls';
 import { SceneToolbar } from './SceneToolbar';
 import { LayoutMenu } from './LayoutMenu';
 import { PanelsMenu } from './PanelsMenu';
 import { TokenBalance } from '../settings/TokenBalance';
-import { ChatPanel } from '../chat/ChatPanel';
 import { DrawerPanel } from './DrawerPanel';
 import { MobileToolbar } from './MobileToolbar';
-import { WelcomeModal } from './WelcomeModal';
-import { KeyboardShortcutsPanel } from './KeyboardShortcutsPanel';
-import { FeedbackDialog } from './FeedbackDialog';
+
+// Lazy-load heavy panels that aren't visible on initial render
+const ScriptEditorPanel = lazy(() => import('./ScriptEditorPanel').then(m => ({ default: m.ScriptEditorPanel })));
+const UIBuilderPanel = lazy(() => import('./UIBuilderPanel').then(m => ({ default: m.UIBuilderPanel })));
+const ShaderEditorPanel = lazy(() => import('./ShaderEditorPanel').then(m => ({ default: m.ShaderEditorPanel })));
+const ChatPanel = lazy(() => import('../chat/ChatPanel').then(m => ({ default: m.ChatPanel })));
+const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m.WelcomeModal })));
+const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
+const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
@@ -142,9 +144,11 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
   return (
     <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
       {activeTab === 'inspector' && <InspectorPanel />}
-      {activeTab === 'script' && <ScriptEditorPanel />}
-      {activeTab === 'ui' && <UIBuilderPanel />}
-      {activeTab === 'chat' && <ChatPanel />}
+      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}>
+        {activeTab === 'script' && <ScriptEditorPanel />}
+        {activeTab === 'ui' && <UIBuilderPanel />}
+        {activeTab === 'chat' && <ChatPanel />}
+      </Suspense>
     </div>
   );
 }
@@ -371,10 +375,12 @@ export function EditorLayout() {
         <DialogueOverlay />
         <TutorialOverlay />
         <OnboardingChecklist />
-        <WelcomeModal />
-        <ShaderEditorPanel />
-        <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
-        <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+        <Suspense fallback={null}>
+          <WelcomeModal />
+          <ShaderEditorPanel />
+          <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+          <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+        </Suspense>
       </div>
     );
   }
