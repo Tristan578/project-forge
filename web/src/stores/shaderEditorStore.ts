@@ -32,10 +32,12 @@ interface ShaderEditorState {
   activeGraphId: string | null;
   graphs: Record<string, ShaderGraph>;
   selectedNodeIds: string[];
+  compilationError: string | null;
 
   // Actions
   openShaderEditor: (graphId?: string) => void;
   closeShaderEditor: () => void;
+  setCompilationError: (error: string | null) => void;
   setActiveGraph: (graphId: string | null) => void;
   addNode: (type: string, position: { x: number; y: number }, data?: Record<string, unknown>) => string;
   removeNodes: (ids: string[]) => void;
@@ -60,6 +62,7 @@ export const useShaderEditorStore = create<ShaderEditorState>((set, get) => ({
   activeGraphId: null,
   graphs: {},
   selectedNodeIds: [],
+  compilationError: null,
 
   openShaderEditor: (graphId?: string) => {
     set({ isOpen: true });
@@ -73,6 +76,8 @@ export const useShaderEditorStore = create<ShaderEditorState>((set, get) => ({
   },
 
   closeShaderEditor: () => set({ isOpen: false }),
+
+  setCompilationError: (error) => set({ compilationError: error }),
 
   setActiveGraph: (graphId) => set({ activeGraphId: graphId }),
 

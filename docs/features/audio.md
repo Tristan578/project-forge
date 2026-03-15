@@ -1,3 +1,9 @@
+---
+lastVerified: 2026-03-15
+relatedCommands: [set_audio, play_audio, stop_audio, pause_audio, set_audio_bus, set_audio_bus_effects, audio_add_layer, audio_crossfade, remove_audio]
+relatedFiles: [web/src/stores/slices/audioSlice.ts, engine/src/core/commands/audio.rs, engine/src/bridge/audio.rs, engine/src/core/audio.rs, web/src/lib/audio/audioManager.ts]
+---
+
 # Audio
 
 Add sound effects and music with spatial 3D audio, mixer buses, and layered audio.
