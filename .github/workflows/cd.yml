@@ -409,7 +409,9 @@ jobs:
         (github.event.inputs.promote_to_production == 'true' &&
          needs.lint.result == 'success' &&
          needs.typecheck.result == 'success' &&
-         needs.test-web.result == 'success')
+         needs.test-web.result == 'success' &&
+         needs.build-wasm.result == 'success' &&
+         (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped'))
       )
     permissions:
       contents: read
