@@ -7,6 +7,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { EXPORT_PRESETS, getPreset, type ExportFormat } from '@/lib/export/presets';
 import { generateResponsiveEmbedSnippet, generateEmbedSnippet } from '@/lib/export/embedGenerator';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
+import { showError } from '@/lib/toast';
 
 function parseResolution(res: string): [number, number] {
   const parts = res.split('x');
@@ -133,7 +134,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       }
     } catch (err) {
       console.error('[Export] Failed to export game:', err);
-      setExportError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setExportError(message);
+      showError(`Export failed: ${message}`);
     } finally {
       setExporting(false);
     }
