@@ -1,14 +1,13 @@
 import type { Page } from '@playwright/test';
 
 /**
- * Whether store injection failures should throw (CI/staging) or skip (local).
+ * Whether store injection failures should throw or skip gracefully.
  *
- * In CI, the dev server exposes __EDITOR_STORE and __CHAT_STORE on window.
- * If they're missing, something is wrong and the test should fail loudly.
- * Locally, developers may run `playwright test --list` or dry-run without
- * the dev server, so we degrade gracefully.
+ * Only strict when explicitly opted in via E2E_STRICT_STORES=true.
+ * CI E2E runs with __SKIP_ENGINE=true which means stores may not be
+ * fully hydrated — strict mode would cause false failures.
  */
-const STRICT_STORES = !!(process.env.CI || process.env.E2E_STRICT_STORES);
+const STRICT_STORES = !!process.env.E2E_STRICT_STORES;
 
 type StoreName = '__EDITOR_STORE' | '__CHAT_STORE';
 
