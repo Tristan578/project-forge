@@ -38,6 +38,8 @@ fi
 # 2. Command count
 echo ""
 echo "--- Command Count ---"
+CMD_COUNT="?"
+CAT_COUNT="?"
 if [ -f "$MCP_MANIFEST" ]; then
   CMD_COUNT=$(python3 -c "import json; data=json.load(open('$MCP_MANIFEST')); print(sum(len(cat.get('commands',[])) for cat in data.get('categories',[])))" 2>/dev/null || echo "?")
   CAT_COUNT=$(python3 -c "import json; data=json.load(open('$MCP_MANIFEST')); print(len(data.get('categories',[])))" 2>/dev/null || echo "?")
