@@ -36,10 +36,6 @@ export function generateGameHTML(options: GameTemplateOptions): string {
   const touchCSS = touchConfig?.enabled ? generateTouchCSS() : '';
   const touchJS = touchConfig?.enabled ? generateTouchJS(touchConfig) : '';
 
-  const orientationLockJS = orientationLock && orientationLock !== 'none'
-    ? `if (screen.orientation && screen.orientation.lock) { screen.orientation.lock('${orientationLock}').catch(function() {}); }`
-    : '';
-
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -118,7 +114,10 @@ export function generateGameHTML(options: GameTemplateOptions): string {
         }
 
         // Orientation lock
-        ${orientationLockJS}
+        ${orientationLock && orientationLock !== 'none'
+          ? `if (screen.orientation && screen.orientation.lock) { screen.orientation.lock('${orientationLock}').catch(function() {}); }`
+          : '// No orientation lock requested'
+        }
 
         // Load scene
         handle_command('load_scene', JSON.stringify(window.__forgeSceneData));

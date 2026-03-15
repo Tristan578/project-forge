@@ -5,6 +5,7 @@ import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Toaster } from "sonner";
 import { AnalyticsProvider } from "@/components/AnalyticsProvider";
+import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
 
 // Prevent static prerendering — all pages require auth (ClerkProvider)
@@ -27,6 +28,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "SpawnForge",
   description: "AI-Powered Game Creation Platform",
+  manifest: "/manifest.json",
 };
 
 export default function RootLayout({
@@ -44,6 +46,7 @@ export default function RootLayout({
         <AnalyticsProvider />
         <SpeedInsights />
         <Toaster theme="dark" position="bottom-right" richColors />
+        <ServiceWorkerRegistration />
       </body>
     </html>
   );

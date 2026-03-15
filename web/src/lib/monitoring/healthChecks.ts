@@ -4,6 +4,9 @@
  * Each check runs with a 5-second timeout. For external services that
  * charge per call (Stripe, etc.) we only validate config presence.
  * For services that are safe to ping (DB, CDN) we perform real checks.
+ *
+ * Individual service checks for Clerk, Anthropic, Sentry, and Cloudflare R2
+ * use a 3-second timeout to keep the health endpoint responsive.
  */
 import 'server-only';
 
@@ -27,6 +30,8 @@ export interface HealthReport {
 }
 
 const TIMEOUT_MS = 5_000;
+/** Tighter timeout for lightweight connectivity checks (Clerk, Anthropic, Sentry, R2) */
+const SERVICE_TIMEOUT_MS = 3_000;
 
 /**
  * Race a promise against a timeout. Returns the promise result or throws
@@ -336,6 +341,205 @@ export async function checkAiProviders(): Promise<ServiceHealth> {
   };
 }
 
+/**
+ * Check Clerk auth service by validating key presence and pinging the JWKS endpoint.
+ * Uses a 3-second timeout. Sends the secret key only in the Authorization header.
+ * Status: healthy = keys present + endpoint reachable,
+ *         degraded = keys missing or endpoint unreachable.
+ */
+export async function checkClerk(): Promise<ServiceHealth> {
+  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  const secretKey = process.env.CLERK_SECRET_KEY;
+
+  if (!publishableKey || !secretKey) {
+    return {
+      name: 'Clerk',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: 'Clerk API keys not configured',
+      details: {
+        publishableKeyConfigured: !!publishableKey,
+        secretKeyConfigured: !!secretKey,
+      },
+    };
+  }
+
+  try {
+    const { latencyMs } = await timed(() =>
+      withTimeout(
+        fetch('https://api.clerk.com/v1/jwks', {
+          method: 'HEAD',
+          headers: { Authorization: `Bearer ${secretKey}` },
+        }).then((res) => {
+          // 405 (Method Not Allowed) is acceptable — endpoint exists but HEAD isn't supported
+          if (!res.ok && res.status !== 405) {
+            throw new Error(`Clerk JWKS returned ${res.status}`);
+          }
+        }),
+        SERVICE_TIMEOUT_MS,
+      ),
+    );
+    return {
+      name: 'Clerk',
+      status: 'healthy',
+      latencyMs,
+      lastChecked: new Date().toISOString(),
+      details: { configured: true },
+    };
+  } catch (err) {
+    return {
+      name: 'Clerk',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: err instanceof Error ? err.message : String(err),
+      details: { configured: true },
+    };
+  }
+}
+
+/**
+ * Check Anthropic API availability via a HEAD request to api.anthropic.com.
+ * Does NOT call a billable endpoint — only checks connectivity and key presence.
+ * Uses a 3-second timeout.
+ * Status: healthy = key present + host reachable,
+ *         degraded = key absent or host unreachable.
+ */
+export async function checkAnthropic(): Promise<ServiceHealth> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!apiKey) {
+    return {
+      name: 'Anthropic',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: 'ANTHROPIC_API_KEY not configured',
+      details: { configured: false },
+    };
+  }
+
+  try {
+    // HEAD request to the base API host — no tokens consumed, just connectivity.
+    const { latencyMs } = await timed(() =>
+      withTimeout(
+        fetch('https://api.anthropic.com', { method: 'HEAD' }).then((res) => {
+          // Any HTTP response (including 4xx) means the host is reachable.
+          if (res.status >= 500) {
+            throw new Error(`Anthropic API returned ${res.status}`);
+          }
+        }),
+        SERVICE_TIMEOUT_MS,
+      ),
+    );
+    return {
+      name: 'Anthropic',
+      status: 'healthy',
+      latencyMs,
+      lastChecked: new Date().toISOString(),
+      details: { configured: true },
+    };
+  } catch (err) {
+    return {
+      name: 'Anthropic',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: err instanceof Error ? err.message : String(err),
+      details: { configured: true },
+    };
+  }
+}
+
+/**
+ * Check Sentry error tracking configuration.
+ * Validates DSN presence and basic format. No network call — DSNs are config-only.
+ * Status: healthy = DSN present and well-formed,
+ *         degraded = DSN absent or malformed.
+ */
+export async function checkSentry(): Promise<ServiceHealth> {
+  const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN ?? process.env.SENTRY_DSN;
+
+  if (!dsn) {
+    return {
+      name: 'Sentry',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: 'NEXT_PUBLIC_SENTRY_DSN not configured — errors will not be tracked',
+      details: { configured: false },
+    };
+  }
+
+  // Basic DSN format check: must start with https:// and contain @
+  const isWellFormed = dsn.startsWith('https://') && dsn.includes('@');
+  if (!isWellFormed) {
+    return {
+      name: 'Sentry',
+      status: 'degraded',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: 'NEXT_PUBLIC_SENTRY_DSN appears malformed',
+      details: { configured: true, wellFormed: false },
+    };
+  }
+
+  return {
+    name: 'Sentry',
+    status: 'healthy',
+    latencyMs: 0,
+    lastChecked: new Date().toISOString(),
+    details: { configured: true, wellFormed: true },
+  };
+}
+
+/**
+ * Check Cloudflare R2 bucket configuration.
+ * Validates all required env vars are present. No actual bucket call — S3 API
+ * calls are expensive and slow. A config check is sufficient for health monitoring.
+ * Status: healthy = all 4 vars present,
+ *         degraded = some vars present (partial config),
+ *         down = no R2 vars at all.
+ */
+export async function checkCloudflareR2(): Promise<ServiceHealth> {
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+  const bucketName = process.env.R2_BUCKET_NAME;
+
+  const allConfigured = !!(accountId && accessKeyId && secretAccessKey && bucketName);
+  const anyConfigured = !!(accountId || accessKeyId || secretAccessKey || bucketName);
+
+  const details = {
+    accountIdConfigured: !!accountId,
+    accessKeyConfigured: !!accessKeyId,
+    secretKeyConfigured: !!secretAccessKey,
+    bucketNameConfigured: !!bucketName,
+  };
+
+  if (!allConfigured) {
+    return {
+      name: 'Cloudflare R2',
+      status: anyConfigured ? 'degraded' : 'down',
+      latencyMs: 0,
+      lastChecked: new Date().toISOString(),
+      error: anyConfigured
+        ? 'Cloudflare R2 partially configured — some vars missing'
+        : 'Cloudflare R2 not configured',
+      details,
+    };
+  }
+
+  return {
+    name: 'Cloudflare R2',
+    status: 'healthy',
+    latencyMs: 0,
+    lastChecked: new Date().toISOString(),
+    details: { ...details, bucket: bucketName },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Aggregate
 // ---------------------------------------------------------------------------
@@ -391,6 +595,10 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
     checkRateLimiting(),
     checkEngineCdn(),
     checkAiProviders(),
+    checkClerk(),
+    checkAnthropic(),
+    checkSentry(),
+    checkCloudflareR2(),
   ]);
 
   const env = process.env.NEXT_PUBLIC_ENVIRONMENT ?? process.env.NODE_ENV ?? 'unknown';

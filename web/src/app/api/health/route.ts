@@ -3,7 +3,22 @@ import {
   runAllHealthChecks,
   computeCriticalStatus,
   sanitizeForPublic,
+  type ServiceHealth,
 } from '@/lib/monitoring/healthChecks';
+
+/** Public status vocabulary — 'healthy' is remapped to 'up'. */
+type PublicStatus = 'up' | 'degraded' | 'down';
+type PublicServiceHealth = Omit<ServiceHealth, 'status'> & { status: PublicStatus };
+
+/**
+ * Normalize internal ServiceStatus to the public API contract.
+ * Internally we use 'healthy', externally we expose 'up' for consistency
+ * with standard uptime monitoring conventions.
+ */
+function normalizeStatus(s: ServiceHealth): PublicServiceHealth {
+  const publicStatus: PublicStatus = s.status === 'healthy' ? 'up' : s.status;
+  return { ...s, status: publicStatus };
+}
 
 /**
  * GET /api/health
@@ -12,6 +27,9 @@ import {
  * Returns application status, environment, version, and per-service health.
  * Only critical service failures (DB, Auth) trigger HTTP 503.
  * Sensitive error details are stripped from the public response.
+ *
+ * Services array reports: Clerk, Anthropic, Sentry, Cloudflare R2 and more.
+ * Each entry has: { name, status: 'up'|'degraded'|'down', latencyMs, error? }
  *
  * Rate limiting: This endpoint makes real network calls (DB, Clerk, CDN).
  * In production, upstream infrastructure (Vercel Edge, Cloudflare) provides
@@ -34,6 +52,8 @@ export async function GET(): Promise<NextResponse> {
         ? 'not_configured'
         : 'unavailable';
 
+  const publicServices = sanitizeForPublic(report.services).map(normalizeStatus);
+
   return NextResponse.json(
     {
       status: criticalStatus === 'down' ? 'error' : 'ok',
@@ -44,7 +64,7 @@ export async function GET(): Promise<NextResponse> {
       timestamp: report.timestamp,
       overall: report.overall,
       version: report.version,
-      services: sanitizeForPublic(report.services),
+      services: publicServices,
     },
     { status: httpStatus },
   );
