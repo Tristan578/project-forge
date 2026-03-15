@@ -271,7 +271,7 @@ When adding a **new ECS component**, update these domain-scoped files:
 
 | File | Contents |
 |------|----------|
-| `rules/bevy-api.md` | Bevy 0.16 migration, ECS limits, library-specific APIs (rapier, hanabi, panorbit) |
+| `rules/bevy-api.md` | Bevy 0.18 API patterns, 0.16→0.18 migration notes, ECS limits, library APIs (rapier, hanabi, panorbit) |
 | `rules/entity-snapshot.md` | EntityType, EntitySnapshot exhaustiveness, history, selection events |
 | `rules/web-quality.md` | ESLint rules, React patterns, Next.js constraints, README update guide |
 | `rules/library-apis.md` | csgrs, noise, serde-wasm-bindgen, terrain, texture pipeline, particles |
