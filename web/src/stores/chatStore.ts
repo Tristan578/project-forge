@@ -290,6 +290,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab } = get();
     if (isStreaming) return;
 
+    // Track AI chat usage
+    try { const { trackAIChatMessageSent } = await import('@/lib/analytics/events'); trackAIChatMessageSent(activeModel); } catch { /* analytics non-critical */ }
+
     // Append entity reference context to the message if @-mentions were used
     let messageContent = text;
     if (entityRefs && Object.keys(entityRefs).length > 0) {
