@@ -12,6 +12,21 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
+    // TODO(PF-389): Enable noUncheckedIndexedAccess — currently blocked by 2022 errors across the codebase.
+    // Dominant error patterns (from tsc --noEmit on 2026-03-14):
+    //   - 992 x "Object is possibly 'undefined'" — array/record index access (arr[i], obj[key])
+    //   - 97  x "Cannot invoke an object which is possibly 'undefined'" — indexed function maps
+    //   - 89  x "'node' is possibly 'undefined'" — dialogue tree node lookup by id
+    //   - 73  x "'tree' is possibly 'undefined'" — dialogue store map access
+    //   - 43  x "Type 'string | undefined' is not assignable to type 'string'" — indexed string maps
+    //   - 42  x "'action' is possibly 'undefined'" — undo/redo action array access
+    //   - 40  x "Argument of type 'HTMLElement | undefined'" — test file querySelectorAll()[i]
+    //   - 12  x "Property 'screenId' does not exist on type 'UIUndoAction'" — narrowing needed
+    // Highest-error files: uiBuilderStore.ts (103), dialogueStore tests (138), compoundHandlers.ts (76),
+    //   yarnImporter.ts (38), wgslCompiler.ts (29), PixelArtEditor.tsx (35).
+    // Before enabling: fix these files to use explicit bounds checks or non-null assertions (!)
+    // where array access is guaranteed safe (e.g., after length checks, Map.get with existence guard).
+    "noUncheckedIndexedAccess": false,
     "incremental": true,
     "plugins": [
       {
