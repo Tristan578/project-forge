@@ -68,7 +68,8 @@ pub(super) fn process_query_requests(
             | QueryRequest::TerrainState { .. }
             | QueryRequest::QualitySettings
             | QueryRequest::ReverbZoneState { .. }
-            | QueryRequest::ListJoints => {
+            | QueryRequest::ListJoints
+            | QueryRequest::PlayState => {
                 remaining.push(request);
             }
             _ => {
@@ -287,8 +288,74 @@ pub(super) fn process_query_requests(
             QueryRequest::SpriteAnimatorState { .. } => {
                 // Handled by sprite::handle_sprite_animator_state_queries
             }
+            QueryRequest::PlayState => {
+                // Handled by process_play_state_queries system to avoid system parameter limit
+            }
         }
     }
+}
+
+/// Process query_play_state requests separately to stay under 16 system parameter limit.
+pub(super) fn process_play_state_queries(
+    mut pending: ResMut<PendingCommands>,
+    engine_mode: Res<EngineMode>,
+    play_state_query: Query<(&EntityId, Option<&EntityName>, &Transform)>,
+) {
+    use crate::core::pending_commands::QueryRequest;
+
+    let has_play_state = pending.query_requests.iter().any(|r| matches!(r, QueryRequest::PlayState));
+    if !has_play_state {
+        return;
+    }
+
+    if !engine_mode.is_playing() && !matches!(*engine_mode, EngineMode::Paused) {
+        events::emit_event("QUERY_PLAY_STATE_ERROR", &serde_json::json!({
+            "error": "query_play_state is only available in Play or Paused mode",
+            "engineMode": engine_mode.as_str(),
+        }));
+        pending.query_requests.retain(|r| !matches!(r, QueryRequest::PlayState));
+        return;
+    }
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EntityPlayState {
+        id: String,
+        name: String,
+        position: [f32; 3],
+        rotation: [f32; 4],
+        scale: [f32; 3],
+    }
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PlayStateResponse {
+        entities: Vec<EntityPlayState>,
+        entity_count: usize,
+        engine_mode: String,
+    }
+
+    let entities: Vec<EntityPlayState> = play_state_query.iter()
+        .map(|(eid, ename, transform)| {
+            let quat = transform.rotation;
+            EntityPlayState {
+                id: eid.0.clone(),
+                name: ename.map(|n| n.0.clone()).unwrap_or_default(),
+                position: [transform.translation.x, transform.translation.y, transform.translation.z],
+                rotation: [quat.x, quat.y, quat.z, quat.w],
+                scale: [transform.scale.x, transform.scale.y, transform.scale.z],
+            }
+        })
+        .collect();
+
+    let entity_count = entities.len();
+    events::emit_event("QUERY_PLAY_STATE", &PlayStateResponse {
+        entities,
+        entity_count,
+        engine_mode: engine_mode.as_str().to_string(),
+    });
+
+    pending.query_requests.retain(|r| !matches!(r, QueryRequest::PlayState));
 }
 
 /// Process terrain query requests separately to stay under 16 system parameter limit.

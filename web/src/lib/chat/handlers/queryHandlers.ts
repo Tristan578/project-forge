@@ -263,6 +263,28 @@ export const queryHandlers: Record<string, ToolHandler> = {
     return { success: true, result: { costs: TOKEN_COSTS, monthlyAllocations: TIER_MONTHLY_TOKENS, packages: TOKEN_PACKAGES } };
   },
 
+  query_play_state: async (_args, { store }) => {
+    if (store.engineMode !== 'play' && store.engineMode !== 'paused') {
+      return {
+        success: false,
+        error: `query_play_state is only available in Play or Paused mode. Current mode: ${store.engineMode}`,
+      };
+    }
+    const entities = Object.values(store.sceneGraph.nodes).map((n) => ({
+      id: n.entityId,
+      name: n.name,
+      visible: n.visible,
+    }));
+    return {
+      success: true,
+      result: {
+        entities,
+        entityCount: entities.length,
+        engineMode: store.engineMode,
+      },
+    };
+  },
+
   get_sprite_generation_status: async (args, _ctx) => {
     const p = parseArgs(z.object({ jobId: z.string().min(1) }), args);
     if (p.error) return p.error;
