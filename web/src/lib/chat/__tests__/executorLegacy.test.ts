@@ -49,7 +49,7 @@ function makeStore(overrides: Record<string, unknown> = {}): EditorState {
     primaryId: null,
     allScripts: {},
     allGameComponents: {},
-    physicsEnabled: {},
+    physicsEnabled: false,
     inputBindings: [],
     inputPreset: 'wasd',
     audioBuses: [],

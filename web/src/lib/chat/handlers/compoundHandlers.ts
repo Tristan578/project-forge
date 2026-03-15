@@ -365,9 +365,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
           typeCounts,
           sceneName: ctx.store.sceneName,
           engineMode: ctx.store.engineMode,
-          hasPhysics: Object.keys(ctx.store.physicsEnabled).length > 0,
+          hasPhysics: ctx.store.physicsEnabled,
           hasScripts: Object.keys(ctx.store.allScripts).length > 0,
-          summary: `Scene contains ${nodes.length} entities. Physics: ${Object.keys(ctx.store.physicsEnabled).length > 0 ? 'enabled' : 'disabled'}. Scripts: ${Object.keys(ctx.store.allScripts).length} active.`,
+          summary: `Scene contains ${nodes.length} entities. Physics: ${ctx.store.physicsEnabled ? 'enabled' : 'disabled'}. Scripts: ${Object.keys(ctx.store.allScripts).length} active.`,
         },
       };
     }
@@ -460,7 +460,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
 
     if (analysis.entityRoles.some((e) => e.role === 'player')) analysis.mechanics.push('player_character');
     if (ctx.store.inputBindings.length > 0) analysis.mechanics.push('input_system');
-    if (Object.keys(ctx.store.physicsEnabled).length > 0) analysis.mechanics.push('physics');
+    if (ctx.store.physicsEnabled) analysis.mechanics.push('physics');
     if (Object.keys(ctx.store.allScripts).length > 0) analysis.mechanics.push('scripting');
     if (analysis.entityRoles.some((e) => e.role === 'collectible')) analysis.mechanics.push('collectibles');
     if (analysis.entityRoles.some((e) => e.role === 'checkpoint')) analysis.mechanics.push('checkpoints');
