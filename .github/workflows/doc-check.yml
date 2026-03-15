@@ -1,0 +1,98 @@
+name: Doc Update Enforcement
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  doc-check:
+    name: Check Docs Updated With Commands
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Check for doc updates when command/handler files change
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          echo "=== Doc Update Enforcement ==="
+          echo "PR #${PR_NUMBER}"
+          echo ""
+
+          # Get list of changed files between base and head
+          CHANGED_FILES=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>/dev/null || git diff --name-only HEAD~1)
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+          echo ""
+
+          # Check if docs-verified label is present — if so, skip check
+          LABELS=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' 2>/dev/null || echo "")
+          if echo "$LABELS" | grep -q "docs-verified"; then
+            echo "Label 'docs-verified' found — skipping doc enforcement check."
+            echo "=== Doc check skipped (docs-verified label present) ==="
+            exit 0
+          fi
+
+          # Patterns for command/handler files that require doc updates
+          COMMAND_FILE_PATTERNS=(
+            "engine/src/core/commands/"
+            "web/src/lib/chat/handlers/"
+            "web/src/data/commands.json"
+            "mcp-server/manifest/commands.json"
+          )
+
+          # Check if any changed file matches the command/handler patterns
+          COMMAND_FILES_CHANGED=false
+          MATCHED_FILES=""
+
+          for PATTERN in "${COMMAND_FILE_PATTERNS[@]}"; do
+            MATCHES=$(echo "$CHANGED_FILES" | grep "^${PATTERN}" || true)
+            if [ -n "$MATCHES" ]; then
+              COMMAND_FILES_CHANGED=true
+              MATCHED_FILES="${MATCHED_FILES}${MATCHES}"$'\n'
+            fi
+          done
+
+          if [ "$COMMAND_FILES_CHANGED" = false ]; then
+            echo "No command/handler files changed — doc check not required."
+            echo "=== Doc check passed (no command files changed) ==="
+            exit 0
+          fi
+
+          echo "Command/handler files changed:"
+          echo "$MATCHED_FILES"
+          echo ""
+
+          # Check if any docs/ file was also modified
+          DOCS_CHANGED=$(echo "$CHANGED_FILES" | grep "^docs/" || true)
+
+          if [ -n "$DOCS_CHANGED" ]; then
+            echo "Docs updated alongside command changes:"
+            echo "$DOCS_CHANGED"
+            echo ""
+            echo "=== Doc check passed ==="
+            exit 0
+          fi
+
+          # Docs not updated — emit a warning (non-blocking: continue-on-error: true on job)
+          echo "::warning::Command or handler files were modified but no docs/ files were updated."
+          echo ""
+          echo "Files changed that require doc updates:"
+          echo "$MATCHED_FILES"
+          echo ""
+          echo "Please update relevant documentation in docs/ to reflect the changes, or add"
+          echo "the 'docs-verified' label to this PR if a docs update is not applicable."
+          echo ""
+          echo "=== Doc check warning issued (non-blocking) ==="

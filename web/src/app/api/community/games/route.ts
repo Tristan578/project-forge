@@ -66,6 +66,7 @@ export async function GET(req: NextRequest) {
         authorName: users.displayName,
         playCount: publishedGames.playCount,
         cdnUrl: publishedGames.cdnUrl,
+        thumbnail: publishedGames.thumbnail,
         createdAt: publishedGames.createdAt,
         likeCount: sql<number>`COALESCE(COUNT(DISTINCT ${gameLikes.id}), 0)`,
         avgRating: sql<number>`COALESCE(AVG(${gameRatings.rating}), 0)`,
@@ -86,6 +87,7 @@ export async function GET(req: NextRequest) {
         publishedGames.userId,
         publishedGames.playCount,
         publishedGames.cdnUrl,
+        publishedGames.thumbnail,
         publishedGames.createdAt,
         users.displayName
       );
@@ -150,6 +152,7 @@ export async function GET(req: NextRequest) {
       authorName: string | null;
       playCount: number;
       cdnUrl: string | null;
+      thumbnail: string | null;
       createdAt: Date;
       likeCount: number;
       avgRating: number;
@@ -168,7 +171,7 @@ export async function GET(req: NextRequest) {
       ratingCount: Number(g.ratingCount),
       commentCount: Number(g.commentCount),
       tags: tagsByGame[g.id] || [],
-      thumbnail: null, // TODO: implement thumbnail support
+      thumbnail: g.thumbnail,
       cdnUrl: g.cdnUrl,
       createdAt: g.createdAt.toISOString(),
     }));

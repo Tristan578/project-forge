@@ -1315,3 +1315,477 @@ describe('Script Sandbox Security: Full Worker Security Flow', () => {
     expect(clearMsg).toBeDefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 13. Memory limit detection
+// ---------------------------------------------------------------------------
+
+describe('Script Sandbox Security: Memory Limit Detection', () => {
+  let mockSelf: {
+    postMessage: (msg: Record<string, unknown>) => void;
+    onmessage: ((e: { data: Record<string, unknown> }) => void) | null;
+  };
+
+  beforeEach(async () => {
+    postedMessages = [];
+    workerOnMessage = null;
+    vi.resetModules();
+
+    mockSelf = {
+      postMessage: (msg: Record<string, unknown>) => {
+        postedMessages.push(structuredClone(msg));
+      },
+      onmessage: null,
+    };
+    vi.stubGlobal('self', mockSelf);
+
+    // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+    await import('../scriptWorker');
+    workerOnMessage = mockSelf.onmessage;
+  });
+
+  it('terminates scripts when heap usage exceeds the configured limit', () => {
+    // Set a very low memory limit (1 MB) so even normal execution triggers it
+    sendToWorker({ type: 'set_limits', memoryLimitMb: 1 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'mem-hog',
+        enabled: true,
+        source: `function onUpdate() { forge.log('tick'); }`,
+      }],
+      entities: { 'mem-hog': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { 'mem-hog': { name: 'MemHog', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    // Stub performance.memory to return a heap exceeding our 1 MB limit
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    vi.stubGlobal('performance', {
+      now: () => 0,
+      memory: { usedJSHeapSize: 2 * 1024 * 1024 }, // 2 MB
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { 'mem-hog': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    // Restore performance
+    vi.stubGlobal('performance', originalPerformance);
+
+    const errors = getMessages('error');
+    const memError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('memory limit exceeded'),
+    );
+    expect(memError).toBeDefined();
+  });
+
+  it('memory error message includes heap usage and limit', () => {
+    sendToWorker({ type: 'set_limits', memoryLimitMb: 1 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'mem-hog',
+        enabled: true,
+        source: `function onUpdate() {}`,
+      }],
+      entities: { 'mem-hog': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { 'mem-hog': { name: 'MemHog', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    vi.stubGlobal('performance', {
+      now: () => 0,
+      memory: { usedJSHeapSize: 75 * 1024 * 1024 }, // 75 MB
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { 'mem-hog': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    vi.stubGlobal('performance', originalPerformance);
+
+    const errors = getMessages('error');
+    const memError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('memory limit exceeded'),
+    );
+    expect(memError).toBeDefined();
+    // Message should contain both "MB" references (usage + limit)
+    const msgText = memError!.message as string;
+    expect(msgText).toContain('MB');
+    expect(msgText).toContain('limit');
+  });
+
+  it('does not terminate scripts when heap is within limit', () => {
+    sendToWorker({ type: 'set_limits', memoryLimitMb: 100 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'fine',
+        enabled: true,
+        source: `function onUpdate() { forge.log('running'); }`,
+      }],
+      entities: { fine: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { fine: { name: 'Fine', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    vi.stubGlobal('performance', {
+      now: () => 0,
+      memory: { usedJSHeapSize: 10 * 1024 * 1024 }, // 10 MB (well within 100 MB)
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { fine: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    vi.stubGlobal('performance', originalPerformance);
+
+    const errors = getMessages('error');
+    const memError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('memory limit exceeded'),
+    );
+    expect(memError).toBeUndefined();
+
+    const logs = getMessages('log');
+    expect(logs.find(l => l.message === 'running')).toBeDefined();
+  });
+
+  it('memory limit is configurable via set_limits message', () => {
+    // Default is 50 MB; override to 200 MB and verify it is accepted
+    sendToWorker({ type: 'set_limits', memoryLimitMb: 200 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'cfg',
+        enabled: true,
+        source: `function onUpdate() { forge.log('ok'); }`,
+      }],
+      entities: { cfg: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { cfg: { name: 'Cfg', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    const originalPerformance = (globalThis as Record<string, unknown>).performance;
+    vi.stubGlobal('performance', {
+      now: () => 0,
+      // 100 MB — would trigger default 50 MB limit, but NOT the overridden 200 MB limit
+      memory: { usedJSHeapSize: 100 * 1024 * 1024 },
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { cfg: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    vi.stubGlobal('performance', originalPerformance);
+
+    const errors = getMessages('error');
+    const memError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('memory limit exceeded'),
+    );
+    // Should NOT have triggered because 100 MB < 200 MB custom limit
+    expect(memError).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 14. Frame time limit detection
+// ---------------------------------------------------------------------------
+
+describe('Script Sandbox Security: Frame Time Limit Detection', () => {
+  let mockNow: number;
+
+  beforeEach(async () => {
+    postedMessages = [];
+    workerOnMessage = null;
+    mockNow = 0;
+    vi.resetModules();
+
+    const mockSelf = {
+      postMessage: (msg: Record<string, unknown>) => {
+        postedMessages.push(structuredClone(msg));
+      },
+      onmessage: null as ((e: { data: Record<string, unknown> }) => void) | null,
+    };
+    vi.stubGlobal('self', mockSelf);
+
+    // Stub performance.now so we can control elapsed time
+    vi.stubGlobal('performance', {
+      now: () => mockNow,
+      memory: undefined,
+    });
+
+    // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+    await import('../scriptWorker');
+    workerOnMessage = mockSelf.onmessage;
+  });
+
+  it('terminates a script that exceeds the frame time limit and emits an error', () => {
+    // Set a 10ms termination limit
+    sendToWorker({ type: 'set_limits', frameTimeLimitMs: 10, frameTimeWarnMs: 5 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'slow',
+        enabled: true,
+        source: `function onUpdate(_dt) {}`,
+      }],
+      entities: { slow: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { slow: { name: 'Slow', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    // Simulate a slow frame: performance.now() returns 0 when the script starts,
+    // then 20ms when we check after — well over the 10ms limit.
+    let callCount = 0;
+    vi.stubGlobal('performance', {
+      now: () => {
+        // First call: frame start time (0ms); second call: elapsed check (20ms)
+        return callCount++ === 0 ? 0 : 20;
+      },
+      memory: undefined,
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { slow: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    const errors = getMessages('error');
+    const timeError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('frame time limit exceeded'),
+    );
+    expect(timeError).toBeDefined();
+  });
+
+  it('frame time error message includes elapsed ms and entity id', () => {
+    sendToWorker({ type: 'set_limits', frameTimeLimitMs: 10, frameTimeWarnMs: 5 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'slow-entity',
+        enabled: true,
+        source: `function onUpdate(_dt) {}`,
+      }],
+      entities: { 'slow-entity': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { 'slow-entity': { name: 'SlowEntity', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    let callCount = 0;
+    vi.stubGlobal('performance', {
+      now: () => callCount++ === 0 ? 0 : 50,
+      memory: undefined,
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { 'slow-entity': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    const errors = getMessages('error');
+    const timeError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('frame time limit exceeded'),
+    );
+    expect(timeError).toBeDefined();
+    expect(timeError!.message as string).toContain('slow-entity');
+    expect(timeError!.message as string).toContain('ms');
+  });
+
+  it('emits a warn-level log when frame time exceeds warn threshold but not limit', () => {
+    sendToWorker({ type: 'set_limits', frameTimeLimitMs: 100, frameTimeWarnMs: 10 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'slightly-slow',
+        enabled: true,
+        source: `function onUpdate(_dt) {}`,
+      }],
+      entities: { 'slightly-slow': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { 'slightly-slow': { name: 'SlightlySlow', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    let callCount = 0;
+    vi.stubGlobal('performance', {
+      // Returns 20ms elapsed — above 10ms warn threshold, below 100ms limit
+      now: () => callCount++ === 0 ? 0 : 20,
+      memory: undefined,
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { 'slightly-slow': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    const errors = getMessages('error');
+    const timeError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('frame time limit exceeded'),
+    );
+    // Should NOT have terminated
+    expect(timeError).toBeUndefined();
+
+    const logs = getMessages('log');
+    const warnLog = logs.find(l =>
+      l.level === 'warn' && typeof l.message === 'string' && l.message.includes('ms'),
+    );
+    expect(warnLog).toBeDefined();
+  });
+
+  it('does not warn or error for a fast frame', () => {
+    sendToWorker({ type: 'set_limits', frameTimeLimitMs: 100, frameTimeWarnMs: 16 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'fast',
+        enabled: true,
+        source: `function onUpdate(_dt) {}`,
+      }],
+      entities: { fast: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { fast: { name: 'Fast', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    // 1ms elapsed — well within both thresholds
+    let callCount = 0;
+    vi.stubGlobal('performance', {
+      now: () => callCount++ === 0 ? 0 : 1,
+      memory: undefined,
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { fast: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    const errors = getMessages('error');
+    const timeError = errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('frame time'),
+    );
+    expect(timeError).toBeUndefined();
+
+    const logs = getMessages('log');
+    const warnLog = logs.find(l =>
+      l.level === 'warn' && typeof l.message === 'string' && l.message.includes('ms'),
+    );
+    expect(warnLog).toBeUndefined();
+  });
+
+  it('terminated script is removed so subsequent ticks do not run it', () => {
+    sendToWorker({ type: 'set_limits', frameTimeLimitMs: 10, frameTimeWarnMs: 5 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'to-remove',
+        enabled: true,
+        source: `function onUpdate(_dt) { forge.log('alive'); }`,
+      }],
+      entities: { 'to-remove': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { 'to-remove': { name: 'ToRemove', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    // Tick 1: slow — exceeds limit, script is removed
+    let call1Count = 0;
+    vi.stubGlobal('performance', {
+      now: () => call1Count++ === 0 ? 0 : 50,
+      memory: undefined,
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { 'to-remove': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+    clearMessages();
+
+    // Tick 2: normal speed — script should be gone, no log
+    vi.stubGlobal('performance', {
+      now: () => 0,
+      memory: undefined,
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.032,
+      entities: { 'to-remove': { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    // No 'alive' log — script was terminated after tick 1
+    expect(getMessages('log').find(l => l.message === 'alive')).toBeUndefined();
+  });
+
+  it('frame time limits are configurable via set_limits', () => {
+    // Override both thresholds
+    sendToWorker({ type: 'set_limits', frameTimeLimitMs: 200, frameTimeWarnMs: 50 });
+
+    sendToWorker({
+      type: 'init',
+      scripts: [{
+        entityId: 'configurable',
+        enabled: true,
+        source: `function onUpdate(_dt) {}`,
+      }],
+      entities: { configurable: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+      entityInfos: { configurable: { name: 'Configurable', type: 'Cube', colliderRadius: 1 } },
+    });
+    clearMessages();
+
+    // 30ms elapsed — would warn at default 16ms, but not at our 50ms threshold
+    let callCount = 0;
+    vi.stubGlobal('performance', {
+      now: () => callCount++ === 0 ? 0 : 30,
+      memory: undefined,
+    });
+
+    sendToWorker({
+      type: 'tick',
+      dt: 0.016,
+      elapsed: 0.016,
+      entities: { configurable: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] } },
+    });
+
+    const errors = getMessages('error');
+    expect(errors.find(e =>
+      typeof e.message === 'string' && e.message.includes('frame time'),
+    )).toBeUndefined();
+
+    const logs = getMessages('log');
+    expect(logs.find(l =>
+      l.level === 'warn' && typeof l.message === 'string' && l.message.includes('ms'),
+    )).toBeUndefined();
+  });
+});
