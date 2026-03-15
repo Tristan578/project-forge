@@ -291,7 +291,8 @@ impl Plugin for SelectionPlugin {
             .add_systems(Update, query::process_query_requests)
             .add_systems(Update, query::process_terrain_queries)
             .add_systems(Update, query::process_quality_queries)
-            .add_systems(Update, query::process_reverb_zone_queries);
+            .add_systems(Update, query::process_reverb_zone_queries)
+            .add_systems(Update, query::process_play_state_queries);
 
         #[cfg(not(feature = "runtime"))]
         app.add_systems(Update, query::process_joint_queries);
