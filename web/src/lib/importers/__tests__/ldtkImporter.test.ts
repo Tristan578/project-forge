@@ -139,6 +139,64 @@ function makeTilesProject(): unknown {
   };
 }
 
+/** Build a project with an AutoLayer that stores tiles in autoLayerTiles. */
+function makeAutoLayerProject(): unknown {
+  return {
+    jsonVersion: '1.5.3',
+    worldLayout: 'Free',
+    defaultGridSize: 16,
+    defs: {
+      tilesets: [
+        {
+          uid: 20,
+          identifier: 'Auto_Tileset',
+          relPath: 'assets/auto_tileset.png',
+          pxWid: 256,
+          pxHei: 256,
+          tileGridSize: 16,
+          spacing: 0,
+          padding: 0,
+        },
+      ],
+      layers: [],
+      entities: [],
+    },
+    levels: [
+      {
+        identifier: 'Level_0',
+        uid: 0,
+        worldX: 0,
+        worldY: 0,
+        pxWid: 48,
+        pxHei: 32,
+        fieldInstances: [],
+        layerInstances: [
+          {
+            __identifier: 'AutoGround',
+            __type: 'AutoLayer',
+            __cWid: 3,
+            __cHei: 2,
+            __gridSize: 16,
+            __opacity: 0.9,
+            __tilesetDefUid: 20,
+            __pxTotalOffsetX: 0,
+            __pxTotalOffsetY: 0,
+            visible: true,
+            intGridCsv: [],
+            gridTiles: [],  // AutoLayer stores nothing here
+            autoLayerTiles: [
+              { px: [0, 0], src: [0, 0], t: 5, f: 0 },
+              { px: [16, 0], src: [16, 0], t: 6, f: 0 },
+              { px: [0, 16], src: [0, 16], t: 10, f: 0 },
+            ],
+            entityInstances: [],
+          },
+        ],
+      },
+    ],
+  };
+}
+
 /** Build a project with an Entity layer. */
 function makeEntityLayerProject(): unknown {
   return {
@@ -485,6 +543,48 @@ describe('parseLdtkProject — Tiles layer', () => {
     expect(result.tilesets[0].relPath).toBe('assets/world_atlas.png');
     // tilesetAssetId already verified above as 'world_atlas'
     expect(result.levels[0].tilemapData!.tilesetAssetId).toBe('world_atlas');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AutoLayer tile parsing
+// ---------------------------------------------------------------------------
+
+describe('parseLdtkProject — AutoLayer tiles', () => {
+  let result: LdtkProjectResult;
+
+  beforeEach(() => {
+    result = parseLdtkProject(makeAutoLayerProject());
+  });
+
+  it('creates a tile layer from the AutoLayer', () => {
+    const td = result.levels[0].tilemapData!;
+    expect(td.layers).toHaveLength(1);
+    expect(td.layers[0].name).toBe('AutoGround');
+  });
+
+  it('reads tiles from autoLayerTiles, not gridTiles', () => {
+    const tiles = result.levels[0].tilemapData!.layers[0].tiles;
+    // autoLayerTiles has 3 entries at (0,0)->5, (1,0)->6, (0,1)->10
+    // gridTiles is empty, so if reading from gridTiles all would be null
+    expect(tiles[0]).toBe(5);
+    expect(tiles[1]).toBe(6);
+    expect(tiles[2]).toBeNull();
+    expect(tiles[3]).toBe(10);
+    expect(tiles[4]).toBeNull();
+    expect(tiles[5]).toBeNull();
+  });
+
+  it('marks AutoLayer as isCollision = false', () => {
+    expect(result.levels[0].tilemapData!.layers[0].isCollision).toBe(false);
+  });
+
+  it('preserves layer opacity', () => {
+    expect(result.levels[0].tilemapData!.layers[0].opacity).toBe(0.9);
+  });
+
+  it('resolves tileset asset ID from AutoLayer tileset def', () => {
+    expect(result.levels[0].tilemapData!.tilesetAssetId).toBe('auto_tileset');
   });
 });
 
