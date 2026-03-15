@@ -189,6 +189,14 @@ class AudioManager {
   }
 
   /**
+   * Returns the decoded AudioBuffer for a given asset ID, or undefined if not
+   * yet loaded. Used by waveform extraction and other read-only buffer queries.
+   */
+  getBuffer(assetId: string): AudioBuffer | undefined {
+    return this.buffers.get(assetId);
+  }
+
+  /**
    * Create an audio instance for an entity.
    */
   createInstance(
