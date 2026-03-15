@@ -218,7 +218,9 @@ function ChatOverlay() {
           </button>
         </div>
         <div className="flex-1 overflow-hidden">
-          <ChatPanel />
+          <Suspense fallback={<div className="p-4 text-zinc-500">Loading chat...</div>}>
+            <ChatPanel />
+          </Suspense>
         </div>
       </div>
     </>
@@ -427,11 +429,13 @@ export function EditorLayout() {
       <DialogueOverlay />
       <TutorialOverlay />
       <OnboardingChecklist />
-      <WelcomeModal />
-      <ShaderEditorPanel />
-      <PerformanceProfiler />
-      <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <Suspense fallback={null}>
+        <WelcomeModal />
+        <ShaderEditorPanel />
+        <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+      </Suspense>
+      <PerformanceProfiler />
     </div>
   );
 }
