@@ -9,7 +9,7 @@ import { SceneTransitionOverlay } from '../SceneTransitionOverlay';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 describe('SceneTransitionOverlay', () => {

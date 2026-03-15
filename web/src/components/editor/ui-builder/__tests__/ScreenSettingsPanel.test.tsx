@@ -13,7 +13,7 @@ import { ScreenSettingsPanel } from '../ScreenSettingsPanel';
 import { useUIBuilderStore } from '@/stores/uiBuilderStore';
 
 vi.mock('@/stores/uiBuilderStore', () => ({
-  useUIBuilderStore: vi.fn(),
+  useUIBuilderStore: vi.fn(() => ({})),
 }));
 
 const makeScreen = (overrides: Record<string, unknown> = {}) => ({

@@ -9,7 +9,7 @@ import AdaptiveMusicInspector from '../AdaptiveMusicInspector';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: Object.assign(vi.fn(), {
+  useEditorStore: Object.assign(vi.fn(() => ({})), {
     getState: vi.fn(() => ({
       audioBuses: [],
       updateAudioBus: vi.fn(),

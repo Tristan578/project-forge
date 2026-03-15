@@ -10,11 +10,11 @@ import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
-  useOnboardingStore: vi.fn(),
+  useOnboardingStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', () => ({

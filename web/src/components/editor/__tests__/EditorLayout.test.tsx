@@ -16,23 +16,23 @@ import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: Object.assign(vi.fn(), {
+  useChatStore: Object.assign(vi.fn(() => ({})), {
     setState: vi.fn(),
   }),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: Object.assign(vi.fn(), {
+  useWorkspaceStore: Object.assign(vi.fn(() => ({})), {
     getState: vi.fn(() => ({ openPanel: vi.fn() })),
   }),
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/generationStore', () => ({
-  useGenerationStore: vi.fn(),
+  useGenerationStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/hooks/useResponsiveLayout', () => ({

@@ -12,11 +12,11 @@ import { useUIBuilderStore } from '@/stores/uiBuilderStore';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/uiBuilderStore', () => ({
-  useUIBuilderStore: vi.fn(),
+  useUIBuilderStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 // Stub all sub-components so they do not pull in deep dependencies

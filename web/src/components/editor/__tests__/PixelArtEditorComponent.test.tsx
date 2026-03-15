@@ -11,7 +11,7 @@ import { PixelArtEditor } from '../PixelArtEditor';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 const mockLoadTexture = vi.fn();

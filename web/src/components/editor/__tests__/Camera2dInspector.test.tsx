@@ -10,7 +10,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import type { Camera2dData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 const baseCamera2d: Camera2dData = {

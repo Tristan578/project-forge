@@ -3,7 +3,7 @@ import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUt
 import { PlayControls } from '../PlayControls';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('lucide-react', async () => {

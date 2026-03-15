@@ -10,11 +10,11 @@ import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore as _useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/onboardingStore', () => ({
-  useOnboardingStore: vi.fn(),
+  useOnboardingStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: Object.assign(vi.fn(), {
+  useEditorStore: Object.assign(vi.fn(() => ({})), {
     getState: vi.fn(() => ({})),
     subscribe: vi.fn(() => vi.fn()), // returns unsubscribe function
   }),

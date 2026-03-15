@@ -10,7 +10,7 @@ import { useVoiceProfileStore } from '@/stores/voiceProfileStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
 
 vi.mock('@/stores/voiceProfileStore', () => ({
-  useVoiceProfileStore: vi.fn(),
+  useVoiceProfileStore: vi.fn(() => ({})),
   VOICE_PRESETS: [
     { id: 'voice-1', label: 'Alice', gender: 'female', accent: 'American' },
     { id: 'voice-2', label: 'Bob', gender: 'male', accent: 'British' },
