@@ -11,9 +11,9 @@ import { shaderHandlers } from '../shaderHandlers';
 
 // vi.hoisted runs before vi.mock hoisting, making these available in mock factories
 const { mockShaderEditorStore, mockCompileToWgsl, mockCompileToMegaShaderSlot } = vi.hoisted(() => ({
-  mockShaderEditorStore: { getState: vi.fn(() => ({ setCompilationError: vi.fn() })) },
+  mockShaderEditorStore: { getState: vi.fn((): Record<string, unknown> => ({ setCompilationError: vi.fn() })) },
   mockCompileToWgsl: vi.fn(),
-  mockCompileToMegaShaderSlot: vi.fn(() => ({ functionBody: '  return color;', error: undefined })),
+  mockCompileToMegaShaderSlot: vi.fn((_graph?: unknown) => ({ functionBody: '  return color;', error: undefined as string | undefined })),
 }));
 
 vi.mock('@/stores/shaderEditorStore', () => ({
@@ -53,8 +53,8 @@ vi.mock('@/lib/shaders/shaderNodeTypes', () => ({
 }));
 
 vi.mock('@/lib/shaders/wgslCompiler', () => ({
-  compileToWgsl: (...args: unknown[]) => mockCompileToWgsl(...args),
-  compileToMegaShaderSlot: (...args: unknown[]) => mockCompileToMegaShaderSlot(...args),
+  compileToWgsl: (graph: unknown) => mockCompileToWgsl(graph),
+  compileToMegaShaderSlot: (graph: unknown) => mockCompileToMegaShaderSlot(graph),
 }));
 
 vi.mock('@/lib/materialPresets', () => ({
