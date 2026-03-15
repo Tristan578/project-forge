@@ -119,6 +119,7 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       if (!tier) break;
 
       await handleSubscriptionCreated(customerId, subscription.id, tier);
+      try { const { trackSubscriptionStarted } = await import('@/lib/analytics/events.server'); await trackSubscriptionStarted(tier); } catch { /* analytics non-critical */ }
       break;
     }
 

@@ -123,6 +123,9 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
       const filename = `${title.replace(/[^a-z0-9_-]/gi, '_')}.${extension}`;
       downloadBlob(blob, filename);
 
+      // Track export event
+      try { const { trackGameExported } = await import('@/lib/analytics/events'); trackGameExported(mode); } catch { /* analytics non-critical */ }
+
       // Show embed snippet for embed mode
       if (mode === 'embed') {
         const snippet = resolution === 'responsive'
