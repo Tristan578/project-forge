@@ -39,7 +39,11 @@ export default defineConfig({
     },
     {
       name: 'webkit',
-      use: { ...devices['Desktop Safari'] },
+      use: {
+        ...devices['Desktop Safari'],
+        // Override global launchOptions — --disable-gpu and --no-sandbox are Chromium-only
+        launchOptions: { args: [] },
+      },
     },
   ],
 
