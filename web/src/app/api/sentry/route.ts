@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 /**
  * POST /api/sentry
@@ -33,6 +34,9 @@ function parseTrustedSentryConfig(): { host: string; projectId: string } | null 
 const TRUSTED_SENTRY = parseTrustedSentryConfig();
 
 export async function POST(request: NextRequest) {
+  const rateLimited = rateLimitPublicRoute(request, 'sentry');
+  if (rateLimited) return rateLimited;
+
   try {
     if (!TRUSTED_SENTRY) {
       return NextResponse.json({ error: 'Sentry tunnel not configured' }, { status: 503 });
