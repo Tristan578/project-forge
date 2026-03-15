@@ -62,7 +62,6 @@ const EXTRA_SEARCH_PATHS: Record<string, Record<string, string[]>> = {
       '/usr/bin/fmodstudio',
       '/usr/local/bin/fmodstudio',
     ],
-    },
   },
   reaper: {
     win32: [
