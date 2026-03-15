@@ -57,6 +57,10 @@ export interface SceneSlice {
   saveToCloud: () => void;
   setCloudSaveStatus: (status: 'idle' | 'saving' | 'saved' | 'error') => void;
   loadTemplate: (templateId: string) => Promise<void>;
+  switchScene: (sceneId: string) => void;
+  createNewScene: (name?: string) => void;
+  deleteScene: (sceneId: string) => void;
+  duplicateScene: (sceneId: string) => void;
 }
 
 let dispatchCommand: ((command: string, payload: unknown) => void) | null = null;
@@ -155,5 +159,17 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   setCloudSaveStatus: (status) => set({ cloudSaveStatus: status }),
   loadTemplate: async (_templateId) => {
     // Template loading implementation
+  },
+  switchScene: (sceneId) => {
+    if (dispatchCommand) dispatchCommand('switch_scene', { sceneId });
+  },
+  createNewScene: (name) => {
+    if (dispatchCommand) dispatchCommand('create_scene', { name: name ?? 'New Scene' });
+  },
+  deleteScene: (sceneId) => {
+    if (dispatchCommand) dispatchCommand('delete_scene', { sceneId });
+  },
+  duplicateScene: (sceneId) => {
+    if (dispatchCommand) dispatchCommand('duplicate_scene', { sceneId });
   },
 });
