@@ -1,0 +1,44 @@
+name: Doc Freshness Check
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  doc-freshness:
+    name: Check Docs Against Changed Source Files
+    runs-on: ubuntu-latest
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run doc freshness validation
+        run: |
+          chmod +x .claude/tools/validate-docs-freshness.sh
+          bash .claude/tools/validate-docs-freshness.sh
+
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## Doc Freshness Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Checking docs/features/ files whose relatedFiles frontmatter" >> "$GITHUB_STEP_SUMMARY"
+          echo "references source files changed in this push." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          OUTPUT=$(bash .claude/tools/validate-docs-freshness.sh 2>&1 || true)
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "$OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          if echo "$OUTPUT" | grep -q "DOC UPDATE NEEDED"; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "> **Note:** One or more docs may be stale. This check is non-blocking." >> "$GITHUB_STEP_SUMMARY"
+            echo "> Update the relevant docs/features/ files and bump their lastVerified date." >> "$GITHUB_STEP_SUMMARY"
+          fi

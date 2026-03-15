@@ -1,5 +1,8 @@
 import type { NextConfig } from "next";
 import { withSentryConfig } from "@sentry/nextjs";
+import withBundleAnalyzer from "@next/bundle-analyzer";
+
+const analyzer = withBundleAnalyzer({ enabled: process.env.ANALYZE === "true" });
 
 // CDN origin for WASM engine files (e.g. "https://cdn.spawnforge.ai")
 const engineCdn = process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '';
@@ -36,6 +39,14 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   compress: true,
+  images: {
+    remotePatterns: [
+      {
+        protocol: 'https',
+        hostname: 'img.clerk.com',
+      },
+    ],
+  },
   async headers() {
     return [
       {
@@ -92,7 +103,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
+export default withSentryConfig(analyzer(nextConfig), {
   // Suppress source map upload logs in CI
   silent: true,
 

@@ -1,0 +1,128 @@
+/**
+ * Provider registry.
+ *
+ * Aggregates all backends and exposes resolution functions for routing AI
+ * capability requests to the best available backend.
+ *
+ * Priority order (highest first):
+ *   1. Vercel AI Gateway — lowest latency, OIDC auth, OpenAI-compatible
+ *   2. OpenRouter       — widest model selection, 500+ models
+ *   3. GitHub Models    — free tier, developer audience, core models only
+ *   4. Direct           — catch-all for asset providers (Meshy, ElevenLabs, etc.)
+ */
+
+import type { ProviderBackend, ProviderCapability, BackendId, ResolvedRoute } from './types';
+import { vercelGatewayBackend } from './backends/vercelGateway';
+import { openrouterBackend } from './backends/openrouter';
+import { githubModelsBackend } from './backends/githubModels';
+import { directBackend, resolveDirectKey } from './backends/direct';
+
+/** Backends ordered by preference — first configured backend wins */
+const BACKENDS: ReadonlyArray<ProviderBackend> = [
+  vercelGatewayBackend,
+  openrouterBackend,
+  githubModelsBackend,
+  directBackend,
+];
+
+/** Index of backends by ID for fast lookup */
+const BACKEND_BY_ID = new Map<BackendId, ProviderBackend>(
+  BACKENDS.map((b) => [b.id, b])
+);
+
+/**
+ * Resolve the best available backend for a capability.
+ *
+ * @param capability     - The AI capability needed (e.g. 'chat', 'model3d')
+ * @param preferredModel - Optional canonical model name to route through
+ * @param preferredBackend - Pin to a specific backend ID (skips priority order)
+ * @returns ResolvedRoute or null if no backend can serve this capability
+ */
+export function resolveBackend(
+  capability: ProviderCapability,
+  preferredModel?: string,
+  preferredBackend?: BackendId
+): ResolvedRoute | null {
+  // If a specific backend is requested, use it (if configured and capable)
+  if (preferredBackend) {
+    const pinned = BACKEND_BY_ID.get(preferredBackend);
+    if (pinned && pinned.isConfigured() && (pinned.capabilities as ProviderCapability[]).includes(capability)) {
+      return buildRoute(pinned, capability, preferredModel);
+    }
+    // Fall through to priority resolution if pinned backend isn't available
+  }
+
+  // Walk backends in priority order
+  for (const backend of BACKENDS) {
+    if (!backend.isConfigured()) continue;
+    if (!(backend.capabilities as ProviderCapability[]).includes(capability)) continue;
+    return buildRoute(backend, capability, preferredModel);
+  }
+
+  return null;
+}
+
+/** Build a ResolvedRoute from a backend + capability */
+function buildRoute(
+  backend: ProviderBackend,
+  capability: ProviderCapability,
+  preferredModel?: string
+): ResolvedRoute {
+  const apiKey =
+    backend.id === 'direct'
+      ? resolveDirectKey(capability)
+      : backend.getApiKey();
+
+  const endpoint = backend.getEndpoint() || undefined;
+  const modelId = preferredModel
+    ? backend.resolveModelId(preferredModel)
+    : undefined;
+
+  return {
+    backendId: backend.id,
+    apiKey,
+    endpoint,
+    modelId,
+    metered: true, // token cost is handled upstream; backends don't gate on this
+  };
+}
+
+/**
+ * Returns the set of capabilities that have at least one configured backend.
+ */
+export function getAvailableCapabilities(): Set<ProviderCapability> {
+  const available = new Set<ProviderCapability>();
+  for (const backend of BACKENDS) {
+    if (!backend.isConfigured()) continue;
+    for (const cap of backend.capabilities) {
+      available.add(cap);
+    }
+  }
+  return available;
+}
+
+/**
+ * Returns true if at least one configured backend supports the capability.
+ */
+export function isCapabilityAvailable(capability: ProviderCapability): boolean {
+  return BACKENDS.some(
+    (b) => b.isConfigured() && (b.capabilities as ProviderCapability[]).includes(capability)
+  );
+}
+
+/**
+ * Returns all backends with their configuration status.
+ */
+export function getAllBackends(): Array<{ backend: ProviderBackend; configured: boolean }> {
+  return BACKENDS.map((backend) => ({
+    backend,
+    configured: backend.isConfigured(),
+  }));
+}
+
+/**
+ * Returns only the backends that are currently configured.
+ */
+export function getConfiguredBackends(): ProviderBackend[] {
+  return BACKENDS.filter((b) => b.isConfigured());
+}

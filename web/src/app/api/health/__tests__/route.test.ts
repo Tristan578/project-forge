@@ -38,7 +38,7 @@ describe('GET /api/health', () => {
       expect(body.status).toBe('ok');
     });
 
-    it('includes required fields: status, environment, commit, branch, database, timestamp', async () => {
+    it('includes required fields: status, environment, commit, branch, database, timestamp, services', async () => {
       const res = await GET();
       const body = await res.json();
 
@@ -48,6 +48,47 @@ describe('GET /api/health', () => {
       expect(body).toHaveProperty('branch');
       expect(body).toHaveProperty('database');
       expect(body).toHaveProperty('timestamp');
+      expect(body).toHaveProperty('services');
+    });
+
+    it('services is a non-empty array', async () => {
+      const res = await GET();
+      const body = await res.json();
+
+      expect(Array.isArray(body.services)).toBe(true);
+      expect(body.services.length).toBeGreaterThan(0);
+    });
+
+    it('each service entry has name, status, latencyMs fields', async () => {
+      const res = await GET();
+      const body = await res.json();
+
+      for (const svc of body.services) {
+        expect(svc).toHaveProperty('name');
+        expect(svc).toHaveProperty('status');
+        expect(svc).toHaveProperty('latencyMs');
+      }
+    });
+
+    it('service status values are up, degraded, or down (never "healthy")', async () => {
+      const res = await GET();
+      const body = await res.json();
+
+      const validStatuses = new Set(['up', 'degraded', 'down']);
+      for (const svc of body.services) {
+        expect(validStatuses.has(svc.status)).toBe(true);
+      }
+    });
+
+    it('services array includes Clerk, Anthropic, Sentry, and Cloudflare R2 checks', async () => {
+      const res = await GET();
+      const body = await res.json();
+
+      const names: string[] = body.services.map((s: { name: string }) => s.name);
+      expect(names).toContain('Clerk');
+      expect(names).toContain('Anthropic');
+      expect(names).toContain('Sentry');
+      expect(names).toContain('Cloudflare R2');
     });
 
     it('timestamp is a valid ISO 8601 string', async () => {

@@ -3,8 +3,9 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { downloadSceneFile, openSceneFilePicker } from '@/lib/sceneFile';
-import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2 } from 'lucide-react';
+import { Save, FolderOpen, FilePlus, Download, Cloud, CloudOff, Loader2, Undo2, Redo2, Layers } from 'lucide-react';
 import { ExportDialog } from './ExportDialog';
+import { SceneBrowser } from './SceneBrowser';
 
 export function SceneToolbar() {
   const sceneName = useEditorStore((s) => s.sceneName);
@@ -27,6 +28,7 @@ export function SceneToolbar() {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(sceneName);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showSceneBrowser, setShowSceneBrowser] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingDownloadRef = useRef(false);
 
@@ -91,6 +93,7 @@ export function SceneToolbar() {
   return (
     <>
       <ExportDialog isOpen={showExportDialog} onClose={() => setShowExportDialog(false)} />
+      <SceneBrowser isOpen={showSceneBrowser} onClose={() => setShowSceneBrowser(false)} />
       <div className="flex items-center gap-1">
       {/* Scene name (click to edit) */}
       {editing ? (
@@ -195,6 +198,16 @@ export function SceneToolbar() {
         aria-label="New scene"
       >
         <FilePlus size={13} />
+      </button>
+
+      {/* Scenes browser button */}
+      <button
+        onClick={() => setShowSceneBrowser(true)}
+        className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+        title="Browse Scenes"
+        aria-label="Browse scenes"
+      >
+        <Layers size={13} />
       </button>
 
       {/* Export button */}

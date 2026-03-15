@@ -896,7 +896,45 @@ const SHADOWED_GLOBALS = [
   'self', 'globalThis',
 ] as const;
 
-// Maximum allowed user script size (512 KB) to prevent resource exhaustion
+// ─── Resource Limits ────────────────────────────────────────────
+// These constants cap per-frame execution time and heap growth.
+// Tests may override them by posting a 'set_limits' message before 'init'.
+
+const SCRIPT_MEMORY_LIMIT_MB = 50;
+const SCRIPT_FRAME_TIME_LIMIT_MS = 100;
+const SCRIPT_FRAME_TIME_WARN_MS = 16;
+
+let memoryLimitMb = SCRIPT_MEMORY_LIMIT_MB;
+let frameTimeLimitMs = SCRIPT_FRAME_TIME_LIMIT_MS;
+let frameTimeWarnMs = SCRIPT_FRAME_TIME_WARN_MS;
+
+/**
+ * Returns current JS heap usage in MB using the Chrome-only
+ * `performance.memory` API when available.  Returns -1 if the
+ * API is not present (Firefox / Safari / Node test environment).
+ */
+function getHeapUsedMb(): number {
+  const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+  if (mem) {
+    return mem.usedJSHeapSize / (1024 * 1024);
+  }
+  return -1;
+}
+
+/**
+ * Posts a memory_limit_exceeded error and clears all script instances
+ * so subsequent ticks are no-ops.
+ */
+function terminateDueToMemory(heapMb: number) {
+  (self as unknown as Worker).postMessage({
+    type: 'error',
+    entityId: '',
+    line: 0,
+    message: `Script memory limit exceeded: ${heapMb.toFixed(1)} MB used (limit: ${memoryLimitMb} MB). Scripts terminated.`,
+  });
+  scripts = [];
+}
+
 const MAX_SCRIPT_SOURCE_BYTES = 512 * 1024;
 
 function compileScript(entityId_: string, source: string): ScriptInstance {
@@ -1053,16 +1091,46 @@ self.onmessage = (e: MessageEvent) => {
         }
       }
 
+      // Memory guard — check once per tick before running scripts
+      const heapMb = getHeapUsedMb();
+      if (heapMb >= 0 && heapMb > memoryLimitMb) {
+        terminateDueToMemory(heapMb);
+        flushCommands();
+        break;
+      }
+
       pendingCommands = [];
+      const scriptsToRemove: string[] = [];
       for (const script of scripts) {
         if (script.onUpdate) {
+          const frameStart = performance.now();
           try {
             script.onUpdate(timeData.delta);
           } catch (err) {
             const msg_ = err instanceof Error ? err.message : String(err);
             (self as unknown as Worker).postMessage({ type: 'error', entityId: script.entityId, line: 0, message: `onUpdate error: ${msg_}` });
           }
+          const elapsed = performance.now() - frameStart;
+          if (elapsed > frameTimeLimitMs) {
+            (self as unknown as Worker).postMessage({
+              type: 'error',
+              entityId: script.entityId,
+              line: 0,
+              message: `Script frame time limit exceeded: ${elapsed.toFixed(1)} ms (limit: ${frameTimeLimitMs} ms). Script '${script.entityId}' terminated.`,
+            });
+            scriptsToRemove.push(script.entityId);
+          } else if (elapsed > frameTimeWarnMs) {
+            (self as unknown as Worker).postMessage({
+              type: 'log',
+              level: 'warn',
+              entityId: script.entityId,
+              message: `Script onUpdate took ${elapsed.toFixed(1)} ms (budget: ${frameTimeWarnMs} ms).`,
+            });
+          }
         }
+      }
+      if (scriptsToRemove.length > 0) {
+        scripts = scripts.filter(s => !scriptsToRemove.includes(s.entityId));
       }
 
       flushCommands();
@@ -1119,6 +1187,14 @@ self.onmessage = (e: MessageEvent) => {
     case 'scene_info': {
       (self as unknown as Record<string, unknown>).__currentScene = msg.currentScene;
       (self as unknown as Record<string, unknown>).__allSceneNames = msg.allSceneNames;
+      break;
+    }
+
+    case 'set_limits': {
+      // Allows tests (and advanced tooling) to override resource limits at runtime.
+      if (typeof msg.memoryLimitMb === 'number') memoryLimitMb = msg.memoryLimitMb;
+      if (typeof msg.frameTimeLimitMs === 'number') frameTimeLimitMs = msg.frameTimeLimitMs;
+      if (typeof msg.frameTimeWarnMs === 'number') frameTimeWarnMs = msg.frameTimeWarnMs;
       break;
     }
   }

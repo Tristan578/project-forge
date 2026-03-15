@@ -1,3 +1,9 @@
+---
+lastVerified: 2026-03-15
+relatedCommands: [set_script, remove_script, set_input_binding, get_script_list]
+relatedFiles: [web/src/stores/slices/scriptSlice.ts, engine/src/core/commands/scene.rs, engine/src/bridge/scripts.rs, engine/src/core/scripting.rs, web/src/lib/scripting/scriptWorker.ts]
+---
+
 # Scripting
 
 Add game logic using TypeScript scripts with the `forge.*` API.
