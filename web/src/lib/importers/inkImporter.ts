@@ -391,30 +391,7 @@ function handleConditional(item: InkObject, i: number, ctx: ParseContext): numbe
 
   const condId = nextId('ink_cond');
 
-  const trueCtx: ParseContext = { nodes: [], pendingText: '', lastNodeId: null };
-  if (branches[0] && branches[0].length > 0) {
-    walkContainer(branches[0], trueCtx);
-  }
-  const trueStartId = trueCtx.nodes.length > 0 ? trueCtx.nodes[0].id : null;
-  ctx.nodes.push(...trueCtx.nodes);
-
-  let falseStartId: string | null = null;
-  if (branches.length > 1 && branches[1].length > 0) {
-    const falseCtx: ParseContext = { nodes: [], pendingText: '', lastNodeId: null };
-    walkContainer(branches[1], falseCtx);
-    falseStartId = falseCtx.nodes.length > 0 ? falseCtx.nodes[0].id : null;
-    ctx.nodes.push(...falseCtx.nodes);
-  }
-
-  const condNode: ConditionNode = {
-    id: condId,
-    type: 'condition',
-    condition: { type: 'equals', variable: '_ink_cond', value: true },
-    onTrue: trueStartId,
-    onFalse: falseStartId,
-    position: { x: 100 + ctx.nodes.length * 20, y: 100 + ctx.nodes.length * 80 },
-  };
-
+  // Link previous node to this condition before pushing anything
   if (ctx.lastNodeId !== null) {
     const prev = ctx.nodes.find(n => n.id === ctx.lastNodeId);
     if (prev && (prev.type === 'text' || prev.type === 'action')) {
@@ -422,7 +399,36 @@ function handleConditional(item: InkObject, i: number, ctx: ParseContext): numbe
     }
   }
 
+  // Push the condition node FIRST so it appears before branch nodes.
+  // This ensures ctx.nodes[0] is the condition when a conditional starts the story.
+  const condNode: ConditionNode = {
+    id: condId,
+    type: 'condition',
+    condition: { type: 'equals', variable: '_ink_cond', value: true },
+    onTrue: null,
+    onFalse: null,
+    position: { x: 100 + ctx.nodes.length * 20, y: 100 + ctx.nodes.length * 80 },
+  };
   ctx.nodes.push(condNode);
+
+  const trueCtx: ParseContext = { nodes: [], pendingText: '', lastNodeId: null };
+  if (branches[0] && branches[0].length > 0) {
+    walkContainer(branches[0], trueCtx);
+  }
+  if (trueCtx.nodes.length > 0) {
+    condNode.onTrue = trueCtx.nodes[0].id;
+    ctx.nodes.push(...trueCtx.nodes);
+  }
+
+  if (branches.length > 1 && branches[1].length > 0) {
+    const falseCtx: ParseContext = { nodes: [], pendingText: '', lastNodeId: null };
+    walkContainer(branches[1], falseCtx);
+    if (falseCtx.nodes.length > 0) {
+      condNode.onFalse = falseCtx.nodes[0].id;
+      ctx.nodes.push(...falseCtx.nodes);
+    }
+  }
+
   ctx.lastNodeId = condId;
   return i + 1;
 }
