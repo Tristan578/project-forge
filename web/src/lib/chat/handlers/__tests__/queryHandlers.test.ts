@@ -1270,6 +1270,58 @@ describe('query_play_state', () => {
     const data = result.result as { entities: unknown[]; entityCount: number };
     expect(data.entityCount).toBe(data.entities.length);
   });
+
+  it('result includes dataSource field set to store_last_sync', async () => {
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      { engineMode: 'play', sceneGraph: { nodes: {}, rootIds: [] } }
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { dataSource: string };
+    expect(data.dataSource).toBe('store_last_sync');
+  });
+
+  it('result includes numeric syncTimestamp', async () => {
+    const before = Date.now();
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      { engineMode: 'play', sceneGraph: { nodes: {}, rootIds: [] } }
+    );
+    const after = Date.now();
+    expect(result.success).toBe(true);
+    const data = result.result as { syncTimestamp: number };
+    expect(typeof data.syncTimestamp).toBe('number');
+    expect(data.syncTimestamp).toBeGreaterThanOrEqual(before);
+    expect(data.syncTimestamp).toBeLessThanOrEqual(after);
+  });
+
+  it('result includes all required fields in play mode', async () => {
+    const { result } = await invokeHandler(
+      queryHandlers,
+      'query_play_state',
+      {},
+      {
+        engineMode: 'play',
+        sceneGraph: {
+          nodes: {
+            hero: { entityId: 'hero', name: 'Hero', parentId: null, children: [], components: [], visible: true },
+          },
+          rootIds: ['hero'],
+        },
+      }
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as Record<string, unknown>;
+    expect(data).toHaveProperty('entities');
+    expect(data).toHaveProperty('entityCount');
+    expect(data).toHaveProperty('engineMode');
+    expect(data).toHaveProperty('dataSource');
+    expect(data).toHaveProperty('syncTimestamp');
+  });
 });
 
 // ---------------------------------------------------------------------------
