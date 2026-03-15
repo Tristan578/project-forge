@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
+import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 
 export const dynamic = 'force-dynamic';
@@ -101,6 +102,10 @@ export async function POST(
       );
     }
 
+    // Auto-flag if severity filter OR keyword blocklist detects issues
+    const keywordFlagged = containsBlockedKeyword(sanitized);
+    const shouldFlag = modResult.severity === 'flag' || keywordFlagged;
+
     // Insert comment (auto-flag if filter detects issues)
     const [comment] = await db
       .insert(gameComments)
@@ -109,7 +114,7 @@ export async function POST(
         userId: authResult.ctx.user.id,
         content: sanitized,
         parentId: parentResult.value ?? null,
-        flagged: modResult.severity === 'flag' ? 1 : 0,
+        flagged: shouldFlag ? 1 : 0,
       })
       .returning();
 

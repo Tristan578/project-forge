@@ -5,6 +5,8 @@ import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
+import { moderateContent } from '@/lib/moderation/contentFilter';
+import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
@@ -18,6 +20,9 @@ vi.mock('@/lib/db/schema', () => ({
 }));
 vi.mock('@/lib/moderation/contentFilter', () => ({
   moderateContent: vi.fn(() => ({ severity: 'pass', reasons: [], cleaned: '' })),
+}));
+vi.mock('@/lib/moderation/keywords', () => ({
+  containsBlockedKeyword: vi.fn(() => false),
 }));
 
 function mockDbChain(data: unknown[] = []) {
@@ -159,5 +164,83 @@ describe('POST /api/community/games/[id]/comment', () => {
     expect(res.status).toBe(201);
     expect(body.comment.content).toBe('Nice game');
     expect(body.comment.authorName).toBe('TestUser');
+  });
+});
+
+describe('POST /api/community/games/[id]/comment — auto-flagging', () => {
+  // Capture the `values` call argument so we can inspect the flagged field
+  let capturedValues: Record<string, unknown> | null = null;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedValues = null;
+
+    // Default auth + rate-limit for this describe block
+    vi.mocked(authenticateRequest).mockResolvedValue({
+      ok: true as const,
+      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator', displayName: 'Test' } as never },
+    });
+    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 19, resetAt: Date.now() + 60000 });
+
+    // Default DB: captures the values argument so tests can assert on flagged
+    const selectChain = mockDbChain([{ displayName: 'Test' }]);
+    vi.mocked(getDb).mockReturnValue({
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockImplementation((vals: Record<string, unknown>) => {
+          capturedValues = vals;
+          return {
+            returning: vi.fn().mockResolvedValue([{
+              id: 'c1', content: 'text', parentId: null, createdAt: new Date(),
+            }]),
+          };
+        }),
+      }),
+      select: vi.fn().mockReturnValue(selectChain),
+    } as never);
+  });
+
+  it('sets flagged=1 when contentFilter returns severity=flag', async () => {
+    vi.mocked(moderateContent).mockReturnValue({ severity: 'flag', reasons: [], cleaned: '' });
+    vi.mocked(containsBlockedKeyword).mockReturnValue(false);
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/community/games/game-1/comment', {
+      method: 'POST',
+      body: JSON.stringify({ content: 'bad text' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: 'game-1' }) });
+
+    expect(res.status).toBe(201);
+    expect(capturedValues?.flagged).toBe(1);
+  });
+
+  it('sets flagged=1 when keyword blocklist matches', async () => {
+    vi.mocked(moderateContent).mockReturnValue({ severity: 'pass', reasons: [], cleaned: '' });
+    vi.mocked(containsBlockedKeyword).mockReturnValue(true);
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/community/games/game-1/comment', {
+      method: 'POST',
+      body: JSON.stringify({ content: 'spam text' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: 'game-1' }) });
+
+    expect(res.status).toBe(201);
+    expect(capturedValues?.flagged).toBe(1);
+  });
+
+  it('sets flagged=0 for clean content with no keyword hits', async () => {
+    vi.mocked(moderateContent).mockReturnValue({ severity: 'pass', reasons: [], cleaned: '' });
+    vi.mocked(containsBlockedKeyword).mockReturnValue(false);
+
+    const { POST } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/community/games/game-1/comment', {
+      method: 'POST',
+      body: JSON.stringify({ content: 'clean text' }),
+    });
+    const res = await POST(req, { params: Promise.resolve({ id: 'game-1' }) });
+
+    expect(res.status).toBe(201);
+    expect(capturedValues?.flagged).toBe(0);
   });
 });

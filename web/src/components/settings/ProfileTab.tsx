@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { useUser } from '@clerk/nextjs';
 import { useUserStore } from '@/stores/userStore';
 import { Check, Pencil, X } from 'lucide-react';
@@ -69,10 +70,11 @@ export function ProfileTab() {
       {/* Avatar */}
       <div className="flex items-center gap-4">
         {clerkUser?.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
+          <Image
             src={clerkUser.imageUrl}
             alt="Profile avatar"
+            width={64}
+            height={64}
             className="h-16 w-16 rounded-full border-2 border-zinc-600"
           />
         ) : (

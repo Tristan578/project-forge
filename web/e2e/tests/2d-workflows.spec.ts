@@ -240,14 +240,35 @@ test.describe('2D Workflows @ui', () => {
       const state = window.__EDITOR_STORE.getState();
       if (state.setProjectType) state.setProjectType('2d');
       const entityId = 'test-physics2d-entity';
-      if (state.addNode) state.addNode({ id: entityId, name: 'TestPhysics2d', parentId: null, components: ['Sprite'], visible: true });
-      if (state.setSelection) state.setSelection([entityId], entityId, 'TestPhysics2d');
-      if (state.setPhysics2dData) state.setPhysics2dData(entityId, {
-        bodyType: 'dynamic', colliderShape: 'box', colliderSize: [1.0, 1.0],
-        density: 1.0, friction: 0.5, restitution: 0.0, isSensor: false,
-        gravityScale: 1.0, linearDamping: 0.0, angularDamping: 0.0,
-        fixedRotation: false, oneWayPlatform: false, surfaceVelocity: [0, 0],
-      });
+      if (state.addNode) {
+        state.addNode({
+          id: entityId,
+          name: 'TestPhysics2d',
+          parentId: null,
+          components: ['Sprite'],
+          visible: true,
+        });
+      }
+      if (state.setSelection) {
+        state.setSelection([entityId], entityId, 'TestPhysics2d');
+      }
+      if (state.setPhysics2d) {
+        state.setPhysics2d(entityId, {
+          bodyType: 'dynamic',
+          colliderShape: 'box',
+          colliderSize: [1.0, 1.0],
+          density: 1.0,
+          friction: 0.5,
+          restitution: 0.0,
+          isSensor: false,
+          gravityScale: 1.0,
+          linearDamping: 0.0,
+          angularDamping: 0.0,
+          fixedRotation: false,
+          oneWayPlatform: false,
+          surfaceVelocity: [0, 0],
+        }, true);
+      }
     `);
 
     if (injected || isStrictMode) {
@@ -287,9 +308,26 @@ test.describe('2D Workflows @ui', () => {
       const state = window.__EDITOR_STORE.getState();
       if (state.setProjectType) state.setProjectType('2d');
       const entityId = 'test-skeleton-entity';
-      if (state.addNode) state.addNode({ id: entityId, name: 'TestSkeleton', parentId: null, components: ['Sprite'], visible: true });
-      if (state.setSelection) state.setSelection([entityId], entityId, 'TestSkeleton');
-      if (state.setSkeletonData2d) state.setSkeletonData2d(entityId, { bones: [], skins: [], defaultSkin: null, animations: [] });
+      if (state.addNode) {
+        state.addNode({
+          id: entityId,
+          name: 'TestSkeleton',
+          parentId: null,
+          components: ['Sprite'],
+          visible: true,
+        });
+      }
+      if (state.setSelection) {
+        state.setSelection([entityId], entityId, 'TestSkeleton');
+      }
+      if (state.setSkeleton2d) {
+        state.setSkeleton2d(entityId, {
+          bones: [],
+          skins: [],
+          defaultSkin: null,
+          animations: [],
+        });
+      }
     `);
 
     if (injected || isStrictMode) {

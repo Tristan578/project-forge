@@ -1,407 +1,403 @@
 /**
- * LDtk (.ldtk) level file importer.
+ * LDtk level importer.
  *
- * Parses the LDtk JSON format (https://ldtk.io/json/) into SpawnForge-native
- * TilemapData structures and entity spawn requests.
+ * Parses the LDtk JSON project format (.ldtk files) and converts levels,
+ * layers, and entity instances into SpawnForge-native data structures.
  *
- * LDtk JSON structure (simplified):
- * {
- *   defs: { tilesets: LdtkTilesetDef[] },
- *   levels: LdtkLevelRaw[]
- * }
+ * Supported LDtk features:
+ * - IntGrid layers (converted to collision TilemapLayer)
+ * - Tiles layers (auto-layer and explicit tile layers)
+ * - Entity layers (converted to entity spawn requests with fieldInstances)
+ * - Tileset definitions from defs.tilesets[]
+ * - Multi-level projects
+ * - World layouts: Free, GridVania, LinearHorizontal, LinearVertical
  *
- * Each level contains layerInstances[] with __type:
- *   "IntGrid"   -> collision/value grid, mapped to TilemapLayer with isCollision=true
- *   "Tiles"     -> explicit tile placement (gridTiles)
- *   "AutoLayer" -> auto-tiling (autoLayerTiles)
- *   "Entities"  -> entity instances (entityInstances)
+ * Not supported (silently ignored):
+ * - Level backgrounds (image overlays)
+ * - __neighbours metadata
+ * - External level files (externalRelPath)
  */
 
 import type { TilemapData, TilemapLayer } from '@/stores/slices/types';
 
 // ---------------------------------------------------------------------------
-// LDtk raw JSON types (subset of the full spec)
+// LDtk JSON schema types (subset we care about)
 // ---------------------------------------------------------------------------
 
-interface LdtkTilesetDefRaw {
-  uid: number;
-  identifier: string;
-  relPath: string | null;
-  tileGridSize: number;
-  pxWid: number;
-  pxHei: number;
-  spacing: number;
-  padding: number;
-}
-
-interface LdtkGridTileRaw {
-  /** Pixel x,y in the tileset */
-  src: [number, number];
-  /** Flip flags: 0=none, 1=x, 2=y, 3=both */
-  f: number;
-  /** Pixel x,y in the level */
-  px: [number, number];
-  /** Tile ID in tileset */
-  t: number;
-  /** Stack index (for stacked tiles) */
-  a: number;
-}
-
-interface LdtkEntityFieldRaw {
+/** A field instance attached to an entity or level. */
+interface LdtkFieldInstance {
   __identifier: string;
   __type: string;
   __value: unknown;
 }
 
-interface LdtkEntityInstanceRaw {
+/** A grid tile entry within a Tiles layer instance. */
+interface LdtkGridTile {
+  /** Pixel X on the source tileset image. */
+  src: [number, number];
+  /** Pixel coordinates within the level. */
+  px: [number, number];
+  /** Local tile index (t) derived from the tileset. */
+  t: number;
+  /** Flip flags: bit0=horizontal, bit1=vertical. */
+  f: number;
+}
+
+/** An entity placed inside an Entity layer instance. */
+interface LdtkEntityInstance {
   __identifier: string;
-  __grid: [number, number];
   __worldX: number;
   __worldY: number;
   px: [number, number];
   width: number;
   height: number;
-  fieldInstances: LdtkEntityFieldRaw[];
+  fieldInstances: LdtkFieldInstance[];
 }
 
-interface LdtkLayerInstanceRaw {
+/** A layer instance (the rendered data for one layer in one level). */
+interface LdtkLayerInstance {
   __identifier: string;
-  __type: 'IntGrid' | 'Tiles' | 'Entities' | 'AutoLayer';
+  __type: 'IntGrid' | 'Tiles' | 'AutoLayer' | 'Entities';
   __cWid: number;
   __cHei: number;
   __gridSize: number;
-  __tilesetDefUid: number | null;
-  __tilesetRelPath: string | null;
-  __opacity: number;
-  visible: boolean;
+  /** IntGrid cell values (1 = first registered value, 0 = empty). Present for IntGrid layers. */
   intGridCsv: number[];
-  gridTiles: LdtkGridTileRaw[];
-  autoLayerTiles: LdtkGridTileRaw[];
-  entityInstances: LdtkEntityInstanceRaw[];
-  /** LDtk tile override: int value -> tileset tile ID */
-  autoTilesetDefUid: number | null;
+  /** Tile data for Tiles and AutoLayer layers. */
+  gridTiles: LdtkGridTile[];
+  /** Entity instances for Entity layers. */
+  entityInstances: LdtkEntityInstance[];
+  visible: boolean;
+  __opacity: number;
+  /** UID of the tileset definition used by this layer (may be null). */
+  __tilesetDefUid: number | null;
+  /** Pixel offset of this layer within the level. */
+  __pxTotalOffsetX: number;
+  __pxTotalOffsetY: number;
 }
 
-interface LdtkLevelRaw {
+/** A single level in the project. */
+interface LdtkLevel {
   identifier: string;
   uid: number;
   worldX: number;
   worldY: number;
   pxWid: number;
   pxHei: number;
-  bgColor: string | null;
-  layerInstances: LdtkLayerInstanceRaw[] | null;
+  /** Layer instances are null when using external level files. */
+  layerInstances: LdtkLayerInstance[] | null;
+  fieldInstances: LdtkFieldInstance[];
 }
 
-// Documented for reference — the full root project shape.
-// Not used as a type annotation in code (root is validated manually via assertObject).
-type _LdtkProjectRaw = {
+/** A tileset definition inside defs. */
+interface LdtkTilesetDef {
+  uid: number;
+  identifier: string;
+  relPath: string | null;
+  pxWid: number;
+  pxHei: number;
+  tileGridSize: number;
+  spacing: number;
+  padding: number;
+}
+
+/** Root LDtk project JSON. */
+interface LdtkProjectJson {
   jsonVersion: string;
+  worldLayout: 'Free' | 'GridVania' | 'LinearHorizontal' | 'LinearVertical' | null;
+  defaultGridSize: number;
+  levels: LdtkLevel[];
   defs: {
-    tilesets: LdtkTilesetDefRaw[];
-    layers: Array<{
-      uid: number;
-      identifier: string;
-      __type: string;
-      gridSize: number;
-      intGridValues?: Array<{ value: number; identifier: string | null; color: string }>;
-    }>;
+    tilesets: LdtkTilesetDef[];
+    layers: unknown[];
+    entities: unknown[];
   };
-  levels: LdtkLevelRaw[];
-  worldGridWidth?: number;
-  worldGridHeight?: number;
-};
+}
 
 // ---------------------------------------------------------------------------
 // Public output types
 // ---------------------------------------------------------------------------
 
-/** A field on a spawned entity (from LDtk Entity layer field instances). */
-export interface LdtkEntityField {
+/** A request to spawn a single entity derived from an LDtk entity instance. */
+export interface LdtkEntitySpawnRequest {
+  /** Entity identifier from LDtk (e.g. "Player", "Enemy"). */
   identifier: string;
-  type: string;
-  value: unknown;
-}
-
-/** A spawn request produced from an LDtk Entities layer. */
-export interface LdtkEntitySpawn {
-  identifier: string;
-  /** Grid cell coordinates [col, row] */
-  gridX: number;
-  gridY: number;
-  /** Pixel coordinates in level space */
-  pixelX: number;
-  pixelY: number;
+  /** Suggested name for the spawned entity. */
+  name: string;
+  /** World-space pixel X (LDtk top-left origin). */
+  x: number;
+  /** World-space pixel Y (LDtk top-left origin). */
+  y: number;
+  /** Bounding box width in pixels. */
   width: number;
+  /** Bounding box height in pixels. */
   height: number;
-  fieldInstances: LdtkEntityField[];
+  /** All LDtk field instances resolved to a plain record. */
+  fields: Record<string, unknown>;
 }
 
-/** A parsed tileset definition extracted from defs.tilesets[]. */
-export interface LdtkTilesetDef {
+/** Metadata about a tileset definition extracted from defs. */
+export interface LdtkTilesetInfo {
   uid: number;
   identifier: string;
-  /** Relative path to the tileset image (may be null for internal tilesets). */
+  /** Relative path to the image asset (null for "no image" tilesets). */
   relPath: string | null;
-  tileSize: number;
-  gridSize: [number, number];
-  spacing: number;
-  padding: number;
+  /** Grid tile size in pixels. */
+  tileGridSize: number;
 }
 
-/** A single parsed LDtk level ready for use in SpawnForge. */
-export interface LdtkLevel {
+/** The parsed representation of a single LDtk level. */
+export interface LdtkLevelResult {
+  /** Level identifier string (e.g. "Level_0"). */
   identifier: string;
-  uid: number;
-  /** Level position in world space (pixels). */
+  /** World-space position in pixels. */
   worldX: number;
   worldY: number;
   /** Level dimensions in pixels. */
-  pxWidth: number;
-  pxHeight: number;
-  bgColor: string | null;
-  /** TilemapData for the tile/intgrid layers (null if no renderable layers). */
+  pxWid: number;
+  pxHei: number;
+  /** Tilemap-ready data covering all tile/intgrid layers in this level. */
   tilemapData: TilemapData | null;
-  /** Tileset UID used for the tilemap (null if none). */
-  tilesetUid: number | null;
-  /** Entity spawn requests from Entities layers. */
-  entitySpawns: LdtkEntitySpawn[];
+  /** Entity spawn requests from Entity layers. */
+  entities: LdtkEntitySpawnRequest[];
+  /** Level-scoped field instances. */
+  fields: Record<string, unknown>;
+  /** Non-fatal warnings emitted during parsing of this level. */
+  warnings: string[];
 }
 
-/** Result of parseLdtkProject(). */
-export interface LdtkParseResult {
-  levels: LdtkLevel[];
-  tilesets: LdtkTilesetDef[];
-  /** LDtk JSON version string. */
-  jsonVersion: string;
+/** Top-level result returned by parseLdtkProject. */
+export interface LdtkProjectResult {
+  levels: LdtkLevelResult[];
+  tilesets: LdtkTilesetInfo[];
+  worldLayout: 'Free' | 'GridVania' | 'LinearHorizontal' | 'LinearVertical' | null;
+  /** Non-fatal warnings emitted during project-level parsing. */
+  warnings: string[];
 }
 
 // ---------------------------------------------------------------------------
-// Errors
+// Validation helpers
 // ---------------------------------------------------------------------------
 
-export class LdtkParseError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'LdtkParseError';
+function isLdtkProjectJson(value: unknown): value is LdtkProjectJson {
+  if (typeof value !== 'object' || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v['jsonVersion'] === 'string' &&
+    Array.isArray(v['levels']) &&
+    typeof v['defs'] === 'object' &&
+    v['defs'] !== null &&
+    Array.isArray((v['defs'] as Record<string, unknown>)['tilesets'])
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Core conversion helpers
+// ---------------------------------------------------------------------------
+
+/** Resolve LDtk fieldInstances array into a plain record. */
+function resolveFields(instances: LdtkFieldInstance[]): Record<string, unknown> {
+  if (!instances || instances.length === 0) return {};
+  const record: Record<string, unknown> = {};
+  for (const f of instances) {
+    record[f.__identifier] = f.__value;
   }
+  return record;
 }
 
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/** Validate that a value is a non-null object (not array). */
-function assertObject(value: unknown, label: string): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new LdtkParseError(`Expected ${label} to be an object`);
-  }
-  return value as Record<string, unknown>;
-}
-
-function assertArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) {
-    throw new LdtkParseError(`Expected ${label} to be an array`);
-  }
-  return value;
-}
-
-/** Convert an LDtk gridTiles / autoLayerTiles array into a flat tile index array.
- *  The output has one slot per cell (colCount * rowCount), containing the tile ID
- *  or null if no tile occupies that cell. Stacked tiles: last one wins.
+/**
+ * Derive a stable asset ID string from a tileset definition.
+ * Uses the file name without extension from relPath, falling back to identifier.
  */
-function gridTilesToLayer(
-  tiles: LdtkGridTileRaw[],
-  colCount: number,
-  rowCount: number,
-  gridSize: number,
-): (number | null)[] {
-  const result: (number | null)[] = new Array(colCount * rowCount).fill(null);
-  for (const tile of tiles) {
-    const col = Math.floor(tile.px[0] / gridSize);
-    const row = Math.floor(tile.px[1] / gridSize);
-    if (col >= 0 && col < colCount && row >= 0 && row < rowCount) {
-      result[row * colCount + col] = tile.t;
+function tilesetAssetId(def: LdtkTilesetDef): string {
+  if (def.relPath) {
+    return def.relPath.replace(/.*\//, '').replace(/\.[^.]+$/, '');
+  }
+  return def.identifier;
+}
+
+/**
+ * Convert an IntGrid layer instance to a collision TilemapLayer.
+ * Any cell with value > 0 is treated as a solid/collision tile (index = value - 1).
+ * Empty cells (value 0) become null.
+ */
+function convertIntGridLayer(layer: LdtkLayerInstance): TilemapLayer {
+  const tiles: (number | null)[] = layer.intGridCsv.map(v => (v > 0 ? v - 1 : null));
+  return {
+    name: layer.__identifier,
+    tiles,
+    visible: layer.visible,
+    opacity: layer.__opacity,
+    isCollision: true,
+  };
+}
+
+/**
+ * Convert a Tiles or AutoLayer instance to a TilemapLayer.
+ * gridTiles are placed into the flat array by computing the cell index from
+ * the pixel position divided by the grid size.
+ */
+function convertTilesLayer(layer: LdtkLayerInstance): TilemapLayer {
+  const cellCount = layer.__cWid * layer.__cHei;
+  const tiles: (number | null)[] = new Array(cellCount).fill(null);
+
+  for (const gt of layer.gridTiles) {
+    const cellX = Math.floor(gt.px[0] / layer.__gridSize);
+    const cellY = Math.floor(gt.px[1] / layer.__gridSize);
+    if (cellX >= 0 && cellX < layer.__cWid && cellY >= 0 && cellY < layer.__cHei) {
+      const idx = cellY * layer.__cWid + cellX;
+      tiles[idx] = gt.t;
     }
   }
-  return result;
+
+  return {
+    name: layer.__identifier,
+    tiles,
+    visible: layer.visible,
+    opacity: layer.__opacity,
+    isCollision: false,
+  };
 }
 
-/** Convert an LDtk IntGrid CSV into a flat tile index array.
- *  Non-zero values map to the same integer as a tile ID (value 0 = empty).
+/**
+ * Convert an Entity layer instance to a list of spawn requests.
+ * Position uses px (level-local pixel coords). __worldX/__worldY include
+ * the level's world offset, which is available from the level itself.
  */
-function intGridCsvToLayer(
-  csv: number[],
-  colCount: number,
-  rowCount: number,
-): (number | null)[] {
-  const result: (number | null)[] = new Array(colCount * rowCount).fill(null);
-  const len = Math.min(csv.length, colCount * rowCount);
-  for (let i = 0; i < len; i++) {
-    result[i] = csv[i] !== 0 ? csv[i] : null;
-  }
-  return result;
+function convertEntityLayer(
+  layer: LdtkLayerInstance,
+  entityCount: { value: number },
+): LdtkEntitySpawnRequest[] {
+  return layer.entityInstances.map(ent => {
+    entityCount.value += 1;
+    const name = ent.__identifier;
+    return {
+      identifier: ent.__identifier,
+      name,
+      x: ent.__worldX,
+      y: ent.__worldY,
+      width: ent.width,
+      height: ent.height,
+      fields: resolveFields(ent.fieldInstances),
+    };
+  });
 }
 
-/** Pick the first non-null tilesetUid from a set of layer instances. */
-function resolveTilesetUid(layers: LdtkLayerInstanceRaw[]): number | null {
-  for (const layer of layers) {
-    if (layer.__tilesetDefUid !== null && layer.__tilesetDefUid !== undefined) {
-      return layer.__tilesetDefUid;
-    }
-    if (layer.autoTilesetDefUid !== null && layer.autoTilesetDefUid !== undefined) {
-      return layer.autoTilesetDefUid;
+/**
+ * Find the primary tileset UID referenced by any Tiles/AutoLayer/IntGrid layer
+ * in this level's layer instances. Falls back to null if none found.
+ */
+function resolvePrimaryTilesetUid(layers: LdtkLayerInstance[]): number | null {
+  for (const l of layers) {
+    if (l.__tilesetDefUid !== null && l.__tilesetDefUid !== undefined) {
+      return l.__tilesetDefUid;
     }
   }
   return null;
 }
 
-/** Parse a single layer instance into a TilemapLayer, or null for Entities layers. */
-function parseLayer(layer: LdtkLayerInstanceRaw): TilemapLayer | null {
-  const colCount = layer.__cWid;
-  const rowCount = layer.__cHei;
-  const gridSize = layer.__gridSize;
-
-  switch (layer.__type) {
-    case 'IntGrid': {
-      const tiles = intGridCsvToLayer(layer.intGridCsv ?? [], colCount, rowCount);
-      return {
-        name: layer.__identifier,
-        tiles,
-        visible: layer.visible ?? true,
-        opacity: layer.__opacity ?? 1,
-        isCollision: true,
-      };
-    }
-
-    case 'Tiles': {
-      const tiles = gridTilesToLayer(layer.gridTiles ?? [], colCount, rowCount, gridSize);
-      return {
-        name: layer.__identifier,
-        tiles,
-        visible: layer.visible ?? true,
-        opacity: layer.__opacity ?? 1,
-        isCollision: false,
-      };
-    }
-
-    case 'AutoLayer': {
-      const tiles = gridTilesToLayer(layer.autoLayerTiles ?? [], colCount, rowCount, gridSize);
-      return {
-        name: layer.__identifier,
-        tiles,
-        visible: layer.visible ?? true,
-        opacity: layer.__opacity ?? 1,
-        isCollision: false,
-      };
-    }
-
-    case 'Entities':
-      // Entity layers are handled separately.
-      return null;
-
-    default:
-      return null;
-  }
-}
-
-/** Parse entity instances from all Entities-type layers. */
-function parseEntitySpawns(layers: LdtkLayerInstanceRaw[]): LdtkEntitySpawn[] {
-  const spawns: LdtkEntitySpawn[] = [];
-  for (const layer of layers) {
-    if (layer.__type !== 'Entities') continue;
-    for (const entity of layer.entityInstances ?? []) {
-      spawns.push({
-        identifier: entity.__identifier,
-        gridX: entity.__grid[0],
-        gridY: entity.__grid[1],
-        pixelX: entity.__worldX ?? entity.px[0],
-        pixelY: entity.__worldY ?? entity.px[1],
-        width: entity.width,
-        height: entity.height,
-        fieldInstances: (entity.fieldInstances ?? []).map((f) => ({
-          identifier: f.__identifier,
-          type: f.__type,
-          value: f.__value,
-        })),
-      });
-    }
-  }
-  return spawns;
-}
-
-/** Parse a raw level into an LdtkLevel. */
+/**
+ * Parse a single LDtk level into a LdtkLevelResult.
+ */
 function parseLevel(
-  raw: LdtkLevelRaw,
-  tilesetMap: Map<number, LdtkTilesetDef>,
-): LdtkLevel {
-  const layers: LdtkLayerInstanceRaw[] = raw.layerInstances ?? [];
-
-  // Separate tile/intgrid layers from entity layers.
-  const tileLayers = layers.filter((l) => l.__type !== 'Entities');
-  const entityLayers = layers.filter((l) => l.__type === 'Entities');
-
-  // Build TilemapLayers.
+  level: LdtkLevel,
+  tilesetDefsById: Map<number, LdtkTilesetDef>,
+  defaultGridSize: number,
+): LdtkLevelResult {
+  const warnings: string[] = [];
+  const entities: LdtkEntitySpawnRequest[] = [];
   const tilemapLayers: TilemapLayer[] = [];
-  for (const layer of tileLayers) {
-    const parsed = parseLayer(layer);
-    if (parsed !== null) {
-      tilemapLayers.push(parsed);
-    }
-  }
+  const entityCount = { value: 0 };
 
-  // Determine grid size (use first tile layer's gridSize, or 16 as default).
-  const firstTileLayer = tileLayers[0];
-  const gridSize = firstTileLayer?.__gridSize ?? 16;
-  const colCount = firstTileLayer?.__cWid ?? Math.ceil(raw.pxWid / gridSize);
-  const rowCount = firstTileLayer?.__cHei ?? Math.ceil(raw.pxHei / gridSize);
-
-  // Resolve tileset.
-  const tilesetUid = resolveTilesetUid(tileLayers);
-  const tilesetDef = tilesetUid !== null ? tilesetMap.get(tilesetUid) : undefined;
-
-  // Build TilemapData only if there are renderable layers.
-  let tilemapData: TilemapData | null = null;
-  if (tilemapLayers.length > 0) {
-    tilemapData = {
-      tilesetAssetId: tilesetDef?.relPath ?? `ldtk-tileset-${tilesetUid ?? 'unknown'}`,
-      tileSize: [gridSize, gridSize],
-      mapSize: [colCount, rowCount],
-      layers: tilemapLayers,
-      origin: 'TopLeft',
+  if (level.layerInstances === null) {
+    warnings.push(
+      `Level "${level.identifier}" uses external level files — layer data was not included. Load the external .ldtkl file separately.`,
+    );
+    return {
+      identifier: level.identifier,
+      worldX: level.worldX,
+      worldY: level.worldY,
+      pxWid: level.pxWid,
+      pxHei: level.pxHei,
+      tilemapData: null,
+      entities: [],
+      fields: resolveFields(level.fieldInstances),
+      warnings,
     };
   }
+
+  // LDtk stores layers bottom-to-top; reverse to match typical render order
+  const reversedLayers = [...level.layerInstances].reverse();
+
+  for (const layer of reversedLayers) {
+    switch (layer.__type) {
+      case 'IntGrid':
+        tilemapLayers.push(convertIntGridLayer(layer));
+        break;
+      case 'Tiles':
+      case 'AutoLayer':
+        tilemapLayers.push(convertTilesLayer(layer));
+        break;
+      case 'Entities':
+        entities.push(...convertEntityLayer(layer, entityCount));
+        break;
+      default:
+        warnings.push(
+          `Layer "${layer.__identifier}" has unknown type "${(layer as LdtkLayerInstance).__type}" — skipped.`,
+        );
+    }
+  }
+
+  // Resolve tileset asset ID for TilemapData
+  let tilesetAssetIdStr = '';
+  let tileSize: [number, number] = [defaultGridSize, defaultGridSize];
+
+  const primaryUid = resolvePrimaryTilesetUid(level.layerInstances);
+  if (primaryUid !== null) {
+    const def = tilesetDefsById.get(primaryUid);
+    if (def) {
+      tilesetAssetIdStr = tilesetAssetId(def);
+      tileSize = [def.tileGridSize, def.tileGridSize];
+    }
+  }
+
+  // Determine map size from the level pixel dimensions
+  const mapW = tileSize[0] > 0 ? Math.ceil(level.pxWid / tileSize[0]) : 1;
+  const mapH = tileSize[1] > 0 ? Math.ceil(level.pxHei / tileSize[1]) : 1;
+
+  // If no tile layers, create one empty placeholder layer
+  const finalLayers: TilemapLayer[] =
+    tilemapLayers.length > 0
+      ? tilemapLayers
+      : [
+          {
+            name: 'Layer_0',
+            tiles: new Array(mapW * mapH).fill(null) as (number | null)[],
+            visible: true,
+            opacity: 1,
+            isCollision: false,
+          },
+        ];
+
+  const tilemapData: TilemapData = {
+    tilesetAssetId: tilesetAssetIdStr,
+    tileSize,
+    mapSize: [mapW, mapH],
+    layers: finalLayers,
+    origin: 'TopLeft',
+  };
 
   return {
-    identifier: raw.identifier,
-    uid: raw.uid,
-    worldX: raw.worldX,
-    worldY: raw.worldY,
-    pxWidth: raw.pxWid,
-    pxHeight: raw.pxHei,
-    bgColor: raw.bgColor ?? null,
+    identifier: level.identifier,
+    worldX: level.worldX,
+    worldY: level.worldY,
+    pxWid: level.pxWid,
+    pxHei: level.pxHei,
     tilemapData,
-    tilesetUid,
-    entitySpawns: parseEntitySpawns(entityLayers),
+    entities,
+    fields: resolveFields(level.fieldInstances),
+    warnings,
   };
-}
-
-/** Parse tileset definitions from `defs.tilesets`. */
-function parseTilesets(raw: LdtkTilesetDefRaw[]): LdtkTilesetDef[] {
-  return raw.map((t) => {
-    const tileSize = t.tileGridSize;
-    const cols = tileSize > 0 ? Math.floor((t.pxWid - t.padding * 2 + t.spacing) / (tileSize + t.spacing)) : 0;
-    const rows = tileSize > 0 ? Math.floor((t.pxHei - t.padding * 2 + t.spacing) / (tileSize + t.spacing)) : 0;
-    return {
-      uid: t.uid,
-      identifier: t.identifier,
-      relPath: t.relPath,
-      tileSize,
-      gridSize: [cols, rows],
-      spacing: t.spacing,
-      padding: t.padding,
-    };
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -409,33 +405,67 @@ function parseTilesets(raw: LdtkTilesetDefRaw[]): LdtkTilesetDef[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse a raw LDtk project JSON (already decoded from JSON.parse) into a
- * structured LdtkParseResult containing levels and tileset definitions.
+ * Parse an LDtk project JSON object into SpawnForge data structures.
  *
- * @throws {LdtkParseError} if the JSON is not a valid LDtk project.
+ * @param json - The parsed JSON content of a .ldtk file (type `unknown` for safe validation).
+ * @returns An LdtkProjectResult with one LdtkLevelResult per level, tileset info, and warnings.
+ * @throws {Error} If `json` does not conform to the LDtk project format.
+ *
+ * @example
+ * ```ts
+ * const raw = JSON.parse(fileContent);
+ * const { levels, tilesets } = parseLdtkProject(raw);
+ * for (const level of levels) {
+ *   if (level.tilemapData) {
+ *     // dispatch set_tilemap_data with level.tilemapData
+ *   }
+ *   for (const entity of level.entities) {
+ *     // dispatch spawn_empty for each entity
+ *   }
+ * }
+ * ```
  */
-export function parseLdtkProject(json: unknown): LdtkParseResult {
-  const root = assertObject(json, 'root');
-
-  if (typeof root['jsonVersion'] !== 'string') {
-    throw new LdtkParseError('Missing or invalid jsonVersion — not a valid LDtk file');
+export function parseLdtkProject(json: unknown): LdtkProjectResult {
+  if (!isLdtkProjectJson(json)) {
+    throw new Error(
+      'Invalid LDtk project format: expected object with jsonVersion, levels[], and defs.tilesets[] fields.',
+    );
   }
 
-  const defs = assertObject(root['defs'], 'defs');
-  const rawTilesets = assertArray(defs['tilesets'], 'defs.tilesets') as LdtkTilesetDefRaw[];
-  const rawLevels = assertArray(root['levels'], 'levels') as LdtkLevelRaw[];
+  const warnings: string[] = [];
 
-  const tilesets = parseTilesets(rawTilesets);
-  const tilesetMap = new Map(tilesets.map((t) => [t.uid, t]));
+  // Index tileset definitions by UID for fast lookup
+  const tilesetDefsById = new Map<number, LdtkTilesetDef>();
+  for (const def of json.defs.tilesets) {
+    tilesetDefsById.set(def.uid, def);
+  }
 
-  const levels = rawLevels.map((rawLevel) => {
-    const levelObj = assertObject(rawLevel, 'level');
-    return parseLevel(levelObj as unknown as LdtkLevelRaw, tilesetMap);
-  });
+  // Extract tileset info for the caller
+  const tilesets: LdtkTilesetInfo[] = json.defs.tilesets.map(def => ({
+    uid: def.uid,
+    identifier: def.identifier,
+    relPath: def.relPath,
+    tileGridSize: def.tileGridSize,
+  }));
+
+  // Parse each level
+  const levels: LdtkLevelResult[] = json.levels.map(level =>
+    parseLevel(level, tilesetDefsById, json.defaultGridSize),
+  );
+
+  // Collect level-scoped warnings into top-level warnings list
+  for (const l of levels) {
+    for (const w of l.warnings) {
+      warnings.push(`[${l.identifier}] ${w}`);
+    }
+    // Clear so they're not duplicated at both levels
+    l.warnings = [];
+  }
 
   return {
     levels,
     tilesets,
-    jsonVersion: root['jsonVersion'] as string,
+    worldLayout: json.worldLayout ?? null,
+    warnings,
   };
 }
