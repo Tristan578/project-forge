@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react';
 import { useEditorStore, setPlayTickCallback } from '@/stores/editorStore';
 import { useDialogueStore } from '@/stores/dialogueStore';
 import { audioManager } from '@/lib/audio/audioManager';
+import { extractWaveform } from '@/lib/audio/waveformExtractor';
 import { AsyncChannelRouter } from '@/lib/scripting/asyncChannelRouter';
 import {
   createPhysicsHandler,
@@ -193,7 +194,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       router.register('animation', createAnimationHandler({ dispatchCommand }));
       router.register('audio', createAudioHandler({
         detectLoopPoints: (assetId: string) => Promise.resolve(audioManager.detectLoopPoints(assetId)),
-        getWaveform: (_assetId: string) => Promise.resolve(null), // TODO: implement waveform extraction
+        getWaveform: (assetId: string) => {
+          const buffer = audioManager.getBuffer(assetId);
+          if (!buffer) return Promise.resolve(null);
+          return Promise.resolve(extractWaveform(buffer));
+        },
       }));
       router.register('ai', createAiHandler({ fetchJson }));
       router.register('asset', createAssetHandler({ fetchJson }));
