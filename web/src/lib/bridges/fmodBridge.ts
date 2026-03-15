@@ -86,9 +86,9 @@ function runFmod(binaryPath: string, args: string[]): Promise<BridgeResult> {
       binaryPath,
       args,
       { timeout: 120_000 },
-      (err, stdout, stderr) => {
+      (err: (Error & { code?: number }) | null, stdout: string, stderr: string) => {
         if (err) {
-          const code = (err as NodeJS.ErrnoException & { code?: number }).code;
+          const code = err.code;
           const exitCode = typeof code === 'number' ? code : 1;
           resolve({
             success: false,
