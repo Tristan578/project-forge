@@ -1,3 +1,9 @@
+---
+lastVerified: 2026-03-15
+relatedCommands: [export_game, get_export_status]
+relatedFiles: [web/src/lib/export/zipExporter.ts, web/src/lib/export/gameTemplate.ts, web/src/lib/export/scriptBundler.ts, web/src/components/editor/ExportDialog.tsx]
+---
+
 # Export
 
 Export your game as a standalone HTML file that runs in any browser.
