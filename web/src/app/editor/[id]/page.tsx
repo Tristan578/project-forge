@@ -2,7 +2,19 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { EditorLayout } from '@/components/editor/EditorLayout';
+import dynamic from 'next/dynamic';
+
+const EditorLayout = dynamic(
+  () => import('@/components/editor/EditorLayout').then((m) => m.EditorLayout),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-screen items-center justify-center bg-zinc-950">
+        <div className="text-zinc-400">Loading editor...</div>
+      </div>
+    ),
+  }
+);
 import { useEditorStore } from '@/stores/editorStore';
 import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 
