@@ -83,6 +83,8 @@ export async function withRetry<T>(
   // Guard against 0 or negative maxAttempts which would skip the loop
   // entirely and throw undefined.
   opts.maxAttempts = Math.max(1, opts.maxAttempts);
+  // Clamp jitterFactor to [0, 1] — values > 1 could produce negative delays.
+  opts.jitterFactor = Math.max(0, Math.min(1, opts.jitterFactor));
   let lastError: unknown;
 
   for (let attempt = 0; attempt < opts.maxAttempts; attempt++) {
