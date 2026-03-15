@@ -405,7 +405,7 @@ jobs:
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       (
-        needs.deploy-staging.result == 'success' ||
+        (needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
         (github.event.inputs.promote_to_production == 'true' &&
          needs.lint.result == 'success' &&
          needs.typecheck.result == 'success' &&
