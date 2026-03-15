@@ -30,6 +30,7 @@ import { gameplayHandlers } from './handlers/gameplayHandlers';
 import { assetHandlers } from './handlers/assetHandlers';
 import { audioLegacyHandlers } from './handlers/audioLegacyHandlers';
 import { pixelArtHandlers } from './handlers/pixelArtHandlers';
+import { compoundHandlers } from './handlers/compoundHandlers';
 
 // Legacy fallback for handlers not yet migrated to the registry pattern
 import { executeToolCall as legacyExecuteToolCall } from './executor.legacy';
@@ -60,6 +61,7 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...assetHandlers,
   ...audioLegacyHandlers,
   ...pixelArtHandlers,
+  ...compoundHandlers,
 };
 
 /**
