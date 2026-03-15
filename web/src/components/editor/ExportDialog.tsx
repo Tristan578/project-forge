@@ -36,6 +36,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     progressBarColor: '#6366f1',
     progressStyle: 'bar',
   });
+  const [orientationLock, setOrientationLock] = useState<'none' | 'landscape' | 'portrait'>('none');
   const [embedSnippet, setEmbedSnippet] = useState<string | null>(null);
   const [snippetCopied, setSnippetCopied] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -117,6 +118,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         includeDebug,
         preset,
         customLoadingScreen: showLoadingCustomization ? loadingConfig : undefined,
+        orientationLock: orientationLock === 'none' ? undefined : orientationLock,
       });
 
       const extension = mode === 'single-html' ? 'html' : 'zip';
@@ -143,7 +145,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     } finally {
       setExporting(false);
     }
-  }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, setExporting, onClose]);
+  }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, setExporting, onClose]);
 
   const handleCopySnippet = useCallback(() => {
     if (!embedSnippet) return;
@@ -314,6 +316,24 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
               <option value="1280x720">1280x720</option>
             </select>
           </div>
+
+          {/* Orientation Lock — not applicable to embeds (inherits parent orientation) */}
+          {mode !== 'embed' && (
+            <div>
+              <label className="mb-1 block text-xs font-medium text-zinc-300">Orientation Lock</label>
+              <select
+                value={orientationLock}
+                onChange={(e) => setOrientationLock(e.target.value as 'none' | 'landscape' | 'portrait')}
+                disabled={isExporting}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
+              >
+                <option value="none">Auto (no lock)</option>
+                <option value="landscape">Landscape</option>
+                <option value="portrait">Portrait</option>
+              </select>
+              <p className="mt-1 text-xs text-zinc-500">Lock screen orientation on mobile devices</p>
+            </div>
+          )}
 
           {/* Background Color */}
           <div>
