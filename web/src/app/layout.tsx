@@ -4,7 +4,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { NextIntlClientProvider } from "next-intl";
-import { getMessages } from "next-intl/server";
+import { getMessages, setRequestLocale } from "next-intl/server";
+import { defaultLocale } from "@/i18n/config";
 import { Toaster } from "sonner";
 import { AnalyticsProvider } from "@/components/AnalyticsProvider";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
@@ -38,6 +39,7 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  setRequestLocale(defaultLocale);
   const messages = await getMessages();
 
   const body = (
