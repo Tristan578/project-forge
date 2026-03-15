@@ -128,21 +128,12 @@ function createIDBMock(shouldFail = false) {
 describe('indexedDBFallback', () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    // Re-enable indexedDB if a test disabled it
-    Object.defineProperty(global, 'indexedDB', {
-      value: global.indexedDB,
-      writable: true,
-      configurable: true,
-    });
+    vi.unstubAllGlobals();
   });
 
   function installMock(shouldFail = false) {
     const idb = createIDBMock(shouldFail);
-    Object.defineProperty(global, 'indexedDB', {
-      value: { open: idb.open },
-      writable: true,
-      configurable: true,
-    });
+    vi.stubGlobal('indexedDB', { open: idb.open });
     return idb;
   }
 
@@ -164,11 +155,7 @@ describe('indexedDBFallback', () => {
     });
 
     it('returns false when IndexedDB is unavailable', async () => {
-      Object.defineProperty(global, 'indexedDB', {
-        value: undefined,
-        writable: true,
-        configurable: true,
-      });
+      vi.stubGlobal('indexedDB', undefined);
       const result = await saveToIndexedDB('k', 'v');
       expect(result).toBe(false);
     });
@@ -193,11 +180,7 @@ describe('indexedDBFallback', () => {
     });
 
     it('returns null when IndexedDB is unavailable', async () => {
-      Object.defineProperty(global, 'indexedDB', {
-        value: undefined,
-        writable: true,
-        configurable: true,
-      });
+      vi.stubGlobal('indexedDB', undefined);
       const result = await loadFromIndexedDB('k');
       expect(result).toBeNull();
     });
@@ -219,11 +202,7 @@ describe('indexedDBFallback', () => {
     });
 
     it('resolves silently when IndexedDB is unavailable', async () => {
-      Object.defineProperty(global, 'indexedDB', {
-        value: undefined,
-        writable: true,
-        configurable: true,
-      });
+      vi.stubGlobal('indexedDB', undefined);
       await expect(deleteFromIndexedDB('k')).resolves.toBeUndefined();
     });
   });
@@ -315,11 +294,7 @@ describe('indexedDBFallback', () => {
       }
 
       const capturingMock = createCapturingIDBMock();
-      Object.defineProperty(global, 'indexedDB', {
-        value: { open: capturingMock.open },
-        writable: true,
-        configurable: true,
-      });
+      vi.stubGlobal('indexedDB', { open: capturingMock.open });
 
       await saveToIndexedDB('test-key', 'test-value');
 
@@ -403,11 +378,7 @@ describe('indexedDBFallback', () => {
       }
 
       const capturingMock = createCapturingIDBMock();
-      Object.defineProperty(global, 'indexedDB', {
-        value: { open: capturingMock.open },
-        writable: true,
-        configurable: true,
-      });
+      vi.stubGlobal('indexedDB', { open: capturingMock.open });
 
       await loadFromIndexedDB('any-key');
 
@@ -424,11 +395,7 @@ describe('indexedDBFallback', () => {
     it('load after save returns the stored string', async () => {
       // Use a shared in-memory mock so save and load see the same data store
       const idb = createIDBMock(false);
-      Object.defineProperty(global, 'indexedDB', {
-        value: { open: idb.open },
-        writable: true,
-        configurable: true,
-      });
+      vi.stubGlobal('indexedDB', { open: idb.open });
 
       await saveToIndexedDB('backup', '{"scene":"data"}');
       const loaded = await loadFromIndexedDB('backup');
@@ -437,11 +404,7 @@ describe('indexedDBFallback', () => {
 
     it('load after delete returns null', async () => {
       const idb = createIDBMock(false);
-      Object.defineProperty(global, 'indexedDB', {
-        value: { open: idb.open },
-        writable: true,
-        configurable: true,
-      });
+      vi.stubGlobal('indexedDB', { open: idb.open });
 
       await saveToIndexedDB('backup', 'data');
       await deleteFromIndexedDB('backup');
