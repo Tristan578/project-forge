@@ -1,3 +1,9 @@
+---
+lastVerified: 2026-03-15
+relatedCommands: [set_physics, set_debug_physics, set_gravity, apply_force, apply_impulse, set_velocity, add_joint, remove_joint, set_physics_2d, add_joint_2d]
+relatedFiles: [web/src/stores/slices/physicsSlice.ts, engine/src/core/commands/physics.rs, engine/src/bridge/physics.rs, engine/src/core/physics.rs]
+---
+
 # Physics
 
 Add realistic physics simulation with rigid bodies, colliders, forces, and constraints.
