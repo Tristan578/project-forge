@@ -31,6 +31,7 @@ export interface OnboardingState {
   // Actions
   startTutorial: (id: string) => void;
   advanceTutorial: () => void;
+  retreatTutorial: () => void;
   completeTutorial: () => void;
   skipTutorial: () => void;
   completeTask: (taskId: string) => void;
@@ -77,6 +78,12 @@ export const useOnboardingStore = create<OnboardingState>()(
       advanceTutorial: () => {
         set((state) => ({
           tutorialStep: state.tutorialStep + 1,
+        }));
+      },
+
+      retreatTutorial: () => {
+        set((state) => ({
+          tutorialStep: Math.max(0, state.tutorialStep - 1),
         }));
       },
 
