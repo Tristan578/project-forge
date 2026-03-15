@@ -26,10 +26,10 @@ jobs:
   smoke:
     name: Smoke Tests
     runs-on: ubuntu-latest
-    # For workflow_run triggers, only run when the CD workflow succeeded.
-    # workflow_dispatch always runs (condition evaluates true when inputs are present).
+    # Run for: workflow_dispatch (manual), workflow_call (from CD), or workflow_run (when CD succeeded).
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'workflow_call' ||
       github.event.workflow_run.conclusion == 'success'
     permissions:
       contents: read
