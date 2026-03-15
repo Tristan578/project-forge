@@ -32,13 +32,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-CONFIG_PATH = SCRIPT_DIR / "github-sync-config.json"
-MAP_PATH = SCRIPT_DIR / "github-project-map.json"
 TB_API = "http://localhost:3010/api"
 
-# Walk up from hooks dir to find the DB
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
-DB_PATH = SCRIPT_DIR.parent / "taskboard.db"
+
+# ---------------------------------------------------------------------------
+# Worktree-safe path resolution
+# ---------------------------------------------------------------------------
+# When running from a git worktree (.claude/worktrees/agent-*/), all paths
+# must resolve to the MAIN repo checkout. Otherwise the sync script uses
+# a stale DB copy and creates duplicate GitHub issues.
+
+def _find_main_repo_root() -> Path:
+    """Return the primary repo root, even when called from a worktree."""
+    candidate = SCRIPT_DIR.parent.parent  # .claude/hooks -> .claude -> repo
+    parts = candidate.parts
+    for i, part in enumerate(parts):
+        if part == "worktrees" and i > 0 and parts[i - 1] == ".claude":
+            return Path(*parts[: i - 1])
+    return candidate
+
+
+PROJECT_ROOT = _find_main_repo_root()
+_MAIN_HOOKS = PROJECT_ROOT / ".claude" / "hooks"
+CONFIG_PATH = _MAIN_HOOKS / "github-sync-config.json"
+MAP_PATH = _MAIN_HOOKS / "github-project-map.json"
+DB_PATH = PROJECT_ROOT / ".claude" / "taskboard.db"
 
 
 def load_config():

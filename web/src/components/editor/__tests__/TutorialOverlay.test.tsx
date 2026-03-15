@@ -33,6 +33,7 @@ vi.mock('@/data/tutorials', () => ({
 }));
 
 const mockAdvanceTutorial = vi.fn();
+const mockRetreatTutorial = vi.fn();
 const mockSkipTutorial = vi.fn();
 const mockCompleteTutorial = vi.fn();
 
@@ -46,6 +47,7 @@ function setupStore(overrides: {
       activeTutorial: 'activeTutorial' in overrides ? overrides.activeTutorial : 'basics',
       tutorialStep: overrides.tutorialStep ?? 0,
       advanceTutorial: mockAdvanceTutorial,
+      retreatTutorial: mockRetreatTutorial,
       skipTutorial: mockSkipTutorial,
       completeTutorial: mockCompleteTutorial,
     };
@@ -171,5 +173,56 @@ describe('TutorialOverlay', () => {
     render(<TutorialOverlay />);
     const backdrop = document.querySelector('.fixed.inset-0');
     expect(backdrop).not.toBeNull();
+  });
+
+  // ── Keyboard navigation ───────────────────────────────────────────────
+
+  it('closes tutorial on Escape key', () => {
+    setupStore();
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(mockSkipTutorial).toHaveBeenCalledOnce();
+  });
+
+  it('advances tutorial on ArrowRight key (no action required)', () => {
+    setupStore(); // step 0 has no actionRequired
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(mockAdvanceTutorial).toHaveBeenCalledOnce();
+  });
+
+  it('does not advance on ArrowRight when action is required', () => {
+    setupStore({ tutorialStep: 1 }); // step 1 has actionRequired
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(mockAdvanceTutorial).not.toHaveBeenCalled();
+  });
+
+  it('completes tutorial on ArrowRight at last step', () => {
+    setupStore({ tutorialStep: 2 }); // last step, no actionRequired
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(mockCompleteTutorial).toHaveBeenCalledOnce();
+  });
+
+  it('retreats tutorial on ArrowLeft key when not on first step', () => {
+    setupStore({ tutorialStep: 2 });
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(mockRetreatTutorial).toHaveBeenCalledOnce();
+  });
+
+  it('does not retreat on ArrowLeft when on first step', () => {
+    setupStore({ tutorialStep: 0 });
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(mockRetreatTutorial).not.toHaveBeenCalled();
+  });
+
+  it('does not respond to keyboard when no tutorial active', () => {
+    setupStore({ activeTutorial: null });
+    render(<TutorialOverlay />);
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(mockSkipTutorial).not.toHaveBeenCalled();
   });
 });
