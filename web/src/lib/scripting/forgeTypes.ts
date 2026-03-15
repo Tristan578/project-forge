@@ -187,6 +187,14 @@ declare namespace forge {
     function setMusicIntensity(level: number): void;
     /** Load multi-stem music (pad, bass, melody, drums) for adaptive playback */
     function loadStems(stems: Record<string, string>): void;
+    /** Save the current mixer state as a named snapshot */
+    function saveSnapshot(name: string, crossfadeDurationMs?: number): void;
+    /** Restore a previously saved mixer snapshot */
+    function loadSnapshot(name: string, durationMs?: number): void;
+    /** Detect loop points for seamless looping (async) */
+    function detectLoopPoints(assetId: string): Promise<{ start: number; end: number } | null>;
+    /** Get waveform data for visualisation (async) */
+    function getWaveform(assetId: string): Promise<number[] | null>;
   }
 
   namespace particles {
@@ -219,6 +227,8 @@ declare namespace forge {
     function setClipSpeed(entityId: string, clipName: string, speed: number): void;
     /** List available clip names (async — requires engine query) */
     function listClips(entityId: string): Promise<string[]>;
+    /** Get the duration of an animation clip in seconds (async) */
+    function getClipDuration(entityId: string, clipName: string): Promise<number | null>;
   }
 
   namespace ui {
@@ -358,6 +368,26 @@ declare namespace forge {
     function playAnimation(entityId: string, animationName: string): void;
     /** Get all bones in the skeleton */
     function getBones(entityId: string): Array<{ name: string; x: number; y: number; rotation: number; length: number }> | null;
+  }
+
+  namespace ai {
+    /** Generate a texture from a text prompt (async — uses AI generation provider) */
+    function generateTexture(prompt: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
+    /** Generate a 3D model from a text prompt (async — uses AI generation provider) */
+    function generateModel(prompt: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
+    /** Generate a sound effect from a text prompt (async — uses AI generation provider) */
+    function generateSound(prompt: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
+    /** Generate voice audio from text (async — uses AI generation provider) */
+    function generateVoice(text: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
+    /** Generate music from a text prompt (async — uses AI generation provider) */
+    function generateMusic(prompt: string, onProgress?: (percent: number) => void): Promise<{ assetId: string; url: string } | null>;
+  }
+
+  namespace asset {
+    /** Load an image from a URL and register it as an asset (async) */
+    function loadImage(url: string): Promise<{ assetId: string } | null>;
+    /** Load a 3D model from a URL and register it as an asset (async) */
+    function loadModel(url: string): Promise<{ assetId: string } | null>;
   }
 }
 
