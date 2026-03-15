@@ -394,14 +394,14 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
 
-  # ---- Stage 2: Promote to Production ----
-  # Triggered manually via workflow_dispatch with promote_to_production=true.
-  # This deploys to production only after staging has been validated.
+  # ---- Stage 2: Deploy to Production ----
+  # Auto-deploys after staging succeeds on push to main.
+  # Also triggerable manually via workflow_dispatch with promote_to_production=true.
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
-    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' && github.event.inputs.promote_to_production == 'true' && (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped') }}
+    needs: [deploy-staging]
+    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' && (needs.deploy-staging.result == 'success' || github.event.inputs.promote_to_production == 'true') }}
     permissions:
       contents: read
       deployments: write
