@@ -589,7 +589,7 @@ export const compoundHandlers: Record<string, ToolHandler> = {
             totalLength += len;
           }
 
-          const targetDist = (i / (entityIds.length - 1)) * totalLength;
+          const targetDist = entityIds.length <= 1 ? 0 : (i / (entityIds.length - 1)) * totalLength;
           let accumulatedDist = 0;
           let segmentIndex = 0;
           for (let j = 0; j < segmentLengths.length; j++) {
@@ -600,7 +600,8 @@ export const compoundHandlers: Record<string, ToolHandler> = {
             accumulatedDist += segmentLengths[j];
           }
 
-          const localT = (targetDist - accumulatedDist) / segmentLengths[segmentIndex];
+          const segLen = segmentLengths[segmentIndex] || 1;
+          const localT = (targetDist - accumulatedDist) / segLen;
           const p1 = pathPoints[segmentIndex];
           const p2 = pathPoints[segmentIndex + 1];
           newPosition = [
