@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Toaster } from "sonner";
+import { AnalyticsProvider } from "@/components/AnalyticsProvider";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
 
@@ -42,6 +43,7 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         {children}
+        <AnalyticsProvider />
         <SpeedInsights />
         <Toaster theme="dark" position="bottom-right" richColors />
         <ServiceWorkerRegistration />

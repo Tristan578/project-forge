@@ -118,6 +118,7 @@ export const createGameSlice: StateCreator<GameSlice, [], [], GameSlice> = (set,
   setLoadingScreenConfig: (config) => set({ loadingScreenConfig: config }),
   play: () => {
     if (dispatchCommand) dispatchCommand('play', {});
+    import('@/lib/analytics/events').then(m => m.trackPlayModeStarted()).catch(() => { /* analytics non-critical */ });
   },
   stop: () => {
     if (dispatchCommand) dispatchCommand('stop', {});
