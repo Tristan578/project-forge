@@ -410,7 +410,10 @@ jobs:
          needs.lint.result == 'success' &&
          needs.typecheck.result == 'success' &&
          needs.test-web.result == 'success' &&
+         needs.test-mcp.result == 'success' &&
          needs.build-wasm.result == 'success' &&
+         needs.e2e.result == 'success' &&
+         needs.security.result == 'success' &&
          (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped'))
       )
     permissions:
