@@ -11,6 +11,11 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Bail if running inside a git worktree (subagent)
+if echo "$SCRIPT_DIR" | grep -q "/worktrees/"; then
+    exit 0
+fi
+
 # Bail if gh CLI is not available or not authenticated
 if ! command -v gh &>/dev/null; then
     exit 0
