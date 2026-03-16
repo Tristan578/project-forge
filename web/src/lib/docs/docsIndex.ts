@@ -13,15 +13,21 @@ export interface DocsData {
 
 let cachedDocs: DocsData | null = null;
 
-/** Load docs index from the API (cached in memory) */
+/** Load docs index from the API (cached in memory, retries on empty) */
 export async function loadDocsIndex(): Promise<DocsData> {
-  if (cachedDocs) return cachedDocs;
+  if (cachedDocs && cachedDocs.docs.length > 0) return cachedDocs;
 
   const res = await fetch('/api/docs');
   if (!res.ok) throw new Error(`Failed to load docs: ${res.status}`);
 
-  cachedDocs = await res.json();
-  return cachedDocs!;
+  const data: DocsData = await res.json();
+
+  // Only cache non-empty results so subsequent calls retry on failure
+  if (data.docs.length > 0) {
+    cachedDocs = data;
+  }
+
+  return data;
 }
 
 /** Clear cached docs (useful after hot reload) */
