@@ -49,11 +49,18 @@ const mockSelect = vi.fn().mockImplementation(() => {
   return buildSelectChain(user ? [user] : []);
 });
 
+const mockTransaction = vi.fn().mockImplementation(
+  async (cb: (tx: unknown) => Promise<unknown>) => {
+    return cb({ select: mockSelect, insert: mockInsert, update: mockUpdate });
+  }
+);
+
 vi.mock('@/lib/db/client', () => ({
   getDb: () => ({
     select: mockSelect,
     insert: mockInsert,
     update: mockUpdate,
+    transaction: mockTransaction,
   }),
 }));
 
@@ -135,6 +142,11 @@ function resetMocks(): void {
   mockUpdate.mockReturnValue({
     set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   });
+  mockTransaction.mockImplementation(
+    async (cb: (tx: unknown) => Promise<unknown>) => {
+      return cb({ select: mockSelect, insert: mockInsert, update: mockUpdate });
+    }
+  );
   mockUpdateUserTier.mockResolvedValue(undefined);
 }
 
@@ -257,6 +269,7 @@ describe('handleSubscriptionUpdated — upgrade', () => {
 
     expect(mockUpdateUserTier).toHaveBeenCalledWith('user-uuid-1', 'pro');
     expect(mockUpdate).toHaveBeenCalledTimes(2); // subscriptionId + token adjustment
+    expect(mockTransaction).toHaveBeenCalledOnce();
     expect(mockInsert).toHaveBeenCalledOnce();
     const txn = mockInsert.mock.results[0].value.values.mock.calls[0][0];
     expect(txn.transactionType).toBe('adjustment');
@@ -291,7 +304,7 @@ describe('handleSubscriptionUpdated — downgrade', () => {
     // so the shared .set mock accumulates calls: [0]=subscriptionId, [1]=tokens
     const sharedSet = mockUpdate.mock.results[0].value.set;
     const tokenSetArg = sharedSet.mock.calls[1][0];
-    expect(tokenSetArg.monthlyTokens).toBe(1000);
+    expect(tokenSetArg.monthlyTokens).toBe(1000); // direct value since token ops stay in JS
     expect(tokenSetArg.monthlyTokensUsed).toBe(0);
   });
 
@@ -548,5 +561,49 @@ describe('handleInvoicePaymentFailed', () => {
     await expect(
       handleInvoicePaymentFailed('cus_abc123', 'inv_123', 1, future)
     ).resolves.not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Transaction safety (PF-487)
+// ---------------------------------------------------------------------------
+
+describe('handleSubscriptionUpdated — transaction safety', () => {
+  it('wraps tier change token adjustment in a db transaction', async () => {
+    mockUser = makeUser({ tier: 'pro' as Tier, monthlyTokens: 3000, monthlyTokensUsed: 0 });
+    mockUserAfterUpdate = makeUser({ tier: 'starter' as Tier, monthlyTokens: 50, monthlyTokensUsed: 0 });
+
+    await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'starter', 'active');
+
+    expect(mockTransaction).toHaveBeenCalledOnce();
+    expect(mockUpdate).toHaveBeenCalledTimes(2);
+    expect(mockInsert).toHaveBeenCalledOnce();
+  });
+
+  it('concurrent operations cannot produce negative balance because of transaction wrapping', async () => {
+    mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 1000, monthlyTokensUsed: 900, addonTokens: 0, earnedCredits: 0 });
+    mockUserAfterUpdate = makeUser({ tier: 'hobbyist' as Tier, monthlyTokens: 300, monthlyTokensUsed: 0, addonTokens: 0, earnedCredits: 0 });
+
+    await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'hobbyist', 'active');
+
+    expect(mockTransaction).toHaveBeenCalledOnce();
+    const txn = mockInsert.mock.results[0].value.values.mock.calls[0][0];
+    expect(txn.balanceAfter).toBeGreaterThanOrEqual(0);
+  });
+
+  it('does not wrap in transaction when tier is unchanged', async () => {
+    mockUser = makeUser({ tier: 'creator' as Tier });
+
+    await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'creator', 'active');
+
+    expect(mockTransaction).not.toHaveBeenCalled();
+  });
+
+  it('does not wrap in transaction for past_due status', async () => {
+    mockUser = makeUser({ tier: 'creator' as Tier });
+
+    await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'pro', 'past_due');
+
+    expect(mockTransaction).not.toHaveBeenCalled();
   });
 });

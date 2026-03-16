@@ -120,57 +120,61 @@ export async function handleSubscriptionUpdated(
     return;
   }
 
-  // Tier actually changed -- adjust token allocation
+  // Tier actually changed -- adjust token allocation.
+  // Wrap in a transaction to prevent concurrent deductions from interleaving
+  // with the token adjustment (which could produce negative balances).
   const oldAllocation = TIER_MONTHLY_TOKENS[currentTier];
   const newAllocation = TIER_MONTHLY_TOKENS[newTier];
 
   await updateUserTier(user.id, newTier);
 
-  if (newAllocation > oldAllocation) {
-    // Upgrade: grant the difference in tokens immediately
-    const difference = newAllocation - oldAllocation;
-    const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
+  await db.transaction(async (tx) => {
+    if (newAllocation > oldAllocation) {
+      // Upgrade: grant the difference in tokens immediately
+      const difference = newAllocation - oldAllocation;
+      const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
 
-    await db
-      .update(users)
-      .set({
-        monthlyTokens: monthlyRemaining + difference,
-        monthlyTokensUsed: 0,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
+      await tx
+        .update(users)
+        .set({
+          monthlyTokens: monthlyRemaining + difference,
+          monthlyTokensUsed: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
 
-    const balance = await getTotalBalance(user.id);
-    await db.insert(creditTransactions).values({
-      userId: user.id,
-      transactionType: 'adjustment',
-      amount: difference,
-      balanceAfter: balance,
-      source: `upgrade:${currentTier}->${newTier}`,
-      referenceId: subscriptionId,
-    });
-  } else {
-    // Downgrade: cap monthly tokens to new allocation, reset used counter
-    // User keeps any addon tokens they purchased
-    await db
-      .update(users)
-      .set({
-        monthlyTokens: newAllocation,
-        monthlyTokensUsed: 0,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
+      const balance = await getTotalBalance(user.id);
+      await tx.insert(creditTransactions).values({
+        userId: user.id,
+        transactionType: 'adjustment',
+        amount: difference,
+        balanceAfter: balance,
+        source: `upgrade:${currentTier}->${newTier}`,
+        referenceId: subscriptionId,
+      });
+    } else {
+      // Downgrade: cap monthly tokens to new allocation, reset used counter
+      // User keeps any addon tokens they purchased
+      await tx
+        .update(users)
+        .set({
+          monthlyTokens: newAllocation,
+          monthlyTokensUsed: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
 
-    const balance = await getTotalBalance(user.id);
-    await db.insert(creditTransactions).values({
-      userId: user.id,
-      transactionType: 'adjustment',
-      amount: newAllocation - oldAllocation, // negative for downgrade
-      balanceAfter: balance,
-      source: `downgrade:${currentTier}->${newTier}`,
-      referenceId: subscriptionId,
-    });
-  }
+      const balance = await getTotalBalance(user.id);
+      await tx.insert(creditTransactions).values({
+        userId: user.id,
+        transactionType: 'adjustment',
+        amount: newAllocation - oldAllocation, // negative for downgrade
+        balanceAfter: balance,
+        source: `downgrade:${currentTier}->${newTier}`,
+        referenceId: subscriptionId,
+      });
+    }
+  });
 }
 
 /**
