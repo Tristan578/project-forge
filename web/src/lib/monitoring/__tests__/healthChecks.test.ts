@@ -64,7 +64,7 @@ describe('healthChecks', () => {
       const { computeCriticalStatus } = await import('@/lib/monitoring/healthChecks');
       const services = [
         { name: 'Database (Neon)', status: 'healthy' as const, latencyMs: 5, lastChecked: '' },
-        { name: 'Authentication (Clerk)', status: 'healthy' as const, latencyMs: 10, lastChecked: '' },
+        { name: 'Clerk', status: 'healthy' as const, latencyMs: 10, lastChecked: '' },
         { name: 'AI Providers', status: 'down' as const, latencyMs: 0, lastChecked: '' },
       ];
       expect(computeCriticalStatus(services)).toBe('healthy');
@@ -638,7 +638,7 @@ describe('healthChecks', () => {
   // runAllHealthChecks
   // ---------------------------------------------------------------------------
   describe('runAllHealthChecks', () => {
-    it('returns a HealthReport with all 12 services', async () => {
+    it('returns a HealthReport with all 8 services', async () => {
       vi.resetModules();
 
       // Minimal mocks: DB neon needs a mock even with no DATABASE_URL
@@ -648,7 +648,7 @@ describe('healthChecks', () => {
       const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
       const report = await runAllHealthChecks();
 
-      expect(report.services).toHaveLength(12);
+      expect(report.services).toHaveLength(8);
       expect(report.environment).toBe('test');
       expect(report.version).toBe('abcdef12');
       expect(report.timestamp).toBeDefined();

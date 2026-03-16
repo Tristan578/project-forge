@@ -364,7 +364,7 @@ describe('parseTiledMap — multiple tile layers', () => {
 
 describe('parseTiledMap — flip bit stripping', () => {
   it('strips horizontal/vertical/diagonal flip flags from GIDs', () => {
-    // Tiled encodes flips in bits 29-31. A flipped tile GID 1 might be:
+    // Tiled encodes flips in bits 28-31. A flipped tile GID 1 might be:
     // 0x80000001 (horizontally flipped)
     const mapWithFlips = makeMinimalMap({
       layers: [
@@ -376,9 +376,9 @@ describe('parseTiledMap — flip bit stripping', () => {
           x: 0,
           y: 0,
           data: [
-            0x80000001, // flipped GID 1 -> local 0
-            0x40000002, // flipped GID 2 -> local 1
-            0x20000003, // flipped GID 3 -> local 2
+            0x80000001, // bit 31: horizontal flip, GID 1 -> local 0
+            0x40000002, // bit 30: vertical flip, GID 2 -> local 1
+            0x20000003, // bit 29: diagonal flip, GID 3 -> local 2
             0,
             0, 0, 0, 0,
             0, 0, 0, 0,
@@ -391,6 +391,37 @@ describe('parseTiledMap — flip bit stripping', () => {
     const result = parseTiledMap(mapWithFlips);
     const tiles = result.tilemapData.layers[0].tiles;
     expect(tiles[0]).toBe(0); // 1 - firstgid(1) = 0
+    expect(tiles[1]).toBe(1);
+    expect(tiles[2]).toBe(2);
+  });
+
+  it('strips bit 28 (rotation/diagonal) from GIDs', () => {
+    // Bit 28 (0x10000000) was not stripped by the old mask (0x1fffffff).
+    const mapWithBit28 = makeMinimalMap({
+      layers: [
+        {
+          type: 'tilelayer',
+          name: '"Ground"',
+          visible: true,
+          opacity: 1,
+          x: 0,
+          y: 0,
+          data: [
+            0x10000001, // bit 28 set, GID 1 -> local 0
+            0x30000002, // bits 28+29 set, GID 2 -> local 1
+            0xF0000003, // all 4 flip bits set, GID 3 -> local 2
+            0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+          ],
+        },
+      ],
+    });
+
+    const result = parseTiledMap(mapWithBit28);
+    const tiles = result.tilemapData.layers[0].tiles;
+    expect(tiles[0]).toBe(0);
     expect(tiles[1]).toBe(1);
     expect(tiles[2]).toBe(2);
   });
