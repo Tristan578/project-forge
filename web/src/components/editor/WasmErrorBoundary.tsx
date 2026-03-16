@@ -166,8 +166,8 @@ export class WasmErrorBoundary extends Component<Props, State> {
       const hasBackup = hasLocalStorageBackup || this.state.hasIndexedDBBackup;
 
       return (
-        <div className="flex h-screen w-full items-center justify-center bg-gray-900 p-4">
-          <div className="max-w-md rounded-lg bg-gray-800 p-6 shadow-lg">
+        <div className="flex h-screen w-full items-center justify-center bg-zinc-950 p-4">
+          <div className="max-w-md rounded-lg bg-zinc-900 p-6 shadow-lg">
             <div className="mb-4 flex items-center gap-3">
               <AlertTriangle className="h-8 w-8 text-red-500" />
               <h1 className="text-xl font-bold text-white">
@@ -175,7 +175,7 @@ export class WasmErrorBoundary extends Component<Props, State> {
               </h1>
             </div>
 
-            <p className="mb-4 text-sm text-gray-300">
+            <p className="mb-4 text-sm text-zinc-300">
               The game engine encountered an unexpected error and needs to restart.
             </p>
 
@@ -201,7 +201,7 @@ export class WasmErrorBoundary extends Component<Props, State> {
 
               <button
                 onClick={this.handleReload}
-                className="flex items-center justify-center gap-2 rounded bg-gray-700 px-4 py-2 text-sm font-medium text-white hover:bg-gray-600 transition-colors"
+                className="flex items-center justify-center gap-2 rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-600 transition-colors"
               >
                 <RefreshCw className="h-4 w-4" />
                 Reload Engine
@@ -209,8 +209,8 @@ export class WasmErrorBoundary extends Component<Props, State> {
             </div>
 
             {process.env.NODE_ENV === 'development' && this.state.error && (
-              <details className="mt-4 rounded bg-gray-900 p-3">
-                <summary className="cursor-pointer text-xs font-semibold text-gray-400">
+              <details className="mt-4 rounded bg-zinc-950 p-3">
+                <summary className="cursor-pointer text-xs font-semibold text-zinc-400">
                   Technical Details
                 </summary>
                 <pre className="mt-2 max-h-40 overflow-auto text-xs text-red-400">

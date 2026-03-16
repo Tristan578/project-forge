@@ -31,7 +31,6 @@ export function useLoadingState(): LoadingState {
   const [state, setState] = useState<LoadingState>(currentLoadingState);
 
   useEffect(() => {
-    // Sync with current state on mount
     setState(currentLoadingState);
     const listener: LoadingStateListener = (s) => setState(s);
     loadingListeners.add(listener);
@@ -52,10 +51,47 @@ let wasmModule: WasmModule | null = null;
 let initPromise: Promise<WasmModule> | null = null;
 let panicInterceptorInstalled = false;
 
+// --- Engine crash state (module-level for cross-component access) ---
+let _engineCrashed = false;
+let _engineCrashMessage: string | null = null;
+type CrashListener = (message: string) => void;
+const _crashListeners = new Set<CrashListener>();
+
+/** Subscribe to engine crash events. Returns an unsubscribe function. */
+export function onEngineCrash(listener: CrashListener): () => void {
+  _crashListeners.add(listener);
+  return () => { _crashListeners.delete(listener); };
+}
+
+/** Whether the WASM engine has crashed and not yet recovered. */
+export function isEngineCrashed(): boolean {
+  return _engineCrashed;
+}
+
+/** The panic message from the last WASM crash, or null if none. */
+export function getEngineCrashMessage(): string | null {
+  return _engineCrashMessage;
+}
+
+/** Mark the engine as crashed and notify all listeners. */
+function setEngineCrashed(message: string): void {
+  _engineCrashed = true;
+  _engineCrashMessage = message;
+  wasmModule = null;
+  for (const listener of _crashListeners) {
+    try { listener(message); } catch { /* prevent listener errors from breaking the loop */ }
+  }
+}
+
+/** Clear crash state (used after recovery). */
+function clearEngineCrash(): void {
+  _engineCrashed = false;
+  _engineCrashMessage = null;
+}
+
 /**
  * Install a global interceptor for WASM panics.
- * Rust's console_error_panic_hook writes panics to console.error —
- * this catches them and forwards to Sentry with structured context.
+ * After detecting a panic, sets engineCrashed state so components can react.
  */
 function installPanicInterceptor(): void {
   if (panicInterceptorInstalled || typeof window === 'undefined') return;
@@ -65,7 +101,6 @@ function installPanicInterceptor(): void {
   console.error = (...args: unknown[]) => {
     originalConsoleError.apply(console, args);
 
-    // Detect Rust/WASM panics from console_error_panic_hook
     const msg = args.map(a => (typeof a === 'string' ? a : String(a))).join(' ');
     if (msg.includes('panicked at') || msg.includes('wasm-bindgen')) {
       captureException(new Error(`WASM panic: ${msg.slice(0, 500)}`), {
@@ -73,18 +108,18 @@ function installPanicInterceptor(): void {
         fullMessage: msg.slice(0, 2000),
         engineBackend: detectWebGPU() ? 'webgpu' : 'webgl2',
       });
+      setEngineCrashed(msg.slice(0, 500));
     }
   };
 }
 
-// Emit event helper that logs and notifies listeners
 function emitEvent(phase: InitPhase, message?: string, error?: string) {
   const event = logInitEvent(phase, message, error);
   emitStatusEvent(event);
 }
 
 /** Race a promise against a timeout. Rejects with a descriptive error on timeout. */
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       reject(new Error(`${label} timed out after ${ms}ms`));
@@ -106,7 +141,7 @@ function detectWebGPU(): boolean {
  * Returns true if WebGPU is available and the device was acquired successfully.
  * Returns false if WebGPU is not supported or device init fails/times out.
  */
-async function probeWebGPU(): Promise<boolean> {
+export async function probeWebGPU(): Promise<boolean> {
   if (!detectWebGPU()) return false;
 
   try {
@@ -122,7 +157,7 @@ async function probeWebGPU(): Promise<boolean> {
       GPU_INIT_TIMEOUT_MS,
       'WebGPU device request',
     );
-    // Clean up the device immediately — the engine will create its own
+    // Clean up the device immediately -- the engine will create its own
     device.destroy();
     return true;
   } catch {
@@ -138,33 +173,22 @@ async function probeWebGPU(): Promise<boolean> {
 const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
 
 async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string): Promise<WasmModule> {
-  // Use AbortController to enforce a timeout on the WASM fetch
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), WASM_FETCH_TIMEOUT_MS);
+  const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
 
-  try {
-    const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
+  // Wrap the WASM fetch/init with a timeout to prevent infinite stalls
+  await withTimeout(
+    wasm.default(`${basePath}${wasmFile}`),
+    WASM_FETCH_TIMEOUT_MS,
+    'WASM fetch',
+  );
 
-    // The default export fetches the .wasm file. Wrap with timeout via fetch override.
-    // Most wasm-bindgen JS glue accepts an object with fetch options or a URL.
-    // We pass the URL and rely on the AbortController timeout wrapping the whole operation.
-    await withTimeout(
-      wasm.default(`${basePath}${wasmFile}`),
-      WASM_FETCH_TIMEOUT_MS,
-      'WASM fetch',
-    );
-
-    const mod = wasm as unknown as WasmModule;
-    if (mod.set_init_callback) {
-      mod.set_init_callback((phase: string, message?: string, error?: string) => {
-        emitEvent(phase as InitPhase, message, error);
-      });
-    }
-    return mod;
-  } finally {
-    clearTimeout(timeoutId);
-    controller.abort(); // Clean up any pending requests
+  const mod = wasm as unknown as WasmModule;
+  if (mod.set_init_callback) {
+    mod.set_init_callback((phase: string, message?: string, error?: string) => {
+      emitEvent(phase as InitPhase, message, error);
+    });
   }
+  return mod;
 }
 
 async function loadWasm(): Promise<WasmModule> {
@@ -240,6 +264,7 @@ export function resetEngine(): void {
   wasmModule = null;
   initPromise = null;
   setLoadingState({ phase: 'idle' });
+  clearEngineCrash();
 }
 
 export interface UseEngineOptions {
@@ -314,7 +339,6 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           backend: detectWebGPU() ? 'webgpu' : 'webgl2',
           cdnBase: ENGINE_CDN_BASE || '(same-origin)',
         });
-        // Skip toast for intentional CI skip — not a real failure
         if (!loadError.message.includes('__SKIP_ENGINE')) {
           showError('Engine failed to load. Please refresh the page.');
         }

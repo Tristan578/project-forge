@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
@@ -11,6 +12,9 @@ export async function GET() {
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
+
+  const rateLimitError = rateLimitAdminRoute(clerkId, 'admin-economics');
+  if (rateLimitError) return rateLimitError;
 
   const db = getDb();
 

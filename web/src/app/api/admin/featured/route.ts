@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { featuredGames, publishedGames, users } from '@/lib/db/schema';
 import { eq, sql } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,9 @@ export async function GET() {
 
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
+
+    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-featured');
+    if (rateLimitError) return rateLimitError;
 
     const db = getDb();
 
@@ -62,6 +66,9 @@ export async function POST(req: NextRequest) {
 
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
+
+    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-featured');
+    if (rateLimitError) return rateLimitError;
 
     const body = await req.json();
     const { gameId, position, expiresAt } = body;
@@ -122,6 +129,9 @@ export async function DELETE(req: NextRequest) {
 
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
+
+    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-featured');
+    if (rateLimitError) return rateLimitError;
 
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
