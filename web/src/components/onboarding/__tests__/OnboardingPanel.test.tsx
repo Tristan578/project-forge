@@ -12,6 +12,10 @@ vi.mock('@/stores/onboardingStore', () => ({
   useOnboardingStore: vi.fn(() => ({})),
 }));
 
+vi.mock('@/hooks/useProjectType', () => ({
+  useProjectType: vi.fn(() => ({ projectType: '3d', is2D: false, is3D: true, canCreate: () => true })),
+}));
+
 vi.mock('@/data/tutorials', () => ({
   TUTORIALS: [
     {
