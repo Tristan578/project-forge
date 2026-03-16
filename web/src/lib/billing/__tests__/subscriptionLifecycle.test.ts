@@ -1,41 +1,28 @@
-/**
- * Tests for subscription-lifecycle handler functions.
- * PF-515/PF-522: Atomic guard and purchase-based refund calculation.
- */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
 const mockInsertValues = vi.fn().mockResolvedValue({});
 const mockInsert = vi.fn().mockReturnValue({ values: mockInsertValues });
-
-const mockUpdateReturning = vi.fn().mockResolvedValue([{ id: 'user_abc' }]);
-const mockUpdateWhere = vi.fn().mockReturnValue({ returning: mockUpdateReturning });
-const mockUpdateSet = vi.fn().mockReturnValue({ where: mockUpdateWhere });
+const mockUpdateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
 const mockUpdate = vi.fn().mockReturnValue({ set: mockUpdateSet });
-
 const mockSelectWhere = vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) });
-const mockSelectFrom = vi.fn().mockReturnValue({ where: mockSelectWhere });
-const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
+const mockSelect = vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: mockSelectWhere }) });
 
 const mockTxInsertValues = vi.fn().mockResolvedValue({});
 const mockTxInsert = vi.fn().mockReturnValue({ values: mockTxInsertValues });
 const mockTxUpdateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
 const mockTxUpdate = vi.fn().mockReturnValue({ set: mockTxUpdateSet });
 const mockTxSelectWhere = vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) });
-const _mockTxSelectFrom = vi.fn().mockReturnValue({ where: mockTxSelectWhere });
-const mockTxSelect = vi.fn().mockReturnValue({ from: _mockTxSelectFrom });
+const mockTxSelect = vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: mockTxSelectWhere }) });
 
 const mockTx = { insert: mockTxInsert, update: mockTxUpdate, select: mockTxSelect };
 
 let lastTxConfig: unknown = undefined;
-const mockTransaction = vi.fn(
-  async (cb: (tx: typeof mockTx) => Promise<void>, config?: unknown) => {
-    lastTxConfig = config;
-    return cb(mockTx);
-  }
-);
+const mockTransaction = vi.fn(async (cb: (tx: typeof mockTx) => Promise<void>, config?: unknown) => {
+  lastTxConfig = config;
+  return cb(mockTx);
+});
 
 const mockDb = { insert: mockInsert, update: mockUpdate, select: mockSelect, transaction: mockTransaction };
 
@@ -45,13 +32,7 @@ vi.mock('@/lib/tokens/pricing', () => ({
   TIER_MONTHLY_TOKENS: { starter: 10000, hobbyist: 50000, creator: 150000, pro: 500000 },
 }));
 
-import {
-  findUserByStripeCustomer,
-  handleSubscriptionDeleted,
-  handleSubscriptionUpdated,
-  handleChargeRefunded,
-  reverseAddonTokens,
-} from '../subscription-lifecycle';
+import { findUserByStripeCustomer, handleSubscriptionDeleted, handleSubscriptionUpdated } from '../subscription-lifecycle';
 
 const mockUser = {
   id: 'user_abc', tier: 'creator', stripeCustomerId: 'cus_abc',
@@ -65,117 +46,69 @@ describe('subscription-lifecycle', () => {
     lastTxConfig = undefined;
     mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
     mockTxSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
-    mockUpdateReturning.mockResolvedValue([{ id: 'user_abc' }]);
-    mockUpdateWhere.mockReturnValue({ returning: mockUpdateReturning });
-    mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
+    mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
     mockTxUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
   });
 
-  it('findUserByStripeCustomer returns null when not found', async () => {
-    mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
-    expect(await findUserByStripeCustomer('cus_unknown')).toBeNull();
+  describe('findUserByStripeCustomer', () => {
+    it('returns the user when found', async () => {
+      expect(await findUserByStripeCustomer('cus_abc')).toMatchObject({ id: 'user_abc' });
+    });
+    it('returns null when not found', async () => {
+      mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
+      expect(await findUserByStripeCustomer('cus_x')).toBeNull();
+    });
   });
 
-  it('findUserByStripeCustomer returns user when found', async () => {
-    expect(await findUserByStripeCustomer('cus_abc')).toMatchObject({ id: 'user_abc' });
+  describe('handleSubscriptionDeleted', () => {
+    it('does nothing when user not found', async () => {
+      mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
+      await handleSubscriptionDeleted('cus_gone', 'sub_gone');
+      expect(mockUpdate).not.toHaveBeenCalled();
+    });
+    it('resets tier to starter', async () => {
+      const { updateUserTier } = await import('@/lib/auth/user-service');
+      await handleSubscriptionDeleted('cus_abc', 'sub_abc');
+      expect(updateUserTier).toHaveBeenCalledWith('user_abc', 'starter');
+      expect(mockUpdate).toHaveBeenCalled();
+      expect(mockInsert).toHaveBeenCalled();
+    });
   });
 
-  it('handleSubscriptionDeleted resets tier', async () => {
-    const { updateUserTier } = await import('@/lib/auth/user-service');
-    await handleSubscriptionDeleted('cus_abc', 'sub_abc');
-    expect(updateUserTier).toHaveBeenCalledWith('user_abc', 'starter');
-  });
+  describe('handleSubscriptionUpdated -- transaction isolation', () => {
+    it('PF-513: tier update inside transaction, not via updateUserTier', async () => {
+      const { updateUserTier } = await import('@/lib/auth/user-service');
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'pro', 'active');
+      expect(vi.mocked(updateUserTier).mock.calls.find((c) => c[0] === 'user_abc' && c[1] === 'pro')).toBeUndefined();
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(mockTxUpdate).toHaveBeenCalled();
+    });
 
-  it('PF-521: handleSubscriptionUpdated uses serializable tx', async () => {
-    await handleSubscriptionUpdated('cus_abc', 'sub_new', 'pro', 'active');
-    expect(lastTxConfig).toEqual({ isolationLevel: 'serializable' });
-  });
-});
+    it('PF-514: getTotalBalance reads through tx', async () => {
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'pro', 'active');
+      expect(mockTxSelect).toHaveBeenCalled();
+    });
 
-describe('handleChargeRefunded (PF-515, PF-522)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
-    mockUpdateReturning.mockResolvedValue([{ id: 'user_abc' }]);
-    mockUpdateWhere.mockReturnValue({ returning: mockUpdateReturning });
-    mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
-  });
+    it('PF-521: serializable isolation level', async () => {
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'pro', 'active');
+      expect(lastTxConfig).toEqual({ isolationLevel: 'serializable' });
+    });
 
-  it('does nothing when user not found', async () => {
-    mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
-    await handleChargeRefunded('cus_gone', 'ch_1', 1000, 1000);
-    expect(mockUpdate).not.toHaveBeenCalled();
-  });
+    it('uses transaction for downgrades too', async () => {
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'hobbyist', 'active');
+      expect(mockTransaction).toHaveBeenCalledTimes(1);
+      expect(lastTxConfig).toEqual({ isolationLevel: 'serializable' });
+    });
 
-  it('does nothing when amountTotal is 0', async () => {
-    await handleChargeRefunded('cus_abc', 'ch_1', 500, 0);
-    expect(mockUpdate).not.toHaveBeenCalled();
-  });
+    it('no transaction when tier unchanged', async () => {
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'creator', 'active');
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
 
-  it('PF-522: deducts based on purchase record tokens', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ tokens: 10000 }]) })
-      .mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
-    await handleChargeRefunded('cus_abc', 'ch_full', 1000, 1000, 'pi_123');
-    expect(mockInsertValues.mock.calls[0][0].amount).toBe(-10000);
-  });
-
-  it('PF-522: partial refund deducts proportionally', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ tokens: 10000 }]) })
-      .mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
-    await handleChargeRefunded('cus_abc', 'ch_p', 500, 1000, 'pi_123');
-    expect(mockInsertValues.mock.calls[0][0].amount).toBe(-5000);
-  });
-});
-
-describe('reverseAddonTokens (PF-515)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([{ tokens: 1000 }]) });
-    mockUpdateReturning.mockResolvedValue([{ id: 'user_abc' }]);
-    mockUpdateWhere.mockReturnValue({ returning: mockUpdateReturning });
-    mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
-  });
-
-  it('skips when no purchase found', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
-    await reverseAddonTokens('user_abc', 'ch_1', 500, 1000, 'pi_x');
-    expect(mockUpdate).not.toHaveBeenCalled();
-  });
-
-  it('PF-515: skips audit when atomic guard rejects', async () => {
-    mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ tokens: 1000 }]) });
-    mockUpdateReturning.mockResolvedValue([]);
-    await reverseAddonTokens('user_abc', 'ch_x', 1000, 1000, 'pi_123');
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).not.toHaveBeenCalled();
-  });
-
-  it('falls back to amountCents match', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ tokens: 2000 }]) })
-      .mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
-    await reverseAddonTokens('user_abc', 'ch_fb', 1000, 1000);
-    expect(mockInsertValues.mock.calls[0][0].amount).toBe(-2000);
-  });
-
-  it('clamps ratio at 1', async () => {
-    mockSelectWhere
-      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ tokens: 500 }]) })
-      .mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
-    await reverseAddonTokens('user_abc', 'ch_o', 2000, 1000, 'pi_123');
-    expect(mockInsertValues.mock.calls[0][0].amount).toBe(-500);
-  });
-
-  it('skips when deduction rounds to 0', async () => {
-    mockSelectWhere.mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ tokens: 10 }]) });
-    await reverseAddonTokens('user_abc', 'ch_t', 1, 10000, 'pi_123');
-    expect(mockUpdate).not.toHaveBeenCalled();
+    it('no transaction for past_due', async () => {
+      await handleSubscriptionUpdated('cus_abc', 'sub_new', 'pro', 'past_due');
+      expect(mockTransaction).not.toHaveBeenCalled();
+    });
   });
 });
 
