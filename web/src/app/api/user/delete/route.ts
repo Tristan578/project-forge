@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { deleteUserAccount } from '@/lib/auth/user-service';
+import { apiErrorResponse, ErrorCode } from '@/lib/api/errors';
 
 /**
  * POST /api/user/delete
@@ -15,9 +16,10 @@ export async function POST() {
     return NextResponse.json({ deleted: true });
   } catch (err) {
     console.error('Account deletion failed:', err);
-    return NextResponse.json(
-      { error: 'Failed to delete account' },
-      { status: 500 }
+    return apiErrorResponse(
+      ErrorCode.INTERNAL_ERROR,
+      'Failed to delete account. Please try again or contact support.',
+      500
     );
   }
 }

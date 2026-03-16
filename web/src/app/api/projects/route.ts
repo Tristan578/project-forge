@@ -4,6 +4,7 @@ import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { parseJsonBody, requireString, requireObject } from '@/lib/apiValidation';
+import { apiErrorResponse, ErrorCode } from '@/lib/api/errors';
 
 /**
  * GET /api/projects
@@ -46,13 +47,11 @@ export async function POST(req: Request) {
   } catch (error) {
     const err = error as Error & { limit?: number };
     if (err.message === 'Project limit exceeded') {
-      return NextResponse.json(
-        {
-          error: 'PROJECT_LIMIT',
-          message: `Your plan allows ${err.limit} project${err.limit === 1 ? '' : 's'}. Upgrade to create more.`,
-          limit: err.limit,
-        },
-        { status: 403 }
+      return apiErrorResponse(
+        ErrorCode.FORBIDDEN,
+        `Your plan allows ${err.limit} project${err.limit === 1 ? '' : 's'}. Upgrade to create more.`,
+        403,
+        { details: { limit: err.limit } }
       );
     }
     captureException(error, { route: '/api/projects', action: 'create' });

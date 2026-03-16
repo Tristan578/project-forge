@@ -5,6 +5,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { apiErrorResponse, ErrorCode } from '@/lib/api/errors';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -28,23 +29,27 @@ export async function POST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    return apiErrorResponse(ErrorCode.VALIDATION_ERROR, 'Invalid JSON body', 400);
   }
 
   const { prompt, mode, quality = 'standard', imageBase64, artStyle, negativePrompt } = body;
 
   // Validate
   if (!prompt || prompt.length < 3 || prompt.length > 500) {
-    return NextResponse.json(
-      { error: 'Prompt must be between 3 and 500 characters' },
-      { status: 422 }
+    return apiErrorResponse(
+      ErrorCode.VALIDATION_ERROR,
+      'Prompt must be between 3 and 500 characters',
+      422,
+      { details: { field: 'prompt', minLength: 3, maxLength: 500 } }
     );
   }
 
   if (mode === 'image-to-3d' && !imageBase64) {
-    return NextResponse.json(
-      { error: 'imageBase64 required for image-to-3d mode' },
-      { status: 422 }
+    return apiErrorResponse(
+      ErrorCode.VALIDATION_ERROR,
+      'imageBase64 required for image-to-3d mode',
+      422,
+      { details: { field: 'imageBase64', mode } }
     );
   }
 
@@ -67,7 +72,9 @@ export async function POST(request: NextRequest) {
     usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
+      return apiErrorResponse(ErrorCode.PAYMENT_REQUIRED, err.message, 402, {
+        details: { code: err.code },
+      });
     }
     throw err;
   }
@@ -105,6 +112,8 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     captureException(err, { route: '/api/generate/model', prompt, mode });
     const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return apiErrorResponse(ErrorCode.PROVIDER_ERROR, message, 500, {
+      details: { provider: 'meshy' },
+    });
   }
 }
