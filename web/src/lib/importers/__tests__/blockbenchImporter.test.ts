@@ -293,6 +293,115 @@ describe('parseBlockbenchModel - face UV extraction', () => {
 });
 
 // ---------------------------------------------------------------------------
+// UV rotation center regression (PF-440)
+// ---------------------------------------------------------------------------
+
+describe('parseBlockbenchModel - UV rotation uses face center not (0.5,0.5)', () => {
+  it('rotation of offset UV face stays within the face UV bounds', () => {
+    // UV rect [8, 0, 16, 8] on 16x16 -> normalised [0.5, 0, 1.0, 0.5]
+    // Face center: (0.75, 0.25)
+    //
+    // BUG: rotating around (0.5, 0.5) would move UVs outside the face bounds,
+    // producing incorrect texture sampling.
+    //
+    // CORRECT: rotating around (0.75, 0.25) keeps all UVs within the face region.
+    const modelJson = minimalModel([
+      {
+        name: 'cube',
+        from: [0, 0, 0],
+        to: [1, 1, 1],
+        faces: {
+          north: { uv: [8, 0, 16, 8], texture: 0, rotation: 90 },
+          south: { uv: [0, 0, 16, 16], texture: 0 },
+          east: { uv: [0, 0, 16, 16], texture: 0 },
+          west: { uv: [0, 0, 16, 16], texture: 0 },
+          up: { uv: [0, 0, 16, 16], texture: 0 },
+          down: { uv: [0, 0, 16, 16], texture: 0 },
+        },
+      },
+    ]);
+    const model = parseBlockbenchModel(modelJson);
+
+    // North face UVs: first 4 vertices x 2 components = indices 0..7
+    const northUVs: [number, number][] = [];
+    for (let i = 0; i < 8; i += 2) {
+      northUVs.push([model.uvs[i], model.uvs[i + 1]]);
+    }
+
+    // All U values should stay in [0.5, 1.0] range (the face's U range)
+    // All V values should stay in [0.0, 0.5] range (the face's V range)
+    // If rotation was done around (0.5, 0.5), some V values would go negative
+    for (const [u, v] of northUVs) {
+      expect(u).toBeGreaterThanOrEqual(0.5 - 0.01);
+      expect(u).toBeLessThanOrEqual(1.0 + 0.01);
+      expect(v).toBeGreaterThanOrEqual(0.0 - 0.01);
+      expect(v).toBeLessThanOrEqual(0.5 + 0.01);
+    }
+  });
+
+  it('full-texture UV (0,0,16,16) rotation works identically regardless of center', () => {
+    // For a face covering the entire texture [0,0,16,16], center is (0.5,0.5)
+    // so the old and new code produce the same result. This is a sanity check.
+    const modelJson = minimalModel([
+      {
+        name: 'cube',
+        from: [0, 0, 0],
+        to: [1, 1, 1],
+        faces: {
+          north: { uv: [0, 0, 16, 16], texture: 0, rotation: 90 },
+          south: { uv: [0, 0, 16, 16], texture: 0 },
+          east: { uv: [0, 0, 16, 16], texture: 0 },
+          west: { uv: [0, 0, 16, 16], texture: 0 },
+          up: { uv: [0, 0, 16, 16], texture: 0 },
+          down: { uv: [0, 0, 16, 16], texture: 0 },
+        },
+      },
+    ]);
+    const model = parseBlockbenchModel(modelJson);
+
+    // All UV values should remain in [0, 1]
+    for (const uv of model.uvs) {
+      expect(uv).toBeGreaterThanOrEqual(-0.01);
+      expect(uv).toBeLessThanOrEqual(1.01);
+    }
+  });
+
+  it('270-degree rotation of offset UV stays within face bounds', () => {
+    // UV rect [0, 8, 8, 16] on 16x16 -> normalised [0, 0.5, 0.5, 1.0]
+    // Face center: (0.25, 0.75)
+    const modelJson = minimalModel([
+      {
+        name: 'cube',
+        from: [0, 0, 0],
+        to: [1, 1, 1],
+        faces: {
+          north: { uv: [0, 8, 8, 16], texture: 0, rotation: 270 },
+          south: { uv: [0, 0, 16, 16], texture: 0 },
+          east: { uv: [0, 0, 16, 16], texture: 0 },
+          west: { uv: [0, 0, 16, 16], texture: 0 },
+          up: { uv: [0, 0, 16, 16], texture: 0 },
+          down: { uv: [0, 0, 16, 16], texture: 0 },
+        },
+      },
+    ]);
+    const model = parseBlockbenchModel(modelJson);
+
+    const northUVs: [number, number][] = [];
+    for (let i = 0; i < 8; i += 2) {
+      northUVs.push([model.uvs[i], model.uvs[i + 1]]);
+    }
+
+    // U should be in [0, 0.5], V should be in [0.5, 1.0]
+    for (const [u, v] of northUVs) {
+      expect(u).toBeGreaterThanOrEqual(0.0 - 0.01);
+      expect(u).toBeLessThanOrEqual(0.5 + 0.01);
+      expect(v).toBeGreaterThanOrEqual(0.5 - 0.01);
+      expect(v).toBeLessThanOrEqual(1.0 + 0.01);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Rotation and origin handling
 // ---------------------------------------------------------------------------
 
