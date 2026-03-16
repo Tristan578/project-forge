@@ -30,6 +30,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     email: 'test@example.com',
     displayName: 'Test User',
     tier: 'starter',
+    banned: false,
     monthlyTokens: 50,
     monthlyTokensUsed: 0,
     addonTokens: 0,
@@ -168,6 +169,42 @@ describe('authenticateRequest', () => {
     const ctx = (result as { ok: true; ctx: { clerkId: string; user: User } }).ctx;
     expect(ctx.clerkId).toBe('clerk_user_123');
     expect(ctx.user).toEqual(fakeUser);
+  });
+
+  it('returns 403 BANNED when user record has banned=true', async () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_valid';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+    const { auth } = await import('@clerk/nextjs/server');
+    vi.mocked(auth).mockResolvedValue({ userId: 'clerk_banned' } as never);
+    const { getUserByClerkId } = await import('./user-service');
+    const bannedUser = makeUser({ clerkId: 'clerk_banned', banned: true });
+    vi.mocked(getUserByClerkId).mockResolvedValue(bannedUser);
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    const response = (result as { ok: false; response: { status: number; body: { error: string } } }).response;
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('BANNED');
+  });
+
+  it('returns 403 BANNED when auto-synced user is banned', async () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_valid';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_valid';
+    const { auth } = await import('@clerk/nextjs/server');
+    vi.mocked(auth).mockResolvedValue({ userId: 'clerk_banned_sync' } as never);
+    const { getUserByClerkId, syncUserFromClerk } = await import('./user-service');
+    vi.mocked(getUserByClerkId).mockResolvedValue(null);
+    const bannedSyncedUser = makeUser({ clerkId: 'clerk_banned_sync', banned: true });
+    vi.mocked(syncUserFromClerk).mockResolvedValue(bannedSyncedUser);
+    mockClerkGetUser.mockResolvedValue({
+      emailAddresses: [{ emailAddress: 'banned@example.com' }],
+      firstName: 'Banned',
+      lastName: 'User',
+    });
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    const response = (result as { ok: false; response: { status: number; body: { error: string } } }).response;
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe('BANNED');
   });
 });
 

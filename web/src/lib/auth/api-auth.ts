@@ -57,6 +57,15 @@ export async function authenticateRequest(): Promise<
         first_name: clerkUser.firstName,
         last_name: clerkUser.lastName,
       });
+      if (syncedUser.banned) {
+        return {
+          ok: false,
+          response: NextResponse.json(
+            { error: 'BANNED', message: 'Your account has been suspended' },
+            { status: 403 },
+          ),
+        };
+      }
       return { ok: true, ctx: { user: syncedUser, clerkId } };
     } catch {
       return {
@@ -67,6 +76,16 @@ export async function authenticateRequest(): Promise<
         ),
       };
     }
+  }
+
+  if (user.banned) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'BANNED', message: 'Your account has been suspended' },
+        { status: 403 },
+      ),
+    };
   }
 
   return { ok: true, ctx: { user, clerkId } };

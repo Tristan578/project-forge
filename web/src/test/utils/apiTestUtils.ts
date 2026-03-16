@@ -12,6 +12,7 @@ export function makeUser(overrides: Partial<User> = {}): User {
     email: 'test@example.com',
     displayName: 'Test User',
     tier: 'starter',
+    banned: false,
     monthlyTokens: 50,
     monthlyTokensUsed: 0,
     addonTokens: 0,

@@ -3,6 +3,7 @@ import {
   uuid,
   text,
   integer,
+  boolean,
   timestamp,
   jsonb,
   uniqueIndex,
@@ -43,6 +44,9 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   displayName: text('display_name'),
   tier: tierEnum('tier').notNull().default('starter'),
+
+  // Moderation
+  banned: boolean('banned').notNull().default(false),
 
   // Token balance
   monthlyTokens: integer('monthly_tokens').notNull().default(0),
