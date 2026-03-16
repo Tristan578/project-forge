@@ -48,7 +48,7 @@ export default async function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        <NextIntlClientProvider messages={messages}>
+        <NextIntlClientProvider locale={defaultLocale} messages={messages}>
           {children}
         </NextIntlClientProvider>
         <AnalyticsProvider />
