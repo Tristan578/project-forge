@@ -15,6 +15,10 @@ vi.mock('../ExportDialog', () => ({
   ExportDialog: () => null,
 }));
 
+vi.mock('../SceneBrowser', () => ({
+  SceneBrowser: () => null,
+}));
+
 vi.mock('@/lib/sceneFile', () => ({
   downloadSceneFile: vi.fn(),
   openSceneFilePicker: vi.fn(),
