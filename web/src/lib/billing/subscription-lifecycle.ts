@@ -19,6 +19,9 @@ import type { Tier } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
 import { updateUserTier } from '@/lib/auth/user-service';
 
+/** Minimal query interface shared by both db and transaction handles. */
+type Queryable = Pick<ReturnType<typeof getDb>, 'select'>;
+
 /**
  * Helper: look up a user by their Stripe customer ID.
  * Returns null if no user is found (graceful handling for orphan events).
@@ -121,14 +124,19 @@ export async function handleSubscriptionUpdated(
   }
 
   // Tier actually changed -- adjust token allocation.
-  // Wrap in a transaction to prevent concurrent deductions from interleaving
-  // with the token adjustment (which could produce negative balances).
+  // PF-513: updateUserTier moved inside transaction.
+  // PF-514: getTotalBalance uses tx instead of global db.
+  // PF-521: serializable isolation prevents interleaving with concurrent deductions.
   const oldAllocation = TIER_MONTHLY_TOKENS[currentTier];
   const newAllocation = TIER_MONTHLY_TOKENS[newTier];
 
-  await updateUserTier(user.id, newTier);
-
   await db.transaction(async (tx) => {
+    // PF-513: tier update inside transaction so it rolls back on failure
+    await tx
+      .update(users)
+      .set({ tier: newTier, updatedAt: new Date() })
+      .where(eq(users.id, user.id));
+
     if (newAllocation > oldAllocation) {
       // Upgrade: grant the difference in tokens immediately
       const difference = newAllocation - oldAllocation;
@@ -143,7 +151,8 @@ export async function handleSubscriptionUpdated(
         })
         .where(eq(users.id, user.id));
 
-      const balance = await getTotalBalance(user.id);
+      // PF-514: read balance through tx, not global db
+      const balance = await getTotalBalance(user.id, tx);
       await tx.insert(creditTransactions).values({
         userId: user.id,
         transactionType: 'adjustment',
@@ -164,7 +173,8 @@ export async function handleSubscriptionUpdated(
         })
         .where(eq(users.id, user.id));
 
-      const balance = await getTotalBalance(user.id);
+      // PF-514: read balance through tx, not global db
+      const balance = await getTotalBalance(user.id, tx);
       await tx.insert(creditTransactions).values({
         userId: user.id,
         transactionType: 'adjustment',
@@ -174,7 +184,7 @@ export async function handleSubscriptionUpdated(
         referenceId: subscriptionId,
       });
     }
-  });
+  }, { isolationLevel: 'serializable' });
 }
 
 /**
@@ -221,26 +231,17 @@ export async function handleSubscriptionDeleted(
 
 /**
  * Handle a successful invoice payment (monthly renewal).
- *
- * This is the main token grant trigger:
- * 1. Roll over unused monthly tokens to addon (up to tier cap)
- * 2. Reset monthly tokens to tier allocation
- * 3. Update billing cycle start date
- *
- * Only processes subscription invoices (skips one-time payments).
  */
 export async function handleInvoicePaid(
   customerId: string,
   invoiceId: string,
   subscriptionId: string | null
 ): Promise<void> {
-  // Only process subscription invoices
   if (!subscriptionId) return;
 
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
 
-  // Skip if user's subscription doesn't match (stale event)
   if (user.stripeSubscriptionId && user.stripeSubscriptionId !== subscriptionId) {
     return;
   }
@@ -249,10 +250,8 @@ export async function handleInvoicePaid(
   const tier = user.tier as Tier;
   const allocation = TIER_MONTHLY_TOKENS[tier];
 
-  // Step 1: Roll over unused monthly tokens
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
   if (monthlyRemaining > 0) {
-    // Cap rollover at the tier's monthly allocation
     const rolloverAmount = Math.min(monthlyRemaining, allocation);
 
     await db
@@ -276,7 +275,6 @@ export async function handleInvoicePaid(
     }
   }
 
-  // Step 2: Grant new monthly tokens
   await db
     .update(users)
     .set({
@@ -300,14 +298,6 @@ export async function handleInvoicePaid(
 
 /**
  * Handle a failed invoice payment.
- *
- * Marks the user as being in a grace period by recording a transaction.
- * Does NOT immediately downgrade the user -- Stripe will send
- * `customer.subscription.updated` with status=past_due, then eventually
- * `customer.subscription.deleted` if payment is never recovered.
- *
- * The grace period information can be queried via the billing status API
- * to show warnings in the UI.
  */
 export async function handleInvoicePaymentFailed(
   customerId: string,
@@ -320,7 +310,6 @@ export async function handleInvoicePaymentFailed(
 
   const db = getDb();
 
-  // Record the failure as an audit event (amount = 0, it's informational)
   const balance = await getTotalBalance(user.id);
   await db.insert(creditTransactions).values({
     userId: user.id,
@@ -331,14 +320,7 @@ export async function handleInvoicePaymentFailed(
     referenceId: invoiceId,
   });
 
-  // If this is the final attempt and there's no next retry, Stripe will
-  // cancel the subscription and we'll handle it in subscription.deleted.
-  // For now, just log the grace period end date if available.
   if (nextPaymentAttempt) {
-    // Store the grace period deadline in the billing cycle field as metadata.
-    // The billing status API already reads this field and the frontend can
-    // detect it to show a "payment failed" warning.
-    // We intentionally do NOT change the user's tier yet -- Stripe handles that.
     console.warn(
       `[billing] Payment failed for user ${user.id}, attempt ${attemptCount}. ` +
       `Next retry: ${nextPaymentAttempt.toISOString()}`
@@ -423,10 +405,13 @@ export async function reverseAddonTokens(
 
 /**
  * Get the total token balance for a user (monthly remaining + addon + earned).
+ *
+ * Accepts an optional transaction handle so callers inside a transaction
+ * read from the same snapshot (PF-514).
  */
-async function getTotalBalance(userId: string): Promise<number> {
-  const db = getDb();
-  const [user] = await db
+async function getTotalBalance(userId: string, queryable?: Queryable): Promise<number> {
+  const conn = queryable ?? getDb();
+  const [user] = await conn
     .select({
       monthlyTokens: users.monthlyTokens,
       monthlyTokensUsed: users.monthlyTokensUsed,
