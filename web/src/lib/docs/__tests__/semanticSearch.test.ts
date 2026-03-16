@@ -157,6 +157,45 @@ describe('buildSemanticIndex', () => {
     const index = await buildSemanticIndex([]);
     expect(index.chunks).toHaveLength(0);
   });
+
+  // PF-458: Empty section content causes indexOf("") to return 0,
+  // dropping the entire document content from the semantic index.
+  it('preserves intro content when first section has empty content (PF-458)', async () => {
+    const doc: DocEntry = {
+      path: 'empty-section',
+      title: 'Empty Section Doc',
+      content: '# Empty Section Doc\n\nIntro text here.\n\n## Empty Section\n\n## Real Section\n\nReal content.',
+      category: 'test',
+      sections: [
+        { heading: 'Empty Section', content: '' },
+        { heading: 'Real Section', content: 'Real content.' },
+      ],
+    };
+    const index = await buildSemanticIndex([doc]);
+
+    // The intro chunk should contain the intro text, not be empty
+    const introChunk = index.chunks.find((c) => c.section === 'Empty Section Doc');
+    expect(introChunk).toBeDefined();
+    expect(introChunk!.content).toContain('Intro text here');
+  });
+
+  // PF-443: Off-by-one in content slicing — indexOf returns -1 when section
+  // content isn't a direct substring, causing slice(0, -1) to lose the last char.
+  it('preserves full intro without off-by-one when section text is not a substring (PF-443)', async () => {
+    const doc: DocEntry = {
+      path: 'off-by-one',
+      title: 'Off By One',
+      content: 'Complete intro text.\n\n## Details\n\nThe details here.',
+      category: 'test',
+      sections: [{ heading: 'Details', content: 'The details here.' }],
+    };
+    const index = await buildSemanticIndex([doc]);
+
+    const introChunk = index.chunks.find((c) => c.section === 'Off By One');
+    expect(introChunk).toBeDefined();
+    // Must contain the FULL intro including the trailing period
+    expect(introChunk!.content).toContain('Complete intro text.');
+  });
 });
 
 describe('semanticSearch', () => {

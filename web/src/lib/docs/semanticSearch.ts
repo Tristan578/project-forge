@@ -61,10 +61,37 @@ export async function generateEmbedding(text: string): Promise<number[]> {
 function chunkDoc(doc: DocEntry): Array<{ section: string; content: string }> {
   const chunks: Array<{ section: string; content: string }> = [];
 
-  // One chunk for the full doc title + intro (content before first section)
-  const introContent = doc.sections.length > 0
-    ? doc.content.slice(0, doc.content.indexOf(doc.sections[0].content))
-    : doc.content;
+  // One chunk for the full doc title + intro (content before first section).
+  // We find the intro boundary by locating the first section's heading in the
+  // raw content, rather than using indexOf(section.content), which has two bugs:
+  // - PF-458: indexOf("") returns 0 when section content is empty, dropping all intro text
+  // - PF-443: indexOf returns -1 when section content isn't a direct substring,
+  //   causing slice(0, -1) to lose the last character of the intro
+  let introContent: string;
+
+  if (doc.sections.length > 0) {
+    let introEnd = -1;
+    for (const section of doc.sections) {
+      // Look for the section heading as a markdown heading line.
+      // Check longest prefixes first to avoid partial matches.
+      for (const prefix of ['#### ', '### ', '## ']) {
+        const pos = doc.content.indexOf(`${prefix}${section.heading}`);
+        if (pos !== -1) {
+          introEnd = pos;
+          break;
+        }
+      }
+      if (introEnd !== -1) break;
+    }
+
+    introContent = introEnd > 0
+      ? doc.content.slice(0, introEnd)
+      : introEnd === -1
+        ? doc.content  // No heading found — treat entire content as intro
+        : '';          // Heading at position 0 — no intro
+  } else {
+    introContent = doc.content;
+  }
 
   if (introContent.trim().length > 0) {
     chunks.push({ section: doc.title, content: `${doc.title}\n\n${introContent.trim()}` });
