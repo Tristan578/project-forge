@@ -162,7 +162,7 @@ jobs:
             engine/pkg-webgpu/
             engine/pkg-webgl2-runtime/
             engine/pkg-webgpu-runtime/
-          retention-days: 1
+          retention-days: 7
 
   e2e:
     name: E2E (UI)
@@ -226,7 +226,7 @@ jobs:
         with:
           name: playwright-report
           path: web/playwright-report/
-          retention-days: 14
+          retention-days: 7
 
       - name: Upload test results
         if: ${{ !cancelled() }}
@@ -234,7 +234,7 @@ jobs:
         with:
           name: playwright-results
           path: web/test-results/
-          retention-days: 14
+          retention-days: 7
 
   security:
     name: Rust Security Audit
@@ -332,6 +332,8 @@ jobs:
     permissions:
       contents: read
       deployments: write
+    outputs:
+      url: ${{ steps.deploy.outputs.url }}
     environment:
       name: staging
       url: ${{ steps.deploy.outputs.url }}
@@ -480,3 +482,23 @@ jobs:
           url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to production: $url"
+
+  # ---- Stage 1b: Smoke Test Staging ----
+  # Runs after staging deploy to verify the deployment is healthy.
+  smoke-staging:
+    name: Smoke Test (Staging)
+    needs: [deploy-staging]
+    if: ${{ needs.deploy-staging.result == 'success' }}
+    uses: ./.github/workflows/post-deploy-smoke.yml
+    with:
+      target_url: ${{ needs.deploy-staging.outputs.url }}
+
+  # ---- Stage 2b: Smoke Test Production ----
+  # Runs after production deploy to verify the deployment is healthy.
+  smoke-production:
+    name: Smoke Test (Production)
+    needs: [deploy-production]
+    if: ${{ needs.deploy-production.result == 'success' }}
+    uses: ./.github/workflows/post-deploy-smoke.yml
+    with:
+      target_url: https://spawnforge.ai

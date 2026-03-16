@@ -3,16 +3,12 @@ export interface OnboardingTask {
   label: string;
   description: string;
   category: 'basic' | 'advanced';
+  /** If set, the task only applies to this project type. Omit for shared tasks. */
+  projectType?: '2d' | '3d';
 }
 
 export const ONBOARDING_TASKS: OnboardingTask[] = [
-  // Basic tasks (6)
-  {
-    id: 'create-entity',
-    label: 'Create an Entity',
-    description: 'Add a cube, sphere, or other object to your scene',
-    category: 'basic',
-  },
+  // Basic tasks — shared
   {
     id: 'customize-material',
     label: 'Customize a Material',
@@ -43,17 +39,27 @@ export const ONBOARDING_TASKS: OnboardingTask[] = [
     description: 'Download your game as a standalone package',
     category: 'basic',
   },
-  // Advanced tasks (6)
+  // Basic tasks — 3D only
+  {
+    id: 'create-entity',
+    label: 'Create an Entity',
+    description: 'Add a cube, sphere, or other object to your scene',
+    category: 'basic',
+    projectType: '3d',
+  },
+  // Basic tasks — 2D only
+  {
+    id: 'create-sprite',
+    label: 'Create a Sprite',
+    description: 'Add a 2D sprite to your scene',
+    category: 'basic',
+    projectType: '2d',
+  },
+  // Advanced tasks — shared
   {
     id: 'create-prefab',
     label: 'Create a Prefab',
     description: 'Save an entity as a reusable template',
-    category: 'advanced',
-  },
-  {
-    id: 'add-particles',
-    label: 'Add Particle Effects',
-    description: 'Create fire, smoke, or sparkle effects',
     category: 'advanced',
   },
   {
@@ -80,4 +86,31 @@ export const ONBOARDING_TASKS: OnboardingTask[] = [
     description: 'Share your game with a public URL',
     category: 'advanced',
   },
+  // Advanced tasks — 3D only
+  {
+    id: 'add-particles',
+    label: 'Add Particle Effects',
+    description: 'Create fire, smoke, or sparkle effects',
+    category: 'advanced',
+    projectType: '3d',
+  },
+  // Advanced tasks — 2D only
+  {
+    id: 'create-tilemap',
+    label: 'Create a Tilemap',
+    description: 'Build levels with tile-based terrain',
+    category: 'advanced',
+    projectType: '2d',
+  },
 ];
+
+/**
+ * Filter onboarding tasks for a specific project type.
+ * Includes tasks with no projectType (shared) and tasks matching the given type.
+ */
+export function getTasksForProjectType(
+  tasks: OnboardingTask[],
+  type: '2d' | '3d',
+): OnboardingTask[] {
+  return tasks.filter((t) => !t.projectType || t.projectType === type);
+}

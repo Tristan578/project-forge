@@ -125,7 +125,27 @@ describe('loadDocsIndex', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('should NOT cache empty docs and retry on next call', async () => {
+  it('should cache empty docs with TTL and not retry within 30s', async () => {
+    const emptyData = { docs: [], meta: {} };
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValue({
+        ok: true,
+        json: async () => emptyData,
+      } as Response);
+
+    // First call returns empty — cached with TTL
+    const result1 = await loadDocsIndex();
+    expect(result1.docs).toHaveLength(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    // Second call within TTL — returns cached empty, no refetch
+    const result2 = await loadDocsIndex();
+    expect(result2.docs).toHaveLength(0);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('should retry empty docs after TTL expires', async () => {
+    vi.useFakeTimers();
     const emptyData = { docs: [], meta: {} };
     const nonEmptyData = { docs: makeDocs(), meta: {} };
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
@@ -138,20 +158,20 @@ describe('loadDocsIndex', () => {
         json: async () => nonEmptyData,
       } as Response);
 
-    // First call returns empty — should NOT be cached
+    // First call returns empty
     const result1 = await loadDocsIndex();
     expect(result1.docs).toHaveLength(0);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
 
-    // Second call should retry (not use cache) and get non-empty docs
+    // Advance past TTL (30 seconds)
+    vi.advanceTimersByTime(31_000);
+
+    // Now it should retry and get non-empty docs
     const result2 = await loadDocsIndex();
     expect(result2.docs).toHaveLength(5);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
 
-    // Third call should use cache now that docs are non-empty
-    const result3 = await loadDocsIndex();
-    expect(result3.docs).toHaveLength(5);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it('should throw on non-ok response', async () => {

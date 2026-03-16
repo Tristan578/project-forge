@@ -72,10 +72,20 @@ let cachedState: CapabilitiesState | null = null;
 let fetchPromise: Promise<void> | null = null;
 let subscribers: Array<() => void> = [];
 
+/** TTL for error states — allows retry after 30 seconds (PF-508) */
+export const ERROR_TTL_MS = 30_000;
+let errorCachedAt: number | null = null;
+
 function notifySubscribers(): void {
   for (const cb of subscribers) {
     cb();
   }
+}
+
+/** Check if the cached error state has expired and should be retried. */
+function isErrorExpired(): boolean {
+  if (!cachedState?.error || errorCachedAt === null) return false;
+  return Date.now() - errorCachedAt >= ERROR_TTL_MS;
 }
 
 function fetchCapabilities(): Promise<void> {
@@ -93,6 +103,7 @@ function fetchCapabilities(): Promise<void> {
         loading: false,
         error: null,
       };
+      errorCachedAt = null;
       notifySubscribers();
     })
     .catch((err: unknown) => {
@@ -103,8 +114,9 @@ function fetchCapabilities(): Promise<void> {
         loading: false,
         error: message,
       };
-      // Allow retry on next mount
+      // Allow retry on next mount or after TTL expires
       fetchPromise = null;
+      errorCachedAt = Date.now();
       notifySubscribers();
     });
 
@@ -118,6 +130,7 @@ export function _resetCapabilitiesCache(): void {
   cachedState = null;
   fetchPromise = null;
   subscribers = [];
+  errorCachedAt = null;
 }
 
 /**
@@ -143,14 +156,16 @@ export function useFeatureGating(featureId: FeatureId): FeatureGateResult {
     const cb = () => forceUpdate((n) => n + 1);
     subscribers.push(cb);
 
-    // Trigger fetch if not started
-    if (!cachedState && !fetchPromise) {
+    // Trigger fetch if not started, or retry if error TTL expired (PF-508)
+    if ((!cachedState && !fetchPromise) || isErrorExpired()) {
       cachedState = {
         capabilities: [],
         available: new Set(),
         loading: true,
         error: null,
       };
+      errorCachedAt = null;
+      fetchPromise = null;
       fetchCapabilities();
     }
 
@@ -208,13 +223,16 @@ export function useCapabilities() {
     const cb = () => forceUpdate((n) => n + 1);
     subscribers.push(cb);
 
-    if (!cachedState && !fetchPromise) {
+    // Trigger fetch if not started, or retry if error TTL expired (PF-508)
+    if ((!cachedState && !fetchPromise) || isErrorExpired()) {
       cachedState = {
         capabilities: [],
         available: new Set(),
         loading: true,
         error: null,
       };
+      errorCachedAt = null;
+      fetchPromise = null;
       fetchCapabilities();
     }
 
@@ -238,6 +256,7 @@ export function useCapabilities() {
       loading: true,
       error: null,
     };
+    errorCachedAt = null;
     notifySubscribers();
     fetchCapabilities();
   }, []);

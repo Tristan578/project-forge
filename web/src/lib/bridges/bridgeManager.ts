@@ -154,19 +154,22 @@ function getVersion(binaryPath: string): Promise<{ version: string | null; error
 // TTL: 60 seconds — stale discovery is acceptable for a local tool check.
 const discoveryCache = new Map<string, { result: BridgeToolConfig; expires: number }>();
 const CACHE_TTL_MS = 60_000;
+const ERROR_CACHE_TTL_MS = 5 * 60_000; // 5-minute TTL for negative results (PF-509)
 
 /** Discover a bridge tool: find binary, check version, return config. */
 export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {
   const cached = discoveryCache.get(toolId);
   if (cached && Date.now() < cached.expires) return cached.result;
   if (!isAllowedToolId(toolId)) {
-    return {
+    const notFoundResult: BridgeToolConfig = {
       id: toolId,
       name: toolId,
       paths: {},
       activeVersion: null,
       status: 'not_found',
     };
+    discoveryCache.set(toolId, { result: notFoundResult, expires: Date.now() + ERROR_CACHE_TTL_MS });
+    return notFoundResult;
   }
 
   const defaults = TOOL_DEFAULTS[toolId];
@@ -174,24 +177,28 @@ export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {
 
   const binaryPath = findBinaryPath(toolId);
   if (!binaryPath) {
-    return {
+    const notFoundResult: BridgeToolConfig = {
       id: toolId,
       name,
       paths: defaults?.paths ?? {},
       activeVersion: null,
       status: 'not_found',
     };
+    discoveryCache.set(toolId, { result: notFoundResult, expires: Date.now() + ERROR_CACHE_TTL_MS });
+    return notFoundResult;
   }
 
   const { version, error } = await getVersion(binaryPath);
   if (error || !version) {
-    return {
+    const errorResult: BridgeToolConfig = {
       id: toolId,
       name,
       paths: defaults?.paths ?? {},
       activeVersion: null,
       status: 'error',
     };
+    discoveryCache.set(toolId, { result: errorResult, expires: Date.now() + ERROR_CACHE_TTL_MS });
+    return errorResult;
   }
 
   // Save discovered config

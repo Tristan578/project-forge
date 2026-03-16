@@ -16,7 +16,7 @@ describe('GET /api/openapi', () => {
   });
 
   it('should return OpenAPI spec as JSON', async () => {
-    const mockSpec = { openapi: '3.0.0', info: { title: 'SpawnForge API', version: '1.0.0' } };
+    const mockSpec = { openapi: '3.1.0', info: { title: 'SpawnForge API', version: '1.0.0' } };
     mockReadFileSync.mockReturnValue(JSON.stringify(mockSpec));
 
     const { GET } = await import('./route');
@@ -24,7 +24,7 @@ describe('GET /api/openapi', () => {
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body.openapi).toBe('3.0.0');
+    expect(body.openapi).toBe('3.1.0');
     expect(body.info.title).toBe('SpawnForge API');
     expect(res.headers.get('Cache-Control')).toBe('public, max-age=3600');
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');

@@ -13,18 +13,33 @@ export interface DocsData {
 
 let cachedDocs: DocsData | null = null;
 
-/** Load docs index from the API (cached in memory, retries on empty) */
+/** TTL for caching empty responses to prevent repeated fetches (30 seconds) */
+const EMPTY_CACHE_TTL_MS = 30_000;
+
+/** Timestamp of the last empty response, used for TTL-based retry gating */
+let emptyCacheTime: number | null = null;
+
+/** Load docs index from the API (cached in memory; empty responses cached with 30s TTL) */
 export async function loadDocsIndex(): Promise<DocsData> {
   if (cachedDocs && cachedDocs.docs.length > 0) return cachedDocs;
+
+  // If we recently got an empty response, return it without re-fetching
+  if (cachedDocs && emptyCacheTime !== null && Date.now() - emptyCacheTime < EMPTY_CACHE_TTL_MS) {
+    return cachedDocs;
+  }
 
   const res = await fetch('/api/docs');
   if (!res.ok) throw new Error(`Failed to load docs: ${res.status}`);
 
   const data: DocsData = await res.json();
 
-  // Only cache non-empty results so subsequent calls retry on failure
-  if (data.docs.length > 0) {
-    cachedDocs = data;
+  cachedDocs = data;
+
+  if (data.docs.length === 0) {
+    // Cache empty result with TTL so we don't hammer the API
+    emptyCacheTime = Date.now();
+  } else {
+    emptyCacheTime = null;
   }
 
   return data;
@@ -33,6 +48,7 @@ export async function loadDocsIndex(): Promise<DocsData> {
 /** Clear cached docs (useful after hot reload) */
 export function clearDocsCache(): void {
   cachedDocs = null;
+  emptyCacheTime = null;
 }
 
 /** Get unique categories from loaded docs */

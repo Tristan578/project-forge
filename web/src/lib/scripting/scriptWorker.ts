@@ -1027,6 +1027,7 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
   }
 
   try {
+    // Inject loop guards before compilation to catch infinite loops at the source level.
     const guardedSource = injectLoopGuards(source);
     // Shadow dangerous globals; new Function() is intentional for sandbox.
     const fn = new Function( // codeql[js/code-injection]

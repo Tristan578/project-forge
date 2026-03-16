@@ -357,4 +357,25 @@ export const physicsJointHandlers: Record<string, ToolHandler> = {
     ctx.store.combineMeshes(p.data.entityIds, p.data.deleteSources, p.data.name);
     return { success: true, result: { message: `Combining ${p.data.entityIds.length} meshes` } };
   },
+
+
+  raycast_query: async (args, ctx) => {
+    const p = parseArgs(
+      z.object({
+        origin: zVec3,
+        direction: zVec3,
+        maxDistance: z.number().optional(),
+        requestId: z.string().optional(),
+      }),
+      args,
+    );
+    if (p.error) return p.error;
+    ctx.dispatchCommand('raycast_query', {
+      origin: p.data.origin,
+      direction: p.data.direction,
+      maxDistance: p.data.maxDistance ?? 100,
+      requestId: p.data.requestId,
+    });
+    return { success: true, result: { message: 'Raycast dispatched. Results arrive asynchronously via RAYCAST_RESULT event.' } };
+  },
 };
