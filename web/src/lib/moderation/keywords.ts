@@ -64,3 +64,33 @@ export function matchSpamKeywords(text: string): KeywordMatchResult {
 export function getSpamKeywords(): { keywords: string[]; phrases: string[] } {
   return { keywords: [...SPAM_KEYWORDS], phrases: [...SPAM_PHRASES] };
 }
+
+/** Combined default blocklist (single words + multi-word phrases) */
+export const DEFAULT_BLOCKED_KEYWORDS: string[] = [...SPAM_KEYWORDS, ...SPAM_PHRASES];
+
+/**
+ * Check whether text contains any blocked keyword.
+ * Uses word-boundary regex for ALL keywords including multi-word phrases.
+ *
+ * FIX (PF-457): Multi-word phrases use per-word \\b boundaries instead of
+ * plain substring matching, preventing "act now" from matching "react now".
+ */
+export function containsBlockedKeyword(
+  text: string,
+  keywords: string[] = DEFAULT_BLOCKED_KEYWORDS
+): boolean {
+  for (const keyword of keywords) {
+    const trimmed = keyword.trim();
+    if (!trimmed) continue;
+
+    if (trimmed.includes(' ')) {
+      const regex = buildPhraseRegex(trimmed);
+      if (regex.test(text)) return true;
+    } else {
+      const pattern = new RegExp(`\\b${escapeRegex(trimmed)}\\b`, 'i');
+      if (pattern.test(text)) return true;
+    }
+  }
+
+  return false;
+}
