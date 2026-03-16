@@ -29,6 +29,11 @@ vi.mock('@/stores/workspaceStore', () => ({
 
 vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
+  getCommandDispatcher: vi.fn(() => null),
+}));
+
+vi.mock('@/lib/storage/autoSave', () => ({
+  startAutoSave: vi.fn(() => ({ stop: vi.fn() })),
 }));
 
 vi.mock('@/stores/generationStore', () => ({
