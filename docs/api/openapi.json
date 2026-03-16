@@ -561,8 +561,7 @@
                       "type": "string"
                     },
                     "commit": {
-                      "type": "string",
-                      "description": "First 8 chars of git commit SHA"
+                      "type": "string"
                     },
                     "branch": {
                       "type": "string"

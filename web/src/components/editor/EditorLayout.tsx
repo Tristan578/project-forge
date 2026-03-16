@@ -31,6 +31,7 @@ import { PerformanceProfiler } from './PerformanceProfiler';
 import { GenerationStatus } from './GenerationStatus';
 import { HelpMenu } from './HelpMenu';
 import { AutoSaveRecovery } from './AutoSaveRecovery';
+import { TokenWarningBanner } from './TokenWarningBanner';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
@@ -435,6 +436,8 @@ export function EditorLayout() {
           {hasClerk && <UserButton afterSignOutUrl="/sign-in" />}
         </div>
       </div>
+
+      <TokenWarningBanner />
 
       {/* Main area: Sidebar + Dockview */}
       <div className="flex flex-1 overflow-hidden">
