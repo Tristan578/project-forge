@@ -1,22 +1,26 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 
 const STORAGE_KEY = 'forge-cookie-consent';
 
 /**
- * Cookie consent banner. Reads consent state from localStorage on mount
- * (via useEffect) to avoid SSR/hydration mismatch — localStorage is not
- * available during server rendering.
+ * Read consent state from localStorage. Returns false (show banner)
+ * when no consent has been stored. Safe to call during SSR — returns
+ * true (hide banner) when localStorage is unavailable.
+ */
+function hasStoredConsent(): boolean {
+  if (typeof localStorage === 'undefined') return true;
+  return localStorage.getItem(STORAGE_KEY) !== null;
+}
+
+/**
+ * Cookie consent banner. Uses a lazy useState initializer to read
+ * localStorage, avoiding both SSR hydration mismatches and the
+ * react-hooks/set-state-in-effect lint rule.
  */
 export function CookieConsent() {
-  const [consented, setConsented] = useState<boolean | null>(null);
-
-  // Read persisted consent on mount (client-only)
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    setConsented(stored === 'true');
-  }, []);
+  const [consented, setConsented] = useState(hasStoredConsent);
 
   const handleAccept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, 'true');
@@ -28,8 +32,7 @@ export function CookieConsent() {
     setConsented(true);
   }, []);
 
-  // Don't render during SSR (null) or if already consented
-  if (consented !== false) return null;
+  if (consented) return null;
 
   return (
     <div

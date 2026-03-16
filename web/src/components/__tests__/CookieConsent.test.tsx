@@ -17,16 +17,9 @@ describe('CookieConsent', () => {
     localStorage.removeItem(STORAGE_KEY);
   });
 
-  it('renders nothing initially during SSR (before useEffect)', () => {
-    // Before useEffect fires, consented is null so nothing renders
-    const { container } = render(<CookieConsent />);
-    // After mount + useEffect, it should show (no stored consent)
-    expect(container.innerHTML).not.toBe('');
-  });
-
-  it('shows banner when no consent is stored', async () => {
+  it('shows banner when no consent is stored', () => {
     render(<CookieConsent />);
-    expect(await screen.findByText(/cookies/i)).toBeDefined();
+    expect(screen.getByText(/cookies/i)).toBeDefined();
     expect(screen.getByText('Accept')).toBeDefined();
     expect(screen.getByText('Decline')).toBeDefined();
   });
@@ -34,25 +27,32 @@ describe('CookieConsent', () => {
   it('hides banner when consent was previously accepted', () => {
     localStorage.setItem(STORAGE_KEY, 'true');
     const { container } = render(<CookieConsent />);
-    // After useEffect reads 'true', banner should not render
     expect(container.querySelector('[role="region"]')).toBeNull();
   });
 
-  it('stores consent and hides banner on Accept click', async () => {
-    render(<CookieConsent />);
-    fireEvent.click(await screen.findByText('Accept'));
+  it('hides banner when consent was previously declined', () => {
+    localStorage.setItem(STORAGE_KEY, 'false');
+    const { container } = render(<CookieConsent />);
+    expect(container.querySelector('[role="region"]')).toBeNull();
+  });
+
+  it('stores consent and hides banner on Accept click', () => {
+    const { container } = render(<CookieConsent />);
+    fireEvent.click(screen.getByText('Accept'));
     expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
+    expect(container.querySelector('[role="region"]')).toBeNull();
   });
 
-  it('stores decline and hides banner on Decline click', async () => {
-    render(<CookieConsent />);
-    fireEvent.click(await screen.findByText('Decline'));
+  it('stores decline and hides banner on Decline click', () => {
+    const { container } = render(<CookieConsent />);
+    fireEvent.click(screen.getByText('Decline'));
     expect(localStorage.getItem(STORAGE_KEY)).toBe('false');
+    expect(container.querySelector('[role="region"]')).toBeNull();
   });
 
-  it('has correct ARIA attributes', async () => {
+  it('has correct ARIA attributes', () => {
     render(<CookieConsent />);
-    const region = await screen.findByRole('region');
+    const region = screen.getByRole('region');
     expect(region.getAttribute('aria-label')).toBe('Cookie consent');
   });
 });

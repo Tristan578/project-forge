@@ -51,9 +51,7 @@ describe('useEngine AbortController', () => {
 
   it('loadWasmFromPath passes signal to fetch when provided', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response());
-    const mockSignal = new AbortController().signal;
 
-    // Use dynamic import to get the module-level function
     // We can't directly test loadWasmFromPath since it's not exported,
     // but we verify the signal plumbing through the fetch call
     try {
