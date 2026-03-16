@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { apiErrorResponse, ErrorCode } from '@/lib/api/errors';
 
 interface RateLimitEntry {
   timestamps: number[];
@@ -120,10 +121,12 @@ export function rateLimitPublicRoute(
 export function rateLimitResponse(remaining: number, resetAt: number): NextResponse {
   const resetInSeconds = Math.ceil((resetAt - Date.now()) / 1000);
 
-  return NextResponse.json(
-    { error: 'Too many requests. Please try again later.' },
+  return apiErrorResponse(
+    ErrorCode.RATE_LIMITED,
+    'Too many requests. Please try again later.',
+    429,
     {
-      status: 429,
+      details: { retryAfterSeconds: resetInSeconds },
       headers: {
         'X-RateLimit-Remaining': remaining.toString(),
         'X-RateLimit-Reset': Math.floor(resetAt / 1000).toString(),

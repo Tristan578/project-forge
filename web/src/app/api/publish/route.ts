@@ -6,6 +6,7 @@ import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
+import { apiErrorResponse, ErrorCode } from '@/lib/api/errors';
 
 export async function POST(request: NextRequest) {
   const authResult = await authenticateRequest();
@@ -34,24 +35,33 @@ export async function POST(request: NextRequest) {
   // Content moderation check on title and description
   const titleMod = moderateContent(titleResult.value);
   if (titleMod.severity === 'block') {
-    return NextResponse.json(
-      { error: 'Game title contains prohibited content' },
-      { status: 422 }
+    return apiErrorResponse(
+      ErrorCode.CONTENT_BLOCKED,
+      'Game title contains prohibited content',
+      422,
+      { details: { field: 'title' } }
     );
   }
   if (descResult.value) {
     const descMod = moderateContent(descResult.value);
     if (descMod.severity === 'block') {
-      return NextResponse.json(
-        { error: 'Game description contains prohibited content' },
-        { status: 422 }
+      return apiErrorResponse(
+        ErrorCode.CONTENT_BLOCKED,
+        'Game description contains prohibited content',
+        422,
+        { details: { field: 'description' } }
       );
     }
   }
 
   // Validate slug format
   if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slugResult.value)) {
-    return NextResponse.json({ error: 'Invalid slug format' }, { status: 400 });
+    return apiErrorResponse(
+      ErrorCode.VALIDATION_ERROR,
+      'Invalid slug format. Use lowercase letters, numbers, and hyphens.',
+      400,
+      { details: { field: 'slug', pattern: '^[a-z0-9][a-z0-9-]*[a-z0-9]$' } }
+    );
   }
 
   const db = getDb();
@@ -64,7 +74,12 @@ export async function POST(request: NextRequest) {
     .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published')));
 
   if (existingPublished.length >= maxPublished) {
-    return NextResponse.json({ error: `Publish limit reached (${maxPublished} for ${user.tier} tier)` }, { status: 403 });
+    return apiErrorResponse(
+      ErrorCode.FORBIDDEN,
+      `Publish limit reached (${maxPublished} for ${user.tier} tier). Upgrade to publish more games.`,
+      403,
+      { details: { limit: maxPublished, tier: user.tier } }
+    );
   }
 
   // Check slug availability (for this user)
@@ -77,7 +92,7 @@ export async function POST(request: NextRequest) {
   const [project] = await db.select().from(projects)
     .where(and(eq(projects.id, projectIdResult.value), eq(projects.userId, user.id)))
     .limit(1);
-  if (!project) return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+  if (!project) return apiErrorResponse(ErrorCode.NOT_FOUND, 'Project not found', 404);
 
   const gameUrl = `/play/${clerkId}/${slugResult.value}`;
 

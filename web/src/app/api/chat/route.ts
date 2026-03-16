@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import { apiErrorResponse, ErrorCode } from '@/lib/api/errors';
 import Anthropic from '@anthropic-ai/sdk';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
@@ -150,9 +151,10 @@ export async function POST(request: NextRequest) {
   //    the more precise MAX_INPUT_CHARS check below enforces the actual token budget)
   const bodyText = await request.text();
   if (!validateBodySize(bodyText, 1024 * 1024)) {
-    return Response.json(
-      { error: 'Request too large. Maximum 1MB allowed.' },
-      { status: 413 }
+    return apiErrorResponse(
+      ErrorCode.PAYLOAD_TOO_LARGE,
+      'Request too large. Maximum 1MB allowed.',
+      413
     );
   }
 
@@ -167,12 +169,12 @@ export async function POST(request: NextRequest) {
   try {
     body = JSON.parse(bodyText);
   } catch {
-    return Response.json({ error: 'Invalid JSON' }, { status: 400 });
+    return apiErrorResponse(ErrorCode.VALIDATION_ERROR, 'Invalid JSON body', 400);
   }
 
   const { messages, model, sceneContext, thinking } = body;
   if (!messages || !Array.isArray(messages)) {
-    return Response.json({ error: 'messages array required' }, { status: 400 });
+    return apiErrorResponse(ErrorCode.VALIDATION_ERROR, 'messages array required', 400);
   }
 
   // 4. Validate message length and content
@@ -182,17 +184,20 @@ export async function POST(request: NextRequest) {
     }
 
     if (msg.content.length > 4000) {
-      return Response.json(
-        { error: 'Message too long. Maximum 4000 characters per message.' },
-        { status: 400 }
+      return apiErrorResponse(
+        ErrorCode.VALIDATION_ERROR,
+        'Message too long. Maximum 4000 characters per message.',
+        400,
+        { details: { maxLength: 4000 } }
       );
     }
 
     // Detect prompt injection attempts
     if (msg.role === 'user' && detectPromptInjection(msg.content)) {
-      return Response.json(
-        { error: 'Message contains suspicious patterns.' },
-        { status: 400 }
+      return apiErrorResponse(
+        ErrorCode.VALIDATION_ERROR,
+        'Message contains suspicious patterns.',
+        400
       );
     }
 
@@ -223,7 +228,9 @@ export async function POST(request: NextRequest) {
     usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
-      return Response.json({ error: err.message, code: err.code }, { status: 402 });
+      return apiErrorResponse(ErrorCode.PAYMENT_REQUIRED, err.message, 402, {
+        details: { code: err.code },
+      });
     }
     throw err;
   }
@@ -249,9 +256,10 @@ export async function POST(request: NextRequest) {
     }
   }
   if (totalChars > MAX_INPUT_CHARS) {
-    return Response.json(
-      { error: 'Conversation too long. Please start a new conversation or clear chat.' },
-      { status: 413 }
+    return apiErrorResponse(
+      ErrorCode.PAYLOAD_TOO_LARGE,
+      'Conversation too long. Please start a new conversation or clear chat.',
+      413
     );
   }
 

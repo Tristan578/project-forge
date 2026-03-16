@@ -90,8 +90,16 @@ export function registerTools(server: McpServer, bridge: EditorBridge): void {
           };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          const code = error instanceof Error && 'code' in error
+            ? String((error as Error & { code?: string }).code)
+            : 'INTERNAL_ERROR';
           return {
-            content: [{ type: 'text' as const, text: `Error: ${message}` }],
+            content: [
+              {
+                type: 'text' as const,
+                text: JSON.stringify({ code, message }),
+              },
+            ],
             isError: true,
           };
         }
