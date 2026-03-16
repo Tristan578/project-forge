@@ -1005,11 +1005,7 @@ describe('graphCompiler - Edge Cases', () => {
   // ==================================================================
 
   describe('Cyclic Graph Detection', () => {
-    it('handles two-node exec cycle (A → B → A) without infinite recursion', () => {
-      // compileExecChain has no visited-node tracking, but cycles only happen
-      // if exec_out of B points back to A. Since compileExecNode recursively
-      // calls compileExecChain on the SAME node's exec_out, a cycle would
-      // cause a stack overflow. This test verifies the compiler doesn't hang.
+    it('detects two-node exec cycle (A -> B -> A) and returns compile error', () => {
       const graph: VisualScriptGraph = {
         nodes: [
           node('1', 'OnStart'),
@@ -1019,22 +1015,18 @@ describe('graphCompiler - Edge Cases', () => {
         edges: [
           execEdge('e1', '1', 'a'),
           execEdge('e2', 'a', 'b'),
-          execEdge('e3', 'b', 'a'), // Cycle: b → a
+          execEdge('e3', 'b', 'a'), // Cycle: b -> a
         ],
       };
-      // This will cause infinite recursion in the current compiler.
-      // We test that it either completes or throws (not hangs forever).
-      try {
-        const result = compileGraph(graph);
-        // If it somehow completes, that's fine — check it didn't crash
-        expect(result).toBeDefined();
-      } catch (e) {
-        // Stack overflow is expected with the current implementation
-        expect(e).toBeInstanceOf(RangeError);
-      }
+      const result = compileGraph(graph);
+      expect(result.success).toBe(false);
+      expect(result.errors.length).toBeGreaterThan(0);
+      const cycleError = result.errors.find(e => e.message.includes('Cycle detected'));
+      expect(cycleError).toBeDefined();
+      expect(cycleError!.nodeId).toBe('a');
     });
 
-    it('handles self-referencing exec edge (node exec_out → own exec_in)', () => {
+    it('detects self-referencing exec edge (node exec_out -> own exec_in)', () => {
       const graph: VisualScriptGraph = {
         nodes: [
           node('1', 'OnStart'),
@@ -1045,16 +1037,14 @@ describe('graphCompiler - Edge Cases', () => {
           execEdge('e2', '2', '2'), // Self-loop
         ],
       };
-      try {
-        const result = compileGraph(graph);
-        expect(result).toBeDefined();
-      } catch (e) {
-        // Stack overflow expected
-        expect(e).toBeInstanceOf(RangeError);
-      }
+      const result = compileGraph(graph);
+      expect(result.success).toBe(false);
+      const cycleError = result.errors.find(e => e.message.includes('Cycle detected'));
+      expect(cycleError).toBeDefined();
+      expect(cycleError!.nodeId).toBe('2');
     });
 
-    it('handles three-node exec cycle (A → B → C → A)', () => {
+    it('detects three-node exec cycle (A -> B -> C -> A)', () => {
       const graph: VisualScriptGraph = {
         nodes: [
           node('1', 'OnStart'),
@@ -1069,16 +1059,18 @@ describe('graphCompiler - Edge Cases', () => {
           execEdge('e4', 'c', 'a'), // Cycle back
         ],
       };
-      try {
-        const result = compileGraph(graph);
-        expect(result).toBeDefined();
-      } catch (e) {
-        expect(e).toBeDefined();
-      }
+      const result = compileGraph(graph);
+      expect(result.success).toBe(false);
+      const cycleError = result.errors.find(e => e.message.includes('Cycle detected'));
+      expect(cycleError).toBeDefined();
+      expect(cycleError!.nodeId).toBe('a');
+      // The error message should contain the cycle path
+      expect(cycleError!.message).toContain('a');
+      expect(cycleError!.message).toContain('b');
+      expect(cycleError!.message).toContain('c');
     });
 
-    it('handles data node cycle (A feeds B, B feeds A) without infinite recursion', () => {
-      // Data node cycles: Add.result → Multiply.a, Multiply.result → Add.a
+    it('detects data node cycle (Add feeds Multiply, Multiply feeds Add)', () => {
       const graph: VisualScriptGraph = {
         nodes: [
           node('1', 'OnStart'),
@@ -1093,13 +1085,33 @@ describe('graphCompiler - Edge Cases', () => {
           dataEdge('e4', 'add', 'result', 'set', 'value'),
         ],
       };
-      try {
-        const result = compileGraph(graph);
-        expect(result).toBeDefined();
-      } catch (e) {
-        // Stack overflow expected from recursive resolveInput
-        expect(e).toBeInstanceOf(RangeError);
-      }
+      const result = compileGraph(graph);
+      expect(result.success).toBe(false);
+      const cycleError = result.errors.find(e => e.message.includes('Data cycle detected'));
+      expect(cycleError).toBeDefined();
+    });
+
+    it('compiles valid acyclic graph correctly after cycle detection was added (regression)', () => {
+      // Linear chain: OnStart -> SetVariable -> Translate -> PlaySound
+      const graph: VisualScriptGraph = {
+        nodes: [
+          node('1', 'OnStart'),
+          node('2', 'SetVariable', { key: 'score', value: 0 }),
+          node('3', 'Translate', { entity: 'e1', dx: 1, dy: 0, dz: 0 }),
+          node('4', 'PlaySound', { entity: 'sfx1' }),
+        ],
+        edges: [
+          execEdge('e1', '1', '2'),
+          execEdge('e2', '2', '3'),
+          execEdge('e3', '3', '4'),
+        ],
+      };
+      const result = compileGraph(graph);
+      expect(result.success).toBe(true);
+      expect(result.errors).toHaveLength(0);
+      expect(result.code).toContain('forge.state.set("score", 0)');
+      expect(result.code).toContain('forge.translate');
+      expect(result.code).toContain('forge.audio.play');
     });
   });
 
