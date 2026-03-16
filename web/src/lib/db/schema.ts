@@ -233,6 +233,7 @@ export const publishedGames = pgTable(
   (table) => [
     uniqueIndex('uq_published_games_slug').on(table.userId, table.slug),
     index('idx_published_games_user').on(table.userId),
+    index('idx_published_games_slug').on(table.slug),
   ]
 );
 
