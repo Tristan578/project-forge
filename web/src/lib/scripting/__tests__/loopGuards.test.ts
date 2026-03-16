@@ -46,13 +46,11 @@ function injectLoopGuards(source: string): string {
 // Helper: compile and run guarded code to verify it produces valid JS.
 // ---------------------------------------------------------------------------
 
-/* eslint-disable @typescript-eslint/no-implied-eval */
 function compileAndRun(source: string): void {
   const guarded = injectLoopGuards(source);
   const fn = new Function(guarded); // codeql[js/code-injection] test-only sandbox verification
   fn();
 }
-/* eslint-enable @typescript-eslint/no-implied-eval */
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -75,7 +73,6 @@ describe('injectLoopGuards', () => {
     it('terminates an infinite braced do...while', () => {
       const source = 'let x = 0; do { /* no increment */ } while (true);';
       const guarded = injectLoopGuards(source);
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const fn = new Function(guarded); // codeql[js/code-injection] test-only
       expect(() => fn()).toThrow('Infinite loop detected');
     });
@@ -97,7 +94,6 @@ describe('injectLoopGuards', () => {
     it('terminates an infinite braceless do...while', () => {
       const source = 'let x = 0; do x = x; while (true);';
       const guarded = injectLoopGuards(source);
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const fn = new Function(guarded); // codeql[js/code-injection] test-only
       expect(() => fn()).toThrow('Infinite loop detected');
     });
@@ -118,7 +114,6 @@ describe('injectLoopGuards', () => {
     it('terminates an infinite while loop', () => {
       const source = 'while (true) { }';
       const guarded = injectLoopGuards(source);
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const fn = new Function(guarded); // codeql[js/code-injection] test-only
       expect(() => fn()).toThrow('Infinite loop detected');
     });
@@ -147,7 +142,6 @@ describe('injectLoopGuards', () => {
     it('terminates an infinite for loop', () => {
       const source = 'for (;;) { }';
       const guarded = injectLoopGuards(source);
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const fn = new Function(guarded); // codeql[js/code-injection] test-only
       expect(() => fn()).toThrow('Infinite loop detected');
     });
@@ -192,7 +186,6 @@ describe('injectLoopGuards', () => {
     it('handles do...while with multiline statement', () => {
       const source = 'let x = 0; do\n  x++;\nwhile (x < 5);';
       const guarded = injectLoopGuards(source);
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
       const fn = new Function(guarded); // codeql[js/code-injection] test-only
       expect(() => fn()).not.toThrow();
     });
