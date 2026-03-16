@@ -8,9 +8,11 @@ export const dynamic = 'force-dynamic';
 
 /**
  * POST /api/admin/moderation/bulk
- * Perform a bulk moderation action on multiple comments in a single transaction.
+ * Bulk moderation action on multiple comments.
  * Body: { action: 'approve' | 'delete', commentIds: string[] }
- * Returns: { processed: number, errors: string[] }
+ *
+ * FIX (PF-457): Uses .returning() to report actual DB rows affected,
+ * not ids.length which was wrong when IDs didn't exist.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -42,7 +44,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate all IDs are strings
     const invalidIds = (commentIds as unknown[]).filter((id) => typeof id !== 'string');
     if (invalidIds.length > 0) {
       return NextResponse.json(
@@ -54,25 +55,26 @@ export async function POST(req: NextRequest) {
     const ids = commentIds as string[];
     const errors: string[] = [];
     let processed = 0;
-
     const db = getDb();
 
-    // Process all comments in a single database operation
     try {
       if (action === 'approve') {
-        await db
+        const result = await db
           .update(gameComments)
           .set({ flagged: 0 })
-          .where(inArray(gameComments.id, ids));
+          .where(inArray(gameComments.id, ids))
+          .returning({ id: gameComments.id });
+        processed = result.length;
       } else {
-        await db
+        const result = await db
           .delete(gameComments)
-          .where(inArray(gameComments.id, ids));
+          .where(inArray(gameComments.id, ids))
+          .returning({ id: gameComments.id });
+        processed = result.length;
       }
-      processed = ids.length;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      errors.push(`Bulk operation failed: ${message}`);
+      errors.push('Bulk operation failed: ' + message);
     }
 
     return NextResponse.json({ processed, errors });

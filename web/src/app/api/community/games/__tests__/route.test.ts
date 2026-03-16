@@ -50,6 +50,7 @@ function makeGameRow(overrides: Partial<Record<string, unknown>> = {}) {
     authorName: 'Alice',
     playCount: 42,
     cdnUrl: '/play/user-1/test-game',
+    thumbnail: null,
     createdAt: new Date('2024-01-01T00:00:00.000Z'),
     likeCount: 5,
     avgRating: 4.2,

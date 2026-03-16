@@ -1,143 +1,68 @@
 import { describe, it, expect } from 'vitest';
-import { containsBlockedKeyword, DEFAULT_BLOCKED_KEYWORDS } from '@/lib/moderation/keywords';
+import { matchSpamKeywords, getSpamKeywords } from '../keywords';
 
-describe('DEFAULT_BLOCKED_KEYWORDS', () => {
-  it('is a non-empty array of strings', () => {
-    expect(Array.isArray(DEFAULT_BLOCKED_KEYWORDS)).toBe(true);
-    expect(DEFAULT_BLOCKED_KEYWORDS.length).toBeGreaterThan(0);
-    for (const kw of DEFAULT_BLOCKED_KEYWORDS) {
-      expect(typeof kw).toBe('string');
-    }
-  });
-});
-
-describe('containsBlockedKeyword', () => {
-  describe('exact single-word matches', () => {
-    it('detects a blocked keyword at the start of the string', () => {
-      expect(containsBlockedKeyword('fuck this game')).toBe(true);
+describe('keywords', () => {
+  describe('matchSpamKeywords', () => {
+    it('should not match clean text', () => {
+      const result = matchSpamKeywords('Build a platformer with react and interact');
+      expect(result.matched).toBe(false);
     });
 
-    it('detects a blocked keyword at the end of the string', () => {
-      expect(containsBlockedKeyword('I hate this shit')).toBe(true);
+    it('should match single-word spam keywords', () => {
+      const result = matchSpamKeywords('Buy viagra online');
+      expect(result.matched).toBe(true);
+      expect(result.matches).toContain('viagra');
     });
 
-    it('detects a blocked keyword in the middle of a sentence', () => {
-      expect(containsBlockedKeyword('you are an asshole for doing this')).toBe(true);
+    it('should match exact "act now" phrase', () => {
+      const result = matchSpamKeywords('You should act now!');
+      expect(result.matched).toBe(true);
+      expect(result.matches).toContain('act now');
     });
 
-    it('detects keyword that is the entire string', () => {
-      expect(containsBlockedKeyword('fuck')).toBe(true);
-    });
-  });
-
-  describe('case insensitivity', () => {
-    it('matches uppercase keyword', () => {
-      expect(containsBlockedKeyword('FUCK you')).toBe(true);
+    it('should NOT match "react now" for "act now" (PF-457)', () => {
+      const result = matchSpamKeywords('react now supports server components');
+      expect(result.matched).toBe(false);
     });
 
-    it('matches mixed-case keyword', () => {
-      expect(containsBlockedKeyword('Shit happens')).toBe(true);
+    it('should NOT match "interact now" for "act now"', () => {
+      const result = matchSpamKeywords('interact now with the game world');
+      expect(result.matched).toBe(false);
     });
 
-    it('matches all-caps with surrounding context', () => {
-      expect(containsBlockedKeyword('this is BITCH behaviour')).toBe(true);
-    });
-  });
-
-  describe('word-boundary enforcement (no false positives)', () => {
-    it('does NOT match "ass" inside "grass"', () => {
-      expect(containsBlockedKeyword('The grass is green')).toBe(false);
+    it('should match "free money" as exact phrase', () => {
+      const result = matchSpamKeywords('Get free money instantly!');
+      expect(result.matched).toBe(true);
+      expect(result.matches).toContain('free money');
     });
 
-    it('does NOT match "ass" inside "classic"', () => {
-      expect(containsBlockedKeyword('a classic game')).toBe(false);
+    it('should NOT match "free" alone from "free money"', () => {
+      const result = matchSpamKeywords('This game is free to play');
+      expect(result.matched).toBe(false);
     });
 
-    it('does NOT match "dick" inside "dictionary"', () => {
-      expect(containsBlockedKeyword('check the dictionary')).toBe(false);
+    it('should match case-insensitively', () => {
+      const result = matchSpamKeywords('ACT NOW for a LIMITED OFFER');
+      expect(result.matched).toBe(true);
     });
 
-    it('does NOT match "cunt" inside "punctuation"', () => {
-      expect(containsBlockedKeyword('watch your punctuation')).toBe(false);
+    it('should handle empty string', () => {
+      const result = matchSpamKeywords('');
+      expect(result.matched).toBe(false);
     });
 
-    it('does NOT match "shit" inside "shifting"', () => {
-      expect(containsBlockedKeyword('the shifting sands')).toBe(false);
+    it('should match at word boundaries with punctuation', () => {
+      const result = matchSpamKeywords('Win at the casino!');
+      expect(result.matched).toBe(true);
+      expect(result.matches).toContain('casino');
     });
   });
 
-  describe('multi-word phrase matching', () => {
-    it('detects "buy now" phrase', () => {
-      expect(containsBlockedKeyword('buy now and save big')).toBe(true);
-    });
-
-    it('detects "free money" phrase', () => {
-      expect(containsBlockedKeyword('win free money today')).toBe(true);
-    });
-
-    it('detects "kill yourself" phrase', () => {
-      expect(containsBlockedKeyword('you should kill yourself')).toBe(true);
-    });
-
-    it('detects phrase case-insensitively', () => {
-      expect(containsBlockedKeyword('BUY NOW to get started')).toBe(true);
-    });
-
-    it('does NOT match partial phrase', () => {
-      // "click" alone is not in the list, only "click here"
-      expect(containsBlockedKeyword('click the button')).toBe(false);
-    });
-  });
-
-  describe('clean text', () => {
-    it('returns false for completely clean text', () => {
-      expect(containsBlockedKeyword('This is a great game!')).toBe(false);
-    });
-
-    it('returns false for empty string', () => {
-      expect(containsBlockedKeyword('')).toBe(false);
-    });
-
-    it('returns false for whitespace only', () => {
-      expect(containsBlockedKeyword('   ')).toBe(false);
-    });
-  });
-
-  describe('custom keywords list', () => {
-    it('uses provided keywords instead of defaults', () => {
-      expect(containsBlockedKeyword('badword here', ['badword'])).toBe(true);
-    });
-
-    it('does NOT match default keywords when custom list provided', () => {
-      // "fuck" is in defaults but NOT in custom list
-      expect(containsBlockedKeyword('fuck this', ['badword'])).toBe(false);
-    });
-
-    it('handles empty custom keywords list (no matches)', () => {
-      expect(containsBlockedKeyword('fuck this', [])).toBe(false);
-    });
-
-    it('handles custom multi-word phrase', () => {
-      expect(containsBlockedKeyword('buy cheap items now', ['buy cheap'])).toBe(true);
-    });
-
-    it('handles custom keyword with word-boundary', () => {
-      // "spam" should match "spam" but not "spammer" when using word boundaries
-      expect(containsBlockedKeyword('this is spam', ['spam'])).toBe(true);
-    });
-  });
-
-  describe('spam patterns in default list', () => {
-    it('detects "kys" abbreviation', () => {
-      expect(containsBlockedKeyword('just kys already')).toBe(true);
-    });
-
-    it('detects "suicide" keyword', () => {
-      expect(containsBlockedKeyword('talking about suicide')).toBe(true);
-    });
-
-    it('detects "retard" slur', () => {
-      expect(containsBlockedKeyword('stop being a retard')).toBe(true);
+  describe('getSpamKeywords', () => {
+    it('should return non-empty lists', () => {
+      const { keywords, phrases } = getSpamKeywords();
+      expect(keywords.length).toBeGreaterThan(0);
+      expect(phrases.length).toBeGreaterThan(0);
     });
   });
 });

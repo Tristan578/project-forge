@@ -18,6 +18,7 @@ const {
   mockConstructEvent,
   mockClaimEvent,
   mockReleaseEvent,
+  _mockFinalizeEvent,
   mockHandleSubscriptionCreated,
   mockHandleSubscriptionUpdated,
   mockHandleSubscriptionDeleted,
@@ -25,8 +26,9 @@ const {
   mockHandleInvoicePaymentFailed,
 } = vi.hoisted(() => ({
   mockConstructEvent: vi.fn(),
-  mockClaimEvent: vi.fn(() => true),
-  mockReleaseEvent: vi.fn(),
+  mockClaimEvent: vi.fn(() => Promise.resolve(true)),
+  mockReleaseEvent: vi.fn(() => Promise.resolve()),
+  _mockFinalizeEvent: vi.fn(() => Promise.resolve()),
   mockHandleSubscriptionCreated: vi.fn(() => Promise.resolve()),
   mockHandleSubscriptionUpdated: vi.fn(() => Promise.resolve()),
   mockHandleSubscriptionDeleted: vi.fn(() => Promise.resolve()),
@@ -47,8 +49,8 @@ vi.mock('@/lib/db/client', () => ({
   })),
 }));
 
-vi.mock('@/lib/db/schema', () => ({ users: {} }));
-vi.mock('drizzle-orm', () => ({ eq: vi.fn() }));
+vi.mock('@/lib/db/schema', () => ({ users: {}, webhookEvents: { eventId: 'eventId' } }));
+vi.mock('drizzle-orm', () => ({ eq: vi.fn(), and: vi.fn(), gt: vi.fn(), lt: vi.fn(), sql: vi.fn() }));
 
 vi.mock('@/lib/tokens/service', () => ({
   creditAddonTokens: vi.fn(() => Promise.resolve()),
@@ -62,9 +64,13 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-vi.mock('@/lib/billing/subscription-lifecycle', () => ({
+vi.mock('@/lib/billing/webhookIdempotency', () => ({
   claimEvent: mockClaimEvent,
   releaseEvent: mockReleaseEvent,
+  finalizeEvent: _mockFinalizeEvent,
+}));
+
+vi.mock('@/lib/billing/subscription-lifecycle', () => ({
   handleSubscriptionCreated: mockHandleSubscriptionCreated,
   handleSubscriptionUpdated: mockHandleSubscriptionUpdated,
   handleSubscriptionDeleted: mockHandleSubscriptionDeleted,
@@ -133,7 +139,7 @@ function makeStripeEvent(type: string, dataObject: unknown, id = 'evt_001') {
 describe('POST /api/stripe/webhook', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockClaimEvent.mockReturnValue(true);
+    mockClaimEvent.mockResolvedValue(true);
     mockHandleSubscriptionCreated.mockResolvedValue(undefined);
     mockHandleSubscriptionUpdated.mockResolvedValue(undefined);
     mockHandleSubscriptionDeleted.mockResolvedValue(undefined);
@@ -188,7 +194,7 @@ describe('POST /api/stripe/webhook', () => {
 
   it('returns 200 with duplicate:true for already-processed events', async () => {
     mockConstructEvent.mockReturnValue(makeStripeEvent('customer.subscription.created', makeSubscription()));
-    mockClaimEvent.mockReturnValue(false);
+    mockClaimEvent.mockResolvedValue(false);
 
     const req = makeRequest('{}');
     const res = await POST(req);
@@ -374,7 +380,7 @@ describe('POST /api/stripe/webhook', () => {
   // Error recovery
   // -------------------------------------------------------------------------
 
-  it('releases event claim and still returns 200 on handler error', async () => {
+  it('releases event claim and returns 500 on handler error', async () => {
     const { captureException } = await import('@/lib/monitoring/sentry-server');
     mockHandleSubscriptionCreated.mockRejectedValueOnce(new Error('DB write failed'));
 
@@ -383,8 +389,8 @@ describe('POST /api/stripe/webhook', () => {
 
     const res = await POST(makeRequest('{}'));
 
-    expect(res.status).toBe(200);
-    expect(mockReleaseEvent).toHaveBeenCalledWith('evt_err');
+    expect(res.status).toBe(500);
+    expect(mockReleaseEvent).toHaveBeenCalledWith('evt_err', 'stripe');
     expect(captureException).toHaveBeenCalled();
   });
 
