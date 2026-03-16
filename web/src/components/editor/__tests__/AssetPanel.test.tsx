@@ -11,7 +11,7 @@ import { AssetPanel } from '../AssetPanel';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('../MaterialLibraryPanel', () => ({

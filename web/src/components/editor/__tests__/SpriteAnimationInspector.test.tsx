@@ -9,7 +9,7 @@ import { SpriteAnimationInspector } from '../SpriteAnimationInspector';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 interface MockClip {

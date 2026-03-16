@@ -4,14 +4,12 @@ import { SceneHierarchy, flattenVisibleNodes } from '../SceneHierarchy';
 import type { SceneGraph } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
-vi.mock('lucide-react', () => {
-  const stub = () => null;
-  return new Proxy({ __esModule: true }, {
-    get: (target, name) => (name in target ? (target as Record<string, unknown>)[name as string] : stub),
-  });
+vi.mock('lucide-react', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('lucide-react');
+  return Object.fromEntries(Object.keys(actual).map(k => [k, () => null]));
 });
 
 vi.mock('@/hooks/useEngine', () => ({

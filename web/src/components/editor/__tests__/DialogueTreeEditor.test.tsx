@@ -11,7 +11,7 @@ import { DialogueTreeEditor } from '../DialogueTreeEditor';
 import { useDialogueStore } from '@/stores/dialogueStore';
 
 vi.mock('@/stores/dialogueStore', () => ({
-  useDialogueStore: vi.fn(),
+  useDialogueStore: vi.fn(() => ({})),
 }));
 
 const mockSelectTree = vi.fn();

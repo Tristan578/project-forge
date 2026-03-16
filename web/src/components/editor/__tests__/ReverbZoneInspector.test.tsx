@@ -11,11 +11,11 @@ import { useWorkspaceStore } from '@/stores/workspaceStore';
 import type { ReverbZoneData } from '@/stores/slices/types';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/components/ui/InfoTooltip', () => ({

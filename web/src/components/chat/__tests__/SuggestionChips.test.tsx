@@ -10,11 +10,11 @@ import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: vi.fn(),
+  useChatStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/chat/suggestions', () => ({

@@ -21,6 +21,7 @@ vi.mock('../events', () => ({
   handleGameEvent: vi.fn().mockReturnValue(false),
   handleSpriteEvent: vi.fn().mockReturnValue(false),
   handleParticleEvent: vi.fn().mockReturnValue(false),
+  handlePerformanceEvent: vi.fn().mockReturnValue(false),
   handleEditModeEvent: vi.fn().mockReturnValue(false),
 }));
 

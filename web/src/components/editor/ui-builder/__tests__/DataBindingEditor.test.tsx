@@ -13,7 +13,7 @@ import { useUIBuilderStore } from '@/stores/uiBuilderStore';
 import type { DataBinding } from '@/stores/uiBuilderStore';
 
 vi.mock('@/stores/uiBuilderStore', () => ({
-  useUIBuilderStore: vi.fn(),
+  useUIBuilderStore: vi.fn(() => ({})),
 }));
 
 const BASE_PROPS = {

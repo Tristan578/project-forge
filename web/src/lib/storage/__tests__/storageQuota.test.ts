@@ -49,21 +49,38 @@ function buildStore(quotaBytes = 100_000) {
 
 /** Install spies on the real `localStorage` object using the provided store. */
 function installStoreSpy(store: ReturnType<typeof buildStore>) {
-  vi.spyOn(localStorage, 'key').mockImplementation((i) => store.api.key(i));
-  vi.spyOn(localStorage, 'getItem').mockImplementation((k) => store.api.getItem(k));
-  vi.spyOn(localStorage, 'setItem').mockImplementation((k, v) => store.api.setItem(k, v));
-  vi.spyOn(localStorage, 'removeItem').mockImplementation((k) => store.api.removeItem(k));
-  vi.spyOn(localStorage, 'clear').mockImplementation(() => store.api.clear());
-  // `length` is a getter — use vi.spyOn on the getter
-  vi.spyOn(localStorage, 'length', 'get').mockImplementation(() => store.api.length);
+  // Node 22's localStorage is a Proxy where defineProperty on 'length' fails.
+  // Replace the entire globalThis.localStorage with a plain object that supports spying.
+  const mock = {
+    get length() { return store.api.length; },
+    key: (i: number) => store.api.key(i),
+    getItem: (k: string) => store.api.getItem(k),
+    setItem: (k: string, v: string) => store.api.setItem(k, v),
+    removeItem: (k: string) => store.api.removeItem(k),
+    clear: () => store.api.clear(),
+  } as unknown as Storage;
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: mock,
+    writable: true,
+    configurable: true,
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
+// Capture the original localStorage for restoration after each test
+const _originalLocalStorage = globalThis.localStorage;
+
 describe('storageQuota', () => {
   afterEach(() => {
+    // Restore original localStorage (installStoreSpy replaces it)
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: _originalLocalStorage,
+      writable: true,
+      configurable: true,
+    });
     vi.restoreAllMocks();
     _resetCapacityCache();
   });

@@ -6,11 +6,11 @@ import { useOnboardingStore, type OnboardingState } from '@/stores/onboardingSto
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+  useWorkspaceStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/onboardingStore', () => ({
-  useOnboardingStore: vi.fn(),
+  useOnboardingStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/workspace/recentProjects', () => ({

@@ -6,12 +6,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, act } from '@/test/utils/componentTestUtils';
+import { render, screen, fireEvent, cleanup, act, waitFor } from '@/test/utils/componentTestUtils';
 import { ExportDialog } from '../ExportDialog';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/export/exportEngine', () => ({
@@ -34,6 +34,10 @@ vi.mock('@/lib/export/presets', () => ({
 vi.mock('@/lib/export/embedGenerator', () => ({
   generateResponsiveEmbedSnippet: vi.fn(() => '<iframe src="game.html"></iframe>'),
   generateEmbedSnippet: vi.fn(() => '<iframe src="game.html" width="1920" height="1080"></iframe>'),
+}));
+
+vi.mock('@/lib/analytics/events', () => ({
+  trackGameExported: vi.fn(),
 }));
 
 const mockSetExporting = vi.fn();
@@ -314,7 +318,9 @@ describe('ExportDialog', () => {
       expect.any(Blob),
       expect.stringContaining('.html'),
     );
-    expect(onClose).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 
   // ── Resolution selector ───────────────────────────────────────────────

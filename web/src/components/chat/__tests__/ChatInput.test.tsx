@@ -11,7 +11,7 @@ import { ChatInput } from '../ChatInput';
 import { useChatStore } from '@/stores/chatStore';
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: Object.assign(vi.fn(), {
+  useChatStore: Object.assign(vi.fn(() => ({})), {
     setState: vi.fn(),
   }),
 }));

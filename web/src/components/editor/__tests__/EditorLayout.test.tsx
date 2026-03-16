@@ -16,23 +16,23 @@ import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 
 vi.mock('@/stores/chatStore', () => ({
-  useChatStore: Object.assign(vi.fn(), {
+  useChatStore: Object.assign(vi.fn(() => ({})), {
     setState: vi.fn(),
   }),
 }));
 
 vi.mock('@/stores/workspaceStore', () => ({
-  useWorkspaceStore: Object.assign(vi.fn(), {
+  useWorkspaceStore: Object.assign(vi.fn(() => ({})), {
     getState: vi.fn(() => ({ openPanel: vi.fn() })),
   }),
 }));
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/stores/generationStore', () => ({
-  useGenerationStore: vi.fn(),
+  useGenerationStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/hooks/useResponsiveLayout', () => ({
@@ -240,18 +240,18 @@ describe('EditorLayout', () => {
 
   // ── Help menu ─────────────────────────────────────────────────────────
 
-  it('opens keyboard shortcuts panel', () => {
+  it('opens keyboard shortcuts panel', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('open-shortcuts'));
-    expect(screen.getByTestId('shortcuts-panel')).toBeDefined();
+    expect(await screen.findByTestId('shortcuts-panel')).toBeDefined();
   });
 
-  it('opens feedback dialog', () => {
+  it('opens feedback dialog', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('open-feedback'));
-    expect(screen.getByTestId('feedback-dialog')).toBeDefined();
+    expect(await screen.findByTestId('feedback-dialog')).toBeDefined();
   });
 
   // ── Global keyboard shortcuts ─────────────────────────────────────────
@@ -265,13 +265,13 @@ describe('EditorLayout', () => {
     expect(mockToggleChatOverlay).toHaveBeenCalledOnce();
   });
 
-  it('? key toggles shortcuts panel', () => {
+  it('? key toggles shortcuts panel', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     act(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
     });
-    expect(screen.getByTestId('shortcuts-panel')).toBeDefined();
+    expect(await screen.findByTestId('shortcuts-panel')).toBeDefined();
   });
 
   // ── Right panel tabs ──────────────────────────────────────────────────

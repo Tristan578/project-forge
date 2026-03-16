@@ -14,7 +14,7 @@ import { WidgetPropertyPanel } from '../WidgetPropertyPanel';
 import { useUIBuilderStore } from '@/stores/uiBuilderStore';
 
 vi.mock('@/stores/uiBuilderStore', () => ({
-  useUIBuilderStore: vi.fn(),
+  useUIBuilderStore: vi.fn(() => ({})),
 }));
 
 // DataBindingEditor is a real child — we stub the store for it too via the same mock.

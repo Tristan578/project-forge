@@ -11,7 +11,7 @@ import { SpriteSheetImportDialog } from '../SpriteSheetImportDialog';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/sprites/sheetImporter', () => ({

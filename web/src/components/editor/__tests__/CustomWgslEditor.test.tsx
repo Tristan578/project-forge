@@ -11,7 +11,7 @@ import { CustomWgslEditor } from '../CustomWgslEditor';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 const mockUpdateCustomWgslSource = vi.fn();

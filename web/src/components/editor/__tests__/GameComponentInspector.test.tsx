@@ -13,7 +13,7 @@ import { useDialogueStore } from '@/stores/dialogueStore';
 import type { GameComponentData } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
   GAME_COMPONENT_TYPES: [
     'character_controller', 'health', 'collectible', 'damage_zone',
     'checkpoint', 'teleporter', 'moving_platform', 'trigger_zone',
@@ -22,7 +22,7 @@ vi.mock('@/stores/editorStore', () => ({
 }));
 
 vi.mock('@/stores/dialogueStore', () => ({
-  useDialogueStore: vi.fn(),
+  useDialogueStore: vi.fn(() => ({})),
 }));
 
 vi.mock('./Vec3Input', () => ({

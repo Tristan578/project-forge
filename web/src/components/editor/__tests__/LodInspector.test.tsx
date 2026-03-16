@@ -10,12 +10,12 @@ import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { usePerformanceStore } from '@/stores/performanceStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
   getCommandDispatcher: vi.fn(),
 }));
 
 vi.mock('@/stores/performanceStore', () => ({
-  usePerformanceStore: vi.fn(),
+  usePerformanceStore: vi.fn(() => ({})),
 }));
 
 const meshEntity = {

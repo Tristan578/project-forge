@@ -14,7 +14,7 @@ import { useUIBuilderStore } from '@/stores/uiBuilderStore';
 import type { UITheme } from '@/stores/uiBuilderStore';
 
 vi.mock('@/stores/uiBuilderStore', () => ({
-  useUIBuilderStore: vi.fn(),
+  useUIBuilderStore: vi.fn(() => ({})),
 }));
 
 const DARK_THEME: UITheme = {

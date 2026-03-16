@@ -9,7 +9,7 @@ import { TokenDashboard } from '../TokenDashboard';
 import { useUserStore } from '@/stores/userStore';
 
 vi.mock('@/stores/userStore', () => ({
-  useUserStore: vi.fn(),
+  useUserStore: vi.fn(() => ({})),
 }));
 
 vi.mock('@/lib/tokens/pricing', () => ({

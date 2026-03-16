@@ -1,0 +1,21 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "loading": "Loading...",
+    "error": "An error occurred"
+  },
+  "editor": {
+    "addEntity": "Add Entity",
+    "play": "Play",
+    "stop": "Stop",
+    "pause": "Pause",
+    "export": "Export Game"
+  },
+  "auth": {
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "signOut": "Sign Out"
+  }
+}

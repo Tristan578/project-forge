@@ -11,7 +11,7 @@ import { TimelinePanel } from '../TimelinePanel';
 import { useEditorStore } from '@/stores/editorStore';
 
 vi.mock('@/stores/editorStore', () => ({
-  useEditorStore: vi.fn(),
+  useEditorStore: vi.fn(() => ({})),
 }));
 
 const mockUpdateClipKeyframe = vi.fn();
