@@ -31,12 +31,14 @@ vi.mock('@/data/tutorials', () => ({
   ],
 }));
 
+const mockTasks = [
+  { id: 'create-entity', label: 'Create an Entity', description: 'Add an object', category: 'basic' },
+  { id: 'add-material', label: 'Add a Material', description: 'Color an object', category: 'basic' },
+  { id: 'write-script', label: 'Write a Script', description: 'Add logic', category: 'advanced' },
+];
 vi.mock('@/data/onboardingTasks', () => ({
-  ONBOARDING_TASKS: [
-    { id: 'create-entity', label: 'Create an Entity', description: 'Add an object', category: 'basic' },
-    { id: 'add-material', label: 'Add a Material', description: 'Color an object', category: 'basic' },
-    { id: 'write-script', label: 'Write a Script', description: 'Add logic', category: 'advanced' },
-  ],
+  ONBOARDING_TASKS: mockTasks,
+  getTasksForProjectType: vi.fn(() => mockTasks),
 }));
 
 vi.mock('@/data/achievements', () => ({
