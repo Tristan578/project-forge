@@ -8,6 +8,7 @@ import { getMessages, setRequestLocale } from "next-intl/server";
 import { defaultLocale } from "@/i18n/config";
 import { Toaster } from "sonner";
 import { AnalyticsProvider } from "@/components/AnalyticsProvider";
+import { WebVitalsReporter } from "@/components/WebVitalsReporter";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
 
@@ -52,6 +53,7 @@ export default async function RootLayout({
           {children}
         </NextIntlClientProvider>
         <AnalyticsProvider />
+        <WebVitalsReporter />
         <SpeedInsights />
         <Toaster theme="dark" position="bottom-right" richColors />
         <ServiceWorkerRegistration />
