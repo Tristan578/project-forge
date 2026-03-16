@@ -262,3 +262,13 @@ jobs:
     uses: ./.github/workflows/post-deploy-smoke.yml
     with:
       target_url: https://spawnforge.ai
+
+  # ---- Stage 2b: Smoke Test Production ----
+  # Runs after production deploy to verify the deployment is healthy.
+  smoke-production:
+    name: Smoke Test (Production)
+    needs: [deploy-production]
+    if: ${{ needs.deploy-production.result == 'success' }}
+    uses: ./.github/workflows/post-deploy-smoke.yml
+    with:
+      target_url: https://spawnforge.ai
