@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
+import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+
+const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
 /**
  * GET /api/billing/status
  * Get current billing status for the authenticated user.
+ * Includes subscription status from Stripe when available.
  */
 export async function GET() {
   const authResult = await authenticateRequest();
@@ -19,11 +23,24 @@ export async function GET() {
     nextRefillDate = nextRefill.toISOString();
   }
 
+  // Fetch subscription status from Stripe if available
+  let subscriptionStatus: string | null = null;
+  if (stripeSecret && user.stripeSubscriptionId) {
+    try {
+      const stripe = new Stripe(stripeSecret, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
+      const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+      subscriptionStatus = subscription.status;
+    } catch {
+      // Stripe unavailable or subscription not found — gracefully degrade
+    }
+  }
+
   return NextResponse.json({
     tier: user.tier,
     stripeCustomerId: user.stripeCustomerId,
     stripeSubscriptionId: user.stripeSubscriptionId,
     billingCycleStart: user.billingCycleStart?.toISOString() ?? null,
     nextRefillDate,
+    subscriptionStatus,
   });
 }
