@@ -85,7 +85,7 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   lastCloudSave: null,
 
   saveScene: () => {
-    if (dispatchCommand) dispatchCommand('save_scene', {});
+    if (dispatchCommand) dispatchCommand('export_scene', {});
   },
   loadScene: (json) => {
     if (dispatchCommand) dispatchCommand('load_scene', { json });
