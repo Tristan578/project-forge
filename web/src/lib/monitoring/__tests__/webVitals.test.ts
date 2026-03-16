@@ -1,16 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const flushPromises = () => new Promise<void>((r) => { queueMicrotask(r); });
+// Mock web-vitals at module level so dynamic import() picks it up
+const mockOnLCP = vi.fn();
+const mockOnFCP = vi.fn();
+const mockOnCLS = vi.fn();
+const mockOnINP = vi.fn();
+
+vi.mock('web-vitals', () => ({
+  onLCP: (...args: unknown[]) => mockOnLCP(...args),
+  onFCP: (...args: unknown[]) => mockOnFCP(...args),
+  onCLS: (...args: unknown[]) => mockOnCLS(...args),
+  onINP: (...args: unknown[]) => mockOnINP(...args),
+}));
+
+const flushPromises = () => new Promise<void>((r) => { setTimeout(r, 0); });
 
 describe('webVitals', () => {
   beforeEach(() => {
-    vi.resetModules();
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.resetModules();
   });
 
   it('exports reportWebVitals function', async () => {
@@ -23,7 +34,6 @@ describe('webVitals', () => {
     // @ts-expect-error -- simulating SSR
     delete globalThis.window;
 
-    vi.resetModules();
     const { reportWebVitals } = await import('@/lib/monitoring/webVitals');
     expect(() => reportWebVitals()).not.toThrow();
 
@@ -31,19 +41,6 @@ describe('webVitals', () => {
   });
 
   it('calls web-vitals observers when window exists', async () => {
-    const mockOnLCP = vi.fn();
-    const mockOnFCP = vi.fn();
-    const mockOnCLS = vi.fn();
-    const mockOnINP = vi.fn();
-
-    vi.doMock('web-vitals', () => ({
-      onLCP: mockOnLCP,
-      onFCP: mockOnFCP,
-      onCLS: mockOnCLS,
-      onINP: mockOnINP,
-    }));
-
-    vi.resetModules();
     const { reportWebVitals } = await import('@/lib/monitoring/webVitals');
     reportWebVitals();
 
@@ -56,32 +53,23 @@ describe('webVitals', () => {
   });
 
   it('calls custom reporter with adapted metric', async () => {
-    let capturedCallback: ((m: unknown) => void) | undefined;
+    mockOnLCP.mockImplementation((cb: (m: unknown) => void) => {
+      cb({
+        name: 'LCP',
+        value: 2500,
+        rating: 'good',
+        id: 'v4-123',
+        delta: 2500,
+        entries: [],
+        navigationType: 'navigate',
+      });
+    });
 
-    vi.doMock('web-vitals', () => ({
-      onLCP: (cb: (m: unknown) => void) => { capturedCallback = cb; },
-      onFCP: vi.fn(),
-      onCLS: vi.fn(),
-      onINP: vi.fn(),
-    }));
-
-    vi.resetModules();
     const reporter = vi.fn();
     const { reportWebVitals } = await import('@/lib/monitoring/webVitals');
     reportWebVitals(reporter);
 
     await flushPromises();
-
-    expect(capturedCallback).toBeDefined();
-    capturedCallback!({
-      name: 'LCP',
-      value: 2500,
-      rating: 'good',
-      id: 'v4-123',
-      delta: 2500,
-      entries: [],
-      navigationType: 'navigate',
-    });
 
     expect(reporter).toHaveBeenCalledWith({
       name: 'LCP',
@@ -96,32 +84,24 @@ describe('webVitals', () => {
     // @ts-expect-error -- override for test
     process.env.NODE_ENV = 'development';
 
-    let capturedCallback: ((m: unknown) => void) | undefined;
+    mockOnLCP.mockImplementation((cb: (m: unknown) => void) => {
+      cb({
+        name: 'FCP',
+        value: 1200.5,
+        rating: 'needs-improvement',
+        id: 'v4-456',
+        delta: 1200.5,
+        entries: [],
+        navigationType: 'navigate',
+      });
+    });
 
-    vi.doMock('web-vitals', () => ({
-      onLCP: (cb: (m: unknown) => void) => { capturedCallback = cb; },
-      onFCP: vi.fn(),
-      onCLS: vi.fn(),
-      onINP: vi.fn(),
-    }));
-
-    vi.resetModules();
     const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const { reportWebVitals } = await import('@/lib/monitoring/webVitals');
     reportWebVitals();
 
     await flushPromises();
-
-    capturedCallback!({
-      name: 'FCP',
-      value: 1200.5,
-      rating: 'needs-improvement',
-      id: 'v4-456',
-      delta: 1200.5,
-      entries: [],
-      navigationType: 'navigate',
-    });
 
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('[Web Vital] FCP: 1200.50 (needs-improvement)')
