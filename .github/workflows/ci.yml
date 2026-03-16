@@ -187,6 +187,18 @@ jobs:
 
           exit $FAILED
 
+  command-parity:
+    name: MCP Command Parity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify all MCP commands have handlers
+        working-directory: web
+        run: node scripts/check-command-parity.js
+
   build-nextjs:
     name: Next.js Production Build
     runs-on: ubuntu-latest
@@ -206,6 +218,10 @@ jobs:
 
       - run: npm run build
         working-directory: web
+
+      - name: Check JS bundle size
+        working-directory: web
+        run: node scripts/check-bundle-size.js
 
   # Engine-dependent E2E tests (@engine) require WASM + GPU which CI runners lack.
   # Only UI-only E2E tests (@ui) run in CI — they test React shell without WASM.
