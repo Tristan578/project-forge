@@ -409,7 +409,7 @@ export async function reverseAddonTokens(
   const balance = await getTotalBalance(userId);
   await db.insert(creditTransactions).values({
     userId,
-    transactionType: 'refund_reversal',
+    transactionType: 'adjustment',
     amount: -clampedDeduction,
     balanceAfter: balance,
     source: `charge_refunded:${chargeId}`,

@@ -181,7 +181,7 @@ describe('reverseAddonTokens', () => {
     expect(mockUpdate).toHaveBeenCalled();
     expect(mockInsert).toHaveBeenCalled();
     const insertValues = mockInsertValues.mock.calls[0][0];
-    expect(insertValues.transactionType).toBe('refund_reversal');
+    expect(insertValues.transactionType).toBe('adjustment');
     expect(insertValues.amount).toBe(-500);
     expect(insertValues.source).toBe('charge_refunded:ch_partial');
   });
