@@ -42,11 +42,6 @@ vi.mock('@/data/onboardingTasks', () => {
     getTasksForProjectType: vi.fn(() => tasks),
   };
 });
-const mockTasks = [
-  { id: 'create-entity', label: 'Create an Entity', description: 'Add an object', category: 'basic' },
-  { id: 'add-material', label: 'Add a Material', description: 'Color an object', category: 'basic' },
-  { id: 'write-script', label: 'Write a Script', description: 'Add logic', category: 'advanced' },
-];
 
 vi.mock('@/data/achievements', () => ({
   ACHIEVEMENTS: [

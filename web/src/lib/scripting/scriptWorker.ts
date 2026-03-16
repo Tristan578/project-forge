@@ -1049,6 +1049,13 @@ function injectLoopGuards(source: string): string {
         result += '{' + gc;
         braceDepth++;
         i++;
+      } else {
+        // Braceless do-while: wrap the single statement in braces with guard
+        result += '{' + gc;
+        while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++];
+        if (i < len && src[i] === ';') result += src[i++];
+        result += '}';
+        skipNextWhile = true;
       }
       continue;
     }
