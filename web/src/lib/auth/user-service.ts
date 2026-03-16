@@ -20,6 +20,7 @@ import {
   assetPurchases,
   sellerProfiles,
   marketplaceAssets,
+  generationJobs,
 } from '../db/schema';
 import type { Tier, User } from '../db/schema';
 
@@ -172,16 +173,19 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     await db.delete(projects).where(eq(projects.userId, userId));
   }
 
-  // 6. Financial data
+  // 6. Generation jobs (references users + projects — must precede user delete)
+  await db.delete(generationJobs).where(eq(generationJobs.userId, userId));
+
+  // 7. Financial data
   await db.delete(costLog).where(eq(costLog.userId, userId));
   await db.delete(creditTransactions).where(eq(creditTransactions.userId, userId));
   await db.delete(tokenUsage).where(eq(tokenUsage.userId, userId));
   await db.delete(tokenPurchases).where(eq(tokenPurchases.userId, userId));
 
-  // 7. Keys
+  // 8. Keys
   await db.delete(apiKeys).where(eq(apiKeys.userId, userId));
   await db.delete(providerKeys).where(eq(providerKeys.userId, userId));
 
-  // 8. User record
+  // 9. User record
   await db.delete(users).where(eq(users.id, userId));
 }
