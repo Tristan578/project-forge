@@ -170,12 +170,14 @@ export async function probeWebGPU(): Promise<boolean> {
  */
 const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
 
-async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string): Promise<WasmModule> {
+async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string, signal?: AbortSignal): Promise<WasmModule> {
   const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
-
-  // Wrap the WASM fetch/init with a timeout to prevent infinite stalls
+  const wasmUrl = `${basePath}${wasmFile}`;
+  // Pre-fetch the .wasm binary with the abort signal so callers can cancel,
+  // and wrap with a timeout to prevent infinite stalls
+  const wasmInput = signal ? await fetch(wasmUrl, { signal }) : wasmUrl;
   await withTimeout(
-    wasm.default(`${basePath}${wasmFile}`),
+    wasm.default(wasmInput),
     WASM_FETCH_TIMEOUT_MS,
     'WASM fetch',
   );
@@ -189,6 +191,8 @@ async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: stri
   return mod;
 }
 
+let loadAbortController: AbortController | null = null;
+
 async function loadWasm(): Promise<WasmModule> {
   // Skip WASM loading when engine is explicitly disabled (CI E2E @ui tests)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -201,6 +205,9 @@ async function loadWasm(): Promise<WasmModule> {
 
   // Intercept WASM panics before loading
   installPanicInterceptor();
+
+  loadAbortController = new AbortController();
+  const { signal } = loadAbortController;
 
   initPromise = (async () => {
     // Phase 1: Detect GPU capability
@@ -221,7 +228,7 @@ async function loadWasm(): Promise<WasmModule> {
 
     try {
       setLoadingState({ phase: 'downloading', progress: 50 });
-      wasmModule = await loadWasmFromPath(basePath, jsFile, wasmFile);
+      wasmModule = await loadWasmFromPath(basePath, jsFile, wasmFile, signal);
       setLoadingState({ phase: 'downloading', progress: 100 });
       emitEvent('wasm_loaded', `WASM JS module loaded (${backend}), initializing...`);
 
@@ -237,7 +244,7 @@ async function loadWasm(): Promise<WasmModule> {
         setLoadingState({ phase: 'downloading', progress: 25 });
         const fallbackPath = `${ENGINE_CDN_BASE}/engine-pkg-webgl2/`;
         try {
-          wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile);
+          wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile, signal);
           setLoadingState({ phase: 'initializing', progress: 0 });
           return wasmModule;
         } catch (fallbackErr) {
@@ -259,6 +266,10 @@ async function loadWasm(): Promise<WasmModule> {
 
 // Reset for retry
 export function resetEngine(): void {
+  if (loadAbortController) {
+    loadAbortController.abort();
+    loadAbortController = null;
+  }
   wasmModule = null;
   initPromise = null;
   setLoadingState({ phase: 'idle' });
