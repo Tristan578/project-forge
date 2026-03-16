@@ -51,17 +51,28 @@ function buildSelectChain(rows: Partial<User>[]): unknown {
 }
 const mockSelect = vi.fn().mockImplementation(() => buildSelectChain(mockUser ? [mockUser] : []));
 
+const mockTransaction = vi.fn().mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+  const txDb = {
+    select: mockSelect,
+    insert: mockInsert,
+    update: mockUpdate,
+    delete: mockDelete,
+  };
+  return fn(txDb);
+});
+
 vi.mock('@/lib/db/client', () => ({
   getDb: () => ({
     select: mockSelect,
     insert: mockInsert,
     update: mockUpdate,
     delete: mockDelete,
+    transaction: mockTransaction,
   }),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
-  users: { id: 'id', clerkId: 'clerkId' },
+  users: { id: 'id', clerkId: 'clerkId', deletedAt: 'deletedAt', banned: 'banned' },
   apiKeys: { userId: 'userId' },
   providerKeys: { userId: 'userId' },
   tokenUsage: { userId: 'userId' },
@@ -94,6 +105,7 @@ import {
   updateUserStripe,
   updateDisplayName,
   deleteUserAccount,
+  softDeleteUser,
 } from '../user-service';
 
 // ---------------------------------------------------------------------------
@@ -153,6 +165,16 @@ function resetMocks(): void {
 
   mockDelete.mockReturnValue({ where: mockDeleteWhere });
   mockDeleteWhere.mockResolvedValue([]);
+
+  mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+    const txDb = {
+      select: mockSelect,
+      insert: mockInsert,
+      update: mockUpdate,
+      delete: mockDelete,
+    };
+    return fn(txDb);
+  });
 }
 
 beforeEach(resetMocks);
@@ -449,5 +471,49 @@ describe('deleteUserAccount', () => {
     const deleteArgs = mockDelete.mock.calls.map((call) => call[0]);
     // Check that both key tables were targeted (they are objects from the schema mock)
     expect(deleteArgs.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('executes all deletes inside a database transaction', async () => {
+    mockSelect.mockImplementation(() => buildSelectChain([]));
+
+    await deleteUserAccount('user-uuid-1');
+    expect(mockTransaction).toHaveBeenCalledOnce();
+    expect(mockDelete).toHaveBeenCalled();
+  });
+
+  it('rolls back all changes when a delete operation fails mid-cascade', async () => {
+    mockSelect.mockImplementation(() => buildSelectChain([]));
+
+    let deleteCallCount = 0;
+    mockDeleteWhere.mockImplementation(() => {
+      deleteCallCount++;
+      if (deleteCallCount === 3) {
+        return Promise.reject(new Error('DB connection lost'));
+      }
+      return Promise.resolve([]);
+    });
+
+    await expect(deleteUserAccount('user-uuid-1')).rejects.toThrow('DB connection lost');
+    expect(mockTransaction).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// softDeleteUser
+// ---------------------------------------------------------------------------
+
+describe('softDeleteUser', () => {
+  it('sets deletedAt and banned=1 on the user record', async () => {
+    await softDeleteUser('clerk_abc');
+    expect(mockUpdate).toHaveBeenCalledOnce();
+    const setArg = mockUpdateSet.mock.calls[0][0];
+    expect(setArg.deletedAt).toBeInstanceOf(Date);
+    expect(setArg.banned).toBe(1);
+    expect(setArg.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it('targets the correct clerk ID', async () => {
+    await softDeleteUser('clerk_xyz');
+    expect(mockUpdateWhere).toHaveBeenCalledOnce();
   });
 });

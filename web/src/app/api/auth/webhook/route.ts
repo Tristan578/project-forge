@@ -1,7 +1,7 @@
 import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { syncUserFromClerk } from '@/lib/auth/user-service';
+import { syncUserFromClerk, softDeleteUser } from '@/lib/auth/user-service';
 
 export async function POST(req: Request) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
@@ -40,7 +40,13 @@ export async function POST(req: Request) {
       await syncUserFromClerk(event.data as Parameters<typeof syncUserFromClerk>[0]);
       break;
     }
-    // user.deleted could be handled to soft-delete
+    case 'user.deleted': {
+      const clerkId = event.data.id;
+      if (typeof clerkId === 'string') {
+        await softDeleteUser(clerkId);
+      }
+      break;
+    }
   }
 
   return NextResponse.json({ received: true });
