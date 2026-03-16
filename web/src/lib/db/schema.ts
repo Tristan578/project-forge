@@ -123,6 +123,9 @@ export const tokenPurchases = pgTable('token_purchases', {
   package: tokenPackageEnum('package').notNull(),
   tokens: integer('tokens').notNull(),
   amountCents: integer('amount_cents').notNull(),
+  // PF-526: Track cumulative refunded amount to prevent double-deduction
+  // when multiple partial refunds are issued for the same charge.
+  refundedCents: integer('refunded_cents').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -533,6 +536,30 @@ export const webhookEvents = pgTable('webhook_events', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+// --- Content Moderation Appeals ---
+
+export const appealStatusEnum = pgEnum('appeal_status', ['pending', 'approved', 'rejected']);
+
+export const moderationAppeals = pgTable(
+  'moderation_appeals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    contentId: text('content_id').notNull(),
+    contentType: text('content_type').notNull(), // 'comment' | 'asset' | 'game'
+    reason: text('reason').notNull(),
+    status: appealStatusEnum('status').notNull().default('pending'),
+    reviewedBy: text('reviewed_by'), // admin clerk ID
+    reviewNote: text('review_note'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  },
+  (table) => [
+    index('idx_moderation_appeals_user').on(table.userId),
+    index('idx_moderation_appeals_status').on(table.status),
+  ]
+);
+
 // --- Types ---
 
 export type User = typeof users.$inferSelect;
@@ -579,3 +606,6 @@ export type AssetLicense = 'standard' | 'extended';
 export type Feedback = typeof feedback.$inferSelect;
 export type NewFeedback = typeof feedback.$inferInsert;
 export type FeedbackType = 'bug' | 'feature' | 'general';
+export type ModerationAppeal = typeof moderationAppeals.$inferSelect;
+export type NewModerationAppeal = typeof moderationAppeals.$inferInsert;
+export type AppealStatus = 'pending' | 'approved' | 'rejected';
