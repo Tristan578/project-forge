@@ -27,396 +27,154 @@
     "schemas": {
       "Error": {
         "type": "object",
-        "required": [
-          "error"
-        ],
+        "required": ["error"],
         "properties": {
-          "error": {
-            "type": "string"
-          }
+          "error": { "type": "string" }
         }
       },
       "Project": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "sceneData": {
-            "type": "object",
-            "description": "Serialized .forge scene format"
-          },
-          "thumbnail": {
-            "type": "string",
-            "nullable": true,
-            "description": "Base64 or URL thumbnail"
-          },
-          "entityCount": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "sceneData": { "type": "object", "description": "Serialized .forge scene format" },
+          "thumbnail": { "type": "string", "nullable": true, "description": "Base64 or URL thumbnail" },
+          "entityCount": { "type": "integer", "minimum": 0 },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
         }
       },
       "ProjectSummary": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          }
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" }
         }
       },
       "Publication": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "projectId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "slug": {
-            "type": "string",
-            "example": "my-awesome-game"
-          },
-          "title": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "published",
-              "unpublished"
-            ]
-          },
-          "version": {
-            "type": "integer"
-          },
-          "url": {
-            "type": "string",
-            "example": "/play/user_xxx/my-awesome-game"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updatedAt": {
-            "type": "string",
-            "format": "date-time"
-          }
+          "id": { "type": "string", "format": "uuid" },
+          "projectId": { "type": "string", "format": "uuid" },
+          "slug": { "type": "string", "example": "my-awesome-game" },
+          "title": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "status": { "type": "string", "enum": ["published", "unpublished"] },
+          "version": { "type": "integer" },
+          "url": { "type": "string", "example": "/play/user_xxx/my-awesome-game" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedAt": { "type": "string", "format": "date-time" }
         }
       },
       "GameSummary": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "title": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string",
-            "nullable": true
-          },
-          "slug": {
-            "type": "string"
-          },
-          "authorId": {
-            "type": "string"
-          },
-          "authorName": {
-            "type": "string"
-          },
-          "playCount": {
-            "type": "integer"
-          },
-          "likeCount": {
-            "type": "integer"
-          },
-          "avgRating": {
-            "type": "number",
-            "format": "float",
-            "minimum": 0,
-            "maximum": 5
-          },
-          "ratingCount": {
-            "type": "integer"
-          },
-          "commentCount": {
-            "type": "integer"
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "thumbnail": {
-            "type": "string",
-            "nullable": true
-          },
-          "cdnUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
+          "id": { "type": "string", "format": "uuid" },
+          "title": { "type": "string" },
+          "description": { "type": "string", "nullable": true },
+          "slug": { "type": "string" },
+          "authorId": { "type": "string" },
+          "authorName": { "type": "string" },
+          "playCount": { "type": "integer" },
+          "likeCount": { "type": "integer" },
+          "avgRating": { "type": "number", "format": "float", "minimum": 0, "maximum": 5 },
+          "ratingCount": { "type": "integer" },
+          "commentCount": { "type": "integer" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "thumbnail": { "type": "string", "nullable": true },
+          "cdnUrl": { "type": "string", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" }
         }
       },
       "Comment": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "content": {
-            "type": "string"
-          },
-          "parentId": {
-            "type": "string",
-            "nullable": true
-          },
-          "authorId": {
-            "type": "string",
-            "nullable": true
-          },
-          "authorName": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
+          "id": { "type": "string", "format": "uuid" },
+          "content": { "type": "string" },
+          "parentId": { "type": "string", "nullable": true },
+          "authorId": { "type": "string", "nullable": true },
+          "authorName": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
         }
       },
       "MarketplaceAsset": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
           "category": {
             "type": "string",
-            "enum": [
-              "model_3d",
-              "sprite",
-              "texture",
-              "audio",
-              "script",
-              "prefab",
-              "template",
-              "shader",
-              "animation"
-            ]
+            "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"]
           },
-          "priceTokens": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "license": {
-            "type": "string"
-          },
-          "previewUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "downloadCount": {
-            "type": "integer"
-          },
-          "avgRating": {
-            "type": "number",
-            "format": "float"
-          },
-          "ratingCount": {
-            "type": "integer"
-          },
-          "tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "aiGenerated": {
-            "type": "boolean"
-          },
-          "sellerName": {
-            "type": "string"
-          },
-          "sellerId": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
+          "priceTokens": { "type": "integer", "minimum": 0 },
+          "license": { "type": "string" },
+          "previewUrl": { "type": "string", "nullable": true },
+          "downloadCount": { "type": "integer" },
+          "avgRating": { "type": "number", "format": "float" },
+          "ratingCount": { "type": "integer" },
+          "tags": { "type": "array", "items": { "type": "string" } },
+          "aiGenerated": { "type": "boolean" },
+          "sellerName": { "type": "string" },
+          "sellerId": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" }
         }
       },
       "GenerationJob": {
         "type": "object",
         "properties": {
-          "jobId": {
-            "type": "string"
-          },
-          "provider": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "processing",
-              "completed",
-              "failed"
-            ]
-          },
-          "estimatedSeconds": {
-            "type": "integer"
-          }
+          "jobId": { "type": "string" },
+          "provider": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed"] },
+          "estimatedSeconds": { "type": "integer" }
         }
       },
       "GenerationStatus": {
         "type": "object",
         "properties": {
-          "jobId": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "pending",
-              "processing",
-              "completed",
-              "failed"
-            ]
-          },
-          "progress": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 100
-          },
-          "resultUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "error": {
-            "type": "string",
-            "nullable": true
-          }
+          "jobId": { "type": "string" },
+          "status": { "type": "string", "enum": ["pending", "processing", "completed", "failed"] },
+          "progress": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "resultUrl": { "type": "string", "nullable": true },
+          "error": { "type": "string", "nullable": true }
         }
       },
       "TokenBalance": {
         "type": "object",
         "properties": {
-          "monthlyTokens": {
-            "type": "integer"
-          },
-          "monthlyTokensUsed": {
-            "type": "integer"
-          },
-          "monthlyTokensRemaining": {
-            "type": "integer"
-          },
-          "addonTokens": {
-            "type": "integer"
-          },
-          "earnedCredits": {
-            "type": "integer"
-          }
+          "monthlyTokens": { "type": "integer" },
+          "monthlyTokensUsed": { "type": "integer" },
+          "monthlyTokensRemaining": { "type": "integer" },
+          "addonTokens": { "type": "integer" },
+          "earnedCredits": { "type": "integer" }
         }
       },
       "ApiKeyRecord": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "name": {
-            "type": "string"
-          },
-          "prefix": {
-            "type": "string",
-            "example": "forge_a1b2"
-          },
+          "id": { "type": "string", "format": "uuid" },
+          "name": { "type": "string" },
+          "prefix": { "type": "string", "example": "forge_a1b2" },
           "scopes": {
             "type": "array",
             "items": {
               "type": "string",
-              "enum": [
-                "scene:read",
-                "scene:write",
-                "ai:generate",
-                "project:manage"
-              ]
+              "enum": ["scene:read", "scene:write", "ai:generate", "project:manage"]
             }
           },
-          "lastUsed": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "createdAt": {
-            "type": "string",
-            "format": "date-time"
-          }
+          "lastUsed": { "type": "string", "format": "date-time", "nullable": true },
+          "createdAt": { "type": "string", "format": "date-time" }
         }
       },
       "SellerProfile": {
         "type": "object",
         "properties": {
-          "displayName": {
-            "type": "string"
-          },
-          "bio": {
-            "type": "string",
-            "nullable": true
-          },
-          "portfolioUrl": {
-            "type": "string",
-            "nullable": true
-          },
-          "totalEarnings": {
-            "type": "integer"
-          },
-          "totalSales": {
-            "type": "integer"
-          },
-          "approved": {
-            "type": "boolean"
-          }
+          "displayName": { "type": "string" },
+          "bio": { "type": "string", "nullable": true },
+          "portfolioUrl": { "type": "string", "nullable": true },
+          "totalEarnings": { "type": "integer" },
+          "totalSales": { "type": "integer" },
+          "approved": { "type": "boolean" }
         }
       }
     },
@@ -425,12 +183,8 @@
         "description": "Missing or invalid session",
         "content": {
           "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            },
-            "example": {
-              "error": "Unauthorized"
-            }
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "Unauthorized" }
           }
         }
       },
@@ -438,12 +192,8 @@
         "description": "Insufficient tier or permissions",
         "content": {
           "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            },
-            "example": {
-              "error": "This feature requires Creator or Pro tier."
-            }
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "This feature requires Creator or Pro tier." }
           }
         }
       },
@@ -451,12 +201,8 @@
         "description": "Resource not found",
         "content": {
           "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            },
-            "example": {
-              "error": "Project not found"
-            }
+            "schema": { "$ref": "#/components/schemas/Error" },
+            "example": { "error": "Project not found" }
           }
         }
       },
@@ -467,13 +213,8 @@
             "schema": {
               "type": "object",
               "properties": {
-                "error": {
-                  "type": "string"
-                },
-                "code": {
-                  "type": "string",
-                  "example": "INSUFFICIENT_TOKENS"
-                }
+                "error": { "type": "string" },
+                "code": { "type": "string", "example": "INSUFFICIENT_TOKENS" }
               }
             }
           }
@@ -482,59 +223,23 @@
     }
   },
   "tags": [
-    {
-      "name": "System",
-      "description": "System health and status endpoints"
-    },
-    {
-      "name": "Projects",
-      "description": "CRUD for game projects"
-    },
-    {
-      "name": "Chat",
-      "description": "Streaming AI assistant (Anthropic Claude)"
-    },
-    {
-      "name": "Billing",
-      "description": "Stripe subscription management"
-    },
-    {
-      "name": "Tokens",
-      "description": "Token balance, usage history, and top-up packages"
-    },
-    {
-      "name": "Publishing",
-      "description": "Publish games to shareable URLs"
-    },
-    {
-      "name": "Community",
-      "description": "Public game gallery, likes, ratings, comments, and forks"
-    },
-    {
-      "name": "Marketplace",
-      "description": "Asset marketplace — browse, purchase, and sell assets"
-    },
-    {
-      "name": "Asset Generation",
-      "description": "AI-powered generation of 3D models, textures, audio, sprites, and skyboxes"
-    },
-    {
-      "name": "Keys",
-      "description": "BYOK provider keys and MCP API keys"
-    },
-    {
-      "name": "Documentation",
-      "description": "In-editor documentation content"
-    }
+    { "name": "Projects", "description": "CRUD for game projects" },
+    { "name": "Chat", "description": "Streaming AI assistant (Anthropic Claude)" },
+    { "name": "Billing", "description": "Stripe subscription management" },
+    { "name": "Tokens", "description": "Token balance, usage history, and top-up packages" },
+    { "name": "Publishing", "description": "Publish games to shareable URLs" },
+    { "name": "Community", "description": "Public game gallery, likes, ratings, comments, and forks" },
+    { "name": "Marketplace", "description": "Asset marketplace — browse, purchase, and sell assets" },
+    { "name": "Asset Generation", "description": "AI-powered generation of 3D models, textures, audio, sprites, and skyboxes" },
+    { "name": "Keys", "description": "BYOK provider keys and MCP API keys" },
+    { "name": "Documentation", "description": "In-editor documentation content" }
   ],
   "paths": {
     "/api/health": {
       "get": {
-        "tags": [
-          "System"
-        ],
+        "tags": ["System"],
         "summary": "Health check",
-        "description": "Unauthenticated health check endpoint for monitoring.",
+        "description": "Unauthenticated health check endpoint for monitoring. Returns application status, environment, version, and per-service health. Returns HTTP 503 when critical services (DB, Auth) are down.",
         "security": [],
         "responses": {
           "200": {
@@ -543,66 +248,24 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": [
-                    "status",
-                    "environment",
-                    "commit",
-                    "timestamp"
-                  ],
+                  "required": ["status", "environment", "commit", "timestamp"],
                   "properties": {
-                    "status": {
-                      "type": "string",
-                      "enum": [
-                        "ok",
-                        "error"
-                      ]
-                    },
-                    "environment": {
-                      "type": "string"
-                    },
-                    "commit": {
-                      "type": "string"
-                    },
-                    "branch": {
-                      "type": "string"
-                    },
-                    "database": {
-                      "type": "string",
-                      "enum": [
-                        "connected",
-                        "not_configured",
-                        "unavailable"
-                      ]
-                    },
-                    "timestamp": {
-                      "type": "string",
-                      "format": "date-time"
-                    },
-                    "overall": {
-                      "type": "string"
-                    },
-                    "version": {
-                      "type": "string"
-                    },
+                    "status": { "type": "string", "enum": ["ok", "error"] },
+                    "environment": { "type": "string" },
+                    "commit": { "type": "string", "description": "First 8 chars of git commit SHA" },
+                    "branch": { "type": "string" },
+                    "database": { "type": "string", "enum": ["connected", "not_configured", "unavailable"] },
+                    "timestamp": { "type": "string", "format": "date-time" },
+                    "overall": { "type": "string" },
+                    "version": { "type": "string" },
                     "services": {
                       "type": "array",
                       "items": {
                         "type": "object",
                         "properties": {
-                          "name": {
-                            "type": "string"
-                          },
-                          "status": {
-                            "type": "string",
-                            "enum": [
-                              "healthy",
-                              "degraded",
-                              "down"
-                            ]
-                          },
-                          "latencyMs": {
-                            "type": "number"
-                          }
+                          "name": { "type": "string" },
+                          "status": { "type": "string", "enum": ["healthy", "degraded", "down"] },
+                          "latencyMs": { "type": "number" }
                         }
                       }
                     }
@@ -615,9 +278,7 @@
             "description": "Critical service failure",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
+                "schema": { "$ref": "#/components/schemas/Error" }
               }
             }
           }
@@ -626,16 +287,10 @@
     },
     "/api/projects": {
       "get": {
-        "tags": [
-          "Projects"
-        ],
+        "tags": ["Projects"],
         "summary": "List projects",
         "description": "Returns all projects owned by the authenticated user.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Array of projects",
@@ -643,48 +298,29 @@
               "application/json": {
                 "schema": {
                   "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Project"
-                  }
+                  "items": { "$ref": "#/components/schemas/Project" }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       },
       "post": {
-        "tags": [
-          "Projects"
-        ],
+        "tags": ["Projects"],
         "summary": "Create project",
         "description": "Creates a new game project. Returns HTTP 403 with error code `PROJECT_LIMIT` when the user has reached their tier's project limit.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "sceneData"
-                ],
+                "required": ["name", "sceneData"],
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "sceneData": {
-                    "type": "object",
-                    "description": "Initial .forge scene JSON"
-                  }
+                  "name": { "type": "string", "minLength": 1 },
+                  "sceneData": { "type": "object", "description": "Initial .forge scene JSON" }
                 }
               }
             }
@@ -695,18 +331,12 @@
             "description": "Project created",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectSummary"
-                }
+                "schema": { "$ref": "#/components/schemas/ProjectSummary" }
               }
             }
           },
-          "400": {
-            "description": "Missing or invalid fields"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
+          "400": { "description": "Missing or invalid fields" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
           "403": {
             "description": "Project limit reached",
             "content": {
@@ -714,16 +344,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "error": {
-                      "type": "string",
-                      "example": "PROJECT_LIMIT"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "limit": {
-                      "type": "integer"
-                    }
+                    "error": { "type": "string", "example": "PROJECT_LIMIT" },
+                    "message": { "type": "string" },
+                    "limit": { "type": "integer" }
                   }
                 }
               }
@@ -738,51 +361,30 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "get": {
-        "tags": [
-          "Projects"
-        ],
+        "tags": ["Projects"],
         "summary": "Get project",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Full project with scene data",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
+                "schema": { "$ref": "#/components/schemas/Project" }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       },
       "put": {
-        "tags": [
-          "Projects"
-        ],
+        "tags": ["Projects"],
         "summary": "Update project",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
@@ -790,20 +392,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": {
-                    "type": "string"
-                  },
-                  "sceneData": {
-                    "type": "object"
-                  },
-                  "thumbnail": {
-                    "type": "string",
-                    "nullable": true
-                  },
-                  "entityCount": {
-                    "type": "integer",
-                    "minimum": 0
-                  }
+                  "name": { "type": "string" },
+                  "sceneData": { "type": "object" },
+                  "thumbnail": { "type": "string", "nullable": true },
+                  "entityCount": { "type": "integer", "minimum": 0 }
                 }
               }
             }
@@ -814,94 +406,52 @@
             "description": "Updated project",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Project"
-                }
+                "schema": { "$ref": "#/components/schemas/Project" }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       },
       "delete": {
-        "tags": [
-          "Projects"
-        ],
+        "tags": ["Projects"],
         "summary": "Delete project",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
-          "204": {
-            "description": "Deleted successfully"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "204": { "description": "Deleted successfully" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
     "/api/chat": {
       "post": {
-        "tags": [
-          "Chat"
-        ],
+        "tags": ["Chat"],
         "summary": "AI assistant (streaming SSE)",
         "description": "Sends messages to the Claude AI assistant and receives a Server-Sent Events (SSE) stream. The stream emits JSON objects of various types:\n\n- `{ type: 'text_start' }` — text block opening\n- `{ type: 'text_delta', text: string }` — incremental text\n- `{ type: 'tool_start', id, name, input }` — tool call opening\n- `{ type: 'tool_input_delta', json }` — partial tool JSON\n- `{ type: 'thinking_start' }` / `{ type: 'thinking_delta', text }` — extended thinking (when `thinking: true`)\n- `{ type: 'content_block_stop', index }` — block closed\n- `{ type: 'usage', inputTokens?, outputTokens? }` — token usage\n- `{ type: 'turn_complete', stop_reason }` — stream finished\n- `{ type: 'error', message }` — error\n\n**Rate limit:** 10 requests per minute. **Max body:** 10 KB. **Max message length:** 4000 characters.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "messages"
-                ],
+                "required": ["messages"],
                 "properties": {
                   "messages": {
                     "type": "array",
                     "description": "Conversation history in Anthropic message format",
                     "items": {
                       "type": "object",
-                      "required": [
-                        "role",
-                        "content"
-                      ],
+                      "required": ["role", "content"],
                       "properties": {
-                        "role": {
-                          "type": "string",
-                          "enum": [
-                            "user",
-                            "assistant"
-                          ]
-                        },
+                        "role": { "type": "string", "enum": ["user", "assistant"] },
                         "content": {
                           "description": "String for text messages, or array of content blocks for tool results",
                           "oneOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "array",
-                              "items": {
-                                "type": "object"
-                              }
-                            }
+                            { "type": "string" },
+                            { "type": "array", "items": { "type": "object" } }
                           ]
                         }
                       }
@@ -930,59 +480,35 @@
             "description": "SSE stream. Content-Type: text/event-stream",
             "content": {
               "text/event-stream": {
-                "schema": {
-                  "type": "string"
-                }
+                "schema": { "type": "string" }
               }
             }
           },
-          "400": {
-            "description": "Invalid JSON, missing messages, message too long, or suspicious content detected"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "413": {
-            "description": "Request body exceeds 10 KB limit"
-          },
-          "429": {
-            "description": "Rate limit exceeded"
-          }
+          "400": { "description": "Invalid JSON, missing messages, message too long, or suspicious content detected" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "413": { "description": "Request body exceeds 10 KB limit" },
+          "429": { "description": "Rate limit exceeded" }
         }
       }
     },
     "/api/billing/checkout": {
       "post": {
-        "tags": [
-          "Billing"
-        ],
+        "tags": ["Billing"],
         "summary": "Create Stripe checkout session",
         "description": "Creates a Stripe Checkout session for upgrading the user's subscription tier. Redirects to `success_url` (`/dashboard?upgraded=true`) on success.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "tier"
-                ],
+                "required": ["tier"],
                 "properties": {
                   "tier": {
                     "type": "string",
-                    "enum": [
-                      "hobbyist",
-                      "creator",
-                      "pro"
-                    ]
+                    "enum": ["hobbyist", "creator", "pro"]
                   }
                 }
               }
@@ -997,37 +523,23 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "url": {
-                      "type": "string",
-                      "format": "uri",
-                      "description": "Stripe hosted checkout URL"
-                    }
+                    "url": { "type": "string", "format": "uri", "description": "Stripe hosted checkout URL" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid tier"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Invalid tier" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/billing/portal": {
       "post": {
-        "tags": [
-          "Billing"
-        ],
+        "tags": ["Billing"],
         "summary": "Create Stripe billing portal session",
         "description": "Opens the Stripe customer portal for managing subscriptions and payment methods. Returns HTTP 400 if the user has no Stripe customer record.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Stripe portal URL",
@@ -1036,36 +548,23 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "url": {
-                      "type": "string",
-                      "format": "uri"
-                    }
+                    "url": { "type": "string", "format": "uri" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "No Stripe customer found"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "No Stripe customer found" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/billing/status": {
       "get": {
-        "tags": [
-          "Billing"
-        ],
+        "tags": ["Billing"],
         "summary": "Get billing status",
         "description": "Returns the current subscription tier and billing cycle details for the authenticated user.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Billing status",
@@ -1074,96 +573,51 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "tier": {
-                      "type": "string",
-                      "enum": [
-                        "starter",
-                        "hobbyist",
-                        "creator",
-                        "pro"
-                      ]
-                    },
-                    "stripeCustomerId": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "stripeSubscriptionId": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "billingCycleStart": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    },
-                    "nextRefillDate": {
-                      "type": "string",
-                      "format": "date-time",
-                      "nullable": true
-                    }
+                    "tier": { "type": "string", "enum": ["starter", "hobbyist", "creator", "pro"] },
+                    "stripeCustomerId": { "type": "string", "nullable": true },
+                    "stripeSubscriptionId": { "type": "string", "nullable": true },
+                    "billingCycleStart": { "type": "string", "format": "date-time", "nullable": true },
+                    "nextRefillDate": { "type": "string", "format": "date-time", "nullable": true }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/tokens/balance": {
       "get": {
-        "tags": [
-          "Tokens"
-        ],
+        "tags": ["Tokens"],
         "summary": "Get token balance",
         "description": "Returns the full token balance breakdown for the authenticated user.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Token balance",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TokenBalance"
-                }
+                "schema": { "$ref": "#/components/schemas/TokenBalance" }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/tokens/usage": {
       "get": {
-        "tags": [
-          "Tokens"
-        ],
+        "tags": ["Tokens"],
         "summary": "Get usage history",
         "description": "Returns token usage history. Defaults to 30 days; capped at 90 days.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "parameters": [
           {
             "name": "days",
             "in": "query",
             "description": "Number of days of history to return (max 90, default 30)",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 90,
-              "default": 30
-            }
+            "schema": { "type": "integer", "minimum": 1, "maximum": 90, "default": 30 }
           }
         ],
         "responses": {
@@ -1179,16 +633,9 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "actionType": {
-                            "type": "string"
-                          },
-                          "tokensCharged": {
-                            "type": "integer"
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
+                          "actionType": { "type": "string" },
+                          "tokensCharged": { "type": "integer" },
+                          "createdAt": { "type": "string", "format": "date-time" }
                         }
                       }
                     }
@@ -1197,41 +644,27 @@
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/tokens/purchase": {
       "post": {
-        "tags": [
-          "Tokens"
-        ],
+        "tags": ["Tokens"],
         "summary": "Purchase token top-up package",
         "description": "Creates a Stripe one-time payment session for a token add-on package. Only available to paid tiers (hobbyist, creator, pro). Available packages: `spark`, `blaze`, `inferno`.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "package"
-                ],
+                "required": ["package"],
                 "properties": {
                   "package": {
                     "type": "string",
-                    "enum": [
-                      "spark",
-                      "blaze",
-                      "inferno"
-                    ]
+                    "enum": ["spark", "blaze", "inferno"]
                   }
                 }
               }
@@ -1246,59 +679,34 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "checkoutUrl": {
-                      "type": "string",
-                      "format": "uri"
-                    }
+                    "checkoutUrl": { "type": "string", "format": "uri" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid package"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
+          "400": { "description": "Invalid package" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
         }
       }
     },
     "/api/publish": {
       "post": {
-        "tags": [
-          "Publishing"
-        ],
+        "tags": ["Publishing"],
         "summary": "Publish or republish a game",
         "description": "Publishes a project under a URL slug. If the slug already exists for this user, increments the version. Returns HTTP 403 when the user has reached their tier's publish limit.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "projectId",
-                  "title",
-                  "slug"
-                ],
+                "required": ["projectId", "title", "slug"],
                 "properties": {
-                  "projectId": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "title": {
-                    "type": "string",
-                    "minLength": 1
-                  },
+                  "projectId": { "type": "string", "format": "uuid" },
+                  "title": { "type": "string", "minLength": 1 },
                   "slug": {
                     "type": "string",
                     "minLength": 3,
@@ -1306,9 +714,7 @@
                     "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$",
                     "description": "URL-safe identifier. Lowercase alphanumeric and hyphens only."
                   },
-                  "description": {
-                    "type": "string"
-                  }
+                  "description": { "type": "string" }
                 }
               }
             }
@@ -1322,41 +728,25 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "publication": {
-                      "$ref": "#/components/schemas/Publication"
-                    }
+                    "publication": { "$ref": "#/components/schemas/Publication" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Missing required fields or invalid slug format"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "description": "Publish limit reached for tier"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "400": { "description": "Missing required fields or invalid slug format" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Publish limit reached for tier" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
     "/api/publish/list": {
       "get": {
-        "tags": [
-          "Publishing"
-        ],
+        "tags": ["Publishing"],
         "summary": "List own publications",
         "description": "Returns all publications (published and unpublished) for the authenticated user, ordered by most recently updated.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "List of publications",
@@ -1367,41 +757,29 @@
                   "properties": {
                     "publications": {
                       "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Publication"
-                      }
+                      "items": { "$ref": "#/components/schemas/Publication" }
                     }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/publish/check-slug": {
       "get": {
-        "tags": [
-          "Publishing"
-        ],
+        "tags": ["Publishing"],
         "summary": "Check slug availability",
         "description": "Checks whether a slug is available for the authenticated user (slugs are scoped per-user, not globally).",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "parameters": [
           {
             "name": "slug",
             "in": "query",
             "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "schema": { "type": "string" }
           }
         ],
         "responses": {
@@ -1412,17 +790,13 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "available": {
-                      "type": "boolean"
-                    }
+                    "available": { "type": "boolean" }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
@@ -1432,23 +806,14 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "delete": {
-        "tags": [
-          "Publishing"
-        ],
+        "tags": ["Publishing"],
         "summary": "Unpublish a game",
         "description": "Sets the publication status to `unpublished`. The record is retained.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Success",
@@ -1456,26 +821,18 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
+                  "properties": { "success": { "type": "boolean" } }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/community/games": {
       "get": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Browse community games",
         "description": "Returns published games with aggregated stats. No authentication required.",
         "parameters": [
@@ -1483,9 +840,7 @@
             "name": "q",
             "in": "query",
             "description": "Full-text search query (matches title and description)",
-            "schema": {
-              "type": "string"
-            }
+            "schema": { "type": "string" }
           },
           {
             "name": "sort",
@@ -1493,12 +848,7 @@
             "description": "Sort order",
             "schema": {
               "type": "string",
-              "enum": [
-                "trending",
-                "newest",
-                "top_rated",
-                "most_played"
-              ],
+              "enum": ["trending", "newest", "top_rated", "most_played"],
               "default": "trending"
             }
           },
@@ -1506,28 +856,17 @@
             "name": "tag",
             "in": "query",
             "description": "Filter by tag",
-            "schema": {
-              "type": "string"
-            }
+            "schema": { "type": "string" }
           },
           {
             "name": "page",
             "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1
-            }
+            "schema": { "type": "integer", "minimum": 1, "default": 1 }
           },
           {
             "name": "limit",
             "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20
-            }
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
           }
         ],
         "responses": {
@@ -1538,15 +877,8 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "games": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/GameSummary"
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
+                    "games": { "type": "array", "items": { "$ref": "#/components/schemas/GameSummary" } },
+                    "hasMore": { "type": "boolean" }
                   }
                 }
               }
@@ -1557,9 +889,7 @@
     },
     "/api/community/games/featured": {
       "get": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Get featured games",
         "description": "Returns up to 5 editorially featured games. No authentication required.",
         "responses": {
@@ -1570,12 +900,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "games": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/GameSummary"
-                      }
-                    }
+                    "games": { "type": "array", "items": { "$ref": "#/components/schemas/GameSummary" } }
                   }
                 }
               }
@@ -1590,16 +915,11 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "get": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Get game details",
         "description": "Returns full game details including tags, comments, and a rating breakdown by star value. No authentication required.",
         "responses": {
@@ -1612,40 +932,24 @@
                   "properties": {
                     "game": {
                       "allOf": [
-                        {
-                          "$ref": "#/components/schemas/GameSummary"
-                        },
+                        { "$ref": "#/components/schemas/GameSummary" },
                         {
                           "type": "object",
                           "properties": {
-                            "status": {
-                              "type": "string",
-                              "enum": [
-                                "published",
-                                "unpublished"
-                              ]
-                            },
+                            "status": { "type": "string", "enum": ["published", "unpublished"] },
                             "ratingBreakdown": {
                               "type": "array",
                               "items": {
                                 "type": "object",
                                 "properties": {
-                                  "rating": {
-                                    "type": "integer",
-                                    "minimum": 1,
-                                    "maximum": 5
-                                  },
-                                  "count": {
-                                    "type": "integer"
-                                  }
+                                  "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+                                  "count": { "type": "integer" }
                                 }
                               }
                             },
                             "comments": {
                               "type": "array",
-                              "items": {
-                                "$ref": "#/components/schemas/Comment"
-                              }
+                              "items": { "$ref": "#/components/schemas/Comment" }
                             }
                           }
                         }
@@ -1656,9 +960,7 @@
               }
             }
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -1668,16 +970,11 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "get": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Get comments for a game",
         "description": "Returns all non-flagged comments. No authentication required.",
         "responses": {
@@ -1688,12 +985,7 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "comments": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Comment"
-                      }
-                    }
+                    "comments": { "type": "array", "items": { "$ref": "#/components/schemas/Comment" } }
                   }
                 }
               }
@@ -1702,35 +994,20 @@
         }
       },
       "post": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Post a comment",
         "description": "Posts a comment on a game. Content is stripped of HTML and capped at 1000 characters.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "content"
-                ],
+                "required": ["content"],
                 "properties": {
-                  "content": {
-                    "type": "string",
-                    "maxLength": 1000
-                  },
-                  "parentId": {
-                    "type": "string",
-                    "format": "uuid",
-                    "description": "Parent comment ID for replies"
-                  }
+                  "content": { "type": "string", "maxLength": 1000 },
+                  "parentId": { "type": "string", "format": "uuid", "description": "Parent comment ID for replies" }
                 }
               }
             }
@@ -1744,20 +1021,14 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "comment": {
-                      "$ref": "#/components/schemas/Comment"
-                    }
+                    "comment": { "$ref": "#/components/schemas/Comment" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Empty or missing content"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Empty or missing content" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
@@ -1767,23 +1038,14 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "post": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Like a game",
         "description": "Adds a like. Idempotent — returns current count if already liked.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Like status",
@@ -1792,32 +1054,20 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "liked": {
-                      "type": "boolean"
-                    },
-                    "likeCount": {
-                      "type": "integer"
-                    }
+                    "liked": { "type": "boolean" },
+                    "likeCount": { "type": "integer" }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       },
       "delete": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Unlike a game",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Unlike status",
@@ -1826,20 +1076,14 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "liked": {
-                      "type": "boolean"
-                    },
-                    "likeCount": {
-                      "type": "integer"
-                    }
+                    "liked": { "type": "boolean" },
+                    "likeCount": { "type": "integer" }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
@@ -1849,38 +1093,23 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "post": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Rate a game",
         "description": "Submits or updates a 1–5 star rating. One rating per user per game.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "rating"
-                ],
+                "required": ["rating"],
                 "properties": {
-                  "rating": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 5
-                  }
+                  "rating": { "type": "integer", "minimum": 1, "maximum": 5 }
                 }
               }
             }
@@ -1894,24 +1123,15 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "avgRating": {
-                      "type": "number",
-                      "format": "float"
-                    },
-                    "ratingCount": {
-                      "type": "integer"
-                    }
+                    "avgRating": { "type": "number", "format": "float" },
+                    "ratingCount": { "type": "integer" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Rating out of range"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Rating out of range" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
@@ -1921,23 +1141,14 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "post": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Fork a game",
         "description": "Copies a published game's project into the authenticated user's account. Returns HTTP 403 if the user has reached their tier's project limit.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "201": {
             "description": "New project ID",
@@ -1946,32 +1157,21 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "projectId": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
+                    "projectId": { "type": "string", "format": "uuid" }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "description": "Project limit reached"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Project limit reached" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
     "/api/community/tags": {
       "get": {
-        "tags": [
-          "Community"
-        ],
+        "tags": ["Community"],
         "summary": "Get popular tags",
         "description": "Returns the top 20 most-used tags across all published games. No authentication required.",
         "responses": {
@@ -1987,12 +1187,8 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "tag": {
-                            "type": "string"
-                          },
-                          "count": {
-                            "type": "integer"
-                          }
+                          "tag": { "type": "string" },
+                          "count": { "type": "integer" }
                         }
                       }
                     }
@@ -2006,9 +1202,7 @@
     },
     "/api/marketplace/assets": {
       "get": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Browse marketplace assets",
         "description": "Returns published assets with seller info. No authentication required.",
         "parameters": [
@@ -2016,26 +1210,14 @@
             "name": "q",
             "in": "query",
             "description": "Search query (name, description, or tags)",
-            "schema": {
-              "type": "string"
-            }
+            "schema": { "type": "string" }
           },
           {
             "name": "category",
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "model_3d",
-                "sprite",
-                "texture",
-                "audio",
-                "script",
-                "prefab",
-                "template",
-                "shader",
-                "animation"
-              ]
+              "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"]
             }
           },
           {
@@ -2043,14 +1225,7 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "newest",
-                "popular",
-                "top_rated",
-                "price_low",
-                "price_high",
-                "free"
-              ],
+              "enum": ["newest", "popular", "top_rated", "price_low", "price_high", "free"],
               "default": "popular"
             }
           },
@@ -2059,32 +1234,19 @@
             "in": "query",
             "schema": {
               "type": "string",
-              "enum": [
-                "all",
-                "free",
-                "paid"
-              ],
+              "enum": ["all", "free", "paid"],
               "default": "all"
             }
           },
           {
             "name": "page",
             "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1
-            }
+            "schema": { "type": "integer", "minimum": 1, "default": 1 }
           },
           {
             "name": "limit",
             "in": "query",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100,
-              "default": 20
-            }
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
           }
         ],
         "responses": {
@@ -2095,15 +1257,8 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "assets": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/MarketplaceAsset"
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
+                    "assets": { "type": "array", "items": { "$ref": "#/components/schemas/MarketplaceAsset" } },
+                    "hasMore": { "type": "boolean" }
                   }
                 }
               }
@@ -2118,16 +1273,11 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "get": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Get asset details",
         "description": "Returns full asset details including seller profile and up to 10 recent reviews. No authentication required.",
         "responses": {
@@ -2140,41 +1290,20 @@
                   "properties": {
                     "asset": {
                       "allOf": [
-                        {
-                          "$ref": "#/components/schemas/MarketplaceAsset"
-                        },
+                        { "$ref": "#/components/schemas/MarketplaceAsset" },
                         {
                           "type": "object",
                           "properties": {
-                            "assetFileSize": {
-                              "type": "integer",
-                              "nullable": true
-                            },
-                            "aiProvider": {
-                              "type": "string",
-                              "nullable": true
-                            },
-                            "metadata": {
-                              "type": "object",
-                              "nullable": true
-                            },
+                            "assetFileSize": { "type": "integer", "nullable": true },
+                            "aiProvider": { "type": "string", "nullable": true },
+                            "metadata": { "type": "object", "nullable": true },
                             "seller": {
                               "type": "object",
                               "properties": {
-                                "id": {
-                                  "type": "string"
-                                },
-                                "name": {
-                                  "type": "string"
-                                },
-                                "bio": {
-                                  "type": "string",
-                                  "nullable": true
-                                },
-                                "portfolioUrl": {
-                                  "type": "string",
-                                  "nullable": true
-                                }
+                                "id": { "type": "string" },
+                                "name": { "type": "string" },
+                                "bio": { "type": "string", "nullable": true },
+                                "portfolioUrl": { "type": "string", "nullable": true }
                               }
                             }
                           }
@@ -2186,26 +1315,11 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "rating": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 5
-                          },
-                          "content": {
-                            "type": "string",
-                            "nullable": true
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "userName": {
-                            "type": "string"
-                          }
+                          "id": { "type": "string", "format": "uuid" },
+                          "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+                          "content": { "type": "string", "nullable": true },
+                          "createdAt": { "type": "string", "format": "date-time" },
+                          "userName": { "type": "string" }
                         }
                       }
                     }
@@ -2214,9 +1328,7 @@
               }
             }
           },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -2226,23 +1338,14 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "post": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Purchase an asset",
         "description": "Deducts tokens from the buyer and credits the seller (70/30 split). Free assets are recorded without token deduction. Tokens are consumed in order: earned credits first, then add-on tokens, then monthly allocation.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Purchase result",
@@ -2251,33 +1354,18 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "downloadUrl": {
-                      "type": "string",
-                      "nullable": true
-                    },
-                    "tokensCharged": {
-                      "type": "integer"
-                    },
-                    "sellerEarnings": {
-                      "type": "integer"
-                    }
+                    "success": { "type": "boolean" },
+                    "downloadUrl": { "type": "string", "nullable": true },
+                    "tokensCharged": { "type": "integer" },
+                    "sellerEarnings": { "type": "integer" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Already purchased, asset unavailable, or self-purchase"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "409": {
-            "description": "Token balance changed concurrently — retry the request"
-          }
+          "400": { "description": "Already purchased, asset unavailable, or self-purchase" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "description": "Token balance changed concurrently — retry the request" }
         }
       }
     },
@@ -2287,39 +1375,20 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "get": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Download a purchased asset",
         "description": "Redirects to the asset file CDN URL. Requires the authenticated user to have purchased the asset or to be the seller.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
-          "302": {
-            "description": "Redirect to asset file URL"
-          },
-          "400": {
-            "description": "Invalid or disallowed file URL"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "description": "Not authorized — asset not purchased"
-          },
-          "404": {
-            "description": "Asset not found or no file available"
-          }
+          "302": { "description": "Redirect to asset file URL" },
+          "400": { "description": "Invalid or disallowed file URL" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Not authorized — asset not purchased" },
+          "404": { "description": "Asset not found or no file available" }
         }
       }
     },
@@ -2329,42 +1398,24 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "post": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Submit or update a review",
         "description": "Posts a review for a purchased asset. Requires the user to have purchased the asset. One review per user per asset — submitting again updates the existing review.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "rating"
-                ],
+                "required": ["rating"],
                 "properties": {
-                  "rating": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 5
-                  },
-                  "content": {
-                    "type": "string",
-                    "description": "Optional review text"
-                  }
+                  "rating": { "type": "integer", "minimum": 1, "maximum": 5 },
+                  "content": { "type": "string", "description": "Optional review text" }
                 }
               }
             }
@@ -2377,39 +1428,23 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
+                  "properties": { "success": { "type": "boolean" } }
                 }
               }
             }
           },
-          "400": {
-            "description": "Rating out of range"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "description": "Must purchase asset before reviewing"
-          }
+          "400": { "description": "Rating out of range" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "description": "Must purchase asset before reviewing" }
         }
       }
     },
     "/api/marketplace/purchases": {
       "get": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "List purchased asset IDs",
         "description": "Returns the IDs of all assets the authenticated user has purchased.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Purchased asset IDs",
@@ -2418,36 +1453,22 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "assetIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "format": "uuid"
-                      }
-                    }
+                    "assetIds": { "type": "array", "items": { "type": "string", "format": "uuid" } }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/marketplace/seller": {
       "get": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Get seller profile",
         "description": "Returns the authenticated user's seller profile, or `{ profile: null }` if not registered as a seller.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Seller profile",
@@ -2459,12 +1480,8 @@
                     "profile": {
                       "nullable": true,
                       "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/SellerProfile"
-                        },
-                        {
-                          "type": "null"
-                        }
+                        { "$ref": "#/components/schemas/SellerProfile" },
+                        { "type": "null" }
                       ]
                     }
                   }
@@ -2472,43 +1489,25 @@
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       },
       "post": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Create or update seller profile",
         "description": "Registers or updates the authenticated user's seller profile. New profiles are created with `approved: false` pending admin review.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "displayName"
-                ],
+                "required": ["displayName"],
                 "properties": {
-                  "displayName": {
-                    "type": "string",
-                    "minLength": 2
-                  },
-                  "bio": {
-                    "type": "string"
-                  },
-                  "portfolioUrl": {
-                    "type": "string",
-                    "format": "uri"
-                  }
+                  "displayName": { "type": "string", "minLength": 2 },
+                  "bio": { "type": "string" },
+                  "portfolioUrl": { "type": "string", "format": "uri" }
                 }
               }
             }
@@ -2521,36 +1520,22 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
+                  "properties": { "success": { "type": "boolean" } }
                 }
               }
             }
           },
-          "400": {
-            "description": "Display name too short"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Display name too short" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/marketplace/seller/assets": {
       "get": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "List seller's own assets",
         "description": "Returns all assets the authenticated user has listed as a seller, including draft/pending/rejected status.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Seller assets",
@@ -2559,80 +1544,37 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "assets": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/MarketplaceAsset"
-                      }
-                    }
+                    "assets": { "type": "array", "items": { "$ref": "#/components/schemas/MarketplaceAsset" } }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       },
       "post": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Create a new asset listing",
         "description": "Creates a new asset listing in `draft` status. Use PATCH to submit for review.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "name",
-                  "description",
-                  "category"
-                ],
+                "required": ["name", "description", "category"],
                 "properties": {
-                  "name": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
                   "category": {
                     "type": "string",
-                    "enum": [
-                      "model_3d",
-                      "sprite",
-                      "texture",
-                      "audio",
-                      "script",
-                      "prefab",
-                      "template",
-                      "shader",
-                      "animation"
-                    ]
+                    "enum": ["model_3d", "sprite", "texture", "audio", "script", "prefab", "template", "shader", "animation"]
                   },
-                  "priceTokens": {
-                    "type": "integer",
-                    "minimum": 0,
-                    "default": 0
-                  },
-                  "license": {
-                    "type": "string",
-                    "default": "standard"
-                  },
-                  "tags": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
+                  "priceTokens": { "type": "integer", "minimum": 0, "default": 0 },
+                  "license": { "type": "string", "default": "standard" },
+                  "tags": { "type": "array", "items": { "type": "string" } }
                 }
               }
             }
@@ -2646,20 +1588,14 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "asset": {
-                      "$ref": "#/components/schemas/MarketplaceAsset"
-                    }
+                    "asset": { "$ref": "#/components/schemas/MarketplaceAsset" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Missing required fields"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Missing required fields" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
@@ -2669,23 +1605,14 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "patch": {
-        "tags": [
-          "Marketplace"
-        ],
+        "tags": ["Marketplace"],
         "summary": "Update seller asset",
         "description": "Updates a seller's own asset listing. Status transitions: `draft` → `pending_review`, `pending_review` → `draft`, `rejected` → `pending_review` or `draft`. Publishing requires admin approval.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
@@ -2693,31 +1620,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": {
-                    "type": "string"
-                  },
-                  "description": {
-                    "type": "string"
-                  },
-                  "priceTokens": {
-                    "type": "integer",
-                    "minimum": 0
-                  },
-                  "license": {
-                    "type": "string"
-                  },
-                  "tags": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
+                  "name": { "type": "string" },
+                  "description": { "type": "string" },
+                  "priceTokens": { "type": "integer", "minimum": 0 },
+                  "license": { "type": "string" },
+                  "tags": { "type": "array", "items": { "type": "string" } },
                   "status": {
                     "type": "string",
-                    "enum": [
-                      "draft",
-                      "pending_review"
-                    ],
+                    "enum": ["draft", "pending_review"],
                     "description": "Sellers may only move to draft or pending_review"
                   }
                 }
@@ -2732,80 +1642,40 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
+                  "properties": { "success": { "type": "boolean" } }
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid status transition"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "400": { "description": "Invalid status transition" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
     "/api/generate/model": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate 3D model",
         "description": "Starts an async 3D model generation job via Meshy. Returns a `jobId` to poll at `/api/generate/model/status`.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt",
-                  "mode"
-                ],
+                "required": ["prompt", "mode"],
                 "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  },
-                  "mode": {
-                    "type": "string",
-                    "enum": [
-                      "text-to-3d",
-                      "image-to-3d"
-                    ]
-                  },
-                  "quality": {
-                    "type": "string",
-                    "enum": [
-                      "standard",
-                      "high"
-                    ],
-                    "default": "standard"
-                  },
+                  "prompt": { "type": "string", "minLength": 3, "maxLength": 500 },
+                  "mode": { "type": "string", "enum": ["text-to-3d", "image-to-3d"] },
+                  "quality": { "type": "string", "enum": ["standard", "high"], "default": "standard" },
                   "imageBase64": {
                     "type": "string",
                     "description": "Required when mode is image-to-3d"
                   },
-                  "artStyle": {
-                    "type": "string"
-                  },
-                  "negativePrompt": {
-                    "type": "string"
-                  }
+                  "artStyle": { "type": "string" },
+                  "negativePrompt": { "type": "string" }
                 }
               }
             }
@@ -2816,43 +1686,27 @@
             "description": "Job started",
             "content": {
               "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJob"
-                }
+                "schema": { "$ref": "#/components/schemas/GenerationJob" }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Validation error (prompt length, missing imageBase64)"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Validation error (prompt length, missing imageBase64)" }
         }
       }
     },
     "/api/generate/model/status": {
       "get": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Poll 3D model generation status",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "parameters": [
           {
             "name": "jobId",
             "in": "query",
             "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "schema": { "type": "string" }
           }
         ],
         "responses": {
@@ -2862,16 +1716,11 @@
               "application/json": {
                 "schema": {
                   "allOf": [
-                    {
-                      "$ref": "#/components/schemas/GenerationStatus"
-                    },
+                    { "$ref": "#/components/schemas/GenerationStatus" },
                     {
                       "type": "object",
                       "properties": {
-                        "thumbnailUrl": {
-                          "type": "string",
-                          "nullable": true
-                        }
+                        "thumbnailUrl": { "type": "string", "nullable": true }
                       }
                     }
                   ]
@@ -2879,116 +1728,49 @@
               }
             }
           },
-          "400": {
-            "description": "Missing jobId"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Missing jobId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/generate/texture": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate texture",
         "description": "Starts an async texture generation job via Meshy. Returns a `jobId` to poll at `/api/generate/texture/status`.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt"
-                ],
+                "required": ["prompt"],
                 "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  },
-                  "resolution": {
-                    "type": "string",
-                    "enum": [
-                      "1024",
-                      "2048"
-                    ],
-                    "default": "1024"
-                  },
-                  "style": {
-                    "type": "string",
-                    "enum": [
-                      "realistic",
-                      "stylized",
-                      "cartoon"
-                    ],
-                    "default": "realistic"
-                  },
-                  "tiling": {
-                    "type": "boolean",
-                    "default": true
-                  },
-                  "entityId": {
-                    "type": "string",
-                    "description": "Optional entity ID for context"
-                  }
+                  "prompt": { "type": "string", "minLength": 3, "maxLength": 500 },
+                  "resolution": { "type": "string", "enum": ["1024", "2048"], "default": "1024" },
+                  "style": { "type": "string", "enum": ["realistic", "stylized", "cartoon"], "default": "realistic" },
+                  "tiling": { "type": "boolean", "default": true },
+                  "entityId": { "type": "string", "description": "Optional entity ID for context" }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Job started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJob"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Prompt validation error"
-          }
+          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Prompt validation error" }
         }
       }
     },
     "/api/generate/texture/status": {
       "get": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Poll texture generation status",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "jobId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
+        "parameters": [{ "name": "jobId", "in": "query", "required": true, "schema": { "type": "string" } }],
         "responses": {
           "200": {
             "description": "Job status with texture maps",
@@ -2996,18 +1778,14 @@
               "application/json": {
                 "schema": {
                   "allOf": [
-                    {
-                      "$ref": "#/components/schemas/GenerationStatus"
-                    },
+                    { "$ref": "#/components/schemas/GenerationStatus" },
                     {
                       "type": "object",
                       "properties": {
                         "maps": {
                           "type": "object",
                           "description": "Texture map URLs keyed by map type (albedo, normal, roughness, etc.)",
-                          "additionalProperties": {
-                            "type": "string"
-                          }
+                          "additionalProperties": { "type": "string" }
                         }
                       }
                     }
@@ -3016,48 +1794,27 @@
               }
             }
           },
-          "400": {
-            "description": "Missing jobId"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Missing jobId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/generate/sfx": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate sound effect",
         "description": "Synchronous — returns audio data immediately (no polling required). Uses ElevenLabs.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt"
-                ],
+                "required": ["prompt"],
                 "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  },
-                  "durationSeconds": {
-                    "type": "number",
-                    "minimum": 0.5,
-                    "maximum": 22,
-                    "default": 5
-                  }
+                  "prompt": { "type": "string", "minLength": 3, "maxLength": 500 },
+                  "durationSeconds": { "type": "number", "minimum": 0.5, "maximum": 22, "default": 5 }
                 }
               }
             }
@@ -3071,80 +1828,39 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "audioBase64": {
-                      "type": "string",
-                      "description": "Base64-encoded MP3 audio data"
-                    },
-                    "durationSeconds": {
-                      "type": "number"
-                    },
-                    "provider": {
-                      "type": "string",
-                      "example": "elevenlabs"
-                    }
+                    "audioBase64": { "type": "string", "description": "Base64-encoded MP3 audio data" },
+                    "durationSeconds": { "type": "number" },
+                    "provider": { "type": "string", "example": "elevenlabs" }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Validation error"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Validation error" }
         }
       }
     },
     "/api/generate/voice": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate voice audio",
         "description": "Synchronous text-to-speech via ElevenLabs. Returns audio immediately.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "text"
-                ],
+                "required": ["text"],
                 "properties": {
-                  "text": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 1000
-                  },
-                  "voiceId": {
-                    "type": "string",
-                    "description": "ElevenLabs voice ID"
-                  },
-                  "stability": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1
-                  },
-                  "similarityBoost": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1
-                  },
-                  "style": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 1
-                  }
+                  "text": { "type": "string", "minLength": 1, "maxLength": 1000 },
+                  "voiceId": { "type": "string", "description": "ElevenLabs voice ID" },
+                  "stability": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "similarityBoost": { "type": "number", "minimum": 0, "maximum": 1 },
+                  "style": { "type": "number", "minimum": 0, "maximum": 1 }
                 }
               }
             }
@@ -3158,119 +1874,56 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "audioBase64": {
-                      "type": "string"
-                    },
-                    "durationSeconds": {
-                      "type": "number"
-                    },
-                    "provider": {
-                      "type": "string",
-                      "example": "elevenlabs"
-                    }
+                    "audioBase64": { "type": "string" },
+                    "durationSeconds": { "type": "number" },
+                    "provider": { "type": "string", "example": "elevenlabs" }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Text validation error"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Text validation error" }
         }
       }
     },
     "/api/generate/music": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate background music",
         "description": "Starts an async music generation job via Suno. Returns a `jobId` to poll at `/api/generate/music/status`.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt"
-                ],
+                "required": ["prompt"],
                 "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  },
-                  "durationSeconds": {
-                    "type": "integer",
-                    "minimum": 15,
-                    "maximum": 120,
-                    "default": 30
-                  },
-                  "instrumental": {
-                    "type": "boolean",
-                    "default": true
-                  }
+                  "prompt": { "type": "string", "minLength": 3, "maxLength": 500 },
+                  "durationSeconds": { "type": "integer", "minimum": 15, "maximum": 120, "default": 30 },
+                  "instrumental": { "type": "boolean", "default": true }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Job started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJob"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Validation error"
-          }
+          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Validation error" }
         }
       }
     },
     "/api/generate/music/status": {
       "get": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Poll music generation status",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "jobId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
+        "parameters": [{ "name": "jobId", "in": "query", "required": true, "schema": { "type": "string" } }],
         "responses": {
           "200": {
             "description": "Job status",
@@ -3278,16 +1931,11 @@
               "application/json": {
                 "schema": {
                   "allOf": [
-                    {
-                      "$ref": "#/components/schemas/GenerationStatus"
-                    },
+                    { "$ref": "#/components/schemas/GenerationStatus" },
                     {
                       "type": "object",
                       "properties": {
-                        "durationSeconds": {
-                          "type": "number",
-                          "nullable": true
-                        }
+                        "durationSeconds": { "type": "number", "nullable": true }
                       }
                     }
                   ]
@@ -3295,50 +1943,29 @@
               }
             }
           },
-          "400": {
-            "description": "Missing jobId"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Missing jobId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/generate/skybox": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate skybox",
         "description": "Generates an equirectangular panoramic skybox image via Meshy. Returns a `jobId` to poll at `/api/generate/skybox/status`.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt"
-                ],
+                "required": ["prompt"],
                 "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  },
+                  "prompt": { "type": "string", "minLength": 3, "maxLength": 500 },
                   "style": {
                     "type": "string",
-                    "enum": [
-                      "realistic",
-                      "fantasy",
-                      "sci-fi",
-                      "cartoon"
-                    ],
+                    "enum": ["realistic", "fantasy", "sci-fi", "cartoon"],
                     "default": "realistic"
                   }
                 }
@@ -3347,378 +1974,151 @@
           }
         },
         "responses": {
-          "201": {
-            "description": "Job started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJob"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Prompt validation error"
-          }
+          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Prompt validation error" }
         }
       }
     },
     "/api/generate/skybox/status": {
       "get": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Poll skybox generation status",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "jobId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
+        "parameters": [{ "name": "jobId", "in": "query", "required": true, "schema": { "type": "string" } }],
         "responses": {
-          "200": {
-            "description": "Job status with equirectangular image URL in resultUrl",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationStatus"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing jobId"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "200": { "description": "Job status with equirectangular image URL in resultUrl", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
+          "400": { "description": "Missing jobId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/generate/sprite": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate sprite",
         "description": "Starts a sprite generation job. Provider auto-selects DALL-E 3 for photorealistic styles and Replicate/SDXL for pixel-art. Returns a `jobId` to poll at `/api/generate/sprite/status`.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt"
-                ],
+                "required": ["prompt"],
                 "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  },
-                  "style": {
-                    "type": "string",
-                    "enum": [
-                      "pixel-art",
-                      "hand-drawn",
-                      "vector",
-                      "realistic"
-                    ]
-                  },
+                  "prompt": { "type": "string", "minLength": 3, "maxLength": 500 },
+                  "style": { "type": "string", "enum": ["pixel-art", "hand-drawn", "vector", "realistic"] },
                   "size": {
                     "type": "string",
-                    "enum": [
-                      "32x32",
-                      "64x64",
-                      "128x128",
-                      "256x256",
-                      "512x512",
-                      "1024x1024"
-                    ],
+                    "enum": ["32x32", "64x64", "128x128", "256x256", "512x512", "1024x1024"],
                     "default": "64x64"
                   },
-                  "provider": {
-                    "type": "string",
-                    "enum": [
-                      "auto",
-                      "dalle3",
-                      "sdxl"
-                    ],
-                    "default": "auto"
-                  },
-                  "removeBackground": {
-                    "type": "boolean",
-                    "default": true
-                  }
+                  "provider": { "type": "string", "enum": ["auto", "dalle3", "sdxl"], "default": "auto" },
+                  "removeBackground": { "type": "boolean", "default": true }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Job started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJob"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Prompt validation error"
-          }
+          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Prompt validation error" }
         }
       }
     },
     "/api/generate/sprite/status": {
       "get": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Poll sprite generation status",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "jobId",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
+        "parameters": [{ "name": "jobId", "in": "query", "required": true, "schema": { "type": "string" } }],
         "responses": {
-          "200": {
-            "description": "Job status",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationStatus"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Missing jobId"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "200": { "description": "Job status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationStatus" } } } },
+          "400": { "description": "Missing jobId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/generate/sprite-sheet": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate sprite sheet",
         "description": "Generates an animation sprite sheet from a source sprite asset using Replicate/ControlNet. Token cost scales with frame count (15 tokens per frame).",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "sourceAssetId"
-                ],
+                "required": ["sourceAssetId"],
                 "properties": {
-                  "sourceAssetId": {
-                    "type": "string",
-                    "description": "Asset ID of the source sprite"
-                  },
-                  "frameCount": {
-                    "type": "integer",
-                    "minimum": 2,
-                    "maximum": 8,
-                    "default": 4
-                  },
-                  "style": {
-                    "type": "string",
-                    "enum": [
-                      "pixel-art",
-                      "hand-drawn",
-                      "vector",
-                      "realistic"
-                    ]
-                  },
-                  "size": {
-                    "type": "string",
-                    "enum": [
-                      "32x32",
-                      "64x64",
-                      "128x128",
-                      "256x256"
-                    ],
-                    "default": "64x64"
-                  }
+                  "sourceAssetId": { "type": "string", "description": "Asset ID of the source sprite" },
+                  "frameCount": { "type": "integer", "minimum": 2, "maximum": 8, "default": 4 },
+                  "style": { "type": "string", "enum": ["pixel-art", "hand-drawn", "vector", "realistic"] },
+                  "size": { "type": "string", "enum": ["32x32", "64x64", "128x128", "256x256"], "default": "64x64" }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Job started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJob"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Validation error"
-          }
+          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Validation error" }
         }
       }
     },
     "/api/generate/tileset-gen": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Generate tileset",
         "description": "Generates a tiling game tileset using Replicate. Fixed cost of 50 tokens.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "prompt"
-                ],
+                "required": ["prompt"],
                 "properties": {
-                  "prompt": {
-                    "type": "string",
-                    "minLength": 3,
-                    "maxLength": 500
-                  },
-                  "tileSize": {
-                    "type": "integer",
-                    "enum": [
-                      16,
-                      32,
-                      48,
-                      64
-                    ],
-                    "default": 32
-                  },
-                  "gridSize": {
-                    "type": "string",
-                    "enum": [
-                      "4x4",
-                      "8x8",
-                      "16x16"
-                    ],
-                    "default": "8x8"
-                  }
+                  "prompt": { "type": "string", "minLength": 3, "maxLength": 500 },
+                  "tileSize": { "type": "integer", "enum": [16, 32, 48, 64], "default": 32 },
+                  "gridSize": { "type": "string", "enum": ["4x4", "8x8", "16x16"], "default": "8x8" }
                 }
               }
             }
           }
         },
         "responses": {
-          "201": {
-            "description": "Job started",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GenerationJob"
-                }
-              }
-            }
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "402": {
-            "$ref": "#/components/responses/PaymentRequired"
-          },
-          "422": {
-            "description": "Prompt validation error"
-          }
+          "201": { "description": "Job started", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/GenerationJob" } } } },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "402": { "$ref": "#/components/responses/PaymentRequired" },
+          "422": { "description": "Prompt validation error" }
         }
       }
     },
     "/api/generate/refund": {
       "post": {
-        "tags": [
-          "Asset Generation"
-        ],
+        "tags": ["Asset Generation"],
         "summary": "Refund tokens for a failed generation",
         "description": "Refunds tokens for a failed generation job. Rate limited to 3 requests per minute.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "usageId"
-                ],
+                "required": ["usageId"],
                 "properties": {
-                  "usageId": {
-                    "type": "string",
-                    "description": "Usage record ID from the original generation call"
-                  }
+                  "usageId": { "type": "string", "description": "Usage record ID from the original generation call" }
                 }
               }
             }
@@ -3731,39 +2131,23 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "properties": {
-                    "success": {
-                      "type": "boolean"
-                    }
-                  }
+                  "properties": { "success": { "type": "boolean" } }
                 }
               }
             }
           },
-          "400": {
-            "description": "Missing usageId"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "429": {
-            "description": "Rate limit exceeded"
-          }
+          "400": { "description": "Missing usageId" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "description": "Rate limit exceeded" }
         }
       }
     },
     "/api/keys": {
       "get": {
-        "tags": [
-          "Keys"
-        ],
+        "tags": ["Keys"],
         "summary": "List configured BYOK providers",
         "description": "Returns which AI providers have BYOK (Bring Your Own Key) keys configured. Requires hobbyist tier or above. Key values are never returned.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Configured providers",
@@ -3777,23 +2161,9 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "provider": {
-                            "type": "string",
-                            "enum": [
-                              "anthropic",
-                              "meshy",
-                              "hyper3d",
-                              "elevenlabs",
-                              "suno"
-                            ]
-                          },
-                          "configured": {
-                            "type": "boolean"
-                          },
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          }
+                          "provider": { "type": "string", "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"] },
+                          "configured": { "type": "boolean" },
+                          "createdAt": { "type": "string", "format": "date-time" }
                         }
                       }
                     }
@@ -3802,12 +2172,8 @@
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
         }
       }
     },
@@ -3819,42 +2185,24 @@
           "required": true,
           "schema": {
             "type": "string",
-            "enum": [
-              "anthropic",
-              "meshy",
-              "hyper3d",
-              "elevenlabs",
-              "suno"
-            ]
+            "enum": ["anthropic", "meshy", "hyper3d", "elevenlabs", "suno"]
           }
         }
       ],
       "put": {
-        "tags": [
-          "Keys"
-        ],
+        "tags": ["Keys"],
         "summary": "Store or update a BYOK provider key",
         "description": "Encrypts and stores an API key for the specified provider. Requires hobbyist tier or above.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "key"
-                ],
+                "required": ["key"],
                 "properties": {
-                  "key": {
-                    "type": "string",
-                    "minLength": 8,
-                    "description": "The API key to store. Encrypted with AES-256-GCM before persisting."
-                  }
+                  "key": { "type": "string", "minLength": 8, "description": "The API key to store. Encrypted with AES-256-GCM before persisting." }
                 }
               }
             }
@@ -3868,41 +2216,23 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "provider": {
-                      "type": "string"
-                    },
-                    "configured": {
-                      "type": "boolean"
-                    }
+                    "success": { "type": "boolean" },
+                    "provider": { "type": "string" },
+                    "configured": { "type": "boolean" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid provider or key"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
+          "400": { "description": "Invalid provider or key" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
         }
       },
       "delete": {
-        "tags": [
-          "Keys"
-        ],
+        "tags": ["Keys"],
         "summary": "Remove a BYOK provider key",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Key removed",
@@ -3911,41 +2241,25 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "provider": {
-                      "type": "string"
-                    },
-                    "configured": {
-                      "type": "boolean"
-                    }
+                    "success": { "type": "boolean" },
+                    "provider": { "type": "string" },
+                    "configured": { "type": "boolean" }
                   }
                 }
               }
             }
           },
-          "400": {
-            "description": "Invalid provider"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "400": { "description": "Invalid provider" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       }
     },
     "/api/keys/api-key": {
       "get": {
-        "tags": [
-          "Keys"
-        ],
+        "tags": ["Keys"],
         "summary": "List MCP API keys",
         "description": "Returns all MCP API keys for the user. Key secrets are never returned — only prefix, name, scopes, and timestamps.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "API keys (no secrets)",
@@ -3954,33 +2268,20 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "keys": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ApiKeyRecord"
-                      }
-                    }
+                    "keys": { "type": "array", "items": { "$ref": "#/components/schemas/ApiKeyRecord" } }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" }
         }
       },
       "post": {
-        "tags": [
-          "Keys"
-        ],
+        "tags": ["Keys"],
         "summary": "Generate a new MCP API key",
         "description": "Creates a new `forge_` prefixed API key for MCP server access. The full key value is returned ONCE and never stored in plaintext. Requires creator or pro tier.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "requestBody": {
           "required": false,
           "content": {
@@ -3988,27 +2289,14 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "name": {
-                    "type": "string",
-                    "default": "Default"
-                  },
+                  "name": { "type": "string", "default": "Default" },
                   "scopes": {
                     "type": "array",
                     "items": {
                       "type": "string",
-                      "enum": [
-                        "scene:read",
-                        "scene:write",
-                        "ai:generate",
-                        "project:manage"
-                      ]
+                      "enum": ["scene:read", "scene:write", "ai:generate", "project:manage"]
                     },
-                    "default": [
-                      "scene:read",
-                      "scene:write",
-                      "ai:generate",
-                      "project:manage"
-                    ]
+                    "default": ["scene:read", "scene:write", "ai:generate", "project:manage"]
                   }
                 }
               }
@@ -4022,20 +2310,12 @@
               "application/json": {
                 "schema": {
                   "allOf": [
-                    {
-                      "$ref": "#/components/schemas/ApiKeyRecord"
-                    },
+                    { "$ref": "#/components/schemas/ApiKeyRecord" },
                     {
                       "type": "object",
                       "properties": {
-                        "key": {
-                          "type": "string",
-                          "example": "forge_a1b2c3d4..."
-                        },
-                        "warning": {
-                          "type": "string",
-                          "example": "Save this key now. It cannot be retrieved again."
-                        }
+                        "key": { "type": "string", "example": "forge_a1b2c3d4..." },
+                        "warning": { "type": "string", "example": "Save this key now. It cannot be retrieved again." }
                       }
                     }
                   ]
@@ -4043,15 +2323,9 @@
               }
             }
           },
-          "400": {
-            "description": "Invalid scopes"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          }
+          "400": { "description": "Invalid scopes" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
         }
       }
     },
@@ -4061,23 +2335,14 @@
           "name": "id",
           "in": "path",
           "required": true,
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
+          "schema": { "type": "string", "format": "uuid" }
         }
       ],
       "delete": {
-        "tags": [
-          "Keys"
-        ],
+        "tags": ["Keys"],
         "summary": "Revoke an MCP API key",
         "description": "Permanently deletes the key. Any MCP requests using this key will be rejected.",
-        "security": [
-          {
-            "ClerkSession": []
-          }
-        ],
+        "security": [{ "ClerkSession": [] }],
         "responses": {
           "200": {
             "description": "Key revoked",
@@ -4086,32 +2351,21 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "success": {
-                      "type": "boolean"
-                    },
-                    "revoked": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
+                    "success": { "type": "boolean" },
+                    "revoked": { "type": "string", "format": "uuid" }
                   }
                 }
               }
             }
           },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
     "/api/docs": {
       "get": {
-        "tags": [
-          "Documentation"
-        ],
+        "tags": ["Documentation"],
         "summary": "Load documentation content",
         "description": "Recursively loads all Markdown files from the `docs/` directory. Returns structured content with titles and sections for BM25 full-text search. No authentication required.",
         "responses": {
@@ -4127,42 +2381,24 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "path": {
-                            "type": "string",
-                            "example": "reference/scripting-api"
-                          },
-                          "title": {
-                            "type": "string"
-                          },
-                          "content": {
-                            "type": "string",
-                            "description": "Raw Markdown content"
-                          },
-                          "category": {
-                            "type": "string",
-                            "example": "reference"
-                          },
+                          "path": { "type": "string", "example": "reference/scripting-api" },
+                          "title": { "type": "string" },
+                          "content": { "type": "string", "description": "Raw Markdown content" },
+                          "category": { "type": "string", "example": "reference" },
                           "sections": {
                             "type": "array",
                             "items": {
                               "type": "object",
                               "properties": {
-                                "heading": {
-                                  "type": "string"
-                                },
-                                "content": {
-                                  "type": "string"
-                                }
+                                "heading": { "type": "string" },
+                                "content": { "type": "string" }
                               }
                             }
                           }
                         }
                       }
                     },
-                    "meta": {
-                      "type": "object",
-                      "description": "Optional _meta.json navigation metadata"
-                    }
+                    "meta": { "type": "object", "description": "Optional _meta.json navigation metadata" }
                   }
                 }
               }
@@ -4170,6 +2406,6 @@
           }
         }
       }
-    }
+    },
   }
 }
