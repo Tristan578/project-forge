@@ -1,0 +1,162 @@
+name: Post-Deploy Smoke Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Base URL to smoke-test (no trailing slash)'
+        required: false
+        default: 'https://spawnforge.ai'
+        type: string
+
+  workflow_call:
+    inputs:
+      target_url:
+        description: 'Base URL to smoke-test (no trailing slash)'
+        required: false
+        default: 'https://spawnforge.ai'
+        type: string
+
+  workflow_run:
+    workflows: [CD]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  smoke:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    # Run for: workflow_dispatch (manual), workflow_call (from CD), or workflow_run (when CD succeeded).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'workflow_call' ||
+      github.event.workflow_run.conclusion == 'success'
+    permissions:
+      contents: read
+
+    env:
+      # Prefer explicit input (workflow_dispatch / workflow_call); then DEPLOY_URL var; then production.
+      TARGET_URL: ${{ inputs.target_url || vars.DEPLOY_URL || 'https://spawnforge.ai' }}
+
+    steps:
+      - name: Resolve target URL
+        run: echo "Smoke-testing $TARGET_URL"
+
+      # -- Check 1: Health endpoint ----------------------------------------------
+      - name: Health check (/api/health)
+        id: health
+        run: |
+          HTTP_CODE=$(curl --silent --output /tmp/health_body.json \
+            --write-out "%{http_code}" \
+            --max-time 10 \
+            "$TARGET_URL/api/health")
+          echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+          echo "HTTP $HTTP_CODE"
+          cat /tmp/health_body.json || true
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::/api/health returned HTTP $HTTP_CODE (expected 200)"
+            exit 1
+          fi
+
+          # Must be a JSON body (Content-Type check not reliable through curl output,
+          # so verify we can parse the body as JSON).
+          if ! python3 -c "import sys, json; json.load(open('/tmp/health_body.json'))" 2>/dev/null; then
+            echo "::error::/api/health response is not valid JSON"
+            exit 1
+          fi
+          echo "/api/health OK"
+
+      # -- Check 2: Homepage HTML ------------------------------------------------
+      - name: Homepage loads (/)
+        id: homepage
+        run: |
+          HTTP_CODE=$(curl --silent --output /tmp/homepage_body.html \
+            --write-out "%{http_code}" \
+            --max-time 10 \
+            "$TARGET_URL/")
+          echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+          echo "HTTP $HTTP_CODE"
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::Homepage returned HTTP $HTTP_CODE (expected 200)"
+            exit 1
+          fi
+
+          if ! grep -qi "SpawnForge" /tmp/homepage_body.html; then
+            echo "::error::Homepage HTML does not contain 'SpawnForge'"
+            exit 1
+          fi
+          echo "Homepage OK"
+
+      # -- Check 3: Static asset ------------------------------------------------
+      - name: Static asset (/manifest.json)
+        id: manifest
+        run: |
+          HTTP_CODE=$(curl --silent --output /tmp/manifest_body.json \
+            --write-out "%{http_code}" \
+            --max-time 10 \
+            "$TARGET_URL/manifest.json")
+          echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+          echo "HTTP $HTTP_CODE"
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::/manifest.json returned HTTP $HTTP_CODE (expected 200)"
+            exit 1
+          fi
+          echo "/manifest.json OK"
+
+      # -- Check 4: WASM binary -------------------------------------------------
+      - name: WASM available (/engine-pkg-webgl2/forge_engine_bg.wasm)
+        id: wasm
+        run: |
+          WASM_PATH="/engine-pkg-webgl2/forge_engine_bg.wasm"
+          RESPONSE=$(curl --silent --head --output /dev/null \
+            --write-out "%{http_code}|%{content_type}" \
+            --max-time 10 \
+            "$TARGET_URL$WASM_PATH")
+          HTTP_CODE=$(echo "$RESPONSE" | cut -d'|' -f1)
+          CONTENT_TYPE=$(echo "$RESPONSE" | cut -d'|' -f2)
+          echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
+          echo "content_type=$CONTENT_TYPE" >> "$GITHUB_OUTPUT"
+          echo "HTTP $HTTP_CODE  Content-Type: $CONTENT_TYPE"
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "::error::$WASM_PATH returned HTTP $HTTP_CODE (expected 200)"
+            exit 1
+          fi
+
+          # Accept application/wasm or application/octet-stream (CDN may differ).
+          if echo "$CONTENT_TYPE" | grep -qvE "application/(wasm|octet-stream)"; then
+            echo "::warning::$WASM_PATH content-type is '$CONTENT_TYPE' -- expected application/wasm or application/octet-stream"
+          fi
+          echo "WASM OK"
+
+      # -- Summary --------------------------------------------------------------
+      - name: Write job summary
+        if: always()
+        env:
+          HEALTH_OUTCOME: ${{ steps.health.outcome }}
+          HOMEPAGE_OUTCOME: ${{ steps.homepage.outcome }}
+          MANIFEST_OUTCOME: ${{ steps.manifest.outcome }}
+          WASM_OUTCOME: ${{ steps.wasm.outcome }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          health_result() { [ "$HEALTH_OUTCOME" = "success" ] && echo "PASS" || echo "FAIL"; }
+          homepage_result() { [ "$HOMEPAGE_OUTCOME" = "success" ] && echo "PASS" || echo "FAIL"; }
+          manifest_result() { [ "$MANIFEST_OUTCOME" = "success" ] && echo "PASS" || echo "FAIL"; }
+          wasm_result() { [ "$WASM_OUTCOME" = "success" ] && echo "PASS" || echo "FAIL"; }
+
+          {
+            echo "## Post-Deploy Smoke Results"
+            echo ""
+            echo "| Check | Result |"
+            echo "|-------|--------|"
+            echo "| /api/health | $(health_result) |"
+            echo "| / (homepage) | $(homepage_result) |"
+            echo "| /manifest.json | $(manifest_result) |"
+            echo "| WASM binary | $(wasm_result) |"
+            echo ""
+            echo "**Target:** \`$TARGET_URL\`"
+            echo "**Triggered by:** \`$EVENT_NAME\`"
+          } >> "$GITHUB_STEP_SUMMARY"

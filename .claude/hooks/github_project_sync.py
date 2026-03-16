@@ -19,6 +19,7 @@ Usage:
 Requires: gh CLI (authenticated), taskboard API at localhost:3010, SQLite DB
 """
 
+import fcntl
 import hashlib
 import json
 import os
@@ -670,6 +671,23 @@ def github_to_local(config, github_status):
 # ---------------------------------------------------------------------------
 
 def push(include_done=False):
+    # --- Exclusive file lock to prevent concurrent sync ---
+    lock_path = _MAIN_HOOKS / ".sync-push.lock"
+    lock_fd = open(lock_path, "w")
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (IOError, OSError):
+        print("[SYNC] Another push is already running — skipping to prevent duplicates")
+        lock_fd.close()
+        return
+    try:
+        _push_inner(include_done)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
+
+
+def _push_inner(include_done=False):
     config = load_config()
     mapping = load_map()
     tmap = mapping.get("tickets", {})
@@ -724,8 +742,12 @@ def push(include_done=False):
                 continue
 
         # Skip done tickets that were already synced as done
+        # BUT still ensure the GitHub issue is closed (previous close may have failed)
         if status == "done" and not include_done:
             if tid in tmap and tmap[tid].get("lastLocalStatus") == "done":
+                gh_num = tmap[tid].get("githubIssueNumber") or db_get_github_issue_number(tid)
+                if gh_num:
+                    gh_sync_issue_state(config, gh_num, "done")
                 skipped += 1
                 continue
 
@@ -764,6 +786,12 @@ def push(include_done=False):
                 continue
 
             # --- New ticket: create GitHub Issue ---
+            # Final dedup: re-check DB in case another process just wrote the issue number
+            fresh_gh_num = db_get_github_issue_number(tid)
+            if fresh_gh_num is not None:
+                skipped += 1
+                continue
+
             try:
                 body = format_github_body(full_ticket)
                 item_id, new_gh_num = gh_create_issue_and_add_to_project(

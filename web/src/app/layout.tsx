@@ -3,7 +3,12 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { NextIntlClientProvider } from "next-intl";
+import { getMessages, setRequestLocale } from "next-intl/server";
+import { defaultLocale } from "@/i18n/config";
 import { Toaster } from "sonner";
+import { AnalyticsProvider } from "@/components/AnalyticsProvider";
+import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import "./globals.css";
 
 // Prevent static prerendering — all pages require auth (ClerkProvider)
@@ -26,22 +31,30 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "SpawnForge",
   description: "AI-Powered Game Creation Platform",
+  manifest: "/manifest.json",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  setRequestLocale(defaultLocale);
+  const messages = await getMessages();
+
   const body = (
     <html lang="en" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        {children}
+        <NextIntlClientProvider locale={defaultLocale} messages={messages}>
+          {children}
+        </NextIntlClientProvider>
+        <AnalyticsProvider />
         <SpeedInsights />
         <Toaster theme="dark" position="bottom-right" richColors />
+        <ServiceWorkerRegistration />
       </body>
     </html>
   );

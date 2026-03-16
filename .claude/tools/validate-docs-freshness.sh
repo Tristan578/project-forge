@@ -1,75 +1,85 @@
 #!/usr/bin/env bash
-# validate-docs-freshness.sh
-# Reads YAML frontmatter from docs in docs/ and reports stale docs
-# where relatedFiles have been modified after lastVerified.
-# Exit 0 always (warning only, not blocking).
+# Validate that docs/features/ files with relatedFiles frontmatter are fresh
+# relative to recent git history.
+#
+# Frontmatter format (YAML block between --- delimiters at top of file):
+#   ---
+#   lastVerified: 2026-03-14
+#   relatedFiles:
+#     - web/src/stores/slices/physicsSlice.ts
+#     - engine/src/core/physics.rs
+#   ---
+#
+# Exit 0 always — output is informational only.
+# Used by: post-merge-doc-check.sh, doc-freshness GitHub Actions workflow
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-DOCS_DIR="$REPO_ROOT/docs"
+PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
-if [ ! -d "$DOCS_DIR" ]; then
-  echo "WARN: docs/ directory not found at $DOCS_DIR" >&2
-  exit 0
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+echo "=== SpawnForge Docs Freshness Check ==="
+echo ""
+
+# Collect list of recently-changed source files from git history
+# Default: look back 30 commits (covers typical merge windows)
+LOOKBACK="${LOOKBACK_COMMITS:-30}"
+RECENT_CHANGED=$(git -C "$PROJECT_ROOT" diff --name-only "HEAD~${LOOKBACK}" HEAD 2>/dev/null || true)
+
+if [ -z "$RECENT_CHANGED" ]; then
+  # Fallback: compare with previous commit only
+  RECENT_CHANGED=$(git -C "$PROJECT_ROOT" diff --name-only HEAD~1 HEAD 2>/dev/null || true)
 fi
 
-stale_count=0
-clean_count=0
+STALE_COUNT=0
+CHECKED_COUNT=0
 
-# Find all markdown docs that contain frontmatter
-while IFS= read -r doc_path; do
-  # Extract YAML frontmatter (content between the first pair of --- lines)
-  frontmatter=$(awk 'BEGIN{in_fm=0; found=0} /^---/{if(!found){in_fm=1; found=1; next} else if(in_fm){exit}} in_fm{print}' "$doc_path")
+# Walk every doc in docs/features/
+while IFS= read -r -d '' DOC_FILE; do
+  DOC_RELATIVE="${DOC_FILE#"$PROJECT_ROOT/"}"
 
-  # Parse lastVerified
-  last_verified=$(printf '%s\n' "$frontmatter" | grep '^lastVerified:' | sed 's/^lastVerified:[[:space:]]*//')
-  if [ -z "$last_verified" ]; then
+  # Extract frontmatter block (content between first --- pair)
+  FRONTMATTER=$(awk '/^---/{if(NR==1){found=1;next}if(found){exit}}found{print}' "$DOC_FILE" 2>/dev/null || true)
+
+  # Skip docs without frontmatter
+  if [ -z "$FRONTMATTER" ]; then
     continue
   fi
 
-  # Parse relatedFiles inline list: [file1, file2, ...]
-  related_files_raw=$(printf '%s\n' "$frontmatter" | grep '^relatedFiles:' | sed 's/^relatedFiles:[[:space:]]*//' | tr -d '[]')
+  # Parse relatedFiles list (lines starting with "  - ")
+  RELATED_FILES=$(echo "$FRONTMATTER" | awk '/^relatedFiles:/{found=1;next}/^[^ ]/{found=0}found && /^ *-/{gsub(/^ *- */,"",$0);print}' || true)
 
-  doc_relative="${doc_path#$REPO_ROOT/}"
-  has_stale=0
-  stale_details=()
-
-  IFS=',' read -ra files_array <<< "$related_files_raw"
-  for raw_file in "${files_array[@]}"; do
-    # Trim leading/trailing whitespace
-    file="${raw_file#"${raw_file%%[! ]*}"}"
-    file="${file%"${file##*[! ]}"}"
-    [ -z "$file" ] && continue
-
-    abs_file="$REPO_ROOT/$file"
-    if [ ! -f "$abs_file" ]; then
-      continue
-    fi
-
-    # Get date of the most recent commit for this file (YYYY-MM-DD)
-    last_commit=$(git -C "$REPO_ROOT" log -1 --format="%as" -- "$file" 2>/dev/null)
-    if [ -z "$last_commit" ]; then
-      continue
-    fi
-
-    # Lexicographic date comparison (YYYY-MM-DD sorts correctly)
-    if [[ "$last_commit" > "$last_verified" ]]; then
-      has_stale=1
-      stale_details+=("$file changed $last_commit, doc verified $last_verified")
-    fi
-  done
-
-  if [ "$has_stale" -eq 1 ]; then
-    stale_count=$((stale_count + 1))
-    for detail in "${stale_details[@]}"; do
-      echo "STALE: $doc_relative ($detail)"
-    done
-  else
-    clean_count=$((clean_count + 1))
+  if [ -z "$RELATED_FILES" ]; then
+    continue
   fi
 
-done < <(find "$DOCS_DIR" -name "*.md" -type f | sort)
+  CHECKED_COUNT=$((CHECKED_COUNT + 1))
+
+  # Check each related file against the recent-changed list
+  while IFS= read -r REL_FILE; do
+    REL_FILE="$(echo "$REL_FILE" | xargs)"  # trim whitespace
+    [ -z "$REL_FILE" ] && continue
+
+    if echo "$RECENT_CHANGED" | grep -qF "$REL_FILE"; then
+      echo -e "${YELLOW}DOC UPDATE NEEDED${NC}: $DOC_RELATIVE ($REL_FILE was modified)"
+      STALE_COUNT=$((STALE_COUNT + 1))
+      break  # One match per doc is enough to flag it
+    fi
+  done <<< "$RELATED_FILES"
+
+done < <(find "$PROJECT_ROOT/docs/features" -name "*.md" -print0 2>/dev/null)
 
 echo ""
-echo "Doc freshness summary: $clean_count clean, $stale_count stale"
-exit 0
+if [ "$CHECKED_COUNT" -eq 0 ]; then
+  echo "No docs with relatedFiles frontmatter found — nothing to check."
+  echo "(Add frontmatter to docs/features/*.md files to enable staleness tracking.)"
+elif [ "$STALE_COUNT" -eq 0 ]; then
+  echo -e "${GREEN}All $CHECKED_COUNT checked doc(s) appear fresh.${NC}"
+else
+  echo "$STALE_COUNT doc(s) may need updating (source files changed in last $LOOKBACK commits)."
+fi
+
+echo ""
+echo "=== Docs freshness check complete ==="

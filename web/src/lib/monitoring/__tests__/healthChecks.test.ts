@@ -376,10 +376,269 @@ describe('healthChecks', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // checkClerk
+  // ---------------------------------------------------------------------------
+  describe('checkClerk', () => {
+    it('returns degraded when Clerk keys not configured', async () => {
+      vi.resetModules();
+      const { checkClerk } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkClerk();
+      expect(result.name).toBe('Clerk');
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('not configured');
+      expect(result.details?.publishableKeyConfigured).toBe(false);
+      expect(result.details?.secretKeyConfigured).toBe(false);
+    });
+
+    it('returns degraded when only publishable key is set', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_abc');
+      const { checkClerk } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkClerk();
+      expect(result.status).toBe('degraded');
+    });
+
+    it('returns healthy when both keys are set and JWKS endpoint responds', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_abc');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_abc');
+
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkClerk } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkClerk();
+
+      expect(result.status).toBe('healthy');
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(result.details?.configured).toBe(true);
+    });
+
+    it('accepts 405 as a healthy response (HEAD not supported)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_abc');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_abc');
+
+      const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 405 });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkClerk } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkClerk();
+
+      expect(result.status).toBe('healthy');
+    });
+
+    it('returns degraded when JWKS endpoint returns non-200 non-405', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_abc');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_abc');
+
+      const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkClerk } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkClerk();
+
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('503');
+    });
+
+    it('returns degraded when JWKS fetch throws', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_abc');
+      vi.stubEnv('CLERK_SECRET_KEY', 'sk_test_abc');
+
+      const mockFetch = vi.fn().mockRejectedValue(new Error('network error'));
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkClerk } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkClerk();
+
+      expect(result.status).toBe('degraded');
+      expect(result.error).toBe('network error');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // checkAnthropic
+  // ---------------------------------------------------------------------------
+  describe('checkAnthropic', () => {
+    it('returns degraded when ANTHROPIC_API_KEY not set', async () => {
+      vi.resetModules();
+      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAnthropic();
+      expect(result.name).toBe('Anthropic');
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('ANTHROPIC_API_KEY not configured');
+      expect(result.details?.configured).toBe(false);
+    });
+
+    it('returns healthy when key is set and api.anthropic.com responds', async () => {
+      vi.resetModules();
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+
+      const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAnthropic();
+
+      expect(result.status).toBe('healthy');
+      expect(result.latencyMs).toBeGreaterThanOrEqual(0);
+      expect(result.details?.configured).toBe(true);
+    });
+
+    it('accepts 4xx responses as healthy (host is reachable)', async () => {
+      vi.resetModules();
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+
+      const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAnthropic();
+
+      expect(result.status).toBe('healthy');
+    });
+
+    it('returns degraded when api.anthropic.com returns 5xx', async () => {
+      vi.resetModules();
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+
+      const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAnthropic();
+
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('503');
+    });
+
+    it('returns degraded when fetch throws', async () => {
+      vi.resetModules();
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-ant-test');
+
+      const mockFetch = vi.fn().mockRejectedValue(new Error('DNS failure'));
+      vi.stubGlobal('fetch', mockFetch);
+
+      const { checkAnthropic } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkAnthropic();
+
+      expect(result.status).toBe('degraded');
+      expect(result.error).toBe('DNS failure');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // checkSentry
+  // ---------------------------------------------------------------------------
+  describe('checkSentry', () => {
+    it('returns degraded when no Sentry DSN configured', async () => {
+      vi.resetModules();
+      const { checkSentry } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkSentry();
+      expect(result.name).toBe('Sentry');
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('not configured');
+      expect(result.details?.configured).toBe(false);
+    });
+
+    it('returns healthy when NEXT_PUBLIC_SENTRY_DSN is well-formed', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://abc123@o123.ingest.sentry.io/456');
+      const { checkSentry } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkSentry();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.configured).toBe(true);
+      expect(result.details?.wellFormed).toBe(true);
+    });
+
+    it('returns healthy when SENTRY_DSN fallback is well-formed', async () => {
+      vi.resetModules();
+      vi.stubEnv('SENTRY_DSN', 'https://xyz@sentry.io/789');
+      const { checkSentry } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkSentry();
+      expect(result.status).toBe('healthy');
+    });
+
+    it('returns degraded when DSN is malformed (no @)', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'not-a-valid-dsn');
+      const { checkSentry } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkSentry();
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('malformed');
+      expect(result.details?.wellFormed).toBe(false);
+    });
+
+    it('returns degraded when DSN does not start with https://', async () => {
+      vi.resetModules();
+      vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'http://abc@sentry.io/123');
+      const { checkSentry } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkSentry();
+      expect(result.status).toBe('degraded');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // checkCloudflareR2
+  // ---------------------------------------------------------------------------
+  describe('checkCloudflareR2', () => {
+    it('returns down when no R2 env vars configured', async () => {
+      vi.resetModules();
+      const { checkCloudflareR2 } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkCloudflareR2();
+      expect(result.name).toBe('Cloudflare R2');
+      expect(result.status).toBe('down');
+      expect(result.error).toContain('not configured');
+    });
+
+    it('returns degraded when only some R2 vars are present', async () => {
+      vi.resetModules();
+      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
+      const { checkCloudflareR2 } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkCloudflareR2();
+      expect(result.status).toBe('degraded');
+      expect(result.error).toContain('partially configured');
+      expect(result.details?.accountIdConfigured).toBe(true);
+      expect(result.details?.accessKeyConfigured).toBe(false);
+    });
+
+    it('returns healthy when all R2 vars are present', async () => {
+      vi.resetModules();
+      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
+      vi.stubEnv('R2_ACCESS_KEY_ID', 'key123');
+      vi.stubEnv('R2_SECRET_ACCESS_KEY', 'secret456');
+      vi.stubEnv('R2_BUCKET_NAME', 'spawnforge-assets');
+      const { checkCloudflareR2 } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkCloudflareR2();
+      expect(result.status).toBe('healthy');
+      expect(result.details?.bucket).toBe('spawnforge-assets');
+      expect(result.details?.accountIdConfigured).toBe(true);
+      expect(result.details?.accessKeyConfigured).toBe(true);
+      expect(result.details?.secretKeyConfigured).toBe(true);
+      expect(result.details?.bucketNameConfigured).toBe(true);
+    });
+
+    it('returns degraded when 3 of 4 vars are present', async () => {
+      vi.resetModules();
+      vi.stubEnv('CLOUDFLARE_ACCOUNT_ID', 'acct_abc');
+      vi.stubEnv('R2_ACCESS_KEY_ID', 'key123');
+      vi.stubEnv('R2_SECRET_ACCESS_KEY', 'secret456');
+      // R2_BUCKET_NAME missing
+      const { checkCloudflareR2 } = await import('@/lib/monitoring/healthChecks');
+      const result = await checkCloudflareR2();
+      expect(result.status).toBe('degraded');
+      expect(result.details?.bucketNameConfigured).toBe(false);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // runAllHealthChecks
   // ---------------------------------------------------------------------------
   describe('runAllHealthChecks', () => {
-    it('returns a HealthReport with all 8 services', async () => {
+    it('returns a HealthReport with all 12 services', async () => {
       vi.resetModules();
 
       // Minimal mocks: DB neon needs a mock even with no DATABASE_URL
@@ -389,7 +648,7 @@ describe('healthChecks', () => {
       const { runAllHealthChecks } = await import('@/lib/monitoring/healthChecks');
       const report = await runAllHealthChecks();
 
-      expect(report.services).toHaveLength(8);
+      expect(report.services).toHaveLength(12);
       expect(report.environment).toBe('test');
       expect(report.version).toBe('abcdef12');
       expect(report.timestamp).toBeDefined();
