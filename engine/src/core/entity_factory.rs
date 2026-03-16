@@ -435,8 +435,8 @@ pub fn apply_duplicate_requests(
         Option<&LightData>,
         Option<&PhysicsData>,
         Option<&PhysicsEnabled>,
-        Option<&AssetRef>,
     )>,
+    asset_ref_query: Query<(&EntityId, Option<&AssetRef>)>,
     script_audio_query: Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
     reverb_particle_query: Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>)>,
     shader_csg_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&csg::CsgMeshData>)>,
@@ -457,9 +457,15 @@ pub fn apply_duplicate_requests(
             Option<&EntityType>, Option<&Mesh3d>, Option<&MeshMaterial3d<StandardMaterial>>,
             Option<&PointLight>, Option<&DirectionalLight>, Option<&SpotLight>,
             Option<&MaterialData>, Option<&LightData>, Option<&PhysicsData>,
-            Option<&PhysicsEnabled>, Option<&AssetRef>,
+            Option<&PhysicsEnabled>,
         ),
     > = query.iter().map(|row| (row.1 .0.clone(), row)).collect();
+
+    // Pre-index: entity ID string -> AssetRef for O(1) lookup
+    let asset_ref_index: HashMap<String, Option<AssetRef>> = asset_ref_query
+        .iter()
+        .map(|(eid, ar)| (eid.0.clone(), ar.cloned()))
+        .collect();
 
     // Pre-index auxiliary component data (single O(n) pass over 6 queries)
     let aux_index = build_aux_index(
@@ -479,9 +485,10 @@ pub fn apply_duplicate_requests(
             _entity, source_eid, name, transform, visible,
             src_entity_type, mesh_handle, material_handle,
             point_light, dir_light, spot_light,
-            src_mat_data, src_light_data, src_phys_data, src_phys_enabled, src_asset_ref,
+            src_mat_data, src_light_data, src_phys_data, src_phys_enabled,
         )) = entity_index.get(&request.entity_id)
         {
+            let src_asset_ref = asset_ref_index.get(&source_eid.0).and_then(|ar| ar.as_ref());
             let aux = aux_index.get(&source_eid.0).unwrap_or(&empty_aux);
 
             // Clone with offset
