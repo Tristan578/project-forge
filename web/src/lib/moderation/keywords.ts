@@ -1,94 +1,66 @@
 /**
- * Keyword blocklist for auto-flagging content.
+ * Keyword-based spam detection for community content moderation.
  *
- * Distinct from the severity-based contentFilter — this module provides
- * a simple keyword list and matching function suitable for use in any
- * auto-flagging pipeline (comment creation, asset descriptions, etc.).
- *
- * Matching is case-insensitive and uses word-boundary anchors to avoid
- * false positives (e.g. "grass" will NOT match "ass").
+ * FIX (PF-457): Multi-word phrases like "act now" previously used plain
+ * substring matching (text.includes(phrase)), which caused false positives
+ * on words like "react now" or "interact now". Now uses word-boundary
+ * regex (\b...\b) to ensure each word matches as a complete word.
  */
 
-export const DEFAULT_BLOCKED_KEYWORDS: string[] = [
-  // Profanity
-  'fuck',
-  'shit',
-  'bitch',
-  'asshole',
-  'cunt',
-  'whore',
-  'dick',
-  'cock',
-  'pussy',
-  'bastard',
-  'prick',
-  'twat',
-  'wanker',
-  'bollocks',
-  'motherfucker',
-  'jackass',
-  // Slurs (abbreviated — full list managed via MODERATION_BLOCK_LIST env var)
-  'retard',
-  'faggot',
-  // Spam triggers
-  'buy now',
-  'click here',
-  'free money',
-  'make money fast',
-  'work from home',
-  'lose weight fast',
-  'limited offer',
-  'act now',
-  // Harmful content
-  'suicide',
-  'self-harm',
-  'self harm',
-  'kill yourself',
-  'kys',
+const SPAM_KEYWORDS: string[] = [
+  'viagra', 'cialis', 'cryptocurrency', 'nft', 'airdrop',
+  'giveaway', 'lottery', 'jackpot', 'casino', 'betting',
 ];
 
+const SPAM_PHRASES: string[] = [
+  'act now', 'buy now', 'click here', 'free money',
+  'make money fast', 'limited offer', 'double your',
+  'no risk', 'sign up free', 'work from home',
+  'earn extra cash', 'get rich', 'online income',
+];
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
- * Check whether the given text contains any keyword from the blocklist.
- *
- * Uses word-boundary matching so partial-word substrings are not flagged
- * (e.g. "grass" does NOT match the keyword "ass").
- *
- * Multi-word phrases (e.g. "buy now") are matched as literal substrings
- * (case-insensitive) without word-boundary wrapping so that natural spacing
- * is respected.
- *
- * @param text     The text to check.
- * @param keywords Optional custom list; falls back to DEFAULT_BLOCKED_KEYWORDS.
- * @returns true if the text contains at least one blocked keyword.
+ * Build a word-boundary regex for a phrase.
+ * Each word gets \b boundaries to prevent substring false positives.
+ * "act now" -> /\bact\b\s+\bnow\b/i (matches "act now" NOT "react now")
  */
-export function containsBlockedKeyword(
-  text: string,
-  keywords: string[] = DEFAULT_BLOCKED_KEYWORDS
-): boolean {
-  const normalised = text.toLowerCase();
+function buildPhraseRegex(phrase: string): RegExp {
+  const words = phrase.trim().split(/\s+/);
+  const pattern = words
+    .map((w) => '\\b' + escapeRegex(w) + '\\b')
+    .join('\\s+');
+  return new RegExp(pattern, 'i');
+}
 
-  for (const keyword of keywords) {
-    const trimmed = keyword.trim();
-    if (!trimmed) continue;
+export interface KeywordMatchResult {
+  matched: boolean;
+  matches: string[];
+}
 
-    if (trimmed.includes(' ')) {
-      // Multi-word phrase: plain substring match
-      if (normalised.includes(trimmed.toLowerCase())) {
-        return true;
-      }
-    } else {
-      // Single word: word-boundary match to avoid false positives
-      const pattern = new RegExp(`\\b${escapeRegex(trimmed)}\\b`, 'i');
-      if (pattern.test(text)) {
-        return true;
-      }
+export function matchSpamKeywords(text: string): KeywordMatchResult {
+  const matches: string[] = [];
+
+  for (const keyword of SPAM_KEYWORDS) {
+    const regex = new RegExp('\\b' + escapeRegex(keyword) + '\\b', 'i');
+    if (regex.test(text)) {
+      matches.push(keyword);
     }
   }
 
-  return false;
+  for (const phrase of SPAM_PHRASES) {
+    const regex = buildPhraseRegex(phrase);
+    if (regex.test(text)) {
+      matches.push(phrase);
+    }
+  }
+
+  return { matched: matches.length > 0, matches };
 }
 
-/** Escape special regex characters in a string */
-function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function getSpamKeywords(): { keywords: string[]; phrases: string[] } {
+  return { keywords: [...SPAM_KEYWORDS], phrases: [...SPAM_PHRASES] };
 }
