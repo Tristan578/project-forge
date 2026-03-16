@@ -432,3 +432,57 @@ describe('processRollover', () => {
     expect(insertValues.userId).toBe('user-uuid-1');
   });
 });
+
+// ---------------------------------------------------------------------------
+// refundCredits (PF-488)
+// ---------------------------------------------------------------------------
+
+describe('refundCredits', () => {
+  it('returns success=true immediately for amount=0 without DB writes', async () => {
+    mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 100, earnedCredits: 0 });
+    selectCallCount = 0;
+
+    const { refundCredits } = await import('../creditManager');
+    const result = await refundCredits('user-uuid-1', 0, 'txn-1');
+    expect(result.success).toBe(true);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
+  it('returns success=true immediately for negative amount', async () => {
+    mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 100, earnedCredits: 0 });
+    selectCallCount = 0;
+
+    const { refundCredits } = await import('../creditManager');
+    const result = await refundCredits('user-uuid-1', -10, 'txn-2');
+    expect(result.success).toBe(true);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('adds refund amount to addon tokens and records audit trail', async () => {
+    mockUser = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 50, earnedCredits: 0 });
+    mockUserAfterUpdate = makeUser({ monthlyTokens: 1000, monthlyTokensUsed: 0, addonTokens: 150, earnedCredits: 0 });
+
+    const { refundCredits } = await import('../creditManager');
+    const result = await refundCredits('user-uuid-1', 100, 'txn-3');
+
+    expect(result.success).toBe(true);
+    expect(mockUpdate).toHaveBeenCalledOnce();
+
+    // Verify audit transaction
+    expect(mockInsert).toHaveBeenCalledOnce();
+    const insertValues = mockInsert.mock.results[0].value.values.mock.calls[0][0];
+    expect(insertValues.transactionType).toBe('refund');
+    expect(insertValues.amount).toBe(100);
+    expect(insertValues.source).toBe('credit_refund');
+    expect(insertValues.referenceId).toBe('txn-3');
+    expect(insertValues.userId).toBe('user-uuid-1');
+  });
+
+  it('throws when user does not exist', async () => {
+    mockUser = null;
+
+    const { refundCredits } = await import('../creditManager');
+    await expect(refundCredits('ghost', 50, 'txn-4')).rejects.toThrow('User not found: ghost');
+  });
+});
