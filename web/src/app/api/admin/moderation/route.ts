@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { gameComments, publishedGames, users } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,9 @@ export async function GET(req: NextRequest) {
 
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
+
+    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation');
+    if (rateLimitError) return rateLimitError;
 
     const db = getDb();
     const searchParams = req.nextUrl.searchParams;
@@ -79,6 +83,9 @@ export async function POST(req: NextRequest) {
 
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
+
+    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation');
+    if (rateLimitError) return rateLimitError;
 
     const db = getDb();
     const body = await req.json();
