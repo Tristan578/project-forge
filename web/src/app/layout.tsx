@@ -8,7 +8,7 @@ import { getMessages, setRequestLocale } from "next-intl/server";
 import { defaultLocale } from "@/i18n/config";
 import { Toaster } from "sonner";
 import { AnalyticsProvider } from "@/components/AnalyticsProvider";
-import { WebVitalsReporter } from "@/components/WebVitalsReporter";
+import { CookieConsent } from "@/components/CookieConsent";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
 import { PostHogProvider } from "@/components/providers/PostHogProvider";
 import "./globals.css";
@@ -30,11 +30,45 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://spawnforge.ai";
+
 export const metadata: Metadata = {
   title: "SpawnForge",
-  description: "AI-Powered Game Creation Platform",
+  description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser with natural language and a visual editor.",
   manifest: "/manifest.json",
+  openGraph: {
+    title: "SpawnForge",
+    description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser with natural language and a visual editor.",
+    url: SITE_URL,
+    siteName: "SpawnForge",
+    type: "website",
+    images: [
+      {
+        url: `${SITE_URL}/og-image.png`,
+        width: 1200,
+        height: 630,
+        alt: "SpawnForge — AI-Powered Game Creation Platform",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "SpawnForge",
+    description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser.",
+    images: [`${SITE_URL}/og-image.png`],
+  },
 };
+
+// Static JSON-LD Organization schema (safe constant — no user input)
+const jsonLdString = JSON.stringify({
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  name: "SpawnForge",
+  url: SITE_URL,
+  logo: `${SITE_URL}/favicon.ico`,
+  description: "AI-Powered Game Creation Platform — build 2D and 3D games in your browser with natural language and a visual editor.",
+  sameAs: [],
+});
 
 export default async function RootLayout({
   children,
@@ -46,6 +80,12 @@ export default async function RootLayout({
 
   const body = (
     <html lang="en" className="dark">
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: jsonLdString }}
+        />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
@@ -54,11 +94,11 @@ export default async function RootLayout({
           {children}
         </NextIntlClientProvider>
         <AnalyticsProvider />
-        <WebVitalsReporter />
         <SpeedInsights />
         <Toaster theme="dark" position="bottom-right" richColors />
         <ServiceWorkerRegistration />
         <PostHogProvider />
+        <CookieConsent />
       </body>
     </html>
   );
