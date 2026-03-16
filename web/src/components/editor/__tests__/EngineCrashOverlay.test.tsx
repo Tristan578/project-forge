@@ -6,15 +6,17 @@ import { render, screen, cleanup, fireEvent } from '@/test/utils/componentTestUt
 import { EngineCrashOverlay } from '../EngineCrashOverlay';
 
 let capturedListener: ((message: string) => void) | null = null;
+
+const mockOnEngineCrash = vi.fn((listener: (message: string) => void) => {
+  capturedListener = listener;
+  return mockUnsubscribe;
+});
 const mockUnsubscribe = vi.fn();
 const mockResetEngine = vi.fn();
 
 vi.mock('@/hooks/useEngine', () => ({
-  onEngineCrash: vi.fn((listener: (message: string) => void) => {
-    capturedListener = listener;
-    return mockUnsubscribe;
-  }),
-  resetEngine: mockResetEngine,
+  onEngineCrash: (...args: unknown[]) => mockOnEngineCrash(...(args as [(_: string) => void])),
+  resetEngine: (...args: unknown[]) => mockResetEngine(...args),
 }));
 
 vi.mock('lucide-react', () => ({
@@ -36,10 +38,9 @@ describe('EngineCrashOverlay', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('subscribes to engine crash on mount', async () => {
+  it('subscribes to engine crash on mount', () => {
     render(<EngineCrashOverlay />);
-    const { onEngineCrash } = await import('@/hooks/useEngine');
-    expect(onEngineCrash).toHaveBeenCalledTimes(1);
+    expect(mockOnEngineCrash).toHaveBeenCalledTimes(1);
   });
 
   it('unsubscribes on unmount', () => {
