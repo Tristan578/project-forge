@@ -13,7 +13,7 @@ vi.mock('web-vitals', () => ({
   onINP: (...args: unknown[]) => mockOnINP(...args),
 }));
 
-const flushPromises = () => new Promise<void>((r) => { setTimeout(r, 0); });
+const flushPromises = () => new Promise<void>((r) => { queueMicrotask(r); });
 
 describe('webVitals', () => {
   beforeEach(() => {
