@@ -122,7 +122,213 @@ pub fn apply_spawn_requests(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared helpers for delete & duplicate — pre-indexed O(1) lookups
+// ---------------------------------------------------------------------------
+
+/// Auxiliary component data collected from secondary queries, keyed by entity ID.
+/// Used by both delete and duplicate to avoid redundant O(n) scans.
+struct AuxComponentData {
+    script_data: Option<ScriptData>,
+    audio_data: Option<AudioData>,
+    reverb_zone_data: Option<super::reverb_zone::ReverbZoneData>,
+    reverb_zone_enabled: bool,
+    particle_data: Option<ParticleData>,
+    particle_enabled: bool,
+    shader_effect_data: Option<ShaderEffectData>,
+    csg_mesh_data: Option<csg::CsgMeshData>,
+    procedural_mesh_data: Option<super::procedural_mesh::ProceduralMeshData>,
+    joint_data: Option<JointData>,
+    game_components: Option<super::game_components::GameComponents>,
+    animation_clip_data: Option<AnimationClipData>,
+    game_camera_data: Option<GameCameraData>,
+    active_game_camera: bool,
+    sprite_data: Option<super::sprite::SpriteData>,
+}
+
+impl Default for AuxComponentData {
+    fn default() -> Self {
+        Self {
+            script_data: None,
+            audio_data: None,
+            reverb_zone_data: None,
+            reverb_zone_enabled: false,
+            particle_data: None,
+            particle_enabled: false,
+            shader_effect_data: None,
+            csg_mesh_data: None,
+            procedural_mesh_data: None,
+            joint_data: None,
+            game_components: None,
+            animation_clip_data: None,
+            game_camera_data: None,
+            active_game_camera: false,
+            sprite_data: None,
+        }
+    }
+}
+
+/// Build a HashMap of auxiliary component data from the secondary queries.
+/// This converts 7 separate O(n) linear scans per entity into a single O(n) pass.
+fn build_aux_index(
+    script_audio_query: &Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
+    reverb_particle_query: &Query<(
+        &EntityId,
+        Option<&super::reverb_zone::ReverbZoneData>,
+        Option<&super::reverb_zone::ReverbZoneEnabled>,
+        Option<&ParticleData>,
+        Option<&ParticleEnabled>,
+    )>,
+    shader_csg_query: &Query<(&EntityId, Option<&ShaderEffectData>, Option<&csg::CsgMeshData>)>,
+    procedural_joint_query: &Query<(
+        &EntityId,
+        Option<&super::procedural_mesh::ProceduralMeshData>,
+        Option<&JointData>,
+    )>,
+    game_anim_query: &Query<(
+        &EntityId,
+        Option<&super::game_components::GameComponents>,
+        Option<&AnimationClipData>,
+        Option<&GameCameraData>,
+        Option<&ActiveGameCamera>,
+    )>,
+    sprite_query: &Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
+) -> HashMap<String, AuxComponentData> {
+    let mut index: HashMap<String, AuxComponentData> = HashMap::new();
+
+    for (eid, sd, ad) in script_audio_query.iter() {
+        let entry = index.entry(eid.0.clone()).or_default();
+        entry.script_data = sd.cloned();
+        entry.audio_data = ad.cloned();
+    }
+
+    for (eid, rzd, rze, pd, pe) in reverb_particle_query.iter() {
+        let entry = index.entry(eid.0.clone()).or_default();
+        entry.reverb_zone_data = rzd.cloned();
+        entry.reverb_zone_enabled = rze.is_some();
+        entry.particle_data = pd.cloned();
+        entry.particle_enabled = pe.is_some();
+    }
+
+    for (eid, sed, cmd) in shader_csg_query.iter() {
+        let entry = index.entry(eid.0.clone()).or_default();
+        entry.shader_effect_data = sed.cloned();
+        entry.csg_mesh_data = cmd.cloned();
+    }
+
+    for (eid, pmd, jd) in procedural_joint_query.iter() {
+        let entry = index.entry(eid.0.clone()).or_default();
+        entry.procedural_mesh_data = pmd.cloned();
+        entry.joint_data = jd.cloned();
+    }
+
+    for (eid, gc, acd, gcd, agc) in game_anim_query.iter() {
+        let entry = index.entry(eid.0.clone()).or_default();
+        entry.game_components = gc.cloned();
+        entry.animation_clip_data = acd.cloned();
+        entry.game_camera_data = gcd.cloned();
+        entry.active_game_camera = agc.is_some();
+    }
+
+    for (eid, sd) in sprite_query.iter() {
+        let entry = index.entry(eid.0.clone()).or_default();
+        entry.sprite_data = sd.cloned();
+    }
+
+    index
+}
+
+/// Build a complete EntitySnapshot from base query data and pre-indexed auxiliary data.
+fn snapshot_entity(
+    entity_id: &str,
+    entity_type: EntityType,
+    name: &str,
+    transform: &Transform,
+    visible: bool,
+    mat_data: Option<&MaterialData>,
+    light_data: Option<&LightData>,
+    phys_data: Option<&PhysicsData>,
+    phys_enabled: bool,
+    asset_ref: Option<&AssetRef>,
+    aux: &AuxComponentData,
+) -> EntitySnapshot {
+    let mut snapshot = EntitySnapshot::new(
+        entity_id.to_string(),
+        entity_type,
+        name.to_string(),
+        TransformSnapshot::from(transform),
+    );
+    snapshot.visible = visible;
+    snapshot.material_data = mat_data.cloned();
+    snapshot.light_data = light_data.cloned();
+    snapshot.physics_data = phys_data.cloned();
+    snapshot.physics_enabled = phys_enabled;
+    snapshot.asset_ref = asset_ref.cloned();
+    snapshot.script_data = aux.script_data.clone();
+    snapshot.audio_data = aux.audio_data.clone();
+    snapshot.reverb_zone_data = aux.reverb_zone_data.clone();
+    snapshot.reverb_zone_enabled = aux.reverb_zone_enabled;
+    snapshot.particle_data = aux.particle_data.clone();
+    snapshot.particle_enabled = aux.particle_enabled;
+    snapshot.shader_effect_data = aux.shader_effect_data.clone();
+    snapshot.csg_mesh_data = aux.csg_mesh_data.clone();
+    snapshot.procedural_mesh_data = aux.procedural_mesh_data.clone();
+    snapshot.joint_data = aux.joint_data.clone();
+    snapshot.game_components = aux.game_components.clone();
+    snapshot.animation_clip_data = aux.animation_clip_data.clone();
+    snapshot.game_camera_data = aux.game_camera_data.clone();
+    snapshot.active_game_camera = aux.active_game_camera;
+    snapshot.sprite_data = aux.sprite_data.clone();
+    snapshot
+}
+
+/// Insert auxiliary component data onto a spawned entity (used by duplicate).
+fn insert_aux_components(entity_commands: &mut bevy::ecs::system::EntityCommands, aux: &AuxComponentData) {
+    if let Some(ref sd) = aux.script_data {
+        entity_commands.insert(sd.clone());
+    }
+    if let Some(ref ad) = aux.audio_data {
+        entity_commands.insert(ad.clone());
+        entity_commands.insert(AudioEnabled);
+    }
+    if let Some(ref pd) = aux.particle_data {
+        entity_commands.insert(pd.clone());
+    }
+    if aux.particle_enabled {
+        entity_commands.insert(ParticleEnabled);
+    }
+    if let Some(ref sed) = aux.shader_effect_data {
+        entity_commands.insert(sed.clone());
+    }
+    if let Some(ref cmd) = aux.csg_mesh_data {
+        entity_commands.insert(cmd.clone());
+    }
+    if let Some(ref pmd) = aux.procedural_mesh_data {
+        entity_commands.insert(pmd.clone());
+    }
+    if let Some(ref jd) = aux.joint_data {
+        entity_commands.insert(jd.clone());
+    }
+    if let Some(ref gc) = aux.game_components {
+        entity_commands.insert(gc.clone());
+    }
+    if let Some(ref acd) = aux.animation_clip_data {
+        entity_commands.insert(acd.clone());
+    }
+    if let Some(ref gcd) = aux.game_camera_data {
+        entity_commands.insert(gcd.clone());
+    }
+    if let Some(ref sd) = aux.sprite_data {
+        entity_commands.insert(sd.clone());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Delete system
+// ---------------------------------------------------------------------------
+
 /// System that processes pending delete requests.
+/// Uses pre-indexed HashMaps for O(n) batch performance instead of O(n^2) nested loops.
 pub fn apply_delete_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -137,89 +343,49 @@ pub fn apply_delete_requests(
     mut selection_events: MessageWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
 ) {
+    if pending.delete_requests.is_empty() {
+        return;
+    }
+
+    // Pre-index: entity ID string -> (Entity, base query data) for O(1) lookup
+    let entity_index: HashMap<String, (Entity, &EntityId, &EntityName, &Transform, &EntityVisible, Option<&EntityType>, Option<&MaterialData>, Option<&LightData>, Option<&PhysicsData>, Option<&PhysicsEnabled>, Option<&AssetRef>)> =
+        query.iter().map(|row| (row.1 .0.clone(), row)).collect();
+
+    // Pre-index auxiliary component data (single O(n) pass over 6 queries)
+    let aux_index = build_aux_index(
+        &script_audio_query,
+        &reverb_particle_query,
+        &shader_csg_query,
+        &procedural_joint_query,
+        &game_anim_query,
+        &sprite_query,
+    );
+
+    let empty_aux = AuxComponentData::default();
     let mut deleted_any = false;
 
     for request in pending.delete_requests.drain(..) {
         for entity_id_to_delete in &request.entity_ids {
-            // Find and despawn entity (skip Undeletable entities)
-            for (entity, eid, name, transform, visible, ent_type, mat_data, light_data, phys_data, phys_enabled, asset_ref) in query.iter() {
-                if &eid.0 == entity_id_to_delete {
-                    let entity_type = ent_type.copied().unwrap_or(EntityType::Cube);
+            // O(1) lookup instead of O(n) linear scan
+            if let Some(&(entity, eid, name, transform, visible, ent_type, mat_data, light_data, phys_data, phys_enabled, asset_ref)) =
+                entity_index.get(entity_id_to_delete)
+            {
+                let entity_type = ent_type.copied().unwrap_or(EntityType::Cube);
+                let aux = aux_index.get(&eid.0).unwrap_or(&empty_aux);
 
-                    // Look up script & audio data
-                    let (script_data, audio_data) = script_audio_query.iter()
-                        .find(|(saeid, _, _)| saeid.0 == eid.0)
-                        .map(|(_, sd, ad)| (sd.cloned(), ad.cloned()))
-                        .unwrap_or((None, None));
+                let snapshot = snapshot_entity(
+                    &eid.0, entity_type, &name.0, transform, visible.0,
+                    mat_data, light_data, phys_data, phys_enabled.is_some(), asset_ref, aux,
+                );
+                history.push(UndoableAction::Delete { snapshot });
 
-                    // Look up reverb zone & particle data
-                    let (reverb_zone_data, reverb_zone_enabled, particle_data, particle_enabled) = reverb_particle_query.iter()
-                        .find(|(rpeid, _, _, _, _)| rpeid.0 == eid.0)
-                        .map(|(_, rzd, rze, pd, pe)| (rzd.cloned(), rze.is_some(), pd.cloned(), pe.is_some()))
-                        .unwrap_or((None, false, None, false));
+                commands.entity(entity).despawn();
 
-                    // Look up shader & csg data
-                    let (shader_effect_data, csg_mesh_data) = shader_csg_query.iter()
-                        .find(|(sceid, _, _)| sceid.0 == eid.0)
-                        .map(|(_, sed, cmd)| (sed.cloned(), cmd.cloned()))
-                        .unwrap_or((None, None));
-
-                    // Look up procedural & joint data
-                    let (procedural_mesh_data, joint_data) = procedural_joint_query.iter()
-                        .find(|(pjeid, _, _)| pjeid.0 == eid.0)
-                        .map(|(_, pmd, jd)| (pmd.cloned(), jd.cloned()))
-                        .unwrap_or((None, None));
-
-                    // Look up game components, animation clip, & game camera data
-                    let (game_components, animation_clip_data, game_camera_data, active_game_camera) = game_anim_query.iter()
-                        .find(|(gaeid, _, _, _, _)| gaeid.0 == eid.0)
-                        .map(|(_, gc, acd, gcd, agc)| (gc.cloned(), acd.cloned(), gcd.cloned(), agc.is_some()))
-                        .unwrap_or((None, None, None, false));
-
-                    // Look up sprite data
-                    let sprite_data = sprite_query.iter()
-                        .find(|(speid, _)| speid.0 == eid.0)
-                        .and_then(|(_, sd)| sd.cloned());
-
-                    // Record delete action in history before deleting
-                    let mut snapshot = EntitySnapshot::new(
-                        eid.0.clone(),
-                        entity_type,
-                        name.0.clone(),
-                        TransformSnapshot::from(transform),
-                    );
-                    snapshot.visible = visible.0;
-                    snapshot.material_data = mat_data.cloned();
-                    snapshot.light_data = light_data.cloned();
-                    snapshot.physics_data = phys_data.cloned();
-                    snapshot.physics_enabled = phys_enabled.is_some();
-                    snapshot.asset_ref = asset_ref.cloned();
-                    snapshot.script_data = script_data;
-                    snapshot.audio_data = audio_data;
-                    snapshot.reverb_zone_data = reverb_zone_data;
-                    snapshot.reverb_zone_enabled = reverb_zone_enabled;
-                    snapshot.particle_data = particle_data;
-                    snapshot.particle_enabled = particle_enabled;
-                    snapshot.shader_effect_data = shader_effect_data;
-                    snapshot.csg_mesh_data = csg_mesh_data;
-                    snapshot.procedural_mesh_data = procedural_mesh_data;
-                    snapshot.joint_data = joint_data;
-                    snapshot.game_components = game_components;
-                    snapshot.animation_clip_data = animation_clip_data;
-                    snapshot.game_camera_data = game_camera_data;
-                    snapshot.active_game_camera = active_game_camera;
-                    snapshot.sprite_data = sprite_data;
-                    history.push(UndoableAction::Delete { snapshot });
-
-                    commands.entity(entity).despawn();
-
-                    // Remove from selection if present
-                    if selection.entity_ids.contains(entity_id_to_delete) {
-                        selection.entities.remove(&entity);
-                        selection.entity_ids.remove(entity_id_to_delete);
-                        deleted_any = true;
-                    }
-                    break;
+                // Remove from selection if present
+                if selection.entity_ids.contains(entity_id_to_delete) {
+                    selection.entities.remove(&entity);
+                    selection.entity_ids.remove(entity_id_to_delete);
+                    deleted_any = true;
                 }
             }
         }
@@ -244,7 +410,12 @@ pub fn apply_delete_requests(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Duplicate system
+// ---------------------------------------------------------------------------
+
 /// System that processes pending duplicate requests.
+/// Uses pre-indexed HashMaps for O(n) batch performance instead of O(n^2) nested loops.
 pub fn apply_duplicate_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -253,6 +424,7 @@ pub fn apply_duplicate_requests(
         &EntityId,
         &EntityName,
         &Transform,
+        &EntityVisible,
         Option<&EntityType>,
         Option<&Mesh3d>,
         Option<&MeshMaterial3d<StandardMaterial>>,
@@ -263,88 +435,61 @@ pub fn apply_duplicate_requests(
         Option<&LightData>,
         Option<&PhysicsData>,
         Option<&PhysicsEnabled>,
-        Option<&AssetRef>,
     )>,
-    script_query: Query<(&EntityId, Option<&ScriptData>)>,
-    audio_query: Query<(&EntityId, Option<&AudioData>)>,
-    reverb_zone_query: Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>)>,
-    particle_query: Query<(&EntityId, Option<&ParticleData>, Option<&ParticleEnabled>)>,
-    shader_query: Query<(&EntityId, Option<&ShaderEffectData>)>,
-    csg_query: Query<(&EntityId, Option<&csg::CsgMeshData>)>,
-    procedural_mesh_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>)>,
-    joint_query: Query<(&EntityId, Option<&JointData>)>,
-    game_component_query: Query<(&EntityId, Option<&super::game_components::GameComponents>)>,
-    animation_clip_query: Query<(&EntityId, Option<&AnimationClipData>)>,
-    game_camera_query: Query<(&EntityId, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
+    asset_ref_query: Query<(&EntityId, Option<&AssetRef>)>,
+    script_audio_query: Query<(&EntityId, Option<&ScriptData>, Option<&AudioData>)>,
+    reverb_particle_query: Query<(&EntityId, Option<&super::reverb_zone::ReverbZoneData>, Option<&super::reverb_zone::ReverbZoneEnabled>, Option<&ParticleData>, Option<&ParticleEnabled>)>,
+    shader_csg_query: Query<(&EntityId, Option<&ShaderEffectData>, Option<&csg::CsgMeshData>)>,
+    procedural_joint_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>)>,
+    game_anim_query: Query<(&EntityId, Option<&super::game_components::GameComponents>, Option<&AnimationClipData>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
     mut history: ResMut<HistoryStack>,
 ) {
+    if pending.duplicate_requests.is_empty() {
+        return;
+    }
+
+    // Pre-index: entity ID string -> query row for O(1) lookup
+    let entity_index: HashMap<
+        String,
+        (
+            Entity, &EntityId, &EntityName, &Transform, &EntityVisible,
+            Option<&EntityType>, Option<&Mesh3d>, Option<&MeshMaterial3d<StandardMaterial>>,
+            Option<&PointLight>, Option<&DirectionalLight>, Option<&SpotLight>,
+            Option<&MaterialData>, Option<&LightData>, Option<&PhysicsData>,
+            Option<&PhysicsEnabled>,
+        ),
+    > = query.iter().map(|row| (row.1 .0.clone(), row)).collect();
+
+    // Pre-index: entity ID string -> AssetRef for O(1) lookup
+    let asset_ref_index: HashMap<String, Option<AssetRef>> = asset_ref_query
+        .iter()
+        .map(|(eid, ar)| (eid.0.clone(), ar.cloned()))
+        .collect();
+
+    // Pre-index auxiliary component data (single O(n) pass over 6 queries)
+    let aux_index = build_aux_index(
+        &script_audio_query,
+        &reverb_particle_query,
+        &shader_csg_query,
+        &procedural_joint_query,
+        &game_anim_query,
+        &sprite_query,
+    );
+
+    let empty_aux = AuxComponentData::default();
+
     for request in pending.duplicate_requests.drain(..) {
-        // Find source entity
-        if let Some((_, source_eid, name, transform, src_entity_type, mesh_handle, material_handle, point_light, dir_light, spot_light, src_mat_data, src_light_data, src_phys_data, src_phys_enabled, src_asset_ref)) =
-            query.iter().find(|(_, eid, ..)| eid.0 == request.entity_id)
+        // O(1) lookup instead of O(n) linear scan
+        if let Some(&(
+            _entity, source_eid, name, transform, visible,
+            src_entity_type, mesh_handle, material_handle,
+            point_light, dir_light, spot_light,
+            src_mat_data, src_light_data, src_phys_data, src_phys_enabled,
+        )) = entity_index.get(&request.entity_id)
         {
-            // Look up script data separately
-            let src_script_data: Option<ScriptData> = script_query.iter()
-                .find(|(script_eid, _)| script_eid.0 == source_eid.0)
-                .and_then(|(_, sd)| sd.cloned());
-
-            // Look up audio data separately
-            let src_audio_data: Option<AudioData> = audio_query.iter()
-                .find(|(audio_eid, _)| audio_eid.0 == source_eid.0)
-                .and_then(|(_, ad)| ad.cloned());
-
-            // Look up reverb zone data separately
-            let (src_reverb_zone_data, src_reverb_zone_enabled) = reverb_zone_query.iter()
-                .find(|(rzeid, _, _)| rzeid.0 == source_eid.0)
-                .map(|(_, rzd, rze)| (rzd.cloned(), rze.is_some()))
-                .unwrap_or((None, false));
-
-            // Look up particle data separately
-            let (src_particle_data, src_particle_enabled) = particle_query.iter()
-                .find(|(peid, _, _)| peid.0 == source_eid.0)
-                .map(|(_, pd, pe)| (pd.cloned(), pe.is_some()))
-                .unwrap_or((None, false));
-
-            // Look up shader data separately
-            let src_shader_data: Option<ShaderEffectData> = shader_query.iter()
-                .find(|(seid, _)| seid.0 == source_eid.0)
-                .and_then(|(_, sed)| sed.cloned());
-
-            // Look up csg data separately
-            let src_csg_data: Option<csg::CsgMeshData> = csg_query.iter()
-                .find(|(ceid, _)| ceid.0 == source_eid.0)
-                .and_then(|(_, cmd)| cmd.cloned());
-
-            // Look up procedural mesh data separately
-            let src_procedural_mesh_data = procedural_mesh_query.iter()
-                .find(|(pmeid, _)| pmeid.0 == source_eid.0)
-                .and_then(|(_, pmd)| pmd.cloned());
-
-            // Look up joint data separately
-            let src_joint_data = joint_query.iter()
-                .find(|(jeid, _)| jeid.0 == source_eid.0)
-                .and_then(|(_, jd)| jd.cloned());
-
-            // Look up game component data separately
-            let src_game_components = game_component_query.iter()
-                .find(|(gceid, _)| gceid.0 == source_eid.0)
-                .and_then(|(_, gc)| gc.cloned());
-
-            // Look up animation clip data separately
-            let src_animation_clip_data = animation_clip_query.iter()
-                .find(|(aceid, _)| aceid.0 == source_eid.0)
-                .and_then(|(_, acd)| acd.cloned());
-
-            // Look up game camera data separately (don't duplicate active state)
-            let src_game_camera_data = game_camera_query.iter()
-                .find(|(gceid, _, _)| gceid.0 == source_eid.0)
-                .and_then(|(_, gcd, _)| gcd.cloned());
-
-            // Look up sprite data separately
-            let src_sprite_data = sprite_query.iter()
-                .find(|(speid, _)| speid.0 == source_eid.0)
-                .and_then(|(_, sd)| sd.cloned());
+            let src_asset_ref = asset_ref_index.get(&source_eid.0).and_then(|ar| ar.as_ref());
+            let aux = aux_index.get(&source_eid.0).unwrap_or(&empty_aux);
 
             // Clone with offset
             let new_pos = transform.translation + Vec3::new(1.0, 0.0, 0.0);
@@ -422,95 +567,30 @@ pub fn apply_duplicate_requests(
                 entity_commands.insert(ar.clone());
             }
 
-            // Clone script data if present
-            if let Some(ref sd) = src_script_data {
-                entity_commands.insert(sd.clone());
-            }
+            // Clone auxiliary component data
+            insert_aux_components(&mut entity_commands, aux);
 
-            // Clone audio data if present
-            if let Some(ref ad) = src_audio_data {
-                entity_commands.insert(ad.clone());
-                entity_commands.insert(AudioEnabled);
-            }
-
-            // Clone particle data if present
-            if let Some(ref pd) = src_particle_data {
-                entity_commands.insert(pd.clone());
-            }
-            if src_particle_enabled {
-                entity_commands.insert(ParticleEnabled);
-            }
-
-            // Clone shader data if present
-            if let Some(ref sed) = src_shader_data {
-                entity_commands.insert(sed.clone());
-            }
-
-            // Clone csg data if present
-            if let Some(ref cmd) = src_csg_data {
-                entity_commands.insert(cmd.clone());
-            }
-
-            // Clone procedural mesh data if present
-            if let Some(ref pmd) = src_procedural_mesh_data {
-                entity_commands.insert(pmd.clone());
-            }
-
-            // Clone joint data if present
-            if let Some(ref jd) = src_joint_data {
-                entity_commands.insert(jd.clone());
-            }
-
-            // Clone game components if present
-            if let Some(ref gc) = src_game_components {
-                entity_commands.insert(gc.clone());
-            }
-
-            // Clone animation clip data if present
-            if let Some(ref acd) = src_animation_clip_data {
-                entity_commands.insert(acd.clone());
-            }
-
-            // Clone game camera data if present (not active state)
-            if let Some(ref gcd) = src_game_camera_data {
-                entity_commands.insert(gcd.clone());
-            }
-
-            // Clone sprite data if present
-            if let Some(ref sd) = src_sprite_data {
-                entity_commands.insert(sd.clone());
-            }
-
-            // Record duplicate action in history
-            let mut snapshot = EntitySnapshot::new(
-                new_entity_id_str,
-                entity_type,
-                new_name,
-                TransformSnapshot {
-                    position: [new_pos.x, new_pos.y, new_pos.z],
-                    rotation: [transform.rotation.x, transform.rotation.y, transform.rotation.z, transform.rotation.w],
-                    scale: [transform.scale.x, transform.scale.y, transform.scale.z],
-                },
+            // Build snapshot using shared helper
+            let mut snapshot = snapshot_entity(
+                &source_eid.0, entity_type, &name.0, transform, visible.0,
+                src_mat_data, src_light_data, src_phys_data, src_phys_enabled.is_some(),
+                src_asset_ref, aux,
             );
-            snapshot.material_data = src_mat_data.cloned();
-            snapshot.light_data = src_light_data.cloned();
-            snapshot.physics_data = src_phys_data.cloned();
-            snapshot.physics_enabled = src_phys_enabled.is_some();
-            snapshot.asset_ref = src_asset_ref.cloned();
-            snapshot.script_data = src_script_data;
-            snapshot.audio_data = src_audio_data;
-            snapshot.reverb_zone_data = src_reverb_zone_data;
-            snapshot.reverb_zone_enabled = src_reverb_zone_enabled;
-            snapshot.particle_data = src_particle_data;
-            snapshot.particle_enabled = src_particle_enabled;
-            snapshot.shader_effect_data = src_shader_data;
-            snapshot.csg_mesh_data = src_csg_data;
-            snapshot.procedural_mesh_data = src_procedural_mesh_data;
-            snapshot.joint_data = src_joint_data;
-            snapshot.game_components = src_game_components;
-            snapshot.animation_clip_data = src_animation_clip_data;
-            snapshot.game_camera_data = src_game_camera_data;
-            snapshot.sprite_data = src_sprite_data;
+            // Override snapshot fields for the NEW duplicate entity
+            snapshot.entity_id = new_entity_id_str;
+            snapshot.entity_type = entity_type;
+            snapshot.name = new_name;
+            snapshot.transform = TransformSnapshot {
+                position: [new_pos.x, new_pos.y, new_pos.z],
+                rotation: [
+                    transform.rotation.x, transform.rotation.y,
+                    transform.rotation.z, transform.rotation.w,
+                ],
+                scale: [transform.scale.x, transform.scale.y, transform.scale.z],
+            };
+            // Don't duplicate active game camera state
+            snapshot.active_game_camera = false;
+
             history.push(UndoableAction::Duplicate {
                 source_entity_id: source_eid.0.clone(),
                 snapshot,

@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
+import { parseHandlerArgs } from '@/lib/validation/parseArgs';
+import { entityId, enumValue, boundedString } from '@/lib/validation/validators';
 
 const ENTITY_TYPES = [
   'cube', 'sphere', 'cylinder', 'capsule', 'torus', 'plane', 'cone', 'icosphere',
@@ -12,8 +14,12 @@ const ENTITY_TYPES = [
 ] as const;
 
 export const transformHandlers: Record<string, ToolHandler> = {
+  // Uses shared validation framework (parseHandlerArgs) instead of Zod
   spawn_entity: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityType: z.enum(ENTITY_TYPES), name: z.string().optional() }), args);
+    const p = parseHandlerArgs(args, {
+      entityType: { validate: enumValue(ENTITY_TYPES) },
+      name: { validate: boundedString(1, 128), optional: true },
+    });
     if (p.error) return p.error;
     store.spawnEntity(p.data.entityType, p.data.name);
     return { success: true, result: { message: `Spawned ${p.data.entityType}` } };
@@ -58,8 +64,12 @@ export const transformHandlers: Record<string, ToolHandler> = {
     return { success: true };
   },
 
+  // Uses shared validation framework (parseHandlerArgs) instead of Zod
   rename_entity: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId, name: z.string().min(1) }), args);
+    const p = parseHandlerArgs(args, {
+      entityId: { validate: entityId() },
+      name: { validate: boundedString(1, 128) },
+    });
     if (p.error) return p.error;
     store.renameEntity(p.data.entityId, p.data.name);
     return { success: true };

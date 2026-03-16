@@ -456,6 +456,8 @@ impl Plugin for SelectionPlugin {
                     entity_factory::apply_ambient_light_updates,
                     material::apply_environment_updates,
                     material::apply_set_skybox_requests,
+                ).in_set(EditorApplySet))
+                .add_systems(Update, (
                     material::apply_remove_skybox_requests,
                     material::apply_update_skybox_requests,
                     material::apply_custom_skybox_requests,

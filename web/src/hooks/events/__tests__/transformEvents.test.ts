@@ -359,6 +359,22 @@ describe('handleTransformEvent', () => {
       dispatchSpy.mockRestore();
     });
 
+
+    it('resets sceneModified to false after export', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
+
+      const payload = { json: '{"entities":[]}', name: 'MyScene' };
+
+      handleTransformEvent(
+        'SCENE_EXPORTED',
+        payload,
+        mockSetGet.set,
+        mockSetGet.get
+      );
+
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ sceneModified: false });
+    });
+
     it('saves to localStorage when autoSaveEnabled is true', () => {
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: true } as unknown as StoreState);
       const mockSetItem = vi.fn();

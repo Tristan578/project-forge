@@ -120,57 +120,61 @@ export async function handleSubscriptionUpdated(
     return;
   }
 
-  // Tier actually changed -- adjust token allocation
+  // Tier actually changed -- adjust token allocation.
+  // Wrap in a transaction to prevent concurrent deductions from interleaving
+  // with the token adjustment (which could produce negative balances).
   const oldAllocation = TIER_MONTHLY_TOKENS[currentTier];
   const newAllocation = TIER_MONTHLY_TOKENS[newTier];
 
   await updateUserTier(user.id, newTier);
 
-  if (newAllocation > oldAllocation) {
-    // Upgrade: grant the difference in tokens immediately
-    const difference = newAllocation - oldAllocation;
-    const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
+  await db.transaction(async (tx) => {
+    if (newAllocation > oldAllocation) {
+      // Upgrade: grant the difference in tokens immediately
+      const difference = newAllocation - oldAllocation;
+      const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
 
-    await db
-      .update(users)
-      .set({
-        monthlyTokens: monthlyRemaining + difference,
-        monthlyTokensUsed: 0,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
+      await tx
+        .update(users)
+        .set({
+          monthlyTokens: monthlyRemaining + difference,
+          monthlyTokensUsed: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
 
-    const balance = await getTotalBalance(user.id);
-    await db.insert(creditTransactions).values({
-      userId: user.id,
-      transactionType: 'adjustment',
-      amount: difference,
-      balanceAfter: balance,
-      source: `upgrade:${currentTier}->${newTier}`,
-      referenceId: subscriptionId,
-    });
-  } else {
-    // Downgrade: cap monthly tokens to new allocation, reset used counter
-    // User keeps any addon tokens they purchased
-    await db
-      .update(users)
-      .set({
-        monthlyTokens: newAllocation,
-        monthlyTokensUsed: 0,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
+      const balance = await getTotalBalance(user.id);
+      await tx.insert(creditTransactions).values({
+        userId: user.id,
+        transactionType: 'adjustment',
+        amount: difference,
+        balanceAfter: balance,
+        source: `upgrade:${currentTier}->${newTier}`,
+        referenceId: subscriptionId,
+      });
+    } else {
+      // Downgrade: cap monthly tokens to new allocation, reset used counter
+      // User keeps any addon tokens they purchased
+      await tx
+        .update(users)
+        .set({
+          monthlyTokens: newAllocation,
+          monthlyTokensUsed: 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
 
-    const balance = await getTotalBalance(user.id);
-    await db.insert(creditTransactions).values({
-      userId: user.id,
-      transactionType: 'adjustment',
-      amount: newAllocation - oldAllocation, // negative for downgrade
-      balanceAfter: balance,
-      source: `downgrade:${currentTier}->${newTier}`,
-      referenceId: subscriptionId,
-    });
-  }
+      const balance = await getTotalBalance(user.id);
+      await tx.insert(creditTransactions).values({
+        userId: user.id,
+        transactionType: 'adjustment',
+        amount: newAllocation - oldAllocation, // negative for downgrade
+        balanceAfter: balance,
+        source: `downgrade:${currentTier}->${newTier}`,
+        referenceId: subscriptionId,
+      });
+    }
+  });
 }
 
 /**
@@ -345,6 +349,76 @@ export async function handleInvoicePaymentFailed(
       `No further retries scheduled -- subscription will be cancelled by Stripe.`
     );
   }
+}
+
+/**
+ * Handle a charge being refunded (full or partial) (PF-480).
+ *
+ * Deducts addon tokens proportionally to the refund amount.
+ * For full refunds, removes all tokens from the original charge.
+ * For partial refunds, removes a proportional share.
+ */
+export async function handleChargeRefunded(
+  customerId: string,
+  chargeId: string,
+  amountRefunded: number,
+  amountTotal: number
+): Promise<void> {
+  const user = await findUserByStripeCustomer(customerId);
+  if (!user) return;
+
+  if (amountTotal <= 0 || amountRefunded <= 0) return;
+
+  await reverseAddonTokens(user.id, chargeId, amountRefunded, amountTotal);
+}
+
+/**
+ * Reverse addon tokens proportionally to a refund amount (PF-480).
+ *
+ * Calculates the proportion of the total charge that was refunded and
+ * deducts that proportion of addon tokens. Clamps to 0 to prevent
+ * negative balances.
+ */
+export async function reverseAddonTokens(
+  userId: string,
+  chargeId: string,
+  amountRefunded: number,
+  amountTotal: number
+): Promise<void> {
+  const db = getDb();
+  const [user] = await db
+    .select({ addonTokens: users.addonTokens })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user) return;
+
+  // Calculate proportional token deduction
+  const refundRatio = Math.min(amountRefunded / amountTotal, 1);
+  const tokensToDeduct = Math.floor(user.addonTokens * refundRatio);
+
+  if (tokensToDeduct <= 0) return;
+
+  // Clamp deduction to current addon balance to prevent negative
+  const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
+
+  await db
+    .update(users)
+    .set({
+      addonTokens: sql`GREATEST(0, ${users.addonTokens} - ${clampedDeduction})`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+
+  const balance = await getTotalBalance(userId);
+  await db.insert(creditTransactions).values({
+    userId,
+    transactionType: 'adjustment',
+    amount: -clampedDeduction,
+    balanceAfter: balance,
+    source: `charge_refunded:${chargeId}`,
+    referenceId: chargeId,
+  });
 }
 
 /**

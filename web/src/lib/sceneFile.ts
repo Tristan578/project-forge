@@ -7,6 +7,77 @@ import { safeLocalStorageSet, wouldExceedThreshold, evictOldAutoSaves } from '@/
 /** Maximum scene format version the web client supports. Must match engine. */
 export const CURRENT_FORMAT_VERSION = 3;
 
+// ---------------------------------------------------------------------------
+// Scene format migration
+// ---------------------------------------------------------------------------
+
+/** Scene data with at least a formatVersion field. */
+interface SceneData {
+  formatVersion: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Migrate a v1 scene to v2.
+ *
+ * v2 added: postProcessing, audioBuses, gameUi fields with defaults.
+ */
+function migrateV1ToV2(data: SceneData): SceneData {
+  return {
+    ...data,
+    formatVersion: 2,
+    postProcessing: data.postProcessing ?? {},
+    audioBuses: data.audioBuses ?? {},
+    gameUi: data.gameUi ?? null,
+  };
+}
+
+/**
+ * Migrate a v2 scene to v3.
+ *
+ * v3 added: customWgslSource, assets map with defaults.
+ */
+function migrateV2ToV3(data: SceneData): SceneData {
+  return {
+    ...data,
+    formatVersion: 3,
+    customWgslSource: data.customWgslSource ?? null,
+    assets: data.assets ?? {},
+  };
+}
+
+/** Registry of migration functions keyed by source version. */
+const MIGRATIONS: Record<number, (data: SceneData) => SceneData> = {
+  1: migrateV1ToV2,
+  2: migrateV2ToV3,
+};
+
+/**
+ * Run the migration chain from fromVersion up to toVersion.
+ *
+ * Each step is applied sequentially (v1 -> v2 -> v3 -> ...).
+ * Returns the migrated scene data with formatVersion set to toVersion.
+ *
+ * @throws if any step in the chain is missing a registered migration.
+ */
+export function migrateScene(
+  data: SceneData,
+  fromVersion: number,
+  toVersion: number,
+): SceneData {
+  let current = { ...data };
+  for (let v = fromVersion; v < toVersion; v++) {
+    const migrateFn = MIGRATIONS[v];
+    if (!migrateFn) {
+      throw new Error(
+        `No migration registered for format version ${v} -> ${v + 1}`,
+      );
+    }
+    current = migrateFn(current);
+  }
+  return current;
+}
+
 const AUTOSAVE_KEY = 'forge:autosave';
 const AUTOSAVE_NAME_KEY = 'forge:autosave:name';
 const AUTOSAVE_TIME_KEY = 'forge:autosave:time';
@@ -24,17 +95,27 @@ export function downloadSceneFile(json: string, name: string): void {
   URL.revokeObjectURL(url);
 }
 
-/** Read a .forge file from a File object. Validates formatVersion. */
+/** Read a .forge file from a File object. Validates formatVersion and migrates older formats. */
 export async function readSceneFile(file: File): Promise<string> {
   const text = await file.text();
   // Basic validation
-  const parsed = JSON.parse(text);
+  const parsed = JSON.parse(text) as SceneData;
   if (typeof parsed.formatVersion !== 'number') {
     throw new Error('Invalid scene file: missing formatVersion');
   }
   if (parsed.formatVersion < 1 || parsed.formatVersion > CURRENT_FORMAT_VERSION) {
     throw new Error(`Unsupported scene format version: ${parsed.formatVersion}`);
   }
+
+  // Migrate older formats to current version
+  if (parsed.formatVersion < CURRENT_FORMAT_VERSION) {
+    console.warn(
+      `[SceneFile] Migrating scene from format v${parsed.formatVersion} to v${CURRENT_FORMAT_VERSION}`,
+    );
+    const migrated = migrateScene(parsed, parsed.formatVersion, CURRENT_FORMAT_VERSION);
+    return JSON.stringify(migrated);
+  }
+
   return text;
 }
 
@@ -91,7 +172,7 @@ export function clearAutoSave(): void {
  *
  * Before writing, checks whether the payload would push usage above 80 %.
  * If it would, the oldest auto-save entries are evicted first.  Uses
- * `safeLocalStorageSet` for an additional eviction pass on QuotaExceededError.
+ * safeLocalStorageSet for an additional eviction pass on QuotaExceededError.
  * Logs a warning (without importing UI code) if storage is still unavailable.
  */
 export function saveAutoSave(json: string, name: string): void {

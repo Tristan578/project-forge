@@ -4,6 +4,7 @@
 
 import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type EngineMode } from '@/stores/editorStore';
 import { saveAutoSave } from '@/lib/sceneFile';
+import { setLastExportedScene } from '@/lib/storage/autoSave';
 import type { SetFn, GetFn } from './types';
 
 const TRANSFORM_DEBOUNCE_MS = 2000;
@@ -102,10 +103,16 @@ export function handleTransformEvent(
       const payload = data as unknown as { json: string; name: string };
       const { json, name } = payload;
       const state = useEditorStore.getState();
+
+      // Cache for periodic IndexedDB auto-save
+      setLastExportedScene(json, name);
+
       if (state.autoSaveEnabled) {
         // Auto-save to localStorage with quota management and LRU eviction
         saveAutoSave(json, name);
       }
+      // Reset sceneModified since the scene has been persisted (PF-528)
+      useEditorStore.setState({ sceneModified: false });
       // Dispatch DOM event so SceneToolbar can trigger file download
       window.dispatchEvent(new CustomEvent('forge:scene-exported', { detail: { json, name } }));
       return true;

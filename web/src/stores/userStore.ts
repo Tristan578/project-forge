@@ -25,6 +25,7 @@ interface UserState {
     tier: string;
     stripeCustomerId: string | null;
     billingCycleStart: string | null;
+    subscriptionStatus: string | null;
   } | null;
 
   // Actions

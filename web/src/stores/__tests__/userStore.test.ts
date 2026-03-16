@@ -220,6 +220,7 @@ describe('userStore', () => {
         tier: 'creator',
         stripeCustomerId: 'cus_123',
         billingCycleStart: '2026-02-01T00:00:00Z',
+        subscriptionStatus: 'active' as string | null,
       };
       useUserStore.setState({ billingStatus: status });
       expect(useUserStore.getState().billingStatus).toEqual(status);

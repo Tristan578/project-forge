@@ -96,4 +96,19 @@ export const performanceHandlers: Record<string, ToolHandler> = {
       result: { message: 'Global LOD distances updated' },
     };
   },
+
+
+  set_simplification_backend: async (args, ctx) => {
+    const p = parseArgs(z.object({
+      backend: z.enum(['qem', 'fast']),
+    }), args);
+    if (p.error) return p.error;
+    ctx.dispatchCommand('set_simplification_backend', {
+      backend: p.data.backend,
+    });
+    return {
+      success: true,
+      result: { message: 'Simplification backend set to ' + p.data.backend },
+    };
+  },
 };

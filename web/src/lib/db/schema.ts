@@ -271,6 +271,26 @@ export const gameComments = pgTable(
   ]
 );
 
+export const moderationAppeals = pgTable(
+  'moderation_appeals',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    contentId: text('content_id').notNull(),
+    contentType: text('content_type').notNull(), // 'comment' | 'asset' | 'game'
+    reason: text('reason').notNull(),
+    status: text('status').notNull().default('pending'), // 'pending' | 'approved' | 'rejected'
+    reviewedBy: text('reviewed_by'),
+    reviewNote: text('review_note'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_moderation_appeals_user').on(table.userId),
+    index('idx_moderation_appeals_status').on(table.status),
+  ]
+);
+
 export const gameLikes = pgTable(
   'game_likes',
   {

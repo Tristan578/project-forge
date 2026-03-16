@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { CURRENT_FORMAT_VERSION, readSceneFile, getAutoSave, clearAutoSave, saveAutoSave } from '../sceneFile';
+import { CURRENT_FORMAT_VERSION, readSceneFile, migrateScene, getAutoSave, clearAutoSave, saveAutoSave } from '../sceneFile';
 
-// ---------------------------------------------------------------------------
-// Allow selective spying on storageQuota helpers used by saveAutoSave
-// ---------------------------------------------------------------------------
 vi.mock('@/lib/storage/storageQuota', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/storage/storageQuota')>();
   return { ...actual };
@@ -16,21 +13,92 @@ describe('CURRENT_FORMAT_VERSION', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// migrateScene tests
+// ---------------------------------------------------------------------------
+
+describe('migrateScene', () => {
+  it('should migrate v1 to v2 by adding postProcessing, audioBuses, gameUi', () => {
+    const v1 = { formatVersion: 1, scene: { name: 'test' } };
+    const v2 = migrateScene(v1, 1, 2);
+    expect(v2.formatVersion).toBe(2);
+    expect(v2.postProcessing).toEqual({});
+    expect(v2.audioBuses).toEqual({});
+    expect(v2.gameUi).toBeNull();
+    expect(v2.scene).toEqual({ name: 'test' });
+  });
+
+  it('should migrate v2 to v3 by adding customWgslSource and assets', () => {
+    const v2 = { formatVersion: 2, postProcessing: { bloom: true }, audioBuses: {}, gameUi: null };
+    const v3 = migrateScene(v2, 2, 3);
+    expect(v3.formatVersion).toBe(3);
+    expect(v3.customWgslSource).toBeNull();
+    expect(v3.assets).toEqual({});
+    expect(v3.postProcessing).toEqual({ bloom: true });
+  });
+
+  it('should run full migration chain from v1 to v3', () => {
+    const v1 = { formatVersion: 1, metadata: { name: 'OldScene' } };
+    const v3 = migrateScene(v1, 1, 3);
+    expect(v3.formatVersion).toBe(3);
+    expect(v3.postProcessing).toEqual({});
+    expect(v3.audioBuses).toEqual({});
+    expect(v3.gameUi).toBeNull();
+    expect(v3.customWgslSource).toBeNull();
+    expect(v3.assets).toEqual({});
+    expect(v3.metadata).toEqual({ name: 'OldScene' });
+  });
+
+  it('should be a no-op when fromVersion equals toVersion', () => {
+    const data = { formatVersion: 3, entities: [] };
+    const result = migrateScene(data, 3, 3);
+    expect(result).toEqual(data);
+  });
+
+  it('should not mutate the original data', () => {
+    const original = { formatVersion: 1, scene: {} };
+    const originalCopy = JSON.parse(JSON.stringify(original));
+    migrateScene(original, 1, 3);
+    expect(original).toEqual(originalCopy);
+  });
+
+  it('should preserve existing v2 fields when migrating from v1', () => {
+    const data = { formatVersion: 1, postProcessing: { bloom: true } };
+    const v2 = migrateScene(data, 1, 2);
+    expect(v2.postProcessing).toEqual({ bloom: true });
+  });
+
+  it('should throw for missing migration step', () => {
+    const data = { formatVersion: 99 };
+    expect(() => migrateScene(data, 99, 100)).toThrow(
+      'No migration registered for format version 99 -> 100',
+    );
+  });
+});
+
 describe('readSceneFile', () => {
   function makeFile(content: string): File {
     return new File([content], 'test.forge', { type: 'application/json' });
   }
 
-  it('should accept a valid scene file', async () => {
+  it('should accept a valid scene file at current version', async () => {
     const json = JSON.stringify({ formatVersion: CURRENT_FORMAT_VERSION, scene: {} });
     const result = await readSceneFile(makeFile(json));
     expect(result).toBe(json);
   });
 
-  it('should accept older format versions', async () => {
+  it('should migrate older format versions and warn', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const json = JSON.stringify({ formatVersion: 1, scene: {} });
     const result = await readSceneFile(makeFile(json));
-    expect(result).toBe(json);
+    const parsed = JSON.parse(result);
+    expect(parsed.formatVersion).toBe(CURRENT_FORMAT_VERSION);
+    expect(parsed.postProcessing).toEqual({});
+    expect(parsed.assets).toEqual({});
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Migrating scene from format v1'),
+    );
+    warnSpy.mockRestore();
   });
 
   it('should reject file without formatVersion', async () => {
@@ -78,7 +146,6 @@ describe('getAutoSave and clearAutoSave', () => {
     mockStore['forge:autosave'] = '{"scene":true}';
     mockStore['forge:autosave:name'] = 'MyScene';
     mockStore['forge:autosave:time'] = '2024-01-01T00:00:00Z';
-
     const result = getAutoSave();
     expect(result).not.toBeNull();
     expect(result!.json).toBe('{"scene":true}');
@@ -97,9 +164,7 @@ describe('getAutoSave and clearAutoSave', () => {
     mockStore['forge:autosave'] = '{}';
     mockStore['forge:autosave:name'] = 'Test';
     mockStore['forge:autosave:time'] = 'now';
-
     clearAutoSave();
-
     expect(mockStore['forge:autosave']).toBeUndefined();
     expect(mockStore['forge:autosave:name']).toBeUndefined();
     expect(mockStore['forge:autosave:time']).toBeUndefined();
@@ -110,22 +175,15 @@ describe('getAutoSave and clearAutoSave', () => {
       getItem: () => { throw new Error('quota exceeded'); },
       removeItem: () => { throw new Error('quota exceeded'); },
     });
-
     expect(getAutoSave()).toBeNull();
     expect(() => clearAutoSave()).not.toThrow();
   });
 });
 
-// ---------------------------------------------------------------------------
-// saveAutoSave tests
-// ---------------------------------------------------------------------------
-
 describe('saveAutoSave', () => {
   let mockStore: Record<string, string>;
 
-  function makeLocalStorageMock(
-    overrideSetItem?: (key: string, val: string) => void,
-  ) {
+  function makeLocalStorageMock(overrideSetItem?: (key: string, val: string) => void) {
     return {
       getItem: (key: string) => mockStore[key] ?? null,
       setItem: overrideSetItem ?? ((key: string, val: string) => { mockStore[key] = val; }),
@@ -147,105 +205,78 @@ describe('saveAutoSave', () => {
 
   it('writes json, name, and timestamp to localStorage on successful write', () => {
     saveAutoSave('{"scene":true}', 'MyScene');
-
     expect(mockStore['forge:autosave']).toBe('{"scene":true}');
     expect(mockStore['forge:autosave:name']).toBe('MyScene');
     expect(typeof mockStore['forge:autosave:time']).toBe('string');
-    // Timestamp should be a parseable ISO date
     expect(new Date(mockStore['forge:autosave:time']).getFullYear()).toBeGreaterThan(2000);
   });
 
   it('calls evictOldAutoSaves when storage would exceed threshold, then writes successfully', async () => {
-    // Force wouldExceedThreshold to return true to exercise the eviction branch
     const storageQuota = await import('@/lib/storage/storageQuota');
     const thresholdSpy = vi.spyOn(storageQuota, 'wouldExceedThreshold').mockReturnValue(true);
     const evictSpy = vi.spyOn(storageQuota, 'evictOldAutoSaves').mockReturnValue(0);
-
     saveAutoSave('{"scene":"new"}', 'NewScene');
-
     expect(thresholdSpy).toHaveBeenCalled();
     expect(evictSpy).toHaveBeenCalledWith(1);
-    // Data should still be written
     expect(mockStore['forge:autosave']).toBe('{"scene":"new"}');
-    expect(mockStore['forge:autosave:name']).toBe('NewScene');
   });
 
-  it('logs a warning but does not throw when localStorage remains full after quota eviction', () => {
+  it('logs a warning but does not throw when localStorage remains full', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    // Make setItem always throw QuotaExceededError (name must match isQuotaError)
     vi.stubGlobal('localStorage', makeLocalStorageMock(() => {
-      const err = new DOMException('QuotaExceededError', 'QuotaExceededError');
-      throw err;
+      throw new DOMException('QuotaExceededError', 'QuotaExceededError');
     }));
-
     expect(() => saveAutoSave('{"scene":true}', 'Test')).not.toThrow();
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('localStorage write failed'),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('localStorage write failed'));
   });
 
   it('does not throw and warns when a non-quota error blocks all writes', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    // Make setItem always throw a generic (non-quota) error
     vi.stubGlobal('localStorage', makeLocalStorageMock(() => {
       throw new Error('SecurityError: access denied');
     }));
-
     expect(() => saveAutoSave('{"scene":true}', 'Test')).not.toThrow();
-    // saveAutoSave warns when any of its three writes fail
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('localStorage write failed'),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('localStorage write failed'));
   });
 
   it('passes autosave keys as protected set so they are not evicted during write', async () => {
-    // Seed the store with a pre-existing autosave that eviction would normally delete
     mockStore['forge:autosave'] = '{"old":"data"}';
-    mockStore['forge:autosave:time'] = new Date(0).toISOString(); // epoch — oldest possible
+    mockStore['forge:autosave:time'] = new Date(0).toISOString();
 
-    // Force threshold to be exceeded so evictOldAutoSaves IS called
     const storageQuota = await import('@/lib/storage/storageQuota');
     vi.spyOn(storageQuota, 'wouldExceedThreshold').mockReturnValue(true);
     const evictSpy = vi.spyOn(storageQuota, 'evictOldAutoSaves').mockReturnValue(0);
 
     saveAutoSave('{"scene":"new"}', 'NewScene');
 
-    // evictOldAutoSaves must be called with count=1
     expect(evictSpy).toHaveBeenCalledWith(1);
-
-    // Now verify that safeLocalStorageSet passes a protected-keys set containing the autosave keys.
-    // We validate this indirectly: the three autosave keys must all be present in mockStore
-    // after the call (they were not evicted).
     expect(mockStore['forge:autosave']).toBe('{"scene":"new"}');
     expect(mockStore['forge:autosave:name']).toBe('NewScene');
     expect(typeof mockStore['forge:autosave:time']).toBe('string');
   });
 
-  it('handles partial write failure gracefully — warns but does not throw', () => {
+  it('handles partial write failure gracefully', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     let callCount = 0;
-    // First write (json key) succeeds; subsequent writes fail with a non-quota error
     vi.stubGlobal('localStorage', makeLocalStorageMock((key: string, val: string) => {
       callCount += 1;
       if (callCount === 1) {
-        mockStore[key] = val; // first write succeeds
+        mockStore[key] = val;
       } else {
-        throw new Error('SecurityError: access denied'); // non-quota, subsequent writes fail
+        throw new Error('SecurityError: access denied');
       }
     }));
 
     expect(() => saveAutoSave('{"scene":true}', 'PartialTest')).not.toThrow();
-    // Two of three writes failed → warn should fire
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('localStorage write failed'),
     );
   });
 
   it('succeeds after eviction frees enough space (quota error then retry succeeds)', () => {
-    // Simulate: first setItem call throws QuotaExceededError; after that, writes succeed.
     let firstAttempt = true;
     vi.stubGlobal('localStorage', makeLocalStorageMock((key: string, val: string) => {
       if (firstAttempt) {
@@ -258,11 +289,8 @@ describe('saveAutoSave', () => {
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    // Should not throw even if first write hits quota; safeLocalStorageSet retries
     expect(() => saveAutoSave('{"scene":true}', 'RetryScene')).not.toThrow();
 
-    // After the retry the remaining writes succeeded, so no warning should appear
-    // (name and time writes should have written without error)
     expect(warnSpy).not.toHaveBeenCalled();
     expect(mockStore['forge:autosave:name']).toBe('RetryScene');
   });
