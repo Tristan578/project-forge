@@ -70,9 +70,15 @@ export function buildBatchExportCommand(
 }
 
 /** Build the CLI argument array for normalize (via ReaScript). */
-export function buildNormalizeCommand(filePath: string): string[] {
+export function buildNormalizeCommand(filePath: string, scriptPath?: string): string[] {
   if (!isSafePath(filePath)) {
     throw new Error('Invalid file path');
+  }
+  if (scriptPath !== undefined) {
+    if (!isSafePath(scriptPath)) {
+      throw new Error('Invalid script path');
+    }
+    return ['-newinst', '-nolicense', filePath, '-reascript', scriptPath];
   }
   // Run a ReaScript action via -newinst and -runscript flags
   // Uses the built-in REAPER action for normalization (action 40108 = Item properties: Normalize items)
@@ -165,14 +171,15 @@ export async function batchExport(
  *
  * @param binaryPath - Absolute path to the REAPER executable.
  * @param filePath   - Absolute path to the audio file to normalize.
+ * @param scriptPath - Optional absolute path to a custom ReaScript for normalization.
  */
-export async function normalize(binaryPath: string, filePath: string): Promise<BridgeResult> {
+export async function normalize(binaryPath: string, filePath: string, scriptPath?: string): Promise<BridgeResult> {
   if (!isSafePath(binaryPath)) {
     return { success: false, error: 'Invalid binary path', exitCode: 1 };
   }
   let args: string[];
   try {
-    args = buildNormalizeCommand(filePath);
+    args = buildNormalizeCommand(filePath, scriptPath);
   } catch (err) {
     return { success: false, error: (err as Error).message, exitCode: 1 };
   }
