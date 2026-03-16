@@ -92,6 +92,10 @@ vi.mock('../SceneTransitionOverlay', () => ({ SceneTransitionOverlay: () => null
 vi.mock('../../game/DialogueOverlay', () => ({ DialogueOverlay: () => null }));
 vi.mock('../TutorialOverlay', () => ({ TutorialOverlay: () => null }));
 vi.mock('../OnboardingChecklist', () => ({ OnboardingChecklist: () => null }));
+vi.mock('@/lib/storage/autoSave', () => ({
+  startAutoSave: vi.fn(() => ({ stop: vi.fn() })),
+  setLastExportedScene: vi.fn(),
+}));
 vi.mock('../PerformanceProfiler', () => ({ PerformanceProfiler: () => null }));
 vi.mock('../GenerationStatus', () => ({ GenerationStatus: () => <div data-testid="gen-status">Gen</div> }));
 vi.mock('../HelpMenu', () => ({

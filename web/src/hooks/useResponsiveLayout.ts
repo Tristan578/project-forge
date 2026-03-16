@@ -15,9 +15,9 @@ export interface LayoutConfig {
 }
 
 /** Threshold: if visualViewport height drops below this fraction of screen height, keyboard is open. */
-const KEYBOARD_THRESHOLD = 0.6;
+export const KEYBOARD_THRESHOLD = 0.6;
 
-function getLayoutConfig(width: number, isKeyboardVisible: boolean = false): LayoutConfig {
+export function getLayoutConfig(width: number, isKeyboardVisible: boolean = false): LayoutConfig {
   // When virtual keyboard is open on mobile, force compact to avoid canvas clipping
   if (isKeyboardVisible && width < 1024) {
     return {
@@ -75,7 +75,7 @@ function getViewportHeight(): number {
 }
 
 /** Detect whether the virtual keyboard is likely visible. */
-function detectKeyboard(): boolean {
+export function detectKeyboard(): boolean {
   if (typeof window === 'undefined' || typeof screen === 'undefined') return false;
   const viewportHeight = getViewportHeight();
   const screenHeight = screen.height;
@@ -119,5 +119,5 @@ export function useResponsiveLayout(): LayoutConfig {
   return config;
 }
 
-// Export for testing
-export { getLayoutConfig as _getLayoutConfig, detectKeyboard as _detectKeyboard, KEYBOARD_THRESHOLD };
+// Also exported as aliases for backward compat in tests
+export { getLayoutConfig as _getLayoutConfig, detectKeyboard as _detectKeyboard };
