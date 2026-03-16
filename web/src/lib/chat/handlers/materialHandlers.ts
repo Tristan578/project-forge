@@ -5,6 +5,8 @@
 import { z } from 'zod';
 import type { ToolHandler, MaterialData, LightData } from './types';
 import { zEntityId, zVec3, parseArgs } from './types';
+import { parseHandlerArgs } from '@/lib/validation/parseArgs';
+import { entityId, boundedString } from '@/lib/validation/validators';
 import { getPresetById } from '@/lib/materialPresets';
 
 export const materialHandlers: Record<string, ToolHandler> = {
@@ -53,8 +55,12 @@ export const materialHandlers: Record<string, ToolHandler> = {
     return { success: true };
   },
 
+  // Uses shared validation framework (parseHandlerArgs) instead of Zod
   apply_material_preset: async (args, { store }) => {
-    const p = parseArgs(z.object({ entityId: zEntityId, presetId: z.string().min(1) }), args);
+    const p = parseHandlerArgs(args, {
+      entityId: { validate: entityId() },
+      presetId: { validate: boundedString(1, 128) },
+    });
     if (p.error) return p.error;
     const preset = getPresetById(p.data.presetId);
     if (!preset) {
