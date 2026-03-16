@@ -97,4 +97,29 @@ describe('useEngine', () => {
     expect(result.current.isReady).toBe(false);
     expect(result.current.error).toBeNull();
   });
+
+  it('returns a cleanup function from the loading useEffect', () => {
+    const { unmount } = renderHook(() => useEngine('forge-canvas'));
+    // Unmounting should not throw — the cleanup sets cancelled=true
+    // so any in-flight WASM load is ignored on resolve/reject
+    expect(() => unmount()).not.toThrow();
+  });
+
+  it('does not update state after unmount (cancelled flag)', async () => {
+    (window as Window & { __SKIP_ENGINE?: boolean }).__SKIP_ENGINE = true;
+
+    const onError = vi.fn();
+    const { unmount } = renderHook(() => useEngine('forge-canvas', { onError }));
+
+    // Unmount immediately before the async load can settle
+    unmount();
+
+    // Wait enough time for the rejected promise to settle
+    await new Promise((r) => setTimeout(r, 50));
+
+    // onError should NOT have been called because the component unmounted
+    expect(onError).not.toHaveBeenCalled();
+
+    delete (window as Window & { __SKIP_ENGINE?: boolean }).__SKIP_ENGINE;
+  });
 });

@@ -308,8 +308,11 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
 
     initializedRef.current = true;
 
+    let cancelled = false;
+
     loadWasm()
       .then((wasm) => {
+        if (cancelled) return;
         emitEvent('engine_starting', `Calling init_engine("${canvasId}")`);
 
         // Set Sentry context for all subsequent errors in this session
@@ -342,6 +345,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         }
       })
       .catch((err) => {
+        if (cancelled) return;
         const loadError = err instanceof Error ? err : new Error(String(err));
         captureException(loadError, {
           phase: 'wasm_load',
@@ -355,6 +359,10 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         onErrorRef.current?.(loadError);
         initializedRef.current = false;
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, [canvasId]);
 
   const sendCommand = useCallback(
