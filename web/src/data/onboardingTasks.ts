@@ -1,19 +1,43 @@
+export type ProjectType = '2d' | '3d';
+
 export interface OnboardingTask {
   id: string;
   label: string;
   description: string;
   category: 'basic' | 'advanced';
-  /** If set, the task only applies to this project type. Omit for shared tasks. */
-  projectType?: '2d' | '3d';
+  /** Which project types this task applies to. Omit for tasks that apply to both. */
+  projectType?: ProjectType | 'both';
 }
 
 export const ONBOARDING_TASKS: OnboardingTask[] = [
-  // Basic tasks — shared
+  // Basic tasks (6 for 3D, with 2D alternatives)
+  {
+    id: 'create-entity',
+    label: 'Create an Entity',
+    description: 'Add a cube, sphere, or other object to your scene',
+    category: 'basic',
+    projectType: '3d',
+  },
+  {
+    id: 'create-sprite',
+    label: 'Create a Sprite',
+    description: 'Add a sprite to your 2D scene',
+    category: 'basic',
+    projectType: '2d',
+  },
   {
     id: 'customize-material',
     label: 'Customize a Material',
     description: 'Change the color or texture of an object',
     category: 'basic',
+    projectType: '3d',
+  },
+  {
+    id: 'customize-sprite',
+    label: 'Customize a Sprite',
+    description: 'Change the image, tint, or sorting layer of a sprite',
+    category: 'basic',
+    projectType: '2d',
   },
   {
     id: 'add-physics',
@@ -39,28 +63,26 @@ export const ONBOARDING_TASKS: OnboardingTask[] = [
     description: 'Download your game as a standalone package',
     category: 'basic',
   },
-  // Basic tasks — 3D only
-  {
-    id: 'create-entity',
-    label: 'Create an Entity',
-    description: 'Add a cube, sphere, or other object to your scene',
-    category: 'basic',
-    projectType: '3d',
-  },
-  // Basic tasks — 2D only
-  {
-    id: 'create-sprite',
-    label: 'Create a Sprite',
-    description: 'Add a 2D sprite to your scene',
-    category: 'basic',
-    projectType: '2d',
-  },
-  // Advanced tasks — shared
+  // Advanced tasks
   {
     id: 'create-prefab',
     label: 'Create a Prefab',
     description: 'Save an entity as a reusable template',
     category: 'advanced',
+  },
+  {
+    id: 'add-particles',
+    label: 'Add Particle Effects',
+    description: 'Create fire, smoke, or sparkle effects',
+    category: 'advanced',
+    projectType: '3d',
+  },
+  {
+    id: 'create-tilemap',
+    label: 'Create a Tilemap',
+    description: 'Build tile-based levels with the tilemap editor',
+    category: 'advanced',
+    projectType: '2d',
   },
   {
     id: 'add-audio',
@@ -86,31 +108,17 @@ export const ONBOARDING_TASKS: OnboardingTask[] = [
     description: 'Share your game with a public URL',
     category: 'advanced',
   },
-  // Advanced tasks — 3D only
-  {
-    id: 'add-particles',
-    label: 'Add Particle Effects',
-    description: 'Create fire, smoke, or sparkle effects',
-    category: 'advanced',
-    projectType: '3d',
-  },
-  // Advanced tasks — 2D only
-  {
-    id: 'create-tilemap',
-    label: 'Create a Tilemap',
-    description: 'Build levels with tile-based terrain',
-    category: 'advanced',
-    projectType: '2d',
-  },
 ];
 
 /**
- * Filter onboarding tasks for a specific project type.
- * Includes tasks with no projectType (shared) and tasks matching the given type.
+ * Filter onboarding tasks to only those relevant to the given project type.
+ * Tasks without a projectType or with projectType 'both' are shown for all types.
  */
 export function getTasksForProjectType(
   tasks: OnboardingTask[],
-  type: '2d' | '3d',
+  projectType: ProjectType
 ): OnboardingTask[] {
-  return tasks.filter((t) => !t.projectType || t.projectType === type);
+  return tasks.filter(
+    (t) => !t.projectType || t.projectType === 'both' || t.projectType === projectType
+  );
 }
