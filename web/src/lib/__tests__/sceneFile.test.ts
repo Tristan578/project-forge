@@ -13,6 +13,10 @@ describe('CURRENT_FORMAT_VERSION', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// migrateScene tests
+// ---------------------------------------------------------------------------
+
 describe('migrateScene', () => {
   it('should migrate v1 to v2 by adding postProcessing, audioBuses, gameUi', () => {
     const v1 = { formatVersion: 1, scene: { name: 'test' } };
@@ -207,7 +211,7 @@ describe('saveAutoSave', () => {
     expect(new Date(mockStore['forge:autosave:time']).getFullYear()).toBeGreaterThan(2000);
   });
 
-  it('calls evictOldAutoSaves when storage would exceed threshold', async () => {
+  it('calls evictOldAutoSaves when storage would exceed threshold, then writes successfully', async () => {
     const storageQuota = await import('@/lib/storage/storageQuota');
     const thresholdSpy = vi.spyOn(storageQuota, 'wouldExceedThreshold').mockReturnValue(true);
     const evictSpy = vi.spyOn(storageQuota, 'evictOldAutoSaves').mockReturnValue(0);
@@ -219,6 +223,7 @@ describe('saveAutoSave', () => {
 
   it('logs a warning but does not throw when localStorage remains full', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
     vi.stubGlobal('localStorage', makeLocalStorageMock(() => {
       throw new DOMException('QuotaExceededError', 'QuotaExceededError');
     }));
@@ -228,10 +233,65 @@ describe('saveAutoSave', () => {
 
   it('does not throw and warns when a non-quota error blocks all writes', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
     vi.stubGlobal('localStorage', makeLocalStorageMock(() => {
       throw new Error('SecurityError: access denied');
     }));
     expect(() => saveAutoSave('{"scene":true}', 'Test')).not.toThrow();
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('localStorage write failed'));
+  });
+
+  it('passes autosave keys as protected set so they are not evicted during write', async () => {
+    mockStore['forge:autosave'] = '{"old":"data"}';
+    mockStore['forge:autosave:time'] = new Date(0).toISOString();
+
+    const storageQuota = await import('@/lib/storage/storageQuota');
+    vi.spyOn(storageQuota, 'wouldExceedThreshold').mockReturnValue(true);
+    const evictSpy = vi.spyOn(storageQuota, 'evictOldAutoSaves').mockReturnValue(0);
+
+    saveAutoSave('{"scene":"new"}', 'NewScene');
+
+    expect(evictSpy).toHaveBeenCalledWith(1);
+    expect(mockStore['forge:autosave']).toBe('{"scene":"new"}');
+    expect(mockStore['forge:autosave:name']).toBe('NewScene');
+    expect(typeof mockStore['forge:autosave:time']).toBe('string');
+  });
+
+  it('handles partial write failure gracefully', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    let callCount = 0;
+    vi.stubGlobal('localStorage', makeLocalStorageMock((key: string, val: string) => {
+      callCount += 1;
+      if (callCount === 1) {
+        mockStore[key] = val;
+      } else {
+        throw new Error('SecurityError: access denied');
+      }
+    }));
+
+    expect(() => saveAutoSave('{"scene":true}', 'PartialTest')).not.toThrow();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('localStorage write failed'),
+    );
+  });
+
+  it('succeeds after eviction frees enough space (quota error then retry succeeds)', () => {
+    let firstAttempt = true;
+    vi.stubGlobal('localStorage', makeLocalStorageMock((key: string, val: string) => {
+      if (firstAttempt) {
+        firstAttempt = false;
+        const err = new DOMException('QuotaExceededError', 'QuotaExceededError');
+        throw err;
+      }
+      mockStore[key] = val;
+    }));
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    expect(() => saveAutoSave('{"scene":true}', 'RetryScene')).not.toThrow();
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(mockStore['forge:autosave:name']).toBe('RetryScene');
   });
 });
