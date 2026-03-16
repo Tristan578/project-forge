@@ -303,4 +303,68 @@ describe('EditorLayout', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'AI Chat' }));
     expect(mockSetRightPanelTab).toHaveBeenCalledWith('chat');
   });
+
+  // ── Tab ARIA attributes (PF-477) ────────────────────────────────────
+
+  it('tabs have aria-selected matching active state', () => {
+    setupStores('compact');
+    render(<EditorLayout />);
+    fireEvent.click(screen.getByTestId('toggle-right'));
+
+    const inspectorTab = screen.getByRole('tab', { name: 'Inspector' });
+    const chatTab = screen.getByRole('tab', { name: 'AI Chat' });
+    const scriptTab = screen.getByRole('tab', { name: 'Script' });
+    const uiTab = screen.getByRole('tab', { name: 'UI' });
+
+    // Default tab is 'inspector'
+    expect(inspectorTab.getAttribute('aria-selected')).toBe('true');
+    expect(chatTab.getAttribute('aria-selected')).toBe('false');
+    expect(scriptTab.getAttribute('aria-selected')).toBe('false');
+    expect(uiTab.getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('tabs have aria-controls linking to tabpanels', () => {
+    setupStores('compact');
+    render(<EditorLayout />);
+    fireEvent.click(screen.getByTestId('toggle-right'));
+
+    const inspectorTab = screen.getByRole('tab', { name: 'Inspector' });
+    expect(inspectorTab.getAttribute('aria-controls')).toBe('tabpanel-inspector');
+    expect(inspectorTab.id).toBe('tab-inspector');
+  });
+
+  it('tabpanel has role and aria-labelledby linking to tab', () => {
+    setupStores('compact');
+    render(<EditorLayout />);
+    fireEvent.click(screen.getByTestId('toggle-right'));
+
+    const panel = screen.getByRole('tabpanel');
+    expect(panel.getAttribute('aria-labelledby')).toBe('tab-inspector');
+    expect(panel.id).toBe('tabpanel-inspector');
+  });
+
+  it('tablist has aria-label', () => {
+    setupStores('compact');
+    render(<EditorLayout />);
+    fireEvent.click(screen.getByTestId('toggle-right'));
+
+    const tablist = screen.getByRole('tablist');
+    expect(tablist.getAttribute('aria-label')).toBe('Right panel tabs');
+  });
+
+  it('arrow keys navigate between tabs', () => {
+    setupStores('compact');
+    render(<EditorLayout />);
+    fireEvent.click(screen.getByTestId('toggle-right'));
+
+    const tablist = screen.getByRole('tablist');
+    // ArrowRight should switch from inspector to chat
+    fireEvent.keyDown(tablist, { key: 'ArrowRight' });
+    expect(mockSetRightPanelTab).toHaveBeenCalledWith('chat');
+
+    // ArrowLeft should switch from inspector to ui (wraps around)
+    mockSetRightPanelTab.mockClear();
+    fireEvent.keyDown(tablist, { key: 'ArrowLeft' });
+    expect(mockSetRightPanelTab).toHaveBeenCalledWith('ui');
+  });
 });
