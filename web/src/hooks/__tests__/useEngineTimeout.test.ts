@@ -66,75 +66,41 @@ describe('probeWebGPU', () => {
   });
 
   it('returns false when navigator.gpu is not available', async () => {
-    // In test environment, navigator.gpu is not defined
     const result = await probeWebGPU();
     expect(result).toBe(false);
   });
 
   it('returns false when requestAdapter returns null', async () => {
-    const mockGpu = {
-      requestAdapter: vi.fn().mockResolvedValue(null),
-    };
-    Object.defineProperty(navigator, 'gpu', {
-      value: mockGpu,
-      configurable: true,
-      writable: true,
-    });
+    const mockGpu = { requestAdapter: vi.fn().mockResolvedValue(null) };
+    Object.defineProperty(navigator, 'gpu', { value: mockGpu, configurable: true, writable: true });
 
     const result = await probeWebGPU();
     expect(result).toBe(false);
 
-    // Clean up
-    Object.defineProperty(navigator, 'gpu', {
-      value: undefined,
-      configurable: true,
-      writable: true,
-    });
+    Object.defineProperty(navigator, 'gpu', { value: undefined, configurable: true, writable: true });
   });
 
   it('returns true when adapter and device are available', async () => {
     const mockDevice = { destroy: vi.fn() };
-    const mockAdapter = {
-      requestDevice: vi.fn().mockResolvedValue(mockDevice),
-    };
-    const mockGpu = {
-      requestAdapter: vi.fn().mockResolvedValue(mockAdapter),
-    };
-    Object.defineProperty(navigator, 'gpu', {
-      value: mockGpu,
-      configurable: true,
-      writable: true,
-    });
+    const mockAdapter = { requestDevice: vi.fn().mockResolvedValue(mockDevice) };
+    const mockGpu = { requestAdapter: vi.fn().mockResolvedValue(mockAdapter) };
+    Object.defineProperty(navigator, 'gpu', { value: mockGpu, configurable: true, writable: true });
 
     const result = await probeWebGPU();
     expect(result).toBe(true);
     expect(mockDevice.destroy).toHaveBeenCalled();
 
-    Object.defineProperty(navigator, 'gpu', {
-      value: undefined,
-      configurable: true,
-      writable: true,
-    });
+    Object.defineProperty(navigator, 'gpu', { value: undefined, configurable: true, writable: true });
   });
 
   it('returns false when requestAdapter throws', async () => {
-    const mockGpu = {
-      requestAdapter: vi.fn().mockRejectedValue(new Error('GPU error')),
-    };
-    Object.defineProperty(navigator, 'gpu', {
-      value: mockGpu,
-      configurable: true,
-      writable: true,
-    });
+    const mockGpu = { requestAdapter: vi.fn().mockRejectedValue(new Error('GPU error')) };
+    Object.defineProperty(navigator, 'gpu', { value: mockGpu, configurable: true, writable: true });
 
     const result = await probeWebGPU();
     expect(result).toBe(false);
 
-    Object.defineProperty(navigator, 'gpu', {
-      value: undefined,
-      configurable: true,
-      writable: true,
-    });
+    Object.defineProperty(navigator, 'gpu', { value: undefined, configurable: true, writable: true });
   });
 });
 
@@ -151,10 +117,7 @@ describe('useLoadingState', () => {
 
   it('resets to idle after resetEngine()', () => {
     const { result } = renderHook(() => useLoadingState());
-    // resetEngine should set phase to idle
-    act(() => {
-      resetEngine();
-    });
+    act(() => { resetEngine(); });
     expect(result.current.phase).toBe('idle');
   });
 });
