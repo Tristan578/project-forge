@@ -143,34 +143,34 @@ class GraphCompiler {
   }
 
   private compileOnStart(eventNode: VisualScriptNode): string {
-    const body = this.compileExecChain(eventNode.id, 'exec_out', '  ');
+    const body = this.compileExecChain(eventNode.id, 'exec_out', '  ', new Set());
     return `function onStart() {\n${body}\n}`;
   }
 
   private compileOnUpdate(eventNode: VisualScriptNode): string {
-    const body = this.compileExecChain(eventNode.id, 'exec_out', '  ');
+    const body = this.compileExecChain(eventNode.id, 'exec_out', '  ', new Set());
     return `function onUpdate(dt: number) {\n${body}\n}`;
   }
 
   private compileCollisionEvent(eventNode: VisualScriptNode, eventName: string): string {
     const entityId = this.resolveInput(eventNode.id, 'entity', eventNode);
-    const body = this.compileExecChain(eventNode.id, 'exec_out', '    ');
+    const body = this.compileExecChain(eventNode.id, 'exec_out', '    ', new Set());
     return `forge.physics.${eventName}(${entityId}, (otherEntityId) => {\n${body}\n});`;
   }
 
   private compileKeyPress(eventNode: VisualScriptNode): string {
     const key = this.resolveInput(eventNode.id, 'key', eventNode);
-    const body = this.compileExecChain(eventNode.id, 'exec_out', '    ');
+    const body = this.compileExecChain(eventNode.id, 'exec_out', '    ', new Set());
     return `// In onUpdate:\n  if (forge.input.justPressed(${key})) {\n${body}\n  }`;
   }
 
   private compileTimer(eventNode: VisualScriptNode): string {
     const interval = this.resolveInput(eventNode.id, 'interval', eventNode);
-    const body = this.compileExecChain(eventNode.id, 'exec_out', '    ');
+    const body = this.compileExecChain(eventNode.id, 'exec_out', '    ', new Set());
     return `// In onUpdate:\n  _timer_${eventNode.id}_elapsed += dt;\n  if (_timer_${eventNode.id}_elapsed >= ${interval}) {\n    _timer_${eventNode.id}_elapsed = 0;\n${body}\n  }`;
   }
 
-  private compileExecChain(startNodeId: string, startHandle: string, indent: string): string {
+  private compileExecChain(startNodeId: string, startHandle: string, indent: string, visited: Set<string>): string {
     const edges = this.edgeMap.bySource.get(`${startNodeId}:${startHandle}`);
     if (!edges || edges.length === 0) return '';
 
@@ -179,7 +179,14 @@ class GraphCompiler {
       const node = this.nodeMap.get(edge.target);
       if (!node) continue;
 
-      const statement = this.compileExecNode(node, indent);
+      if (visited.has(node.id)) {
+        // Build cycle path: list visited nodes in order, then the repeated node
+        const path = [...visited, node.id].join(' \u2192 ');
+        this.errors.push({ nodeId: node.id, message: `Cycle detected: ${path}` });
+        continue;
+      }
+
+      const statement = this.compileExecNode(node, indent, visited);
       if (statement) {
         lines.push(statement);
       }
@@ -187,13 +194,18 @@ class GraphCompiler {
     return lines.join('\n');
   }
 
-  private compileExecNode(node: VisualScriptNode, indent: string): string | null {
+  private compileExecNode(node: VisualScriptNode, indent: string, visited: Set<string>): string | null {
+    // Track this node as visited during its subtree traversal
+    visited.add(node.id);
+
+    let result: string | null;
     switch (node.type) {
       case 'SetPosition': {
         const entity = this.resolveInput(node.id, 'entity', node);
         const pos = this.resolveInput(node.id, 'position', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.setPosition(${entity}, ${pos}[0], ${pos}[1], ${pos}[2]);${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.setPosition(${entity}, ${pos}[0], ${pos}[1], ${pos}[2]);${next ? '\n' + next : ''}`;
+        break;
       }
 
       case 'Translate': {
@@ -201,8 +213,9 @@ class GraphCompiler {
         const dx = this.resolveInput(node.id, 'dx', node);
         const dy = this.resolveInput(node.id, 'dy', node);
         const dz = this.resolveInput(node.id, 'dz', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.translate(${entity}, ${dx}, ${dy}, ${dz});${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.translate(${entity}, ${dx}, ${dy}, ${dz});${next ? '\n' + next : ''}`;
+        break;
       }
 
       case 'ApplyForce': {
@@ -210,8 +223,9 @@ class GraphCompiler {
         const fx = this.resolveInput(node.id, 'fx', node);
         const fy = this.resolveInput(node.id, 'fy', node);
         const fz = this.resolveInput(node.id, 'fz', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.physics.applyForce(${entity}, ${fx}, ${fy}, ${fz});${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.physics.applyForce(${entity}, ${fx}, ${fy}, ${fz});${next ? '\n' + next : ''}`;
+        break;
       }
 
       case 'ApplyImpulse': {
@@ -219,40 +233,44 @@ class GraphCompiler {
         const fx = this.resolveInput(node.id, 'fx', node);
         const fy = this.resolveInput(node.id, 'fy', node);
         const fz = this.resolveInput(node.id, 'fz', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.physics.applyImpulse(${entity}, ${fx}, ${fy}, ${fz});${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.physics.applyImpulse(${entity}, ${fx}, ${fy}, ${fz});${next ? '\n' + next : ''}`;
+        break;
       }
 
       case 'Branch': {
         const condition = this.resolveInput(node.id, 'condition', node);
-        const trueBody = this.compileExecChain(node.id, 'exec_true', indent + '  ');
-        const falseBody = this.compileExecChain(node.id, 'exec_false', indent + '  ');
+        const trueBody = this.compileExecChain(node.id, 'exec_true', indent + '  ', visited);
+        const falseBody = this.compileExecChain(node.id, 'exec_false', indent + '  ', visited);
         let code = `${indent}if (${condition}) {\n`;
         if (trueBody) code += trueBody + '\n';
         code += `${indent}}`;
         if (falseBody) {
           code += ` else {\n${falseBody}\n${indent}}`;
         }
-        return code;
+        result = code;
+        break;
       }
 
       case 'ForLoop': {
         const start = this.resolveInput(node.id, 'start', node);
         const end = this.resolveInput(node.id, 'end', node);
-        const body = this.compileExecChain(node.id, 'exec_body', indent + '  ');
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
+        const body = this.compileExecChain(node.id, 'exec_body', indent + '  ', visited);
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
         let code = `${indent}for (let i = ${start}; i < ${end}; i++) {\n`;
         if (body) code += body + '\n';
         code += `${indent}}`;
         if (next) code += '\n' + next;
-        return code;
+        result = code;
+        break;
       }
 
       case 'SetVariable': {
         const key = this.resolveInput(node.id, 'key', node);
         const value = this.resolveInput(node.id, 'value', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.state.set(${key}, ${value});${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.state.set(${key}, ${value});${next ? '\n' + next : ''}`;
+        break;
       }
 
       case 'SpawnEntity': {
@@ -261,14 +279,16 @@ class GraphCompiler {
         const x = this.resolveInput(node.id, 'x', node);
         const y = this.resolveInput(node.id, 'y', node);
         const z = this.resolveInput(node.id, 'z', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.spawn(${type}, { name: ${name}, position: [${x}, ${y}, ${z}] });${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.spawn(${type}, { name: ${name}, position: [${x}, ${y}, ${z}] });${next ? '\n' + next : ''}`;
+        break;
       }
 
       case 'PlaySound': {
         const entity = this.resolveInput(node.id, 'entity', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.audio.play(${entity});${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.audio.play(${entity});${next ? '\n' + next : ''}`;
+        break;
       }
 
       case 'ShowText': {
@@ -276,82 +296,112 @@ class GraphCompiler {
         const text = this.resolveInput(node.id, 'text', node);
         const x = this.resolveInput(node.id, 'x', node);
         const y = this.resolveInput(node.id, 'y', node);
-        const next = this.compileExecChain(node.id, 'exec_out', indent);
-        return `${indent}forge.ui.showText(${id}, ${text}, ${x}, ${y});${next ? '\n' + next : ''}`;
+        const next = this.compileExecChain(node.id, 'exec_out', indent, visited);
+        result = `${indent}forge.ui.showText(${id}, ${text}, ${x}, ${y});${next ? '\n' + next : ''}`;
+        break;
       }
 
       default:
         this.warnings.push({ nodeId: node.id, message: `Unknown exec node type: ${node.type}` });
-        return null;
+        result = null;
+        break;
     }
+
+    visited.delete(node.id);
+    return result;
   }
 
-  private compileDataNode(node: VisualScriptNode, _outputPort: string): string {
+  private compileDataNode(node: VisualScriptNode, _outputPort: string, dataAncestors?: Set<string>): string {
+    const ancestors = dataAncestors ?? new Set<string>();
+
+    if (ancestors.has(node.id)) {
+      const path = [...ancestors, node.id].join(' \u2192 ');
+      this.errors.push({ nodeId: node.id, message: `Data cycle detected: ${path}` });
+      return '0 /* circular reference */';
+    }
+
+    ancestors.add(node.id);
+
+    let result: string;
     switch (node.type) {
       case 'Add': {
-        const a = this.resolveInput(node.id, 'a', node);
-        const b = this.resolveInput(node.id, 'b', node);
-        return `(${a} + ${b})`;
+        const a = this.resolveInput(node.id, 'a', node, ancestors);
+        const b = this.resolveInput(node.id, 'b', node, ancestors);
+        result = `(${a} + ${b})`;
+        break;
       }
 
       case 'Subtract': {
-        const a = this.resolveInput(node.id, 'a', node);
-        const b = this.resolveInput(node.id, 'b', node);
-        return `(${a} - ${b})`;
+        const a = this.resolveInput(node.id, 'a', node, ancestors);
+        const b = this.resolveInput(node.id, 'b', node, ancestors);
+        result = `(${a} - ${b})`;
+        break;
       }
 
       case 'Multiply': {
-        const a = this.resolveInput(node.id, 'a', node);
-        const b = this.resolveInput(node.id, 'b', node);
-        return `(${a} * ${b})`;
+        const a = this.resolveInput(node.id, 'a', node, ancestors);
+        const b = this.resolveInput(node.id, 'b', node, ancestors);
+        result = `(${a} * ${b})`;
+        break;
       }
 
       case 'Divide': {
-        const a = this.resolveInput(node.id, 'a', node);
-        const b = this.resolveInput(node.id, 'b', node);
-        return `(${a} / ${b})`;
+        const a = this.resolveInput(node.id, 'a', node, ancestors);
+        const b = this.resolveInput(node.id, 'b', node, ancestors);
+        result = `(${a} / ${b})`;
+        break;
       }
 
       case 'GetPosition': {
-        const entity = this.resolveInput(node.id, 'entity', node);
-        return `(forge.getTransform(${entity})?.position || [0, 0, 0])`;
+        const entity = this.resolveInput(node.id, 'entity', node, ancestors);
+        result = `(forge.getTransform(${entity})?.position || [0, 0, 0])`;
+        break;
       }
 
       case 'IsPressed': {
-        const action = this.resolveInput(node.id, 'action', node);
-        return `forge.input.isPressed(${action})`;
+        const action = this.resolveInput(node.id, 'action', node, ancestors);
+        result = `forge.input.isPressed(${action})`;
+        break;
       }
 
       case 'GetAxis': {
-        const action = this.resolveInput(node.id, 'action', node);
-        return `forge.input.getAxis(${action})`;
+        const action = this.resolveInput(node.id, 'action', node, ancestors);
+        result = `forge.input.getAxis(${action})`;
+        break;
       }
 
       case 'MakeVec3': {
-        const x = this.resolveInput(node.id, 'x', node);
-        const y = this.resolveInput(node.id, 'y', node);
-        const z = this.resolveInput(node.id, 'z', node);
-        return `[${x}, ${y}, ${z}]`;
+        const x = this.resolveInput(node.id, 'x', node, ancestors);
+        const y = this.resolveInput(node.id, 'y', node, ancestors);
+        const z = this.resolveInput(node.id, 'z', node, ancestors);
+        result = `[${x}, ${y}, ${z}]`;
+        break;
       }
 
       case 'Distance': {
-        const a = this.resolveInput(node.id, 'a', node);
-        const b = this.resolveInput(node.id, 'b', node);
-        return `Math.sqrt(Math.pow(${a}[0]-${b}[0],2)+Math.pow(${a}[1]-${b}[1],2)+Math.pow(${a}[2]-${b}[2],2))`;
+        const a = this.resolveInput(node.id, 'a', node, ancestors);
+        const b = this.resolveInput(node.id, 'b', node, ancestors);
+        result = `Math.sqrt(Math.pow(${a}[0]-${b}[0],2)+Math.pow(${a}[1]-${b}[1],2)+Math.pow(${a}[2]-${b}[2],2))`;
+        break;
       }
 
       case 'GetVariable': {
-        const key = this.resolveInput(node.id, 'key', node);
-        return `forge.state.get(${key})`;
+        const key = this.resolveInput(node.id, 'key', node, ancestors);
+        result = `forge.state.get(${key})`;
+        break;
       }
 
       default:
         this.warnings.push({ nodeId: node.id, message: `Unknown data node type: ${node.type}` });
-        return '0';
+        result = '0';
+        break;
     }
+
+    ancestors.delete(node.id);
+    return result;
   }
 
-  private resolveInput(nodeId: string, portId: string, node: VisualScriptNode): string {
+  private resolveInput(nodeId: string, portId: string, node: VisualScriptNode, dataAncestors?: Set<string>): string {
     const key = `${nodeId}:${portId}`;
     const incoming = this.edgeMap.byTarget.get(key);
 
@@ -359,7 +409,7 @@ class GraphCompiler {
       const srcEdge = incoming[0];
       const srcNode = this.nodeMap.get(srcEdge.source);
       if (srcNode) {
-        return this.compileDataNode(srcNode, srcEdge.sourceHandle);
+        return this.compileDataNode(srcNode, srcEdge.sourceHandle, dataAncestors);
       }
     }
 

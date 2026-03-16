@@ -937,39 +937,78 @@ function terminateDueToMemory(heapMb: number) {
 
 const MAX_SCRIPT_SOURCE_BYTES = 512 * 1024;
 
-/** Maximum iterations a single loop may execute before the guard throws. */
-const MAX_LOOP_ITERATIONS = 1_000_000;
+// ─── Infinite Loop Watchdog ──────────────────────────────────────
+const DEFAULT_LOOP_ITERATION_LIMIT = 1_000_000;
+let loopIterationLimit = DEFAULT_LOOP_ITERATION_LIMIT;
+const DEFAULT_ON_START_TIMEOUT_MS = 1000;
+const DEFAULT_ON_DESTROY_TIMEOUT_MS = 1000;
+let onStartTimeoutMs = DEFAULT_ON_START_TIMEOUT_MS;
+let onDestroyTimeoutMs = DEFAULT_ON_DESTROY_TIMEOUT_MS;
 
-/**
- * Injects iteration-counter guards into `for`, `while`, and `do...while` loops.
- * If a loop exceeds MAX_LOOP_ITERATIONS the guard throws, caught by the
- * per-script error handler. Regex-based best-effort — the frame-time watchdog
- * is the true safety net.
- */
 function injectLoopGuards(source: string): string {
-  let counter = 0;
-  function makeGuard(): string {
-    const id = counter++;
-    return `var __lc${id}=0;if(++__lc${id}>${MAX_LOOP_ITERATIONS}){throw new Error("Infinite loop detected")}`;
-  }
-  // Braceless do...while first to avoid double-matching
-  let result = source.replace(
-    /\bdo\s+(?!\{)([\s\S]*?);\s*while\s*\(([^)]*)\)\s*;?/g,
-    (_m, stmt: string, cond: string) => `do{${makeGuard()}${stmt.trim()};}while(${cond});`
-  );
-  // Braced do...while
-  result = result.replace(/\bdo\s*\{/g, () => `do{${makeGuard()}`);
-  // while (skip do...while tails)
-  result = result.replace(
-    /\bwhile\s*\(([^)]*)\)\s*\{/g,
-    (match, _c, offset) => {
-      const before = result.slice(Math.max(0, offset - 20), offset).trimEnd();
-      if (before.endsWith('}') || before.endsWith(');')) return match;
-      return `${match}${makeGuard()}`;
+  const guardVar = '__loopGuard';
+  const guardCheck = 'if(++' + guardVar + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
+  let result = 'let ' + guardVar + '=0;\n';
+  let i = 0;
+  const src = source;
+  const len = src.length;
+  while (i < len) {
+    if (src[i] === '"' || src[i] === "'" || src[i] === '`') {
+      const quote = src[i];
+      result += src[i++];
+      while (i < len && src[i] !== quote) {
+        if (src[i] === '\\') { result += src[i++]; }
+        if (i < len) { result += src[i++]; }
+      }
+      if (i < len) result += src[i++];
+      continue;
     }
-  );
-  // for loops
-  result = result.replace(/\bfor\s*\([^)]*\)\s*\{/g, (match) => `${match}${makeGuard()}`);
+    if (src[i] === '/' && i + 1 < len && src[i + 1] === '/') {
+      while (i < len && src[i] !== '\n') result += src[i++];
+      continue;
+    }
+    if (src[i] === '/' && i + 1 < len && src[i + 1] === '*') {
+      result += src[i++]; result += src[i++];
+      while (i < len && !(src[i] === '*' && i + 1 < len && src[i + 1] === '/')) result += src[i++];
+      if (i < len) { result += src[i++]; result += src[i++]; }
+      continue;
+    }
+    const remaining = src.slice(i);
+    if (/^while\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
+      result += 'while';
+      i += 5;
+      while (i < len && /\s/.test(src[i])) result += src[i++];
+      if (i < len && src[i] === '(') {
+        let depth = 0;
+        do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; result += src[i++]; } while (i < len && depth > 0);
+        while (i < len && /\s/.test(src[i])) result += src[i++];
+        if (i < len && src[i] === '{') { result += '{' + guardCheck; i++; }
+        else { result += '{' + guardCheck; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
+      }
+      continue;
+    }
+    if (/^for\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
+      result += 'for';
+      i += 3;
+      while (i < len && /\s/.test(src[i])) result += src[i++];
+      if (i < len && src[i] === '(') {
+        let depth = 0;
+        do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; result += src[i++]; } while (i < len && depth > 0);
+        while (i < len && /\s/.test(src[i])) result += src[i++];
+        if (i < len && src[i] === '{') { result += '{' + guardCheck; i++; }
+        else { result += '{' + guardCheck; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
+      }
+      continue;
+    }
+    if (/^do\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
+      result += 'do';
+      i += 2;
+      while (i < len && /\s/.test(src[i])) result += src[i++];
+      if (i < len && src[i] === '{') { result += '{' + guardCheck; i++; }
+      continue;
+    }
+    result += src[i++];
+  }
   return result;
 }
 
@@ -991,19 +1030,17 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
   const guardedSource = injectLoopGuards(source);
 
   try {
-    // Shadow dangerous globals to prevent network access from user scripts.
-    // This runs inside a Web Worker (no DOM access) with additional globals
-    // explicitly overridden to undefined to sandbox user-provided code.
-    const fn = new Function( // codeql[js/code-injection] intentional: user-authored game scripts execute in an isolated Web Worker with shadowed globals, size cap, and exception containment
-      'forge', 'entityId',
+    const guardedSource = injectLoopGuards(source);
+    // Shadow dangerous globals; new Function() is intentional for sandbox.
+    const fn = new Function( // codeql[js/code-injection]
+      'forge', 'entityId', '__loopLimit',
       ...SHADOWED_GLOBALS,
       `
       ${guardedSource}
       return { onStart: typeof onStart === 'function' ? onStart : undefined, onUpdate: typeof onUpdate === 'function' ? onUpdate : undefined, onDestroy: typeof onDestroy === 'function' ? onDestroy : undefined };
       `
     );
-    // Pass undefined for all shadowed globals
-    const result = fn(forge, entityId_, ...SHADOWED_GLOBALS.map(() => undefined));
+    const result = fn(forge, entityId_, loopIterationLimit, ...SHADOWED_GLOBALS.map(() => undefined));
     instance.onStart = result.onStart;
     instance.onUpdate = result.onUpdate;
     instance.onDestroy = result.onDestroy;
@@ -1064,17 +1101,32 @@ self.onmessage = (e: MessageEvent) => {
         scripts.push(instance);
       }
 
-      // Call onStart on all scripts
+      // Call onStart on all scripts with watchdog
       pendingCommands = [];
+      const startScriptsToRemove: string[] = [];
       for (const script of scripts) {
         if (script.onStart) {
+          const hookStart = performance.now();
           try {
             script.onStart();
           } catch (err) {
             const msg_ = err instanceof Error ? err.message : String(err);
-            (self as unknown as Worker).postMessage({ type: 'error', entityId: script.entityId, line: 0, message: `onStart error: ${msg_}` });
+            if (msg_.includes('Infinite loop detected')) {
+              (self as unknown as Worker).postMessage({ type: 'script_timeout', entityId: script.entityId, hookName: 'onStart', message: msg_ });
+              startScriptsToRemove.push(script.entityId);
+            } else {
+              (self as unknown as Worker).postMessage({ type: 'error', entityId: script.entityId, line: 0, message: `onStart error: ${msg_}` });
+            }
+          }
+          const hookElapsed = performance.now() - hookStart;
+          if (hookElapsed > onStartTimeoutMs && !startScriptsToRemove.includes(script.entityId)) {
+            (self as unknown as Worker).postMessage({ type: 'script_timeout', entityId: script.entityId, hookName: 'onStart', message: `onStart exceeded timeout: ${hookElapsed.toFixed(1)} ms (limit: ${onStartTimeoutMs} ms). Script terminated.` });
+            startScriptsToRemove.push(script.entityId);
           }
         }
+      }
+      if (startScriptsToRemove.length > 0) {
+        scripts = scripts.filter(s => !startScriptsToRemove.includes(s.entityId));
       }
 
       flushCommands();
@@ -1147,6 +1199,11 @@ self.onmessage = (e: MessageEvent) => {
             script.onUpdate(timeData.delta);
           } catch (err) {
             const msg_ = err instanceof Error ? err.message : String(err);
+            if (msg_.includes('Infinite loop detected')) {
+              (self as unknown as Worker).postMessage({ type: 'script_timeout', entityId: script.entityId, hookName: 'onUpdate', message: msg_ });
+              scriptsToRemove.push(script.entityId);
+              continue;
+            }
             (self as unknown as Worker).postMessage({ type: 'error', entityId: script.entityId, line: 0, message: `onUpdate error: ${msg_}` });
           }
           const elapsed = performance.now() - frameStart;
@@ -1180,11 +1237,22 @@ self.onmessage = (e: MessageEvent) => {
       clearPendingAsyncRequests('Script execution stopped');
       for (const script of scripts) {
         if (script.onDestroy) {
+          const destroyStart = performance.now();
+          let destroyHandled = false;
           try {
             script.onDestroy();
           } catch (err) {
             const msg_ = err instanceof Error ? err.message : String(err);
-            (self as unknown as Worker).postMessage({ type: 'error', entityId: script.entityId, line: 0, message: `onDestroy error: ${msg_}` });
+            if (msg_.includes('Infinite loop detected')) {
+              (self as unknown as Worker).postMessage({ type: 'script_timeout', entityId: script.entityId, hookName: 'onDestroy', message: msg_ });
+              destroyHandled = true;
+            } else {
+              (self as unknown as Worker).postMessage({ type: 'error', entityId: script.entityId, line: 0, message: `onDestroy error: ${msg_}` });
+            }
+          }
+          const destroyElapsed = performance.now() - destroyStart;
+          if (!destroyHandled && destroyElapsed > onDestroyTimeoutMs) {
+            (self as unknown as Worker).postMessage({ type: 'script_timeout', entityId: script.entityId, hookName: 'onDestroy', message: `onDestroy exceeded timeout: ${destroyElapsed.toFixed(1)} ms (limit: ${onDestroyTimeoutMs} ms). Script terminated.` });
           }
         }
       }
@@ -1234,6 +1302,9 @@ self.onmessage = (e: MessageEvent) => {
       if (typeof msg.memoryLimitMb === 'number') memoryLimitMb = msg.memoryLimitMb;
       if (typeof msg.frameTimeLimitMs === 'number') frameTimeLimitMs = msg.frameTimeLimitMs;
       if (typeof msg.frameTimeWarnMs === 'number') frameTimeWarnMs = msg.frameTimeWarnMs;
+      if (typeof msg.loopIterationLimit === 'number') loopIterationLimit = msg.loopIterationLimit;
+      if (typeof msg.onStartTimeoutMs === 'number') onStartTimeoutMs = msg.onStartTimeoutMs;
+      if (typeof msg.onDestroyTimeoutMs === 'number') onDestroyTimeoutMs = msg.onDestroyTimeoutMs;
       break;
     }
   }
