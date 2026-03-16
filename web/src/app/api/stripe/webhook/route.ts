@@ -18,6 +18,7 @@ import {
   handleSubscriptionDeleted,
   handleInvoicePaid,
   handleInvoicePaymentFailed,
+  handleChargeRefunded,
 } from '@/lib/billing/subscription-lifecycle';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -192,6 +193,23 @@ async function processEvent(event: Stripe.Event): Promise<void> {
         invoice.id,
         attemptCount,
         nextAttempt
+      );
+      break;
+    }
+
+    // -----------------------------------------------------------
+    // Charge refunded — reverse addon token credits (PF-480)
+    // -----------------------------------------------------------
+    case 'charge.refunded': {
+      const charge = event.data.object as Stripe.Charge;
+      const customerId = resolveCustomerId(charge.customer);
+      if (!customerId) break;
+
+      await handleChargeRefunded(
+        customerId,
+        charge.id,
+        charge.amount_refunded,
+        charge.amount
       );
       break;
     }

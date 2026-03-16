@@ -45,6 +45,18 @@ export default defineConfig({
         launchOptions: { args: [] },
       },
     },
+    {
+      name: 'mobile-iphone',
+      use: {
+        ...devices['iPhone 14'],
+      },
+    },
+    {
+      name: 'mobile-pixel',
+      use: {
+        ...devices['Pixel 7'],
+      },
+    },
   ],
 
   webServer: {

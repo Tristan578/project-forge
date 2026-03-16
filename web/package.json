@@ -18,7 +18,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "check:command-parity": "node scripts/check-command-parity.js",
+    "check:bundle-size": "node scripts/check-bundle-size.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",

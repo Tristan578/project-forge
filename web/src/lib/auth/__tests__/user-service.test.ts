@@ -80,6 +80,7 @@ vi.mock('@/lib/db/schema', () => ({
   assetPurchases: { buyerId: 'buyerId' },
   marketplaceAssets: { sellerId: 'sellerId' },
   sellerProfiles: { userId: 'userId' },
+  generationJobs: { userId: 'userId' },
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -449,5 +450,14 @@ describe('deleteUserAccount', () => {
     const deleteArgs = mockDelete.mock.calls.map((call) => call[0]);
     // Check that both key tables were targeted (they are objects from the schema mock)
     expect(deleteArgs.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it('deletes generationJobs as part of cascade (PF-510)', async () => {
+    mockSelect.mockImplementation(() => buildSelectChain([]));
+
+    await deleteUserAccount('user-uuid-1');
+    // generationJobs mock has { userId: 'userId' } — verify it was passed to delete()
+    const deleteArgs = mockDelete.mock.calls.map((call) => call[0]);
+    expect(deleteArgs).toContainEqual({ userId: 'userId' });
   });
 });

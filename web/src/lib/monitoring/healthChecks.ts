@@ -545,7 +545,7 @@ export async function checkCloudflareR2(): Promise<ServiceHealth> {
 // ---------------------------------------------------------------------------
 
 /** Services whose downtime should trigger HTTP 503 */
-const CRITICAL_SERVICES = new Set(['Database (Neon)', 'Authentication (Clerk)']);
+const CRITICAL_SERVICES = new Set(['Database (Neon)', 'Clerk']);
 
 /**
  * Compute overall status from a list of service results.
@@ -588,15 +588,11 @@ export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
 export async function runAllHealthChecks(): Promise<HealthReport> {
   const services = await Promise.all([
     checkDatabase(),
-    checkAuthentication(),
     checkPayments(),
-    checkErrorTracking(),
-    checkAssetStorage(),
     checkRateLimiting(),
     checkEngineCdn(),
     checkAiProviders(),
     checkClerk(),
-    checkAnthropic(),
     checkSentry(),
     checkCloudflareR2(),
   ]);

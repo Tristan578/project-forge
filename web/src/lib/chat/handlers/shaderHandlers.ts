@@ -327,6 +327,28 @@ export const shaderHandlers: Record<string, ToolHandler> = {
       result: `Shader Graphs:\n${list}`,
     };
   },
+
+  set_custom_wgsl_source: async (args, ctx) => {
+    const p = parseArgs(z.object({
+      userCode: z.string().min(1, 'userCode is required'),
+      name: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+    ctx.dispatchCommand('set_custom_wgsl_source', {
+      userCode: p.data.userCode,
+      name: p.data.name ?? 'Custom WGSL',
+    });
+    return { success: true, result: { message: 'Custom WGSL shader applied' } };
+  },
+
+  validate_wgsl: async (args, ctx) => {
+    const p = parseArgs(z.object({
+      code: z.string().min(1, 'WGSL code is required'),
+    }), args);
+    if (p.error) return p.error;
+    ctx.dispatchCommand('validate_wgsl', { code: p.data.code });
+    return { success: true, result: { message: 'WGSL validation dispatched. Check engine events for result.' } };
+  },
 };
 
 /**
