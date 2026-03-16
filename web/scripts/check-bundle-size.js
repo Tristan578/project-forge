@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * CI quality gate: enforce JS/CSS bundle size limits after next build.
  *

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * CI quality gate: verify every MCP command in the manifest has a matching
  * handler registered in the chat handler modules.
