@@ -24,6 +24,11 @@ export default function EditorPage() {
   const loadScene = useEditorStore((s) => s.loadScene);
   const setSceneName = useEditorStore((s) => s.setSceneName);
 
+  // Prefetch Monaco editor chunks so the script panel opens instantly
+  useEffect(() => {
+    void import('@monaco-editor/react');
+  }, []);
+
   useEffect(() => {
     const fetchProject = async () => {
       try {

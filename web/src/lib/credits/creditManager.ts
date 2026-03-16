@@ -95,6 +95,50 @@ export async function deductCredits(
   return { success: true, balance };
 }
 
+/**
+ * Refund credits for a specific deduction transaction (PF-488).
+ * Restores the amount to the purchased (addon) pool and records an audit trail.
+ * Returns the updated balance, or throws if the user is not found.
+ */
+export async function refundCredits(
+  userId: string,
+  amount: number,
+  transactionId: string
+): Promise<{ success: boolean; balance: CreditBalance }> {
+  if (amount <= 0) {
+    return { success: true, balance: await getBalance(userId) };
+  }
+
+  const db = getDb();
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!user) throw new Error(`User not found: ${userId}`);
+
+  // Restore credits to the addon (purchased) pool.
+  // We use addon because the original deduction may have spanned pools
+  // and monthly tokens may have since reset.
+  await db
+    .update(users)
+    .set({
+      addonTokens: sql`${users.addonTokens} + ${amount}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+
+  const balance = await getBalance(userId);
+
+  // Audit trail
+  await db.insert(creditTransactions).values({
+    userId,
+    transactionType: 'refund',
+    amount,
+    balanceAfter: balance.total,
+    source: 'credit_refund',
+    referenceId: transactionId,
+  });
+
+  return { success: true, balance };
+}
+
 /** Grant monthly credits at billing cycle start */
 export async function grantMonthlyCredits(
   userId: string,

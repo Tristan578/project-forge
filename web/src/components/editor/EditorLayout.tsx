@@ -30,12 +30,14 @@ import { OnboardingChecklist } from './OnboardingChecklist';
 import { PerformanceProfiler } from './PerformanceProfiler';
 import { GenerationStatus } from './GenerationStatus';
 import { HelpMenu } from './HelpMenu';
+import { AutoSaveRecovery } from './AutoSaveRecovery';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { useEditorStore } from '@/stores/editorStore';
+import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
+import { startAutoSave } from '@/lib/storage/autoSave';
 import { UserButton } from '@clerk/nextjs';
 
 // Clerk validates key format — skip rendering Clerk components without a valid key (CI E2E)
@@ -330,6 +332,26 @@ export function EditorLayout() {
     }
   }, []);
 
+  // Periodic IndexedDB auto-save (every 30 s)
+  useEffect(() => {
+    const handle = startAutoSave(
+      () => {
+        const s = useEditorStore.getState();
+        return {
+          projectId: s.projectId,
+          sceneName: s.sceneName,
+          sceneModified: s.sceneModified,
+          autoSaveEnabled: s.autoSaveEnabled,
+        };
+      },
+      () => {
+        const dispatcher = getCommandDispatcher();
+        if (dispatcher) dispatcher('save_scene', {});
+      },
+    );
+    return () => handle.stop();
+  }, []);
+
   // --- Compact layout (mobile/tablet) --- unchanged
   if (layout.mode === 'compact') {
     return (
@@ -372,6 +394,7 @@ export function EditorLayout() {
           </div>
         </DrawerPanel>
 
+        <AutoSaveRecovery />
         <ChatOverlay />
         <SceneTransitionOverlay />
         <DialogueOverlay />
@@ -424,6 +447,7 @@ export function EditorLayout() {
         </div>
       </div>
 
+      <AutoSaveRecovery />
       <ChatOverlay />
       <SceneTransitionOverlay />
       <DialogueOverlay />
