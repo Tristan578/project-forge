@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments } from '@/lib/db/schema';
 import { eq, sql, and, or, ilike, desc } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { parsePaginationParams } from '@/lib/apiValidation';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
     const sort = searchParams.get('sort') || 'trending';
     const tag = searchParams.get('tag');
     const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
+    const { limit } = parsePaginationParams(searchParams);
 
     const offset = (page - 1) * limit;
 

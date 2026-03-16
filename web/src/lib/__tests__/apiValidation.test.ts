@@ -6,6 +6,7 @@ import {
   requireObject,
   requireInteger,
   requireOneOf,
+  parsePaginationParams,
 } from '../apiValidation';
 
 describe('parseJsonBody', () => {
@@ -201,6 +202,62 @@ describe('requireInteger', () => {
   it('rejects null', () => {
     const result = requireInteger(null, 'count');
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('parsePaginationParams', () => {
+  function makeParams(params: Record<string, string> = {}): URLSearchParams {
+    return new URLSearchParams(params);
+  }
+
+  it('returns defaults when no params provided', () => {
+    const result = parsePaginationParams(makeParams());
+    expect(result).toEqual({ limit: 20, offset: 0 });
+  });
+
+  it('parses valid limit and offset', () => {
+    const result = parsePaginationParams(makeParams({ limit: '10', offset: '30' }));
+    expect(result).toEqual({ limit: 10, offset: 30 });
+  });
+
+  it('clamps limit to max 100', () => {
+    const result = parsePaginationParams(makeParams({ limit: '9999' }));
+    expect(result.limit).toBe(100);
+  });
+
+  it('clamps limit to min 1', () => {
+    const result = parsePaginationParams(makeParams({ limit: '0' }));
+    expect(result.limit).toBe(1);
+  });
+
+  it('clamps negative limit to 1', () => {
+    const result = parsePaginationParams(makeParams({ limit: '-5' }));
+    expect(result.limit).toBe(1);
+  });
+
+  it('clamps negative offset to 0', () => {
+    const result = parsePaginationParams(makeParams({ offset: '-10' }));
+    expect(result.offset).toBe(0);
+  });
+
+  it('falls back to default on non-numeric limit', () => {
+    const result = parsePaginationParams(makeParams({ limit: 'abc' }));
+    expect(result.limit).toBe(20);
+  });
+
+  it('falls back to 0 on non-numeric offset', () => {
+    const result = parsePaginationParams(makeParams({ offset: 'abc' }));
+    expect(result.offset).toBe(0);
+  });
+
+  it('respects custom defaultLimit', () => {
+    const result = parsePaginationParams(makeParams(), { defaultLimit: 50 });
+    expect(result.limit).toBe(50);
+  });
+
+  it('respects custom maxLimit', () => {
+    const result = parsePaginationParams(makeParams({ limit: '200' }), { maxLimit: 50 });
+    expect(result.limit).toBe(50);
   });
 });
 

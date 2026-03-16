@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { marketplaceAssets, sellerProfiles } from '@/lib/db/schema';
 import { desc, asc, eq, ilike, and, or, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { parsePaginationParams } from '@/lib/apiValidation';
 
 export async function GET(req: NextRequest) {
   const limited = await rateLimitPublicRoute(req, 'marketplace-assets', 30, 5 * 60 * 1000);
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
     const sort = (searchParams.get('sort') || 'popular') as 'newest' | 'popular' | 'top_rated' | 'price_low' | 'price_high' | 'free';
     const priceFilter = (searchParams.get('price') || 'all') as 'all' | 'free' | 'paid';
     const page = parseInt(searchParams.get('page') || '1', 10);
-    const limit = Math.min(parseInt(searchParams.get('limit') || '20', 10), 100);
+    const { limit } = parsePaginationParams(new URL(req.url).searchParams);
 
     // Build base query
     const conditions = [eq(marketplaceAssets.status, 'published')];
