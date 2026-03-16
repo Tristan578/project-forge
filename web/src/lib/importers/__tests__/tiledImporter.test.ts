@@ -401,7 +401,7 @@ describe('parseTiledMap — flip bit stripping', () => {
       layers: [
         {
           type: 'tilelayer',
-          name: '"Ground"',
+          name: 'Ground',
           visible: true,
           opacity: 1,
           x: 0,
