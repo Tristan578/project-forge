@@ -110,6 +110,9 @@ function setupStore() {
   vi.mocked(useEditorStore).mockImplementation((selector: any) => {
     const state = {
       ...defaultState,
+      bridgeTools: {},
+      setBridgeTool: vi.fn(),
+      removeBridgeTool: vi.fn(),
       updateAmbientLight: mockUpdateAmbientLight,
       updateEnvironment: mockUpdateEnvironment,
       setSkybox: mockSetSkybox,

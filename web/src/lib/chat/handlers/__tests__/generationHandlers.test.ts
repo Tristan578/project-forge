@@ -254,12 +254,10 @@ describe('generationHandlers', () => {
       expect(result.error).toBe('Quota exceeded');
     });
 
-    it('normalizes empty materialSlot to undefined', async () => {
-      mockFetchSuccess();
-      await invoke('generate_texture', { prompt: 'rock', entityId: 'ent-1', materialSlot: '' });
-      expect(mockAddJob).toHaveBeenCalledWith(expect.objectContaining({
-        materialSlot: undefined,
-      }));
+    it('rejects empty materialSlot string via validation', async () => {
+      const { result } = await invoke('generate_texture', { prompt: 'rock', entityId: 'ent-1', materialSlot: '' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Invalid arguments');
     });
 
     it('accepts valid materialSlot', async () => {

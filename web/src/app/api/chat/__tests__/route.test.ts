@@ -394,11 +394,13 @@ describe('POST /api/chat', () => {
       );
     });
 
-    it('appends scene context to system prompt', async () => {
+    it('appends scene context to system prompt blocks', async () => {
       await POST(makeRequest(validBody()));
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          system: expect.stringContaining('## Scene\nEmpty'),
+          system: expect.arrayContaining([
+            expect.objectContaining({ type: 'text', text: '## Scene\nEmpty' }),
+          ]),
         }),
       );
     });

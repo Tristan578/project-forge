@@ -50,7 +50,7 @@ describe('AsyncChannelRouter', () => {
     await router.handleRequest(makeRequest());
     const responses = router.flush();
 
-    expect(handler).toHaveBeenCalledWith('raycast', { origin: [0, 0, 0] }, expect.any(Function));
+    expect(handler).toHaveBeenCalledWith('raycast', { origin: [0, 0, 0] }, expect.any(Function), expect.any(AbortSignal));
     expect(responses).toHaveLength(1);
     expect(responses![0].status).toBe('ok');
     expect(responses![0].data).toEqual({ hit: true, distance: 5.0 });
@@ -241,6 +241,6 @@ describe('AsyncChannelRouter', () => {
 
     expect(responses).toHaveLength(1);
     expect(responses![0].status).toBe('ok');
-    expect(handler).toHaveBeenCalledWith('raycast', {}, expect.any(Function));
+    expect(handler).toHaveBeenCalledWith('raycast', {}, expect.any(Function), expect.any(AbortSignal));
   });
 });
