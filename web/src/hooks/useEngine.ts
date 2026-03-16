@@ -15,10 +15,47 @@ let wasmModule: WasmModule | null = null;
 let initPromise: Promise<WasmModule> | null = null;
 let panicInterceptorInstalled = false;
 
+// --- Engine crash state (module-level for cross-component access) ---
+let _engineCrashed = false;
+let _engineCrashMessage: string | null = null;
+type CrashListener = (message: string) => void;
+const _crashListeners = new Set<CrashListener>();
+
+/** Subscribe to engine crash events. Returns an unsubscribe function. */
+export function onEngineCrash(listener: CrashListener): () => void {
+  _crashListeners.add(listener);
+  return () => { _crashListeners.delete(listener); };
+}
+
+/** Whether the WASM engine has crashed and not yet recovered. */
+export function isEngineCrashed(): boolean {
+  return _engineCrashed;
+}
+
+/** The panic message from the last WASM crash, or null if none. */
+export function getEngineCrashMessage(): string | null {
+  return _engineCrashMessage;
+}
+
+/** Mark the engine as crashed and notify all listeners. */
+function setEngineCrashed(message: string): void {
+  _engineCrashed = true;
+  _engineCrashMessage = message;
+  wasmModule = null;
+  for (const listener of _crashListeners) {
+    try { listener(message); } catch { /* prevent listener errors from breaking the loop */ }
+  }
+}
+
+/** Clear crash state (used after recovery). */
+function clearEngineCrash(): void {
+  _engineCrashed = false;
+  _engineCrashMessage = null;
+}
+
 /**
  * Install a global interceptor for WASM panics.
- * Rust's console_error_panic_hook writes panics to console.error —
- * this catches them and forwards to Sentry with structured context.
+ * After detecting a panic, sets engineCrashed state so components can react.
  */
 function installPanicInterceptor(): void {
   if (panicInterceptorInstalled || typeof window === 'undefined') return;
@@ -28,7 +65,6 @@ function installPanicInterceptor(): void {
   console.error = (...args: unknown[]) => {
     originalConsoleError.apply(console, args);
 
-    // Detect Rust/WASM panics from console_error_panic_hook
     const msg = args.map(a => (typeof a === 'string' ? a : String(a))).join(' ');
     if (msg.includes('panicked at') || msg.includes('wasm-bindgen')) {
       captureException(new Error(`WASM panic: ${msg.slice(0, 500)}`), {
@@ -36,26 +72,20 @@ function installPanicInterceptor(): void {
         fullMessage: msg.slice(0, 2000),
         engineBackend: detectWebGPU() ? 'webgpu' : 'webgl2',
       });
+      setEngineCrashed(msg.slice(0, 500));
     }
   };
 }
 
-// Emit event helper that logs and notifies listeners
 function emitEvent(phase: InitPhase, message?: string, error?: string) {
   const event = logInitEvent(phase, message, error);
   emitStatusEvent(event);
 }
 
-/** Detect whether the browser supports WebGPU. */
 function detectWebGPU(): boolean {
   return typeof navigator !== 'undefined' && 'gpu' in navigator;
 }
 
-/**
- * Base URL for WASM engine files. When NEXT_PUBLIC_ENGINE_CDN_URL is set
- * (e.g. "https://cdn.spawnforge.ai"), files are loaded from the CDN.
- * Otherwise falls back to same-origin paths (local dev / self-hosted).
- */
 const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
 
 async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string): Promise<WasmModule> {
@@ -71,7 +101,6 @@ async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: stri
 }
 
 async function loadWasm(): Promise<WasmModule> {
-  // Skip WASM loading when engine is explicitly disabled (CI E2E @ui tests)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof window !== 'undefined' && (window as any).__SKIP_ENGINE) {
     throw new Error('Engine loading skipped (__SKIP_ENGINE is set)');
@@ -79,13 +108,11 @@ async function loadWasm(): Promise<WasmModule> {
   if (wasmModule) return wasmModule;
   if (initPromise) return initPromise;
 
-  // Intercept WASM panics before loading
   installPanicInterceptor();
 
   initPromise = (async () => {
     const useWebGPU = detectWebGPU();
     const backend = useWebGPU ? 'webgpu' : 'webgl2';
-
     emitEvent('wasm_loading', `Fetching WASM module (${backend})...`);
 
     const basePath = `${ENGINE_CDN_BASE}/engine-pkg-${backend}/`;
@@ -98,8 +125,6 @@ async function loadWasm(): Promise<WasmModule> {
       return wasmModule;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
-
-      // If WebGPU failed, try falling back to WebGL2
       if (useWebGPU) {
         emitEvent('wasm_loading', 'WebGPU load failed, falling back to WebGL2...');
         const fallbackPath = `${ENGINE_CDN_BASE}/engine-pkg-webgl2/`;
@@ -112,7 +137,6 @@ async function loadWasm(): Promise<WasmModule> {
           throw fallbackErr;
         }
       }
-
       emitEvent('error', 'Failed to load WASM module', errorMsg);
       throw err;
     }
@@ -121,10 +145,10 @@ async function loadWasm(): Promise<WasmModule> {
   return initPromise;
 }
 
-// Reset for retry
 export function resetEngine(): void {
   wasmModule = null;
   initPromise = null;
+  clearEngineCrash();
 }
 
 export interface UseEngineOptions {
@@ -139,7 +163,6 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
   const onReadyRef = useRef(options?.onReady);
   const onErrorRef = useRef(options?.onError);
 
-  // Keep refs updated
   useEffect(() => {
     onReadyRef.current = options?.onReady;
     onErrorRef.current = options?.onError;
@@ -147,32 +170,22 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
 
   useEffect(() => {
     if (initializedRef.current) return;
-
-    // SSR guard
     if (typeof document === 'undefined') return;
-
     const canvas = document.getElementById(canvasId);
     if (!canvas) {
       emitEvent('error', 'Canvas element not found', `No element with id="${canvasId}"`);
       return;
     }
-
     initializedRef.current = true;
 
     loadWasm()
       .then((wasm) => {
         emitEvent('engine_starting', `Calling init_engine("${canvasId}")`);
-
-        // Set Sentry context for all subsequent errors in this session
         setTag('engine.backend', detectWebGPU() ? 'webgpu' : 'webgl2');
         setTag('engine.canvas', canvasId);
-
         try {
           wasm.init_engine(canvasId);
-          // Note: For Bevy on WASM, init_engine may not return immediately
-          // The 'ready' event will be emitted from Rust when first frame renders
           setIsReady(true);
-          // Expose readiness flag for E2E tests (Playwright)
           if (typeof window !== 'undefined') {
             (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
           }
@@ -180,11 +193,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         } catch (err) {
           const engineError = err instanceof Error ? err : new Error(String(err));
           emitEvent('error', 'Engine initialization failed', engineError.message);
-          captureException(engineError, {
-            phase: 'init_engine',
-            canvasId,
-            backend: detectWebGPU() ? 'webgpu' : 'webgl2',
-          });
+          captureException(engineError, { phase: 'init_engine', canvasId, backend: detectWebGPU() ? 'webgpu' : 'webgl2' });
           setError(engineError);
           onErrorRef.current?.(engineError);
           initializedRef.current = false;
@@ -192,12 +201,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
       })
       .catch((err) => {
         const loadError = err instanceof Error ? err : new Error(String(err));
-        captureException(loadError, {
-          phase: 'wasm_load',
-          backend: detectWebGPU() ? 'webgpu' : 'webgl2',
-          cdnBase: ENGINE_CDN_BASE || '(same-origin)',
-        });
-        // Skip toast for intentional CI skip — not a real failure
+        captureException(loadError, { phase: 'wasm_load', backend: detectWebGPU() ? 'webgpu' : 'webgl2', cdnBase: ENGINE_CDN_BASE || '(same-origin)' });
         if (!loadError.message.includes('__SKIP_ENGINE')) {
           showError('Engine failed to load. Please refresh the page.');
         }
@@ -209,17 +213,13 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
 
   const sendCommand = useCallback(
     <T = unknown>(command: string, payload: unknown): T | undefined => {
-      if (!wasmModule) {
-        console.warn('Engine not initialized');
-        return undefined;
-      }
+      if (!wasmModule) { console.warn('Engine not initialized'); return undefined; }
       try {
         return wasmModule.handle_command(command, payload) as T;
       } catch (err) {
         const cmdError = err instanceof Error ? err : new Error(String(err));
         captureException(cmdError, {
-          phase: 'handle_command',
-          command,
+          phase: 'handle_command', command,
           payload: typeof payload === 'object' ? (() => { try { return JSON.stringify(payload).slice(0, 500); } catch { return '[unserializable]'; } })() : String(payload),
         });
         throw err;
@@ -231,10 +231,8 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
   return { isReady, error, sendCommand, wasmModule };
 }
 
-// Export for use by other hooks
 export { wasmModule, loadWasm };
 
-// Getter for wasmModule (for hooks that need it outside of React context)
 export function getWasmModule(): WasmModule | null {
   return wasmModule;
 }
