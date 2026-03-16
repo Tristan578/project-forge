@@ -1234,15 +1234,22 @@ self.onmessage = (e: MessageEvent) => {
       clearPendingAsyncRequests('Script execution stopped');
       for (const script of scripts) {
         if (script.onDestroy) {
+          const destroyStart = performance.now();
+          let destroyHandled = false;
           try {
             script.onDestroy();
           } catch (err) {
             const msg_ = err instanceof Error ? err.message : String(err);
             if (msg_.includes('Infinite loop detected')) {
               (self as unknown as Worker).postMessage({ type: 'script_timeout', entityId: script.entityId, hookName: 'onDestroy', message: msg_ });
+              destroyHandled = true;
             } else {
               (self as unknown as Worker).postMessage({ type: 'error', entityId: script.entityId, line: 0, message: `onDestroy error: ${msg_}` });
             }
+          }
+          const destroyElapsed = performance.now() - destroyStart;
+          if (!destroyHandled && destroyElapsed > onDestroyTimeoutMs) {
+            (self as unknown as Worker).postMessage({ type: 'script_timeout', entityId: script.entityId, hookName: 'onDestroy', message: `onDestroy exceeded timeout: ${destroyElapsed.toFixed(1)} ms (limit: ${onDestroyTimeoutMs} ms). Script terminated.` });
           }
         }
       }
