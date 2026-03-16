@@ -16,9 +16,9 @@ import {
 // Mock the IndexedDB fallback module
 // ---------------------------------------------------------------------------
 
-const mockSave = vi.fn<[string, string], Promise<boolean>>().mockResolvedValue(true);
-const mockLoad = vi.fn<[string], Promise<string | null>>().mockResolvedValue(null);
-const mockDelete = vi.fn<[string], Promise<void>>().mockResolvedValue(undefined);
+const mockSave = vi.fn().mockResolvedValue(true);
+const mockLoad = vi.fn().mockResolvedValue(null);
+const mockDelete = vi.fn().mockResolvedValue(undefined);
 
 vi.mock('@/lib/storage/indexedDBFallback', () => ({
   saveToIndexedDB: (...args: [string, string]) => mockSave(...args),
