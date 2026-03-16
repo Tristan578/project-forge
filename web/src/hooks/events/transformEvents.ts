@@ -111,6 +111,8 @@ export function handleTransformEvent(
         // Auto-save to localStorage with quota management and LRU eviction
         saveAutoSave(json, name);
       }
+      // Reset sceneModified since the scene has been persisted (PF-528)
+      useEditorStore.setState({ sceneModified: false });
       // Dispatch DOM event so SceneToolbar can trigger file download
       window.dispatchEvent(new CustomEvent('forge:scene-exported', { detail: { json, name } }));
       return true;

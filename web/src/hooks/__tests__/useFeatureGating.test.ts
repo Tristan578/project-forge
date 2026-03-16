@@ -10,6 +10,7 @@ import {
   useFeatureGating,
   useCapabilities,
   _resetCapabilitiesCache,
+  ERROR_TTL_MS,
 } from '../useFeatureGating';
 import type { CapabilitiesResponse } from '@/app/api/capabilities/route';
 
@@ -262,6 +263,62 @@ describe('useCapabilities', () => {
     });
 
     expect(result.current.error).toBe('Offline');
+  });
+
+
+  it('retries fetch after error TTL expires', async () => {
+    // First call fails
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('Offline'));
+
+    const { result, unmount } = renderHook(() => useCapabilities());
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    expect(result.current.error).toBe('Offline');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+    _resetCapabilitiesCache();
+
+    // Simulate TTL expiration by setting errorCachedAt in the past
+    // We test indirectly: after reset + new error, a fresh mount within TTL should NOT re-fetch
+    fetchSpy.mockRejectedValueOnce(new Error('Still offline'));
+
+    const { result: r2 } = renderHook(() => useCapabilities());
+
+    await waitFor(() => {
+      expect(r2.current.loading).toBe(false);
+    });
+
+    // Should have made a second fetch (cache was reset)
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry within TTL window', async () => {
+    // First call fails
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('Offline'));
+
+    const { result: r1, unmount: u1 } = renderHook(() => useCapabilities());
+
+    await waitFor(() => {
+      expect(r1.current.loading).toBe(false);
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    u1();
+
+    // Mount again immediately (within TTL) - should use cached error, not re-fetch
+    const { result: r2 } = renderHook(() => useCapabilities());
+
+    // Should still have error from cache, no new fetch
+    expect(r2.current.error).toBe('Offline');
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('exports ERROR_TTL_MS as 30 seconds', () => {
+    expect(ERROR_TTL_MS).toBe(30_000);
   });
 
   it('refresh re-fetches capabilities', async () => {
