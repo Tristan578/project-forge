@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { ilike, or, desc } from 'drizzle-orm';
@@ -14,6 +15,9 @@ export async function GET(req: NextRequest) {
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
+
+  const rateLimitError = rateLimitAdminRoute(clerkId, 'admin-users');
+  if (rateLimitError) return rateLimitError;
 
   const { searchParams } = req.nextUrl;
   const rawLimit = parseInt(searchParams.get('limit') ?? String(DEFAULT_LIMIT), 10);
