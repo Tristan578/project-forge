@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useRef, useCallback, useState, useSyncExternalStore } from 'react';
 import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
 import { captureException, setTag } from '@/lib/monitoring/sentry-client';
@@ -28,16 +28,14 @@ function setLoadingState(state: LoadingState): void {
 
 /** Hook to subscribe to WASM loading progress state. */
 export function useLoadingState(): LoadingState {
-  const [state, setState] = useState<LoadingState>(currentLoadingState);
-
-  useEffect(() => {
-    setState(currentLoadingState);
-    const listener: LoadingStateListener = (s) => setState(s);
-    loadingListeners.add(listener);
-    return () => { loadingListeners.delete(listener); };
-  }, []);
-
-  return state;
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      loadingListeners.add(onStoreChange);
+      return () => { loadingListeners.delete(onStoreChange); };
+    },
+    () => currentLoadingState,
+    () => currentLoadingState,
+  );
 }
 
 export type WasmModule = {
