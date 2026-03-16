@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const flushPromises = () => new Promise<void>((r) => { setTimeout(r, 50); });
+const flushPromises = () => new Promise<void>((r) => { queueMicrotask(r); });
 
 describe('webVitals', () => {
   beforeEach(() => {

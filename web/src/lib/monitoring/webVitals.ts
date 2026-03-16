@@ -20,7 +20,6 @@ type MetricReporter = (metric: WebVitalMetric) => void;
 /** Default reporter: console in dev, Vercel Analytics track() in prod. */
 function defaultReporter(metric: WebVitalMetric): void {
   if (process.env.NODE_ENV === 'development') {
-    // eslint-disable-next-line no-console
     console.log(`[Web Vital] ${metric.name}: ${metric.value.toFixed(2)} (${metric.rating})`);
     return;
   }

@@ -99,7 +99,6 @@ export function enqueueRetry(
   error: unknown,
 ): boolean {
   if (queue.length >= config.maxQueueSize) {
-    // eslint-disable-next-line no-console
     console.warn('[WebhookRetry] Queue full, dropping event:', eventType);
     return false;
   }
@@ -143,7 +142,6 @@ export async function processRetryQueue(
 
       if (entry.attempt >= config.maxRetries || !isTransientError(retryError)) {
         // Max retries exceeded or permanent error — discard
-        // eslint-disable-next-line no-console
         console.error(
           `[WebhookRetry] Permanently failed after ${entry.attempt} attempts:`,
           entry.eventType,

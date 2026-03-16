@@ -68,7 +68,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true, queued: true });
     }
     // Permanent error — log and return error status
-    // eslint-disable-next-line no-console
     console.error('[Webhook] Permanent error processing event:', event.type, error);
     return NextResponse.json({ error: 'Failed to process event' }, { status: 500 });
   }
