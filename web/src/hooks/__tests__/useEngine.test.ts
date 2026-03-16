@@ -114,11 +114,11 @@ describe('useEngine', () => {
     // Unmount immediately before the async load can settle
     unmount();
 
-    // Wait enough time for the rejected promise to settle
-    await new Promise((r) => setTimeout(r, 50));
-
-    // onError should NOT have been called because the component unmounted
-    expect(onError).not.toHaveBeenCalled();
+    // Flush microtasks so the rejected promise settles
+    await vi.waitFor(() => {
+      // onError should NOT have been called because the component unmounted
+      expect(onError).not.toHaveBeenCalled();
+    });
 
     delete (window as Window & { __SKIP_ENGINE?: boolean }).__SKIP_ENGINE;
   });
