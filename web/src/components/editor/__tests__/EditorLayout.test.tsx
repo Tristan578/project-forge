@@ -240,18 +240,18 @@ describe('EditorLayout', () => {
 
   // ── Help menu ─────────────────────────────────────────────────────────
 
-  it('opens keyboard shortcuts panel', () => {
+  it('opens keyboard shortcuts panel', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('open-shortcuts'));
-    expect(screen.getByTestId('shortcuts-panel')).toBeDefined();
+    expect(await screen.findByTestId('shortcuts-panel')).toBeDefined();
   });
 
-  it('opens feedback dialog', () => {
+  it('opens feedback dialog', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('open-feedback'));
-    expect(screen.getByTestId('feedback-dialog')).toBeDefined();
+    expect(await screen.findByTestId('feedback-dialog')).toBeDefined();
   });
 
   // ── Global keyboard shortcuts ─────────────────────────────────────────
@@ -265,13 +265,13 @@ describe('EditorLayout', () => {
     expect(mockToggleChatOverlay).toHaveBeenCalledOnce();
   });
 
-  it('? key toggles shortcuts panel', () => {
+  it('? key toggles shortcuts panel', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     act(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
     });
-    expect(screen.getByTestId('shortcuts-panel')).toBeDefined();
+    expect(await screen.findByTestId('shortcuts-panel')).toBeDefined();
   });
 
   // ── Right panel tabs ──────────────────────────────────────────────────
