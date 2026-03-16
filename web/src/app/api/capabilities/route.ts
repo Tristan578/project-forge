@@ -101,7 +101,9 @@ export async function GET(): Promise<NextResponse<CapabilitiesResponse>> {
 
   const capabilities: CapabilityStatus[] = allCapabilities.map((cap) => {
     const envVars = CAPABILITY_KEY_MAP[cap];
-    const isAvailable = envVars.some((envVar) => Boolean(process.env[envVar]));
+    // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
+    const vercelOidc = Boolean(process.env.VERCEL) && envVars.includes('AI_GATEWAY_API_KEY');
+    const isAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
 
     const status: CapabilityStatus = {
       capability: cap,
