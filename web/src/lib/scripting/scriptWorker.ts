@@ -937,6 +937,42 @@ function terminateDueToMemory(heapMb: number) {
 
 const MAX_SCRIPT_SOURCE_BYTES = 512 * 1024;
 
+/** Maximum iterations a single loop may execute before the guard throws. */
+const MAX_LOOP_ITERATIONS = 1_000_000;
+
+/**
+ * Injects iteration-counter guards into `for`, `while`, and `do...while` loops.
+ * If a loop exceeds MAX_LOOP_ITERATIONS the guard throws, caught by the
+ * per-script error handler. Regex-based best-effort — the frame-time watchdog
+ * is the true safety net.
+ */
+function injectLoopGuards(source: string): string {
+  let counter = 0;
+  function makeGuard(): string {
+    const id = counter++;
+    return `var __lc${id}=0;if(++__lc${id}>${MAX_LOOP_ITERATIONS}){throw new Error("Infinite loop detected")}`;
+  }
+  // Braceless do...while first to avoid double-matching
+  let result = source.replace(
+    /\bdo\s+(?!\{)([\s\S]*?);\s*while\s*\(([^)]*)\)\s*;?/g,
+    (_m, stmt: string, cond: string) => `do{${makeGuard()}${stmt.trim()};}while(${cond});`
+  );
+  // Braced do...while
+  result = result.replace(/\bdo\s*\{/g, () => `do{${makeGuard()}`);
+  // while (skip do...while tails)
+  result = result.replace(
+    /\bwhile\s*\(([^)]*)\)\s*\{/g,
+    (match, _c, offset) => {
+      const before = result.slice(Math.max(0, offset - 20), offset).trimEnd();
+      if (before.endsWith('}') || before.endsWith(');')) return match;
+      return `${match}${makeGuard()}`;
+    }
+  );
+  // for loops
+  result = result.replace(/\bfor\s*\([^)]*\)\s*\{/g, (match) => `${match}${makeGuard()}`);
+  return result;
+}
+
 function compileScript(entityId_: string, source: string): ScriptInstance {
   const forge = buildForgeApi(entityId_);
   const instance: ScriptInstance = { entityId: entityId_ };
@@ -951,6 +987,9 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
     return instance;
   }
 
+  // Inject loop guards before compilation to catch infinite loops at the source level.
+  const guardedSource = injectLoopGuards(source);
+
   try {
     // Shadow dangerous globals to prevent network access from user scripts.
     // This runs inside a Web Worker (no DOM access) with additional globals
@@ -959,7 +998,7 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
       'forge', 'entityId',
       ...SHADOWED_GLOBALS,
       `
-      ${source}
+      ${guardedSource}
       return { onStart: typeof onStart === 'function' ? onStart : undefined, onUpdate: typeof onUpdate === 'function' ? onUpdate : undefined, onDestroy: typeof onDestroy === 'function' ? onDestroy : undefined };
       `
     );
