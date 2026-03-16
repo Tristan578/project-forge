@@ -81,6 +81,8 @@ if (Test-Path $cargoWasmOpt) {
 
 if ($wasmOpt) {
     Write-Host "=== Running wasm-opt (Oz) ===" -ForegroundColor Cyan
+    $wasmOptFailed = @()
+    $wasmOptPassed = @()
     foreach ($pkg in @("pkg-webgl2", "pkg-webgpu", "pkg-webgl2-runtime", "pkg-webgpu-runtime")) {
         $wasmFile = Join-Path $pkg "forge_engine_bg.wasm"
         if (Test-Path $wasmFile) {
@@ -89,10 +91,24 @@ if ($wasmOpt) {
             if ($LASTEXITCODE -eq 0) {
                 $sizeAfter = (Get-Item $wasmFile).Length / 1MB
                 Write-Host ("  {0}: {1:N1} MB -> {2:N1} MB" -f $pkg, $sizeBefore, $sizeAfter) -ForegroundColor DarkGray
+                $wasmOptPassed += $pkg
             } else {
-                Write-Host "  wasm-opt failed for $pkg (non-fatal)" -ForegroundColor Yellow
+                Write-Host "  wasm-opt FAILED for $pkg (exit code $LASTEXITCODE)" -ForegroundColor Red
+                $wasmOptFailed += $pkg
             }
         }
+    }
+
+    # Summary
+    Write-Host ""
+    Write-Host "=== wasm-opt summary ===" -ForegroundColor Cyan
+    if ($wasmOptPassed.Count -gt 0) {
+        Write-Host ("  Optimized: " + ($wasmOptPassed -join ", ")) -ForegroundColor Green
+    }
+    if ($wasmOptFailed.Count -gt 0) {
+        Write-Host ("  FAILED:    " + ($wasmOptFailed -join ", ")) -ForegroundColor Red
+        Write-Host "Build FAILED: wasm-opt errors must be resolved" -ForegroundColor Red
+        exit 1
     }
 } else {
     Write-Host "wasm-opt not found - skipping optimization. Install via: cargo install wasm-opt" -ForegroundColor Yellow
