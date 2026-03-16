@@ -94,13 +94,35 @@ gh api repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}/replies \
   -f body="This is a false positive — <explanation of why the code is intentional>"
 ```
 
-Reply templates by source:
+Every reply MUST fall into exactly one of these four outcomes. There is no fifth option.
 
-| Source | Fixed | False Positive |
-|--------|-------|----------------|
-| Sentry | "Fixed in `abc1234`. [description of fix]" | "False positive — [reason, e.g., 'vi.doMock survives resetModules in vitest']" |
-| Copilot | "Applied suggestion in `abc1234`." | "Skipping — [reason, e.g., 'cosmetic rename, existing naming follows project convention']" |
-| Human | "Addressed in `abc1234`. [description]" | N/A — always address human comments |
+| Outcome | When | Reply Template | Requires |
+|---------|------|----------------|----------|
+| **Fixed** | Bug is valid and fixed in this PR | "Fixed in `abc1234`. [description]" | Commit SHA |
+| **Deferred** | Bug is valid but out of scope | "Valid bug. Tracked as **PF-XXX** — [title]." | PF-ticket (create FIRST) |
+| **False positive** | Bug report is incorrect | "False positive — [specific technical reason]" | Evidence |
+| **Already addressed** | Fixed in a prior commit | "Already addressed in `abc1234`." | Commit SHA |
+
+**There is no "out of scope" without a ticket. There is no "follow-up" without a PF-number.**
+
+### Banned Phrases (require a PF-ticket before use)
+
+Before writing ANY reply, scan your draft for these patterns. If present, you MUST create a ticket first:
+
+- "will fix in follow-up"
+- "tracked for future"
+- "known issue"
+- "will address later"
+- "out of scope"
+- "if this becomes an issue"
+- "if this becomes a real problem"
+- "we can add"
+- "could add in future"
+- "acceptable tradeoff" (without a ticket for monitoring)
+- "when needed" / "if needed"
+- any conditional future work ("if X happens, we'll Y")
+
+**The rule:** If your reply acknowledges valid work that won't happen in this PR — no matter how you phrase it — a ticket is required. Conditional language ("if this becomes...") is just a softer way of saying "will fix later" and requires the same ticket.
 
 ### Step 7: Report
 
@@ -140,7 +162,8 @@ Common false positives from automated reviewers:
 ## Important Notes
 
 - Never force-push or rewrite history on shared branches
-- If a fix requires architectural changes, create a ticket instead of patching inline
 - Always run the quick validation suite before pushing
 - If multiple PRs need the same fix, fix on the earliest branch and note in others
 - **ALWAYS reply to comments** — even false positives need a reply so reviewers know they were seen
+- **EVERY reply must contain one of:** a commit SHA, a PF-ticket number, or a technical false-positive explanation
+- **Self-check before posting:** Re-read your reply. Does it promise, imply, or conditionally suggest future work? If yes, where's the ticket? No ticket = rewrite the reply.
