@@ -1,5 +1,27 @@
 //! Command handling - pure Rust logic for processing commands from the frontend.
 //! Split into domain modules for maintainability.
+//!
+//! ## Validation Pattern (recommended for future handlers)
+//!
+//! The TypeScript side has a shared validation framework at `web/src/lib/validation/`
+//! with `ValidationResult<T>` types and composable validators. For Rust command
+//! handlers, a similar pattern is recommended:
+//!
+//! ```ignore
+//! enum ValidationResult<T> {
+//!     Ok(T),
+//!     Err { field: String, error: String },
+//! }
+//!
+//! fn validate_entity_id(value: &serde_json::Value) -> ValidationResult<String> { ... }
+//! fn validate_positive_f32(value: &serde_json::Value, field: &str) -> ValidationResult<f32> { ... }
+//! fn validate_enum<T: FromStr>(value: &serde_json::Value, field: &str) -> ValidationResult<T> { ... }
+//! ```
+//!
+//! Each domain handler would validate fields using these helpers before queuing
+//! commands, returning `Err(field_error)` to propagate clear error messages back
+//! to the frontend via `CommandResponse`. This prevents 15+ classes of validation
+//! bugs identified in the audit (PF-499).
 
 mod transform;
 mod material;
