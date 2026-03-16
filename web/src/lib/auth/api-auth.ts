@@ -8,6 +8,11 @@ export interface AuthContext {
   clerkId: string;
 }
 
+/** Delay helper for retry backoff */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Returns true when valid Clerk keys are present (matching the condition in proxy.ts).
  * When false, Clerk middleware is inactive (CI/E2E passthrough mode) and calling
@@ -46,30 +51,48 @@ export async function authenticateRequest(): Promise<
   if (!user) {
     // Auto-sync: user is authenticated with Clerk but missing from our DB.
     // This handles webhook failures, new deployments, or DB resets.
-    try {
-      const client = await clerkClient();
-      const clerkUser = await client.users.getUser(clerkId);
-      const syncedUser = await syncUserFromClerk({
-        id: clerkId,
-        email_addresses: clerkUser.emailAddresses.map(
-          (e: { emailAddress: string }) => ({ email_address: e.emailAddress })
-        ),
-        first_name: clerkUser.firstName,
-        last_name: clerkUser.lastName,
-      });
+    // Retry once after 500ms on transient failures (PF-474).
+    const syncedUser = await attemptSyncWithRetry(clerkId);
+    if (syncedUser) {
       return { ok: true, ctx: { user: syncedUser, clerkId } };
-    } catch {
-      return {
-        ok: false,
-        response: NextResponse.json(
-          { error: 'USER_NOT_FOUND', message: 'Authenticated but user record not yet synced' },
-          { status: 404 },
-        ),
-      };
     }
+    // Degraded mode: deny access with 503 instead of returning a user
+    // without DB state (tier, credits). This prevents credit bypass (PF-474).
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: 'SERVICE_DEGRADED', message: 'User sync temporarily unavailable. Please retry.' },
+        { status: 503 },
+      ),
+    };
   }
 
   return { ok: true, ctx: { user, clerkId } };
+}
+
+/**
+ * Attempt to sync user from Clerk with 1 retry on failure.
+ * Returns the synced User on success, or null after both attempts fail.
+ */
+async function attemptSyncWithRetry(clerkId: string, _attempt = 0): Promise<User | null> {
+  try {
+    const client = await clerkClient();
+    const clerkUser = await client.users.getUser(clerkId);
+    return await syncUserFromClerk({
+      id: clerkId,
+      email_addresses: clerkUser.emailAddresses.map(
+        (e: { emailAddress: string }) => ({ email_address: e.emailAddress })
+      ),
+      first_name: clerkUser.firstName,
+      last_name: clerkUser.lastName,
+    });
+  } catch {
+    if (_attempt < 1) {
+      await delay(500);
+      return attemptSyncWithRetry(clerkId, _attempt + 1);
+    }
+    return null;
+  }
 }
 
 /**

@@ -348,6 +348,76 @@ export async function handleInvoicePaymentFailed(
 }
 
 /**
+ * Handle a charge being refunded (full or partial) (PF-480).
+ *
+ * Deducts addon tokens proportionally to the refund amount.
+ * For full refunds, removes all tokens from the original charge.
+ * For partial refunds, removes a proportional share.
+ */
+export async function handleChargeRefunded(
+  customerId: string,
+  chargeId: string,
+  amountRefunded: number,
+  amountTotal: number
+): Promise<void> {
+  const user = await findUserByStripeCustomer(customerId);
+  if (!user) return;
+
+  if (amountTotal <= 0 || amountRefunded <= 0) return;
+
+  await reverseAddonTokens(user.id, chargeId, amountRefunded, amountTotal);
+}
+
+/**
+ * Reverse addon tokens proportionally to a refund amount (PF-480).
+ *
+ * Calculates the proportion of the total charge that was refunded and
+ * deducts that proportion of addon tokens. Clamps to 0 to prevent
+ * negative balances.
+ */
+export async function reverseAddonTokens(
+  userId: string,
+  chargeId: string,
+  amountRefunded: number,
+  amountTotal: number
+): Promise<void> {
+  const db = getDb();
+  const [user] = await db
+    .select({ addonTokens: users.addonTokens })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!user) return;
+
+  // Calculate proportional token deduction
+  const refundRatio = Math.min(amountRefunded / amountTotal, 1);
+  const tokensToDeduct = Math.floor(user.addonTokens * refundRatio);
+
+  if (tokensToDeduct <= 0) return;
+
+  // Clamp deduction to current addon balance to prevent negative
+  const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
+
+  await db
+    .update(users)
+    .set({
+      addonTokens: sql`GREATEST(0, ${users.addonTokens} - ${clampedDeduction})`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+
+  const balance = await getTotalBalance(userId);
+  await db.insert(creditTransactions).values({
+    userId,
+    transactionType: 'refund_reversal',
+    amount: -clampedDeduction,
+    balanceAfter: balance,
+    source: `charge_refunded:${chargeId}`,
+    referenceId: chargeId,
+  });
+}
+
+/**
  * Get the total token balance for a user (monthly remaining + addon + earned).
  */
 async function getTotalBalance(userId: string): Promise<number> {
