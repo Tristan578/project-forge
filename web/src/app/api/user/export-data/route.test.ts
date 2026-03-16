@@ -70,7 +70,7 @@ describe('/api/user/export-data', () => {
     });
 
     const mockDb = makeMockDb();
-    vi.mocked(getDb).mockReturnValue(mockDb as ReturnType<typeof getDb>);
+    vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
 
     const res = await GET();
     expect(res.status).toBe(200);
@@ -122,7 +122,7 @@ describe('/api/user/export-data', () => {
       providerKeys: [{ id: 'pk-1', provider: 'anthropic', createdAt: new Date().toISOString() }],
       apiKeys: [{ id: 'ak-1', name: 'My Key', keyPrefix: 'sf_abc', scopes: ['scene:read'], createdAt: new Date().toISOString() }],
     });
-    vi.mocked(getDb).mockReturnValue(mockDb as ReturnType<typeof getDb>);
+    vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
 
     const res = await GET();
     const data = await res.json();
@@ -147,7 +147,7 @@ describe('/api/user/export-data', () => {
     });
 
     const mockDb = makeMockDb({ users: [] });
-    vi.mocked(getDb).mockReturnValue(mockDb as ReturnType<typeof getDb>);
+    vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
 
     const res = await GET();
     const data = await res.json();
