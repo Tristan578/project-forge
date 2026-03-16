@@ -42,30 +42,30 @@ export default async function RootLayout({
   setRequestLocale(defaultLocale);
   const messages = await getMessages();
 
-  const body = (
+  const content = (
+    <NextIntlClientProvider locale={defaultLocale} messages={messages}>
+      {children}
+    </NextIntlClientProvider>
+  );
+
+  return (
     <html lang="en" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        <NextIntlClientProvider locale={defaultLocale} messages={messages}>
-          {children}
-        </NextIntlClientProvider>
+        {hasValidClerkKey ? (
+          <ClerkProvider appearance={{ baseTheme: dark }}>
+            {content}
+          </ClerkProvider>
+        ) : (
+          content
+        )}
         <AnalyticsProvider />
         <SpeedInsights />
         <Toaster theme="dark" position="bottom-right" richColors />
         <ServiceWorkerRegistration />
       </body>
     </html>
-  );
-
-  if (!hasValidClerkKey) {
-    return body;
-  }
-
-  return (
-    <ClerkProvider appearance={{ baseTheme: dark }}>
-      {body}
-    </ClerkProvider>
   );
 }
