@@ -946,13 +946,36 @@ let onStartTimeoutMs = DEFAULT_ON_START_TIMEOUT_MS;
 let onDestroyTimeoutMs = DEFAULT_ON_DESTROY_TIMEOUT_MS;
 
 function injectLoopGuards(source: string): string {
-  const guardVar = '__loopGuard';
-  const guardCheck = 'if(++' + guardVar + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
-  let result = 'let ' + guardVar + '=0;\n';
+  // PF-524: Each loop gets its own counter variable (__lg0, __lg1, ...)
+  // declared immediately before the loop statement so the counter resets
+  // each time control reaches the loop. The guard check increments the
+  // counter on every iteration and throws when the limit is exceeded.
+  //
+  // For do-while loops, the trailing `while(cond)` must not be treated as
+  // a standalone while-loop. We track open do-body braces to detect this.
+  let loopIndex = 0;
+  let result = '';
   let i = 0;
   const src = source;
   const len = src.length;
+  // Stack of brace depths where do-while bodies start.
+  // When we see `do {`, we push the current brace depth.
+  // When the depth returns to that level, the next `while` is the do-while
+  // condition and must be emitted verbatim (no guard injection).
+  let braceDepth = 0;
+  const doBodyStartDepths: number[] = [];
+  let skipNextWhile = false;
   while (i < len) {
+    // Track brace depth for do-while detection
+    if (src[i] === '{') braceDepth++;
+    if (src[i] === '}') {
+      braceDepth--;
+      // If we just closed a do-while body, flag to skip the next `while`
+      if (doBodyStartDepths.length > 0 && braceDepth === doBodyStartDepths[doBodyStartDepths.length - 1]) {
+        doBodyStartDepths.pop();
+        skipNextWhile = true;
+      }
+    }
     if (src[i] === '"' || src[i] === "'" || src[i] === '`') {
       const quote = src[i];
       result += src[i++];
@@ -975,36 +998,58 @@ function injectLoopGuards(source: string): string {
     }
     const remaining = src.slice(i);
     if (/^while\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
-      result += 'while';
+      if (skipNextWhile) {
+        // This is the condition part of a do-while — emit verbatim
+        skipNextWhile = false;
+        result += src[i++];
+        continue;
+      }
+      const gv = '__lg' + loopIndex++;
+      const gd = 'let ' + gv + '=0;';
+      const gc = 'if(++' + gv + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
+      result += gd + 'while';
       i += 5;
       while (i < len && /\s/.test(src[i])) result += src[i++];
       if (i < len && src[i] === '(') {
         let depth = 0;
         do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; result += src[i++]; } while (i < len && depth > 0);
         while (i < len && /\s/.test(src[i])) result += src[i++];
-        if (i < len && src[i] === '{') { result += '{' + guardCheck; i++; }
-        else { result += '{' + guardCheck; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
+        if (i < len && src[i] === '{') { result += '{' + gc; braceDepth++; i++; }
+        else { result += '{' + gc; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
       }
       continue;
     }
     if (/^for\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
-      result += 'for';
+      const gv = '__lg' + loopIndex++;
+      const gd = 'let ' + gv + '=0;';
+      const gc = 'if(++' + gv + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
+      result += gd + 'for';
       i += 3;
       while (i < len && /\s/.test(src[i])) result += src[i++];
       if (i < len && src[i] === '(') {
         let depth = 0;
         do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; result += src[i++]; } while (i < len && depth > 0);
         while (i < len && /\s/.test(src[i])) result += src[i++];
-        if (i < len && src[i] === '{') { result += '{' + guardCheck; i++; }
-        else { result += '{' + guardCheck; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
+        if (i < len && src[i] === '{') { result += '{' + gc; braceDepth++; i++; }
+        else { result += '{' + gc; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
       }
       continue;
     }
     if (/^do\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
-      result += 'do';
+      const gv = '__lg' + loopIndex++;
+      const gd = 'let ' + gv + '=0;';
+      const gc = 'if(++' + gv + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
+      result += gd + 'do';
       i += 2;
       while (i < len && /\s/.test(src[i])) result += src[i++];
-      if (i < len && src[i] === '{') { result += '{' + guardCheck; i++; }
+      if (i < len && src[i] === '{') {
+        // Record the depth BEFORE opening the brace so we can detect
+        // when this do-body closes.
+        doBodyStartDepths.push(braceDepth);
+        result += '{' + gc;
+        braceDepth++;
+        i++;
+      }
       continue;
     }
     result += src[i++];

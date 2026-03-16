@@ -314,6 +314,89 @@ describe('infinite loop watchdog', () => {
     expect(timeouts).toHaveLength(0);
   });
 
+  // ─── Per-loop counter isolation (PF-524) ─────────────────────────
+
+  it('PF-524: each loop gets its own counter that accumulates independently', async () => {
+    const handler = await setupWorker();
+    // Set limit to 200 — two sequential loops of 150 iterations each
+    // should succeed because each loop has its own counter.
+    await handler(setLimitsMsg({ loopIterationLimit: 200 }));
+
+    const code = `
+      function onUpdate(dt) {
+        let sum1 = 0;
+        for (let i = 0; i < 150; i++) { sum1 += 1; }
+        let sum2 = 0;
+        for (let j = 0; j < 150; j++) { sum2 += 1; }
+        forge.log("sums=" + sum1 + "," + sum2);
+      }
+    `;
+
+    await handler(initMsg([{ entityId: 'iso', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+    await handler(tickMsg());
+
+    const logs = getMessages('log');
+    expect(logs.some(m => (m.message as string).includes('sums=150,150'))).toBe(true);
+    const timeouts = getMessages('script_timeout');
+    expect(timeouts).toHaveLength(0);
+  });
+
+  it('PF-524: counter resets on each invocation of the same loop', async () => {
+    const handler = await setupWorker();
+    await handler(setLimitsMsg({ loopIterationLimit: 200 }));
+
+    const code = `
+      function onUpdate(dt) {
+        let sum = 0;
+        for (let i = 0; i < 100; i++) { sum += 1; }
+        forge.log("sum=" + sum);
+      }
+    `;
+
+    await handler(initMsg([{ entityId: 'reset', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+
+    // Tick multiple times — each tick should succeed because the counter
+    // is declared fresh before the loop on each call.
+    await handler(tickMsg());
+    await handler(tickMsg());
+    await handler(tickMsg());
+
+    const logs = getMessages('log');
+    expect(logs.filter(m => (m.message as string).includes('sum=100'))).toHaveLength(3);
+    const timeouts = getMessages('script_timeout');
+    expect(timeouts).toHaveLength(0);
+  });
+
+  it('PF-524: nested loops each get independent counters', async () => {
+    const handler = await setupWorker();
+    await handler(setLimitsMsg({ loopIterationLimit: 200 }));
+
+    const code = `
+      function onUpdate(dt) {
+        let total = 0;
+        for (let i = 0; i < 10; i++) {
+          for (let j = 0; j < 150; j++) {
+            total++;
+          }
+        }
+        forge.log("total=" + total);
+      }
+    `;
+
+    await handler(initMsg([{ entityId: 'nested', enabled: true, source: code }]));
+    mockPostMessage.mockClear();
+    await handler(tickMsg());
+
+    // Inner loop runs 150 per outer iteration (under 200 limit).
+    // Total = 10 * 150 = 1500.
+    const logs = getMessages('log');
+    expect(logs.some(m => (m.message as string).includes('total=1500'))).toBe(true);
+    const timeouts = getMessages('script_timeout');
+    expect(timeouts).toHaveLength(0);
+  });
+
   // ─── Multiple scripts: one infinite doesn't block others' init ───
 
   it('terminates only the offending script, others still run', async () => {
