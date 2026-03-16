@@ -201,8 +201,10 @@ function convertTileLayer(
   firstgid: number,
 ): TilemapLayer {
   const rawData = layer.data ?? [];
-  // Tiled encodes flip flags in the high 3 bits of each GID.
-  const FLIP_MASK = 0x1fffffff;
+  // Tiled encodes flip flags in the high 4 bits (28-31) of each GID:
+  // bit 31 = horizontal flip, bit 30 = vertical flip,
+  // bit 29 = diagonal flip, bit 28 = rotation.
+  const FLIP_MASK = 0x0fffffff;
 
   const tiles: (number | null)[] = new Array(mapWidth * mapHeight).fill(null);
 
