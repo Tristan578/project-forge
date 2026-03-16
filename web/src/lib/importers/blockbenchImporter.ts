@@ -184,22 +184,41 @@ const FACE_DEFS: Record<keyof RawFaces, FaceDef> = {
 // ---------------------------------------------------------------------------
 
 /**
- * Rotate UV coordinates around the centre of the face quad by `degrees`
+ * Rotate UV coordinates around the centre of the UV face bounds by `degrees`
  * (0, 90, 180, 270).  Input/output are normalised [0..1] UV pairs.
+ *
+ * IMPORTANT: The rotation center is computed from the actual UV face bounds,
+ * NOT a hardcoded (0.5, 0.5). Blockbench UV faces can be positioned anywhere
+ * on the texture atlas, so using a fixed center produces incorrect results
+ * for any face that is not perfectly centered in the texture.
  */
 function rotateUVs(
   uvs: [number, number][],
   degrees: 0 | 90 | 180 | 270,
 ): [number, number][] {
   if (degrees === 0) return uvs;
-  // Rotate each point around (0.5, 0.5)
+
+  // Compute the actual center of this UV face's bounding box
+  let minU = Infinity;
+  let minV = Infinity;
+  let maxU = -Infinity;
+  let maxV = -Infinity;
+  for (const [u, v] of uvs) {
+    if (u < minU) minU = u;
+    if (v < minV) minV = v;
+    if (u > maxU) maxU = u;
+    if (v > maxV) maxV = v;
+  }
+  const centerU = (minU + maxU) / 2;
+  const centerV = (minV + maxV) / 2;
+
   const rad = (degrees * Math.PI) / 180;
   const cos = Math.round(Math.cos(rad));
   const sin = Math.round(Math.sin(rad));
   return uvs.map(([u, v]) => {
-    const du = u - 0.5;
-    const dv = v - 0.5;
-    return [cos * du - sin * dv + 0.5, sin * du + cos * dv + 0.5];
+    const du = u - centerU;
+    const dv = v - centerV;
+    return [cos * du - sin * dv + centerU, sin * du + cos * dv + centerV];
   });
 }
 
