@@ -4,6 +4,43 @@ import { emitStatusEvent } from './useEngineStatus';
 import { captureException, setTag } from '@/lib/monitoring/sentry-client';
 import { showError } from '@/lib/toast';
 
+/** Loading progress state exported for UI components to display progress feedback. */
+export type LoadingPhase = 'idle' | 'detecting' | 'downloading' | 'initializing' | 'ready' | 'error';
+
+export interface LoadingState {
+  phase: LoadingPhase;
+  progress?: number;
+  error?: string;
+}
+
+/** Timeout constants (exported for testing) */
+export const GPU_INIT_TIMEOUT_MS = 30_000;
+export const WASM_FETCH_TIMEOUT_MS = 60_000;
+
+let currentLoadingState: LoadingState = { phase: 'idle' };
+type LoadingStateListener = (state: LoadingState) => void;
+const loadingListeners: Set<LoadingStateListener> = new Set();
+
+function setLoadingState(state: LoadingState): void {
+  currentLoadingState = state;
+  loadingListeners.forEach((listener) => listener(state));
+}
+
+/** Hook to subscribe to WASM loading progress state. */
+export function useLoadingState(): LoadingState {
+  const [state, setState] = useState<LoadingState>(currentLoadingState);
+
+  useEffect(() => {
+    // Sync with current state on mount
+    setState(currentLoadingState);
+    const listener: LoadingStateListener = (s) => setState(s);
+    loadingListeners.add(listener);
+    return () => { loadingListeners.delete(listener); };
+  }, []);
+
+  return state;
+}
+
 export type WasmModule = {
   init_engine: (canvasId: string) => void;
   handle_command: (command: string, payload: unknown) => unknown;
@@ -46,9 +83,51 @@ function emitEvent(phase: InitPhase, message?: string, error?: string) {
   emitStatusEvent(event);
 }
 
+/** Race a promise against a timeout. Rejects with a descriptive error on timeout. */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); },
+    );
+  });
+}
+
 /** Detect whether the browser supports WebGPU. */
 function detectWebGPU(): boolean {
   return typeof navigator !== 'undefined' && 'gpu' in navigator;
+}
+
+/**
+ * Request a WebGPU adapter + device with a timeout.
+ * Returns true if WebGPU is available and the device was acquired successfully.
+ * Returns false if WebGPU is not supported or device init fails/times out.
+ */
+async function probeWebGPU(): Promise<boolean> {
+  if (!detectWebGPU()) return false;
+
+  try {
+    const adapter = await withTimeout(
+      navigator.gpu.requestAdapter(),
+      GPU_INIT_TIMEOUT_MS,
+      'WebGPU adapter request',
+    );
+    if (!adapter) return false;
+
+    const device = await withTimeout(
+      adapter.requestDevice(),
+      GPU_INIT_TIMEOUT_MS,
+      'WebGPU device request',
+    );
+    // Clean up the device immediately — the engine will create its own
+    device.destroy();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -59,21 +138,40 @@ function detectWebGPU(): boolean {
 const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
 
 async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string): Promise<WasmModule> {
-  const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
-  await wasm.default(`${basePath}${wasmFile}`);
-  const mod = wasm as unknown as WasmModule;
-  if (mod.set_init_callback) {
-    mod.set_init_callback((phase: string, message?: string, error?: string) => {
-      emitEvent(phase as InitPhase, message, error);
-    });
+  // Use AbortController to enforce a timeout on the WASM fetch
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WASM_FETCH_TIMEOUT_MS);
+
+  try {
+    const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
+
+    // The default export fetches the .wasm file. Wrap with timeout via fetch override.
+    // Most wasm-bindgen JS glue accepts an object with fetch options or a URL.
+    // We pass the URL and rely on the AbortController timeout wrapping the whole operation.
+    await withTimeout(
+      wasm.default(`${basePath}${wasmFile}`),
+      WASM_FETCH_TIMEOUT_MS,
+      'WASM fetch',
+    );
+
+    const mod = wasm as unknown as WasmModule;
+    if (mod.set_init_callback) {
+      mod.set_init_callback((phase: string, message?: string, error?: string) => {
+        emitEvent(phase as InitPhase, message, error);
+      });
+    }
+    return mod;
+  } finally {
+    clearTimeout(timeoutId);
+    controller.abort(); // Clean up any pending requests
   }
-  return mod;
 }
 
 async function loadWasm(): Promise<WasmModule> {
   // Skip WASM loading when engine is explicitly disabled (CI E2E @ui tests)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   if (typeof window !== 'undefined' && (window as any).__SKIP_ENGINE) {
+    setLoadingState({ phase: 'error', error: 'Engine loading skipped' });
     throw new Error('Engine loading skipped (__SKIP_ENGINE is set)');
   }
   if (wasmModule) return wasmModule;
@@ -83,9 +181,16 @@ async function loadWasm(): Promise<WasmModule> {
   installPanicInterceptor();
 
   initPromise = (async () => {
-    const useWebGPU = detectWebGPU();
+    // Phase 1: Detect GPU capability
+    setLoadingState({ phase: 'detecting', progress: 0 });
+
+    const useWebGPU = await probeWebGPU();
     const backend = useWebGPU ? 'webgpu' : 'webgl2';
 
+    setLoadingState({ phase: 'detecting', progress: 100 });
+
+    // Phase 2: Download WASM module
+    setLoadingState({ phase: 'downloading', progress: 0 });
     emitEvent('wasm_loading', `Fetching WASM module (${backend})...`);
 
     const basePath = `${ENGINE_CDN_BASE}/engine-pkg-${backend}/`;
@@ -93,8 +198,13 @@ async function loadWasm(): Promise<WasmModule> {
     const wasmFile = 'forge_engine_bg.wasm';
 
     try {
+      setLoadingState({ phase: 'downloading', progress: 50 });
       wasmModule = await loadWasmFromPath(basePath, jsFile, wasmFile);
+      setLoadingState({ phase: 'downloading', progress: 100 });
       emitEvent('wasm_loaded', `WASM JS module loaded (${backend}), initializing...`);
+
+      // Phase 3: Initializing (will transition to 'ready' in useEngine hook)
+      setLoadingState({ phase: 'initializing', progress: 0 });
       return wasmModule;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
@@ -102,18 +212,22 @@ async function loadWasm(): Promise<WasmModule> {
       // If WebGPU failed, try falling back to WebGL2
       if (useWebGPU) {
         emitEvent('wasm_loading', 'WebGPU load failed, falling back to WebGL2...');
+        setLoadingState({ phase: 'downloading', progress: 25 });
         const fallbackPath = `${ENGINE_CDN_BASE}/engine-pkg-webgl2/`;
         try {
           wasmModule = await loadWasmFromPath(fallbackPath, jsFile, wasmFile);
+          setLoadingState({ phase: 'initializing', progress: 0 });
           return wasmModule;
         } catch (fallbackErr) {
           const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
           emitEvent('error', 'Failed to load both WebGPU and WebGL2 WASM modules', fallbackMsg);
+          setLoadingState({ phase: 'error', error: fallbackMsg });
           throw fallbackErr;
         }
       }
 
       emitEvent('error', 'Failed to load WASM module', errorMsg);
+      setLoadingState({ phase: 'error', error: errorMsg });
       throw err;
     }
   })();
@@ -125,6 +239,7 @@ async function loadWasm(): Promise<WasmModule> {
 export function resetEngine(): void {
   wasmModule = null;
   initPromise = null;
+  setLoadingState({ phase: 'idle' });
 }
 
 export interface UseEngineOptions {
@@ -172,6 +287,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
           // Note: For Bevy on WASM, init_engine may not return immediately
           // The 'ready' event will be emitted from Rust when first frame renders
           setIsReady(true);
+          setLoadingState({ phase: 'ready', progress: 100 });
           // Expose readiness flag for E2E tests (Playwright)
           if (typeof window !== 'undefined') {
             (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
@@ -180,6 +296,7 @@ export function useEngine(canvasId: string, options?: UseEngineOptions) {
         } catch (err) {
           const engineError = err instanceof Error ? err : new Error(String(err));
           emitEvent('error', 'Engine initialization failed', engineError.message);
+          setLoadingState({ phase: 'error', error: engineError.message });
           captureException(engineError, {
             phase: 'init_engine',
             canvasId,
