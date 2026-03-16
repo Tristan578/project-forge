@@ -264,6 +264,54 @@ describe('POST /api/publish', () => {
   });
 
   // -------------------------------------------------------------------------
+  // Thumbnail MIME type validation (PF-467)
+  // -------------------------------------------------------------------------
+  describe('thumbnail MIME type validation', () => {
+    it('rejects SVG thumbnails to prevent XSS', async () => {
+      const svgDataUrl = 'data:image/svg+xml;base64,PHN2Zz48c2NyaXB0PmFsZXJ0KDEpPC9zY3JpcHQ+PC9zdmc+';
+      const res = await POST(makeRequest(validBody({ thumbnail: svgDataUrl })));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('Unsupported thumbnail type');
+    });
+
+    it('rejects image/gif thumbnails', async () => {
+      const gifDataUrl = 'data:image/gif;base64,R0lGODlhAQABAA==';
+      const res = await POST(makeRequest(validBody({ thumbnail: gifDataUrl })));
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('Unsupported thumbnail type');
+    });
+
+    it('accepts image/png thumbnails', async () => {
+      vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
+      const pngDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+      const res = await POST(makeRequest(validBody({ thumbnail: pngDataUrl })));
+      expect(res.status).toBe(200);
+    });
+
+    it('accepts image/jpeg thumbnails', async () => {
+      vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
+      const jpegDataUrl = 'data:image/jpeg;base64,/9j/4AAQ=';
+      const res = await POST(makeRequest(validBody({ thumbnail: jpegDataUrl })));
+      expect(res.status).toBe(200);
+    });
+
+    it('accepts image/webp thumbnails', async () => {
+      vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
+      const webpDataUrl = 'data:image/webp;base64,UklGRg==';
+      const res = await POST(makeRequest(validBody({ thumbnail: webpDataUrl })));
+      expect(res.status).toBe(200);
+    });
+
+    it('rejects thumbnail with crafted SVG MIME containing charset', async () => {
+      const craftedUrl = 'data:image/svg+xml;charset=utf-8,<svg onload="alert(1)"/>';
+      const res = await POST(makeRequest(validBody({ thumbnail: craftedUrl })));
+      expect(res.status).toBe(400);
+    });
+  });
+
+  // -------------------------------------------------------------------------
   // Slug format validation
   // -------------------------------------------------------------------------
   describe('slug format', () => {
@@ -294,6 +342,32 @@ describe('POST /api/publish', () => {
         expect(body.error).toBe('Invalid slug format');
       });
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // Reserved slug validation (PF-470)
+  // -------------------------------------------------------------------------
+  describe('reserved slug validation', () => {
+    const reservedSlugs = ['admin', 'api', 'auth', 'webhook', 'webhooks', 'play', 'dev',
+      'login', 'logout', 'signup', 'sign-up', 'sign-in', 'settings', 'account',
+      'billing', 'dashboard', 'help', 'support', 'status', 'health', 'internal',
+      'system', 'static', 'assets', 'public'];
+
+    for (const slug of reservedSlugs) {
+      it(`rejects reserved slug: ${slug}`, async () => {
+        const res = await POST(makeRequest(validBody({ slug })));
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toContain('reserved');
+        expect(body.error).toContain(slug);
+      });
+    }
+
+    it('accepts a non-reserved slug', async () => {
+      vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
+      const res = await POST(makeRequest(validBody({ slug: 'my-cool-game' })));
+      expect(res.status).toBe(200);
+    });
   });
 
   // -------------------------------------------------------------------------

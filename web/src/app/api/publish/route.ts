@@ -32,9 +32,19 @@ export async function POST(request: NextRequest) {
   if (!descResult.ok) return descResult.response;
 
   // Thumbnail is an optional base64 data URL (max 200 KB to prevent abuse).
+  // Only safe raster MIME types allowed — SVG excluded to prevent XSS.
+  const ALLOWED_THUMBNAIL_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
   const thumbnailRaw = parsed.body.thumbnail;
   let thumbnail: string | null = null;
   if (typeof thumbnailRaw === 'string' && thumbnailRaw.startsWith('data:image/')) {
+    const mimeMatch = thumbnailRaw.match(/^data:(image\/[^;,]+)/);
+    const mime = mimeMatch ? mimeMatch[1] : null;
+    if (!mime || !ALLOWED_THUMBNAIL_TYPES.includes(mime)) {
+      return NextResponse.json(
+        { error: `Unsupported thumbnail type. Allowed: ${ALLOWED_THUMBNAIL_TYPES.join(', ')}` },
+        { status: 400 },
+      );
+    }
     const MAX_THUMBNAIL_BYTES = 200 * 1024;
     if (thumbnailRaw.length <= MAX_THUMBNAIL_BYTES) {
       thumbnail = thumbnailRaw;
@@ -62,6 +72,20 @@ export async function POST(request: NextRequest) {
   // Validate slug format
   if (!/^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(slugResult.value)) {
     return NextResponse.json({ error: 'Invalid slug format' }, { status: 400 });
+  }
+
+  // Block reserved words that could collide with platform routes
+  const RESERVED_SLUGS = [
+    'admin', 'api', 'auth', 'webhook', 'webhooks',
+    'play', 'dev', 'login', 'logout', 'signup', 'sign-up', 'sign-in',
+    'settings', 'account', 'billing', 'dashboard', 'help', 'support',
+    'status', 'health', 'internal', 'system', 'static', 'assets', 'public',
+  ];
+  if (RESERVED_SLUGS.includes(slugResult.value)) {
+    return NextResponse.json(
+      { error: `Slug "${slugResult.value}" is reserved and cannot be used` },
+      { status: 400 },
+    );
   }
 
   const db = getDb();
