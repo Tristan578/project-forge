@@ -16,7 +16,6 @@ import {
   type SceneContext,
   type EntitySummary,
   type ColorblindType,
-  type AccessibilityProfile,
 } from '../accessibilityGenerator';
 
 // ---------------------------------------------------------------------------
@@ -206,7 +205,7 @@ describe('COLORBLIND_FILTERS', () => {
   });
 
   it('contains valid CSS feColorMatrix values (20 numbers)', () => {
-    for (const [type, matrix] of Object.entries(COLORBLIND_FILTERS)) {
+    for (const [_type, matrix] of Object.entries(COLORBLIND_FILTERS)) {
       const values = matrix.split(/[\s,]+/).filter(Boolean);
       expect(values.length).toBe(20);
       for (const val of values) {
