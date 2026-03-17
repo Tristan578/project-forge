@@ -58,7 +58,7 @@ beforeEach(async () => {
   vi.stubGlobal('self', mockSelf);
 
   // Dynamically import the worker — it sets self.onmessage at module scope
-  // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+  // @ts-ignore — scriptWorker.ts is a Web Worker script, not a module
   await import('../scriptWorker');
 
   // Capture the onmessage handler that was set during import

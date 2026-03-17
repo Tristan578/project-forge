@@ -291,7 +291,7 @@ describe('Script Sandbox Security: Global Shadowing (worker integration)', () =>
     };
     vi.stubGlobal('self', mockSelf);
 
-    // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+    // @ts-ignore — scriptWorker.ts is a Web Worker script, not a module
     await import('../scriptWorker');
     workerOnMessage = mockSelf.onmessage;
   });
@@ -458,7 +458,7 @@ describe('Script Sandbox Security: Rate Limiter (worker integration)', () => {
     };
     vi.stubGlobal('self', mockSelf);
 
-    // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+    // @ts-ignore — scriptWorker.ts is a Web Worker script, not a module
     await import('../scriptWorker');
     workerOnMessage = mockSelf.onmessage;
   });
@@ -1092,7 +1092,7 @@ describe('Script Sandbox Security: Full Worker Security Flow', () => {
     };
     vi.stubGlobal('self', mockSelf);
 
-    // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+    // @ts-ignore — scriptWorker.ts is a Web Worker script, not a module
     await import('../scriptWorker');
     workerOnMessage = mockSelf.onmessage;
   });
@@ -1339,7 +1339,7 @@ describe('Script Sandbox Security: Memory Limit Detection', () => {
     };
     vi.stubGlobal('self', mockSelf);
 
-    // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+    // @ts-ignore — scriptWorker.ts is a Web Worker script, not a module
     await import('../scriptWorker');
     workerOnMessage = mockSelf.onmessage;
   });
@@ -1533,7 +1533,7 @@ describe('Script Sandbox Security: Frame Time Limit Detection', () => {
       memory: undefined,
     });
 
-    // @ts-expect-error scriptWorker.ts is a Web Worker script, not a module
+    // @ts-ignore — scriptWorker.ts is a Web Worker script, not a module
     await import('../scriptWorker');
     workerOnMessage = mockSelf.onmessage;
   });
