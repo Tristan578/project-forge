@@ -104,19 +104,20 @@ function BindingCard({
   onRemove: (index: number) => void;
 }) {
   const [expanded, setExpanded] = useState(true);
-  const dispatch = getCommandDispatcher();
 
   const handlePreviewAll = useCallback(() => {
+    const dispatch = getCommandDispatcher();
     if (!dispatch) return;
     applyBinding(binding, dispatch);
-  }, [binding, dispatch]);
+  }, [binding]);
 
   const handlePreviewEffect = useCallback(
     (effect: Effect) => {
+      const dispatch = getCommandDispatcher();
       if (!dispatch) return;
       applyEffect(effect, dispatch);
     },
-    [dispatch],
+    [],
   );
 
   const handleEffectIntensity = useCallback(
