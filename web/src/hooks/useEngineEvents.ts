@@ -20,6 +20,23 @@ import {
   handleEditModeEvent,
 } from './events';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
+import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
+
+/**
+ * Events that carry high-frequency runtime data and can be throttled to 10fps
+ * during play mode without meaningful loss of user-perceivable fidelity.
+ *
+ * Events NOT in this set (scene graph changes, selection, mode transitions,
+ * collision events, script errors, history changes) are always processed immediately.
+ */
+const THROTTLED_EVENTS = new Set([
+  'TRANSFORM_CHANGED',
+  'ANIMATION_STATE_CHANGED',
+  'ANIMATION_LIST_CHANGED',
+  'PHYSICS_CHANGED',
+  'DEBUG_PHYSICS_CHANGED',
+  'PHYSICS2D_UPDATED',
+]);
 
 interface UseEngineEventsOptions {
   wasmModule: {
@@ -71,6 +88,11 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       handleTransformEvent('SELECTION_CHANGED', batchedPayload as unknown as Record<string, unknown>, set, get);
     });
 
+    // Throttle instances for high-frequency play-mode events.
+    // One shared throttle is sufficient because all throttled events are
+    // display-only updates that share the same 10fps budget.
+    const playThrottle = createPlayModeThrottle(100);
+
     const handleEvent = (rawEvent: unknown) => {
       const parsedEvent = rawEvent as { type: string; payload: Record<string, unknown> };
       const { type, payload } = parsedEvent;
@@ -83,8 +105,25 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
         return;
       }
 
+      // On mode transitions reset the throttle so the inspector immediately
+      // reflects the current engine state after switching back to edit mode.
+      if (type === 'ENGINE_MODE_CHANGED') {
+        playThrottle.reset();
+      }
+
       const set = useEditorStore.setState;
       const get = useEditorStore.getState;
+
+      // Throttle high-frequency runtime events during play/paused mode to 10fps.
+      // This prevents 60fps Bevy ticks from driving 60fps React re-renders for
+      // data the user cannot perceive faster than ~10fps in the inspector.
+      if (THROTTLED_EVENTS.has(type)) {
+        const { engineMode } = useEditorStore.getState();
+        const isPlayMode = engineMode === 'play' || engineMode === 'paused';
+        if (!playThrottle.shouldUpdate(isPlayMode)) {
+          return;
+        }
+      }
 
       // Delegate to domain handlers (return true if handled)
       if (handleTransformEvent(type, payload, set, get)) return;
