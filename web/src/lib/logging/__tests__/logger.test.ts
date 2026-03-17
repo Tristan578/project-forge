@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { logger } from '@/lib/logging/logger';
 import type { LogEntry } from '@/lib/logging/logger';
 
