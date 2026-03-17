@@ -66,6 +66,7 @@ test.describe('Accessibility @ui', () => {
     test('dialogs have proper role and labeling', async ({ page }) => {
       // Open settings to test dialog accessibility
       const settingsBtn = page.locator('button[title="Settings"]').first();
+      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
 
       const dialog = page.locator('[role="dialog"]');
@@ -99,6 +100,7 @@ test.describe('Accessibility @ui', () => {
     test('Escape key closes open dialogs', async ({ page }) => {
       // Open settings
       const settingsBtn = page.locator('button[title="Settings"]').first();
+      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
       await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
@@ -109,6 +111,7 @@ test.describe('Accessibility @ui', () => {
 
     test('focus returns to trigger after dialog closes', async ({ page }) => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
+      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
       await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
@@ -122,6 +125,7 @@ test.describe('Accessibility @ui', () => {
 
     test('Tab key moves focus to interactive elements inside settings dialog', async ({ page }) => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
+      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
       await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
 
