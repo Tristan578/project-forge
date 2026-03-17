@@ -24,6 +24,8 @@ export function SceneToolbar() {
   const projectId = useEditorStore((s) => s.projectId);
   const cloudSaveStatus = useEditorStore((s) => s.cloudSaveStatus);
   const saveToCloud = useEditorStore((s) => s.saveToCloud);
+  const setCloudSaveStatus = useEditorStore((s) => s.setCloudSaveStatus);
+  const setLastCloudSave = useEditorStore((s) => s.setLastCloudSave);
 
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState(sceneName);
@@ -31,23 +33,62 @@ export function SceneToolbar() {
   const [showSceneBrowser, setShowSceneBrowser] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const pendingDownloadRef = useRef(false);
+  // Set to true when a cloud save is requested so the next forge:scene-exported
+  // event handler performs the PUT to /api/projects/{id} (PF-540).
+  const pendingCloudSaveRef = useRef(false);
 
-  // Listen for SCENE_EXPORTED to trigger file download when save was manual
+  // Listen for SCENE_EXPORTED to trigger file download or cloud save
   useEffect(() => {
     const handleExported = (e: CustomEvent<{ json: string; name: string }>) => {
       if (pendingDownloadRef.current) {
         pendingDownloadRef.current = false;
         downloadSceneFile(e.detail.json, e.detail.name);
       }
+
+      if (pendingCloudSaveRef.current && projectId) {
+        pendingCloudSaveRef.current = false;
+        const { json, name } = e.detail;
+        let sceneData: unknown;
+        try {
+          sceneData = JSON.parse(json) as unknown;
+        } catch {
+          setCloudSaveStatus('error');
+          return;
+        }
+        void fetch(`/api/projects/${projectId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, sceneData }),
+        }).then((res) => {
+          if (res.ok) {
+            setCloudSaveStatus('saved');
+            setLastCloudSave(new Date().toISOString());
+          } else {
+            setCloudSaveStatus('error');
+          }
+        }).catch(() => {
+          setCloudSaveStatus('error');
+        });
+      }
     };
     window.addEventListener('forge:scene-exported', handleExported as EventListener);
     return () => window.removeEventListener('forge:scene-exported', handleExported as EventListener);
-  }, []);
+  }, [projectId, setCloudSaveStatus, setLastCloudSave]);
 
   const handleSave = useCallback(() => {
     pendingDownloadRef.current = true;
     saveScene();
   }, [saveScene]);
+
+  /**
+   * Trigger a cloud save. Sets the pending flag so the next forge:scene-exported
+   * event completes the PUT to /api/projects/{id} (PF-540).
+   */
+  const handleCloudSave = useCallback(() => {
+    if (!projectId) return;
+    pendingCloudSaveRef.current = true;
+    saveToCloud();
+  }, [projectId, saveToCloud]);
 
   const handleLoad = useCallback(async () => {
     const json = await openSceneFilePicker();
@@ -69,7 +110,7 @@ export function SceneToolbar() {
       if (e.ctrlKey && e.key === 's') {
         e.preventDefault();
         if (projectId) {
-          saveToCloud();
+          handleCloudSave();
         } else {
           pendingDownloadRef.current = true;
           saveScene();
@@ -82,7 +123,7 @@ export function SceneToolbar() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [saveScene, newScene, projectId, saveToCloud]);
+  }, [saveScene, newScene, projectId, handleCloudSave]);
 
   const handleExport = useCallback(() => {
     setShowExportDialog(true);
