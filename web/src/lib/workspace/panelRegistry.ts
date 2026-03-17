@@ -125,6 +125,11 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     title: 'Procedural Animation',
     component: 'procedural-anim',
     minWidth: 220,
+  accessibility: {
+    id: 'accessibility',
+    title: 'Accessibility',
+    component: 'accessibility',
+    minWidth: 260,
     minHeight: 200,
   },
 };
