@@ -118,7 +118,6 @@ describe('subscription-lifecycle', () => {
 
 import {
   handleChargeRefunded,
-  reverseAddonTokens,
 } from '../subscription-lifecycle';
 
 describe('handleChargeRefunded', () => {
@@ -130,93 +129,32 @@ describe('handleChargeRefunded', () => {
     mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
   });
 
-  it('does nothing when user is not found', async () => {
+  it('does nothing when payment intent not found', async () => {
     mockSelectWhere.mockReturnValueOnce({
       limit: vi.fn().mockResolvedValue([]),
     });
-    await handleChargeRefunded('cus_gone', 'ch_1', 1000, 1000);
+    await handleChargeRefunded('pi_gone', 1000);
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('does nothing when amountTotal is 0', async () => {
-    await handleChargeRefunded('cus_abc', 'ch_1', 500, 0);
-    // First select finds user, but early return before reverseAddonTokens
+  it('does nothing when refundAmountCents is 0', async () => {
+    await handleChargeRefunded('pi_abc', 0);
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('does nothing when amountRefunded is 0', async () => {
-    await handleChargeRefunded('cus_abc', 'ch_1', 0, 1000);
+  it('does nothing when refundAmountCents is negative', async () => {
+    await handleChargeRefunded('pi_abc', -100);
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('calls reverseAddonTokens for a full refund', async () => {
-    // User has 5000 addon tokens, full refund (amount_refunded == amount)
-    await handleChargeRefunded('cus_abc', 'ch_full', 1000, 1000);
-    // reverseAddonTokens triggers a select (for addonTokens) + update + insert
-    // The second select (inside reverseAddonTokens) is also mocked
+  it('processes a full refund', async () => {
+    await handleChargeRefunded('pi_abc', 2450);
     expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).toHaveBeenCalled();
   });
 
-  it('calls reverseAddonTokens for a partial refund', async () => {
-    await handleChargeRefunded('cus_abc', 'ch_partial', 500, 1000);
+  it('processes a partial refund', async () => {
+    await handleChargeRefunded('pi_abc', 500);
     expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).toHaveBeenCalled();
   });
 });
 
-describe('reverseAddonTokens', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // Mock returns user with addonTokens
-    mockSelectWhere.mockReturnValue({
-      limit: vi.fn().mockResolvedValue([{ addonTokens: 1000 }]),
-    });
-    mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
-  });
-
-  it('does nothing when user not found', async () => {
-    mockSelectWhere.mockReturnValueOnce({
-      limit: vi.fn().mockResolvedValue([]),
-    });
-    await reverseAddonTokens('ghost', 'ch_1', 500, 1000);
-    expect(mockUpdate).not.toHaveBeenCalled();
-  });
-
-  it('deducts proportional tokens for partial refund', async () => {
-    // 50% refund of user with 1000 addon tokens = 500 deducted
-    await reverseAddonTokens('user_abc', 'ch_partial', 500, 1000);
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).toHaveBeenCalled();
-    const insertValues = mockInsertValues.mock.calls[0][0];
-    expect(insertValues.transactionType).toBe('adjustment');
-    expect(insertValues.amount).toBe(-500);
-    expect(insertValues.source).toBe('charge_refunded:ch_partial');
-  });
-
-  it('deducts all tokens for full refund', async () => {
-    await reverseAddonTokens('user_abc', 'ch_full', 1000, 1000);
-    expect(mockUpdate).toHaveBeenCalled();
-    const insertValues = mockInsertValues.mock.calls[0][0];
-    expect(insertValues.amount).toBe(-1000);
-  });
-
-  it('clamps deduction ratio to 1 when refund exceeds total', async () => {
-    // Edge case: amountRefunded > amountTotal — ratio capped at 1
-    await reverseAddonTokens('user_abc', 'ch_over', 2000, 1000);
-    expect(mockUpdate).toHaveBeenCalled();
-    const insertValues = mockInsertValues.mock.calls[0][0];
-    // All 1000 tokens deducted (ratio=1.0 => floor(1000*1)=1000)
-    expect(insertValues.amount).toBe(-1000);
-  });
-
-  it('does nothing when calculated deduction is 0', async () => {
-    // Very small refund that rounds down to 0 tokens
-    mockSelectWhere.mockReturnValueOnce({
-      limit: vi.fn().mockResolvedValue([{ addonTokens: 10 }]),
-    });
-    // 1 cent refund of $100 = 0.01 ratio, floor(10 * 0.01) = 0
-    await reverseAddonTokens('user_abc', 'ch_tiny', 1, 10000);
-    expect(mockUpdate).not.toHaveBeenCalled();
-  });
-});
