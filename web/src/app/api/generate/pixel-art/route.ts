@@ -1,3 +1,5 @@
+export const maxDuration = 60; // seconds — pixel art generation
+
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';

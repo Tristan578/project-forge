@@ -1,3 +1,5 @@
+export const maxDuration = 120; // seconds — AI streaming + tool calls need more than the 10s default
+
 import { NextRequest } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';

@@ -1,3 +1,5 @@
+export const maxDuration = 180; // seconds — Suno music generation is very slow
+
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';

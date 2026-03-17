@@ -1,3 +1,5 @@
+export const maxDuration = 10; // seconds — simple DB refund operation
+
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { refundTokens } from '@/lib/tokens/service';
