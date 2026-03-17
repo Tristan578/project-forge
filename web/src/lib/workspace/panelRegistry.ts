@@ -127,6 +127,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 220,
     minHeight: 200,
   },
+  accessibility: {
+    id: 'accessibility',
+    title: 'Accessibility',
+    component: 'accessibility',
+    minWidth: 260,
+    minHeight: 200,
+  },
   tutorial: {
     id: 'tutorial',
     title: 'Tutorial Generator',
