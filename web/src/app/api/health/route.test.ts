@@ -1,6 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { NextRequest } from 'next/server';
 
 vi.mock('server-only', () => ({}));
+
+function makeReq(ip = '1.2.3.4'): NextRequest {
+  return new NextRequest('http://localhost:3000/api/health', {
+    headers: { 'x-forwarded-for': ip },
+  });
+}
 
 describe('GET /api/health', () => {
   beforeEach(() => {
@@ -22,7 +29,7 @@ describe('GET /api/health', () => {
     // No DATABASE_URL set, so DB should be 'not_configured'
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     expect(res.status).toBeLessThan(600); // any valid HTTP status
@@ -34,7 +41,7 @@ describe('GET /api/health', () => {
 
   it('should use defaults when env vars not set', async () => {
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     expect(body.commit).toBe('local');
@@ -43,7 +50,7 @@ describe('GET /api/health', () => {
 
   it('should include services array with 12 entries', async () => {
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     expect(body.services).toBeInstanceOf(Array);
@@ -59,7 +66,7 @@ describe('GET /api/health', () => {
 
   it('should include overall status field', async () => {
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     expect(['healthy', 'degraded', 'down']).toContain(body.overall);
@@ -75,7 +82,7 @@ describe('GET /api/health', () => {
     vi.doMock('@neondatabase/serverless', () => ({ neon: mockNeon }));
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     expect(res.status).toBe(503);
   });
 
@@ -95,7 +102,7 @@ describe('GET /api/health', () => {
     vi.stubGlobal('fetch', mockFetch);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     // Both critical services (DB + Auth) healthy → HTTP 200 + status 'ok'
@@ -113,7 +120,7 @@ describe('GET /api/health', () => {
     vi.doMock('@neondatabase/serverless', () => ({ neon: mockNeon }));
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     expect(body.database).toBe('unavailable');
@@ -123,9 +130,126 @@ describe('GET /api/health', () => {
     vi.resetModules();
     // No DATABASE_URL
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     expect(body.database).toBe('not_configured');
+  });
+
+  // -------------------------------------------------------------------------
+  // Rate limiting
+  // -------------------------------------------------------------------------
+  describe('rate limiting', () => {
+    it('returns 429 when IP exceeds 60 requests per minute', async () => {
+      vi.resetModules();
+      const { GET } = await import('./route');
+      const req = makeReq('192.168.100.1');
+
+      // Exhaust the 60 req/min limit
+      for (let i = 0; i < 60; i++) {
+        await GET(req);
+      }
+
+      const res = await GET(req);
+      expect(res.status).toBe(429);
+    });
+
+    it('returns Retry-After header on rate limit response', async () => {
+      vi.resetModules();
+      const { GET } = await import('./route');
+      const req = makeReq('192.168.100.2');
+
+      for (let i = 0; i < 60; i++) {
+        await GET(req);
+      }
+
+      const res = await GET(req);
+      expect(res.headers.get('Retry-After')).toBeTruthy();
+      expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
+    });
+
+    it('allows requests under the 60 req/min limit', async () => {
+      vi.resetModules();
+      const { GET } = await import('./route');
+      const req = makeReq('192.168.100.3');
+
+      const res = await GET(req);
+      expect(res.status).not.toBe(429);
+    });
+
+    it('separates rate limits by IP address', async () => {
+      vi.resetModules();
+      const { GET } = await import('./route');
+      const req1 = makeReq('10.0.1.1');
+      const req2 = makeReq('10.0.1.2');
+
+      // Exhaust limit for first IP
+      for (let i = 0; i < 60; i++) {
+        await GET(req1);
+      }
+      const res1 = await GET(req1);
+      expect(res1.status).toBe(429);
+
+      // Second IP should still be allowed
+      const res2 = await GET(req2);
+      expect(res2.status).not.toBe(429);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Response caching
+  // -------------------------------------------------------------------------
+  describe('response caching', () => {
+    it('returns X-Cache: MISS on first request', async () => {
+      vi.resetModules();
+      const { GET, resetHealthCache } = await import('./route');
+      resetHealthCache();
+
+      const res = await GET(makeReq('10.10.0.1'));
+      expect(res.headers.get('X-Cache')).toBe('MISS');
+    });
+
+    it('returns X-Cache: HIT on cached request within 30s', async () => {
+      vi.useFakeTimers();
+      vi.resetModules();
+      const { GET, resetHealthCache } = await import('./route');
+      resetHealthCache();
+
+      // First request populates cache
+      await GET(makeReq('10.10.0.2'));
+
+      // Advance 10s (within 30s TTL)
+      vi.advanceTimersByTime(10_000);
+
+      const res = await GET(makeReq('10.10.0.2'));
+      expect(res.headers.get('X-Cache')).toBe('HIT');
+      vi.useRealTimers();
+    });
+
+    it('returns Cache-Control: public, max-age=30 header', async () => {
+      vi.resetModules();
+      const { GET, resetHealthCache } = await import('./route');
+      resetHealthCache();
+
+      const res = await GET(makeReq('10.10.0.3'));
+      expect(res.headers.get('Cache-Control')).toBe('public, max-age=30');
+    });
+
+    it('fetches fresh data after cache TTL expires', async () => {
+      vi.useFakeTimers();
+      vi.resetModules();
+      const { GET, resetHealthCache } = await import('./route');
+      resetHealthCache();
+
+      // First request
+      await GET(makeReq('10.10.0.4'));
+
+      // Advance past 30s TTL
+      vi.advanceTimersByTime(31_000);
+
+      const res = await GET(makeReq('10.10.0.4'));
+      expect(res.headers.get('X-Cache')).toBe('MISS');
+      vi.useRealTimers();
+    });
   });
 });
