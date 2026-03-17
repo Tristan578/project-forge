@@ -7,6 +7,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { EXPORT_PRESETS, getPreset, type ExportFormat } from '@/lib/export/presets';
 import { generateResponsiveEmbedSnippet, generateEmbedSnippet } from '@/lib/export/embedGenerator';
 import type { LoadingScreenConfig } from '@/lib/export/loadingScreen';
+import { COMPRESSION_PRESETS, estimateCompression, type CompressionConfig, type CompressionFormat } from '@/lib/export/textureCompression';
 import { showError } from '@/lib/toast';
 
 function parseResolution(res: string): [number, number] {
@@ -37,6 +38,8 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     progressStyle: 'bar',
   });
   const [orientationLock, setOrientationLock] = useState<'none' | 'landscape' | 'portrait'>('none');
+  const [compressionPreset, setCompressionPreset] = useState<string>('original');
+  const [compressionQuality, setCompressionQuality] = useState(85);
   const [embedSnippet, setEmbedSnippet] = useState<string | null>(null);
   const [snippetCopied, setSnippetCopied] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -110,6 +113,13 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     try {
       const preset = selectedPreset ? getPreset(selectedPreset) : undefined;
 
+      // Build texture compression config from selected preset + quality override
+      let textureCompressionConfig: CompressionConfig | undefined;
+      if (compressionPreset !== 'original') {
+        const baseConfig = COMPRESSION_PRESETS[compressionPreset] ?? COMPRESSION_PRESETS.balanced;
+        textureCompressionConfig = { ...baseConfig, quality: compressionQuality };
+      }
+
       const blob = await exportGame({
         title,
         mode,
@@ -119,6 +129,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         preset,
         customLoadingScreen: showLoadingCustomization ? loadingConfig : undefined,
         orientationLock: orientationLock === 'none' ? undefined : orientationLock,
+        textureCompressionConfig,
       });
 
       const extension = mode === 'single-html' ? 'html' : 'zip';
@@ -145,7 +156,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
     } finally {
       setExporting(false);
     }
-  }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, setExporting, onClose]);
+  }, [title, mode, resolution, bgColor, includeDebug, selectedPreset, showLoadingCustomization, loadingConfig, orientationLock, compressionPreset, compressionQuality, setExporting, onClose]);
 
   const handleCopySnippet = useCallback(() => {
     if (!embedSnippet) return;
@@ -370,6 +381,50 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
               <span className="text-sm text-zinc-300">Include Debug Info</span>
             </label>
             <p className="mt-1 text-xs text-zinc-500">Includes console logs and error messages</p>
+          </div>
+
+          {/* Texture Compression */}
+          <div>
+            <label className="mb-1 block text-xs font-medium text-zinc-300">Texture Compression</label>
+            <select
+              value={compressionPreset}
+              onChange={(e) => {
+                const key = e.target.value;
+                setCompressionPreset(key);
+                if (key !== 'original' && COMPRESSION_PRESETS[key]) {
+                  setCompressionQuality(COMPRESSION_PRESETS[key].quality);
+                }
+              }}
+              disabled={isExporting}
+              className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
+            >
+              <option value="original">None (original textures)</option>
+              <option value="fast_load">Fast Load (WebP, 75%, max 1024px)</option>
+              <option value="balanced">Balanced (WebP, 85%, max 2048px)</option>
+              <option value="high_quality">High Quality (WebP, 95%, max 4096px)</option>
+            </select>
+            {compressionPreset !== 'original' && (
+              <div className="mt-2 space-y-2 rounded border border-zinc-700 bg-zinc-800/50 p-3">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-zinc-300">Quality</label>
+                    <span className="text-xs text-zinc-500">{compressionQuality}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={compressionQuality}
+                    onChange={(e) => setCompressionQuality(parseInt(e.target.value, 10))}
+                    disabled={isExporting}
+                    className="mt-1 w-full accent-blue-500"
+                  />
+                </div>
+                <p className="text-xs text-zinc-500">
+                  Est. size reduction: ~{Math.round((1 - estimateCompression(1000, COMPRESSION_PRESETS[compressionPreset]?.format as CompressionFormat ?? 'webp', compressionQuality) / 1000) * 100)}%
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Loading Screen Customization */}
