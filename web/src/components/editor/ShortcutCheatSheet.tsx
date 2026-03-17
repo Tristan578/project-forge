@@ -68,6 +68,7 @@ export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
     (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
       }
     },
