@@ -185,10 +185,10 @@ describe('parseModificationPlan', () => {
 // ---------------------------------------------------------------------------
 
 describe('executeModificationPlan', () => {
-  let dispatch: ReturnType<typeof vi.fn>;
+  let dispatch: ReturnType<typeof vi.fn<(cmd: string, payload: unknown) => void>>;
 
   beforeEach(() => {
-    dispatch = vi.fn();
+    dispatch = vi.fn<(cmd: string, payload: unknown) => void>();
   });
 
   it('dispatches correct commands for each step', () => {
