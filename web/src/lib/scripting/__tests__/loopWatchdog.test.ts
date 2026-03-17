@@ -23,6 +23,7 @@ type MessageHandler = (e: { data: Record<string, unknown> }) => void | Promise<v
 async function setupWorker(): Promise<MessageHandler> {
   vi.resetModules();
   globalScope.self = { postMessage: mockPostMessage };
+  // @ts-expect-error scriptWorker is a web worker with no module exports
   await import('../scriptWorker');
   return (globalScope.self as Record<string, unknown>).onmessage as MessageHandler;
 }

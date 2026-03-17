@@ -9,6 +9,7 @@ const globalScope = globalThis as Record<string, unknown>;
 type MessageHandler = (e: { data: Record<string, unknown> }) => void | Promise<void>;
 
 async function setupWorker(): Promise<MessageHandler> {
+  // @ts-expect-error scriptWorker is a web worker with no module exports
   await import('../scriptWorker');
   return (globalScope.self as Record<string, unknown>).onmessage as MessageHandler;
 }
