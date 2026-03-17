@@ -209,7 +209,7 @@ async function loadWasm(): Promise<WasmModule> {
   loadAbortController = new AbortController();
   const { signal } = loadAbortController;
 
-  initPromise = (async () => {
+  const attempt = (async () => {
     // Phase 1: Detect GPU capability
     setLoadingState({ phase: 'detecting', progress: 0 });
 
@@ -251,16 +251,21 @@ async function loadWasm(): Promise<WasmModule> {
           const fallbackMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
           emitEvent('error', 'Failed to load both WebGPU and WebGL2 WASM modules', fallbackMsg);
           setLoadingState({ phase: 'error', error: fallbackMsg });
+          // Reset so the next mount can try again (PF-585)
+          initPromise = null;
           throw fallbackErr;
         }
       }
 
       emitEvent('error', 'Failed to load WASM module', errorMsg);
       setLoadingState({ phase: 'error', error: errorMsg });
+      // Reset so the next mount can try again (PF-585)
+      initPromise = null;
       throw err;
     }
   })();
 
+  initPromise = attempt;
   return initPromise;
 }
 
