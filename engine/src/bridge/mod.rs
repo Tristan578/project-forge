@@ -215,6 +215,7 @@ pub fn handle_command(command: &str, payload: JsValue) -> Result<JsValue, JsValu
     let payload_value: serde_json::Value = serde_wasm_bindgen::from_value(payload)
         .unwrap_or(serde_json::Value::Null);
 
+    #[cfg(debug_assertions)]
     log(&format!("Received command: {} with payload: {:?}", command, payload_value));
 
     // Dispatch to core command handler
