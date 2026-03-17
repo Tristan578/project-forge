@@ -564,3 +564,99 @@ Immediate actions needed:
 9. **No client-side Web Vitals collection.** LCP, FID, CLS, INP are not being reported to any backend for monitoring.
 
 10. **AI provider cost has no automatic circuit breaker.** If API costs spike (e.g., due to a bug generating infinite requests), there is no automatic shutoff beyond per-user token limits.
+
+---
+
+## 11. SSL/TLS Certificate Management
+
+### 11.1 Certificate Ownership
+
+| Domain | Certificate Provider | Renewal Mechanism | Managed By |
+|--------|---------------------|-------------------|------------|
+| `spawnforge.ai` | Let's Encrypt (via Vercel) | Automatic (60-day certificates, renewed at 30 days) | Vercel |
+| `www.spawnforge.ai` | Let's Encrypt (via Vercel) | Automatic | Vercel |
+| `engine.spawnforge.ai` | Cloudflare Universal SSL | Automatic (90-day certificates) | Cloudflare |
+
+### 11.2 How Auto-Renewal Works
+
+**Vercel (spawnforge.ai)**
+
+Vercel automatically provisions and renews Let's Encrypt certificates for all custom domains attached to a project. Renewal is triggered approximately 30 days before expiry. No manual action is required under normal circumstances. Vercel retries failed renewals and surfaces errors in the project dashboard under "Domains".
+
+**Cloudflare (engine.spawnforge.ai)**
+
+The `engine.spawnforge.ai` domain is a Cloudflare custom hostname backed by the `engine-cdn` Worker. Cloudflare Universal SSL covers all hostnames under the zone and renews automatically. The CDN Worker (`infra/engine-cdn/worker.js`) adds CORS headers but does not touch TLS — certificate management is entirely Cloudflare's responsibility.
+
+### 11.3 Verifying Certificates Manually
+
+Use the provided script to check certificate expiry for all SpawnForge domains:
+
+```bash
+# Standard check — prints a human-readable report
+bash scripts/verify-ssl-certs.sh
+
+# Check with custom thresholds
+bash scripts/verify-ssl-certs.sh --warn-days 45 --alert-days 14
+
+# JSON output (suitable for piping to monitoring systems)
+bash scripts/verify-ssl-certs.sh --json
+
+# Quiet mode (only prints warnings/alerts, suppresses info output)
+bash scripts/verify-ssl-certs.sh --quiet
+```
+
+Exit codes:
+- `0` — All certificates healthy (expiry > 30 days by default)
+- `1` — One or more certificates expire within the warn threshold
+- `2` — One or more certificates expire within the alert threshold (treat as incident)
+- `3` — Could not retrieve one or more certificates (connectivity or TLS error)
+
+You can also check a domain directly with `openssl`:
+
+```bash
+# Show certificate expiry date
+echo "" | openssl s_client -connect spawnforge.ai:443 -servername spawnforge.ai 2>/dev/null \
+  | openssl x509 -noout -enddate
+
+# Full certificate details
+echo "" | openssl s_client -connect engine.spawnforge.ai:443 -servername engine.spawnforge.ai 2>/dev/null \
+  | openssl x509 -noout -text
+```
+
+### 11.4 What To Do If Auto-Renewal Fails
+
+**Vercel certificate failure:**
+
+1. Go to the Vercel dashboard → Project → Settings → Domains.
+2. Find the domain showing a certificate error. Vercel will display the error type (DNS propagation, CAA record conflict, etc.).
+3. If the domain is correctly configured and Vercel renewal still fails, click "Refresh" to trigger an immediate re-attempt.
+4. If the domain shows "Invalid Configuration", verify the DNS records in Cloudflare match Vercel's required CNAME/A record.
+5. As a last resort, remove and re-add the custom domain in Vercel — this triggers a fresh certificate issuance.
+6. **Escalation:** Open a Vercel support ticket. Vercel SLA for enterprise is 4 hours; Pro tier is best-effort.
+
+**Cloudflare certificate failure:**
+
+1. Go to the Cloudflare dashboard → SSL/TLS → Edge Certificates.
+2. Check whether Universal SSL is showing "Active" or "Pending". Pending can take up to 24 hours on a new zone.
+3. If Universal SSL is disabled, re-enable it under SSL/TLS → Overview → Universal SSL → Enable.
+4. If the certificate is stuck in "Pending Validation", check that there are no conflicting CAA DNS records that exclude Cloudflare's issuer (`digicert.com` or `letsencrypt.org`).
+5. **Escalation:** Open a Cloudflare support ticket. Cloudflare resolves certificate issues within hours for paid plans.
+
+**Emergency fallback (certificate expired, site unreachable over HTTPS):**
+
+1. Temporarily disable "Always Use HTTPS" in Cloudflare to allow HTTP traffic while the certificate is renewed.
+2. Post a status update on the SpawnForge status page immediately.
+3. Work the Vercel or Cloudflare support channels in parallel.
+4. Re-enable "Always Use HTTPS" immediately after renewal completes.
+
+### 11.5 Monthly Verification Checklist
+
+Add the following item to the monthly ops review:
+
+- [ ] Run `bash scripts/verify-ssl-certs.sh` and confirm exit code 0.
+- [ ] Verify both domains return expiry > 30 days from today.
+- [ ] Check Vercel dashboard "Domains" tab for any certificate warnings.
+- [ ] Check Cloudflare dashboard "SSL/TLS → Edge Certificates" for any anomalies.
+- [ ] If a certificate is < 45 days from expiry, open a tracking ticket and monitor daily.
+
+This check takes under 2 minutes and should be part of the standard monthly on-call handoff.
