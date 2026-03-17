@@ -1,5 +1,3 @@
-export const maxDuration = 60; // seconds — ElevenLabs voice generation
-
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
@@ -7,7 +5,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { refundTokens } from '@/lib/tokens/service';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -15,7 +13,7 @@ export async function POST(request: NextRequest) {
   if (!authResult.ok) return authResult.response;
 
   // 1b. Rate limit: 10 generation requests per 5 minutes per user
-  const rl = await rateLimit(`gen-voice:${authResult.ctx.user.id}`, 10, 300_000);
+  const rl = rateLimit(`gen-voice:${authResult.ctx.user.id}`, 10, 300_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Parse request
@@ -54,11 +52,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(text);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
+  }
+
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('voice_generation');
 
   let apiKey: string;
-  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -69,7 +75,6 @@ export async function POST(request: NextRequest) {
       { text, textLength: text.length }
     );
     apiKey = resolved.key;
-    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -95,14 +100,6 @@ export async function POST(request: NextRequest) {
       provider: 'elevenlabs',
     });
   } catch (err) {
-    // Refund tokens on provider failure
-    if (usageId) {
-      try {
-        await refundTokens(authResult.ctx.user.id, usageId);
-      } catch (refundErr) {
-        captureException(refundErr, { route: '/api/generate/voice', action: 'refund', usageId });
-      }
-    }
     captureException(err, { route: '/api/generate/voice', text });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });

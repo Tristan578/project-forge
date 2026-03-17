@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
 
@@ -64,6 +65,15 @@ export async function POST(request: NextRequest) {
     }
     if (provider && !VALID_PROVIDERS.includes(provider as string)) {
       return NextResponse.json({ error: `Invalid provider. Must be one of: ${VALID_PROVIDERS.join(', ')}` }, { status: 400 });
+    }
+
+    // 2b. Content safety filter
+    const safety = sanitizePrompt(prompt as string);
+    if (!safety.safe) {
+      return NextResponse.json(
+        { error: safety.reason ?? 'Content rejected by safety filter' },
+        { status: 422 }
+      );
     }
 
     // 3. Resolve provider

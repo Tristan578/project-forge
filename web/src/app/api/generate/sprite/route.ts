@@ -6,6 +6,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -43,6 +44,15 @@ export async function POST(request: NextRequest) {
   if (!prompt || prompt.length < 3 || prompt.length > 500) {
     return NextResponse.json(
       { error: 'Prompt must be between 3 and 500 characters' },
+      { status: 422 }
+    );
+  }
+
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(prompt);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
       { status: 422 }
     );
   }

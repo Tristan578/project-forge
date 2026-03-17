@@ -7,6 +7,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -46,6 +47,15 @@ export async function POST(request: NextRequest) {
   if (mode === 'image-to-3d' && !imageBase64) {
     return NextResponse.json(
       { error: 'imageBase64 required for image-to-3d mode' },
+      { status: 422 }
+    );
+  }
+
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(prompt);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
       { status: 422 }
     );
   }

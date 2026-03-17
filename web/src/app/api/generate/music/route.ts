@@ -7,6 +7,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -43,6 +44,15 @@ export async function POST(request: NextRequest) {
   if (durationSeconds < 15 || durationSeconds > 120) {
     return NextResponse.json(
       { error: 'Duration must be between 15 and 120 seconds' },
+      { status: 422 }
+    );
+  }
+
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(prompt);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
       { status: 422 }
     );
   }
