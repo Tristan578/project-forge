@@ -5,6 +5,7 @@ import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { rateLimit } from '@/lib/rateLimit';
+import { refundTokens } from '@/lib/tokens/service';
 import type { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 
 vi.mock('@/lib/auth/api-auth');
@@ -41,6 +42,9 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
   rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
+}));
+vi.mock('@/lib/tokens/service', () => ({
+  refundTokens: vi.fn().mockResolvedValue(undefined),
 }));
 
 const mockUser = { id: 'user_sfx', tier: 'creator' };
@@ -281,6 +285,67 @@ describe('POST /api/generate/sfx', () => {
 
       expect(res.status).toBe(500);
       expect(body.error).toBe('Provider error');
+    });
+  });
+
+  describe('usageId tracking and refund', () => {
+    it('returns usageId in success response', async () => {
+      const { POST } = await import('../route');
+      const res = await POST(makeRequest({ prompt: 'explosion sound', durationSeconds: 3 }));
+      const body = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(body.usageId).toBe('usage_sfx_001');
+    });
+
+    it('calls refundTokens when provider fails with platform key', async () => {
+      const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
+        this.generateSfx = vi.fn().mockRejectedValue(new Error('Provider timeout'));
+        this.generateVoice = vi.fn();
+      } as never);
+
+      const { POST } = await import('../route');
+      const res = await POST(makeRequest({ prompt: 'crash boom', durationSeconds: 2 }));
+
+      expect(res.status).toBe(500);
+      expect(vi.mocked(refundTokens)).toHaveBeenCalledWith('user_sfx', 'usage_sfx_001');
+    });
+
+    it('does not call refundTokens when usageId is undefined (BYOK)', async () => {
+      vi.mocked(resolveApiKey).mockResolvedValue({
+        type: 'byok',
+        key: 'user-own-key',
+        metered: false,
+      });
+
+      const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
+        this.generateSfx = vi.fn().mockRejectedValue(new Error('Provider error'));
+        this.generateVoice = vi.fn();
+      } as never);
+
+      const { POST } = await import('../route');
+      await POST(makeRequest({ prompt: 'zap sound', durationSeconds: 1 }));
+
+      expect(vi.mocked(refundTokens)).not.toHaveBeenCalled();
+    });
+
+    it('still returns 500 even if refund fails', async () => {
+      vi.mocked(refundTokens).mockRejectedValueOnce(new Error('Refund DB error'));
+
+      const { ElevenLabsClient } = await import('@/lib/generate/elevenlabsClient');
+      vi.mocked(ElevenLabsClient).mockImplementationOnce(function (this: ElevenLabsClient) {
+        this.generateSfx = vi.fn().mockRejectedValue(new Error('Provider down'));
+        this.generateVoice = vi.fn();
+      } as never);
+
+      const { POST } = await import('../route');
+      const res = await POST(makeRequest({ prompt: 'bang', durationSeconds: 2 }));
+      const body = await res.json();
+
+      expect(res.status).toBe(500);
+      expect(body.error).toContain('Provider down');
     });
   });
 });
