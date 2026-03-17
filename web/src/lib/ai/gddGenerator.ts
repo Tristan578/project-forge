@@ -266,7 +266,7 @@ export function parseGDDResponse(raw: string): GameDesignDocument {
     throw new Error('Failed to parse GDD response as JSON');
   }
 
-  if (!parsed || typeof parsed !== 'object') {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('GDD response is not a JSON object');
   }
 
