@@ -1,0 +1,4 @@
+# Ignore generated benchmark reports — these are produced at runtime by
+# scripts/run-benchmarks.sh and should not be committed to version control.
+# Upload them as CI artifacts instead.
+*.json
