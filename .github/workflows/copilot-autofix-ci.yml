@@ -1,0 +1,15 @@
+# This file exists solely to clear a ghost workflow registration.
+# The copilot-autofix-ci workflow was previously registered with GitHub Actions
+# but the file was deleted without being disabled first, leaving a ghost entry
+# in the Actions tab. This stub has no triggers so it never runs.
+name: Copilot Autofix (disabled)
+
+on: workflow_dispatch
+
+jobs:
+  noop:
+    name: No-op (ghost workflow stub)
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - run: echo "This workflow is disabled"
