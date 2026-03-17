@@ -13,7 +13,6 @@ vi.mock('web-vitals', () => ({
   onINP: (...args: unknown[]) => mockOnINP(...args),
 }));
 
-// eslint-disable-next-line no-restricted-syntax -- dynamic import() needs real async tick, not fake timers
 const flushPromises = () => new Promise<void>((r) => { setTimeout(r, 0); });
 
 describe('webVitals', () => {
