@@ -13,8 +13,6 @@ import {
   filterEntitiesByScope,
   MODIFIER_SYSTEM_PROMPT,
   type ModificationPlan,
-  type ModificationStep,
-  type ModificationRequest,
 } from '../gameModifier';
 import { buildSceneContext, type SceneContext, type SceneContextStore } from '../sceneContext';
 
