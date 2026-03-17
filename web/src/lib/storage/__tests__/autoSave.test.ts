@@ -16,15 +16,9 @@ import {
 // Mock the IndexedDB fallback module
 // ---------------------------------------------------------------------------
 
-<<<<<<< HEAD
 const mockSave = vi.fn().mockResolvedValue(true);
 const mockLoad = vi.fn().mockResolvedValue(null);
 const mockDelete = vi.fn().mockResolvedValue(undefined);
-=======
-const mockSave = vi.fn<[string, string], Promise<boolean>>().mockResolvedValue(true);
-const mockLoad = vi.fn<[string], Promise<string | null>>().mockResolvedValue(null);
-const mockDelete = vi.fn<[string], Promise<void>>().mockResolvedValue(undefined);
->>>>>>> 25c9a816 (feat: add periodic IndexedDB auto-save with crash recovery and Monaco prefetch)
 
 vi.mock('@/lib/storage/indexedDBFallback', () => ({
   saveToIndexedDB: (...args: [string, string]) => mockSave(...args),
