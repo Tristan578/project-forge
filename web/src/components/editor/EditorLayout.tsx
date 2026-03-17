@@ -55,7 +55,9 @@ const MOBILE_DISMISSED_KEY = 'forge-mobile-dismissed';
 
 // ---- Mobile-only components (unchanged) ----
 
-const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui', 'gdd'];
+const ReviewPanel = lazy(() => import('./ReviewPanel').then(m => ({ default: m.ReviewPanel })));
+
+const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui', 'gdd', 'review'];
 
 function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; onTabChange: (tab: RightPanelTab) => void }) {
   const hasUnread = useChatStore((s) => s.hasUnreadMessages);
@@ -175,6 +177,21 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
       >
         GDD
       </button>
+      <button
+        role="tab"
+        id="tab-review"
+        aria-selected={activeTab === 'review'}
+        aria-controls="tabpanel-review"
+        tabIndex={activeTab === 'review' ? 0 : -1}
+        onClick={() => onTabChange('review')}
+        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+          activeTab === 'review'
+            ? 'border-b border-yellow-500 text-zinc-200'
+            : 'text-zinc-600 hover:text-zinc-400'
+        }`}
+      >
+        Review
+      </button>
     </div>
   );
 }
@@ -189,6 +206,7 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
         {activeTab === 'chat' && <ChatPanel />}
         {activeTab === 'modify' && <ModifyPanel />}
         {activeTab === 'gdd' && <GDDPanel />}
+        {activeTab === 'review' && <ReviewPanel />}
       </Suspense>
     </div>
   );

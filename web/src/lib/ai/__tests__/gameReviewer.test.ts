@@ -209,7 +209,7 @@ describe('buildReviewContext', () => {
           e1: {
             entityId: 'e1',
             name: 'Player',
-            components: ['Mesh3d', 'Transform'],
+            components: ['Mesh3d', 'Transform', 'PhysicsEnabled'],
             visible: true,
             children: [],
           },
@@ -223,15 +223,15 @@ describe('buildReviewContext', () => {
         },
       },
       sceneName: 'My Cool Game',
-      physicsEnabled: { e1: true },
-      particleEnabled: {},
-      audioEnabled: { e1: true },
+      physicsEnabled: true,
+      particleEnabled: false,
+      primaryAudio: { source: 'test.mp3', enabled: true },
+      primaryAnimation: { availableClips: [] },
       allScripts: { e1: { enabled: true }, e2: { enabled: false } },
       allGameComponents: { e1: [{ type: 'characterController' }, { type: 'health' }] },
       scenes: [{ id: 's1' }, { id: 's2' }],
       postProcessing: { bloom: { enabled: true }, chromaticAberration: { enabled: false } },
       environment: { skyboxPreset: 'sunset' },
-      animationStates: {},
       projectType: '3d' as const,
       ...overrides,
     };
@@ -257,8 +257,18 @@ describe('buildReviewContext', () => {
     expect(ctx.hasPhysics).toBe(true);
   });
 
-  it('detects no physics when empty', () => {
-    const ctx = buildReviewContext(() => createMockState({ physicsEnabled: {} }) as never);
+  it('detects no physics when disabled', () => {
+    const ctx = buildReviewContext(() =>
+      createMockState({
+        physicsEnabled: false,
+        sceneGraph: {
+          rootIds: ['e1'],
+          nodes: {
+            e1: { entityId: 'e1', name: 'Box', components: ['Mesh3d'], visible: true, children: [] },
+          },
+        },
+      }) as never
+    );
     expect(ctx.hasPhysics).toBe(false);
   });
 
@@ -320,15 +330,15 @@ describe('buildReviewContext', () => {
     const ctx = buildReviewContext(() =>
       createMockState({
         sceneGraph: { rootIds: [], nodes: {} },
-        physicsEnabled: undefined,
-        particleEnabled: undefined,
-        audioEnabled: undefined,
+        physicsEnabled: false,
+        particleEnabled: false,
+        primaryAudio: null,
+        primaryAnimation: null,
         allScripts: undefined,
         allGameComponents: undefined,
         scenes: undefined,
         postProcessing: undefined,
         environment: undefined,
-        animationStates: undefined,
       }) as never
     );
     expect(ctx.entityCount).toBe(0);

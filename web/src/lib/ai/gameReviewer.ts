@@ -81,11 +81,13 @@ export function buildReviewContext(getState: () => EditorState): ReviewContext {
   const nodes = Object.values(state.sceneGraph.nodes);
   const entityCount = nodes.length;
 
-  // Detect entity types
+  // Detect entity types and features from scene graph components
   const entityTypes: string[] = [];
   let lightCount = 0;
   let hasPhysics = false;
   let hasParticles = false;
+  let hasAudio = false;
+  let hasAnimations = false;
 
   for (const node of nodes) {
     const comps = node.components;
@@ -97,35 +99,29 @@ export function buildReviewContext(getState: () => EditorState): ReviewContext {
     if (comps.includes('DirectionalLight') && !entityTypes.includes('directional_light')) entityTypes.push('directional_light');
     if (comps.includes('SpotLight') && !entityTypes.includes('spot_light')) entityTypes.push('spot_light');
     if (comps.includes('TerrainEnabled') && !entityTypes.includes('terrain')) entityTypes.push('terrain');
+
+    // Detect features from component tags
+    if (comps.includes('PhysicsEnabled') || comps.includes('RigidBody')) hasPhysics = true;
+    if (comps.includes('ParticleEnabled') || comps.includes('ParticleEffect')) hasParticles = true;
+    if (comps.includes('AudioEnabled') || comps.includes('AudioSource')) hasAudio = true;
+    if (comps.includes('AnimationPlayer') || comps.includes('AnimationClip')) hasAnimations = true;
   }
 
-  // Check physics
-  const physicsMap = state.physicsEnabled as Record<string, boolean> | undefined;
-  if (physicsMap) {
-    hasPhysics = Object.values(physicsMap).some(Boolean);
-  }
-
-  // Check particles
-  const particleMap = state.particleEnabled as Record<string, boolean> | undefined;
-  if (particleMap) {
-    hasParticles = Object.values(particleMap).some(Boolean);
-  }
-
-  // Check audio
-  const audioMap = state.audioEnabled as Record<string, boolean> | undefined;
-  const hasAudio = audioMap ? Object.values(audioMap).some(Boolean) : false;
+  // Also check store-level flags for primary entity
+  if (state.physicsEnabled) hasPhysics = true;
+  if (state.particleEnabled) hasParticles = true;
+  if (state.primaryAudio) hasAudio = true;
+  if (state.primaryAnimation?.availableClips?.length) hasAnimations = true;
 
   // Check scripts
-  const allScripts = state.allScripts as Record<string, { enabled: boolean }> | undefined;
-  const scriptCount = allScripts
-    ? Object.values(allScripts).filter((s) => s.enabled).length
+  const scriptCount = state.allScripts
+    ? Object.values(state.allScripts).filter((s) => s.enabled).length
     : 0;
 
   // Detect mechanics from game components
   const mechanics: string[] = [];
-  const allGameComponents = state.allGameComponents as Record<string, Array<{ type: string }>> | undefined;
-  if (allGameComponents) {
-    for (const comps of Object.values(allGameComponents)) {
+  if (state.allGameComponents) {
+    for (const comps of Object.values(state.allGameComponents)) {
       for (const comp of comps) {
         if (!mechanics.includes(comp.type)) {
           mechanics.push(comp.type);
@@ -135,18 +131,16 @@ export function buildReviewContext(getState: () => EditorState): ReviewContext {
   }
 
   // Scene count
-  const scenes = state.scenes as Array<{ id: string }> | undefined;
-  const sceneCount = scenes ? scenes.length : 1;
+  const sceneCount = state.scenes ? state.scenes.length : 1;
 
   // Post-processing
-  const pp = state.postProcessing as { bloom?: { enabled: boolean }; chromaticAberration?: { enabled: boolean } } | undefined;
+  const pp = state.postProcessing;
   const hasPostProcessing = pp
     ? Boolean(pp.bloom?.enabled || pp.chromaticAberration?.enabled)
     : false;
 
   // Environment
-  const env = state.environment as { skyboxPreset?: string } | undefined;
-  const hasSkybox = Boolean(env?.skyboxPreset);
+  const hasSkybox = Boolean(state.environment?.skyboxPreset);
 
   // Dialogue
   let hasDialogue = false;
@@ -170,14 +164,8 @@ export function buildReviewContext(getState: () => EditorState): ReviewContext {
     // uiBuilderStore not available
   }
 
-  // Animations
-  const animationStates = state.animationStates as Record<string, { availableClips: unknown[] }> | undefined;
-  const hasAnimations = animationStates
-    ? Object.values(animationStates).some((a) => a.availableClips.length > 0)
-    : false;
-
   // Project type
-  const projectType = (state as { projectType?: '2d' | '3d' }).projectType ?? '3d';
+  const projectType = (state as unknown as { projectType?: '2d' | '3d' }).projectType ?? '3d';
 
   // Genre inference from mechanics
   let genre = 'general';
