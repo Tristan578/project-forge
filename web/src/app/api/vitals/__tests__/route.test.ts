@@ -84,7 +84,7 @@ describe('POST /api/vitals', () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain('Missing required fields');
+    expect(body.error).toContain('Missing or invalid required fields');
   });
 
   it('rejects missing value field with 400', async () => {
@@ -114,7 +114,7 @@ describe('POST /api/vitals', () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain('finite numbers');
+    expect(body.error).toContain('invalid required fields');
   });
 
   it('rejects non-finite delta with 400', async () => {
@@ -123,7 +123,7 @@ describe('POST /api/vitals', () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.error).toContain('finite numbers');
+    expect(body.error).toContain('invalid required fields');
   });
 
   it('rejects invalid JSON with 400', async () => {

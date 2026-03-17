@@ -25,8 +25,10 @@ function isValidPayload(body: unknown): body is VitalsPayload {
   return (
     typeof obj.name === 'string' &&
     typeof obj.value === 'number' &&
+    Number.isFinite(obj.value) &&
     typeof obj.id === 'string' &&
-    typeof obj.delta === 'number'
+    typeof obj.delta === 'number' &&
+    Number.isFinite(obj.delta)
   );
 }
 
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest) {
 
   if (!isValidPayload(body)) {
     return NextResponse.json(
-      { error: 'Missing required fields: name, value, id, delta' },
+      { error: 'Missing or invalid required fields: name (string), value (finite number), id (string), delta (finite number)' },
       { status: 400 }
     );
   }
@@ -51,13 +53,6 @@ export async function POST(request: NextRequest) {
   if (!VALID_METRIC_NAMES.includes(body.name as typeof VALID_METRIC_NAMES[number])) {
     return NextResponse.json(
       { error: `Invalid metric name. Must be one of: ${VALID_METRIC_NAMES.join(', ')}` },
-      { status: 400 }
-    );
-  }
-
-  if (!Number.isFinite(body.value) || !Number.isFinite(body.delta)) {
-    return NextResponse.json(
-      { error: 'value and delta must be finite numbers' },
       { status: 400 }
     );
   }

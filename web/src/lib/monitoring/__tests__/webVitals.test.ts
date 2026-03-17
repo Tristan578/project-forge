@@ -111,6 +111,11 @@ describe('webVitals', () => {
     process.env.NODE_ENV = originalEnv;
   });
 
+  it('exports sendToEndpoint function', async () => {
+    const mod = await import('@/lib/monitoring/webVitals');
+    expect(typeof mod.sendToEndpoint).toBe('function');
+  });
+
   it('sendToEndpoint no-ops in non-production', async () => {
     const originalEnv = process.env.NODE_ENV;
     // @ts-expect-error -- override for test
