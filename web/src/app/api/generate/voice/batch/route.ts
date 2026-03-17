@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 5 batch requests per 5 minutes per user
-  const rl = rateLimit(`gen-voice-batch:${authResult.ctx.user.id}`, 5, 300_000);
+  const rl = await rateLimit(`gen-voice-batch:${authResult.ctx.user.id}`, 5, 300_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   let body: {

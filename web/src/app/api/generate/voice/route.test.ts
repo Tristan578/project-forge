@@ -38,7 +38,7 @@ const makeRequest = (body: Record<string, unknown>) =>
 describe('POST /api/generate/voice', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
   });
 
   it('returns 401 if unauthenticated', async () => {
@@ -54,7 +54,7 @@ describe('POST /api/generate/voice', () => {
   it('returns 429 if rate limited', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const res = await POST(makeRequest({ text: 'Hello world' }));
     expect(res.status).toBe(429);

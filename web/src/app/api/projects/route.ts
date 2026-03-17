@@ -28,7 +28,7 @@ export async function POST(req: Request) {
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 10 project creation requests per minute per user
-  const rl = rateLimit(`projects-create:${authResult.ctx.user.id}`, 10, 60_000);
+  const rl = await rateLimit(`projects-create:${authResult.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const parsed = await parseJsonBody(req);

@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 5 API key generation requests per minute per user
-  const rl = rateLimit(`apikey-gen:${authResult.ctx.user.id}`, 5, 60_000);
+  const rl = await rateLimit(`apikey-gen:${authResult.ctx.user.id}`, 5, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // MCP keys require Creator+ tier

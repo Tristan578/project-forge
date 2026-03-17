@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   const { user, clerkId } = authResult.ctx;
 
   // Rate limit: 10 publish requests per minute per user
-  const rl = rateLimit(`publish:${clerkId}`, 10, 60_000);
+  const rl = await rateLimit(`publish:${clerkId}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const parsed = await parseJsonBody(request);

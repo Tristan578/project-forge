@@ -22,7 +22,7 @@ vi.mock('@/lib/auth/api-auth', () => ({
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(() => ({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 })),
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }),
   rateLimitResponse: vi.fn(() => new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 })),
 }));
 
@@ -162,7 +162,7 @@ describe('POST /api/chat', () => {
     });
 
     // Default: rate limit allows
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
 
     // Default: body size OK
     vi.mocked(validateBodySize).mockReturnValue(true);
@@ -206,7 +206,7 @@ describe('POST /api/chat', () => {
   // -------------------------------------------------------------------------
   describe('rate limiting', () => {
     it('returns 429 when rate limited', async () => {
-      vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
+      vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
       vi.mocked(rateLimitResponse).mockReturnValue(
         new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) as never,
       );

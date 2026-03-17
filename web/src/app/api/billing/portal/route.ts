@@ -20,7 +20,7 @@ export async function POST() {
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 5 portal requests per minute per user
-  const rl = rateLimit(`billing-portal:${authResult.ctx.user.id}`, 5, 60_000);
+  const rl = await rateLimit(`billing-portal:${authResult.ctx.user.id}`, 5, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const user = authResult.ctx.user;

@@ -32,7 +32,7 @@ describe('POST /api/generate/refund', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 2, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 2, resetAt: Date.now() + 60000 });
     vi.mocked(refundTokens).mockResolvedValue(undefined);
   });
 
@@ -47,7 +47,7 @@ describe('POST /api/generate/refund', () => {
   });
 
   it('returns 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const res = await POST(makeRequest({ usageId: 'usage-1' }) as any);
     expect(res.status).toBe(429);

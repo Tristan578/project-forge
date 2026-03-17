@@ -16,7 +16,7 @@ export async function PUT(
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 10 key management requests per minute per user
-  const rl = rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
+  const rl = await rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
@@ -45,7 +45,7 @@ export async function DELETE(
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 10 key management requests per minute per user
-  const rl = rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
+  const rl = await rateLimit(`keys:${authResult.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { provider } = await params;

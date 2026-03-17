@@ -60,7 +60,7 @@ describe('POST /api/generate/model', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: mockUser as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({
+    vi.mocked(rateLimit).mockResolvedValue({
       allowed: true,
       remaining: 9,
       resetAt: Date.now() + 300_000,
@@ -89,7 +89,7 @@ describe('POST /api/generate/model', () => {
 
   describe('rate limiting', () => {
     it('returns 429 when rate limited', async () => {
-      vi.mocked(rateLimit).mockReturnValue({
+      vi.mocked(rateLimit).mockResolvedValue({
         allowed: false,
         remaining: 0,
         resetAt: Date.now() + 60_000,

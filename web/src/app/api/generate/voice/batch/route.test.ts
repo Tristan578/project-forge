@@ -60,7 +60,7 @@ const defaultVoiceSettings: VoiceSettings = {
 describe('POST /api/generate/voice/batch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 });
   });
 
   it('returns 401 if unauthenticated', async () => {
@@ -76,7 +76,7 @@ describe('POST /api/generate/voice/batch', () => {
   it('returns 429 if rate limited', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
     expect(res.status).toBe(429);

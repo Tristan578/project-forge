@@ -26,7 +26,7 @@ describe('POST /api/feedback', () => {
       clerkId: 'clerk_1',
     });
     vi.mocked(getUserByClerkId).mockResolvedValue({ id: 'user_1' } as never);
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
   });
 
   it('should return 401 when not authenticated', async () => {
@@ -47,7 +47,7 @@ describe('POST /api/feedback', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/feedback', {

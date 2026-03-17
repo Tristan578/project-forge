@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     if (!authResult.ok) return authResult.response;
 
     // 1b. Rate limit: 10 generation requests per 5 minutes per user
-    const rl = rateLimit(`gen-pixel-art:${authResult.ctx.user.id}`, 10, 300_000);
+    const rl = await rateLimit(`gen-pixel-art:${authResult.ctx.user.id}`, 10, 300_000);
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     // 2. Parse request

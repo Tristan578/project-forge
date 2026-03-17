@@ -22,7 +22,7 @@ describe('PUT /api/keys/[provider]', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
     vi.mocked(assertTier).mockReturnValue(null);
     vi.mocked(storeProviderKey).mockResolvedValue(undefined);
   });
@@ -45,7 +45,7 @@ describe('PUT /api/keys/[provider]', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { PUT } = await import('./route');
     const req = new Request('http://localhost:3000/api/keys/anthropic', {
@@ -107,7 +107,7 @@ describe('DELETE /api/keys/[provider]', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
     vi.mocked(deleteProviderKey).mockResolvedValue(undefined);
   });
 

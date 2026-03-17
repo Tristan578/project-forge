@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
   if (!authResult.ok) return authResult.response;
 
   // 1b. Rate limit: 3 requests per minute per user
-  const rl = rateLimit(`refund:${authResult.ctx.user.id}`, 3, 60_000);
+  const rl = await rateLimit(`refund:${authResult.ctx.user.id}`, 3, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Parse request

@@ -32,7 +32,7 @@ describe('POST /api/tokens/purchase', () => {
         } as never,
       },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60000 });
     vi.mocked(assertTier).mockReturnValue(null);
     process.env.STRIPE_SECRET_KEY = 'sk_test_123';
     process.env.STRIPE_PRICE_TOKEN_SPARK = 'price_spark';
@@ -58,7 +58,7 @@ describe('POST /api/tokens/purchase', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
     const req = new Request('http://localhost:3000/api/tokens/purchase', {
