@@ -3,8 +3,10 @@
 import { X, CheckCircle2, Circle, Lock } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { TUTORIALS } from '@/data/tutorials';
-import { ONBOARDING_TASKS } from '@/data/onboardingTasks';
+import { ONBOARDING_TASKS, getTasksForProjectType } from '@/data/onboardingTasks';
+import type { ProjectType } from '@/data/onboardingTasks';
 import { ACHIEVEMENTS } from '@/data/achievements';
+import { useProjectType } from '@/hooks/useProjectType';
 import * as Icons from 'lucide-react';
 
 export function OnboardingPanel() {
@@ -17,11 +19,13 @@ export function OnboardingPanel() {
     unlockedAchievements,
     startTutorial,
   } = useOnboardingStore();
+  const { projectType } = useProjectType();
 
   if (!showOnboardingPanel) return null;
 
-  const basicTasksArray = ONBOARDING_TASKS.filter(t => t.category === 'basic');
-  const advancedTasksArray = ONBOARDING_TASKS.filter(t => t.category === 'advanced');
+  const filteredTasks = getTasksForProjectType(ONBOARDING_TASKS, (projectType ?? '3d') as ProjectType);
+  const basicTasksArray = filteredTasks.filter(t => t.category === 'basic');
+  const advancedTasksArray = filteredTasks.filter(t => t.category === 'advanced');
 
   const basicProgress = Object.keys(basicTasks).length / basicTasksArray.length;
   const advancedProgress = Object.keys(advancedTasks).length / advancedTasksArray.length;

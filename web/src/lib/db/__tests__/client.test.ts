@@ -117,4 +117,24 @@ describe('db/client', () => {
       delete process.env.DATABASE_URL;
     });
   });
+
+  describe('PF-525: neon-http transaction support', () => {
+    it('NeonHttpSession.transaction() throws because neon-http does not support interactive transactions', async () => {
+      vi.resetModules();
+
+      // Import the actual NeonHttpSession to verify its transaction method
+      const sessionModule = await import('drizzle-orm/neon-http/session');
+      const NeonHttpSession = sessionModule.NeonHttpSession;
+      const fakeSql = (() => Promise.resolve({ rows: [] }));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const session = new NeonHttpSession(fakeSql as any, {} as any, undefined);
+
+      // The session's transaction() must throw -- this protects against
+      // accidentally calling db.transaction() with the neon-http driver.
+      await expect(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (session as any).transaction(async () => { /* never reached */ })
+      ).rejects.toThrow('No transactions support in neon-http driver');
+    });
+  });
 });
