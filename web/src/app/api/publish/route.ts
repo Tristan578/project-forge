@@ -3,7 +3,8 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 import { logger } from '@/lib/logging/logger';
@@ -19,8 +20,8 @@ export async function POST(request: NextRequest) {
 
   const reqLogAuth = reqLog.child({ userId: user.id });
 
-  // Rate limit: 10 publish requests per minute per user
-  const rl = await rateLimit(`publish:${clerkId}`, 10, 60_000);
+  // Rate limit: 10 publish requests per minute per user (distributed across instances)
+  const rl = await distributedRateLimit(`publish:${clerkId}`, 10, 60);
   if (!rl.allowed) {
     reqLogAuth.warn('Publish rate limit exceeded');
     return rateLimitResponse(rl.remaining, rl.resetAt);

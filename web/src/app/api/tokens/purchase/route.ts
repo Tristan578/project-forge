@@ -3,7 +3,8 @@ import Stripe from 'stripe';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import type { TokenPackage } from '@/lib/tokens/pricing';
 import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -21,8 +22,8 @@ export async function POST(req: Request) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  // Rate limit: 5 purchase requests per minute per user
-  const rl = await rateLimit(`tokens-purchase:${authResult.ctx.user.id}`, 5, 60_000);
+  // Rate limit: 5 purchase requests per minute per user (distributed across instances)
+  const rl = await distributedRateLimit(`tokens-purchase:${authResult.ctx.user.id}`, 5, 60);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // Only paid tiers can buy tokens
