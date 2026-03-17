@@ -73,6 +73,7 @@ describe('webVitals', () => {
         value: 2500,
         rating: 'good',
         id: 'v4-123',
+        delta: 2500,
       });
     });
   });
@@ -106,6 +107,23 @@ describe('webVitals', () => {
     });
 
     consoleSpy.mockRestore();
+    // @ts-expect-error -- restore
+    process.env.NODE_ENV = originalEnv;
+  });
+
+  it('sendToEndpoint no-ops in non-production', async () => {
+    const originalEnv = process.env.NODE_ENV;
+    // @ts-expect-error -- override for test
+    process.env.NODE_ENV = 'development';
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const { sendToEndpoint } = await import('@/lib/monitoring/webVitals');
+    sendToEndpoint({ name: 'LCP', value: 100, rating: 'good', id: 'test', delta: 100 });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    fetchSpy.mockRestore();
     // @ts-expect-error -- restore
     process.env.NODE_ENV = originalEnv;
   });
