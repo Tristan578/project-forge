@@ -11,6 +11,7 @@ jobs:
   doc-freshness:
     name: Check Docs Against Changed Source Files
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     continue-on-error: true
 
     steps:

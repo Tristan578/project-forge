@@ -9,7 +9,12 @@ on:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+<<<<<<< HEAD
     runs-on: ubuntu-latest
+=======
+    runs-on: ${{ (matrix.language == 'swift' && 'macos-latest') || 'ubuntu-latest' }}
+    timeout-minutes: 20
+>>>>>>> 1bb3f284 (fix: add timeout-minutes to all CI/CD jobs, cache WASM artifacts, remove ghost workflow (PF-635, PF-636, PF-637))
     permissions:
       security-events: write
       packages: read
