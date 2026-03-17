@@ -84,9 +84,6 @@ describe('getLayoutConfig', () => {
 });
 
 describe('detectKeyboard', () => {
-  const originalWindow = globalThis.window;
-  const originalScreen = globalThis.screen;
-
   beforeEach(() => {
     // Reset window and screen mocks
     vi.stubGlobal('window', {
