@@ -18,16 +18,25 @@ type UpstashRateLimiter = {
   limit: (key: string, opts: { rate: number; window: string }) => Promise<RateLimitResult>;
 };
 
-// null = not initialised, false = unavailable, Promise = initialising
-let _upstashLimiter: UpstashRateLimiter | null | false = null;
+// Singleton promise ensures only one initialization runs at a time.
+// Concurrent callers await the same promise, preventing a failed init
+// from overwriting a successful one (race condition).
+let _initPromise: Promise<UpstashRateLimiter | false> | null = null;
 
 /**
  * Lazily initialise the Upstash-backed rate limiter.
  * Returns the limiter instance, or `false` if env vars are missing.
+ *
+ * Uses a promise lock so concurrent calls share a single init attempt.
  */
-async function getUpstashLimiter(): Promise<UpstashRateLimiter | false> {
-  if (_upstashLimiter !== null) return _upstashLimiter;
+function getUpstashLimiter(): Promise<UpstashRateLimiter | false> {
+  if (!_initPromise) {
+    _initPromise = doInitUpstash();
+  }
+  return _initPromise;
+}
 
+async function doInitUpstash(): Promise<UpstashRateLimiter | false> {
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
@@ -36,7 +45,6 @@ async function getUpstashLimiter(): Promise<UpstashRateLimiter | false> {
       '[rateLimit] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN not set — falling back to in-memory rate limiting. ' +
       'Rate limits will reset on serverless cold starts.'
     );
-    _upstashLimiter = false;
     return false;
   }
 
@@ -73,11 +81,9 @@ async function getUpstashLimiter(): Promise<UpstashRateLimiter | false> {
       },
     };
 
-    _upstashLimiter = limiter;
     return limiter;
   } catch {
     console.warn('[rateLimit] Failed to initialise Upstash — falling back to in-memory rate limiting.');
-    _upstashLimiter = false;
     return false;
   }
 }
@@ -285,7 +291,7 @@ export async function rateLimitAdminRoute(
 
 /** Reset the Upstash limiter state — for testing only. */
 export function _resetUpstashLimiter(): void {
-  _upstashLimiter = null;
+  _initPromise = null;
 }
 
 /** Expose in-memory rate limit for direct testing. */
