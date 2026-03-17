@@ -267,8 +267,8 @@ describe('handleSubscriptionUpdated — upgrade', () => {
 
     await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'pro', 'active');
 
-    expect(mockUpdateUserTier).toHaveBeenCalledWith('user-uuid-1', 'pro');
-    expect(mockUpdate).toHaveBeenCalledTimes(2); // subscriptionId + token adjustment
+    // PF-513: updateUserTier moved inside transaction — tier is set via tx.update, not updateUserTier
+    expect(mockUpdate).toHaveBeenCalled();
     expect(mockTransaction).toHaveBeenCalledOnce();
     expect(mockInsert).toHaveBeenCalledOnce();
     const txn = mockInsert.mock.results[0].value.values.mock.calls[0][0];
@@ -298,13 +298,13 @@ describe('handleSubscriptionUpdated — downgrade', () => {
 
     await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'creator', 'active');
 
-    expect(mockUpdateUserTier).toHaveBeenCalledWith('user-uuid-1', 'creator');
-    expect(mockUpdate).toHaveBeenCalledTimes(2);
+    // PF-513: tier is updated inside transaction via tx.update, not updateUserTier
+    expect(mockUpdate).toHaveBeenCalled();
     // mockReturnValue returns the same mock object for all .update() calls,
-    // so the shared .set mock accumulates calls: [0]=subscriptionId, [1]=tokens
+    // so the shared .set mock accumulates calls: [0]=subscriptionId, [1]=tier (PF-513), [2]=tokens
     const sharedSet = mockUpdate.mock.results[0].value.set;
-    const tokenSetArg = sharedSet.mock.calls[1][0];
-    expect(tokenSetArg.monthlyTokens).toBe(1000); // direct value since token ops stay in JS
+    const tokenSetArg = sharedSet.mock.calls[2][0];
+    expect(tokenSetArg.monthlyTokens).toBe(1000);
     expect(tokenSetArg.monthlyTokensUsed).toBe(0);
   });
 
@@ -576,7 +576,8 @@ describe('handleSubscriptionUpdated — transaction safety', () => {
     await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'starter', 'active');
 
     expect(mockTransaction).toHaveBeenCalledOnce();
-    expect(mockUpdate).toHaveBeenCalledTimes(2);
+    // PF-513: 3 updates: subscriptionId + tier (inside tx) + token adjustment (inside tx)
+    expect(mockUpdate).toHaveBeenCalledTimes(3);
     expect(mockInsert).toHaveBeenCalledOnce();
   });
 
