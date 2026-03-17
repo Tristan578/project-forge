@@ -9,7 +9,6 @@ import {
   GDD_STANDARD_SECTIONS,
   generateGDD,
   type GameDesignDocument,
-  type GDDSection,
 } from '../gddGenerator';
 
 // ---------------------------------------------------------------------------
