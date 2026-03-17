@@ -5,6 +5,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { refundTokens } from '@/lib/tokens/service';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -55,6 +56,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = getTokenCost('voice_generation');
 
   let apiKey: string;
+  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -65,6 +67,7 @@ export async function POST(request: NextRequest) {
       { text, textLength: text.length }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -88,10 +91,19 @@ export async function POST(request: NextRequest) {
       audioBase64: result.audioBase64,
       durationSeconds: result.durationSeconds,
       provider: 'elevenlabs',
+      usageId,
     });
   } catch (err) {
+    // Refund tokens on provider failure
+    if (usageId) {
+      try {
+        await refundTokens(authResult.ctx.user.id, usageId);
+      } catch (refundErr) {
+        captureException(refundErr, { route: '/api/generate/voice', action: 'refund', usageId });
+      }
+    }
     captureException(err, { route: '/api/generate/voice', text });
     const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, usageId }, { status: 500 });
   }
 }

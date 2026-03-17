@@ -4,6 +4,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { refundTokens } from '@/lib/tokens/service';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -54,6 +55,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = frameCount * 15;
 
   let apiKey: string;
+  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -64,6 +66,7 @@ export async function POST(request: NextRequest) {
       { prompt: prompt.trim(), frameCount, style, size }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -88,12 +91,21 @@ export async function POST(request: NextRequest) {
         provider: 'replicate',
         status: result.status,
         estimatedSeconds: frameCount * 10,
+        usageId,
       },
       { status: 201 }
     );
   } catch (err) {
+    // Refund tokens on provider failure
+    if (usageId) {
+      try {
+        await refundTokens(authResult.ctx.user.id, usageId);
+      } catch (refundErr) {
+        captureException(refundErr, { route: '/api/generate/sprite-sheet', action: 'refund', usageId });
+      }
+    }
     captureException(err, { route: '/api/generate/sprite-sheet', prompt: prompt.trim() });
     const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, usageId }, { status: 500 });
   }
 }
