@@ -125,6 +125,11 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     title: 'Procedural Animation',
     component: 'procedural-anim',
     minWidth: 220,
+  'pacing-analyzer': {
+    id: 'pacing-analyzer',
+    title: 'Pacing Analyzer',
+    component: 'pacing-analyzer',
+    minWidth: 280,
     minHeight: 200,
   },
   review: {
@@ -278,6 +283,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     id: 'quest-generator',
     title: 'Quest Generator',
     component: 'quest-generator',
+    minWidth: 260,
+    minHeight: 200,
+  },
+  'pacing-analyzer': {
+    id: 'pacing-analyzer',
+    title: 'Pacing Analyzer',
+    component: 'pacing-analyzer',
     minWidth: 260,
     minHeight: 200,
   },

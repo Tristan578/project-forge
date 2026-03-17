@@ -46,6 +46,7 @@ import { WorldBuilderPanel } from './WorldBuilderPanel';
 import { TexturePainterPanel } from './TexturePainterPanel';
 import { IdeaGeneratorPanel } from './IdeaGeneratorPanel';
 import { QuestGeneratorPanel } from './QuestGeneratorPanel';
+import { PacingAnalyzerPanel } from './PacingAnalyzerPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -350,6 +351,14 @@ function QuestGeneratorPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function PacingAnalyzerPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <PacingAnalyzerPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -389,6 +398,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'texture-painter': TexturePainterPanelWrapper,
   'idea-generator': IdeaGeneratorPanelWrapper,
   'quest-generator': QuestGeneratorPanelWrapper,
+  'pacing-analyzer': PacingAnalyzerPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
