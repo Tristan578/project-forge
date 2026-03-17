@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback, lazy, Suspense, useSyncExternalStore } from 'react';
 import { X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CanvasArea } from './CanvasArea';
@@ -24,6 +24,7 @@ const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
+const QuickStartFlow = lazy(() => import('../onboarding/QuickStartFlow').then(m => ({ default: m.QuickStartFlow })));
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
@@ -248,6 +249,51 @@ function ChatOverlay() {
   );
 }
 
+// ---- Quick Start / Welcome gate ----
+
+const QUICKSTART_STORAGE_KEY = 'forge-quickstart-completed';
+const WELCOME_STORAGE_KEY = 'forge-welcomed';
+// No-op subscribe — localStorage doesn't fire events in the same tab
+const noopSubscribe = () => () => {};
+
+/**
+ * Shows QuickStartFlow for brand-new users (neither quickstart nor welcome completed).
+ * Falls back to WelcomeModal for returning users who skipped quickstart previously.
+ * Prevents both modals from appearing simultaneously.
+ */
+function QuickStartGate() {
+  const quickstartDone = useSyncExternalStore(
+    noopSubscribe,
+    () => !!localStorage.getItem(QUICKSTART_STORAGE_KEY),
+    () => true, // SSR: treat as done to avoid hydration mismatch
+  );
+  const welcomeDone = useSyncExternalStore(
+    noopSubscribe,
+    () => !!localStorage.getItem(WELCOME_STORAGE_KEY),
+    () => true,
+  );
+
+  const [quickstartDismissed, setQuickstartDismissed] = useState(false);
+
+  const handleComplete = useCallback(() => {
+    setQuickstartDismissed(true);
+  }, []);
+
+  const handleSkip = useCallback(() => {
+    setQuickstartDismissed(true);
+  }, []);
+
+  // Show QuickStartFlow to truly new users who haven't done either modal
+  if (!quickstartDone && !welcomeDone && !quickstartDismissed) {
+    return (
+      <QuickStartFlow onComplete={handleComplete} onSkip={handleSkip} />
+    );
+  }
+
+  // Show WelcomeModal for returning users who haven't dismissed it
+  return <WelcomeModal />;
+}
+
 // ---- Main EditorLayout ----
 
 export function EditorLayout() {
@@ -421,7 +467,7 @@ export function EditorLayout() {
         <TutorialOverlay />
         <OnboardingChecklist />
         <Suspense fallback={null}>
-          <WelcomeModal />
+          <QuickStartGate />
           <ShaderEditorPanel />
           <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
           <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
