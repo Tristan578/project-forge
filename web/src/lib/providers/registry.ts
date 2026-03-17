@@ -16,6 +16,7 @@ import { vercelGatewayBackend } from './backends/vercelGateway';
 import { openrouterBackend } from './backends/openrouter';
 import { githubModelsBackend } from './backends/githubModels';
 import { directBackend, resolveDirectKey } from './backends/direct';
+import { providerHealthMonitor } from '@/lib/ai/providerHealth';
 
 /** Backends ordered by preference — first configured backend wins */
 const BACKENDS: ReadonlyArray<ProviderBackend> = [
@@ -52,11 +53,21 @@ export function resolveBackend(
     // Fall through to priority resolution if pinned backend isn't available
   }
 
-  // Walk backends in priority order
+  // Walk backends in priority order, preferring healthy ones
+  let firstCapable: ProviderBackend | null = null;
   for (const backend of BACKENDS) {
     if (!backend.isConfigured()) continue;
     if (!(backend.capabilities as ProviderCapability[]).includes(capability)) continue;
+    // Track first capable backend as fallback
+    if (!firstCapable) firstCapable = backend;
+    // Skip unhealthy backends — failover to next in priority order
+    if (!providerHealthMonitor.isHealthy(backend.id)) continue;
     return buildRoute(backend, capability, preferredModel);
+  }
+
+  // All capable backends are unhealthy — use first capable as last resort
+  if (firstCapable) {
+    return buildRoute(firstCapable, capability, preferredModel);
   }
 
   return null;
