@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { Eye, EyeOff, ScanSearch, Wand2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { ScanSearch, Wand2, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import {
   analyzeAccessibility,
@@ -9,7 +9,6 @@ import {
   generateEntityDescriptions,
   buildEntitySummaries,
   createDefaultProfile,
-  COLORBLIND_FILTERS,
   type AccessibilityProfile,
   type AccessibilityAudit,
   type AccessibilityIssue,
