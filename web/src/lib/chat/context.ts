@@ -1,6 +1,7 @@
 import type { SceneGraph, SceneNode, TransformData, MaterialData, LightData, PhysicsData, AmbientLightData, EnvironmentData, EngineMode, InputBinding, InputPreset, AssetMetadata, ScriptData, AudioData, ParticleData, PostProcessingData, AudioBusDef, AnimationPlaybackState, AnimationClipData, ShaderEffectData, JointData } from '@/stores/editorStore';
 import type { GenerationJob } from '@/stores/generationStore';
 import { loadScripts as loadLibraryScripts } from '@/stores/scriptLibraryStore';
+import { buildEntityIndex } from '@/lib/engine/entityIndex';
 
 
 interface EditorSnapshot {
@@ -216,13 +217,14 @@ export function buildSceneContext(state: EditorSnapshot): string {
     }
     sections.push(lines.join('\n'));
   } else {
-    // Large scene — just summary
-    const types: Record<string, number> = {};
-    for (const node of Object.values(sceneGraph.nodes)) {
-      const type = node.components.includes('Mesh3d') ? 'mesh' : node.components.includes('PointLight') || node.components.includes('DirectionalLight') || node.components.includes('SpotLight') ? 'light' : 'other';
-      types[type] = (types[type] || 0) + 1;
-    }
-    sections.push(`Scene summary: ${types.mesh || 0} meshes, ${types.light || 0} lights, ${types.other || 0} other`);
+    // Large scene — use indexed counts for O(n) build + O(1) lookups
+    const largeSceneIndex = buildEntityIndex(sceneGraph);
+    const meshCount = largeSceneIndex.byComponent.get('Mesh3d')?.size ?? 0;
+    const lightCount = (largeSceneIndex.byComponent.get('PointLight')?.size ?? 0)
+      + (largeSceneIndex.byComponent.get('DirectionalLight')?.size ?? 0)
+      + (largeSceneIndex.byComponent.get('SpotLight')?.size ?? 0);
+    const otherCount = nodeCount - meshCount - lightCount;
+    sections.push(`Scene summary: ${meshCount} meshes, ${lightCount} lights, ${otherCount} other`);
   }
 
   // Selected entity detail
