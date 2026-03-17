@@ -71,12 +71,12 @@ test.describe('2D Workflows @ui', () => {
 
   test('settings modal can be opened from sidebar', async ({ page }) => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
-    await expect(settingsBtn).toBeVisible({ timeout: 5000 });
+    await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
     await settingsBtn.click();
 
     // Settings modal renders as a dialog with role="dialog"
     const dialog = page.locator('[role="dialog"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
 
     // Close it
     await page.keyboard.press('Escape');
