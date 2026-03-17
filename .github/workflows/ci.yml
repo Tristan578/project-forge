@@ -41,6 +41,7 @@ jobs:
               - 'mcp-server/**'
             engine:
               - 'engine/**'
+              - '.transform-gizmo-fork/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
             ci:
