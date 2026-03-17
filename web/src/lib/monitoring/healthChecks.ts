@@ -102,54 +102,6 @@ export async function checkDatabase(): Promise<ServiceHealth> {
   }
 }
 
-export async function checkAuthentication(): Promise<ServiceHealth> {
-  const publishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-  const secretKey = process.env.CLERK_SECRET_KEY;
-
-  if (!publishableKey || !secretKey) {
-    return {
-      name: 'Authentication (Clerk)',
-      status: 'degraded',
-      latencyMs: 0,
-      lastChecked: new Date().toISOString(),
-      error: 'Clerk keys not configured',
-    };
-  }
-
-  try {
-    const jwksUrl = 'https://api.clerk.com/v1/jwks';
-    const { latencyMs } = await timed(() =>
-      withTimeout(
-        fetch(jwksUrl, {
-          method: 'HEAD',
-          headers: { Authorization: `Bearer ${secretKey}` },
-        }).then((res) => {
-          if (!res.ok && res.status !== 405) {
-            throw new Error(`JWKS endpoint returned ${res.status}`);
-          }
-        }),
-        TIMEOUT_MS,
-      ),
-    );
-    return {
-      name: 'Authentication (Clerk)',
-      status: 'healthy',
-      latencyMs,
-      lastChecked: new Date().toISOString(),
-      details: { configured: true },
-    };
-  } catch (err) {
-    return {
-      name: 'Authentication (Clerk)',
-      status: 'degraded',
-      latencyMs: 0,
-      lastChecked: new Date().toISOString(),
-      error: err instanceof Error ? err.message : String(err),
-      details: { configured: true },
-    };
-  }
-}
-
 export async function checkPayments(): Promise<ServiceHealth> {
   const key = process.env.STRIPE_SECRET_KEY;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -584,6 +536,8 @@ export function sanitizeForPublic(services: ServiceHealth[]): ServiceHealth[] {
 
 /**
  * Run all service checks concurrently and return a full HealthReport.
+ * Checks run in parallel. Anthropic downtime causes 'degraded' overall but
+ * does not trigger 503 (not in CRITICAL_SERVICES).
  */
 export async function runAllHealthChecks(): Promise<HealthReport> {
   const services = await Promise.all([
@@ -593,6 +547,7 @@ export async function runAllHealthChecks(): Promise<HealthReport> {
     checkEngineCdn(),
     checkAiProviders(),
     checkClerk(),
+    checkAnthropic(),
     checkSentry(),
     checkCloudflareR2(),
   ]);
