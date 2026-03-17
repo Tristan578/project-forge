@@ -38,8 +38,10 @@ import {
   readTransformFromClipboard,
 } from '@/lib/transformClipboard';
 import { radToDeg, degToRad } from '@/lib/colorUtils';
+import { useComplexityStore } from '@/stores/slices/complexitySlice';
 
 export const InspectorPanel = memo(function InspectorPanel() {
+  const isSectionVisible = useComplexityStore((s) => s.isInspectorSectionVisible);
   const primaryId = useEditorStore((s) => s.primaryId);
   const primaryName = useEditorStore((s) => s.primaryName);
   const primaryTransform = useEditorStore((s) => s.primaryTransform);
@@ -310,7 +312,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* 2D Sprite section (only for sprite entities in 2D projects) */}
-      {is2D && entityType.includes('Sprite') && (
+      {is2D && entityType.includes('Sprite') && isSectionVisible('sprite') && (
         <InspectorErrorBoundary section="Sprite">
           <CollapsibleSection id="sprite" title="Sprite">
             <SpriteInspector />
@@ -319,7 +321,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Sprite Animation section (for sprites with animation data) */}
-      {is2D && entityType.includes('Sprite') && (
+      {is2D && entityType.includes('Sprite') && isSectionVisible('sprite-animation') && (
         <InspectorErrorBoundary section="Sprite Animation">
           <CollapsibleSection id="sprite-animation" title="Sprite Animation">
             <SpriteAnimationInspector />
@@ -328,7 +330,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Skeletal 2D Animation section (for entities with skeleton data in 2D projects) */}
-      {is2D && primaryId && (hasSkeleton || entityType.includes('Sprite')) && (
+      {is2D && primaryId && (hasSkeleton || entityType.includes('Sprite')) && isSectionVisible('skeleton-2d') && (
         <InspectorErrorBoundary section="Skeleton 2D">
           <CollapsibleSection id="skeleton-2d" title="Skeleton 2D">
             <SkeletonInspector entityId={primaryId} />
@@ -337,7 +339,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* 2D Camera section (only for camera2d entities in 2D projects) */}
-      {is2D && entityType.includes('Camera2d') && (
+      {is2D && entityType.includes('Camera2d') && isSectionVisible('camera-2d') && (
         <InspectorErrorBoundary section="Camera 2D">
           <CollapsibleSection id="camera-2d" title="Camera 2D">
             <Camera2dInspector />
@@ -346,7 +348,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Tilemap section (only in 2D projects) */}
-      {is2D && (
+      {is2D && isSectionVisible('tilemap') && (
         <InspectorErrorBoundary section="Tilemap">
           <CollapsibleSection id="tilemap" title="Tilemap">
             <TilemapInspector />
@@ -355,7 +357,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Light section (only for light entities in 3D projects) */}
-      {!is2D && primaryLight && (
+      {!is2D && primaryLight && isSectionVisible('light') && (
         <InspectorErrorBoundary section="Light">
           <CollapsibleSection id="light" title="Light">
             <LightInspector />
@@ -364,7 +366,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Material section (only for mesh entities in 3D projects — mutually exclusive with light) */}
-      {!is2D && !primaryLight && (
+      {!is2D && !primaryLight && isSectionVisible('material') && (
         <InspectorErrorBoundary section="Material">
           <CollapsibleSection id="material" title="Material">
             <MaterialInspector />
@@ -373,7 +375,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* LOD section (only for mesh entities in 3D projects) */}
-      {!is2D && !primaryLight && (
+      {!is2D && !primaryLight && isSectionVisible('lod') && (
         <InspectorErrorBoundary section="LOD">
           <CollapsibleSection id="lod" title="LOD">
             <LodInspector />
@@ -382,35 +384,43 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Physics section (conditional based on project type) */}
-      <InspectorErrorBoundary section="Physics">
-        <CollapsibleSection id="physics" title="Physics">
-          {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('physics') && (
+        <InspectorErrorBoundary section="Physics">
+          <CollapsibleSection id="physics" title="Physics">
+            {is2D ? <Physics2dInspector /> : <PhysicsInspector />}
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Joint section (for entities with physics) */}
-      <InspectorErrorBoundary section="Joints">
-        <CollapsibleSection id="joints" title="Joints">
-          <JointInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('joints') && (
+        <InspectorErrorBoundary section="Joints">
+          <CollapsibleSection id="joints" title="Joints">
+            <JointInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Terrain section (for terrain entities) */}
-      <InspectorErrorBoundary section="Terrain">
-        <CollapsibleSection id="terrain" title="Terrain">
-          <TerrainInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('terrain') && (
+        <InspectorErrorBoundary section="Terrain">
+          <CollapsibleSection id="terrain" title="Terrain">
+            <TerrainInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Audio section (for all entities) */}
-      <InspectorErrorBoundary section="Audio">
-        <CollapsibleSection id="audio" title="Audio">
-          <AudioInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('audio') && (
+        <InspectorErrorBoundary section="Audio">
+          <CollapsibleSection id="audio" title="Audio">
+            <AudioInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Reverb Zone section (for all entities in 3D) */}
-      {!is2D && primaryId && (
+      {!is2D && primaryId && isSectionVisible('reverb-zone') && (
         <InspectorErrorBoundary section="Reverb Zone">
           <CollapsibleSection id="reverb-zone" title="Reverb Zone">
             <ReverbZoneInspector entityId={primaryId} />
@@ -419,55 +429,69 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Adaptive Music section (global) */}
-      <InspectorErrorBoundary section="Adaptive Music">
-        <CollapsibleSection id="adaptive-music" title="Adaptive Music">
-          <AdaptiveMusicInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('adaptive-music') && (
+        <InspectorErrorBoundary section="Adaptive Music">
+          <CollapsibleSection id="adaptive-music" title="Adaptive Music">
+            <AdaptiveMusicInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Particle section (for all entities) */}
-      <InspectorErrorBoundary section="Particles">
-        <CollapsibleSection id="particles" title="Particles">
-          <ParticleInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('particles') && (
+        <InspectorErrorBoundary section="Particles">
+          <CollapsibleSection id="particles" title="Particles">
+            <ParticleInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Animation section (for glTF entities with animations) */}
-      <InspectorErrorBoundary section="Animation">
-        <CollapsibleSection id="animation" title="Animation">
-          <AnimationInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('animation') && (
+        <InspectorErrorBoundary section="Animation">
+          <CollapsibleSection id="animation" title="Animation">
+            <AnimationInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Keyframe property animation (D-2) */}
-      <InspectorErrorBoundary section="Animation Clips">
-        <CollapsibleSection id="animation-clips" title="Animation Clips">
-          <AnimationClipInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('animation-clips') && (
+        <InspectorErrorBoundary section="Animation Clips">
+          <CollapsibleSection id="animation-clips" title="Animation Clips">
+            <AnimationClipInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Game Components section */}
-      <InspectorErrorBoundary section="Game Components">
-        <CollapsibleSection id="game-components" title="Game Components">
-          <GameComponentInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('game-components') && (
+        <InspectorErrorBoundary section="Game Components">
+          <CollapsibleSection id="game-components" title="Game Components">
+            <GameComponentInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Game Camera section */}
-      <InspectorErrorBoundary section="Game Camera">
-        <CollapsibleSection id="game-camera" title="Game Camera">
-          <GameCameraInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('game-camera') && (
+        <InspectorErrorBoundary section="Game Camera">
+          <CollapsibleSection id="game-camera" title="Game Camera">
+            <GameCameraInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
       {/* Edit Mode section */}
-      <InspectorErrorBoundary section="Edit Mode">
-        <CollapsibleSection id="edit-mode" title="Edit Mode">
-          <EditModeInspector />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('edit-mode') && (
+        <InspectorErrorBoundary section="Edit Mode">
+          <CollapsibleSection id="edit-mode" title="Edit Mode">
+            <EditModeInspector />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
 
-      {/* Script section */}
+      {/* Script section — always visible (critical workflow) */}
       <CollapsibleSection
         id="script"
         title="Script"
@@ -500,13 +524,14 @@ export const InspectorPanel = memo(function InspectorPanel() {
         </div>
       )}
 
-
       {/* Input bindings section */}
-      <InspectorErrorBoundary section="Input Bindings">
-        <CollapsibleSection id="input-bindings" title="Input Bindings">
-          <InputBindingsPanel />
-        </CollapsibleSection>
-      </InspectorErrorBoundary>
+      {isSectionVisible('input-bindings') && (
+        <InspectorErrorBoundary section="Input Bindings">
+          <CollapsibleSection id="input-bindings" title="Input Bindings">
+            <InputBindingsPanel />
+          </CollapsibleSection>
+        </InspectorErrorBoundary>
+      )}
     </div>
   );
 });

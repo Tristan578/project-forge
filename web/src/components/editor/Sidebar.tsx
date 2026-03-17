@@ -7,6 +7,7 @@ import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { AddEntityMenu, EntityType } from './AddEntityMenu';
 import { SettingsPanel } from '../settings/SettingsPanel';
+import { ComplexityToggle } from './ComplexityToggle';
 
 interface ToolButtonProps {
   icon: React.ReactNode;
@@ -35,6 +36,7 @@ function ToolButton({ icon, active, onClick, title }: ToolButtonProps) {
 
 export function Sidebar() {
   const [showSettings, setShowSettings] = useState(false);
+  const [showComplexity, setShowComplexity] = useState(false);
   const gizmoMode = useEditorStore((s) => s.gizmoMode);
   const setGizmoMode = useEditorStore((s) => s.setGizmoMode);
   const spawnEntity = useEditorStore((s) => s.spawnEntity);
@@ -283,6 +285,26 @@ export function Sidebar() {
         active={chatOverlayOpen}
         onClick={toggleChatOverlay}
         title="AI Chat (Ctrl+K)"
+      />
+
+      {/* Complexity level toggle */}
+      {showComplexity && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setShowComplexity(false)} />
+          <div className="fixed bottom-14 left-14 z-50 w-72 rounded border border-zinc-700 bg-zinc-900 p-3 shadow-xl">
+            <ComplexityToggle />
+          </div>
+        </>
+      )}
+      <ToolButton
+        icon={
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 6h18M7 12h10M11 18h2" />
+          </svg>
+        }
+        active={showComplexity}
+        onClick={() => setShowComplexity((o) => !o)}
+        title="Complexity Level"
       />
 
       {/* Settings */}
