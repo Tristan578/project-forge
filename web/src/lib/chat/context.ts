@@ -217,12 +217,12 @@ export function buildSceneContext(state: EditorSnapshot): string {
     }
     sections.push(lines.join('\n'));
   } else {
-    // Large scene — use indexed counts for O(n) build + O(1) lookups
+    // Large scene — use indexed counts by entity type (each entity counted once)
     const largeSceneIndex = buildEntityIndex(sceneGraph);
-    const meshCount = largeSceneIndex.byComponent.get('Mesh3d')?.size ?? 0;
-    const lightCount = (largeSceneIndex.byComponent.get('PointLight')?.size ?? 0)
-      + (largeSceneIndex.byComponent.get('DirectionalLight')?.size ?? 0)
-      + (largeSceneIndex.byComponent.get('SpotLight')?.size ?? 0);
+    const meshCount = largeSceneIndex.byType.get('mesh')?.size ?? 0;
+    const lightCount = (largeSceneIndex.byType.get('point_light')?.size ?? 0)
+      + (largeSceneIndex.byType.get('directional_light')?.size ?? 0)
+      + (largeSceneIndex.byType.get('spot_light')?.size ?? 0);
     const otherCount = nodeCount - meshCount - lightCount;
     sections.push(`Scene summary: ${meshCount} meshes, ${lightCount} lights, ${otherCount} other`);
   }
