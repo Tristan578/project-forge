@@ -9,7 +9,6 @@ import {
   type SceneEntityContext,
   type GameMechanic,
   type TutorialPlan,
-  type TutorialStep,
 } from '../tutorialGenerator';
 
 // ---------------------------------------------------------------------------
