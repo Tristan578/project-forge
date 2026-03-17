@@ -7,7 +7,6 @@ import {
   REVIEWER_SYSTEM_PROMPT,
   type GameReview,
   type ReviewContext,
-  type ReviewScores,
 } from '../gameReviewer';
 
 // ---- clampScore ----
