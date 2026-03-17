@@ -1,6 +1,6 @@
 'use client';
 
-import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge } from 'lucide-react';
+import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
@@ -269,6 +269,13 @@ export function Sidebar() {
 
       {/* Spacer to push bottom tools */}
       <div className="flex-1" />
+
+      {/* Effect Bindings toggle */}
+      <ToolButton
+        icon={<Sparkles size={20} />}
+        onClick={() => openPanel('effect-bindings')}
+        title="Effect Bindings"
+      />
 
       {/* Audio Mixer toggle */}
       <ToolButton
