@@ -1,7 +1,7 @@
 /**
  * Core Web Vitals monitoring.
  *
- * Measures LCP, FCP, CLS, and INP using the `web-vitals` library and reports
+ * Measures LCP, FCP, CLS, INP, and TTFB using the `web-vitals` library and reports
  * metrics to Vercel Analytics (via the `@vercel/analytics` `track` helper) in
  * production, or logs to the console during development.
  *
@@ -95,12 +95,13 @@ function adaptMetric(metric: Metric): WebVitalMetric {
 export function reportWebVitals(reporter: MetricReporter = defaultReporter): void {
   if (typeof window === 'undefined') return;
 
-  import('web-vitals').then(({ onLCP, onFCP, onCLS, onINP }) => {
+  import('web-vitals').then(({ onLCP, onFCP, onCLS, onINP, onTTFB }) => {
     const report = (m: Metric) => reporter(adaptMetric(m));
     onLCP(report);
     onFCP(report);
     onCLS(report);
     onINP(report);
+    onTTFB(report);
   }).catch(() => {
     // web-vitals not available — silently skip
   });
