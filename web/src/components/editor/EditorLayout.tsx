@@ -35,6 +35,8 @@ import { GenerationStatus } from './GenerationStatus';
 import { HelpMenu } from './HelpMenu';
 import { AutoSaveRecovery } from './AutoSaveRecovery';
 import { TokenWarningBanner } from './TokenWarningBanner';
+import { Celebration } from '@/components/ui/Celebration';
+import { useCelebrations } from '@/hooks/useCelebrations';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
@@ -309,6 +311,9 @@ export function EditorLayout() {
   // Start generation job polling
   useGenerationPolling();
 
+  // Milestone celebrations
+  const { activeCelebration, dismissCelebration } = useCelebrations();
+
   // Hydrate generation jobs from server on mount
   useEffect(() => {
     hydrateFromServer();
@@ -475,6 +480,14 @@ export function EditorLayout() {
           <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
           <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
         </Suspense>
+        {activeCelebration && (
+          <Celebration
+            key={activeCelebration.id}
+            title={activeCelebration.title}
+            message={activeCelebration.message}
+            onDismiss={dismissCelebration}
+          />
+        )}
       </div>
     );
   }
@@ -532,6 +545,14 @@ export function EditorLayout() {
         <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       </Suspense>
       <PerformanceProfiler />
+      {activeCelebration && (
+        <Celebration
+          key={activeCelebration.id}
+          title={activeCelebration.title}
+          message={activeCelebration.message}
+          onDismiss={dismissCelebration}
+        />
+      )}
     </div>
   );
 }
