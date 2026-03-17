@@ -199,14 +199,17 @@ done
 
 log_info "Checking row counts..."
 
-declare -A table_counts
+# Portable associative storage (Bash 3.2 compatible — no declare -A).
+# We store counts as _tc_<table>=<count> variables.
+_tc_get() { eval "echo \"\${_tc_$1:-N/A}\""; }
+_tc_set() { eval "_tc_$1=\"$2\""; }
 
 count_table() {
   local table="$1"
   local min="${2:-0}"
   local count
   count=$(run_sql "SELECT COUNT(*) FROM $table")
-  table_counts["$table"]="$count"
+  _tc_set "$table" "$count"
 
   if [[ -z "$count" ]]; then
     log_fail "Row count query failed for table: $table"
@@ -339,7 +342,8 @@ log_info "Checking data freshness..."
 
 # If this is a recent backup, the most recent user or project should have
 # been created within the last 30 days. Skip on a completely empty database.
-users_count="${table_counts[users]:-0}"
+users_count="$(_tc_get users)"
+if [[ "$users_count" == "N/A" ]]; then users_count=0; fi
 
 if (( users_count > 0 )); then
   recent_user=$(run_sql "SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '30 days'")
@@ -375,7 +379,7 @@ if (( fail_count == 0 )); then
   printf "\n"
   printf "Row counts:\n"
   for table in users projects token_purchases token_usage cost_log credit_transactions published_games generation_jobs; do
-    printf "  %-30s %s\n" "$table" "${table_counts[$table]:-N/A}"
+    printf "  %-30s %s\n" "$table" "$(_tc_get "$table")"
   done
   printf "\n"
   exit 0
