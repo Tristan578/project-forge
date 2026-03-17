@@ -125,6 +125,12 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     title: 'Procedural Animation',
     component: 'procedural-anim',
     minWidth: 220,
+  },
+  tutorial: {
+    id: 'tutorial',
+    title: 'Tutorial Generator',
+    component: 'tutorial',
+    minWidth: 240,
     minHeight: 200,
   },
   'effect-bindings': {
