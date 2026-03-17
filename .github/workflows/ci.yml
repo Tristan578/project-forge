@@ -1,3 +1,4 @@
+# CI pipeline — quality gates for pull requests (PF-635)
 name: CI
 
 on:
