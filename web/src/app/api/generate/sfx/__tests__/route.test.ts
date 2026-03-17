@@ -289,13 +289,13 @@ describe('POST /api/generate/sfx', () => {
   });
 
   describe('usageId tracking and refund', () => {
-    it('returns usageId in success response', async () => {
+    it('does not expose usageId in success response (prevents double refund)', async () => {
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'explosion sound', durationSeconds: 3 }));
       const body = await res.json();
 
       expect(res.status).toBe(200);
-      expect(body.usageId).toBe('usage_sfx_001');
+      expect(body.usageId).toBeUndefined();
     });
 
     it('calls refundTokens when provider fails with platform key', async () => {

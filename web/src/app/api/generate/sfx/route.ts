@@ -78,7 +78,6 @@ export async function POST(request: NextRequest) {
       audioBase64: result.audioBase64,
       durationSeconds: result.durationSeconds,
       provider: 'elevenlabs',
-      usageId,
     });
   } catch (err) {
     // Refund tokens on provider failure
@@ -91,6 +90,6 @@ export async function POST(request: NextRequest) {
     }
     captureException(err, { route: '/api/generate/sfx', prompt });
     const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message, usageId }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

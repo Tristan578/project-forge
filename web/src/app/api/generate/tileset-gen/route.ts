@@ -81,7 +81,6 @@ export async function POST(request: NextRequest) {
         provider: 'replicate',
         status: result.status,
         estimatedSeconds: 60,
-        usageId,
       },
       { status: 201 }
     );
@@ -96,6 +95,6 @@ export async function POST(request: NextRequest) {
     }
     captureException(err, { route: '/api/generate/tileset-gen', prompt });
     const message = err instanceof Error ? err.message : 'Provider error';
-    return NextResponse.json({ error: message, usageId }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
