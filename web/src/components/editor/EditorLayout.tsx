@@ -26,6 +26,8 @@ const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').the
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
 const QuickStartFlow = lazy(() => import('../onboarding/QuickStartFlow').then(m => ({ default: m.QuickStartFlow })));
+const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
+
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
 import { DialogueOverlay } from '../game/DialogueOverlay';
@@ -57,7 +59,8 @@ const MOBILE_DISMISSED_KEY = 'forge-mobile-dismissed';
 
 const ReviewPanel = lazy(() => import('./ReviewPanel').then(m => ({ default: m.ReviewPanel })));
 
-const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui', 'gdd', 'review'];
+const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui', 'gdd', 'review', 'behavior'];
+
 
 function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; onTabChange: (tab: RightPanelTab) => void }) {
   const hasUnread = useChatStore((s) => s.hasUnreadMessages);
@@ -192,6 +195,22 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
       >
         Review
       </button>
+      <button
+        role="tab"
+        id="tab-behavior"
+        aria-selected={activeTab === 'behavior'}
+        aria-controls="tabpanel-behavior"
+        tabIndex={activeTab === 'behavior' ? 0 : -1}
+        onClick={() => onTabChange('behavior')}
+        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+          activeTab === 'behavior'
+            ? 'border-b border-teal-500 text-zinc-200'
+            : 'text-zinc-600 hover:text-zinc-400'
+        }`}
+      >
+        AI NPC
+
+      </button>
     </div>
   );
 }
@@ -207,6 +226,8 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
         {activeTab === 'modify' && <ModifyPanel />}
         {activeTab === 'gdd' && <GDDPanel />}
         {activeTab === 'review' && <ReviewPanel />}
+        {activeTab === 'behavior' && <BehaviorTreePanel />}
+
       </Suspense>
     </div>
   );
