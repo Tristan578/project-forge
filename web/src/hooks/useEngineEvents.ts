@@ -19,7 +19,6 @@ import {
   handlePerformanceEvent,
   handleEditModeEvent,
 } from './events';
-import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
 import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
 
 /**
@@ -77,17 +76,6 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       return;
     }
 
-    // Batch rapid SELECTION_CHANGED events into a single store update.
-    // When an entity is selected, the Rust bridge emits SELECTION_CHANGED
-    // followed immediately by 15+ component-data events in the same tick.
-    // Each WASM→JS call crosses the boundary synchronously, so we coalesce
-    // them with queueMicrotask and only apply the final payload.
-    const selectionBatcher = createSelectionBatcher((batchedPayload: SelectionPayload) => {
-      const set = useEditorStore.setState;
-      const get = useEditorStore.getState;
-      handleTransformEvent('SELECTION_CHANGED', batchedPayload as unknown as Record<string, unknown>, set, get);
-    });
-
     // Throttle instances for high-frequency play-mode events.
     // One shared throttle is sufficient because all throttled events are
     // display-only updates that share the same 10fps budget.
@@ -96,14 +84,6 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
     const handleEvent = (rawEvent: unknown) => {
       const parsedEvent = rawEvent as { type: string; payload: Record<string, unknown> };
       const { type, payload } = parsedEvent;
-
-      // Intercept SELECTION_CHANGED and route through the batcher so that
-      // rapid back-to-back emissions (one per selection request) coalesce
-      // into a single Zustand setState call.
-      if (type === 'SELECTION_CHANGED') {
-        selectionBatcher.batch(payload as unknown as SelectionPayload);
-        return;
-      }
 
       // On mode transitions reset the throttle so the inspector immediately
       // reflects the current engine state after switching back to edit mode.
