@@ -16,6 +16,7 @@ import { vercelGatewayBackend } from './backends/vercelGateway';
 import { openrouterBackend } from './backends/openrouter';
 import { githubModelsBackend } from './backends/githubModels';
 import { directBackend, resolveDirectKey } from './backends/direct';
+import { getProviderBreaker, type ProviderName } from './circuitBreaker';
 
 /** Backends ordered by preference — first configured backend wins */
 const BACKENDS: ReadonlyArray<ProviderBackend> = [
@@ -125,4 +126,83 @@ export function getAllBackends(): Array<{ backend: ProviderBackend; configured: 
  */
 export function getConfiguredBackends(): ProviderBackend[] {
   return BACKENDS.filter((b) => b.isConfigured());
+}
+
+/**
+ * Map backend IDs to circuit breaker provider names.
+ * For the 'direct' backend, callers should use the specific provider name
+ * (e.g. 'anthropic', 'meshy') rather than 'direct'.
+ */
+function backendIdToProviderName(backendId: BackendId): ProviderName | null {
+  const map: Partial<Record<BackendId, ProviderName>> = {
+    'vercel-gateway': 'vercel-gateway',
+    'openrouter': 'openrouter',
+    'github-models': 'github-models',
+  };
+  return map[backendId] ?? null;
+}
+
+/**
+ * Resolve the best available backend for a capability, skipping any backends
+ * whose circuit breaker is OPEN.
+ *
+ * This is the preferred resolution path for all AI operations. Falls back to
+ * the next available backend if the preferred one is open-circuited.
+ *
+ * @param capability     - The AI capability needed (e.g. 'chat', 'model3d')
+ * @param preferredModel - Optional canonical model name to route through
+ * @param preferredBackend - Pin to a specific backend ID (skips priority order)
+ * @returns ResolvedRoute with circuit breaker state, or null if no backend available
+ */
+export function resolveBackendWithCircuitBreaker(
+  capability: ProviderCapability,
+  preferredModel?: string,
+  preferredBackend?: BackendId
+): ResolvedRoute & { circuitBreakerWarning?: string } | null {
+  // If a specific backend is requested, check its circuit breaker
+  if (preferredBackend) {
+    const pinned = BACKEND_BY_ID.get(preferredBackend);
+    if (
+      pinned &&
+      pinned.isConfigured() &&
+      (pinned.capabilities as ProviderCapability[]).includes(capability)
+    ) {
+      const providerName = backendIdToProviderName(preferredBackend);
+      if (providerName) {
+        const breaker = getProviderBreaker(providerName);
+        const blocked = breaker.checkNonEssential();
+        if (!blocked) {
+          const route = buildRoute(pinned, capability, preferredModel);
+          const warning = breaker.checkEssential();
+          return warning ? { ...route, circuitBreakerWarning: warning } : route;
+        }
+        // Fall through to priority resolution
+      } else {
+        return buildRoute(pinned, capability, preferredModel);
+      }
+    }
+  }
+
+  // Walk backends in priority order, skipping open-circuited ones
+  for (const backend of BACKENDS) {
+    if (!backend.isConfigured()) continue;
+    if (!(backend.capabilities as ProviderCapability[]).includes(capability)) continue;
+
+    const providerName = backendIdToProviderName(backend.id);
+    if (providerName) {
+      const breaker = getProviderBreaker(providerName);
+      const blocked = breaker.checkNonEssential();
+      if (blocked) continue; // Skip this backend, try next
+    }
+
+    const route = buildRoute(backend, capability, preferredModel);
+    const providerName2 = backendIdToProviderName(backend.id);
+    if (providerName2) {
+      const warning = getProviderBreaker(providerName2).checkEssential();
+      return warning ? { ...route, circuitBreakerWarning: warning } : route;
+    }
+    return route;
+  }
+
+  return null;
 }
