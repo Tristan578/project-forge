@@ -135,7 +135,7 @@ export function Vec3Input({
           )}
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex gap-2 min-w-0">
         <NumberInput
           label="X"
           labelColor="text-red-400"

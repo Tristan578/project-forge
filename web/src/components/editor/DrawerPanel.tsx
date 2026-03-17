@@ -88,7 +88,7 @@ export function DrawerPanel({ side, open, onClose, width = 280, children }: Draw
               ? '-translate-x-full'
               : 'translate-x-full'
         }`}
-        style={{ width: `${width}px` }}
+        style={{ width: `min(${width}px, 85vw)` }}
       >
         {children}
       </div>

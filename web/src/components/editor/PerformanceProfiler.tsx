@@ -78,7 +78,7 @@ export function PerformanceProfiler() {
   const hasWarnings = warnings.length > 0;
 
   return (
-    <div className="fixed bottom-4 left-4 z-50 bg-gray-900 text-white rounded-lg shadow-2xl border border-gray-700 min-w-[320px]">
+    <div className="fixed bottom-4 left-4 right-4 z-50 bg-gray-900 text-white rounded-lg shadow-2xl border border-gray-700 sm:right-auto sm:min-w-[320px]">
       {/* Header */}
       <button
         onClick={handleToggle}

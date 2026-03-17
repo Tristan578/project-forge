@@ -83,7 +83,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         aria-controls="tabpanel-inspector"
         tabIndex={activeTab === 'inspector' ? 0 : -1}
         onClick={() => onTabChange('inspector')}
-        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+        className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'inspector'
             ? 'border-b border-blue-500 text-zinc-200'
             : 'text-zinc-600 hover:text-zinc-400'
@@ -98,7 +98,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         aria-controls="tabpanel-chat"
         tabIndex={activeTab === 'chat' ? 0 : -1}
         onClick={() => onTabChange('chat')}
-        className={`relative flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+        className={`relative flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'chat'
             ? 'border-b border-purple-500 text-zinc-200'
             : 'text-zinc-600 hover:text-zinc-400'
@@ -116,7 +116,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         aria-controls="tabpanel-script"
         tabIndex={activeTab === 'script' ? 0 : -1}
         onClick={() => onTabChange('script')}
-        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+        className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'script'
             ? 'border-b border-green-500 text-zinc-200'
             : 'text-zinc-600 hover:text-zinc-400'
@@ -131,7 +131,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         aria-controls="tabpanel-ui"
         tabIndex={activeTab === 'ui' ? 0 : -1}
         onClick={() => onTabChange('ui')}
-        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+        className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'ui'
             ? 'border-b border-orange-500 text-zinc-200'
             : 'text-zinc-600 hover:text-zinc-400'
@@ -174,7 +174,7 @@ function MobileBanner() {
   return (
     <div className="absolute top-10 left-2 right-2 z-20 flex items-center gap-2 rounded border border-amber-700/50 bg-amber-900/80 px-3 py-2 text-xs text-amber-200 shadow-lg">
       <span className="flex-1">SpawnForge is optimized for desktop browsers. Some features may be limited on mobile.</span>
-      <button onClick={handleDismiss} className="shrink-0 rounded p-0.5 hover:bg-amber-800">
+      <button onClick={handleDismiss} aria-label="Dismiss banner" className="shrink-0 flex items-center justify-center rounded h-8 w-8 hover:bg-amber-800">
         <X size={14} />
       </button>
     </div>
