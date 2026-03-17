@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { Trash2, Save, FileCode } from 'lucide-react';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useEditorStore } from '@/stores/editorStore';
 import { SCRIPT_TEMPLATES } from '@/lib/scripting/scriptTemplates';
 import { FORGE_TYPE_DEFINITIONS } from '@/lib/scripting/forgeTypes';
@@ -202,16 +203,14 @@ export function ScriptEditorPanel() {
           <h2 className="text-sm font-semibold text-zinc-300">Script</h2>
           <span className="text-xs text-zinc-500">{primaryName}</span>
         </div>
-        <div className="flex flex-1 flex-col items-center justify-center gap-3">
-          <FileCode size={32} className="text-zinc-600" />
-          <p className="text-xs text-zinc-500">No script attached</p>
-          <button
-            onClick={handleAddScript}
-            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
-          >
-            Add Script
-          </button>
-          <div className="mt-2 w-full">
+        <div className="flex flex-1 flex-col items-center justify-center gap-4">
+          <EmptyState
+            icon={FileCode}
+            title="No scripts"
+            description="Add a script to this entity to start coding game logic"
+            action={{ label: 'Add Script', onClick: handleAddScript }}
+          />
+          <div className="w-full">
             <p className="mb-1.5 text-center text-[10px] uppercase tracking-wider text-zinc-600">
               Or start from a template
             </p>

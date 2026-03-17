@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, memo } from 'react';
 import { Copy, ClipboardPaste, MousePointerClick } from 'lucide-react';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { useEditorStore } from '@/stores/editorStore';
 import { useChatStore } from '@/stores/chatStore';
 import { Vec3Input } from './Vec3Input';
@@ -191,13 +192,13 @@ export const InspectorPanel = memo(function InspectorPanel() {
   // No selection — show empty state hint + Scene Settings
   if (!primaryId) {
     return (
-      <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto overflow-x-hidden">
-        <div className="mb-4 flex flex-col items-center gap-2 rounded border border-zinc-800 bg-zinc-800/40 p-4">
-          <MousePointerClick size={20} className="text-zinc-600" />
-          <p className="text-xs text-zinc-500 text-center">
-            Select an entity in the hierarchy or viewport to inspect its properties
-          </p>
-        </div>
+      <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
+        <EmptyState
+          icon={MousePointerClick}
+          title="Select an entity"
+          description="Click an entity in the viewport or hierarchy to inspect its properties"
+          className="mb-4"
+        />
         <h2 className="mb-4 text-sm font-semibold text-zinc-300">Scene Settings</h2>
         <SceneSettings />
         <InputBindingsPanel />
@@ -221,7 +222,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
   `;
 
   return (
-    <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto overflow-x-hidden">
+    <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
       <h2 className="mb-4 text-sm font-semibold text-zinc-300">Inspector</h2>
 
       {/* Name field */}

@@ -2,7 +2,8 @@
 
 import { useState, memo } from 'react';
 import { useEditorStore, type AudioBusDef, type AudioEffectDef } from '@/stores/editorStore';
-import { SlidersHorizontal, Plus } from 'lucide-react';
+import { SlidersHorizontal, Plus, Volume2 } from 'lucide-react';
+import { EmptyState } from '@/components/ui/EmptyState';
 
 interface MixerStripProps {
   bus: AudioBusDef;
@@ -382,19 +383,30 @@ export const AudioMixerPanel = memo(function AudioMixerPanel() {
 
       {/* Mixer Strips Container */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden">
-        <div className="flex h-full">
-          {sortedBuses.map((bus) => (
-            <MixerStrip
-              key={bus.name}
-              bus={bus}
-              isMaster={bus.name === 'master'}
-              onVolumeChange={(volume) => updateAudioBus(bus.name, { volume })}
-              onMuteToggle={() => updateAudioBus(bus.name, { muted: !bus.muted })}
-              onSoloToggle={() => updateAudioBus(bus.name, { soloed: !bus.soloed })}
-              onEffectsChange={(effects) => setBusEffects(bus.name, effects)}
+        {sortedBuses.length === 0 ? (
+          <div className="flex h-full items-center justify-center p-6">
+            <EmptyState
+              icon={Volume2}
+              title="No audio"
+              description="Add audio components to entities to mix them here"
+              action={{ label: 'Add Bus', onClick: () => setShowAddBusDialog(true) }}
             />
-          ))}
-        </div>
+          </div>
+        ) : (
+          <div className="flex h-full">
+            {sortedBuses.map((bus) => (
+              <MixerStrip
+                key={bus.name}
+                bus={bus}
+                isMaster={bus.name === 'master'}
+                onVolumeChange={(volume) => updateAudioBus(bus.name, { volume })}
+                onMuteToggle={() => updateAudioBus(bus.name, { muted: !bus.muted })}
+                onSoloToggle={() => updateAudioBus(bus.name, { soloed: !bus.soloed })}
+                onEffectsChange={(effects) => setBusEffects(bus.name, effects)}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
