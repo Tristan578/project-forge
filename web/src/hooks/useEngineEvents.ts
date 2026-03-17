@@ -19,6 +19,24 @@ import {
   handlePerformanceEvent,
   handleEditModeEvent,
 } from './events';
+import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
+import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
+
+/**
+ * Events that carry high-frequency runtime data and can be throttled to 10fps
+ * during play mode without meaningful loss of user-perceivable fidelity.
+ *
+ * Events NOT in this set (scene graph changes, selection, mode transitions,
+ * collision events, script errors, history changes) are always processed immediately.
+ */
+const THROTTLED_EVENTS = new Set([
+  'TRANSFORM_CHANGED',
+  'ANIMATION_STATE_CHANGED',
+  'ANIMATION_LIST_CHANGED',
+  'PHYSICS_CHANGED',
+  'DEBUG_PHYSICS_CHANGED',
+  'PHYSICS2D_UPDATED',
+]);
 
 interface UseEngineEventsOptions {
   wasmModule: {
@@ -59,9 +77,28 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
       return;
     }
 
+    // Batch rapid SELECTION_CHANGED events into a single store update.
+    // When an entity is selected, the Rust bridge emits SELECTION_CHANGED
+    // followed immediately by 15+ component-data events in the same tick.
+    // Each WASM→JS call crosses the boundary synchronously, so we coalesce
+    // them with queueMicrotask and only apply the final payload.
+    const selectionBatcher = createSelectionBatcher((batchedPayload: SelectionPayload) => {
+      const set = useEditorStore.setState;
+      const get = useEditorStore.getState;
+      handleTransformEvent('SELECTION_CHANGED', batchedPayload as unknown as Record<string, unknown>, set, get);
+    });
+
     const handleEvent = (rawEvent: unknown) => {
       const parsedEvent = rawEvent as { type: string; payload: Record<string, unknown> };
       const { type, payload } = parsedEvent;
+
+      // Intercept SELECTION_CHANGED and route through the batcher so that
+      // rapid back-to-back emissions (one per selection request) coalesce
+      // into a single Zustand setState call.
+      if (type === 'SELECTION_CHANGED') {
+        selectionBatcher.batch(payload as unknown as SelectionPayload);
+        return;
+      }
 
       const set = useEditorStore.setState;
       const get = useEditorStore.getState;
