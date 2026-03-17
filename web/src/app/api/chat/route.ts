@@ -3,7 +3,6 @@ export const maxDuration = 120; // seconds — AI streaming + tool calls need mo
 import { NextRequest } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
-import Anthropic from '@anthropic-ai/sdk';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
@@ -18,6 +17,9 @@ import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
+import { resolveChat, resolveChatRoute } from '@/lib/providers/resolveChat';
+import type { AnthropicContentBlock } from '@/lib/providers/resolveChat';
+import Anthropic from '@anthropic-ai/sdk';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -283,30 +285,36 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 5. Resolve Anthropic API key
+  // 5. Resolve API key for billing — determines which key to use and deducts tokens.
+  // resolveChat() below picks the actual backend (gateway vs direct) independently.
   const estimatedCost = getTokenCost(
     'chat_message',
     messages.length > 3 ? 'long' : 'short'
   );
 
-  let apiKey: string;
   let usageId: string | undefined;
 
-  try {
-    const resolved = await resolveApiKey(
-      auth.ctx.user.id,
-      'anthropic',
-      estimatedCost,
-      messages.length > 3 ? 'chat_long' : 'chat_short',
-      { model }
-    );
-    apiKey = resolved.key;
-    usageId = resolved.usageId;
-  } catch (err) {
-    if (err instanceof ApiKeyError) {
-      return Response.json({ error: err.message, code: err.code }, { status: 402 });
+  // Only deduct tokens / check tier when using the direct (platform key) path.
+  // Gateway backends (Vercel AI Gateway, OpenRouter) bill differently.
+  const chatRoute = resolveChatRoute(model);
+  const usingDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
+
+  if (usingDirectBackend) {
+    try {
+      const resolved = await resolveApiKey(
+        auth.ctx.user.id,
+        'anthropic',
+        estimatedCost,
+        messages.length > 3 ? 'chat_long' : 'chat_short',
+        { model }
+      );
+      usageId = resolved.usageId;
+    } catch (err) {
+      if (err instanceof ApiKeyError) {
+        return Response.json({ error: err.message, code: err.code }, { status: 402 });
+      }
+      throw err;
     }
-    throw err;
   }
 
   // 5b. Server-side token budget validation
@@ -340,18 +348,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 6. Build Claude request
-  const client = new Anthropic({ apiKey });
-
+  // 6. Build request parameters
   const tools = getChatTools();
 
-  // Convert messages to Anthropic format
-  const anthropicMessages = messages.map((m) => ({
-    role: m.role as 'user' | 'assistant',
-    content: m.content as string | Anthropic.ContentBlockParam[],
-  }));
+  // Convert messages to internal ChatMessage format for resolveChat
+  const chatMessages = messages
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content as string | AnthropicContentBlock[],
+    }));
 
-  // 7. Stream response
+  // 7. Stream response via provider registry
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
@@ -416,95 +424,32 @@ export async function POST(request: NextRequest) {
           return tool;
         });
 
-        // Build params with proper typing for streaming
-        const baseParams = {
+        // Dispatch through provider registry — routes to gateway or direct Anthropic
+        const chatResult = await resolveChat(chatMessages, {
           model: model || 'claude-sonnet-4-5-20250929',
-          max_tokens: thinking ? 16384 : 4096,
-          system: systemBlocks,
-          messages: anthropicMessages,
+          systemBlocks,
           tools: cachedTools as Anthropic.Tool[],
-          stream: true as const,
-          ...(thinking ? { thinking: { type: 'enabled' as const, budget_tokens: 10000 } } : {}),
-        };
+          thinking,
+          maxTokens: thinking ? 16384 : 4096,
+        });
 
-        const response = await client.messages.create(baseParams);
+        if (!chatResult.ok) {
+          send({ type: 'error', message: chatResult.error });
+          return;
+        }
 
-        let stopReason: string | null = null;
-
-        for await (const event of response) {
-          switch (event.type) {
-            case 'content_block_start': {
-              const block = event.content_block;
-              if (block.type === 'text') {
-                send({ type: 'text_start' });
-              } else if (block.type === 'tool_use') {
-                send({
-                  type: 'tool_start',
-                  id: block.id,
-                  name: block.name,
-                  input: {},
-                });
-              } else if (block.type === 'thinking') {
-                send({ type: 'thinking_start' });
-              }
-              break;
-            }
-
-            case 'content_block_delta': {
-              const delta = event.delta;
-              if (delta.type === 'text_delta') {
-                send({ type: 'text_delta', text: delta.text });
-              } else if (delta.type === 'input_json_delta') {
-                send({ type: 'tool_input_delta', json: delta.partial_json });
-              } else if (delta.type === 'thinking_delta') {
-                send({ type: 'thinking_delta', text: delta.thinking });
-              }
-              break;
-            }
-
-            case 'content_block_stop': {
-              send({ type: 'content_block_stop', index: event.index });
-              break;
-            }
-
-            case 'message_delta': {
-              if (event.delta && 'stop_reason' in event.delta) {
-                stopReason = event.delta.stop_reason as string;
-              }
-              if (event.usage) {
-                send({
-                  type: 'usage',
-                  outputTokens: event.usage.output_tokens,
-                });
-              }
-              break;
-            }
-
-            case 'message_start': {
-              if (event.message?.usage) {
-                send({
-                  type: 'usage',
-                  inputTokens: event.message.usage.input_tokens,
-                });
-              }
-              break;
-            }
-
-            case 'message_stop': {
-              send({ type: 'turn_complete', stop_reason: stopReason || 'end_turn' });
-              break;
-            }
-          }
+        for await (const event of chatResult.stream) {
+          send(event);
         }
       } catch (err) {
         captureException(err, { route: '/api/chat', model });
 
-        // Refund tokens on API failure
+        // Refund tokens on API failure (only on direct/metered path)
         if (usageId) {
           await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
         }
 
-        const message = err instanceof Error ? err.message : 'Claude API error';
+        const message = err instanceof Error ? err.message : 'AI API error';
         send({ type: 'error', message });
       } finally {
         controller.close();

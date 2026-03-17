@@ -63,11 +63,17 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-// Mock the Anthropic SDK
-const mockCreate = vi.fn();
+// Mock resolveChat and resolveChatRoute so tests don't depend on any backend being configured
+const mockResolveChatStream = vi.fn();
+vi.mock('@/lib/providers/resolveChat', () => ({
+  resolveChat: vi.fn(),
+  // Always return a direct backend route so the route handler calls resolveApiKey for billing
+  resolveChatRoute: vi.fn(() => ({ backendId: 'direct', apiKey: '', metered: true })),
+}));
+// Keep @anthropic-ai/sdk mock for modules that still import it indirectly
 vi.mock('@anthropic-ai/sdk', () => {
   class MockAnthropic {
-    messages = { create: mockCreate };
+    messages = { create: vi.fn() };
   }
   return { default: MockAnthropic };
 });
@@ -81,6 +87,7 @@ import { resolveApiKey } from '@/lib/keys/resolver';
 import { validateBodySize, detectPromptInjection } from '@/lib/chat/sanitizer';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { resolveChat } from '@/lib/providers/resolveChat';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -101,34 +108,17 @@ function validBody() {
   };
 }
 
-/** Create an async iterable that yields SSE-like events */
-async function* makeStreamEvents() {
-  yield {
-    type: 'message_start' as const,
-    message: { usage: { input_tokens: 100 } },
-  };
-  yield {
-    type: 'content_block_start' as const,
-    index: 0,
-    content_block: { type: 'text' as const },
-  };
-  yield {
-    type: 'content_block_delta' as const,
-    index: 0,
-    delta: { type: 'text_delta' as const, text: 'Hello!' },
-  };
-  yield {
-    type: 'content_block_stop' as const,
-    index: 0,
-  };
-  yield {
-    type: 'message_delta' as const,
-    delta: { stop_reason: 'end_turn' },
-    usage: { output_tokens: 10 },
-  };
-  yield {
-    type: 'message_stop' as const,
-  };
+/**
+ * Create an async generator that yields ResolveChatStreamEvent objects.
+ * Matches the shape produced by resolveChat (not raw Anthropic SDK events).
+ */
+async function* makeResolveChatStream() {
+  yield { type: 'usage' as const, inputTokens: 100 };
+  yield { type: 'text_start' as const };
+  yield { type: 'text_delta' as const, text: 'Hello!' };
+  yield { type: 'content_block_stop' as const, index: 0 };
+  yield { type: 'usage' as const, outputTokens: 10 };
+  yield { type: 'turn_complete' as const, stop_reason: 'end_turn' };
 }
 
 /** Read an SSE response body into parsed events */
@@ -170,7 +160,7 @@ describe('POST /api/chat', () => {
     // Default: no injection
     vi.mocked(detectPromptInjection).mockReturnValue(false);
 
-    // Default: API key resolves
+    // Default: API key resolves (used for billing on direct backend path)
     vi.mocked(resolveApiKey).mockResolvedValue({
       type: 'platform',
       key: 'sk-ant-test-key',
@@ -178,8 +168,13 @@ describe('POST /api/chat', () => {
       usageId: 'usage-1',
     } as Awaited<ReturnType<typeof resolveApiKey>>);
 
-    // Default: Anthropic stream succeeds (fresh generator per call)
-    mockCreate.mockImplementation(() => makeStreamEvents());
+    // Default: resolveChat succeeds and emits the standard event sequence
+    mockResolveChatStream.mockImplementation(makeResolveChatStream);
+    vi.mocked(resolveChat).mockImplementation(async (_messages, _options) => ({
+      ok: true as const,
+      stream: mockResolveChatStream(),
+      backendId: 'direct',
+    }));
 
     // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
     vi.mocked(refundTokens).mockResolvedValue(undefined);
@@ -386,28 +381,28 @@ describe('POST /api/chat', () => {
     it('uses extended max_tokens when thinking is enabled', async () => {
       const res = await POST(makeRequest({ ...validBody(), thinking: true }));
       await res.text(); // drain stream
-      expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          max_tokens: 16384,
-          thinking: expect.objectContaining({ type: 'enabled' }),
-        }),
+      expect(resolveChat).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ maxTokens: 16384, thinking: true }),
       );
     });
 
     it('uses 4096 max_tokens without thinking', async () => {
       const res = await POST(makeRequest(validBody()));
       await res.text(); // drain stream
-      expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({ max_tokens: 4096 }),
+      expect(resolveChat).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ maxTokens: 4096 }),
       );
     });
 
     it('appends scene context to system prompt blocks', async () => {
       const res = await POST(makeRequest(validBody()));
       await res.text(); // drain stream
-      expect(mockCreate).toHaveBeenCalledWith(
+      expect(resolveChat).toHaveBeenCalledWith(
+        expect.any(Array),
         expect.objectContaining({
-          system: expect.arrayContaining([
+          systemBlocks: expect.arrayContaining([
             expect.objectContaining({ type: 'text', text: '## Scene\nEmpty' }),
           ]),
         }),
@@ -420,7 +415,8 @@ describe('POST /api/chat', () => {
   // -------------------------------------------------------------------------
   describe('error handling', () => {
     it('captures exception and refunds tokens on API failure', async () => {
-      mockCreate.mockRejectedValue(new Error('API overloaded'));
+      // Make resolveChat throw to simulate an API error inside the stream
+      vi.mocked(resolveChat).mockRejectedValue(new Error('API overloaded'));
 
       const res = await POST(makeRequest(validBody()));
       expect(res.status).toBe(200); // Stream response is always 200
@@ -464,7 +460,7 @@ describe('POST /api/chat', () => {
         metered: false,
       } as Awaited<ReturnType<typeof resolveApiKey>>);
 
-      mockCreate.mockRejectedValue(new Error('fail'));
+      vi.mocked(resolveChat).mockRejectedValue(new Error('fail'));
 
       const res = await POST(makeRequest(validBody()));
       await res.text(); // drain stream
