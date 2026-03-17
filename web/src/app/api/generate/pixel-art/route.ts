@@ -75,6 +75,7 @@ export async function POST(request: NextRequest) {
         { status: 422 }
       );
     }
+    const safePrompt = safety.filtered ?? (prompt as string);
 
     // 3. Resolve provider
     const resolvedProvider = (!provider || provider === 'auto' || provider === 'replicate') ? 'replicate' : 'openai';
@@ -88,7 +89,7 @@ export async function POST(request: NextRequest) {
         resolvedProvider as 'replicate' | 'openai',
         tokenCost,
         'pixel_art_generation',
-        { prompt, targetSize, palette, style }
+        { prompt: safePrompt, targetSize, palette, style }
       );
       usageId = resolved.usageId;
     } catch (err) {

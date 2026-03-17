@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safeText = safety.filtered ?? text;
 
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('voice_generation');
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
       'elevenlabs',
       tokenCost,
       'voice_generation',
-      { text, textLength: text.length }
+      { text: safeText, textLength: safeText.length }
     );
     apiKey = resolved.key;
   } catch (err) {
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateVoice({
-      text,
+      text: safeText,
       voiceId,
       stability,
       similarityBoost,
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
       provider: 'elevenlabs',
     });
   } catch (err) {
-    captureException(err, { route: '/api/generate/voice', text });
+    captureException(err, { route: '/api/generate/voice', text: safeText });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

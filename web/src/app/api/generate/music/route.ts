@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('music_generation');
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest) {
       'suno',
       tokenCost,
       'music_generation',
-      { prompt, durationSeconds, instrumental }
+      { prompt: safePrompt, durationSeconds, instrumental }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -85,7 +86,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.createMusic({
-      prompt,
+      prompt: safePrompt,
       durationSeconds,
       instrumental,
     });
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/music', prompt });
+    captureException(err, { route: '/api/generate/music', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

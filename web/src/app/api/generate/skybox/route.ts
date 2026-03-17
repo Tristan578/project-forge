@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('skybox_generation');
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
       'meshy',
       tokenCost,
       'skybox_generation',
-      { prompt, style }
+      { prompt: safePrompt, style }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
   try {
     // Use texture generation with skybox-specific prompt augmentation
     const result = await client.createTextToTexture({
-      prompt: `Equirectangular panorama skybox: ${prompt}`,
+      prompt: `Equirectangular panorama skybox: ${safePrompt}`,
       resolution: '2048',
       style,
       tiling: false,
@@ -95,7 +96,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/skybox', prompt });
+    captureException(err, { route: '/api/generate/skybox', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

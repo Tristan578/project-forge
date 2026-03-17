@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('texture_generation');
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
       'meshy',
       tokenCost,
       'texture_generation',
-      { prompt, resolution, style, entityId }
+      { prompt: safePrompt, resolution, style, entityId }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.createTextToTexture({
-      prompt,
+      prompt: safePrompt,
       resolution,
       style,
       tiling,
@@ -99,7 +100,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/texture', prompt });
+    captureException(err, { route: '/api/generate/texture', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

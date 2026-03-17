@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key (Replicate for tiling mode)
   const tokenCost = 50;
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
       'replicate',
       tokenCost,
       'tileset_generation',
-      { prompt, tileSize, gridSize }
+      { prompt: safePrompt, tileSize, gridSize }
     );
     apiKey = resolved.key;
   } catch (err) {
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateTileset({
-      prompt,
+      prompt: safePrompt,
       tileSize,
       gridSize,
     });
@@ -92,7 +93,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/tileset-gen', prompt });
+    captureException(err, { route: '/api/generate/tileset-gen', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

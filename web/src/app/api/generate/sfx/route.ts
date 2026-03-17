@@ -53,6 +53,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('sfx_generation');
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
       'elevenlabs',
       tokenCost,
       'sfx_generation',
-      { prompt, durationSeconds }
+      { prompt: safePrompt, durationSeconds }
     );
     apiKey = resolved.key;
   } catch (err) {
@@ -79,7 +80,7 @@ export async function POST(request: NextRequest) {
   const client = new ElevenLabsClient({ apiKey });
 
   try {
-    const result = await client.generateSfx({ prompt, durationSeconds });
+    const result = await client.generateSfx({ prompt: safePrompt, durationSeconds });
 
     return NextResponse.json({
       audioBase64: result.audioBase64,
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
       provider: 'elevenlabs',
     });
   } catch (err) {
-    captureException(err, { route: '/api/generate/sfx', prompt });
+    captureException(err, { route: '/api/generate/sfx', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

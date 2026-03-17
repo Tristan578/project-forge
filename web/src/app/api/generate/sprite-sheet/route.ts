@@ -59,6 +59,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key (Replicate for ControlNet)
   const tokenCost = frameCount * 15;
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
       'replicate',
       tokenCost,
       'sprite_sheet_generation',
-      { prompt: prompt.trim(), frameCount, style, size }
+      { prompt: safePrompt.trim(), frameCount, style, size }
     );
     apiKey = resolved.key;
   } catch (err) {
@@ -86,7 +87,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateSpriteSheet({
-      prompt: prompt.trim(),
+      prompt: safePrompt.trim(),
       frameCount,
       style,
       size,
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/sprite-sheet', prompt: prompt.trim() });
+    captureException(err, { route: '/api/generate/sprite-sheet', prompt: safePrompt.trim() });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

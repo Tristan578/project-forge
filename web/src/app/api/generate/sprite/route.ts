@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Determine provider and resolve API key
   const actualProvider = provider === 'auto'
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
       serviceName,
       tokenCost,
       'sprite_generation',
-      { prompt, style, size }
+      { prompt: safePrompt, style, size }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateSprite({
-      prompt,
+      prompt: safePrompt,
       style,
       size,
       provider: actualProvider,
@@ -115,7 +116,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/sprite', prompt });
+    captureException(err, { route: '/api/generate/sprite', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
