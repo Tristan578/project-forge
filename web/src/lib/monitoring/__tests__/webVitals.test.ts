@@ -13,8 +13,6 @@ vi.mock('web-vitals', () => ({
   onINP: (...args: unknown[]) => mockOnINP(...args),
 }));
 
-const flushPromises = () => new Promise<void>((r) => { setTimeout(r, 0); });
-
 describe('webVitals', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -44,9 +42,9 @@ describe('webVitals', () => {
     const { reportWebVitals } = await import('@/lib/monitoring/webVitals');
     reportWebVitals();
 
-    await flushPromises();
-
-    expect(mockOnLCP).toHaveBeenCalledOnce();
+    await vi.waitFor(() => {
+      expect(mockOnLCP).toHaveBeenCalledOnce();
+    });
     expect(mockOnFCP).toHaveBeenCalledOnce();
     expect(mockOnCLS).toHaveBeenCalledOnce();
     expect(mockOnINP).toHaveBeenCalledOnce();
@@ -69,13 +67,13 @@ describe('webVitals', () => {
     const { reportWebVitals } = await import('@/lib/monitoring/webVitals');
     reportWebVitals(reporter);
 
-    await flushPromises();
-
-    expect(reporter).toHaveBeenCalledWith({
-      name: 'LCP',
-      value: 2500,
-      rating: 'good',
-      id: 'v4-123',
+    await vi.waitFor(() => {
+      expect(reporter).toHaveBeenCalledWith({
+        name: 'LCP',
+        value: 2500,
+        rating: 'good',
+        id: 'v4-123',
+      });
     });
   });
 
@@ -101,11 +99,11 @@ describe('webVitals', () => {
     const { reportWebVitals } = await import('@/lib/monitoring/webVitals');
     reportWebVitals();
 
-    await flushPromises();
-
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('[Web Vital] FCP: 1200.50 (needs-improvement)')
-    );
+    await vi.waitFor(() => {
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[Web Vital] FCP: 1200.50 (needs-improvement)')
+      );
+    });
 
     consoleSpy.mockRestore();
     // @ts-expect-error -- restore
