@@ -270,7 +270,7 @@ describe('getColorblindSVGFilter', () => {
 describe('analyzeAccessibility', () => {
   it('returns 100 score for empty scene with lights', () => {
     const ctx = makeSceneContext({
-      lights: { 'light-1': { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, range: 100, innerAngle: 0.5, outerAngle: 0.8, softShadowSize: 1, shadowFarPlane: 100 } },
+      lights: { 'light-1': { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, shadowDepthBias: 0, shadowNormalBias: 0, range: 100, radius: 0, innerAngle: 0.5, outerAngle: 0.8 } },
     });
     const audit = analyzeAccessibility(ctx);
     expect(audit.score).toBe(100);
@@ -294,7 +294,7 @@ describe('analyzeAccessibility', () => {
         nodes: { e1: makeNode('e1', 'SoundEmitter', ['AudioEnabled']) },
         rootIds: ['e1'],
       },
-      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, range: 100, innerAngle: 0.5, outerAngle: 0.8, softShadowSize: 1, shadowFarPlane: 100 } },
+      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, shadowDepthBias: 0, shadowNormalBias: 0, range: 100, radius: 0, innerAngle: 0.5, outerAngle: 0.8 } },
       audioEntities: new Set(['e1']),
     });
     const audit = analyzeAccessibility(ctx);
@@ -314,7 +314,7 @@ describe('analyzeAccessibility', () => {
         e1: { baseColor: [0.5, 0.5, 0.5, 1], metallic: 0, perceptualRoughness: 0.5, reflectance: 0.5, emissive: [0, 0, 0, 1], emissiveExposureWeight: 0, alphaMode: 'opaque', alphaCutoff: 0.5, doubleSided: false, unlit: false },
         e2: { baseColor: [0.52, 0.52, 0.52, 1], metallic: 0, perceptualRoughness: 0.5, reflectance: 0.5, emissive: [0, 0, 0, 1], emissiveExposureWeight: 0, alphaMode: 'opaque', alphaCutoff: 0.5, doubleSided: false, unlit: false },
       },
-      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, range: 100, innerAngle: 0.5, outerAngle: 0.8, softShadowSize: 1, shadowFarPlane: 100 } },
+      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, shadowDepthBias: 0, shadowNormalBias: 0, range: 100, radius: 0, innerAngle: 0.5, outerAngle: 0.8 } },
     });
     const audit = analyzeAccessibility(ctx);
     expect(audit.issues.some((i) => i.message.includes('similar colors'))).toBe(true);
@@ -328,7 +328,7 @@ describe('analyzeAccessibility', () => {
 
   it('includes passedChecks array', () => {
     const ctx = makeSceneContext({
-      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, range: 100, innerAngle: 0.5, outerAngle: 0.8, softShadowSize: 1, shadowFarPlane: 100 } },
+      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, shadowDepthBias: 0, shadowNormalBias: 0, range: 100, radius: 0, innerAngle: 0.5, outerAngle: 0.8 } },
     });
     const audit = analyzeAccessibility(ctx);
     expect(audit.passedChecks.length).toBeGreaterThan(0);
@@ -343,7 +343,7 @@ describe('analyzeAccessibility', () => {
       materials: {
         e1: { baseColor: [0.001, 0.001, 0.001, 1], metallic: 0, perceptualRoughness: 0.5, reflectance: 0.5, emissive: [0, 0, 0, 1], emissiveExposureWeight: 0, alphaMode: 'opaque', alphaCutoff: 0.5, doubleSided: false, unlit: false },
       },
-      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, range: 100, innerAngle: 0.5, outerAngle: 0.8, softShadowSize: 1, shadowFarPlane: 100 } },
+      lights: { l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1, shadowsEnabled: false, shadowDepthBias: 0, shadowNormalBias: 0, range: 100, radius: 0, innerAngle: 0.5, outerAngle: 0.8 } },
     });
     const audit = analyzeAccessibility(ctx);
     expect(audit.issues.some((i) => i.message.includes('very dark'))).toBe(true);
