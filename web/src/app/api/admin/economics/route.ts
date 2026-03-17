@@ -13,7 +13,7 @@ export async function GET() {
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const rateLimitError = rateLimitAdminRoute(clerkId, 'admin-economics');
+  const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-economics');
   if (rateLimitError) return rateLimitError;
 
   const db = getDb();

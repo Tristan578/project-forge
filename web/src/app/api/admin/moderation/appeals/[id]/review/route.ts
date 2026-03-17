@@ -26,7 +26,7 @@ export async function POST(
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation-appeals-review');
+    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation-appeals-review');
     if (rateLimitError) return rateLimitError;
 
     const { id } = await params;

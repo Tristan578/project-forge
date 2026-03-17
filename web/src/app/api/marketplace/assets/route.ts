@@ -5,7 +5,7 @@ import { desc, asc, eq, ilike, and, or, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 export async function GET(req: NextRequest) {
-  const limited = rateLimitPublicRoute(req, 'marketplace-assets', 30, 5 * 60 * 1000);
+  const limited = await rateLimitPublicRoute(req, 'marketplace-assets', 30, 5 * 60 * 1000);
   if (limited) return limited;
 
   try {

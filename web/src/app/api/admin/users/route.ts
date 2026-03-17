@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const rateLimitError = rateLimitAdminRoute(clerkId, 'admin-users');
+  const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-users');
   if (rateLimitError) return rateLimitError;
 
   const { searchParams } = req.nextUrl;
