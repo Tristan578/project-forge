@@ -11,7 +11,7 @@ import { NextRequest } from 'next/server';
 // --- Mocks ---
 
 vi.mock('@/lib/rateLimit', () => ({
-  rateLimitPublicRoute: vi.fn(() => null),
+  rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
 }));
 
 // Default: TRUSTED_SENTRY is configured via env
@@ -59,7 +59,7 @@ describe('POST /api/sentry', () => {
     // Re-import after reset so module-level TRUSTED_SENTRY re-runs
     const rateLimitMod = await import('@/lib/rateLimit');
     rateLimitPublicRouteMock = rateLimitMod.rateLimitPublicRoute as ReturnType<typeof vi.fn>;
-    rateLimitPublicRouteMock.mockReturnValue(null);
+    rateLimitPublicRouteMock.mockResolvedValue(null);
 
     const routeMod = await import('../route');
     POST = routeMod.POST;
@@ -75,7 +75,7 @@ describe('POST /api/sentry', () => {
         { error: 'Too many requests. Please try again later.' },
         { status: 429 }
       );
-      rateLimitPublicRouteMock.mockReturnValue(limitResponse);
+      rateLimitPublicRouteMock.mockResolvedValue(limitResponse);
 
       const req = makeRequest(validEnvelope());
       const res = await POST(req);
@@ -92,7 +92,7 @@ describe('POST /api/sentry', () => {
     });
 
     it('proceeds when rate limit returns null', async () => {
-      rateLimitPublicRouteMock.mockReturnValue(null);
+      rateLimitPublicRouteMock.mockResolvedValue(null);
 
       const req = makeRequest(validEnvelope());
       const res = await POST(req);
@@ -141,7 +141,7 @@ describe('POST /api/sentry', () => {
       delete process.env['SENTRY_DSN'];
 
       const rateLimitMod = await import('@/lib/rateLimit');
-      (rateLimitMod.rateLimitPublicRoute as ReturnType<typeof vi.fn>).mockReturnValue(null);
+      (rateLimitMod.rateLimitPublicRoute as ReturnType<typeof vi.fn>).mockResolvedValue(null);
 
       const routeMod = await import('../route');
       const req = makeRequest(validEnvelope());

@@ -6,7 +6,7 @@ import { getDb } from '@/lib/db/client';
 
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/rateLimit', () => ({
-  rateLimitPublicRoute: vi.fn().mockReturnValue(null),
+  rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('@/lib/db/schema', () => ({
   publishedGames: { id: 'id', title: 'title', description: 'description', slug: 'slug', userId: 'userId', playCount: 'playCount', cdnUrl: 'cdnUrl', createdAt: 'createdAt', status: 'status' },

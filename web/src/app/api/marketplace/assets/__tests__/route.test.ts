@@ -18,7 +18,7 @@ vi.mock('@/lib/db/client', () => ({
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
-  rateLimitPublicRoute: vi.fn(() => null),
+  rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
 }));
 
 // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ describe('GET /api/marketplace/assets', () => {
     vi.clearAllMocks();
     vi.resetModules();
 
-    vi.mocked(rateLimitPublicRoute).mockReturnValue(null);
+    vi.mocked(rateLimitPublicRoute).mockResolvedValue(null);
 
     const mod = await import('../route');
     GET = mod.GET;
@@ -97,7 +97,7 @@ describe('GET /api/marketplace/assets', () => {
   // -------------------------------------------------------------------------
   describe('rate limiting', () => {
     it('returns 429 when rate limited', async () => {
-      vi.mocked(rateLimitPublicRoute).mockReturnValue(
+      vi.mocked(rateLimitPublicRoute).mockResolvedValue(
         new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) as never,
       );
 

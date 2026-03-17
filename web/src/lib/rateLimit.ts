@@ -18,37 +18,31 @@ type UpstashRateLimiter = {
   limit: (key: string, opts: { rate: number; window: string }) => Promise<RateLimitResult>;
 };
 
-let _upstashLimiter: UpstashRateLimiter | null | false = null; // null = not initialised, false = unavailable
+// null = not initialised, false = unavailable, Promise = initialising
+let _upstashLimiter: UpstashRateLimiter | null | false = null;
 
 /**
  * Lazily initialise the Upstash-backed rate limiter.
  * Returns the limiter instance, or `false` if env vars are missing.
  */
-function getUpstashLimiter(): UpstashRateLimiter | false {
+async function getUpstashLimiter(): Promise<UpstashRateLimiter | false> {
   if (_upstashLimiter !== null) return _upstashLimiter;
 
   const url = process.env.UPSTASH_REDIS_REST_URL;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN;
 
   if (!url || !token) {
-    if (typeof window === 'undefined') {
-      console.warn(
-        '[rateLimit] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN not set — falling back to in-memory rate limiting. ' +
-        'Rate limits will reset on serverless cold starts.'
-      );
-    }
+    console.warn(
+      '[rateLimit] UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN not set — falling back to in-memory rate limiting. ' +
+      'Rate limits will reset on serverless cold starts.'
+    );
     _upstashLimiter = false;
     return false;
   }
 
-  // Lazy-require so the module still loads when the packages are absent
-  // (e.g. lightweight test environments). The packages are listed as prod
-  // dependencies, so they will be present in every real deployment.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Redis } = require('@upstash/redis') as typeof import('@upstash/redis');
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { Ratelimit } = require('@upstash/ratelimit') as typeof import('@upstash/ratelimit');
+    const { Redis } = await import('@upstash/redis');
+    const { Ratelimit } = await import('@upstash/ratelimit');
 
     const redis = new Redis({ url, token });
 
@@ -177,7 +171,7 @@ export async function rateLimit(
   maxRequests: number,
   windowMs: number
 ): Promise<RateLimitResult> {
-  const limiter = getUpstashLimiter();
+  const limiter = await getUpstashLimiter();
   if (limiter) {
     try {
       return await limiter.limit(key, {
