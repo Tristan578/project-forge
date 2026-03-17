@@ -113,7 +113,12 @@ export function buildModificationPrompt(
   request: ModificationRequest,
   context: SceneContext,
 ): string {
-  const scope = request.scope ?? 'scene';
+  // Fall back to 'scene' scope when 'selected' is requested but nothing is selected
+  const requestedScope = request.scope ?? 'scene';
+  const scope: ModificationScope =
+    requestedScope === 'selected' && context.selectedIds.length === 0
+      ? 'scene'
+      : requestedScope;
   const relevantEntities = filterEntitiesByScope(
     context.entities,
     context.selectedIds,
