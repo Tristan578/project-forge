@@ -78,6 +78,10 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
     }
 
     // Batch rapid SELECTION_CHANGED events into a single store update.
+    // When an entity is selected, the Rust bridge emits SELECTION_CHANGED
+    // followed immediately by 15+ component-data events in the same tick.
+    // Each WASM→JS call crosses the boundary synchronously, so we coalesce
+    // them with queueMicrotask and only apply the final payload.
     const selectionBatcher = createSelectionBatcher((batchedPayload: SelectionPayload) => {
       const set = useEditorStore.setState;
       const get = useEditorStore.getState;
@@ -85,13 +89,17 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
     });
 
     // Throttle instances for high-frequency play-mode events.
+    // One shared throttle is sufficient because all throttled events are
+    // display-only updates that share the same 10fps budget.
     const playThrottle = createPlayModeThrottle(100);
 
     const handleEvent = (rawEvent: unknown) => {
       const parsedEvent = rawEvent as { type: string; payload: Record<string, unknown> };
       const { type, payload } = parsedEvent;
 
-      // Intercept SELECTION_CHANGED and route through the batcher.
+      // Intercept SELECTION_CHANGED and route through the batcher so that
+      // rapid back-to-back emissions (one per selection request) coalesce
+      // into a single Zustand setState call.
       if (type === 'SELECTION_CHANGED') {
         selectionBatcher.batch(payload as unknown as SelectionPayload);
         return;
