@@ -8,6 +8,7 @@
 
 import { create } from 'zustand';
 import { useGenerationHistoryStore } from './generationHistoryStore';
+import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 
 export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music' | 'sprite' | 'sprite_sheet' | 'tileset' | 'pixel-art';
 export type GenerationStatus = 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
@@ -64,6 +65,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     set((state) => ({
       jobs: { ...state.jobs, [job.id]: job },
     }));
+    trackEvent(AnalyticsEvent.AI_GENERATION_STARTED, { type: job.type, provider: job.provider });
 
     // Persist to database (fire-and-forget)
     fetch('/api/jobs', {
@@ -102,6 +104,11 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       const existing = state.jobs[id];
       if (!existing) return state;
       const updated = { ...existing, ...updates };
+
+      // Track completion
+      if (updated.status === 'completed' && existing.status !== 'completed') {
+        trackEvent(AnalyticsEvent.AI_GENERATION_COMPLETED, { type: updated.type, provider: updated.provider });
+      }
 
       // Auto-save completed jobs with results to generation history
       if (updated.status === 'completed' && updated.resultUrl) {

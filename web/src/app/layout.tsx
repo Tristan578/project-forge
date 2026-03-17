@@ -10,6 +10,7 @@ import { Toaster } from "sonner";
 import { AnalyticsProvider } from "@/components/AnalyticsProvider";
 import { WebVitalsReporter } from "@/components/WebVitalsReporter";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
+import { PostHogProvider } from "@/components/providers/PostHogProvider";
 import "./globals.css";
 
 // Prevent static prerendering — all pages require auth (ClerkProvider)
@@ -57,6 +58,7 @@ export default async function RootLayout({
         <SpeedInsights />
         <Toaster theme="dark" position="bottom-right" richColors />
         <ServiceWorkerRegistration />
+        <PostHogProvider />
       </body>
     </html>
   );

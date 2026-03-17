@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 
 export interface PublishedGameInfo {
   id: string;
@@ -57,6 +58,7 @@ export const usePublishStore = create<PublishState>((set, get) => ({
       const data = await res.json();
       await get().fetchPublications();
       set({ isPublishing: false });
+      trackEvent(AnalyticsEvent.GAME_PUBLISHED, { slug, projectId });
       return data.publication;
     } catch (err) {
       set({ isPublishing: false, publishError: err instanceof Error ? err.message : 'Unknown error' });
