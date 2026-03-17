@@ -24,22 +24,63 @@ function buildSceneContextFromStore(): SceneContext {
   const state = useEditorStore.getState();
   const sceneGraph = state.sceneGraph;
 
-  // The store only has primaryMaterial (for selected entity), not a full map.
-  // We build a partial materials map from what's available.
+  // Build materials map from all entities that have material-related components.
+  // The store only has primaryMaterial for the selected entity, so for other
+  // entities we use a default white material to ensure the audit can detect them.
   const materials: SceneContext['materials'] = {};
-  if (state.primaryMaterial && state.selectedIds.size > 0) {
-    const primaryId = [...state.selectedIds][0];
-    if (primaryId) {
-      materials[primaryId] = state.primaryMaterial;
+  const defaultMaterial = {
+    baseColor: [1, 1, 1, 1] as [number, number, number, number],
+    metallic: 0,
+    perceptualRoughness: 0.5,
+    reflectance: 0.5,
+    emissive: [0, 0, 0, 1] as [number, number, number, number],
+    emissiveExposureWeight: 1,
+    alphaMode: 'opaque' as const,
+    alphaCutoff: 0.5,
+    doubleSided: false,
+    unlit: false,
+  };
+  for (const node of Object.values(sceneGraph.nodes)) {
+    const hasMesh = node.components.includes('Mesh3d') || node.components.includes('Sprite');
+    if (hasMesh) {
+      // Use actual material data for the selected entity, default for others
+      const isPrimary = state.selectedIds.has(node.entityId);
+      if (isPrimary && state.primaryMaterial) {
+        materials[node.entityId] = state.primaryMaterial;
+      } else {
+        materials[node.entityId] = defaultMaterial;
+      }
     }
   }
 
-  // Lights: the store only has primaryLight for selected entity
+  // Build lights map from all entities that have light components.
+  // The store only has primaryLight for the selected entity, so for other
+  // light entities we use a default based on detected light type.
   const lights: SceneContext['lights'] = {};
-  if (state.primaryLight && state.selectedIds.size > 0) {
-    const primaryId = [...state.selectedIds][0];
-    if (primaryId) {
-      lights[primaryId] = state.primaryLight;
+  for (const node of Object.values(sceneGraph.nodes)) {
+    let lightType: 'point' | 'directional' | 'spot' | null = null;
+    if (node.components.includes('PointLight')) lightType = 'point';
+    else if (node.components.includes('DirectionalLight')) lightType = 'directional';
+    else if (node.components.includes('SpotLight')) lightType = 'spot';
+
+    if (lightType) {
+      const isPrimary = state.selectedIds.has(node.entityId);
+      if (isPrimary && state.primaryLight) {
+        lights[node.entityId] = state.primaryLight;
+      } else {
+        lights[node.entityId] = {
+          lightType,
+          color: [1, 1, 1],
+          intensity: 1000,
+          shadowsEnabled: false,
+          shadowDepthBias: 0.02,
+          shadowNormalBias: 1.8,
+          range: 20,
+          radius: 0,
+          innerAngle: 0.6,
+          outerAngle: 0.8,
+        };
+      }
     }
   }
 
