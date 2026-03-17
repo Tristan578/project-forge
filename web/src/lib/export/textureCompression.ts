@@ -156,60 +156,62 @@ export async function compressTexture(
 
   // Create ImageBitmap from the blob
   const bitmap = await createImageBitmap(inputBlob);
-  const { width, height } = fitDimensions(
-    bitmap.width,
-    bitmap.height,
-    config.maxWidth,
-    config.maxHeight
-  );
+  try {
+    const { width, height } = fitDimensions(
+      bitmap.width,
+      bitmap.height,
+      config.maxWidth,
+      config.maxHeight
+    );
 
-  let outputBlob: Blob;
+    let outputBlob: Blob;
 
-  // Prefer OffscreenCanvas for non-UI-thread compression
-  if (typeof OffscreenCanvas !== 'undefined') {
-    const canvas = new OffscreenCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Failed to get 2D context from OffscreenCanvas');
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    outputBlob = await canvas.convertToBlob({ type: mimeType, quality });
-  } else if (typeof document !== 'undefined') {
-    // Fallback to regular canvas
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Failed to get 2D context from canvas');
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    outputBlob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(
-        (blob) => {
-          if (blob) resolve(blob);
-          else reject(new Error('Canvas toBlob returned null'));
-        },
-        mimeType,
-        quality
-      );
-    });
-  } else {
-    // No canvas available (e.g. Node.js test environment) — passthrough
+    // Prefer OffscreenCanvas for non-UI-thread compression
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const canvas = new OffscreenCanvas(width, height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Failed to get 2D context from OffscreenCanvas');
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      outputBlob = await canvas.convertToBlob({ type: mimeType, quality });
+    } else if (typeof document !== 'undefined') {
+      // Fallback to regular canvas
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Failed to get 2D context from canvas');
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      outputBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Canvas toBlob returned null'));
+          },
+          mimeType,
+          quality
+        );
+      });
+    } else {
+      // No canvas available (e.g. Node.js test environment) — passthrough
+      return {
+        data: inputBlob,
+        format: mimeType,
+        originalSize,
+        compressedSize: originalSize,
+        ratio: 1,
+      };
+    }
+
     return {
-      data: inputBlob,
+      data: outputBlob,
       format: mimeType,
       originalSize,
-      compressedSize: originalSize,
-      ratio: 1,
+      compressedSize: outputBlob.size,
+      ratio: originalSize > 0 ? outputBlob.size / originalSize : 1,
     };
+  } finally {
+    bitmap.close();
   }
-
-  bitmap.close();
-
-  return {
-    data: outputBlob,
-    format: mimeType,
-    originalSize,
-    compressedSize: outputBlob.size,
-    ratio: originalSize > 0 ? outputBlob.size / originalSize : 1,
-  };
 }
 
 /**
