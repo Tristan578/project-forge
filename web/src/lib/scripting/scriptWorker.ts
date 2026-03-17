@@ -1191,7 +1191,62 @@ self.onmessage = (e: MessageEvent) => {
 
       timeData.delta = msg.dt || 0;
       timeData.elapsed = msg.elapsed || 0;
-      const newEntities = msg.entities || {};
+
+      // Delta encoding support: if entitiesDelta is present, apply it to
+      // the current entityStates to reconstruct the full state. This avoids
+      // serializing the entire scene every frame.
+      let newEntities: Record<string, EntityState>;
+      if (msg.entitiesDelta) {
+        const delta = msg.entitiesDelta as {
+          changed: Record<string, Record<string, unknown>>;
+          removed: string[];
+          isKeyframe: boolean;
+        };
+        if (delta.isKeyframe) {
+          // Keyframe: changed contains the full state
+          newEntities = delta.changed as unknown as Record<string, EntityState>;
+        } else {
+          // Incremental delta: apply changes to current state
+          newEntities = { ...entityStates };
+          for (const eid of delta.removed) {
+            delete newEntities[eid];
+          }
+          for (const [eid, components] of Object.entries(delta.changed)) {
+            if (!newEntities[eid]) {
+              newEntities[eid] = { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
+            }
+            newEntities[eid] = { ...newEntities[eid], ...components } as EntityState;
+          }
+        }
+      } else {
+        newEntities = msg.entities || {};
+      }
+
+      // Apply entityInfos delta if present
+      if (msg.entityInfosDelta) {
+        const delta = msg.entityInfosDelta as {
+          changed: Record<string, Record<string, unknown>>;
+          removed: string[];
+          isKeyframe: boolean;
+        };
+        if (delta.isKeyframe) {
+          entityInfos = delta.changed as unknown as Record<string, EntityInfo>;
+        } else {
+          const updated = { ...entityInfos };
+          for (const eid of delta.removed) {
+            delete updated[eid];
+          }
+          for (const [eid, components] of Object.entries(delta.changed)) {
+            if (!updated[eid]) {
+              updated[eid] = { name: '', type: 'unknown', colliderRadius: 0.5 };
+            }
+            updated[eid] = { ...updated[eid], ...components } as EntityInfo;
+          }
+          entityInfos = updated;
+        }
+      } else if (msg.entityInfos) {
+        entityInfos = msg.entityInfos;
+      }
 
       // Estimate 2D velocities from position deltas when engine doesn't provide them
       if (timeData.delta > 0) {
@@ -1218,7 +1273,7 @@ self.onmessage = (e: MessageEvent) => {
       prevEntityStates = { ...newEntities };
 
       entityStates = newEntities;
-      entityInfos = msg.entityInfos || entityInfos;
+      // entityInfos already updated above (delta or full)
       currentInput = msg.inputState || currentInput;
       if (msg.tilemapStates) tilemapStates = msg.tilemapStates;
       if (msg.skeletonStates) skeletonStates = msg.skeletonStates;
