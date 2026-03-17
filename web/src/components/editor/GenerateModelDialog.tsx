@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { useUserStore } from '@/stores/userStore';
+import { GenerationProgress } from '@/components/ui/GenerationProgress';
 
 interface GenerateModelDialogProps {
   isOpen: boolean;
@@ -184,6 +185,13 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
           </div>
         </div>
 
+        {/* Submission progress — shown while the API call is in flight */}
+        {isSubmitting && (
+          <div className="px-4 pb-3">
+            <GenerationProgress operation="model" />
+          </div>
+        )}
+
         {/* Footer */}
         <div className="flex gap-2 border-t border-zinc-700 px-4 py-3">
           <button
@@ -198,7 +206,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
             disabled={!canSubmit}
             className="flex-1 rounded bg-purple-600 px-4 py-2 text-sm font-medium text-white hover:bg-purple-500 disabled:opacity-50 disabled:hover:bg-purple-600"
           >
-            Generate
+            {isSubmitting ? 'Starting...' : 'Generate'}
           </button>
         </div>
       </div>
