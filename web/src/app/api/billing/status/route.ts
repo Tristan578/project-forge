@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+import { logger } from '@/lib/logging/logger';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
@@ -14,6 +15,7 @@ export async function GET() {
   if (!authResult.ok) return authResult.response;
 
   const user = authResult.ctx.user;
+  const reqLog = logger.child({ endpoint: 'GET /api/billing/status', userId: user.id });
 
   // Calculate next refill date (30 days after billing cycle start)
   let nextRefillDate: string | null = null;
@@ -30,8 +32,12 @@ export async function GET() {
       const stripe = new Stripe(stripeSecret, { apiVersion: '2025-01-27.acacia' as Stripe.LatestApiVersion });
       const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
       subscriptionStatus = subscription.status;
-    } catch {
+    } catch (err) {
       // Stripe unavailable or subscription not found — gracefully degrade
+      reqLog.warn('Stripe subscription lookup failed', {
+        subscriptionId: user.stripeSubscriptionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
