@@ -242,6 +242,7 @@ export async function POST(request: NextRequest) {
     model: string;
     sceneContext: string;
     thinking?: boolean;
+    systemOverride?: string;
   };
 
   try {
@@ -250,7 +251,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Invalid JSON' }, { status: 400 });
   }
 
-  const { messages, model, sceneContext, thinking } = body;
+  const { messages, model, sceneContext, thinking, systemOverride } = body;
   if (!messages || !Array.isArray(messages)) {
     return Response.json({ error: 'messages array required' }, { status: 400 });
   }
@@ -362,10 +363,14 @@ export async function POST(request: NextRequest) {
       try {
         // Build system prompt with cache_control for prompt caching
         // The static system prompt gets cached; sceneContext changes per request
+        const effectiveSystemPrompt =
+          typeof systemOverride === 'string' && systemOverride.length > 0
+            ? systemOverride
+            : SYSTEM_PROMPT;
         const systemBlocks: Anthropic.TextBlockParam[] = [
           {
             type: 'text' as const,
-            text: SYSTEM_PROMPT,
+            text: effectiveSystemPrompt,
             cache_control: { type: 'ephemeral' as const },
           },
         ];
