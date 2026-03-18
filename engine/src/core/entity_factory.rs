@@ -588,6 +588,10 @@ pub fn apply_duplicate_requests(
                 ],
                 scale: [transform.scale.x, transform.scale.y, transform.scale.z],
             };
+            // Duplicates are always spawned visible (EntityVisible::default() = true)
+            // regardless of source visibility. The snapshot must match the spawned state
+            // so that redo correctly restores the duplicate as visible.
+            snapshot.visible = true;
             // Don't duplicate active game camera state
             snapshot.active_game_camera = false;
 
