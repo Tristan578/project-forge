@@ -316,7 +316,8 @@ describe('POST /api/chat', () => {
 
     it('estimates cost based on message count', async () => {
       // Short conversation (<= 3 messages)
-      await POST(makeRequest(validBody()));
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
       expect(resolveApiKey).toHaveBeenCalledWith(
         'user-1',
         'anthropic',
@@ -337,7 +338,8 @@ describe('POST /api/chat', () => {
         model: 'claude-sonnet-4-5-20250929',
         sceneContext: '',
       };
-      await POST(makeRequest(body));
+      const res = await POST(makeRequest(body));
+      await res.text(); // drain stream
       expect(resolveApiKey).toHaveBeenCalledWith(
         'user-1',
         'anthropic',
