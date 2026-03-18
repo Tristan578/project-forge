@@ -23,6 +23,7 @@ import type {
 } from './types';
 import type { GameComponentData, PlatformLoopMode, WinConditionType } from '@/stores/editorStore';
 import { getPresetById } from '@/lib/materialPresets';
+import { buildEntityIndex, findEntityByName } from '@/lib/engine/entityIndex';
 
 // ===== Compound Action Types =====
 
@@ -1018,16 +1019,15 @@ export const compoundHandlers: Record<string, ToolHandler> = {
       }
     }
 
+    const mechIndex = buildEntityIndex(ctx.store.sceneGraph);
     for (const config of entityConfigs) {
       try {
         const entityName = config.entityName as string;
-        const node = Object.values(ctx.store.sceneGraph.nodes).find((n) => n.name === entityName);
-        if (!node) {
+        const entityId = findEntityByName(mechIndex, entityName);
+        if (!entityId) {
           results.push({ action: `configure "${entityName}"`, success: false, error: 'Entity not found' });
           continue;
         }
-
-        const entityId = node.entityId;
 
         if (config.physics) {
           ctx.store.togglePhysics(entityId, true);
@@ -1091,12 +1091,9 @@ export const compoundHandlers: Record<string, ToolHandler> = {
     if (targetEntityIds) {
       targets = targetEntityIds;
     } else {
-      targets = Object.values(ctx.store.sceneGraph.nodes)
-        .filter((n) => {
-          const comps = n.components || [];
-          return comps.includes('Mesh3d');
-        })
-        .map((n) => n.entityId);
+      const styleIndex = buildEntityIndex(ctx.store.sceneGraph);
+      const meshSet = styleIndex.byComponent.get('Mesh3d');
+      targets = meshSet ? [...meshSet] : [];
     }
 
     if (palette && targets.length > 0) {
