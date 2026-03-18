@@ -43,6 +43,16 @@
             "timeout": 120000
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/verify-branch.sh\"",
+            "timeout": 5000
+          }
+        ]
       }
     ],
     "PostToolUse": [

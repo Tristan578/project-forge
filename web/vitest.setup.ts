@@ -44,23 +44,13 @@ if (typeof globalThis.localStorage?.clear !== 'function') {
   });
 }
 
+// Global test isolation — prevent state leaks between tests
 // ---------------------------------------------------------------------------
-// Global test isolation: clear localStorage between every test
-// ---------------------------------------------------------------------------
-// Prevents shared state leaks where one test's localStorage.setItem
-// affects subsequent tests in the same file or pool worker.
 import { afterEach } from 'vitest';
 
 afterEach(() => {
-  // Clear localStorage mock between tests
+  // Clear localStorage between tests to prevent shared state leaks
   if (typeof globalThis.localStorage?.clear === 'function') {
     globalThis.localStorage.clear();
-  }
-
-  // Clear any lingering timers that tests forgot to clean up
-  // (prevents timer leaks between tests in the same worker)
-  if (typeof globalThis.clearTimeout === 'function') {
-    // vitest handles fake timer cleanup, but real timers from
-    // dynamic imports or module-level side effects can leak
   }
 });
