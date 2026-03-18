@@ -46,7 +46,7 @@ vi.mock('@/lib/tokens/pricing', () => ({
 }));
 
 vi.mock('@/lib/tokens/service', () => ({
-  refundTokens: vi.fn(),
+  refundTokens: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/chat/tools', () => ({
@@ -424,6 +424,27 @@ describe('POST /api/chat', () => {
         expect(captureException).toHaveBeenCalled();
       });
 
+      expect(refundTokens).toHaveBeenCalledWith('user-1', 'usage-1');
+    });
+
+    it('refunds tokens when conversation exceeds token budget (413)', async () => {
+      // Build a body where totalChars > 600_000 (MAX_INPUT_CHARS)
+      const longContent = 'x'.repeat(3999); // under per-message limit
+      const messages = Array.from({ length: 200 }, (_, i) => ({
+        role: i % 2 === 0 ? 'user' : 'assistant',
+        content: longContent,
+      }));
+      // 200 * 3999 = 799_800 > 600_000
+
+      const res = await POST(makeRequest({
+        messages,
+        model: 'claude-sonnet-4-5-20250929',
+        sceneContext: '',
+      }));
+
+      expect(res.status).toBe(413);
+      const body = await res.json();
+      expect(body.error).toContain('Conversation too long');
       expect(refundTokens).toHaveBeenCalledWith('user-1', 'usage-1');
     });
 
