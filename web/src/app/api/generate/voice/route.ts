@@ -6,6 +6,7 @@ import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { refundTokens } from '@/lib/tokens/service';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -66,6 +67,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = getTokenCost('voice_generation');
 
   let apiKey: string;
+  let usageId: string | undefined;
 
   try {
     const resolved = await resolveApiKey(
@@ -76,6 +78,7 @@ export async function POST(request: NextRequest) {
       { text: safeText, textLength: safeText.length }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -101,6 +104,14 @@ export async function POST(request: NextRequest) {
       provider: 'elevenlabs',
     });
   } catch (err) {
+    // Refund tokens on provider failure
+    if (usageId) {
+      try {
+        await refundTokens(authResult.ctx.user.id, usageId);
+      } catch (refundErr) {
+        captureException(refundErr, { route: '/api/generate/voice', action: 'refund', usageId });
+      }
+    }
     captureException(err, { route: '/api/generate/voice', text: safeText });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
