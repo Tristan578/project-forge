@@ -5,6 +5,7 @@
 import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type EngineMode } from '@/stores/editorStore';
 import { saveAutoSave } from '@/lib/sceneFile';
 import { setLastExportedScene } from '@/lib/storage/autoSave';
+import type { SceneNode } from '@/stores/slices/types';
 import type { SetFn, GetFn } from './types';
 
 const TRANSFORM_DEBOUNCE_MS = 2000;
@@ -40,8 +41,33 @@ export function handleTransformEvent(
 
     case 'SCENE_GRAPH_UPDATE': {
       const payload = data as unknown as SceneGraph;
-      useEditorStore.getState().updateSceneGraph(payload);
+      useEditorStore.getState().setFullGraph(payload);
       // Mark scene as modified and trigger debounced auto-save
+      useEditorStore.setState({ sceneModified: true });
+      scheduleAutoSave();
+      return true;
+    }
+
+    case 'SCENE_NODE_ADDED': {
+      const node = data as unknown as SceneNode;
+      useEditorStore.getState().addNode(node);
+      useEditorStore.setState({ sceneModified: true });
+      scheduleAutoSave();
+      return true;
+    }
+
+    case 'SCENE_NODE_REMOVED': {
+      const payload = data as unknown as { entityId: string };
+      useEditorStore.getState().removeNode(payload.entityId);
+      useEditorStore.setState({ sceneModified: true });
+      scheduleAutoSave();
+      return true;
+    }
+
+    case 'SCENE_NODE_UPDATED': {
+      const payload = data as unknown as { entityId: string } & Partial<SceneNode>;
+      const { entityId, ...changes } = payload;
+      useEditorStore.getState().updateNode(entityId, changes);
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
       return true;

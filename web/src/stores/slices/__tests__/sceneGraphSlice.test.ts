@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { create } from 'zustand';
 import { createMockDispatch } from './sliceTestTemplate';
 import { createSceneGraphSlice, setSceneGraphDispatcher, type SceneGraphSlice } from '../sceneGraphSlice';
-import type { SceneGraph } from '../types';
+import type { SceneGraph, SceneNode } from '../types';
 
 // SceneGraphSlice depends on external state (selectedIds, primaryId, etc.)
 // so we compose a test store with the required extra fields.
@@ -217,6 +217,166 @@ describe('sceneGraphSlice', () => {
         newParentId: null,
         insertIndex: undefined,
       });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Incremental operations
+  // ---------------------------------------------------------------------------
+
+  describe('setFullGraph', () => {
+    it('should replace the full scene graph', () => {
+      store.getState().setFullGraph(mockGraph);
+      expect(store.getState().sceneGraph.rootIds).toEqual(['cam-1', 'cube-1']);
+      expect(Object.keys(store.getState().sceneGraph.nodes)).toHaveLength(3);
+    });
+
+    it('should overwrite an existing graph', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().setFullGraph({ nodes: {}, rootIds: [] });
+      expect(store.getState().sceneGraph).toEqual({ nodes: {}, rootIds: [] });
+    });
+  });
+
+  describe('addNode', () => {
+    const newRootNode: SceneNode = {
+      entityId: 'light-1',
+      name: 'PointLight',
+      parentId: null,
+      children: [],
+      components: ['PointLight'],
+      visible: true,
+    };
+    const newChildNode: SceneNode = {
+      entityId: 'child-1',
+      name: 'Child',
+      parentId: 'cube-1',
+      children: [],
+      components: [],
+      visible: true,
+    };
+
+    it('should insert a new root node', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().addNode(newRootNode);
+
+      const { sceneGraph } = store.getState();
+      expect(sceneGraph.nodes['light-1']).toEqual(newRootNode);
+      expect(sceneGraph.rootIds).toContain('light-1');
+    });
+
+    it('should not duplicate rootIds when adding root node twice', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().addNode(newRootNode);
+      store.getState().addNode(newRootNode);
+
+      expect(store.getState().sceneGraph.rootIds.filter((id) => id === 'light-1')).toHaveLength(1);
+    });
+
+    it('should attach child node to parent children list', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().addNode(newChildNode);
+
+      const { sceneGraph } = store.getState();
+      expect(sceneGraph.nodes['child-1']).toBeDefined();
+      expect(sceneGraph.nodes['cube-1'].children).toContain('child-1');
+    });
+
+    it('should not add child to rootIds', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().addNode(newChildNode);
+
+      expect(store.getState().sceneGraph.rootIds).not.toContain('child-1');
+    });
+
+    it('should add node even when parent does not exist yet', () => {
+      store.getState().setFullGraph({ nodes: {}, rootIds: [] });
+      store.getState().addNode(newChildNode);
+
+      expect(store.getState().sceneGraph.nodes['child-1']).toBeDefined();
+    });
+  });
+
+  describe('removeNode', () => {
+    it('should remove a root node and update rootIds', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().removeNode('cam-1');
+
+      const { sceneGraph } = store.getState();
+      expect(sceneGraph.nodes['cam-1']).toBeUndefined();
+      expect(sceneGraph.rootIds).not.toContain('cam-1');
+    });
+
+    it('should remove a child node and detach from parent', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().removeNode('sphere-1');
+
+      const { sceneGraph } = store.getState();
+      expect(sceneGraph.nodes['sphere-1']).toBeUndefined();
+      expect(sceneGraph.nodes['cube-1'].children).not.toContain('sphere-1');
+    });
+
+    it('should be a no-op for unknown entity', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().removeNode('no-such-entity');
+
+      expect(Object.keys(store.getState().sceneGraph.nodes)).toHaveLength(3);
+    });
+  });
+
+  describe('updateNode', () => {
+    it('should patch name only', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().updateNode('cube-1', { name: 'PatchedCube' });
+
+      const node = store.getState().sceneGraph.nodes['cube-1'];
+      expect(node.name).toBe('PatchedCube');
+      expect(node.visible).toBe(true); // unchanged
+    });
+
+    it('should patch visible only', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().updateNode('cube-1', { visible: false });
+
+      expect(store.getState().sceneGraph.nodes['cube-1'].visible).toBe(false);
+    });
+
+    it('should move node from parent to root when parentId set to null', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().updateNode('sphere-1', { parentId: null });
+
+      const { sceneGraph } = store.getState();
+      expect(sceneGraph.nodes['sphere-1'].parentId).toBeNull();
+      expect(sceneGraph.rootIds).toContain('sphere-1');
+      // Detached from old parent
+      expect(sceneGraph.nodes['cube-1'].children).not.toContain('sphere-1');
+    });
+
+    it('should reparent node from root to a new parent', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().updateNode('cam-1', { parentId: 'cube-1' });
+
+      const { sceneGraph } = store.getState();
+      expect(sceneGraph.nodes['cam-1'].parentId).toBe('cube-1');
+      expect(sceneGraph.rootIds).not.toContain('cam-1');
+      expect(sceneGraph.nodes['cube-1'].children).toContain('cam-1');
+    });
+
+    it('should be a no-op for unknown entity', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().updateNode('ghost-entity', { name: 'Ghost' });
+
+      // Graph unchanged
+      expect(Object.keys(store.getState().sceneGraph.nodes)).toHaveLength(3);
+    });
+
+    it('should patch multiple fields at once', () => {
+      store.getState().setFullGraph(mockGraph);
+      store.getState().updateNode('cube-1', { name: 'Multi', visible: false });
+
+      const node = store.getState().sceneGraph.nodes['cube-1'];
+      expect(node.name).toBe('Multi');
+      expect(node.visible).toBe(false);
     });
   });
 });
