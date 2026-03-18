@@ -4,14 +4,16 @@ vi.mock('server-only', () => ({}));
 
 const mockInsertValues = vi.fn().mockResolvedValue({});
 const mockInsert = vi.fn().mockReturnValue({ values: mockInsertValues });
-const mockUpdateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
+const mockUpdateWhere = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) });
+const mockUpdateSet = vi.fn().mockReturnValue({ where: mockUpdateWhere });
 const mockUpdate = vi.fn().mockReturnValue({ set: mockUpdateSet });
 const mockSelectWhere = vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) });
 const mockSelect = vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: mockSelectWhere }) });
 
 const mockTxInsertValues = vi.fn().mockResolvedValue({});
 const mockTxInsert = vi.fn().mockReturnValue({ values: mockTxInsertValues });
-const mockTxUpdateSet = vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
+const mockTxUpdateWhere = vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) });
+const mockTxUpdateSet = vi.fn().mockReturnValue({ where: mockTxUpdateWhere });
 const mockTxUpdate = vi.fn().mockReturnValue({ set: mockTxUpdateSet });
 const mockTxSelectWhere = vi.fn().mockReturnValue({ limit: vi.fn().mockResolvedValue([]) });
 const mockTxSelect = vi.fn().mockReturnValue({ from: vi.fn().mockReturnValue({ where: mockTxSelectWhere }) });
@@ -46,8 +48,10 @@ describe('subscription-lifecycle', () => {
     lastTxConfig = undefined;
     mockSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
     mockTxSelectWhere.mockReturnValue({ limit: vi.fn().mockResolvedValue([mockUser]) });
-    mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
-    mockTxUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
+    mockUpdateWhere.mockReturnValue({ returning: vi.fn().mockResolvedValue([]) });
+    mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
+    mockTxUpdateWhere.mockReturnValue({ returning: vi.fn().mockResolvedValue([]) });
+    mockTxUpdateSet.mockReturnValue({ where: mockTxUpdateWhere });
   });
 
   describe('findUserByStripeCustomer', () => {
@@ -120,13 +124,25 @@ import {
   handleChargeRefunded,
 } from '../subscription-lifecycle';
 
+const mockPurchase = {
+  id: 'purchase_1',
+  userId: 'user_abc',
+  stripePaymentIntent: 'pi_abc',
+  tokens: 5000,
+  amountCents: 4900,
+  refundedCents: 0,
+  package: 'blaze',
+  createdAt: new Date(),
+};
+
 describe('handleChargeRefunded', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSelectWhere.mockReturnValue({
-      limit: vi.fn().mockResolvedValue([mockUser]),
+      limit: vi.fn().mockResolvedValue([mockPurchase]),
     });
-    mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
+    mockUpdateWhere.mockReturnValue({ returning: vi.fn().mockResolvedValue([{ id: 'purchase_1' }]) });
+    mockUpdateSet.mockReturnValue({ where: mockUpdateWhere });
   });
 
   it('does nothing when payment intent not found', async () => {
