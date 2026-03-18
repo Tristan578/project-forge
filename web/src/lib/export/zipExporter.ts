@@ -11,11 +11,13 @@ import { generateLoadingHtml, generateLoadingScript, type LoadingScreenConfig } 
 import { generatePostMessageBridge } from './embedGenerator';
 import type { ExportFormat } from './presets';
 import type { ScriptData } from '@/stores/editorStore';
+import { compressTexture, COMPRESSION_PRESETS, type CompressionConfig } from './textureCompression';
 
 export interface ZipExportOptions {
   format: ExportFormat;
   includeSourceMaps: boolean;
   compressTextures: boolean;
+  textureCompressionConfig?: CompressionConfig;
   customLoadingScreen?: LoadingScreenConfig;
   title: string;
   resolution: GameTemplateOptions['resolution'];
@@ -98,11 +100,23 @@ export async function exportAsZip(
     content: scriptBundle.code,
   });
 
-  // Add extracted assets
+  // Add extracted assets (with optional texture compression)
   for (const asset of assets) {
+    let assetBlob = asset.blob;
+
+    if (options.compressTextures && asset.blob.type.startsWith('image/')) {
+      const compressionConfig = options.textureCompressionConfig ?? COMPRESSION_PRESETS.balanced;
+      try {
+        const result = await compressTexture(asset.blob, compressionConfig);
+        assetBlob = result.data;
+      } catch {
+        // Compression failed for this asset — use original
+      }
+    }
+
     entries.push({
       path: asset.relativePath,
-      content: asset.blob,
+      content: assetBlob,
     });
   }
 

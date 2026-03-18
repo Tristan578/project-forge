@@ -4,6 +4,7 @@ import { useEditorStore } from '@/stores/editorStore';
 import { exportAsZip, type ZipExportOptions } from './zipExporter';
 import type { LoadingScreenConfig } from './loadingScreen';
 import type { ExportFormat, ExportPreset } from './presets';
+import type { CompressionConfig } from './textureCompression';
 
 export interface ExportOptions {
   title: string;
@@ -14,6 +15,7 @@ export interface ExportOptions {
   preset?: ExportPreset;
   customLoadingScreen?: LoadingScreenConfig;
   orientationLock?: 'landscape' | 'portrait' | 'none';
+  textureCompressionConfig?: CompressionConfig;
 }
 
 export async function exportGame(options: ExportOptions): Promise<Blob> {
@@ -48,7 +50,8 @@ export async function exportGame(options: ExportOptions): Promise<Blob> {
     const zipOptions: ZipExportOptions = {
       format: options.mode,
       includeSourceMaps: options.preset?.includeSourceMaps ?? false,
-      compressTextures: options.preset?.compressTextures ?? false,
+      compressTextures: options.preset?.compressTextures ?? (options.textureCompressionConfig?.format !== 'original' && options.textureCompressionConfig != null),
+      textureCompressionConfig: options.textureCompressionConfig,
       customLoadingScreen: options.customLoadingScreen,
       title: options.title,
       resolution: options.resolution,
