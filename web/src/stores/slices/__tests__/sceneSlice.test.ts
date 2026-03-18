@@ -43,9 +43,9 @@ describe('sceneSlice', () => {
   });
 
   describe('saveScene / loadScene / newScene', () => {
-    it('should dispatch save_scene', () => {
+    it('should dispatch export_scene', () => {
       store.getState().saveScene();
-      expect(mockDispatch).toHaveBeenCalledWith('save_scene', {});
+      expect(mockDispatch).toHaveBeenCalledWith('export_scene', {});
     });
 
     it('should dispatch load_scene with json', () => {

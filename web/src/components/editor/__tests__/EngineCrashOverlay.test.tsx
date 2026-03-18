@@ -13,10 +13,14 @@ const mockOnEngineCrash = vi.fn((listener: (message: string) => void) => {
 });
 const mockUnsubscribe = vi.fn();
 const mockResetEngine = vi.fn();
+const mockIsEngineCrashed = vi.fn(() => false);
+const mockGetEngineCrashMessage = vi.fn(() => null as string | null);
 
 vi.mock('@/hooks/useEngine', () => ({
   onEngineCrash: (...args: unknown[]) => mockOnEngineCrash(...(args as [(_: string) => void])),
   resetEngine: (...args: unknown[]) => mockResetEngine(...args),
+  isEngineCrashed: () => mockIsEngineCrashed(),
+  getEngineCrashMessage: () => mockGetEngineCrashMessage(),
 }));
 
 vi.mock('lucide-react', () => ({
@@ -76,6 +80,15 @@ describe('EngineCrashOverlay', () => {
     fireEvent.click(await screen.findByText('Reload Engine'));
     expect(mockResetEngine).toHaveBeenCalled();
     expect(window.location.reload).toHaveBeenCalled();
+  });
+
+  it('shows crash dialog immediately if engine already crashed before mount', () => {
+    mockIsEngineCrashed.mockReturnValue(true);
+    mockGetEngineCrashMessage.mockReturnValue('pre-existing panic');
+    render(<EngineCrashOverlay />);
+    expect(screen.getByText('Engine Crashed')).toBeDefined();
+    mockIsEngineCrashed.mockReturnValue(false);
+    mockGetEngineCrashMessage.mockReturnValue(null);
   });
 
   it('saves state to localStorage on Save & Refresh click', async () => {

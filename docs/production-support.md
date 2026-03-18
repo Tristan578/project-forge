@@ -1,662 +1,766 @@
-# SpawnForge Production Support Guide
+# SpawnForge Production Support Handbook
 
-> Last updated: 2026-03-16 | Pass #1 | SDE Audit
+## Audit Changelog
+
+| Pass | Date | Changes | Rationale |
+|------|------|---------|-----------|
+| #1 | 2026-03-16 | Initial audit: created document, 11 tickets (PF-607 to PF-617) | Baseline operational readiness assessment |
+| #2 | 2026-03-16 | Deepened runbooks with copy-pasteable commands; added dependency map, degraded mode behavior, capacity planning, disaster recovery, security incident playbook; corrected SLOs; reviewed all 11 tickets | Pass #1 had placeholder runbooks lacking actionable commands; missing DR/capacity/security sections |
+
+---
 
 ## 1. Service Inventory
 
-| Service | Health Check | SLO | Alert | Runbook | Owner |
-|---------|-------------|-----|-------|---------|-------|
-| Neon Database | `SELECT 1` (5s timeout) | 99.9% uptime, <100ms p99 | db-connection-failure (P0) | See 3.1 | Engineering |
-| Clerk Auth | JWKS HEAD (3s timeout) | 99.9% uptime | auth-failure-spike (P0) | See 3.2 | Engineering |
-| Stripe Billing | Config check (env var presence) | 99.95% uptime | payment-failure (P1) | See 3.3 | Engineering |
-| Sentry Error Tracking | DSN format validation | 99.9% uptime | N/A (meta-monitoring) | See 3.4 | Engineering |
-| Cloudflare R2 (Assets) | Config check (4 env vars) | 99.9% uptime | r2-config-failure (P1) | See 3.5 | Engineering |
-| Engine CDN (R2 Worker) | HEAD request (5s timeout) | 99.9%, <200ms TTFB | cdn-failure (P1) | See 3.6 | Engineering |
-| Anthropic Claude API | HEAD to api.anthropic.com (3s) | 99.5%, <30s generation | ai-generation-failure (P1) | See 3.7 | Engineering |
-| Meshy 3D Generation | Config check (env var) | 99%, <60s generation | asset-gen-failure (P2) | See 3.8 | Engineering |
-| ElevenLabs Audio | Config check (env var) | 99%, <10s generation | audio-gen-failure (P2) | See 3.9 | Engineering |
-| Suno Music | Config check (env var) | 99%, <30s generation | music-gen-failure (P2) | See 3.10 | Engineering |
-| WASM Engine | Runtime load (client-side) | 99.9%, <5s init | wasm-panic (P0) | See 3.11 | Engineering |
-| Vercel Hosting | Platform managed | 99.99% uptime | deployment-failure (P1) | See 3.12 | Engineering |
-| Upstash Redis (Rate Limiting) | Config check (env var) | 99.9% uptime | rate-limit-degraded (P2) | See 3.13 | Engineering |
+| Service | Provider | Purpose | Health Check | Critical? |
+|---------|----------|---------|--------------|-----------|
+| Web App | Vercel (Next.js 16) | Editor UI, API routes | `GET /api/health` | Yes |
+| Database | Neon (PostgreSQL) | User data, projects, assets, cost logs | `SELECT 1` via health check | Yes |
+| Authentication | Clerk | User auth, session management | HEAD `api.clerk.com/v1/jwks` | Yes |
+| Payments | Stripe | Subscriptions, billing | Config check only (no live ping) | Yes |
+| Error Tracking | Sentry | Error capture, tracing, replay | DSN format validation | No |
+| Asset Storage | Cloudflare R2 | User assets, marketplace files | Config check (4 env vars) | No |
+| Engine CDN | Cloudflare R2 + Worker | WASM binary delivery | HEAD `engine.spawnforge.ai/` | No |
+| Rate Limiting | Upstash Redis | Distributed rate limiting | Config check | No |
+| AI (Anthropic) | Anthropic API | Chat, scene generation | HEAD `api.anthropic.com` | No |
+| AI (Meshy) | Meshy API | 3D model generation | Config check | No |
+| AI (ElevenLabs) | ElevenLabs API | SFX/voice generation | Config check | No |
+| AI (Suno) | Suno API | Music generation | Config check | No |
 
-### Current State Summary
+### Critical vs Non-Critical
 
-**What exists (strong foundation):**
-- Health check library (`web/src/lib/monitoring/healthChecks.ts`) with 10 individual checks
-- Aggregated health API at `GET /api/health` with critical vs. non-critical distinction
-- Sentry integration (client + server) with performance tracing, session replay, source maps
-- Sentry tunnel (`POST /api/sentry`) to bypass ad-blockers
-- Post-deploy smoke tests for staging and production (health, homepage, static, WASM)
-- CI pipeline with lint, typecheck, unit tests, E2E, security audit, bundle size checks
-- CD pipeline with staging-first deployment, quality gates, and automated production promotion
-- In-memory rate limiting with IP-based public route protection
-- CSP headers, X-Frame-Options, X-Content-Type-Options
-- Cost observability DB tables (tokenConfig, tierConfig, costLog, creditTransactions)
-- Weekly repository health report (GitHub Actions agent)
-
-**What is missing (gaps identified):**
-- No external synthetic monitoring (uptime checks from outside the network)
-- No structured log aggregation or search (relies on Vercel's built-in logs)
-- No distributed tracing across AI provider call chains
-- No database connection pool monitoring or slow query alerts
-- No client-side performance metrics collection (Web Vitals)
-- No cost anomaly detection for AI provider spend
-- No SSL/TLS certificate expiry monitoring
-- No CDN cache hit rate monitoring
-- No deployment rollback automation (manual Vercel rollback only)
-- No defined on-call rotation or PagerDuty integration
-- No incident response channel or war room process
-- No post-mortem template or blameless review process
-- Health check endpoint is not rate-limited (makes real network calls per request)
-- Upstash rate limiting listed as a dependency but implementation is in-memory only
-- Duplicate health check functions: `checkAuthentication()` and `checkClerk()` do the same thing
-- Stripe health check only validates config presence, not API reachability
-- R2 and AI provider checks only validate config presence, not actual connectivity
-
-## 2. Incident Severity Levels
-
-| Level | Definition | Response Time | Notification | Example |
-|-------|-----------|--------------|-------------|---------|
-| P0 | Service down, all users affected | <15 min | PagerDuty + Slack #incidents | DB down, WASM panic, auth failure |
-| P1 | Major feature degraded, >10% users | <1 hour | Slack #incidents | AI generation failing, export broken, CDN down |
-| P2 | Minor feature degraded, <10% users | <4 hours | Slack #engineering | Asset gen slow, analytics gap, rate limit exhaustion |
-| P3 | Cosmetic/non-blocking | Next business day | GitHub issue | UI glitch, doc error, non-critical test failure |
-
-## 3. Runbooks
-
-### 3.1 Database (Neon)
-
-**Health check implementation:** `checkDatabase()` in `healthChecks.ts` runs `SELECT 1` via `@neondatabase/serverless` with 5s timeout.
-
-**Critical service:** Yes. Database failure triggers HTTP 503 on `/api/health`.
-
-**Symptoms:**
-- `/api/health` returns `status: "error"`, `database: "unavailable"`
-- API routes returning 500 errors
-- "connection refused" or "timed out" errors in Sentry
-
-**Impact:** All authenticated features unavailable. Save/load, publish, user settings, cost tracking, billing -- all down.
-
-**Diagnosis steps:**
-1. Check `/api/health` response -- look at Database (Neon) service status
-2. Check Neon dashboard: https://console.neon.tech
-3. Verify `DATABASE_URL` env var on Vercel (Settings > Environment Variables)
-4. Check if Neon region is experiencing an outage: https://neonstatus.com
-
-**Recovery:**
-1. If Neon outage: wait for resolution; communicate to users via status page
-2. If config issue: update `DATABASE_URL` on Vercel, trigger redeployment
-3. If connection pool exhaustion: restart Vercel serverless functions (redeploy)
-4. If schema mismatch: check recent migrations, rollback if needed
-
-**Prevention:**
-- Connection pool monitoring (GAP: not currently implemented)
-- Slow query alerting (GAP: not currently implemented)
+Only **Database (Neon)** and **Clerk** trigger HTTP 503 on the health endpoint. All other services degrade gracefully -- the app remains usable without AI, payments, or asset storage.
 
 ---
 
-### 3.2 Authentication (Clerk)
+## 2. Service Level Objectives (SLOs)
 
-**Health check implementation:** `checkClerk()` in `healthChecks.ts` sends HEAD to `https://api.clerk.com/v1/jwks` with Bearer auth, 3s timeout.
-
-**Critical service:** Yes. Clerk failure triggers HTTP 503 on `/api/health`.
-
-**Symptoms:**
-- Users cannot sign in or sign up
-- `/api/health` shows Clerk as "degraded" or "down"
-- 401/403 errors on authenticated routes
-- JWKS endpoint unreachable
-
-**Impact:** All authenticated features unavailable. Unauthenticated routes (homepage, `/dev`, published games) still work.
-
-**Diagnosis steps:**
-1. Check `/api/health` Clerk service status
-2. Check Clerk dashboard: https://dashboard.clerk.com
-3. Check Clerk status page: https://status.clerk.com
-4. Verify `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` on Vercel
-
-**Recovery:**
-1. If Clerk outage: wait for resolution; `/dev` route bypasses auth for development
-2. If key rotation needed: update both keys on Vercel, trigger redeployment
-3. If JWKS cache stale: Clerk SDK handles this automatically
+| Metric | Target | Measurement | Alert Threshold |
+|--------|--------|-------------|-----------------|
+| Availability | 99.9% (8.7h downtime/year) | External synthetic monitor (1-min interval, 3 regions) | 2 consecutive failures = page |
+| Health endpoint latency (p99) | < 3s | Sentry transaction traces | > 5s for 5 min |
+| Homepage TTFB (p95) | < 1.5s | Web Vitals reporting | > 3s for 10% of sessions |
+| LCP (p75) | < 2.5s | Web Vitals reporting | > 4s warning, > 6s critical |
+| CLS (p75) | < 0.1 | Web Vitals reporting | > 0.25 |
+| INP (p75) | < 200ms | Web Vitals reporting | > 500ms |
+| WASM init (p95) | < 8s | Custom Sentry measurement | > 10s |
+| API error rate (5xx) | < 1% | Sentry/Vercel analytics | > 2% for 5 min |
+| AI generation success rate | > 95% | costLog table aggregation | < 90% for 15 min |
+| DB query latency (p99) | < 500ms | Sentry spans | > 1s for 5 min |
+| Deploy success rate | 100% | CD workflow outcomes | Any failure = investigate |
 
 ---
 
-### 3.3 Payments (Stripe)
-
-**Health check implementation:** `checkPayments()` in `healthChecks.ts` validates `STRIPE_SECRET_KEY` presence only. Does not ping Stripe API.
-
-**Symptoms:**
-- Subscription creation/update fails
-- Webhook events not processing
-- Sentry errors from `/api/webhooks/stripe`
-
-**Impact:** Payment processing and tier upgrades unavailable. Existing subscriptions and features continue working.
-
-**Diagnosis steps:**
-1. Check `/api/health` Payments (Stripe) status
-2. Check Stripe dashboard: https://dashboard.stripe.com
-3. Check webhook logs: Stripe Dashboard > Developers > Webhooks
-4. Verify `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET` on Vercel
-
-**Recovery:**
-1. If Stripe outage: payments queue and retry automatically
-2. If webhook secret rotated: update `STRIPE_WEBHOOK_SECRET` on Vercel, redeploy
-3. If failed webhooks: replay events from Stripe dashboard
-
----
-
-### 3.4 Error Tracking (Sentry)
-
-**Health check implementation:** `checkSentry()` validates DSN format (starts with `https://`, contains `@`). No network call.
-
-**Config:**
-- Org: `tristan-nolan`, Project: `spawnforge-ai`
-- Client: 10% trace sample rate in prod, 100% in dev
-- Session replay: 10% sessions, 100% on error
-- Tunnel: `POST /api/sentry` bypasses ad-blockers
-- Source maps uploaded and deleted after upload
-
-**Symptoms:**
-- No errors appearing in Sentry dashboard
-- `/api/health` shows Sentry as "degraded"
-
-**Impact:** Errors not tracked. No user-facing impact, but blind to production issues.
-
-**Diagnosis steps:**
-1. Check `/api/health` Sentry status
-2. Verify `NEXT_PUBLIC_SENTRY_DSN` / `SENTRY_DSN` on Vercel
-3. Check Sentry status: https://status.sentry.io
-4. Test tunnel: `curl -X POST https://spawnforge.ai/api/sentry` (should return 400, not 503)
-5. Verify `SENTRY_AUTH_TOKEN` for source map uploads
-
-**Recovery:**
-1. If DSN missing: add `NEXT_PUBLIC_SENTRY_DSN` and `SENTRY_DSN` to Vercel env vars
-2. If tunnel broken: check `/api/sentry` route, verify rate limiting not blocking
-3. If source maps missing: re-run build with `SENTRY_AUTH_TOKEN` set
-
----
-
-### 3.5 Asset Storage (Cloudflare R2)
-
-**Health check implementation:** `checkCloudflareR2()` validates 4 env vars: `CLOUDFLARE_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`. No actual S3 API call.
-
-**Symptoms:**
-- Asset upload failures
-- Published game assets not loading
-- `/api/health` shows R2 as "degraded" or "down"
-
-**Impact:** Asset upload and retrieval broken. Existing cached assets may still work.
-
-**Diagnosis steps:**
-1. Check `/api/health` R2 status
-2. Check Cloudflare dashboard: https://dash.cloudflare.com
-3. Verify all 4 R2 env vars on Vercel
-4. Check R2 bucket `spawnforge-assets` exists and has correct CORS policy
-
-**Recovery:**
-1. If Cloudflare R2 outage: wait for resolution
-2. If credential rotation: update all 4 env vars, redeploy
-3. If bucket deleted: recreate bucket, restore from backup if available
-
----
-
-### 3.6 Engine CDN (R2 Worker)
-
-**Health check implementation:** `checkEngineCdn()` sends HEAD request to `NEXT_PUBLIC_ENGINE_CDN_URL` with 5s timeout. Accepts 404 (no file at root is OK), rejects 5xx and non-404 4xx.
-
-**CDN config:** Worker `engine-cdn` at `engine.spawnforge.ai`, R2 bucket `spawnforge-engine`.
-
-**Symptoms:**
-- WASM engine files load slowly or fail to load
-- Post-deploy smoke test "WASM available" check fails
-- `/api/health` shows Engine CDN as "degraded"
-
-**Impact:** Engine load time increases (falls back to Vercel-hosted WASM). Not a hard failure -- local copies exist as fallback.
-
-**Diagnosis steps:**
-1. Check `/api/health` Engine CDN status
-2. Test directly: `curl -I https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm`
-3. Check Cloudflare Workers dashboard for errors
-4. Verify `NEXT_PUBLIC_ENGINE_CDN_URL` on Vercel
-
-**Recovery:**
-1. If Worker down: check `infra/engine-cdn/worker.js`, redeploy via Wrangler
-2. If R2 bucket issue: verify `spawnforge-engine` bucket exists
-3. If CDN stale: re-run `/deploy-engine` skill to upload fresh WASM binaries
-4. Fallback: app automatically serves WASM from Vercel if CDN unavailable
-
----
-
-### 3.7 Anthropic Claude API
-
-**Health check implementation:** `checkAnthropic()` sends HEAD to `https://api.anthropic.com` (no tokens consumed), 3s timeout.
-
-**Symptoms:**
-- AI chat generation fails or times out
-- Compound actions (create_scene, etc.) fail
-- Sentry errors from chat API routes
-
-**Impact:** AI-powered features unavailable. Manual editing still works. BYOK users with their own API keys may be unaffected.
-
-**Diagnosis steps:**
-1. Check `/api/health` Anthropic status
-2. Check Anthropic status: https://status.anthropic.com
-3. Verify `ANTHROPIC_API_KEY` on Vercel
-4. Check cost observability: are tokens depleted?
-5. Check rate limiting: has the API key been rate-limited?
-
-**Recovery:**
-1. If Anthropic outage: wait for resolution; AI features degrade gracefully
-2. If API key revoked: generate new key, update on Vercel
-3. If rate limited: check admin economics dashboard (`/admin/economics`) for spend patterns
-4. If token budget exhausted: top up via Anthropic console
-
----
-
-### 3.8 Meshy 3D Generation
-
-**Health check implementation:** Config check only (`MESHY_API_KEY` presence in `checkAiProviders()`).
-
-**Symptoms:**
-- 3D model generation fails
-- Meshy dialog shows error state
-
-**Impact:** 3D asset generation unavailable. Users can still import models manually.
-
-**Diagnosis steps:**
-1. Check `/api/health` AI Providers status
-2. Verify `MESHY_API_KEY` on Vercel
-3. Check Meshy dashboard for API status/quota
-
-**Recovery:**
-1. Update API key if expired
-2. Check Meshy billing/quota
-
----
-
-### 3.9 ElevenLabs Audio
-
-**Health check implementation:** Config check only (`ELEVENLABS_API_KEY` presence).
-
-**Symptoms:**
-- Voice and SFX generation fails
-
-**Impact:** Audio generation unavailable. Manual audio import still works.
-
-**Recovery:** Same pattern as 3.8.
-
----
-
-### 3.10 Suno Music
-
-**Health check implementation:** Config check only (`SUNO_API_KEY` presence).
-
-**Symptoms:**
-- Music generation fails
-
-**Impact:** Music generation unavailable. Manual audio import still works.
-
-**Recovery:** Same pattern as 3.8.
-
----
-
-### 3.11 WASM Engine
-
-**Health check implementation:** No server-side check. Engine loads client-side via `useEngine.ts` hook. Post-deploy smoke test checks binary availability.
-
-**Symptoms:**
-- Editor canvas blank or shows loading spinner indefinitely
-- Browser console shows WASM panic or OOM
-- `useEngine.ts` error callback fires
-
-**Impact:** P0. Editor completely non-functional. Users cannot create or edit games.
-
-**Diagnosis steps:**
-1. Check browser console for WASM errors
-2. Verify WASM files exist: `curl -I https://spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm`
-3. Check CDN: `curl -I https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm`
-4. Check CI build logs for WASM compilation errors
-5. Check WASM binary size (should be ~47MB, threshold 50MB)
-
-**Recovery:**
-1. If WASM binary missing: re-run CD pipeline or `/deploy-engine` skill
-2. If WASM panic: check Sentry for error details, may need engine code fix
-3. If size regression: check CI binary size check, may need feature removal
-4. If WebGPU-specific: browser falls back to WebGL2 automatically
-
-**Known issue:** `initPromise` does not reset on timeout (PF-585), blocking retry. Workaround: page refresh.
-
----
-
-### 3.12 Vercel Hosting
-
-**Health check implementation:** Platform managed. Not checked by health endpoint.
-
-**Symptoms:**
-- Site completely unreachable
-- Build/deploy failures in GitHub Actions
-
-**Impact:** P0 if site unreachable. P1 if deploys blocked.
-
-**Diagnosis steps:**
-1. Check Vercel status: https://www.vercel-status.com
-2. Check GitHub Actions CD workflow for deployment errors
-3. Verify `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` secrets
-
-**Recovery:**
-1. If Vercel outage: wait for resolution
-2. If deploy failure: check build logs, fix code, re-run CD
-3. Manual rollback: Vercel Dashboard > Deployments > promote previous deployment
-
----
-
-### 3.13 Rate Limiting (Upstash)
-
-**Health check implementation:** `checkRateLimiting()` validates `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` presence.
-
-**Current state:** Health check references Upstash, but actual rate limiting is IN-MEMORY (`web/src/lib/rateLimit.ts`). Upstash is not wired up yet.
-
-**Impact:** In-memory rate limiting resets on cold start and is per-instance (not distributed). Under load, rate limits may not be effective.
-
-**Diagnosis steps:**
-1. Check if Upstash env vars are configured
-2. Review rate limit effectiveness via API response headers (`X-RateLimit-Remaining`)
-
-**Recovery:**
-1. In-memory rate limiting provides basic protection
-2. Vercel Edge and Cloudflare provide upstream rate limiting
-
----
-
-## 4. Monitoring Thresholds
-
-### Error Rate Thresholds
-
-| Metric | Warning | Critical | Action |
-|--------|---------|----------|--------|
-| Overall error rate | >1% for 5min | >5% for 2min | Page on-call |
-| API 5xx rate | >0.5% for 10min | >2% for 5min | Page on-call |
-| WASM panic rate | Any panic | >1 in 5min | Page on-call immediately |
-| Auth failure rate | >5 in 5min | >20 in 5min | Page on-call + review security |
-| Payment failure (charge.failed) | Any occurrence | N/A | Page on-call + review billing |
-
-### Latency Thresholds
-
-| Endpoint | p50 | p95 | p99 | Action if exceeded |
-|----------|-----|-----|-----|--------------------|
-| `/api/health` | <50ms | <200ms | <500ms | Alert if p99 >1s |
-| API routes (general) | <100ms | <500ms | <2s | Alert if p99 >5s |
-| AI generation (Claude) | <5s | <15s | <30s | Alert if p99 >60s |
-| AI generation (Meshy 3D) | <15s | <45s | <60s | Alert if >120s |
-| WASM engine init | <2s | <5s | <10s | Alert if >15s |
-| Page load (LCP) | <1.5s | <2.5s | <4s | Alert if >4s |
-| Database queries | <20ms | <50ms | <100ms | Alert if p99 >500ms |
-
-### Resource Thresholds
-
-| Resource | Warning | Critical |
-|----------|---------|----------|
-| DB connection pool | >60% utilized | >80% utilized |
-| Token balance (per user) | <10% tier allocation | 0 remaining |
-| JS bundle size | >3.5MB | >4MB |
-| WASM binary size | >47MB (current) | >50MB (CI threshold) |
-| Client memory (heap) | >500MB | >1GB |
-| Vercel function duration | >5s | >10s (Vercel limit) |
-| AI provider monthly spend | >80% budget | >100% budget |
-
-## 5. CI/CD Pipeline
-
-### Quality Gates (must all pass for deployment)
-
-| Gate | Tool | Where |
-|------|------|-------|
-| Lint (zero warnings) | ESLint | CI + CD |
-| Type checking | TypeScript `tsc --noEmit` | CI + CD |
-| Unit tests (5000+) | Vitest | CI + CD |
-| MCP tests (25+) | Vitest | CI + CD |
-| WASM build | Cargo + wasm-bindgen | CI + CD |
-| E2E UI tests | Playwright | CI + CD |
-| Security audit | `npm audit` + `cargo audit` | CI + CD |
-| Bundle size check | Custom script | CI |
-| WASM binary size check | Custom script | CI |
-| MCP command parity | Custom script | CI |
-
-### Deployment Flow
+## 3. Dependency Map
 
 ```
-Push to main
-  -> Lint + TypeScript + Tests + WASM Build + E2E + Security (parallel)
-  -> Upload WASM to R2 CDN (if enabled)
-  -> Deploy to Staging (Vercel preview)
-  -> Smoke test staging (health, homepage, static, WASM)
-  -> Deploy to Production (Vercel prod)
-  -> Smoke test production
+User Browser
+  |
+  v
+Vercel Edge (CDN, routing, headers)
+  |
+  +---> Next.js App (API Routes + SSR)
+  |       |
+  |       +---> Neon (PostgreSQL)      -- user data, projects, cost logs, credits
+  |       |       (DATABASE_URL)
+  |       |
+  |       +---> Clerk (Auth)           -- session validation, user management
+  |       |       (CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY)
+  |       |
+  |       +---> Stripe (Payments)      -- subscriptions, webhooks
+  |       |       (STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET)
+  |       |
+  |       +---> Anthropic API          -- AI chat, scene generation
+  |       |       (ANTHROPIC_API_KEY)
+  |       |
+  |       +---> Meshy / ElevenLabs / Suno  -- AI asset generation
+  |       |
+  |       +---> Cloudflare R2          -- asset upload/download (S3 API)
+  |       |       (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME)
+  |       |
+  |       +---> Upstash Redis          -- distributed rate limiting
+  |       |       (UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
+  |       |
+  |       +---> Sentry                 -- error tracking, tracing
+  |               (SENTRY_DSN, via /api/sentry tunnel)
+  |
+  +---> Engine CDN (engine.spawnforge.ai)  -- WASM binary delivery
+          Cloudflare Worker -> R2 bucket (spawnforge-engine)
 ```
 
-### Post-Deploy Smoke Tests
+### Failure Cascade Analysis
 
-The `post-deploy-smoke.yml` workflow verifies 4 checks:
-1. `/api/health` returns 200 with valid JSON
-2. Homepage returns 200 and contains "SpawnForge"
-3. `/manifest.json` returns 200
-4. WASM binary (`/engine-pkg-webgl2/forge_engine_bg.wasm`) returns 200 with correct content-type
-
-## 6. Escalation Matrix
-
-| Level | Who | When |
-|-------|-----|------|
-| L1 | On-call engineer | First responder, all P0-P2 incidents |
-| L2 | Engineering lead | If L1 cannot resolve in 30 min, or any P0 |
-| L3 | CTO/Founder | P0 lasting >1 hour, data loss risk, security breach |
-
-## 7. On-Call Rotation
-
-**Current state: NOT CONFIGURED.**
-
-Immediate actions needed:
-- Set up PagerDuty or Opsgenie for alert routing
-- Define rotation schedule
-- Create Slack #incidents channel
-- Wire Sentry alerts to PagerDuty
-
-## 8. Post-Incident Process
-
-1. Incident declared in Slack #incidents (to be created)
-2. War room initiated for P0/P1 (video call link in channel topic)
-3. Incident commander assigned (on-call engineer or escalation)
-4. Status updates every 30 min for P0, every 1 hour for P1
-5. Resolution verified via smoke tests and health check
-6. Post-mortem document within 48 hours (blameless)
-7. Action items tracked as PF-tickets on taskboard
-8. Runbook updated with learnings from incident
-9. Monitoring improved if gap discovered
-
-### Post-Mortem Template
-
-```markdown
-## Incident Post-Mortem: [Title]
-
-**Date:** YYYY-MM-DD
-**Duration:** X hours Y minutes
-**Severity:** P0/P1/P2
-**Impact:** [Number of users affected, features degraded]
-
-### Timeline
-- HH:MM — [Event]
-- HH:MM — [Detection]
-- HH:MM — [Response]
-- HH:MM — [Resolution]
-
-### Root Cause
-[Detailed technical explanation]
-
-### What Went Well
-- [Item]
-
-### What Went Poorly
-- [Item]
-
-### Action Items
-| Action | Owner | Ticket | Due Date |
-|--------|-------|--------|----------|
-| [Description] | [Name] | PF-XXX | YYYY-MM-DD |
-```
-
-## 9. Environment Variables Inventory
-
-### Critical (P0 if missing in production)
-
-| Variable | Service | Server/Client |
-|----------|---------|---------------|
-| `DATABASE_URL` | Neon | Server |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk | Client |
-| `CLERK_SECRET_KEY` | Clerk | Server |
-
-### Important (P1 if missing)
-
-| Variable | Service | Server/Client |
-|----------|---------|---------------|
-| `STRIPE_SECRET_KEY` | Stripe | Server |
-| `STRIPE_WEBHOOK_SECRET` | Stripe | Server |
-| `NEXT_PUBLIC_SENTRY_DSN` | Sentry | Client |
-| `SENTRY_DSN` | Sentry | Server |
-| `SENTRY_AUTH_TOKEN` | Sentry source maps | Build |
-| `ANTHROPIC_API_KEY` | Claude AI | Server |
-| `NEXT_PUBLIC_ENGINE_CDN_URL` | Engine CDN | Client |
-| `CLOUDFLARE_ACCOUNT_ID` | R2 | Server |
-| `R2_ACCESS_KEY_ID` | R2 | Server |
-| `R2_SECRET_ACCESS_KEY` | R2 | Server |
-| `R2_BUCKET_NAME` | R2 | Server |
-
-### Optional (P2 if missing)
-
-| Variable | Service | Server/Client |
-|----------|---------|---------------|
-| `MESHY_API_KEY` | Meshy 3D gen | Server |
-| `ELEVENLABS_API_KEY` | ElevenLabs audio | Server |
-| `SUNO_API_KEY` | Suno music | Server |
-| `UPSTASH_REDIS_REST_URL` | Rate limiting | Server |
-| `UPSTASH_REDIS_REST_TOKEN` | Rate limiting | Server |
-| `VERCEL_TOKEN` | Deployment | CI/CD |
-| `VERCEL_ORG_ID` | Deployment | CI/CD |
-| `VERCEL_PROJECT_ID` | Deployment | CI/CD |
-
-## 10. Known Limitations and Risks
-
-1. **Rate limiting is in-memory only.** The health check references Upstash, but `rateLimit.ts` uses an in-memory `Map`. This resets on cold start and is per-serverless-instance, not distributed. Under sustained attack, rate limits are ineffective.
-
-2. **No external uptime monitoring.** All health checks are self-reported. If Vercel is down, the health endpoint is unreachable. Need external synthetic monitoring (e.g., Checkly, Better Uptime).
-
-3. **No structured logging.** Server logs go to Vercel's built-in log viewer which has limited retention (1 hour for free, 3 days for Pro). No log aggregation, search, or alerting on log patterns.
-
-4. **No distributed tracing for AI calls.** AI generation involves multiple services (Claude, Meshy, ElevenLabs) but traces do not span across providers. Latency attribution is manual.
-
-5. **Health endpoint is not rate-limited.** Each call to `/api/health` triggers real network requests (DB query, Clerk JWKS fetch, CDN HEAD). A DDoS on `/api/health` could amplify to downstream services.
-
-6. **Duplicate health checks.** `checkAuthentication()` and `checkClerk()` both check Clerk JWKS. `runAllHealthChecks()` only calls `checkClerk()`, but `checkAuthentication()` is still exported and could cause confusion.
-
-7. **WASM init has no retry.** If `initPromise` fails, it is not reset (PF-585). Users must manually refresh the page.
-
-8. **No deployment rollback automation.** Rollback requires manual action in Vercel dashboard. No "one-click rollback" in CI/CD.
-
-9. **No client-side Web Vitals collection.** LCP, FID, CLS, INP are not being reported to any backend for monitoring.
-
-10. **AI provider cost has no automatic circuit breaker.** If API costs spike (e.g., due to a bug generating infinite requests), there is no automatic shutoff beyond per-user token limits.
+| If this goes down... | What breaks | What still works |
+|---------------------|-------------|------------------|
+| **Neon (Database)** | All authenticated operations, projects, save/load, marketplace, admin, cost tracking | Static pages, WASM engine (cached), local-only editing (no save) |
+| **Clerk (Auth)** | Login, signup, all authenticated API routes, user tier checks | Public pages, health check, already-loaded editor sessions (until token expires) |
+| **Stripe** | New subscriptions, plan changes, webhook processing | Existing users retain current tier, all editing features work |
+| **Anthropic API** | AI chat, scene generation, compound AI actions | Manual editing, all non-AI features, asset import/export |
+| **R2 (Assets)** | Asset upload/download, marketplace, published game hosting | Editor with local assets, WASM engine (separate CDN) |
+| **Engine CDN** | New WASM loads for new visitors | Returning visitors with cached WASM, Vercel fallback if R2_CDN_ENABLED=false |
+| **Upstash Redis** | Distributed rate limiting (falls back to in-memory per-instance) | All features; rate limiting still works per-instance |
+| **Sentry** | Error tracking, tracing, replay capture | All features; errors just go untracked |
 
 ---
 
-## 11. SSL/TLS Certificate Management
+## 4. Degraded Mode Behavior
 
-### 11.1 Certificate Ownership
+### Database Down
+- Health endpoint returns HTTP 503
+- All `/api/*` routes requiring auth will fail (Clerk may still validate JWTs, but DB-dependent operations fail)
+- Users already in the editor can continue editing locally but cannot save
+- Mitigation: Neon has automatic failover; check Neon dashboard
 
-| Domain | Certificate Provider | Renewal Mechanism | Managed By |
-|--------|---------------------|-------------------|------------|
-| `spawnforge.ai` | Let's Encrypt (via Vercel) | Automatic (60-day certificates, renewed at 30 days) | Vercel |
-| `www.spawnforge.ai` | Let's Encrypt (via Vercel) | Automatic | Vercel |
-| `engine.spawnforge.ai` | Cloudflare Universal SSL | Automatic (90-day certificates) | Cloudflare |
+### Auth Down
+- Health endpoint returns HTTP 503
+- New logins fail; existing sessions with valid JWTs may continue briefly
+- `/dev` route (development bypass) still accessible
+- Mitigation: Clerk has 99.99% SLA; check status.clerk.com
 
-### 11.2 How Auto-Renewal Works
+### AI Providers Down
+- Health endpoint stays 200 (non-critical)
+- AI chat shows error messages; manual editing fully functional
+- Per-provider: if only one provider is down, other generation types still work
 
-**Vercel (spawnforge.ai)**
+### CDN Down
+- New users cannot load WASM engine
+- If `R2_CDN_ENABLED != 'true'`, Vercel serves WASM from `/public/` as fallback
+- Users with browser-cached WASM are unaffected
 
-Vercel automatically provisions and renews Let's Encrypt certificates for all custom domains attached to a project. Renewal is triggered approximately 30 days before expiry. No manual action is required under normal circumstances. Vercel retries failed renewals and surfaces errors in the project dashboard under "Domains".
+---
 
-**Cloudflare (engine.spawnforge.ai)**
+## 5. Runbooks
 
-The `engine.spawnforge.ai` domain is a Cloudflare custom hostname backed by the `engine-cdn` Worker. Cloudflare Universal SSL covers all hostnames under the zone and renews automatically. The CDN Worker (`infra/engine-cdn/worker.js`) adds CORS headers but does not touch TLS — certificate management is entirely Cloudflare's responsibility.
+### 5.1 Complete Outage (Site Unreachable)
 
-### 11.3 Verifying Certificates Manually
+**Detection:** External synthetic monitor fires after 2 consecutive failures (~3 min). PagerDuty alert: "SpawnForge Unreachable".
 
-Use the provided script to check certificate expiry for all SpawnForge domains:
-
+**Verification:**
 ```bash
-# Standard check — prints a human-readable report
-bash scripts/verify-ssl-certs.sh
+# From your local machine or a different network:
+curl -sS -o /dev/null -w "HTTP %{http_code} | TTFB: %{time_starttransfer}s\n" \
+  --max-time 10 https://spawnforge.ai/api/health
 
-# Check with custom thresholds
-bash scripts/verify-ssl-certs.sh --warn-days 45 --alert-days 14
+# Check Vercel deployment status:
+vercel ls --scope=<team> --token=$VERCEL_TOKEN | head -5
 
-# JSON output (suitable for piping to monitoring systems)
-bash scripts/verify-ssl-certs.sh --json
-
-# Quiet mode (only prints warnings/alerts, suppresses info output)
-bash scripts/verify-ssl-certs.sh --quiet
+# Check if it's a DNS issue:
+dig spawnforge.ai +short
+nslookup spawnforge.ai
 ```
 
-Exit codes:
-- `0` — All certificates healthy (expiry > 30 days by default)
-- `1` — One or more certificates expire within the warn threshold
-- `2` — One or more certificates expire within the alert threshold (treat as incident)
-- `3` — Could not retrieve one or more certificates (connectivity or TLS error)
-
-You can also check a domain directly with `openssl`:
-
+**Mitigation:**
 ```bash
-# Show certificate expiry date
-echo "" | openssl s_client -connect spawnforge.ai:443 -servername spawnforge.ai 2>/dev/null \
-  | openssl x509 -noout -enddate
+# 1. Check Vercel status page: https://www.vercel-status.com/
+# 2. Check GitHub Actions for failed deploy:
+gh run list --workflow=cd.yml --limit=5
 
-# Full certificate details
-echo "" | openssl s_client -connect engine.spawnforge.ai:443 -servername engine.spawnforge.ai 2>/dev/null \
-  | openssl x509 -noout -text
+# 3. If last deploy is the cause, rollback:
+# Option A: Vercel Dashboard > Deployments > find last-known-good > "Promote to Production"
+# Option B: Manual rollback via CLI:
+vercel ls --scope=<team> --token=$VERCEL_TOKEN
+vercel promote <last-good-deployment-url> --scope=<team> --token=$VERCEL_TOKEN
+
+# 4. If Vercel itself is down, there is no self-remediation.
+#    Post in #incidents: "Vercel outage affecting SpawnForge. Monitoring Vercel status page."
 ```
 
-### 11.4 What To Do If Auto-Renewal Fails
+**Communication:**
+- Page on-call engineer via PagerDuty (when PF-608 is implemented)
+- Post in #incidents Slack channel
+- If user-facing for > 15 min, update status page
 
-**Vercel certificate failure:**
+**Resolution Verification:**
+```bash
+curl -sS https://spawnforge.ai/api/health | python3 -m json.tool
+# Expect: {"status": "ok", ...}
 
-1. Go to the Vercel dashboard → Project → Settings → Domains.
-2. Find the domain showing a certificate error. Vercel will display the error type (DNS propagation, CAA record conflict, etc.).
-3. If the domain is correctly configured and Vercel renewal still fails, click "Refresh" to trigger an immediate re-attempt.
-4. If the domain shows "Invalid Configuration", verify the DNS records in Cloudflare match Vercel's required CNAME/A record.
-5. As a last resort, remove and re-add the custom domain in Vercel — this triggers a fresh certificate issuance.
-6. **Escalation:** Open a Vercel support ticket. Vercel SLA for enterprise is 4 hours; Pro tier is best-effort.
+# Run full smoke test:
+gh workflow run post-deploy-smoke.yml -f target_url=https://spawnforge.ai
+```
 
-**Cloudflare certificate failure:**
+**Prevention:** PF-607 (synthetic monitoring), PF-614 (auto-rollback)
 
-1. Go to the Cloudflare dashboard → SSL/TLS → Edge Certificates.
-2. Check whether Universal SSL is showing "Active" or "Pending". Pending can take up to 24 hours on a new zone.
-3. If Universal SSL is disabled, re-enable it under SSL/TLS → Overview → Universal SSL → Enable.
-4. If the certificate is stuck in "Pending Validation", check that there are no conflicting CAA DNS records that exclude Cloudflare's issuer (`digicert.com` or `letsencrypt.org`).
-5. **Escalation:** Open a Cloudflare support ticket. Cloudflare resolves certificate issues within hours for paid plans.
+---
 
-**Emergency fallback (certificate expired, site unreachable over HTTPS):**
+### 5.2 Database Outage
 
-1. Temporarily disable "Always Use HTTPS" in Cloudflare to allow HTTP traffic while the certificate is renewed.
-2. Post a status update on the SpawnForge status page immediately.
-3. Work the Vercel or Cloudflare support channels in parallel.
-4. Re-enable "Always Use HTTPS" immediately after renewal completes.
+**Detection:** Health endpoint returns 503 with Database service "down". Sentry alert: "Database connection failure".
 
-### 11.5 Monthly Verification Checklist
+**Verification:**
+```bash
+# Check health endpoint for DB status:
+curl -sS https://spawnforge.ai/api/health | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+db = next((s for s in data['services'] if 'Database' in s.get('name','')), None)
+print(f\"DB Status: {db}\" if db else 'DB service not found')
+"
 
-Add the following item to the monthly ops review:
+# Check Neon dashboard: https://console.neon.tech/
+# Check Neon status: https://neonstatus.com/
+```
 
-- [ ] Run `bash scripts/verify-ssl-certs.sh` and confirm exit code 0.
-- [ ] Verify both domains return expiry > 30 days from today.
-- [ ] Check Vercel dashboard "Domains" tab for any certificate warnings.
-- [ ] Check Cloudflare dashboard "SSL/TLS → Edge Certificates" for any anomalies.
-- [ ] If a certificate is < 45 days from expiry, open a tracking ticket and monitor daily.
+**Mitigation:**
+```bash
+# 1. Verify DATABASE_URL is still valid in Vercel env:
+vercel env ls --scope=<team> --token=$VERCEL_TOKEN | grep DATABASE
 
-This check takes under 2 minutes and should be part of the standard monthly on-call handoff.
+# 2. If Neon is down (check neonstatus.com), wait for recovery.
+#    Neon serverless driver auto-reconnects. No manual restart needed.
+
+# 3. If DATABASE_URL was rotated (e.g., branch reset):
+#    Update in Vercel Dashboard > Settings > Environment Variables
+#    Redeploy: vercel --prod --scope=<team> --token=$VERCEL_TOKEN
+
+# 4. Test direct connectivity (requires psql or neon CLI):
+#    neon connection-string --project-id <id>
+```
+
+**Communication:** Post in #incidents: "Database connectivity issue. Investigating. Users may be unable to save/load projects."
+
+**Resolution Verification:**
+```bash
+curl -sS https://spawnforge.ai/api/health | python3 -c "
+import sys, json; data = json.load(sys.stdin)
+print('OK' if data['database'] == 'connected' else 'STILL DOWN')
+"
+```
+
+**Prevention:** PF-616 (query monitoring), connection pool health tracking
+
+---
+
+### 5.3 Auth Service Outage
+
+**Detection:** Health endpoint returns 503 or Clerk service shows "degraded"/"down".
+
+**Verification:**
+```bash
+# Check Clerk status:
+curl -sS https://api.clerk.com/v1/jwks -H "Authorization: Bearer $CLERK_SECRET_KEY" -o /dev/null -w "%{http_code}\n"
+# Expect: 200
+
+# Check Clerk status page: https://status.clerk.com/
+```
+
+**Mitigation:**
+```bash
+# 1. If Clerk is partially down, existing sessions with valid JWTs still work.
+#    No action needed unless it persists > 30 min.
+
+# 2. If Clerk keys were rotated:
+#    - Get new keys from Clerk Dashboard
+#    - Update CLERK_SECRET_KEY and NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY in Vercel
+#    - Redeploy
+
+# 3. For development/testing, /dev route bypasses auth entirely.
+```
+
+**Communication:** Post in #engineering-alerts: "Auth service degraded. New logins may fail. Existing sessions unaffected."
+
+**Resolution Verification:**
+```bash
+curl -sS https://spawnforge.ai/api/health | python3 -c "
+import sys, json; data = json.load(sys.stdin)
+clerk = next((s for s in data['services'] if 'Clerk' in s.get('name','')), None)
+print(f\"Clerk: {clerk['status']}\" if clerk else 'NOT FOUND')
+"
+```
+
+---
+
+### 5.4 WASM Engine Load Failure
+
+**Detection:** Post-deploy smoke test fails on WASM binary check. Users report blank canvas.
+
+**Verification:**
+```bash
+# Check WASM availability on CDN:
+curl -sI --max-time 10 https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm | head -5
+
+# Check Vercel-hosted fallback:
+curl -sI --max-time 10 https://spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm | head -5
+
+# Check file size (should be ~15-40MB):
+curl -sI https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm | grep -i content-length
+```
+
+**Mitigation:**
+```bash
+# 1. If CDN is down but Vercel fallback works:
+#    Temporarily set R2_CDN_ENABLED=false in Vercel env vars and redeploy
+
+# 2. If WASM is missing from both CDN and Vercel:
+#    Check last successful CD run for WASM build artifacts:
+gh run list --workflow=cd.yml --status=success --limit=3
+#    Re-run CD workflow if needed:
+gh workflow run cd.yml
+
+# 3. If CDN Worker is misconfigured:
+#    Check Cloudflare dashboard for engine-cdn worker
+#    Worker source: infra/engine-cdn/worker.js (if infra/ exists, otherwise check R2 directly)
+```
+
+**Resolution Verification:**
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" \
+  https://engine.spawnforge.ai/engine-pkg-webgl2/forge_engine_bg.wasm
+# Expect: 200
+```
+
+---
+
+### 5.5 AI Provider Failure
+
+**Detection:** AI generation failure rate > 10% in 15 min window. Sentry alert: "AI generation failure spike".
+
+**Verification:**
+```bash
+# Check Anthropic API:
+curl -sI --max-time 5 https://api.anthropic.com | head -3
+
+# Check health endpoint AI providers status:
+curl -sS https://spawnforge.ai/api/health | python3 -c "
+import sys, json; data = json.load(sys.stdin)
+for s in data['services']:
+    if 'AI' in s.get('name','') or 'Anthropic' in s.get('name',''):
+        print(f\"{s['name']}: {s['status']}\")
+"
+
+# Check Anthropic status: https://status.anthropic.com/
+```
+
+**Mitigation:**
+```bash
+# 1. If Anthropic is down, all AI features degrade. Manual editing still works.
+#    Post in #engineering-alerts with ETA from status page.
+
+# 2. If API key was invalidated:
+#    - Rotate key in Anthropic console
+#    - Update ANTHROPIC_API_KEY in Vercel env
+#    - Redeploy
+
+# 3. If cost anomaly triggered circuit breaker (PF-612 when implemented):
+#    Check /admin/economics dashboard for spend spikes
+#    Re-enable via admin override if spend was legitimate
+```
+
+---
+
+### 5.6 Payment System Failure
+
+**Detection:** Stripe webhook failures spike. Sentry alert: "Stripe webhook error".
+
+**Verification:**
+```bash
+# Check Stripe status: https://status.stripe.com/
+# Check webhook delivery in Stripe Dashboard > Developers > Webhooks
+```
+
+**Mitigation:**
+```bash
+# 1. Stripe webhook failures are automatically retried by Stripe (up to 72h).
+#    No immediate action needed unless persistent.
+
+# 2. If STRIPE_WEBHOOK_SECRET was rotated:
+#    - Get new secret from Stripe Dashboard > Developers > Webhooks
+#    - Update in Vercel env
+#    - Redeploy
+
+# 3. Existing subscriptions continue to work; only new signups/changes are affected.
+```
+
+---
+
+### 5.7 Rate Limiting Exhaustion
+
+**Detection:** Spike in 429 responses. Sentry breadcrumbs show rate limit triggers.
+
+**Verification:**
+```bash
+# Test rate limiting on health endpoint:
+for i in $(seq 1 35); do
+  code=$(curl -sS -o /dev/null -w "%{http_code}" https://spawnforge.ai/api/health)
+  echo "Request $i: HTTP $code"
+done
+# Should see 429 after 30 requests in 5 minutes
+```
+
+**Mitigation:**
+```bash
+# 1. Current rate limiting is in-memory per Vercel function instance.
+#    Under DDoS, each instance has its own counter -- not truly distributed.
+#    PF-610 addresses this with Upstash Redis.
+
+# 2. For acute DDoS, use Vercel's Edge protection or Cloudflare in front.
+
+# 3. To adjust limits, edit web/src/lib/rateLimit.ts:
+#    rateLimitPublicRoute() defaults: 30 requests per 5 minutes per IP
+```
+
+---
+
+### 5.8 Deployment Failure
+
+**Detection:** CD workflow fails. GitHub Actions notification.
+
+**Verification:**
+```bash
+# Check latest CD run:
+gh run list --workflow=cd.yml --limit=3
+gh run view <run-id> --log-failed
+```
+
+**Mitigation:**
+```bash
+# 1. Identify which job failed:
+gh run view <run-id>
+
+# Common failures:
+# - Lint/TypeScript: Fix code, push new commit
+# - WASM build: Check Rust toolchain, wasm-bindgen version (must be 0.2.108)
+# - E2E tests: Check Playwright report artifact
+# - Vercel deploy: Check VERCEL_TOKEN, project IDs
+
+# 2. Production is NOT affected by a failed deploy -- it stays on the last good version.
+
+# 3. If you need to force a redeploy of the last good code:
+gh workflow run cd.yml
+```
+
+---
+
+## 6. Capacity Planning
+
+### Current Limits
+
+| Resource | Current Limit | Scaling Trigger | Action |
+|----------|--------------|-----------------|--------|
+| Vercel Serverless Functions | Pro: 1000 concurrent | > 700 concurrent avg | Upgrade to Enterprise or add edge caching |
+| Neon Database | Free: 0.5 GiB storage, 1 compute | > 400 MiB storage | Upgrade to Pro (autoscaling) |
+| Neon Compute | Free: 0.25 vCPU | p99 query > 500ms sustained | Upgrade, add read replicas |
+| Cloudflare R2 | 10 GiB free storage | > 8 GiB used | Monitor via Cloudflare dashboard |
+| R2 Bandwidth | 10 GiB free/month | > 8 GiB/month | Add caching, optimize WASM size |
+| Anthropic API | Per-key rate limits | 429 responses > 5% | Request limit increase, add retry/backoff |
+| Clerk | 10k MAU free | > 8k MAU | Upgrade to Pro plan |
+| Stripe | No hard limits | N/A | N/A |
+| Sentry | 5k errors/month free | > 4k errors/month | Increase sample rate filtering, upgrade plan |
+| Upstash Redis | 10k commands/day free | > 8k commands/day | Upgrade to Pro |
+
+### WASM Binary Size
+- WebGL2 editor: ~20-30 MiB (after wasm-opt)
+- WebGPU editor: ~25-35 MiB
+- Runtime variants: ~15-25 MiB (stripped editor systems)
+- Each deploy uploads 4 variants to R2 CDN
+
+### Monitoring Recommendations
+- Track R2 storage via Cloudflare Analytics
+- Track Neon storage via Neon Dashboard metrics
+- Track Vercel function invocations in Vercel Analytics
+- Track Sentry event count in Sentry Settings > Subscription
+
+---
+
+## 7. Disaster Recovery
+
+### Recovery Point Objective (RPO) / Recovery Time Objective (RTO)
+
+| Data Store | Backup Method | RPO | RTO | Notes |
+|-----------|---------------|-----|-----|-------|
+| Neon PostgreSQL | Point-in-time recovery (PITR) | ~0 (WAL-based, continuous) | < 5 min | Neon retains 7 days of history (free) or 30 days (Pro). Restore via Neon console: Branches > Create from timestamp |
+| Cloudflare R2 | No built-in versioning | Last upload | < 30 min (re-upload from source) | Asset files can be re-uploaded. WASM binaries regenerated from CI |
+| Clerk | Managed by Clerk | N/A | N/A | User accounts managed externally. No backup needed from our side |
+| Stripe | Managed by Stripe | N/A | N/A | Subscription data managed externally |
+| Vercel | Git-based (deploy from any commit) | Last commit | < 10 min | Rollback by promoting previous deployment |
+| Code | GitHub (git) | Last push | Immediate | Protected main branch, PR reviews |
+
+### Database Recovery Procedure
+```bash
+# 1. Go to Neon Console: https://console.neon.tech/
+# 2. Select the SpawnForge project
+# 3. Go to "Branches" tab
+# 4. Click "Create Branch"
+# 5. Select "From a point in time" and pick a timestamp BEFORE the incident
+# 6. Name it "recovery-YYYY-MM-DD"
+# 7. Get the new branch's connection string
+# 8. Update DATABASE_URL in Vercel env vars to point to the recovery branch
+# 9. Redeploy
+# 10. Verify data integrity
+# 11. Once confirmed, either:
+#     a. Keep using the recovery branch (rename to main), or
+#     b. Export data and import back to the original branch
+```
+
+### Full Environment Recovery (from scratch)
+1. Clone repo from GitHub
+2. Set up Neon database, run Drizzle migrations: `cd web && npx drizzle-kit push`
+3. Configure all env vars in Vercel (see `web/src/lib/config/validateEnv.ts` for required list)
+4. Build and deploy WASM: `gh workflow run cd.yml`
+5. Upload WASM to R2 CDN (if R2_CDN_ENABLED)
+6. Verify via smoke tests: `gh workflow run post-deploy-smoke.yml`
+
+---
+
+## 8. Security Incident Playbook
+
+### 8.1 Auth Breach (Leaked Clerk Keys)
+
+**Detection:** Unexpected user creation, suspicious session activity, or key detected in public repo.
+
+**Immediate Actions (within 15 min):**
+```bash
+# 1. Rotate Clerk keys immediately:
+#    - Clerk Dashboard > API Keys > Rotate
+#    - Update in Vercel env:
+#      CLERK_SECRET_KEY, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
+# 2. Redeploy immediately:
+gh workflow run cd.yml
+
+# 3. Invalidate all active sessions:
+#    Clerk Dashboard > Users > "Sign out all users" (if feature available)
+#    Or: Clerk API to revoke sessions
+
+# 4. Audit recent user activity:
+#    Check Clerk Dashboard > Logs for suspicious sign-ups or session creation
+```
+
+**Communication:** Post in #incidents: "Security incident: Auth key rotation in progress. Users will need to re-login."
+
+### 8.2 Database Credentials Leaked
+
+**Immediate Actions:**
+```bash
+# 1. Rotate DATABASE_URL in Neon Console:
+#    Project > Settings > Connection > Reset password
+
+# 2. Update DATABASE_URL in Vercel env vars
+
+# 3. Redeploy
+
+# 4. Audit database for unauthorized access:
+#    Check Neon query logs for unusual patterns
+#    Check for new tables, dropped tables, or data exfiltration queries
+```
+
+### 8.3 API Key Exposure (AI Providers, Stripe)
+
+**Immediate Actions:**
+```bash
+# 1. Rotate the exposed key in the provider's dashboard:
+#    - Anthropic: console.anthropic.com > API Keys
+#    - Stripe: dashboard.stripe.com > Developers > API Keys
+#    - Meshy/ElevenLabs/Suno: respective dashboards
+
+# 2. Update in Vercel env vars
+
+# 3. Redeploy
+
+# 4. Check provider dashboards for unauthorized usage/spend
+```
+
+### 8.4 DDoS Attack
+
+**Detection:** Spike in 429 responses, Vercel function timeouts, degraded health check latency.
+
+**Immediate Actions:**
+```bash
+# 1. Check current rate limiting status:
+curl -sS https://spawnforge.ai/api/health -w "\nHTTP: %{http_code} | Time: %{time_total}s\n"
+
+# 2. Current rate limiting is per-instance in-memory (web/src/lib/rateLimit.ts).
+#    Under sustained DDoS, this is insufficient.
+
+# 3. Enable Vercel Firewall rules (Vercel Dashboard > Firewall):
+#    - Block specific IPs or CIDR ranges
+#    - Enable challenge mode for suspicious traffic
+
+# 4. If attack targets engine.spawnforge.ai:
+#    - Cloudflare Dashboard > Security > WAF > Create rule to block pattern
+#    - Or: temporarily enable "Under Attack Mode" in Cloudflare
+
+# 5. Health endpoint amplification (PF-609):
+#    /api/health makes real network calls. Under DDoS, this amplifies to Neon/Clerk/CDN.
+#    Temporary fix: Add response caching at Vercel Edge
+```
+
+### 8.5 Data Leak (User Data Exposed)
+
+**Immediate Actions:**
+1. Identify the scope: which data, which users, which endpoint
+2. Fix the vulnerability (patch and deploy)
+3. Audit access logs for exploitation evidence
+4. If PII was exposed: prepare notification per applicable privacy law
+5. Document in incident report
+
+**Post-Incident:**
+- Review all API routes for similar patterns
+- Add/improve input validation
+- Consider adding request logging (PF-613)
+
+---
+
+## 9. Environment Configuration
+
+### Required Environment Variables (Production)
+
+| Variable | Service | Validated At |
+|----------|---------|-------------|
+| `DATABASE_URL` | Neon PostgreSQL | Startup (`validateEnvironment`) |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk (client) | Startup |
+| `CLERK_SECRET_KEY` | Clerk (server) | Startup |
+| `STRIPE_SECRET_KEY` | Stripe | Startup |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhooks | Startup |
+
+### Optional Environment Variables
+
+| Variable | Service | Default |
+|----------|---------|---------|
+| `NEXT_PUBLIC_APP_URL` | App URL | `http://localhost:3000` |
+| `NEXT_PUBLIC_ENGINE_CDN_URL` | WASM CDN | (empty, uses local) |
+| `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Sentry | (empty, errors untracked) |
+| `ANTHROPIC_API_KEY` | Anthropic AI | (empty, AI disabled) |
+| `MESHY_API_KEY` | Meshy 3D gen | (empty) |
+| `ELEVENLABS_API_KEY` | ElevenLabs audio | (empty) |
+| `SUNO_API_KEY` | Suno music | (empty) |
+| `CLOUDFLARE_ACCOUNT_ID` | R2 config | (empty) |
+| `R2_ACCESS_KEY_ID` | R2 auth | (empty) |
+| `R2_SECRET_ACCESS_KEY` | R2 auth | (empty) |
+| `R2_BUCKET_NAME` | R2 bucket | (empty) |
+| `UPSTASH_REDIS_REST_URL` | Rate limiting | (empty, in-memory fallback) |
+| `UPSTASH_REDIS_REST_TOKEN` | Rate limiting | (empty) |
+
+---
+
+## 10. Deployment Pipeline
+
+### Pipeline Stages (cd.yml)
+
+```
+push to main
+  |
+  +---> [Parallel Quality Gates]
+  |       Lint (eslint --max-warnings 0)
+  |       TypeScript (tsc --noEmit)
+  |       Web Tests (vitest run)
+  |       MCP Tests (vitest run)
+  |       WASM Build (4 variants: webgl2/webgpu x editor/runtime)
+  |       Security Audit (cargo audit + npm audit)
+  |
+  +---> E2E Tests (Playwright, needs WASM build)
+  |
+  +---> [Optional] Upload WASM to R2 CDN (if R2_CDN_ENABLED=true)
+  |
+  +---> Deploy to Staging
+  |
+  +---> Deploy to Production
+  |
+  +---> [Triggered] Post-Deploy Smoke Tests
+          - /api/health (200 + valid JSON)
+          - / (200 + contains "SpawnForge")
+          - /manifest.json (200)
+          - WASM binary (200 + correct content-type)
+```
+
+### Rollback Procedure
+```bash
+# Option 1: Vercel Dashboard
+# Deployments > select last-known-good > "Promote to Production"
+
+# Option 2: CLI
+vercel promote <deployment-url> --scope=<team> --token=$VERCEL_TOKEN
+
+# Option 3: Re-run CD from a good commit
+git log --oneline -10  # Find the last good commit
+gh workflow run cd.yml --ref <good-commit-sha>
+```
+
+---
+
+## 11. Monitoring Architecture
+
+### Current State
+- **Sentry**: Client-side (browser tracing + replay) and server-side error tracking
+  - Client sample rate: 10% traces, 10% session replay, 100% error replay
+  - Server sample rate: 10% traces
+  - Tunnel: `/api/sentry` (bypasses ad-blockers)
+  - Org: `tristan-nolan`, Project: `spawnforge-ai`
+- **Health endpoint**: `/api/health` with 8 service checks (5s timeout each, 3s for external services)
+- **Post-deploy smoke tests**: 4 checks run automatically after CD
+- **Env validation**: Startup check for 5 required vars (`validateEnvironment()`)
+
+### Gaps (Addressed by PF-607 through PF-617)
+- No external synthetic monitoring (PF-607)
+- No on-call rotation or paging (PF-608)
+- Health endpoint not rate-limited (PF-609)
+- Rate limiting is per-instance, not distributed (PF-610)
+- No client Web Vitals reporting (PF-611)
+- No AI cost anomaly detection (PF-612)
+- No structured log aggregation (PF-613)
+- No automated rollback (PF-614)
+- Duplicate checkAuthentication() function (PF-615)
+- No DB query monitoring (PF-616)
+- No CDN cache metrics (PF-617)
+
+---
+
+## 12. Sentry Configuration Reference
+
+### Alert Rules (To Be Created)
+
+| Alert Name | Condition | Severity | Action |
+|-----------|-----------|----------|--------|
+| DB Connection Failure | `Database (Neon)` health check returns "down" 2x in 5 min | P0 | Page on-call |
+| Auth Failure Spike | Clerk health check "down" for 5 min | P0 | Page on-call |
+| 5xx Error Rate | > 2% of requests return 5xx for 5 min | P1 | Page on-call |
+| AI Gen Failure Spike | AI provider errors > 10% for 15 min | P1 | Notify #engineering-alerts |
+| WASM Load Failure | Custom measurement `wasm_init_time` errors > 5% | P1 | Notify #engineering-alerts |
+| High LCP | p75 LCP > 4s for 30 min | P2 | Notify #engineering-alerts |
+| Rate Limit Exhaustion | 429 responses > 20/min for 10 min | P2 | Investigate DDoS |
+| Cost Anomaly | Hourly AI spend > 2x rolling 7-day avg | P2 | Notify + review |
+
+### Sentry Tracing Configuration
+
+```typescript
+// Client: web/sentry.client.config.ts
+tracesSampleRate: 0.1        // 10% of transactions
+replaysSessionSampleRate: 0.1 // 10% of sessions
+replaysOnErrorSampleRate: 1.0 // 100% of error sessions
+
+// Server: web/sentry.server.config.ts
+tracesSampleRate: 0.1         // 10% of server transactions
+```
+
+---
+
+## 13. Known Technical Debt
+
+| Item | Ticket | Risk | Impact |
+|------|--------|------|--------|
+| checkAuthentication() is dead code duplicate of checkClerk() | PF-615 | Low | Maintenance confusion |
+| Rate limiting is in-memory per-instance | PF-610 | Medium | Ineffective under distributed load |
+| Health endpoint makes real network calls without caching | PF-609 | Medium | DDoS amplification vector |
+| No structured logging or log retention beyond Vercel limits | PF-613 | High | Cannot diagnose past incidents |
+| No automated rollback on smoke test failure | PF-614 | Medium | Manual intervention needed |
+| Sentry traces at 10% may miss intermittent issues | -- | Low | Increase if budget allows |
+
+---
+
+## 14. On-Call Checklist
+
+When paged, follow this sequence:
+
+1. **Acknowledge** the page within 5 minutes
+2. **Assess** severity:
+   - Check `https://spawnforge.ai/api/health`
+   - Check Sentry for error spikes
+   - Check Vercel deployment status
+3. **Classify**: P0 (site down), P1 (major feature broken), P2 (degraded performance)
+4. **Mitigate** using the appropriate runbook above
+5. **Communicate** in #incidents with:
+   - What is happening
+   - What is affected
+   - What you are doing
+   - ETA for resolution (or "investigating")
+6. **Resolve** and verify with health checks + smoke tests
+7. **Post-mortem** within 24 hours for P0/P1 incidents

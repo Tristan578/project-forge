@@ -2,11 +2,11 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { AlertTriangle, RefreshCw, Save } from 'lucide-react';
-import { onEngineCrash, resetEngine } from '@/hooks/useEngine';
+import { onEngineCrash, isEngineCrashed, getEngineCrashMessage, resetEngine } from '@/hooks/useEngine';
 
 export function EngineCrashOverlay() {
-  const [crashed, setCrashed] = useState(false);
-  const [crashMessage, setCrashMessage] = useState<string | null>(null);
+  const [crashed, setCrashed] = useState(() => isEngineCrashed());
+  const [crashMessage, setCrashMessage] = useState<string | null>(() => getEngineCrashMessage());
 
   useEffect(() => {
     const unsubscribe = onEngineCrash((message) => {
