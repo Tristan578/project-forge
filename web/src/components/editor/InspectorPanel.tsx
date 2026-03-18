@@ -191,7 +191,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
   // No selection — show empty state hint + Scene Settings
   if (!primaryId) {
     return (
-      <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
+      <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto overflow-x-hidden">
         <div className="mb-4 flex flex-col items-center gap-2 rounded border border-zinc-800 bg-zinc-800/40 p-4">
           <MousePointerClick size={20} className="text-zinc-600" />
           <p className="text-xs text-zinc-500 text-center">
@@ -221,7 +221,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
   `;
 
   return (
-    <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
+    <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto overflow-x-hidden">
       <h2 className="mb-4 text-sm font-semibold text-zinc-300">Inspector</h2>
 
       {/* Name field */}

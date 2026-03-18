@@ -31,6 +31,7 @@ export function MobileToolbar({ onToggleLeft, onToggleRight }: MobileToolbarProp
       {/* Left: panel toggle */}
       <button
         onClick={onToggleLeft}
+        aria-label="Scene Hierarchy"
         className="flex h-11 w-11 items-center justify-center rounded text-zinc-400 hover:text-zinc-200 active:bg-zinc-700"
         title="Scene Hierarchy"
       >
@@ -43,6 +44,8 @@ export function MobileToolbar({ onToggleLeft, onToggleRight }: MobileToolbarProp
           <button
             key={mode}
             onClick={() => setGizmoMode(mode)}
+            aria-label={label}
+            aria-pressed={gizmoMode === mode}
             className={`flex h-11 w-11 items-center justify-center rounded transition-colors ${
               gizmoMode === mode
                 ? 'bg-blue-600 text-white'
@@ -60,6 +63,7 @@ export function MobileToolbar({ onToggleLeft, onToggleRight }: MobileToolbarProp
       {/* Right: inspector toggle */}
       <button
         onClick={onToggleRight}
+        aria-label="Inspector"
         className="flex h-11 w-11 items-center justify-center rounded text-zinc-400 hover:text-zinc-200 active:bg-zinc-700"
         title="Inspector"
       >

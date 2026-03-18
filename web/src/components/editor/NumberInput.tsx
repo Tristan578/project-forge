@@ -84,9 +84,9 @@ export function NumberInput({
   };
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex flex-1 items-center gap-1 min-w-0">
       {label && (
-        <span className={`w-4 text-xs font-medium ${labelColor}`}>{label}</span>
+        <span className={`shrink-0 w-4 text-xs font-medium ${labelColor}`}>{label}</span>
       )}
       <input
         ref={inputRef}
@@ -104,7 +104,7 @@ export function NumberInput({
         onWheel={handleWheel}
         disabled={disabled}
         aria-label={ariaLabel ?? label}
-        className="w-16 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
+        className="w-full min-w-0 rounded bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed
           [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
       />
