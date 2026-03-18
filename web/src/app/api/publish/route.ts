@@ -6,15 +6,25 @@ import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
+import { logger } from '@/lib/logging/logger';
+import { extractRequestId } from '@/lib/logging/requestContext';
 
 export async function POST(request: NextRequest) {
+  const requestId = extractRequestId(request.headers);
+  const reqLog = logger.child({ requestId, endpoint: 'POST /api/publish' });
+
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
   const { user, clerkId } = authResult.ctx;
 
+  const reqLogAuth = reqLog.child({ userId: user.id });
+
   // Rate limit: 10 publish requests per minute per user
   const rl = await rateLimit(`publish:${clerkId}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  if (!rl.allowed) {
+    reqLogAuth.warn('Publish rate limit exceeded');
+    return rateLimitResponse(rl.remaining, rl.resetAt);
+  }
 
   const parsed = await parseJsonBody(request);
   if (!parsed.ok) return parsed.response;
@@ -54,6 +64,7 @@ export async function POST(request: NextRequest) {
   // Content moderation check on title and description
   const titleMod = moderateContent(titleResult.value);
   if (titleMod.severity === 'block') {
+    reqLogAuth.warn('Publish blocked: prohibited title content', { slug: slugResult.value });
     return NextResponse.json(
       { error: 'Game title contains prohibited content' },
       { status: 422 }
@@ -62,6 +73,7 @@ export async function POST(request: NextRequest) {
   if (descResult.value) {
     const descMod = moderateContent(descResult.value);
     if (descMod.severity === 'block') {
+      reqLogAuth.warn('Publish blocked: prohibited description content', { slug: slugResult.value });
       return NextResponse.json(
         { error: 'Game description contains prohibited content' },
         { status: 422 }
@@ -98,6 +110,7 @@ export async function POST(request: NextRequest) {
     .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.status, 'published')));
 
   if (existingPublished.length >= maxPublished) {
+    reqLogAuth.warn('Publish limit reached', { tier: user.tier, maxPublished });
     return NextResponse.json({ error: `Publish limit reached (${maxPublished} for ${user.tier} tier)` }, { status: 403 });
   }
 
@@ -146,6 +159,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    reqLogAuth.info('Game republished', {
+      projectId: projectIdResult.value,
+      slug: slugResult.value,
+      version: newVersion,
+    });
+
     const [updated] = await db.select().from(publishedGames).where(eq(publishedGames.id, gameDbId));
     return NextResponse.json({ publication: { ...updated, url: gameUrl } });
   }
@@ -170,6 +189,12 @@ export async function POST(request: NextRequest) {
       validTags.map((tag) => ({ gameId: publication.id, tag }))
     );
   }
+
+  reqLogAuth.info('Game published', {
+    projectId: projectIdResult.value,
+    slug: slugResult.value,
+    version: 1,
+  });
 
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });
 }

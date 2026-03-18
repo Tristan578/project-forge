@@ -6,6 +6,7 @@ import {
   type ServiceHealth,
 } from '@/lib/monitoring/healthChecks';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { logger } from '@/lib/logging/logger';
 
 /** Public status vocabulary — 'healthy' is remapped to 'up'. */
 type PublicStatus = 'up' | 'degraded' | 'down';
@@ -84,6 +85,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         : 'unavailable';
 
   const publicServices = sanitizeForPublic(report.services).map(normalizeStatus);
+
+  // Log degraded or down health to aid incident response
+  if (criticalStatus !== 'healthy') {
+    const degradedServices = report.services
+      .filter((s) => s.status !== 'healthy')
+      .map((s) => s.name);
+    logger.warn('Health check degraded', {
+      endpoint: 'GET /api/health',
+      criticalStatus,
+      degradedServices,
+    });
+  }
 
   const body = {
     status: criticalStatus === 'down' ? 'error' : 'ok',

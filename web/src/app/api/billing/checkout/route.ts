@@ -5,6 +5,7 @@ import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { logger } from '@/lib/logging/logger';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -29,9 +30,15 @@ export async function POST(req: Request) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
+  const { user } = authResult.ctx;
+  const reqLog = logger.child({ endpoint: 'POST /api/billing/checkout', userId: user.id });
+
   // Rate limit: 5 checkout requests per minute per user
-  const rl = await rateLimit(`billing-checkout:${authResult.ctx.user.id}`, 5, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const rl = await rateLimit(`billing-checkout:${user.id}`, 5, 60_000);
+  if (!rl.allowed) {
+    reqLog.warn('Checkout rate limit exceeded');
+    return rateLimitResponse(rl.remaining, rl.resetAt);
+  }
 
   let body;
   try {
@@ -39,7 +46,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
-  const { tier } = body;
+  const { tier } = body as { tier?: string };
 
   if (!tier || !['hobbyist', 'creator', 'pro'].includes(tier)) {
     return NextResponse.json(
@@ -50,13 +57,13 @@ export async function POST(req: Request) {
 
   const priceId = PRICE_IDS[tier];
   if (!priceId) {
+    reqLog.error('Stripe price not configured', { tier });
     return NextResponse.json(
       { error: 'Stripe price not configured for this tier' },
       { status: 500 }
     );
   }
 
-  const user = authResult.ctx.user;
   const db = getDb();
 
   // Create or retrieve Stripe customer
@@ -73,6 +80,7 @@ export async function POST(req: Request) {
 
     // Save customer ID to database
     await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, user.id));
+    reqLog.info('Stripe customer created', { customerId });
   }
 
   // Create Stripe Checkout session
@@ -87,6 +95,8 @@ export async function POST(req: Request) {
     success_url: `${APP_URL}/dashboard?upgraded=true`,
     cancel_url: `${APP_URL}/pricing`,
   });
+
+  reqLog.info('Checkout session created', { tier, sessionId: session.id });
 
   return NextResponse.json({ url: session.url });
 }
