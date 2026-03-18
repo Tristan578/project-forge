@@ -78,7 +78,7 @@ describe('handleTransformEvent', () => {
   });
 
   describe('SCENE_GRAPH_UPDATE', () => {
-    it('calls updateSceneGraph with payload and marks scene as modified', () => {
+    it('calls setFullGraph with payload and marks scene as modified', () => {
       const sceneGraph = {
         entities: [
           { id: 'entity-1', name: 'Cube', entityType: 'cube', parentId: null },
@@ -93,7 +93,7 @@ describe('handleTransformEvent', () => {
       );
 
       expect(result).toBe(true);
-      expect(actions.updateSceneGraph).toHaveBeenCalledWith(sceneGraph);
+      expect(actions.setFullGraph).toHaveBeenCalledWith(sceneGraph);
       expect(useEditorStore.setState).toHaveBeenCalledWith({ sceneModified: true });
     });
   });

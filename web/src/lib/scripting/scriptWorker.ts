@@ -2,6 +2,8 @@
 // Receives: init (scripts + entity states), tick (dt + states), stop
 // Sends: commands (engine commands), log (console output), error (runtime errors), ui (HUD updates)
 
+import { injectLoopGuards } from './loopGuards';
+
 interface ScriptInstance {
   entityId: string;
   onStart?: () => void;
@@ -945,124 +947,6 @@ const DEFAULT_ON_DESTROY_TIMEOUT_MS = 1000;
 let onStartTimeoutMs = DEFAULT_ON_START_TIMEOUT_MS;
 let onDestroyTimeoutMs = DEFAULT_ON_DESTROY_TIMEOUT_MS;
 
-function injectLoopGuards(source: string): string {
-  // PF-524: Each loop gets its own counter variable (__lg0, __lg1, ...)
-  // declared immediately before the loop statement so the counter resets
-  // each time control reaches the loop. The guard check increments the
-  // counter on every iteration and throws when the limit is exceeded.
-  //
-  // For do-while loops, the trailing `while(cond)` must not be treated as
-  // a standalone while-loop. We track open do-body braces to detect this.
-  let loopIndex = 0;
-  let result = '';
-  let i = 0;
-  const src = source;
-  const len = src.length;
-  // Stack of brace depths where do-while bodies start.
-  // When we see `do {`, we push the current brace depth.
-  // When the depth returns to that level, the next `while` is the do-while
-  // condition and must be emitted verbatim (no guard injection).
-  let braceDepth = 0;
-  const doBodyStartDepths: number[] = [];
-  let skipNextWhile = false;
-  while (i < len) {
-    // Track brace depth for do-while detection
-    if (src[i] === '{') braceDepth++;
-    if (src[i] === '}') {
-      braceDepth--;
-      // If we just closed a do-while body, flag to skip the next `while`
-      if (doBodyStartDepths.length > 0 && braceDepth === doBodyStartDepths[doBodyStartDepths.length - 1]) {
-        doBodyStartDepths.pop();
-        skipNextWhile = true;
-      }
-    }
-    if (src[i] === '"' || src[i] === "'" || src[i] === '`') {
-      const quote = src[i];
-      result += src[i++];
-      while (i < len && src[i] !== quote) {
-        if (src[i] === '\\') { result += src[i++]; }
-        if (i < len) { result += src[i++]; }
-      }
-      if (i < len) result += src[i++];
-      continue;
-    }
-    if (src[i] === '/' && i + 1 < len && src[i + 1] === '/') {
-      while (i < len && src[i] !== '\n') result += src[i++];
-      continue;
-    }
-    if (src[i] === '/' && i + 1 < len && src[i + 1] === '*') {
-      result += src[i++]; result += src[i++];
-      while (i < len && !(src[i] === '*' && i + 1 < len && src[i + 1] === '/')) result += src[i++];
-      if (i < len) { result += src[i++]; result += src[i++]; }
-      continue;
-    }
-    const remaining = src.slice(i);
-    if (/^while\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
-      if (skipNextWhile) {
-        // This is the condition part of a do-while — emit verbatim
-        skipNextWhile = false;
-        result += src[i++];
-        continue;
-      }
-      const gv = '__lg' + loopIndex++;
-      const gd = 'let ' + gv + '=0;';
-      const gc = 'if(++' + gv + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
-      result += gd + 'while';
-      i += 5;
-      while (i < len && /\s/.test(src[i])) result += src[i++];
-      if (i < len && src[i] === '(') {
-        let depth = 0;
-        do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; result += src[i++]; } while (i < len && depth > 0);
-        while (i < len && /\s/.test(src[i])) result += src[i++];
-        if (i < len && src[i] === '{') { result += '{' + gc; braceDepth++; i++; }
-        else { result += '{' + gc; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
-      }
-      continue;
-    }
-    if (/^for\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
-      const gv = '__lg' + loopIndex++;
-      const gd = 'let ' + gv + '=0;';
-      const gc = 'if(++' + gv + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
-      result += gd + 'for';
-      i += 3;
-      while (i < len && /\s/.test(src[i])) result += src[i++];
-      if (i < len && src[i] === '(') {
-        let depth = 0;
-        do { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; result += src[i++]; } while (i < len && depth > 0);
-        while (i < len && /\s/.test(src[i])) result += src[i++];
-        if (i < len && src[i] === '{') { result += '{' + gc; braceDepth++; i++; }
-        else { result += '{' + gc; while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++]; if (i < len && src[i] === ';') result += src[i++]; result += '}'; }
-      }
-      continue;
-    }
-    if (/^do\b/.test(remaining) && (i === 0 || !/\w/.test(src[i - 1]))) {
-      const gv = '__lg' + loopIndex++;
-      const gd = 'let ' + gv + '=0;';
-      const gc = 'if(++' + gv + '>__loopLimit)throw new Error("Infinite loop detected: exceeded "+__loopLimit+" iterations");';
-      result += gd + 'do';
-      i += 2;
-      while (i < len && /\s/.test(src[i])) result += src[i++];
-      if (i < len && src[i] === '{') {
-        // Record the depth BEFORE opening the brace so we can detect
-        // when this do-body closes.
-        doBodyStartDepths.push(braceDepth);
-        result += '{' + gc;
-        braceDepth++;
-        i++;
-      } else {
-        // Braceless do-while: wrap the single statement in braces with guard
-        result += '{' + gc;
-        while (i < len && src[i] !== ';' && src[i] !== '\n') result += src[i++];
-        if (i < len && src[i] === ';') result += src[i++];
-        result += '}';
-        skipNextWhile = true;
-      }
-      continue;
-    }
-    result += src[i++];
-  }
-  return result;
-}
 
 function compileScript(entityId_: string, source: string): ScriptInstance {
   const forge = buildForgeApi(entityId_);
@@ -1080,14 +964,27 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
 
   try {
     // Inject loop guards before compilation to catch infinite loops at the source level.
-    const guardedSource = injectLoopGuards(source);
-    // Shadow dangerous globals; new Function() is intentional for sandbox.
-    const fn = new Function( // codeql[js/code-injection]
+    // PF-589: guardVarNames lets us generate a __resetGuards() function so that each
+    // entry-point call (onStart, onUpdate, onDestroy) starts with all counters at 0,
+    // preventing legitimate loops from accumulating iterations across frames.
+    const { source: guardedSource, guardVarNames } = injectLoopGuards(source);
+    const resetBody = guardVarNames.length > 0
+      ? guardVarNames.map(v => v + '=0;').join('')
+      : '';
+    const resetFn = resetBody ? 'function __resetGuards(){' + resetBody + '}' : 'function __resetGuards(){}';
+    // Shadow dangerous globals; sandbox compilation is intentional for script isolation.
+    const sandboxCtor = Function; // codeql[js/code-injection]
+    const fn = sandboxCtor(
       'forge', 'entityId', '__loopLimit',
       ...SHADOWED_GLOBALS,
       `
       ${guardedSource}
-      return { onStart: typeof onStart === 'function' ? onStart : undefined, onUpdate: typeof onUpdate === 'function' ? onUpdate : undefined, onDestroy: typeof onDestroy === 'function' ? onDestroy : undefined };
+      ${resetFn}
+      return {
+        onStart: typeof onStart === 'function' ? function(){__resetGuards();onStart();} : undefined,
+        onUpdate: typeof onUpdate === 'function' ? function(dt){__resetGuards();onUpdate(dt);} : undefined,
+        onDestroy: typeof onDestroy === 'function' ? function(){__resetGuards();onDestroy();} : undefined,
+      };
       `
     );
     const result = fn(forge, entityId_, loopIterationLimit, ...SHADOWED_GLOBALS.map(() => undefined));
