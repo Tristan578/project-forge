@@ -24,6 +24,7 @@ import { TilesetPanel } from './TilesetPanel';
 import { TimelinePanel } from './TimelinePanel';
 import { TaskboardPanel } from './TaskboardPanel';
 import { ProceduralAnimPanel } from './ProceduralAnimPanel';
+import { EffectBindingsPanel } from './EffectBindingsPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -152,6 +153,14 @@ function ProceduralAnimPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function EffectBindingsPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <EffectBindingsPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -169,6 +178,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   timeline: TimelinePanelWrapper,
   taskboard: TaskboardPanelWrapper,
   'procedural-anim': ProceduralAnimPanelWrapper,
+  'effect-bindings': EffectBindingsPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
