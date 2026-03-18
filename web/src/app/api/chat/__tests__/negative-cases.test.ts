@@ -107,7 +107,7 @@ async function* makeStreamEvents() {
   yield { type: 'message_stop' as const };
 }
 
-async function readSSEEvents(response: Response): Promise<unknown[]> {
+async function _readSSEEvents(response: Response): Promise<unknown[]> {
   const text = await response.text();
   const events: unknown[] = [];
   for (const line of text.split('\n')) {
@@ -400,8 +400,9 @@ describe('POST /api/chat — negative cases', () => {
       await res.text();
 
       // Give async operations time to settle
-      await new Promise((r) => setTimeout(r, 50));
-      expect(refundTokens).not.toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(refundTokens).not.toHaveBeenCalled();
+      });
     });
   });
 
