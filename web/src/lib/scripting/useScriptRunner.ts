@@ -13,6 +13,7 @@ import {
 } from '@/lib/scripting/channels';
 import type { AsyncRequest } from '@/lib/scripting/asyncTypes';
 import { showError } from '@/lib/toast';
+import { DeltaSerializer, type SceneSnapshot } from '@/lib/engine/deltaSerializer';
 
 // Commands allowed from user scripts (maps to forge.* API surface)
 const SCRIPT_ALLOWED_COMMANDS = new Set([
@@ -154,6 +155,8 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
   const lastOcclusionCheckRef = useRef(0);
   const collisionEventCallbackRef = useRef<((event: { entityA: string; entityB: string; started: boolean }) => void) | null>(null);
   const routerRef = useRef<AsyncChannelRouter | null>(null);
+  const entityDeltaRef = useRef<DeltaSerializer | null>(null);
+  const entityInfoDeltaRef = useRef<DeltaSerializer | null>(null);
 
   const dispatchCommand = useCallback(
     (command: string, payload: unknown): unknown => {
@@ -432,6 +435,11 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       elapsedRef.current = 0;
       lastTickRef.current = performance.now();
 
+      // Initialize delta serializers for play-tick optimization
+      // Keyframe every 60 frames (~1s at 60fps) for safety against drift
+      entityDeltaRef.current = new DeltaSerializer(60);
+      entityInfoDeltaRef.current = new DeltaSerializer(300); // entityInfos change rarely
+
       setPlayTickCallback((data: unknown) => {
         const now = performance.now();
         const dt = (now - lastTickRef.current) / 1000;
@@ -479,12 +487,28 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         // Flush any pending async responses into the tick message
         const asyncResponses = routerRef.current?.flush();
 
+        // Delta-encode entities and entityInfos to reduce per-frame serialization cost.
+        // Instead of sending the full scene every frame, only changed components are sent.
+        // The worker receives deltas and reconstructs full state locally.
+        const entitiesSnapshot = tickData.entities as SceneSnapshot;
+        const entityInfosSnapshot = tickData.entityInfos as SceneSnapshot;
+
+        const entitiesDelta = entityDeltaRef.current
+          ? entityDeltaRef.current.computeDelta(entitiesSnapshot)
+          : null;
+        const entityInfosDelta = entityInfoDeltaRef.current
+          ? entityInfoDeltaRef.current.computeDelta(entityInfosSnapshot)
+          : null;
+
         worker.postMessage({
           type: 'tick',
           dt,
           elapsed: elapsedRef.current,
-          entities: tickData.entities,
-          entityInfos: tickData.entityInfos,
+          // Send deltas when available, fall back to full state
+          entities: entitiesDelta ? undefined : tickData.entities,
+          entitiesDelta: entitiesDelta || undefined,
+          entityInfos: entityInfosDelta ? undefined : tickData.entityInfos,
+          entityInfosDelta: entityInfosDelta || undefined,
           inputState: tickData.inputState,
           audioPlayingStates: audioManager.getPlayingStates(),
           tilemapStates: tickTilemapStates,
@@ -543,6 +567,15 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
         clearTimeout(watchdogRef.current);
         watchdogRef.current = null;
       }
+      // Reset delta serializers
+      if (entityDeltaRef.current) {
+        entityDeltaRef.current.reset();
+        entityDeltaRef.current = null;
+      }
+      if (entityInfoDeltaRef.current) {
+        entityInfoDeltaRef.current.reset();
+        entityInfoDeltaRef.current = null;
+      }
       // Reset async channel router
       if (routerRef.current) {
         routerRef.current.reset();
@@ -577,6 +610,15 @@ export function useScriptRunner({ wasmModule }: ScriptRunnerOptions) {
       if (routerRef.current) {
         routerRef.current.reset();
         routerRef.current = null;
+      }
+      // Reset delta serializers
+      if (entityDeltaRef.current) {
+        entityDeltaRef.current.reset();
+        entityDeltaRef.current = null;
+      }
+      if (entityInfoDeltaRef.current) {
+        entityInfoDeltaRef.current.reset();
+        entityInfoDeltaRef.current = null;
       }
     };
   }, []);
