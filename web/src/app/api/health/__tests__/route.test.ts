@@ -7,9 +7,16 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { NextRequest } from 'next/server';
+
+function makeReq(ip = '1.2.3.4'): NextRequest {
+  return new NextRequest('http://localhost:3000/api/health', {
+    headers: { 'x-forwarded-for': ip },
+  });
+}
 
 describe('GET /api/health', () => {
-  let GET: () => Promise<Response>;
+  let GET: (req: NextRequest) => Promise<Response>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -17,6 +24,7 @@ describe('GET /api/health', () => {
 
     const mod = await import('../route');
     GET = mod.GET;
+    mod.resetHealthCache();
   });
 
   afterEach(() => {
@@ -28,18 +36,18 @@ describe('GET /api/health', () => {
   // -------------------------------------------------------------------------
   describe('response format', () => {
     it('returns 200 status', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       expect(res.status).toBe(200);
     });
 
     it('returns JSON with status=ok', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
       expect(body.status).toBe('ok');
     });
 
     it('includes required fields: status, environment, commit, branch, database, timestamp, services', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
 
       expect(body).toHaveProperty('status');
@@ -52,7 +60,7 @@ describe('GET /api/health', () => {
     });
 
     it('services is a non-empty array', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
 
       expect(Array.isArray(body.services)).toBe(true);
@@ -60,7 +68,7 @@ describe('GET /api/health', () => {
     });
 
     it('each service entry has name, status, latencyMs fields', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
 
       for (const svc of body.services) {
@@ -71,7 +79,7 @@ describe('GET /api/health', () => {
     });
 
     it('service status values are up, degraded, or down (never "healthy")', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
 
       const validStatuses = new Set(['up', 'degraded', 'down']);
@@ -80,8 +88,8 @@ describe('GET /api/health', () => {
       }
     });
 
-    it('services array includes at least one known service', async () => {
-      const res = await GET();
+    it('services array includes at least 8 service checks', async () => {
+      const res = await GET(makeReq());
       const body = await res.json();
 
       const names: string[] = body.services.map((s: { name: string }) => s.name);
@@ -93,7 +101,7 @@ describe('GET /api/health', () => {
     });
 
     it('timestamp is a valid ISO 8601 string', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
 
       expect(() => new Date(body.timestamp)).not.toThrow();
@@ -104,14 +112,14 @@ describe('GET /api/health', () => {
       vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'abcdef1234567890');
 
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(makeReq());
       const body = await res.json();
 
       expect(body.commit).toBe('abcdef12');
     });
 
     it('commit is a string (present or defaulting to "local")', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
 
       // Commit is always a string (either truncated SHA or 'local')
@@ -122,14 +130,14 @@ describe('GET /api/health', () => {
       vi.stubEnv('VERCEL_GIT_COMMIT_REF', 'main');
 
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(makeReq());
       const body = await res.json();
 
       expect(body.branch).toBe('main');
     });
 
     it('branch is a string (from env or defaulting to "unknown")', async () => {
-      const res = await GET();
+      const res = await GET(makeReq());
       const body = await res.json();
 
       // Branch is always a string
@@ -145,7 +153,7 @@ describe('GET /api/health', () => {
       vi.stubEnv('NEXT_PUBLIC_ENVIRONMENT', 'staging');
 
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(makeReq());
       const body = await res.json();
 
       expect(body.environment).toBe('staging');
@@ -156,7 +164,7 @@ describe('GET /api/health', () => {
       vi.stubEnv('NODE_ENV', 'production');
 
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(makeReq());
       const body = await res.json();
 
       // NODE_ENV is 'test' in vitest, so check it's a string
@@ -172,7 +180,7 @@ describe('GET /api/health', () => {
       vi.stubEnv('DATABASE_URL', '');
 
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(makeReq());
       const body = await res.json();
 
       expect(body.database).toBe('not_configured');
@@ -193,7 +201,7 @@ describe('GET /api/health', () => {
       }));
 
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(makeReq());
       const body = await res.json();
 
       expect(body.database).toBe('connected');
@@ -212,7 +220,7 @@ describe('GET /api/health', () => {
       }));
 
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(makeReq());
       const body = await res.json();
 
       expect(body.database).toBe('unavailable');

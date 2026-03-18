@@ -1,10 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import {
   runAllHealthChecks,
   computeCriticalStatus,
   sanitizeForPublic,
   type ServiceHealth,
 } from '@/lib/monitoring/healthChecks';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 /** Public status vocabulary — 'healthy' is remapped to 'up'. */
 type PublicStatus = 'up' | 'degraded' | 'down';
@@ -21,6 +22,25 @@ function normalizeStatus(s: ServiceHealth): PublicServiceHealth {
 }
 
 /**
+ * Module-level response cache to reduce downstream service calls.
+ * Health checks make 8 concurrent network requests; caching for 30s
+ * reduces amplification factor when monitoring tools poll frequently.
+ */
+interface CachedReport {
+  body: Record<string, unknown>;
+  httpStatus: number;
+  timestamp: number;
+}
+
+let cachedReport: CachedReport | null = null;
+const CACHE_TTL_MS = 30_000;
+
+/** Exposed for testing — resets the module-level cache. */
+export function resetHealthCache(): void {
+  cachedReport = null;
+}
+
+/**
  * GET /api/health
  *
  * Unauthenticated health check endpoint for monitoring and staging verification.
@@ -28,15 +48,26 @@ function normalizeStatus(s: ServiceHealth): PublicServiceHealth {
  * Only critical service failures (DB, Auth) trigger HTTP 503.
  * Sensitive error details are stripped from the public response.
  *
- * Services array reports: Clerk, Anthropic, Sentry, Cloudflare R2 and more.
- * Each entry has: { name, status: 'up'|'degraded'|'down', latencyMs, error? }
- *
- * Rate limiting: This endpoint makes real network calls (DB, Clerk, CDN).
- * In production, upstream infrastructure (Vercel Edge, Cloudflare) provides
- * basic rate limiting. For additional protection, add Upstash-based rate
- * limiting when the rate-limiting infrastructure is fully deployed.
+ * Rate limiting: 60 requests per minute per IP. Cached for 30 seconds to
+ * reduce downstream amplification (1 request → 8 service checks).
  */
-export async function GET(): Promise<NextResponse> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  // Rate limit: 60 req/min per IP (generous for monitoring tools, blocks hammering)
+  const limited = await rateLimitPublicRoute(req, 'health', 60, 60_000);
+  if (limited) return limited;
+
+  // Return cached result if still fresh
+  const now = Date.now();
+  if (cachedReport !== null && now - cachedReport.timestamp < CACHE_TTL_MS) {
+    return NextResponse.json(cachedReport.body, {
+      status: cachedReport.httpStatus,
+      headers: {
+        'Cache-Control': 'public, max-age=30',
+        'X-Cache': 'HIT',
+      },
+    });
+  }
+
   const report = await runAllHealthChecks();
   const criticalStatus = computeCriticalStatus(report.services);
   const httpStatus = criticalStatus === 'down' ? 503 : 200;
@@ -54,20 +85,28 @@ export async function GET(): Promise<NextResponse> {
 
   const publicServices = sanitizeForPublic(report.services).map(normalizeStatus);
 
-  return NextResponse.json(
-    {
-      status: criticalStatus === 'down' ? 'error' : 'ok',
-      environment: report.environment,
-      commit: commit.slice(0, 8),
-      branch,
-      database: dbStatus,
-      timestamp: report.timestamp,
-      overall: report.overall,
-      version: report.version,
-      services: publicServices,
+  const body = {
+    status: criticalStatus === 'down' ? 'error' : 'ok',
+    environment: report.environment,
+    commit: commit.slice(0, 8),
+    branch,
+    database: dbStatus,
+    timestamp: report.timestamp,
+    overall: report.overall,
+    version: report.version,
+    services: publicServices,
+  };
+
+  // Cache the fresh result
+  cachedReport = { body, httpStatus, timestamp: now };
+
+  return NextResponse.json(body, {
+    status: httpStatus,
+    headers: {
+      'Cache-Control': 'public, max-age=30',
+      'X-Cache': 'MISS',
     },
-    { status: httpStatus },
-  );
+  });
 }
 
 export const dynamic = 'force-dynamic';
