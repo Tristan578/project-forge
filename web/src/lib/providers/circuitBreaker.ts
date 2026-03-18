@@ -129,7 +129,7 @@ export class ProviderCircuitBreaker {
         actualCostCents > estimatedCostCents * this.costAnomalyMultiplier
       ) {
         this.costAnomalyDetected = true;
-        if (this.state === 'CLOSED') {
+        if (this.state === 'CLOSED' || this.state === 'HALF_OPEN') {
           this._openCircuit();
           return;
         }
