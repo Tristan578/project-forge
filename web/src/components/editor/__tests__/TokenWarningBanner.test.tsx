@@ -140,4 +140,29 @@ describe('TokenWarningBanner', () => {
     const { container } = render(<TokenWarningBanner />);
     expect(container.querySelector('[data-testid="token-warning-banner"]')).toBeNull();
   });
+
+  it('renders without crashing when localStorage.getItem throws SecurityError', () => {
+    const originalGetItem = Storage.prototype.getItem;
+    Storage.prototype.getItem = () => { throw new DOMException('SecurityError', 'SecurityError'); };
+    try {
+      mockState.tokenBalance = { monthlyRemaining: 100, monthlyTotal: 10000, addon: 0, total: 100, nextRefillDate: null };
+      // Should not throw; defaults to false (not dismissed), so banner should appear
+      render(<TokenWarningBanner />);
+      expect(screen.getByTestId('token-warning-banner')).toBeDefined();
+    } finally {
+      Storage.prototype.getItem = originalGetItem;
+    }
+  });
+
+  it('shows payment banner without crashing when localStorage.getItem throws', () => {
+    const originalGetItem = Storage.prototype.getItem;
+    Storage.prototype.getItem = () => { throw new DOMException('SecurityError', 'SecurityError'); };
+    try {
+      mockState.billingStatus = { tier: 'creator', stripeCustomerId: 'cus_123', billingCycleStart: null, subscriptionStatus: 'past_due' };
+      render(<TokenWarningBanner />);
+      expect(screen.getByTestId('payment-warning-banner')).toBeDefined();
+    } finally {
+      Storage.prototype.getItem = originalGetItem;
+    }
+  });
 });

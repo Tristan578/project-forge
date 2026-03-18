@@ -17,13 +17,19 @@ export function TokenWarningBanner() {
   const billingStatus = useUserStore((s) => s.billingStatus);
 
   const [tokenDismissed, setTokenDismissed] = useState(() => {
-    if (typeof localStorage === 'undefined') return false;
-    return !!localStorage.getItem(DISMISSED_KEY);
+    try {
+      return !!localStorage.getItem(DISMISSED_KEY);
+    } catch {
+      return false;
+    }
   });
 
   const [paymentDismissed, setPaymentDismissed] = useState(() => {
-    if (typeof localStorage === 'undefined') return false;
-    return !!localStorage.getItem(PAYMENT_DISMISSED_KEY);
+    try {
+      return !!localStorage.getItem(PAYMENT_DISMISSED_KEY);
+    } catch {
+      return false;
+    }
   });
 
   const isTokenLow = useMemo(() => {
