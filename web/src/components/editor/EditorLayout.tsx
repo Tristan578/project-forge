@@ -21,6 +21,7 @@ const ShaderEditorPanel = lazy(() => import('./ShaderEditorPanel').then(m => ({ 
 const ChatPanel = lazy(() => import('../chat/ChatPanel').then(m => ({ default: m.ChatPanel })));
 const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m.WelcomeModal })));
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
+const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
@@ -252,6 +253,7 @@ export function EditorLayout() {
   const [leftDrawerOpen, setLeftDrawerOpen] = useState(false);
   const [rightDrawerOpen, setRightDrawerOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   // Close drawers when switching away from compact mode (prev-value pattern)
@@ -305,10 +307,10 @@ export function EditorLayout() {
         return;
       }
 
-      // ? key opens shortcuts panel
+      // ? key opens cheat sheet overlay
       if (e.key === '?') {
         e.preventDefault();
-        setShortcutsOpen((prev) => !prev);
+        setCheatSheetOpen((prev) => !prev);
       }
     },
     [toggleChatOverlay]
@@ -405,6 +407,7 @@ export function EditorLayout() {
           <WelcomeModal />
           <ShaderEditorPanel />
           <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+          <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
           <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
         </Suspense>
       </div>
@@ -460,6 +463,7 @@ export function EditorLayout() {
         <WelcomeModal />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+        <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
         <FeedbackDialog open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
       </Suspense>
       <PerformanceProfiler />
