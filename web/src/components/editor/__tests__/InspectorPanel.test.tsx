@@ -19,6 +19,12 @@ vi.mock('@/stores/chatStore', () => ({
   useChatStore: vi.fn(() => ({})),
 }));
 
+vi.mock('@/stores/slices/complexitySlice', () => ({
+  useComplexityStore: vi.fn((selector: (s: Record<string, unknown>) => unknown) =>
+    selector({ isInspectorSectionVisible: () => true }),
+  ),
+}));
+
 vi.mock('@/components/ui/InfoTooltip', () => ({
   InfoTooltip: () => null,
 }));

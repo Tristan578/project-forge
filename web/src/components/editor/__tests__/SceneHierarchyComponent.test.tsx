@@ -233,7 +233,7 @@ describe('SceneHierarchy', () => {
   it('shows loading skeleton when scene has no entities', () => {
     setupStore({ sceneGraph: makeGraph({}) });
     const { container } = render(<SceneHierarchy />);
-    expect(container.textContent).toContain('Loading scene entities');
+    expect(container.textContent).toContain('No entities yet');
   });
 
   // ── Background click ──────────────────────────────────────────────────

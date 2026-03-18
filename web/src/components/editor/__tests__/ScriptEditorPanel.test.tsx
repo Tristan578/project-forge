@@ -97,7 +97,7 @@ describe('ScriptEditorPanel', () => {
   it('shows No script attached message', () => {
     setupStore();
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('No script attached')).toBeDefined();
+    expect(screen.getByText('No scripts')).toBeDefined();
   });
 
   it('shows Add Script button', () => {

@@ -75,7 +75,7 @@ describe('SceneHierarchy', () => {
   it('shows loading skeleton when no entities exist', () => {
     mockEditorStore();
     render(<SceneHierarchy />);
-    expect(screen.getByText('Loading scene entities...')).toBeDefined();
+    expect(screen.getByText('No entities yet')).toBeDefined();
   });
 
   it('shows selected count when entities are selected', () => {

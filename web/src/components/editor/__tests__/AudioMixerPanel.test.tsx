@@ -12,10 +12,14 @@ vi.mock('@/stores/editorStore', () => ({
   useEditorStore: vi.fn(() => ({})),
 }));
 
-vi.mock('lucide-react', () => ({
-  SlidersHorizontal: (props: Record<string, unknown>) => <span data-testid="sliders-icon" {...props} />,
-  Plus: (props: Record<string, unknown>) => <span data-testid="plus-icon" {...props} />,
-}));
+vi.mock('lucide-react', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('lucide-react');
+  return {
+    ...actual,
+    SlidersHorizontal: (props: Record<string, unknown>) => <span data-testid="sliders-icon" {...props} />,
+    Plus: (props: Record<string, unknown>) => <span data-testid="plus-icon" {...props} />,
+  };
+});
 
 describe('AudioMixerPanel', () => {
   const mockUpdateAudioBus = vi.fn();
