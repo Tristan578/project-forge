@@ -66,9 +66,9 @@ test.describe('Help & Onboarding @ui', () => {
     });
   });
 
-  test.describe('Welcome Modal', () => {
-    test('welcome modal appears on first visit', async ({ page }) => {
-      // Skip engine loading, do NOT set forge-welcomed
+  test.describe('Onboarding Flow', () => {
+    test('onboarding appears on first visit', async ({ page }) => {
+      // Skip engine loading, do NOT set forge-quickstart-completed or forge-welcomed
       await page.addInitScript(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__SKIP_ENGINE = true;
@@ -84,15 +84,16 @@ test.describe('Help & Onboarding @ui', () => {
         { timeout: 30_000 },
       );
 
-      // Welcome modal should appear
-      const welcomeModal = page.locator('.fixed').filter({ hasText: /welcome|getting started/i }).first();
-      await expect(welcomeModal).toBeVisible({ timeout: 5000 });
+      // QuickStartFlow or WelcomeModal should appear (fixed overlay)
+      const onboardingOverlay = page.locator('.fixed').filter({ hasText: /what kind of game|welcome|getting started/i }).first();
+      await expect(onboardingOverlay).toBeVisible({ timeout: 5000 });
     });
 
-    test('welcome modal does not appear when already welcomed', async ({ page }) => {
+    test('onboarding does not appear when already completed', async ({ page }) => {
       await page.addInitScript(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (window as any).__SKIP_ENGINE = true;
+        localStorage.setItem('forge-quickstart-completed', '1');
         localStorage.setItem('forge-welcomed', '1');
         localStorage.setItem('forge-checklist-dismissed', '1');
         localStorage.setItem('forge-mobile-dismissed', '1');
@@ -109,9 +110,9 @@ test.describe('Help & Onboarding @ui', () => {
       // Wait a moment for modal to potentially appear
       await page.waitForTimeout(2000);
 
-      // Welcome modal should NOT appear
-      const welcomeModal = page.locator('.fixed').filter({ hasText: /welcome|getting started/i }).first();
-      const visible = await welcomeModal.isVisible().catch(() => false);
+      // No onboarding overlay should appear
+      const onboardingOverlay = page.locator('.fixed').filter({ hasText: /what kind of game|welcome|getting started/i }).first();
+      const visible = await onboardingOverlay.isVisible().catch(() => false);
       expect(visible).toBe(false);
     });
   });

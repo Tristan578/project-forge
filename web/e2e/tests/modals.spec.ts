@@ -63,28 +63,28 @@ test.describe('Modals @ui', () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  test('welcome modal appears on first visit', async ({ page }) => {
+  test('onboarding flow appears on first visit', async ({ page }) => {
     // Skip engine loading (prevents browser crash without WASM assets)
     await page.addInitScript(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__SKIP_ENGINE = true;
-      // Do NOT set forge-welcomed — we want the welcome modal to appear
+      // Do NOT set forge-quickstart-completed or forge-welcomed — first visit
       localStorage.setItem('forge-checklist-dismissed', '1');
       localStorage.setItem('forge-mobile-dismissed', '1');
     });
 
     await page.goto('/dev');
     await page.waitForLoadState('domcontentloaded');
-    // Wait for React hydration (welcome modal only renders client-side)
+    // Wait for React hydration (onboarding only renders client-side)
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
       { timeout: 30_000 }
     );
 
-    // Welcome modal should be visible (fixed overlay with welcome text)
-    const welcomeModal = page.locator('.fixed').filter({ hasText: /welcome|getting started/i }).first();
-    await expect(welcomeModal).toBeVisible({ timeout: 5000 });
+    // QuickStartFlow or WelcomeModal should be visible (fixed overlay)
+    const onboardingOverlay = page.locator('.fixed').filter({ hasText: /what kind of game|welcome|getting started/i }).first();
+    await expect(onboardingOverlay).toBeVisible({ timeout: 5000 });
   });
 
   test('keyboard shortcuts modal opens via Help menu', async ({ page, editor }) => {
