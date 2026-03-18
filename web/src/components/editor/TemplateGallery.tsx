@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Gamepad2, Zap, Crosshair, Puzzle, Compass, X } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
+import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import type { TemplateRegistryEntry } from '@/data/templates';
 
 interface TemplateGalleryProps {
@@ -70,9 +71,11 @@ export function TemplateGallery({ isOpen, onClose }: TemplateGalleryProps) {
     if (templateId === null) {
       // Blank project
       newScene();
+      trackEvent(AnalyticsEvent.GAME_CREATED, { source: 'blank' });
     } else {
       // Load template
       await loadTemplate(templateId);
+      trackEvent(AnalyticsEvent.TEMPLATE_USED, { templateId });
     }
     onClose();
   };
