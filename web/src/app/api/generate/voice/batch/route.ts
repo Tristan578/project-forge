@@ -1,3 +1,5 @@
+export const maxDuration = 120; // seconds — batch voice generation processes up to 20 items sequentially
+
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
