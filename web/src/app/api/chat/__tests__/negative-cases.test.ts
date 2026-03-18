@@ -141,7 +141,7 @@ describe('POST /api/chat — negative cases', () => {
       metered: true,
       usageId: 'usage-neg',
     } as Awaited<ReturnType<typeof resolveApiKey>>);
-    mockCreate.mockReturnValue(makeStreamEvents());
+    mockCreate.mockImplementation(() => makeStreamEvents());
 
     const mod = await import('../route');
     POST = mod.POST;
