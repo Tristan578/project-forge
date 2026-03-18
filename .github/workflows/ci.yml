@@ -81,3 +81,58 @@ jobs:
       - name: Run UI-only E2E tests
         working-directory: web
         run: npx playwright test --grep @ui --project=chromium
+
+  # ---------------------------------------------------------------------------
+  # Performance Benchmark Regression Detection
+  #
+  # STATUS: Commented out — enable once a stable baseline has been committed to
+  #         the benchmarks/ directory (see scripts/run-benchmarks.sh).
+  #
+  # HOW TO ENABLE:
+  #   1. Run `bash scripts/run-benchmarks.sh` locally on a representative machine.
+  #   2. Commit the output as benchmarks/baseline.json.
+  #   3. Uncomment the job below and update the --baseline flag accordingly.
+  #
+  # HOW IT WORKS:
+  #   - Runs the benchmark test suite via vitest (web/src/lib/perf/__tests__/).
+  #   - Produces benchmarks/latest.json with per-test timing measurements.
+  #   - Compares against the stored baseline; exits 1 if any metric exceeds 2x.
+  #   - Uploads both reports as CI artifacts for manual inspection.
+  #
+  # STABILITY NOTE:
+  #   CI runners have variable load. Ratios are used (not absolute numbers).
+  #   Raise --threshold to 3.0 if false positives occur on the CI runner.
+  #
+  # benchmark-regression:
+  #   name: Performance Benchmark Regression
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 15
+  #   permissions:
+  #     contents: read
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #
+  #     - uses: actions/setup-node@v6
+  #       with:
+  #         node-version: 20
+  #         cache: npm
+  #         cache-dependency-path: web/package-lock.json
+  #
+  #     - run: npm ci
+  #       working-directory: web
+  #
+  #     - name: Run benchmark suite and check for regressions
+  #       run: |
+  #         bash scripts/run-benchmarks.sh \
+  #           --baseline benchmarks/baseline.json \
+  #           --output   benchmarks/latest.json \
+  #           --threshold 2.0
+  #
+  #     - name: Upload benchmark reports
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: benchmark-reports-${{ github.run_id }}
+  #         path: benchmarks/
+  #         retention-days: 30
+  # ---------------------------------------------------------------------------
