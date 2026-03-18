@@ -206,10 +206,10 @@ async function processEvent(event: Stripe.Event): Promise<void> {
       if (!customerId) break;
 
       await handleChargeRefunded(
-        typeof charge.payment_intent === 'string'
-          ? charge.payment_intent
-          : charge.payment_intent?.id ?? charge.id,
-        charge.amount_refunded
+        customerId,
+        charge.id,
+        charge.amount_refunded,
+        charge.amount
       );
       break;
     }
