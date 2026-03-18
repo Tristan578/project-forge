@@ -48,96 +48,93 @@ vi.mock('drizzle-orm', () => ({
 
 import { handleChargeRefunded } from '../subscription-lifecycle';
 
-const mockPurchase = {
-  id: 'purchase-1',
-  userId: 'user-1',
-  stripePaymentIntent: 'pi_abc',
-  package: 'blaze',
-  tokens: 5000,
-  amountCents: 4900,
-  refundedCents: 0,
-  createdAt: new Date(),
-};
-
-const mockUser = {
+const mockUserRecord = {
+  id: 'user-1',
+  stripeCustomerId: 'cus_abc',
   monthlyTokens: 1000,
   monthlyTokensUsed: 200,
   addonTokens: 5000,
   earnedCredits: 0,
+  tier: 'hobbyist',
 };
 
 describe('handleChargeRefunded (PF-526)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSelectLimit.mockResolvedValue([mockPurchase]);
-    mockReturning.mockResolvedValue([{ id: 'purchase-1' }]);
-    mockUpdateWhere.mockReturnValue({ returning: mockReturning });
+    // Default: findUserByStripeCustomer returns the mock user
+    mockSelectLimit.mockResolvedValue([mockUserRecord]);
   });
 
   it('does nothing for zero refund amount', async () => {
-    await handleChargeRefunded('pi_abc', 0);
-    expect(mockSelect).not.toHaveBeenCalled();
+    await handleChargeRefunded('cus_abc', 'ch_abc', 0, 4900);
+    // amountRefunded <= 0 early return, only the findUser select happens
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it('does nothing for negative refund amount', async () => {
-    await handleChargeRefunded('pi_abc', -100);
-    expect(mockSelect).not.toHaveBeenCalled();
+    await handleChargeRefunded('cus_abc', 'ch_abc', -100, 4900);
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('does nothing when purchase not found', async () => {
+  it('does nothing for zero total amount', async () => {
+    await handleChargeRefunded('cus_abc', 'ch_abc', 100, 0);
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when user not found', async () => {
     mockSelectLimit.mockResolvedValueOnce([]);
-    await handleChargeRefunded('pi_missing', 2000);
+    await handleChargeRefunded('cus_missing', 'ch_abc', 2000, 4900);
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it('deducts proportional tokens for partial refund', async () => {
+    // First select: findUserByStripeCustomer
+    // Second select: reverseAddonTokens reads addonTokens
+    // Third select: getTotalBalance
     mockSelectLimit
-      .mockResolvedValueOnce([mockPurchase])
-      .mockResolvedValueOnce([mockUser]);
+      .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([{ addonTokens: 5000 }])
+      .mockResolvedValueOnce([mockUserRecord]);
 
-    await handleChargeRefunded('pi_abc', 2450);
+    await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
 
     expect(mockUpdate).toHaveBeenCalled();
     expect(mockInsert).toHaveBeenCalled();
   });
 
-  it('does nothing when purchase is already fully refunded', async () => {
-    const fullyRefunded = { ...mockPurchase, refundedCents: 4900 };
-    mockSelectLimit.mockResolvedValueOnce([fullyRefunded]);
+  it('deducts all tokens for full refund', async () => {
+    mockSelectLimit
+      .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([{ addonTokens: 5000 }])
+      .mockResolvedValueOnce([mockUserRecord]);
 
-    await handleChargeRefunded('pi_abc', 100);
+    await handleChargeRefunded('cus_abc', 'ch_abc', 4900, 4900);
 
+    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockInsert).toHaveBeenCalled();
+  });
+
+  it('skips deduction when user has zero addon tokens', async () => {
+    mockSelectLimit
+      .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([{ addonTokens: 0 }]);
+
+    await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
+
+    // No update because tokensToDeduct is 0
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('PF-526: double refund -- second refund uses remaining portion', async () => {
+  it('skips deduction when reverseAddonTokens user not found', async () => {
+    // findUserByStripeCustomer returns user
+    // reverseAddonTokens select returns empty
     mockSelectLimit
-      .mockResolvedValueOnce([{ ...mockPurchase, refundedCents: 0 }])
-      .mockResolvedValueOnce([mockUser]);
+      .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([]);
 
-    await handleChargeRefunded('pi_abc', 2450);
-    expect(mockUpdate.mock.calls.length).toBeGreaterThan(0);
+    await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
 
-    vi.clearAllMocks();
-    mockUpdateWhere.mockReturnValue({ returning: mockReturning });
-    mockReturning.mockResolvedValue([{ id: 'purchase-1' }]);
-
-    const afterFirstRefund = { ...mockPurchase, refundedCents: 2450 };
-    mockSelectLimit
-      .mockResolvedValueOnce([afterFirstRefund])
-      .mockResolvedValueOnce([mockUser]);
-
-    await handleChargeRefunded('pi_abc', 2450);
-
-    expect(mockUpdate).toHaveBeenCalled();
-  });
-
-  it('skips token deduction when atomic update fails (race condition)', async () => {
-    mockSelectLimit.mockResolvedValueOnce([mockPurchase]);
-    mockReturning.mockResolvedValueOnce([]);
-
-    await handleChargeRefunded('pi_abc', 2450);
-
+    expect(mockUpdate).not.toHaveBeenCalled();
     expect(mockInsert).not.toHaveBeenCalled();
   });
 });

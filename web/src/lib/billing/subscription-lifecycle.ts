@@ -12,9 +12,9 @@
  * produce audit records in the credit_transactions table.
  */
 
-import { eq, sql, and } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
-import { users, creditTransactions, tokenPurchases } from '@/lib/db/schema';
+import { users, creditTransactions } from '@/lib/db/schema';
 import type { Tier } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
 import { updateUserTier } from '@/lib/auth/user-service';
@@ -36,6 +36,13 @@ export async function findUserByStripeCustomer(customerId: string) {
   return user ?? null;
 }
 
+/**
+ * Handle a brand-new subscription being created.
+ *
+ * - Sets the user's tier and subscription ID
+ * - Grants initial monthly token allocation
+ * - Records a credit transaction
+ */
 export async function handleSubscriptionCreated(
   customerId: string,
   subscriptionId: string,
@@ -60,6 +67,7 @@ export async function handleSubscriptionCreated(
     })
     .where(eq(users.id, user.id));
 
+  // Audit trail
   const balance = await getTotalBalance(user.id);
   await db.insert(creditTransactions).values({
     userId: user.id,
@@ -71,6 +79,15 @@ export async function handleSubscriptionCreated(
   });
 }
 
+/**
+ * Handle a subscription being updated (plan change, status change, etc.).
+ *
+ * Key distinction from `handleSubscriptionCreated`:
+ * - Only adjusts tokens when the tier actually changes
+ * - On upgrade: grants the difference in token allocation immediately
+ * - On downgrade: caps tokens to the new tier's allocation
+ * - On status change only (same tier): no token change
+ */
 export async function handleSubscriptionUpdated(
   customerId: string,
   subscriptionId: string,
@@ -84,6 +101,7 @@ export async function handleSubscriptionUpdated(
   const currentTier = user.tier as Tier;
   const tierChanged = currentTier !== newTier;
 
+  // Always update the subscription ID and status-related fields
   await db
     .update(users)
     .set({
@@ -92,11 +110,15 @@ export async function handleSubscriptionUpdated(
     })
     .where(eq(users.id, user.id));
 
+  // If subscription is past_due or unpaid, we do NOT change tier or tokens
+  // -- let the invoice.payment_failed handler deal with grace period
   if (subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid') {
     return;
   }
 
   if (!tierChanged) {
+    // No tier change -- update tier in case it was out of sync, but don't
+    // reset tokens. This handles status changes like active -> trialing, etc.
     await updateUserTier(user.id, newTier);
     return;
   }
@@ -109,12 +131,14 @@ export async function handleSubscriptionUpdated(
   const newAllocation = TIER_MONTHLY_TOKENS[newTier];
 
   await db.transaction(async (tx) => {
+    // PF-513: tier update inside transaction so it rolls back on failure
     await tx
       .update(users)
       .set({ tier: newTier, updatedAt: new Date() })
       .where(eq(users.id, user.id));
 
     if (newAllocation > oldAllocation) {
+      // Upgrade: grant the difference in tokens immediately
       const difference = newAllocation - oldAllocation;
       const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
 
@@ -127,6 +151,7 @@ export async function handleSubscriptionUpdated(
         })
         .where(eq(users.id, user.id));
 
+      // PF-514: read balance through tx, not global db
       const balance = await getTotalBalance(user.id, tx);
       await tx.insert(creditTransactions).values({
         userId: user.id,
@@ -137,6 +162,8 @@ export async function handleSubscriptionUpdated(
         referenceId: subscriptionId,
       });
     } else {
+      // Downgrade: cap monthly tokens to new allocation, reset used counter
+      // User keeps any addon tokens they purchased
       await tx
         .update(users)
         .set({
@@ -146,11 +173,12 @@ export async function handleSubscriptionUpdated(
         })
         .where(eq(users.id, user.id));
 
+      // PF-514: read balance through tx, not global db
       const balance = await getTotalBalance(user.id, tx);
       await tx.insert(creditTransactions).values({
         userId: user.id,
         transactionType: 'adjustment',
-        amount: newAllocation - oldAllocation,
+        amount: newAllocation - oldAllocation, // negative for downgrade
         balanceAfter: balance,
         source: `downgrade:${currentTier}->${newTier}`,
         referenceId: subscriptionId,
@@ -159,6 +187,14 @@ export async function handleSubscriptionUpdated(
   }, { isolationLevel: 'serializable' });
 }
 
+/**
+ * Handle a subscription being deleted (cancelled).
+ *
+ * - Reverts user to starter (free) tier
+ * - Zeros out monthly tokens (addon tokens are preserved)
+ * - Clears subscription ID
+ * - Records an audit transaction
+ */
 export async function handleSubscriptionDeleted(
   customerId: string,
   subscriptionId: string
@@ -193,15 +229,22 @@ export async function handleSubscriptionDeleted(
   });
 }
 
+/**
+ * Handle a successful invoice payment (monthly renewal).
+ */
 export async function handleInvoicePaid(
   customerId: string,
   invoiceId: string,
   subscriptionId: string | null
 ): Promise<void> {
   if (!subscriptionId) return;
+
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
-  if (user.stripeSubscriptionId && user.stripeSubscriptionId !== subscriptionId) return;
+
+  if (user.stripeSubscriptionId && user.stripeSubscriptionId !== subscriptionId) {
+    return;
+  }
 
   const db = getDb();
   const tier = user.tier as Tier;
@@ -210,32 +253,52 @@ export async function handleInvoicePaid(
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
   if (monthlyRemaining > 0) {
     const rolloverAmount = Math.min(monthlyRemaining, allocation);
-    await db.update(users).set({
-      addonTokens: sql`${users.addonTokens} + ${rolloverAmount}`,
-      updatedAt: new Date(),
-    }).where(eq(users.id, user.id));
+
+    await db
+      .update(users)
+      .set({
+        addonTokens: sql`${users.addonTokens} + ${rolloverAmount}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
 
     if (rolloverAmount > 0) {
       const rolloverBalance = await getTotalBalance(user.id);
       await db.insert(creditTransactions).values({
-        userId: user.id, transactionType: 'rollover', amount: rolloverAmount,
-        balanceAfter: rolloverBalance, source: `renewal_rollover:${tier}`, referenceId: invoiceId,
+        userId: user.id,
+        transactionType: 'rollover',
+        amount: rolloverAmount,
+        balanceAfter: rolloverBalance,
+        source: `renewal_rollover:${tier}`,
+        referenceId: invoiceId,
       });
     }
   }
 
-  await db.update(users).set({
-    monthlyTokens: allocation, monthlyTokensUsed: 0,
-    billingCycleStart: new Date(), updatedAt: new Date(),
-  }).where(eq(users.id, user.id));
+  await db
+    .update(users)
+    .set({
+      monthlyTokens: allocation,
+      monthlyTokensUsed: 0,
+      billingCycleStart: new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, user.id));
 
   const balance = await getTotalBalance(user.id);
   await db.insert(creditTransactions).values({
-    userId: user.id, transactionType: 'monthly_grant', amount: allocation,
-    balanceAfter: balance, source: `renewal:${tier}`, referenceId: invoiceId,
+    userId: user.id,
+    transactionType: 'monthly_grant',
+    amount: allocation,
+    balanceAfter: balance,
+    source: `renewal:${tier}`,
+    referenceId: invoiceId,
   });
 }
 
+/**
+ * Handle a failed invoice payment.
+ */
 export async function handleInvoicePaymentFailed(
   customerId: string,
   invoiceId: string,
@@ -246,97 +309,103 @@ export async function handleInvoicePaymentFailed(
   if (!user) return;
 
   const db = getDb();
+
   const balance = await getTotalBalance(user.id);
   await db.insert(creditTransactions).values({
-    userId: user.id, transactionType: 'adjustment', amount: 0,
-    balanceAfter: balance, source: `payment_failed:attempt_${attemptCount}`, referenceId: invoiceId,
+    userId: user.id,
+    transactionType: 'adjustment',
+    amount: 0,
+    balanceAfter: balance,
+    source: `payment_failed:attempt_${attemptCount}`,
+    referenceId: invoiceId,
   });
 
   if (nextPaymentAttempt) {
-    console.warn(`[billing] Payment failed for user ${user.id}, attempt ${attemptCount}. Next retry: ${nextPaymentAttempt.toISOString()}`);
+    console.warn(
+      `[billing] Payment failed for user ${user.id}, attempt ${attemptCount}. ` +
+      `Next retry: ${nextPaymentAttempt.toISOString()}`
+    );
   } else {
-    console.warn(`[billing] Payment failed for user ${user.id}, attempt ${attemptCount}. No further retries scheduled -- subscription will be cancelled by Stripe.`);
+    console.warn(
+      `[billing] Payment failed for user ${user.id}, attempt ${attemptCount}. ` +
+      `No further retries scheduled -- subscription will be cancelled by Stripe.`
+    );
   }
 }
 
 /**
- * Handle a Stripe charge refund (partial or full).
+ * Handle a charge being refunded (full or partial) (PF-480).
  *
- * PF-526: Multiple partial refunds for the same charge must each deduct
- * tokens based only on the REMAINING un-refunded portion, not the original
- * total. We track cumulative refunded cents in tokenPurchases.refundedCents
- * and use an atomic SQL update with a WHERE guard to prevent races.
- *
- * Token deduction is proportional: if a $49 purchase granted 5000 tokens and
- * $24.50 is refunded, we deduct floor(5000 * 24.50 / 49) = 2500 tokens.
+ * Deducts addon tokens proportionally to the refund amount.
+ * For full refunds, removes all tokens from the original charge.
+ * For partial refunds, removes a proportional share.
  */
 export async function handleChargeRefunded(
-  paymentIntentId: string,
-  refundAmountCents: number
+  customerId: string,
+  chargeId: string,
+  amountRefunded: number,
+  amountTotal: number
 ): Promise<void> {
-  if (refundAmountCents <= 0) return;
+  const user = await findUserByStripeCustomer(customerId);
+  if (!user) return;
 
+  if (amountTotal <= 0 || amountRefunded <= 0) return;
+
+  await reverseAddonTokens(user.id, chargeId, amountRefunded, amountTotal);
+}
+
+/**
+ * Reverse addon tokens proportionally to a refund amount (PF-480).
+ *
+ * Calculates the proportion of the total charge that was refunded and
+ * deducts that proportion of addon tokens. Clamps to 0 to prevent
+ * negative balances.
+ */
+export async function reverseAddonTokens(
+  userId: string,
+  chargeId: string,
+  amountRefunded: number,
+  amountTotal: number
+): Promise<void> {
   const db = getDb();
-
-  // Find the purchase record for this payment intent
-  const [purchase] = await db
-    .select()
-    .from(tokenPurchases)
-    .where(eq(tokenPurchases.stripePaymentIntent, paymentIntentId))
+  const [user] = await db
+    .select({ addonTokens: users.addonTokens })
+    .from(users)
+    .where(eq(users.id, userId))
     .limit(1);
+  if (!user) return;
 
-  if (!purchase) return;
+  // Calculate proportional token deduction
+  const refundRatio = Math.min(amountRefunded / amountTotal, 1);
+  const tokensToDeduct = Math.floor(user.addonTokens * refundRatio);
 
-  const remainingCents = purchase.amountCents - purchase.refundedCents;
-  if (remainingCents <= 0) return;
+  if (tokensToDeduct <= 0) return;
 
-  // Clamp refund to what is actually remaining
-  const effectiveRefund = Math.min(refundAmountCents, remainingCents);
+  // Clamp deduction to current addon balance to prevent negative
+  const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
 
-  // Calculate proportional token deduction based on original total
-  const tokensToDeduct = Math.floor(
-    (purchase.tokens * effectiveRefund) / purchase.amountCents
-  );
-
-  // Atomically update refundedCents with a WHERE guard to prevent races
-  const updateResult = await db
-    .update(tokenPurchases)
+  await db
+    .update(users)
     .set({
-      refundedCents: sql`${tokenPurchases.refundedCents} + ${effectiveRefund}`,
+      addonTokens: sql`GREATEST(0, ${users.addonTokens} - ${clampedDeduction})`,
+      updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(tokenPurchases.id, purchase.id),
-        sql`${tokenPurchases.amountCents} - ${tokenPurchases.refundedCents} >= ${effectiveRefund}`
-      )
-    )
-    .returning({ id: tokenPurchases.id });
+    .where(eq(users.id, userId));
 
-  if (updateResult.length === 0) return;
-
-  if (tokensToDeduct > 0) {
-    await db
-      .update(users)
-      .set({
-        addonTokens: sql`GREATEST(0, ${users.addonTokens} - ${tokensToDeduct})`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, purchase.userId));
-
-    const balance = await getTotalBalance(purchase.userId);
-    await db.insert(creditTransactions).values({
-      userId: purchase.userId,
-      transactionType: 'refund',
-      amount: -tokensToDeduct,
-      balanceAfter: balance,
-      source: `charge_refund:${effectiveRefund}c/${purchase.amountCents}c`,
-      referenceId: paymentIntentId,
-    });
-  }
+  const balance = await getTotalBalance(userId);
+  await db.insert(creditTransactions).values({
+    userId,
+    transactionType: 'adjustment',
+    amount: -clampedDeduction,
+    balanceAfter: balance,
+    source: `charge_refunded:${chargeId}`,
+    referenceId: chargeId,
+  });
 }
 
 /**
  * Get the total token balance for a user (monthly remaining + addon + earned).
+ *
  * Accepts an optional transaction handle so callers inside a transaction
  * read from the same snapshot (PF-514).
  */

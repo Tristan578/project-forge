@@ -574,7 +574,6 @@ describe('handleSubscriptionUpdated — transaction safety', () => {
     mockUserAfterUpdate = makeUser({ tier: 'starter' as Tier, monthlyTokens: 50, monthlyTokensUsed: 0 });
 
     await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'starter', 'active');
-
     expect(mockTransaction).toHaveBeenCalledOnce();
     // PF-513: 3 updates: subscriptionId + tier (inside tx) + token adjustment (inside tx)
     expect(mockUpdate).toHaveBeenCalledTimes(3);
