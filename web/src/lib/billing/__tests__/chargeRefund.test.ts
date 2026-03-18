@@ -88,11 +88,13 @@ describe('handleChargeRefunded (PF-526)', () => {
   });
 
   it('deducts proportional tokens for partial refund', async () => {
-    // First select: findUserByStripeCustomer
-    // Second select: reverseAddonTokens reads addonTokens
-    // Third select: getTotalBalance
+    // Select 1: findUserByStripeCustomer
+    // Select 2: fallback idempotency check (no existing refund)
+    // Select 3: reverseAddonTokens reads addonTokens
+    // Select 4: getTotalBalance
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ addonTokens: 5000 }])
       .mockResolvedValueOnce([mockUserRecord]);
 
@@ -105,6 +107,7 @@ describe('handleChargeRefunded (PF-526)', () => {
   it('deducts all tokens for full refund', async () => {
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ addonTokens: 5000 }])
       .mockResolvedValueOnce([mockUserRecord]);
 
@@ -117,6 +120,7 @@ describe('handleChargeRefunded (PF-526)', () => {
   it('skips deduction when user has zero addon tokens', async () => {
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ addonTokens: 0 }]);
 
     await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
@@ -128,6 +132,7 @@ describe('handleChargeRefunded (PF-526)', () => {
   it('skips deduction when reverseAddonTokens user not found', async () => {
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
 
     await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
