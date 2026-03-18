@@ -4,6 +4,7 @@ import { useCallback, useRef, memo, useState, useEffect } from 'react';
 import { FolderOpen, Upload, Image as ImageIcon, Trash2, Box, Music, Palette, Sparkles, ChevronDown, Loader2 } from 'lucide-react';
 import { useEditorStore, type AssetMetadata } from '@/stores/editorStore';
 import { showError } from '@/lib/toast';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { MaterialLibraryPanel } from './MaterialLibraryPanel';
 import { GenerateModelDialog } from './GenerateModelDialog';
 import { GenerateTextureDialog } from './GenerateTextureDialog';
@@ -373,10 +374,12 @@ export const AssetPanel = memo(function AssetPanel() {
         <>
           {assets.length === 0 ? (
             <div className="flex flex-1 items-center justify-center p-4">
-              <div className="flex flex-col items-center gap-2 text-zinc-600">
-                <FolderOpen size={20} />
-                <span className="text-xs">Drop .glb, .png, or audio files here</span>
-              </div>
+              <EmptyState
+                icon={FolderOpen}
+                title="No assets imported"
+                description="Drag files here or use AI to generate assets"
+                action={{ label: 'Import File', onClick: () => gltfInputRef.current?.click() }}
+              />
             </div>
           ) : (
             <div className="grid grid-cols-4 gap-1.5 overflow-y-auto p-2">
