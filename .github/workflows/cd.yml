@@ -19,6 +19,9 @@ on:
 permissions:
   contents: read
 
+permissions:
+  contents: read
+
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: true
