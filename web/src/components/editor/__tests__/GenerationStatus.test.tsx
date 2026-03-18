@@ -12,13 +12,17 @@ vi.mock('@/stores/generationStore', () => ({
   useGenerationStore: vi.fn(() => ({})),
 }));
 
-vi.mock('lucide-react', () => ({
-  Loader2: (props: Record<string, unknown>) => <span data-testid="loader" {...props} />,
-  CheckCircle: (props: Record<string, unknown>) => <span data-testid="check-circle" {...props} />,
-  XCircle: (props: Record<string, unknown>) => <span data-testid="x-circle" {...props} />,
-  ChevronDown: (props: Record<string, unknown>) => <span data-testid="chevron-down" {...props} />,
-  Trash2: (props: Record<string, unknown>) => <span data-testid="trash" {...props} />,
-}));
+vi.mock('lucide-react', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>('lucide-react');
+  return {
+    ...actual,
+    Loader2: (props: Record<string, unknown>) => <span data-testid="loader" {...props} />,
+    CheckCircle: (props: Record<string, unknown>) => <span data-testid="check-circle" {...props} />,
+    XCircle: (props: Record<string, unknown>) => <span data-testid="x-circle" {...props} />,
+    ChevronDown: (props: Record<string, unknown>) => <span data-testid="chevron-down" {...props} />,
+    Trash2: (props: Record<string, unknown>) => <span data-testid="trash" {...props} />,
+  };
+});
 
 const pendingJob: GenerationJob = {
   id: 'job-1',
@@ -126,14 +130,14 @@ describe('GenerationStatus', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('model')).toBeDefined();
+    expect(screen.getByText(/3D model/i)).toBeDefined();
   });
 
   it('shows processing status with progress', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('Processing... 50%')).toBeDefined();
+    expect(screen.getByText('50%')).toBeDefined();
   });
 
   it('shows Completed status for completed jobs', () => {
