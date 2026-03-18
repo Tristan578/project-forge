@@ -34,13 +34,6 @@ export interface MonitoredServiceConfig {
  */
 export const MONITORED_SERVICES: MonitoredServiceConfig[] = [
   {
-    id: 'app',
-    displayName: 'Application',
-    healthCheckName: 'Application',
-    description: 'Main SpawnForge web application and editor',
-    critical: true,
-  },
-  {
     id: 'database',
     displayName: 'Database',
     healthCheckName: 'Database (Neon)',
@@ -57,7 +50,7 @@ export const MONITORED_SERVICES: MonitoredServiceConfig[] = [
   {
     id: 'ai',
     displayName: 'AI Assistant',
-    healthCheckName: 'Anthropic',
+    healthCheckName: 'AI Providers',
     description: 'AI chat, code generation, and scene building',
     critical: false,
   },
