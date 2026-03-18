@@ -12,9 +12,9 @@
  * produce audit records in the credit_transactions table.
  */
 
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '@/lib/db/client';
-import { users, creditTransactions } from '@/lib/db/schema';
+import { users, creditTransactions, tokenPurchases } from '@/lib/db/schema';
 import type { Tier } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
 import { updateUserTier } from '@/lib/auth/user-service';
@@ -334,40 +334,130 @@ export async function handleInvoicePaymentFailed(
 }
 
 /**
- * Handle a charge being refunded (full or partial) (PF-480).
+ * Handle a charge being refunded (full or partial) (PF-480, PF-734).
  *
- * Deducts addon tokens proportionally to the refund amount.
- * For full refunds, removes all tokens from the original charge.
- * For partial refunds, removes a proportional share.
+ * Looks up the original token purchase via paymentIntentId, then deducts
+ * tokens proportionally to the refund amount based on the *purchase* token
+ * count (not the user's current balance). Uses the tokenPurchases.refundedCents
+ * column for idempotency across multiple partial refunds.
  */
 export async function handleChargeRefunded(
   customerId: string,
   chargeId: string,
   amountRefunded: number,
-  amountTotal: number
+  amountTotal: number,
+  paymentIntentId?: string | null
 ): Promise<void> {
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
 
   if (amountTotal <= 0 || amountRefunded <= 0) return;
 
-  await reverseAddonTokens(user.id, chargeId, amountRefunded, amountTotal);
+  await reverseAddonTokens(user.id, chargeId, amountRefunded, amountTotal, paymentIntentId);
 }
 
 /**
- * Reverse addon tokens proportionally to a refund amount (PF-480).
+ * Reverse addon tokens proportionally to a refund amount (PF-480, PF-734).
  *
- * Calculates the proportion of the total charge that was refunded and
- * deducts that proportion of addon tokens. Clamps to 0 to prevent
- * negative balances.
+ * Looks up the original token purchase via paymentIntentId to determine how
+ * many tokens were granted for that specific charge. Calculates the
+ * proportional deduction from the *purchase* token count, not from the
+ * user's current addon balance. Uses tokenPurchases.refundedCents to track
+ * cumulative refunds and prevent double-deduction on duplicate webhooks.
+ *
+ * Falls back to the legacy balance-based calculation when no matching
+ * purchase record is found (e.g. for non-addon charges).
  */
 export async function reverseAddonTokens(
   userId: string,
   chargeId: string,
   amountRefunded: number,
-  amountTotal: number
+  amountTotal: number,
+  paymentIntentId?: string | null
 ): Promise<void> {
   const db = getDb();
+
+  // --- Try to find the original token purchase for precise reversal ---
+  if (paymentIntentId) {
+    const [purchase] = await db
+      .select()
+      .from(tokenPurchases)
+      .where(
+        and(
+          eq(tokenPurchases.userId, userId),
+          eq(tokenPurchases.stripePaymentIntent, paymentIntentId)
+        )
+      )
+      .limit(1);
+
+    if (purchase) {
+      // Idempotency: calculate only the *new* refund increment.
+      // Stripe sends cumulative amount_refunded, so we subtract what
+      // we've already processed.
+      const newRefundCents = amountRefunded - purchase.refundedCents;
+      if (newRefundCents <= 0) return; // Already fully processed
+
+      // Proportional tokens based on the purchase's token count
+      const refundRatio = Math.min(newRefundCents / purchase.amountCents, 1);
+      const tokensToDeduct = Math.floor(purchase.tokens * refundRatio);
+
+      if (tokensToDeduct <= 0) return;
+
+      // Read current addon balance to clamp
+      const [user] = await db
+        .select({ addonTokens: users.addonTokens })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
+      if (!user) return;
+
+      const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
+
+      // Update refundedCents on the purchase for idempotency tracking
+      await db
+        .update(tokenPurchases)
+        .set({ refundedCents: amountRefunded })
+        .where(eq(tokenPurchases.id, purchase.id));
+
+      if (clampedDeduction > 0) {
+        await db
+          .update(users)
+          .set({
+            addonTokens: sql`GREATEST(0, ${users.addonTokens} - ${clampedDeduction})`,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, userId));
+      }
+
+      const balance = await getTotalBalance(userId);
+      await db.insert(creditTransactions).values({
+        userId,
+        transactionType: 'adjustment',
+        amount: -clampedDeduction,
+        balanceAfter: balance,
+        source: `charge_refunded:${chargeId}`,
+        referenceId: chargeId,
+      });
+      return;
+    }
+  }
+
+  // --- Fallback: no purchase record found (non-addon charge or legacy) ---
+  // Check idempotency via existing credit transaction for this chargeId
+  const [existingRefund] = await db
+    .select({ id: creditTransactions.id })
+    .from(creditTransactions)
+    .where(
+      and(
+        eq(creditTransactions.userId, userId),
+        eq(creditTransactions.referenceId, chargeId),
+        eq(creditTransactions.source, `charge_refunded:${chargeId}`)
+      )
+    )
+    .limit(1);
+
+  if (existingRefund) return; // Already processed this charge
+
   const [user] = await db
     .select({ addonTokens: users.addonTokens })
     .from(users)
@@ -375,13 +465,12 @@ export async function reverseAddonTokens(
     .limit(1);
   if (!user) return;
 
-  // Calculate proportional token deduction
+  // Calculate proportional token deduction from current balance (legacy)
   const refundRatio = Math.min(amountRefunded / amountTotal, 1);
   const tokensToDeduct = Math.floor(user.addonTokens * refundRatio);
 
   if (tokensToDeduct <= 0) return;
 
-  // Clamp deduction to current addon balance to prevent negative
   const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
 
   await db
