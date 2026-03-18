@@ -17,6 +17,7 @@ pub fn set_event_callback_impl(callback: js_sys::Function) {
     EVENT_CALLBACK.with(|cb| {
         *cb.borrow_mut() = Some(callback);
     });
+    #[cfg(debug_assertions)]
     web_sys::console::log_1(&"Event callback stored".into());
 }
 
