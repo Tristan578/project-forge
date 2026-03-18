@@ -18,7 +18,8 @@ const STORAGE_KEY = 'forge-cookie-consent';
 function readConsentFromStorage(): boolean | null {
   if (typeof window === 'undefined') return null;
   const stored = localStorage.getItem(STORAGE_KEY);
-  return stored === 'true';
+  // Any stored value ('true' or 'false') means the user has already interacted
+  return stored !== null;
 }
 
 /**
