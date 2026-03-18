@@ -28,7 +28,7 @@ export async function GET() {
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const rateLimitError = rateLimitAdminRoute(clerkId, 'admin-db-metrics');
+  const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-db-metrics');
   if (rateLimitError) return rateLimitError;
 
   const metrics = getMetrics();
