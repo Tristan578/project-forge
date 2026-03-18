@@ -7,7 +7,29 @@ import { z } from 'zod';
 import type { ToolHandler, ExecutionResult } from './types';
 import { zEntityId, zXYZ, zSelectionMode, zGizmoMode, zCameraPreset, parseArgs } from './types';
 
+const ENTITY_TYPES = [
+  'cube', 'sphere', 'cylinder', 'capsule', 'torus', 'plane', 'cone', 'icosphere',
+  'point_light', 'directional_light', 'spot_light', 'gltf_model', 'empty',
+] as const;
+
 export const entityHandlers: Record<string, ToolHandler> = {
+  spawn_entity: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(
+      z.object({ entityType: z.enum(ENTITY_TYPES), name: z.string().min(1).optional() }),
+      args,
+    );
+    if (p.error) return p.error;
+    ctx.store.spawnEntity(p.data.entityType, p.data.name);
+    return { success: true, result: { message: `Spawned ${p.data.entityType}` } };
+  },
+
+  rename_entity: async (args, ctx): Promise<ExecutionResult> => {
+    const p = parseArgs(z.object({ entityId: zEntityId, name: z.string().min(1) }), args);
+    if (p.error) return p.error;
+    ctx.store.renameEntity(p.data.entityId, p.data.name);
+    return { success: true };
+  },
+
   despawn_entity: async (args, ctx): Promise<ExecutionResult> => {
     const p = parseArgs(z.object({ entityIds: z.array(zEntityId).optional(), entityId: zEntityId.optional() }), args);
     if (p.error) return p.error;
