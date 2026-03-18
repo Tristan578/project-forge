@@ -83,6 +83,10 @@ vi.mock('../KeyboardShortcutsPanel', () => ({
   KeyboardShortcutsPanel: ({ open }: { open: boolean }) =>
     open ? <div data-testid="shortcuts-panel">Shortcuts</div> : null,
 }));
+vi.mock('../ShortcutCheatSheet', () => ({
+  ShortcutCheatSheet: ({ open }: { open: boolean }) =>
+    open ? <div data-testid="cheat-sheet">Cheat Sheet</div> : null,
+}));
 vi.mock('../FeedbackDialog', () => ({
   FeedbackDialog: ({ open }: { open: boolean }) =>
     open ? <div data-testid="feedback-dialog">Feedback</div> : null,
@@ -274,13 +278,13 @@ describe('EditorLayout', () => {
     expect(mockToggleChatOverlay).toHaveBeenCalledOnce();
   });
 
-  it('? key toggles shortcuts panel', async () => {
+  it('? key toggles cheat sheet', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     act(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
     });
-    expect(await screen.findByTestId('shortcuts-panel')).toBeDefined();
+    expect(await screen.findByTestId('cheat-sheet')).toBeDefined();
   });
 
   // ── Right panel tabs ──────────────────────────────────────────────────
