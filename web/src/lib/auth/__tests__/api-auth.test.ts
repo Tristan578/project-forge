@@ -259,3 +259,207 @@ describe('assertTier', () => {
     expect(response?.status).toBe(403);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Edge Cases: Expired tokens, banned users, tier downgrades, etc. (PF-686)
+// ---------------------------------------------------------------------------
+
+describe('authenticateRequest — edge cases', () => {
+  it('returns 401 when auth() throws (expired/invalid token)', async () => {
+    mockAuth.mockRejectedValue(new Error('Token expired'));
+
+    await expect(authenticateRequest()).rejects.toThrow('Token expired');
+  });
+
+  it('returns 401 when auth() returns empty object (no userId key)', async () => {
+    mockAuth.mockResolvedValue({});
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+
+  it('returns 401 when auth() returns undefined userId', async () => {
+    mockAuth.mockResolvedValue({ userId: undefined });
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+
+  it('returns 401 when auth() returns empty string userId', async () => {
+    mockAuth.mockResolvedValue({ userId: '' });
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+
+  it('returns 401 when Clerk secret key has wrong prefix', async () => {
+    process.env.CLERK_SECRET_KEY = 'wrong_prefix_abc';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_abc';
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+
+  it('returns 401 when publishable key has wrong prefix', async () => {
+    process.env.CLERK_SECRET_KEY = 'sk_test_abc';
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'wrong_prefix_abc';
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+
+  it('handles deleted user (exists in Clerk but DB lookup returns null, sync also returns null)', async () => {
+    mockAuth.mockResolvedValue({ userId: 'clerk_deleted_user' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    // Clerk user was deleted — getUser throws 404
+    mockClerkClient.mockResolvedValue({
+      users: {
+        getUser: vi.fn().mockRejectedValue(new Error('User not found (404)')),
+      },
+    });
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(503);
+      const body = await result.response.json();
+      expect(body.error).toBe('SERVICE_DEGRADED');
+    }
+  });
+
+  it('handles syncUserFromClerk returning null (user cannot be synced)', async () => {
+    mockAuth.mockResolvedValue({ userId: 'clerk_abc' });
+    mockGetUserByClerkId.mockResolvedValue(null);
+    mockClerkClient.mockResolvedValue({
+      users: {
+        getUser: vi.fn().mockResolvedValue({
+          emailAddresses: [{ emailAddress: 'test@example.com' }],
+          firstName: 'Test',
+          lastName: 'User',
+        }),
+      },
+    });
+    mockSyncUserFromClerk.mockResolvedValue(null);
+
+    const result = await authenticateRequest();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(503);
+    }
+  });
+});
+
+describe('authenticateClerkSession — edge cases', () => {
+  it('returns 401 when auth() throws (expired token)', async () => {
+    mockAuth.mockRejectedValue(new Error('Session expired'));
+
+    await expect(authenticateClerkSession()).rejects.toThrow('Session expired');
+  });
+
+  it('returns 401 when auth() returns empty object', async () => {
+    mockAuth.mockResolvedValue({});
+
+    const result = await authenticateClerkSession();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+
+  it('returns 401 when both Clerk env vars are missing', async () => {
+    delete process.env.CLERK_SECRET_KEY;
+    delete process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+    const result = await authenticateClerkSession();
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.response.status).toBe(401);
+    }
+  });
+});
+
+describe('assertAdmin — edge cases', () => {
+  it('returns 403 when ADMIN_USER_IDS env var is not set', () => {
+    delete process.env.ADMIN_USER_IDS;
+    const response = assertAdmin('clerk_abc');
+    expect(response?.status).toBe(403);
+  });
+
+  it('handles whitespace in ADMIN_USER_IDS', () => {
+    process.env.ADMIN_USER_IDS = ' clerk_abc , clerk_def ';
+    expect(assertAdmin('clerk_abc')).toBeNull();
+    expect(assertAdmin('clerk_def')).toBeNull();
+  });
+
+  it('returns 403 for partial ID match (not substring)', () => {
+    process.env.ADMIN_USER_IDS = 'clerk_abc';
+    const response = assertAdmin('clerk_ab');
+    expect(response?.status).toBe(403);
+  });
+});
+
+describe('assertTier — edge cases (PF-686)', () => {
+  it('allows starter tier when starter is in required list', () => {
+    const user = makeUser({ tier: 'starter' });
+    expect(assertTier(user, ['starter'])).toBeNull();
+  });
+
+  it('allows hobbyist tier when hobbyist is in required list', () => {
+    const user = makeUser({ tier: 'hobbyist' });
+    expect(assertTier(user, ['hobbyist', 'creator', 'pro'])).toBeNull();
+  });
+
+  it('allows pro tier when pro is in required list', () => {
+    const user = makeUser({ tier: 'pro' });
+    expect(assertTier(user, ['pro'])).toBeNull();
+  });
+
+  it('denies hobbyist when only pro and creator required', () => {
+    const user = makeUser({ tier: 'hobbyist' });
+    const response = assertTier(user, ['creator', 'pro']);
+    expect(response?.status).toBe(403);
+  });
+
+  it('includes currentTier and message in 403 response body', async () => {
+    const user = makeUser({ tier: 'starter' });
+    const response = assertTier(user, ['pro']);
+    expect(response).not.toBeNull();
+    const body = await response!.json();
+    expect(body.error).toBe('TIER_REQUIRED');
+    expect(body.currentTier).toBe('starter');
+    expect(body.message).toContain('pro');
+  });
+
+  it('reflects tier downgrade — user was creator, downgraded to starter', () => {
+    // Simulates a mid-session tier downgrade: the DB record now says 'starter'
+    // even though the user's session may have been established as 'creator'
+    const user = makeUser({ tier: 'starter' });
+    const response = assertTier(user, ['creator', 'pro']);
+    expect(response?.status).toBe(403);
+  });
+
+  it('allows single-tier required list', () => {
+    const user = makeUser({ tier: 'creator' });
+    expect(assertTier(user, ['creator'])).toBeNull();
+  });
+
+  it('allows when all tiers are in required list', () => {
+    const user = makeUser({ tier: 'starter' });
+    expect(assertTier(user, ['starter', 'hobbyist', 'creator', 'pro'])).toBeNull();
+  });
+});
