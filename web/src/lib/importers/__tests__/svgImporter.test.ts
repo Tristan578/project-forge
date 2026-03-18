@@ -233,6 +233,26 @@ describe('parseSvg - path', () => {
     expect(pts[1]).toEqual([5, 10]);
   });
 
+  it('treats coordinates after M as implicit lineto (SVG spec)', () => {
+    // SVG spec: "M 0 0 10 0 10 10" is equivalent to "M 0 0 L 10 0 L 10 10"
+    const result = parseSvg(wrap('<path d="M 0 0 10 0 10 10 Z"/>'));
+    expect(result.shapes).toHaveLength(1);
+    const pts = result.shapes[0].points;
+    expect(pts[0]).toEqual([0, 0]);
+    expect(pts[1]).toEqual([10, 0]);
+    expect(pts[2]).toEqual([10, 10]);
+    expect(pts[3]).toEqual([0, 0]); // Z closes back
+  });
+
+  it('treats coordinates after m as implicit relative lineto', () => {
+    const result = parseSvg(wrap('<path d="m 0 0 10 0 0 10 Z"/>'));
+    expect(result.shapes).toHaveLength(1);
+    const pts = result.shapes[0].points;
+    expect(pts[0]).toEqual([0, 0]);
+    expect(pts[1]).toEqual([10, 0]);
+    expect(pts[2]).toEqual([10, 10]);
+  });
+
   it('ignores a path with only one point', () => {
     const result = parseSvg(wrap('<path d="M 10 10"/>'));
     expect(result.shapes).toHaveLength(0);

@@ -119,6 +119,22 @@ function parsePathData(d: string): [number, number][] {
       }
       subPathStart = [currentX, currentY];
       result.push([currentX, currentY]);
+
+      // SVG spec: coordinates after M/m are treated as implicit L/l commands
+      while (i < tokens.length && !isNaN(parseFloat(tokens[i]))) {
+        const ix = parseFloat(tokens[i] ?? 'NaN');
+        const iy = parseFloat(tokens[i + 1] ?? 'NaN');
+        i += 2;
+        if (isNaN(ix) || isNaN(iy)) break;
+        if (cmd === 'm') {
+          currentX += ix;
+          currentY += iy;
+        } else {
+          currentX = ix;
+          currentY = iy;
+        }
+        result.push([currentX, currentY]);
+      }
     } else if (cmd === 'L' || cmd === 'l') {
       const x = parseFloat(tokens[i] ?? 'NaN');
       const y = parseFloat(tokens[i + 1] ?? 'NaN');
