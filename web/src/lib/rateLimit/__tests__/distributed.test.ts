@@ -53,7 +53,7 @@ describe('distributedRateLimit — fallback (Upstash not configured)', () => {
 
   it('falls back to in-memory rateLimit when env vars are missing', async () => {
     const { rateLimit } = await import('@/lib/rateLimit');
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60_000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 4, resetAt: Date.now() + 60_000 });
 
     const result = await distributedRateLimit('test-key', 5, 60);
 
@@ -64,7 +64,7 @@ describe('distributedRateLimit — fallback (Upstash not configured)', () => {
 
   it('passes through denied result from in-memory fallback', async () => {
     const { rateLimit } = await import('@/lib/rateLimit');
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60_000 });
 
     const result = await distributedRateLimit('test-key', 5, 60);
 
@@ -74,7 +74,7 @@ describe('distributedRateLimit — fallback (Upstash not configured)', () => {
 
   it('does not call fetch when Upstash is not configured', async () => {
     const { rateLimit } = await import('@/lib/rateLimit');
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 3, resetAt: Date.now() + 1000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 3, resetAt: Date.now() + 1000 });
 
     await distributedRateLimit('no-upstash', 10, 30);
 
@@ -169,7 +169,7 @@ describe('distributedRateLimit — Upstash path', () => {
     });
 
     const { rateLimit } = await import('@/lib/rateLimit');
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
 
     const result = await distributedRateLimit('fallback-key', 10, 60);
 
@@ -181,7 +181,7 @@ describe('distributedRateLimit — Upstash path', () => {
     mockFetch.mockRejectedValue(new Error('Network error'));
 
     const { rateLimit } = await import('@/lib/rateLimit');
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 1000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 1000 });
 
     const result = await distributedRateLimit('network-fail-key', 5, 60);
 
