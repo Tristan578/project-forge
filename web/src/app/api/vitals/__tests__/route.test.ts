@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 
 // Mock rateLimit module
 vi.mock('@/lib/rateLimit', () => {
-  const mockRateLimitPublicRoute = vi.fn().mockReturnValue(null);
+  const mockRateLimitPublicRoute = vi.fn().mockResolvedValue(null);
   return {
     rateLimitPublicRoute: mockRateLimitPublicRoute,
     rateLimit: vi.fn(),
@@ -139,7 +139,7 @@ describe('POST /api/vitals', () => {
     const { NextResponse } = await import('next/server');
     const rateLimitMod = await import('@/lib/rateLimit');
     const mockFn = rateLimitMod.rateLimitPublicRoute as ReturnType<typeof vi.fn>;
-    mockFn.mockReturnValueOnce(
+    mockFn.mockResolvedValueOnce(
       NextResponse.json({ error: 'Too many requests' }, { status: 429 })
     );
 

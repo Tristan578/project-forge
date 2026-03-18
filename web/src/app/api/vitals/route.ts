@@ -33,7 +33,7 @@ function isValidPayload(body: unknown): body is VitalsPayload {
 }
 
 export async function POST(request: NextRequest) {
-  const rateLimited = rateLimitPublicRoute(request, 'vitals', 10, 60_000);
+  const rateLimited = await rateLimitPublicRoute(request, 'vitals', 10, 60_000);
   if (rateLimited) return rateLimited;
 
   let body: unknown;
