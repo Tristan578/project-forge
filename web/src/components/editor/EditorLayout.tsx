@@ -276,10 +276,12 @@ function QuickStartGate() {
   const [quickstartDismissed, setQuickstartDismissed] = useState(false);
 
   const handleComplete = useCallback(() => {
+    localStorage.setItem(WELCOME_STORAGE_KEY, '1');
     setQuickstartDismissed(true);
   }, []);
 
   const handleSkip = useCallback(() => {
+    localStorage.setItem(WELCOME_STORAGE_KEY, '1');
     setQuickstartDismissed(true);
   }, []);
 
@@ -523,7 +525,7 @@ export function EditorLayout() {
       <TutorialOverlay />
       <OnboardingChecklist />
       <Suspense fallback={null}>
-        <WelcomeModal />
+        <QuickStartGate />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
