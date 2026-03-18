@@ -276,7 +276,7 @@ describe('GET /api/status', () => {
     vi.resetModules();
 
     vi.doMock('@/lib/rateLimit', () => ({
-      rateLimitPublicRoute: vi.fn().mockReturnValue(
+      rateLimitPublicRoute: vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ error: 'Too many requests. Please try again later.' }), {
           status: 429,
           headers: {
@@ -299,7 +299,7 @@ describe('GET /api/status', () => {
     const fixedTimestamp = '2026-03-16T12:34:56.000Z';
 
     vi.doMock('@/lib/rateLimit', () => ({
-      rateLimitPublicRoute: vi.fn().mockReturnValue(null),
+      rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
     }));
 
     vi.doMock('@/lib/monitoring/healthChecks', () => ({

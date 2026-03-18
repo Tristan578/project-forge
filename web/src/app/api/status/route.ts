@@ -29,7 +29,7 @@ import { MONITORED_SERVICES } from '@/lib/status/statusConfig';
  * HTTP 429 — rate limit exceeded.
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
-  const rateLimitResult = rateLimitPublicRoute(req, 'status');
+  const rateLimitResult = await rateLimitPublicRoute(req, 'status');
   if (rateLimitResult) return rateLimitResult;
 
   const report = await runAllHealthChecks();
