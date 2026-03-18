@@ -7,8 +7,13 @@
  *
  * Individual service checks for Clerk, Anthropic, Sentry, and Cloudflare R2
  * use a 3-second timeout to keep the health endpoint responsive.
+ *
+ * The database check additionally consults the query monitor: if the average
+ * query time over the last 5 minutes exceeds DEGRADED_AVG_THRESHOLD_MS (1 s),
+ * the database is reported as "degraded" even if SELECT 1 succeeds.
  */
 import 'server-only';
+import { getMetrics, DEGRADED_AVG_THRESHOLD_MS } from '@/lib/db/queryMonitor';
 
 export type ServiceStatus = 'healthy' | 'degraded' | 'down';
 
@@ -85,11 +90,36 @@ export async function checkDatabase(): Promise<ServiceHealth> {
         TIMEOUT_MS,
       ),
     );
+    // Check query monitor metrics: flag as degraded if average query time is too high
+    const metrics = getMetrics();
+    if (metrics.totalQueryCount > 0 && metrics.avgQueryTimeMs > DEGRADED_AVG_THRESHOLD_MS) {
+      return {
+        name: 'Database (Neon)',
+        status: 'degraded',
+        latencyMs,
+        lastChecked: new Date().toISOString(),
+        error: `Average query time ${Math.round(metrics.avgQueryTimeMs)}ms exceeds ${DEGRADED_AVG_THRESHOLD_MS}ms threshold`,
+        details: {
+          avgQueryTimeMs: Math.round(metrics.avgQueryTimeMs),
+          slowQueryCount: metrics.slowQueryCount,
+          totalQueryCount: metrics.totalQueryCount,
+        },
+      };
+    }
+
     return {
       name: 'Database (Neon)',
       status: 'healthy',
       latencyMs,
       lastChecked: new Date().toISOString(),
+      details:
+        metrics.totalQueryCount > 0
+          ? {
+              avgQueryTimeMs: Math.round(metrics.avgQueryTimeMs),
+              slowQueryCount: metrics.slowQueryCount,
+              totalQueryCount: metrics.totalQueryCount,
+            }
+          : undefined,
     };
   } catch (err) {
     return {
