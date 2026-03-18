@@ -26,6 +26,7 @@ jobs:
   smoke:
     name: Smoke Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Run for: workflow_dispatch (manual), workflow_call (from CD), or workflow_run (when CD succeeded).
     if: >-
       github.event_name == 'workflow_dispatch' ||
