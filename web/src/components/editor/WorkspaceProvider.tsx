@@ -150,6 +150,10 @@ function ProceduralAnimPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
       <ProceduralAnimPanel />
+    </div>
+  );
+}
+
 function TutorialPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
