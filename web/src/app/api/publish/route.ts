@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
   const reqLogAuth = reqLog.child({ userId: user.id });
 
   // Rate limit: 10 publish requests per minute per user
-  const rl = rateLimit(`publish:${clerkId}`, 10, 60_000);
+  const rl = await rateLimit(`publish:${clerkId}`, 10, 60_000);
   if (!rl.allowed) {
     reqLogAuth.warn('Publish rate limit exceeded');
     return rateLimitResponse(rl.remaining, rl.resetAt);

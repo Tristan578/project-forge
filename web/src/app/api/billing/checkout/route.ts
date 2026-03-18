@@ -34,7 +34,7 @@ export async function POST(req: Request) {
   const reqLog = logger.child({ endpoint: 'POST /api/billing/checkout', userId: user.id });
 
   // Rate limit: 5 checkout requests per minute per user
-  const rl = rateLimit(`billing-checkout:${user.id}`, 5, 60_000);
+  const rl = await rateLimit(`billing-checkout:${user.id}`, 5, 60_000);
   if (!rl.allowed) {
     reqLog.warn('Checkout rate limit exceeded');
     return rateLimitResponse(rl.remaining, rl.resetAt);
