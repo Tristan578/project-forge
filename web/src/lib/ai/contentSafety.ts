@@ -78,22 +78,24 @@ const BLOCKED_REGEXES: RegExp[] = BLOCKED_TERMS.map(buildBlockedRegex);
 // Prompt injection patterns
 // ---------------------------------------------------------------------------
 
+// Use atomic-safe patterns: replace \s+ with [ ]+ (no backtracking on
+// mixed whitespace) to avoid ReDoS on untrusted input (CodeQL cwe-1333).
 const INJECTION_PATTERNS: RegExp[] = [
-  /ignore\s+(all\s+)?previous\s+(instructions?|prompts?|rules?)/i,
-  /ignore\s+(above|prior|earlier)\s+(instructions?|prompts?|context)/i,
-  /disregard\s+(all\s+)?(previous|prior|above)\s/i,
-  /system\s*:\s/i,
-  /\[\s*INST\s*\]/i,
-  /\[\s*SYSTEM\s*\]/i,
-  /<\s*\|?\s*system\s*\|?\s*>/i,
-  /you\s+are\s+now\s+(a|an|the)\s/i,
-  /act\s+as\s+(a|an|the|if)\s/i,
-  /new\s+instructions?\s*:/i,
-  /override\s+(safety|content|filter|guardrail)/i,
+  /ignore[ ]+(all[ ]+)?previous[ ]+(instructions?|prompts?|rules?)/i,
+  /ignore[ ]+(above|prior|earlier)[ ]+(instructions?|prompts?|context)/i,
+  /disregard[ ]+(all[ ]+)?(previous|prior|above)[ ]/i,
+  /system[ ]*:[ ]/i,
+  /\[[ ]*INST[ ]*\]/i,
+  /\[[ ]*SYSTEM[ ]*\]/i,
+  /<[ ]*\|?[ ]*system[ ]*\|?[ ]*>/i,
+  /you[ ]+are[ ]+now[ ]+(a|an|the)[ ]/i,
+  /act[ ]+as[ ]+(a|an|the|if)[ ]/i,
+  /new[ ]+instructions?[ ]*:/i,
+  /override[ ]+(safety|content|filter|guardrail)/i,
   /jailbreak/i,
-  /do\s+anything\s+now/i,
-  /DAN\s+mode/i,
-  /pretend\s+(you|there)\s+(are|is)\s+no\s+(rules?|filter|restrictions?)/i,
+  /do[ ]+anything[ ]+now/i,
+  /DAN[ ]+mode/i,
+  /pretend[ ]+(you|there)[ ]+(are|is)[ ]+no[ ]+(rules?|filter|restrictions?)/i,
 ];
 
 // ---------------------------------------------------------------------------
