@@ -53,7 +53,10 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     return [entry];
   });
 
-  const overall = deriveOverallStatus(serviceEntries);
+  const criticalIds = new Set(
+    MONITORED_SERVICES.filter((c) => c.critical).map((c) => c.id),
+  );
+  const overall = deriveOverallStatus(serviceEntries, criticalIds);
 
   const payload: StatusPagePayload = {
     generatedAt: report.timestamp,

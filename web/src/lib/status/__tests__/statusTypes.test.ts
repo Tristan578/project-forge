@@ -37,77 +37,163 @@ function makeEntry(id: string, status: ServiceStatusEntry['status']): ServiceSta
   };
 }
 
+/** Critical service IDs matching statusConfig.ts */
+const CRITICAL = new Set(['app', 'database', 'auth']);
+
 describe('deriveOverallStatus', () => {
-  it('returns operational when all services are operational', () => {
-    const services = [
-      makeEntry('db', 'operational'),
-      makeEntry('auth', 'operational'),
-      makeEntry('ai', 'operational'),
-    ];
-    expect(deriveOverallStatus(services)).toBe('operational');
+  // -----------------------------------------------------------------------
+  // Legacy behaviour (no criticalServiceIds supplied)
+  // -----------------------------------------------------------------------
+  describe('without criticalServiceIds (legacy)', () => {
+    it('returns operational when all services are operational', () => {
+      const services = [
+        makeEntry('db', 'operational'),
+        makeEntry('auth', 'operational'),
+        makeEntry('ai', 'operational'),
+      ];
+      expect(deriveOverallStatus(services)).toBe('operational');
+    });
+
+    it('returns partial_outage when at least one service is degraded', () => {
+      const services = [
+        makeEntry('db', 'operational'),
+        makeEntry('auth', 'degraded'),
+        makeEntry('ai', 'operational'),
+      ];
+      expect(deriveOverallStatus(services)).toBe('partial_outage');
+    });
+
+    it('returns major_outage when at least one service is outage', () => {
+      const services = [
+        makeEntry('db', 'outage'),
+        makeEntry('auth', 'operational'),
+        makeEntry('ai', 'operational'),
+      ];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
+    });
+
+    it('returns major_outage even when other services are only degraded', () => {
+      const services = [
+        makeEntry('db', 'outage'),
+        makeEntry('auth', 'degraded'),
+        makeEntry('ai', 'degraded'),
+      ];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
+    });
+
+    it('returns maintenance when any service is in maintenance (and none outage or degraded)', () => {
+      const services = [
+        makeEntry('db', 'operational'),
+        makeEntry('auth', 'maintenance'),
+        makeEntry('ai', 'operational'),
+      ];
+      expect(deriveOverallStatus(services)).toBe('maintenance');
+    });
+
+    it('major_outage takes precedence over maintenance', () => {
+      const services = [
+        makeEntry('db', 'outage'),
+        makeEntry('auth', 'maintenance'),
+      ];
+      expect(deriveOverallStatus(services)).toBe('major_outage');
+    });
+
+    it('partial_outage takes precedence over maintenance', () => {
+      const services = [
+        makeEntry('db', 'degraded'),
+        makeEntry('auth', 'maintenance'),
+      ];
+      expect(deriveOverallStatus(services)).toBe('partial_outage');
+    });
+
+    it('returns operational for an empty service list', () => {
+      expect(deriveOverallStatus([])).toBe('operational');
+    });
+
+    it('returns operational for a single operational service', () => {
+      expect(deriveOverallStatus([makeEntry('db', 'operational')])).toBe('operational');
+    });
+
+    it('returns major_outage for a single outage service', () => {
+      expect(deriveOverallStatus([makeEntry('db', 'outage')])).toBe('major_outage');
+    });
   });
 
-  it('returns partial_outage when at least one service is degraded', () => {
-    const services = [
-      makeEntry('db', 'operational'),
-      makeEntry('auth', 'degraded'),
-      makeEntry('ai', 'operational'),
-    ];
-    expect(deriveOverallStatus(services)).toBe('partial_outage');
-  });
+  // -----------------------------------------------------------------------
+  // With criticalServiceIds — PF-740 fix
+  // -----------------------------------------------------------------------
+  describe('with criticalServiceIds', () => {
+    it('returns major_outage when a critical service is down', () => {
+      const services = [
+        makeEntry('app', 'operational'),
+        makeEntry('database', 'outage'),
+        makeEntry('ai', 'operational'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('major_outage');
+    });
 
-  it('returns major_outage when at least one service is outage', () => {
-    const services = [
-      makeEntry('db', 'outage'),
-      makeEntry('auth', 'operational'),
-      makeEntry('ai', 'operational'),
-    ];
-    expect(deriveOverallStatus(services)).toBe('major_outage');
-  });
+    it('returns partial_outage when only non-critical services are down', () => {
+      const services = [
+        makeEntry('app', 'operational'),
+        makeEntry('database', 'operational'),
+        makeEntry('auth', 'operational'),
+        makeEntry('ai', 'outage'),
+        makeEntry('payments', 'outage'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('partial_outage');
+    });
 
-  it('returns major_outage even when other services are only degraded', () => {
-    const services = [
-      makeEntry('db', 'outage'),
-      makeEntry('auth', 'degraded'),
-      makeEntry('ai', 'degraded'),
-    ];
-    expect(deriveOverallStatus(services)).toBe('major_outage');
-  });
+    it('returns major_outage when both critical and non-critical services are down', () => {
+      const services = [
+        makeEntry('app', 'outage'),
+        makeEntry('ai', 'outage'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('major_outage');
+    });
 
-  it('returns maintenance when any service is in maintenance (and none outage or degraded)', () => {
-    const services = [
-      makeEntry('db', 'operational'),
-      makeEntry('auth', 'maintenance'),
-      makeEntry('ai', 'operational'),
-    ];
-    expect(deriveOverallStatus(services)).toBe('maintenance');
-  });
+    it('returns partial_outage for non-critical outage even with degraded services', () => {
+      const services = [
+        makeEntry('app', 'degraded'),
+        makeEntry('ai', 'outage'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('partial_outage');
+    });
 
-  it('major_outage takes precedence over maintenance', () => {
-    const services = [
-      makeEntry('db', 'outage'),
-      makeEntry('auth', 'maintenance'),
-    ];
-    expect(deriveOverallStatus(services)).toBe('major_outage');
-  });
+    it('returns partial_outage for degraded critical service (not outage)', () => {
+      const services = [
+        makeEntry('database', 'degraded'),
+        makeEntry('ai', 'operational'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('partial_outage');
+    });
 
-  it('partial_outage takes precedence over maintenance', () => {
-    const services = [
-      makeEntry('db', 'degraded'),
-      makeEntry('auth', 'maintenance'),
-    ];
-    expect(deriveOverallStatus(services)).toBe('partial_outage');
-  });
+    it('returns maintenance when no outage or degraded, only maintenance', () => {
+      const services = [
+        makeEntry('app', 'operational'),
+        makeEntry('payments', 'maintenance'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('maintenance');
+    });
 
-  it('returns operational for an empty service list', () => {
-    expect(deriveOverallStatus([])).toBe('operational');
-  });
+    it('non-critical outage takes precedence over maintenance', () => {
+      const services = [
+        makeEntry('ai', 'outage'),
+        makeEntry('auth', 'maintenance'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('partial_outage');
+    });
 
-  it('returns operational for a single operational service', () => {
-    expect(deriveOverallStatus([makeEntry('db', 'operational')])).toBe('operational');
-  });
+    it('returns operational when all services are operational', () => {
+      const services = [
+        makeEntry('app', 'operational'),
+        makeEntry('database', 'operational'),
+        makeEntry('ai', 'operational'),
+      ];
+      expect(deriveOverallStatus(services, CRITICAL)).toBe('operational');
+    });
 
-  it('returns major_outage for a single outage service', () => {
-    expect(deriveOverallStatus([makeEntry('db', 'outage')])).toBe('major_outage');
+    it('returns operational for empty service list', () => {
+      expect(deriveOverallStatus([], CRITICAL)).toBe('operational');
+    });
   });
 });

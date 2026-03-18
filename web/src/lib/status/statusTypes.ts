@@ -111,15 +111,41 @@ export function mapHealthStatusToServiceStatus(
 
 /**
  * Derive the overall platform status from the list of service statuses.
- * Uses the most severe status across all services.
+ *
+ * When `criticalServiceIds` is provided, only outages on critical services
+ * result in `major_outage`. Outages on non-critical services are treated as
+ * `partial_outage`. When omitted, all outages are treated as `major_outage`
+ * (legacy behaviour).
  */
-export function deriveOverallStatus(services: ServiceStatusEntry[]): OverallStatus {
-  const hasOutage = services.some((s) => s.status === 'outage');
-  const hasDegraded = services.some((s) => s.status === 'degraded');
-  const hasMaintenance = services.some((s) => s.status === 'maintenance');
+export function deriveOverallStatus(
+  services: ServiceStatusEntry[],
+  criticalServiceIds?: ReadonlySet<string>,
+): OverallStatus {
+  let hasCriticalOutage = false;
+  let hasNonCriticalOutage = false;
+  let hasDegraded = false;
+  let hasMaintenance = false;
 
-  if (hasOutage) return 'major_outage';
-  if (hasDegraded) return 'partial_outage';
+  for (const s of services) {
+    switch (s.status) {
+      case 'outage':
+        if (!criticalServiceIds || criticalServiceIds.has(s.id)) {
+          hasCriticalOutage = true;
+        } else {
+          hasNonCriticalOutage = true;
+        }
+        break;
+      case 'degraded':
+        hasDegraded = true;
+        break;
+      case 'maintenance':
+        hasMaintenance = true;
+        break;
+    }
+  }
+
+  if (hasCriticalOutage) return 'major_outage';
+  if (hasNonCriticalOutage || hasDegraded) return 'partial_outage';
   if (hasMaintenance) return 'maintenance';
   return 'operational';
 }
