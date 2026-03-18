@@ -44,6 +44,8 @@ function mockEditorStore(overrides: Record<string, unknown> = {}) {
     projectId: null,
     cloudSaveStatus: 'idle',
     saveToCloud: vi.fn(),
+    setCloudSaveStatus: vi.fn(),
+    setLastCloudSave: vi.fn(),
     ...overrides,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

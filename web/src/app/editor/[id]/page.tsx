@@ -23,6 +23,7 @@ export default function EditorPage() {
   const setProjectId = useEditorStore((s) => s.setProjectId);
   const loadScene = useEditorStore((s) => s.loadScene);
   const setSceneName = useEditorStore((s) => s.setSceneName);
+  const setLastCloudSave = useEditorStore((s) => s.setLastCloudSave);
 
   // Prefetch Monaco editor chunks so the script panel opens instantly
   useEffect(() => {
@@ -34,10 +35,16 @@ export default function EditorPage() {
       try {
         const res = await fetch(`/api/projects/${projectId}`);
         if (!res.ok) { if (res.status === 404) { router.push('/dashboard'); return; } throw new Error('Failed to load project'); }
-        const project = await res.json();
+        const project = await res.json() as { name: string; sceneData: unknown; updatedAt?: string };
         setProjectId(projectId);
         setSceneName(project.name);
         trackProjectOpen(projectId, project.name);
+        // Populate lastCloudSave from the project's server-side timestamp so
+        // AutoSaveRecovery can correctly compare auto-save age against the last
+        // known cloud save (fixes PF-540: lastCloudSave was always null).
+        if (project.updatedAt) {
+          setLastCloudSave(project.updatedAt);
+        }
         loadScene(JSON.stringify(project.sceneData));
         setLoading(false);
       } catch (err) {
@@ -47,7 +54,7 @@ export default function EditorPage() {
       }
     };
     fetchProject();
-  }, [projectId, router, setProjectId, loadScene, setSceneName]);
+  }, [projectId, router, setProjectId, loadScene, setSceneName, setLastCloudSave]);
 
   if (loading) return (<div className="flex h-screen items-center justify-center bg-zinc-950"><div className="text-zinc-400">Loading project...</div></div>);
   if (error) return (<div className="flex h-screen items-center justify-center bg-zinc-950"><div className="text-center"><div className="mb-2 text-red-400">{error}</div><button onClick={() => router.push('/dashboard')} className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:opacity-90">Back to Dashboard</button></div></div>);

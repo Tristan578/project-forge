@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { AlertTriangle, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, Loader2, RefreshCw, X } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
+import { getWasmModule } from '@/hooks/useEngine';
 import {
   loadAutoSaveEntry,
   deleteAutoSaveEntry,
@@ -25,6 +26,23 @@ export function AutoSaveRecovery() {
 
   const [entry, setEntry] = useState<AutoSaveEntry | null>(null);
   const [dismissed, setDismissed] = useState(false);
+
+  // Track whether the WASM engine is ready to accept commands (PF-587).
+  // Initialise from the current module state; poll only when the dialog is
+  // visible and the engine is not yet initialised.
+  const [engineReady, setEngineReady] = useState(() => getWasmModule() !== null);
+
+  // Only start the poll when we have an entry to show and the engine is not yet ready.
+  // This avoids an unnecessary interval when the dialog is hidden.
+  useEffect(() => {
+    if (engineReady || !entry) return;
+    const poll = setInterval(() => {
+      if (getWasmModule() !== null) {
+        setEngineReady(true);
+      }
+    }, 200);
+    return () => clearInterval(poll);
+  }, [engineReady, entry]);
 
   useEffect(() => {
     if (!projectId) return;
@@ -62,14 +80,18 @@ export function AutoSaveRecovery() {
 
   const handleRecover = useCallback(() => {
     if (!entry) return;
+    // Guard: do not dispatch load_scene before the engine is initialised.
+    // If we delete the auto-save entry before the engine is ready the backup is
+    // permanently lost even though the scene was never loaded (PF-587).
+    if (!engineReady) return;
 
     loadScene(entry.sceneJson);
     setSceneName(entry.sceneName);
 
-    // Clean up the auto-save entry
+    // Only delete the auto-save entry after successfully dispatching the load.
     void deleteAutoSaveEntry(entry.projectId);
     setEntry(null);
-  }, [entry, loadScene, setSceneName]);
+  }, [entry, engineReady, loadScene, setSceneName]);
 
   const handleDismiss = useCallback(() => {
     if (entry) {
@@ -114,10 +136,17 @@ export function AutoSaveRecovery() {
         <div className="flex gap-3">
           <button
             onClick={handleRecover}
-            className="flex flex-1 items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            disabled={!engineReady}
+            aria-disabled={!engineReady}
+            title={engineReady ? undefined : 'Waiting for engine to load\u2026'}
+            className="flex flex-1 items-center justify-center gap-2 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <RefreshCw className="h-4 w-4" />
-            Restore
+            {engineReady ? (
+              <RefreshCw className="h-4 w-4" />
+            ) : (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
+            {engineReady ? 'Restore' : 'Loading engine\u2026'}
           </button>
           <button
             onClick={handleDismiss}

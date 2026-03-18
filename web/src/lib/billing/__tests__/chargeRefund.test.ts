@@ -126,8 +126,6 @@ describe('handleChargeRefunded (PF-526)', () => {
   });
 
   it('skips deduction when reverseAddonTokens user not found', async () => {
-    // findUserByStripeCustomer returns user
-    // reverseAddonTokens select returns empty
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
       .mockResolvedValueOnce([]);

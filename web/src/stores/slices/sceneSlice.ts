@@ -56,6 +56,8 @@ export interface SceneSlice {
   setProjectId: (id: string | null) => void;
   saveToCloud: () => void;
   setCloudSaveStatus: (status: 'idle' | 'saving' | 'saved' | 'error') => void;
+  /** Set the ISO-8601 timestamp of the most recent successful cloud save (PF-540). */
+  setLastCloudSave: (timestamp: string) => void;
   loadTemplate: (templateId: string) => Promise<void>;
   switchScene: (sceneId: string) => void;
   createNewScene: (name?: string) => void;
@@ -154,9 +156,16 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   setExporting: (value) => set({ isExporting: value }),
   setProjectId: (id) => set({ projectId: id }),
   saveToCloud: () => {
-    // Cloud save implementation
+    // Cloud save is orchestrated externally via SceneToolbar which listens for
+    // the forge:scene-exported window event to obtain the scene JSON. This
+    // action triggers the engine export; SceneToolbar is responsible for calling
+    // setCloudSaveStatus and setLastCloudSave on completion (PF-540).
+    if (dispatchCommand) {
+      dispatchCommand('export_scene', {});
+    }
   },
   setCloudSaveStatus: (status) => set({ cloudSaveStatus: status }),
+  setLastCloudSave: (timestamp) => set({ lastCloudSave: timestamp }),
   loadTemplate: async (_templateId) => {
     // Template loading implementation
   },

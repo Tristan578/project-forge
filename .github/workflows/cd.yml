@@ -10,6 +10,11 @@ on:
         required: false
         type: boolean
         default: false
+      rollback_production:
+        description: 'Rollback production to a previous deployment URL (leave blank to skip)'
+        required: false
+        type: string
+        default: ''
 
 concurrency:
   group: cd-${{ github.ref }}
@@ -20,29 +25,313 @@ env:
   RUSTFLAGS: --cfg=web_sys_unstable_apis
 
 jobs:
-  # ---- Quality Gates ----
-  # On push to main: CI already ran quality gates on this commit (required to merge).
-  # Skip re-running them here to save ~780 CI minutes/month (PF-631).
-  # On workflow_dispatch: no prior CI run guaranteed, so run gates unconditionally.
-  quality-gates:
-    name: Quality Gates
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-    uses: ./.github/workflows/quality-gates.yml
+  # ---- Manual Rollback (workflow_dispatch only, bypasses quality gates) ----
+  # Trigger via: gh workflow run cd.yml -f rollback_production=https://prev-deploy.vercel.app
+  rollback-production-manual:
+    name: Rollback Production (Manual)
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.rollback_production != '' && github.event.inputs.rollback_production != null }}
+    permissions:
+      contents: read
+      deployments: write
+    environment:
+      name: production
+    steps:
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@latest
+
+      - name: Promote previous deployment to production
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          ROLLBACK_URL: ${{ github.event.inputs.rollback_production }}
+        run: |
+          echo "Rolling back production to: $ROLLBACK_URL"
+          vercel promote "$ROLLBACK_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          echo "Rollback complete. Production now at: $ROLLBACK_URL"
+
+      - name: Notify Slack of manual rollback
+        if: ${{ vars.SLACK_WEBHOOK_INCIDENTS != '' }}
+        env:
+          SLACK_WEBHOOK: ${{ vars.SLACK_WEBHOOK_INCIDENTS }}
+          ROLLBACK_URL: ${{ github.event.inputs.rollback_production }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          payload=$(printf '{"text":"*SpawnForge Production Rollback (Manual)*\n*Triggered by:* %s\n*Promoted URL:* <%s|%s>\n*Workflow run:* <%s|View run>"}' \
+            "$ACTOR" "$ROLLBACK_URL" "$ROLLBACK_URL" "$RUN_URL")
+          curl --silent --fail -X POST "$SLACK_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$payload" || echo "Slack notification failed (non-fatal)"
+
+  # ---- Quality Gates (must all pass before any deployment) ----
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      - run: npx eslint --max-warnings 0
+        working-directory: web
+
+  typecheck:
+    name: TypeScript
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      - run: npx tsc --noEmit
+        working-directory: web
+
+  test-web:
+    name: Web Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      - run: npx vitest run
+        working-directory: web
+
+  test-mcp:
+    name: MCP Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp-server/package-lock.json
+
+      - run: npm ci
+        working-directory: mcp-server
+
+      - run: npx vitest run
+        working-directory: mcp-server
+
+  build-wasm:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine -> target
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.108
+
+      - name: Build WebGL2
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgl2
+
+      - name: Build WebGPU
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgpu
+
+      - name: Run wasm-bindgen (WebGL2)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Run wasm-bindgen (WebGPU)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Build WebGL2 Runtime (stripped editor)
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
+
+      - name: Run wasm-bindgen (WebGL2 Runtime)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Build WebGPU Runtime (stripped editor)
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
+
+      - name: Run wasm-bindgen (WebGPU Runtime)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Upload WASM artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: wasm-binaries
+          path: |
+            engine/pkg-webgl2/
+            engine/pkg-webgpu/
+            engine/pkg-webgl2-runtime/
+            engine/pkg-webgpu-runtime/
+          retention-days: 1
+
+  e2e:
+    name: E2E (UI)
+    runs-on: ubuntu-latest
+    needs: [build-wasm]
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-
+
+      - name: Install Playwright chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Download WASM artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: wasm-binaries
+          path: engine/
+
+      - name: Copy WASM to web/public
+        run: |
+          mkdir -p web/public/engine-pkg-webgl2
+          mkdir -p web/public/engine-pkg-webgpu
+          mkdir -p web/public/engine-pkg-webgl2-runtime
+          mkdir -p web/public/engine-pkg-webgpu-runtime
+          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
+          cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
+          cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
+          cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
+
+      - name: Run Playwright tests (UI-only, skip @engine)
+        working-directory: web
+        run: npx playwright test --project=chromium --grep-invert @engine
+        env:
+          CI: true
+
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: web/playwright-report/
+          retention-days: 14
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-results
+          path: web/test-results/
+          retention-days: 14
+
+  security:
+    name: Rust Security Audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      - name: npm audit (web)
+        working-directory: web
+        run: npm audit --audit-level=high
+
+      - run: npm ci
+        working-directory: mcp-server
+
+      - name: npm audit (mcp-server)
+        working-directory: mcp-server
+        run: npm audit --audit-level=high
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: engine -> target
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: cargo audit (engine)
+        working-directory: engine
+        run: cargo audit
 
   # ---- WASM CDN Upload ----
-  # On push: reuse the WASM artifact already built by CI on this commit (if available),
-  # otherwise build fresh. The artifact name is keyed by SHA in ci.yml uploads.
-  # On workflow_dispatch: quality-gates.yml builds and uploads the artifact.
   upload-wasm-cdn:
     name: Upload WASM to R2 CDN
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [quality-gates]
-    # quality-gates is skipped on push (CI already ran), so treat skipped as success.
-    if: |
-      always() &&
-      vars.R2_CDN_ENABLED == 'true' &&
-      (needs.quality-gates.result == 'success' || needs.quality-gates.result == 'skipped')
+    needs: [build-wasm]
+    if: ${{ vars.R2_CDN_ENABLED == 'true' }}
     permissions:
       contents: read
     steps:
@@ -82,24 +371,16 @@ jobs:
           R2_BUCKET: ${{ vars.R2_BUCKET || 'spawnforge-engine' }}
 
   # ---- Stage 1: Deploy to Staging ----
-  # Runs automatically after all gates pass on push to main.
+  # Runs automatically after all quality gates pass on push to main.
   # Staging mirrors production config but receives new code first.
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    needs: [quality-gates, upload-wasm-cdn]
-    if: |
-      always() &&
-      vars.VERCEL_DEPLOY_ENABLED == 'true' &&
-      github.event.inputs.promote_to_production != 'true' &&
-      (needs.quality-gates.result == 'success' || needs.quality-gates.result == 'skipped') &&
-      (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped')
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
+    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' && github.event.inputs.promote_to_production != 'true' && (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped') }}
     permissions:
       contents: read
       deployments: write
-    outputs:
-      url: ${{ steps.deploy.outputs.url }}
     environment:
       name: staging
       url: ${{ steps.deploy.outputs.url }}
@@ -162,15 +443,14 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
 
-  # ---- Stage 1b: Smoke Test Staging ----
-  # Runs after staging deploy to verify the deployment is healthy.
-  smoke-staging:
-    name: Smoke Test (Staging)
-    needs: [deploy-staging]
-    if: ${{ needs.deploy-staging.result == 'success' }}
-    uses: ./.github/workflows/post-deploy-smoke.yml
-    with:
-      target_url: ${{ needs.deploy-staging.outputs.url }}
+      - name: Post-deploy health check (staging)
+        id: health-check-staging
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          HEALTH_CHECK_STABILIZE_S: '30'
+          HEALTH_CHECK_RETRIES: '3'
+          HEALTH_CHECK_INTERVAL_S: '10'
+        run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
   # ---- Stage 2: Deploy to Production ----
   # Auto-deploys after staging succeeds on push to main.
@@ -178,14 +458,20 @@ jobs:
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [quality-gates, upload-wasm-cdn, deploy-staging]
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       (
         (needs.deploy-staging.result == 'success' && github.event_name == 'push') ||
         (github.event.inputs.promote_to_production == 'true' &&
-         needs.quality-gates.result == 'success' &&
+         needs.lint.result == 'success' &&
+         needs.typecheck.result == 'success' &&
+         needs.test-web.result == 'success' &&
+         needs.test-mcp.result == 'success' &&
+         needs.build-wasm.result == 'success' &&
+         needs.e2e.result == 'success' &&
+         needs.security.result == 'success' &&
          (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped'))
       )
     permissions:
@@ -225,6 +511,24 @@ jobs:
           cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
           cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
 
+      - name: Capture current production URL (last-known-good)
+        id: prev-deploy
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          # Retrieve the URL of the deployment currently aliased to production.
+          # This becomes the rollback target if the new deployment fails health checks.
+          prev_url=$(vercel ls --scope "$VERCEL_ORG_ID" --prod \
+            --token="$VERCEL_TOKEN" 2>/dev/null \
+            | awk 'NR==2 {print $2}' || echo "")
+          if [[ -n "$prev_url" && "$prev_url" != "http"* ]]; then
+            prev_url="https://${prev_url}"
+          fi
+          echo "prev_url=${prev_url}" >> "$GITHUB_OUTPUT"
+          echo "Last-known-good production URL: ${prev_url:-unknown}"
+
       - name: Pull Vercel environment (production)
         working-directory: web
         env:
@@ -253,23 +557,39 @@ jobs:
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to production: $url"
 
-  # ---- Stage 2b: Smoke Test Production ----
-  # Runs after production deploy to verify the deployment is healthy.
-  smoke-production:
-    name: Smoke Test (Production)
-    needs: [deploy-production]
-    if: ${{ needs.deploy-production.result == 'success' }}
-    uses: ./.github/workflows/post-deploy-smoke.yml
-    with:
-      target_url: https://spawnforge.ai
+      - name: Post-deploy health check (production)
+        id: health-check-production
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          HEALTH_CHECK_STABILIZE_S: '30'
+          HEALTH_CHECK_RETRIES: '3'
+          HEALTH_CHECK_INTERVAL_S: '10'
+        run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
-  # ---- Stage 2b: Smoke Test Production ----
-  # Runs after production deploy to verify the deployment is healthy.
-  smoke-production:
-    name: Smoke Test (Production)
-    needs: [deploy-production]
-    if: ${{ needs.deploy-production.result == 'success' }}
-    uses: ./.github/workflows/post-deploy-smoke.yml
-    with:
-      target_url: https://spawnforge.ai
+      - name: Rollback production on health check failure
+        if: ${{ failure() && steps.health-check-production.outcome == 'failure' && steps.prev-deploy.outputs.prev_url != '' }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
+          NEW_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          echo "::error::Health check failed — rolling back production to $PREV_URL"
+          vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
+          echo "Rollback complete. Production restored to: $PREV_URL"
 
+      - name: Notify Slack of automatic rollback
+        if: ${{ failure() && steps.health-check-production.outcome == 'failure' && steps.prev-deploy.outputs.prev_url != '' && vars.SLACK_WEBHOOK_INCIDENTS != '' }}
+        env:
+          SLACK_WEBHOOK: ${{ vars.SLACK_WEBHOOK_INCIDENTS }}
+          PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
+          NEW_URL: ${{ steps.deploy.outputs.url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          short_sha="${COMMIT_SHA:0:8}"
+          payload=$(printf '{"text":"*SpawnForge Production Auto-Rollback*\n:rotating_light: Health check failed for commit `%s`.\n*Failed deployment:* <%s|%s>\n*Rolled back to:* <%s|%s>\n*Workflow run:* <%s|View run>"}' \
+            "$short_sha" "$NEW_URL" "$NEW_URL" "$PREV_URL" "$PREV_URL" "$RUN_URL")
+          curl --silent --fail -X POST "$SLACK_WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$payload" || echo "Slack notification failed (non-fatal)"

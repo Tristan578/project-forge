@@ -235,5 +235,28 @@ describe('sceneSlice', () => {
       store.getState().setCloudSaveStatus('saved');
       expect(store.getState().cloudSaveStatus).toBe('saved');
     });
+
+    // PF-540: lastCloudSave must be settable so AutoSaveRecovery can compare timestamps
+    it('should set lastCloudSave via setLastCloudSave', () => {
+      const ts = '2026-01-15T12:00:00.000Z';
+      store.getState().setLastCloudSave(ts);
+      expect(store.getState().lastCloudSave).toBe(ts);
+    });
+
+    it('should update lastCloudSave to a newer timestamp', () => {
+      const first = '2026-01-15T10:00:00.000Z';
+      const second = '2026-01-15T12:00:00.000Z';
+      store.getState().setLastCloudSave(first);
+      store.getState().setLastCloudSave(second);
+      expect(store.getState().lastCloudSave).toBe(second);
+    });
+  });
+
+  describe('saveToCloud', () => {
+    // PF-540: saveToCloud should trigger export_scene so SceneToolbar can PUT to the API
+    it('dispatches export_scene when projectId-aware cloud save is triggered', () => {
+      store.getState().saveToCloud();
+      expect(mockDispatch).toHaveBeenCalledWith('export_scene', {});
+    });
   });
 });
