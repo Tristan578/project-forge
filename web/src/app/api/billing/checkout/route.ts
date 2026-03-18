@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -33,8 +34,8 @@ export async function POST(req: Request) {
   const { user } = authResult.ctx;
   const reqLog = logger.child({ endpoint: 'POST /api/billing/checkout', userId: user.id });
 
-  // Rate limit: 5 checkout requests per minute per user
-  const rl = await rateLimit(`billing-checkout:${user.id}`, 5, 60_000);
+  // Rate limit: 5 checkout requests per minute per user (distributed across instances)
+  const rl = await distributedRateLimit(`billing-checkout:${user.id}`, 5, 60);
   if (!rl.allowed) {
     reqLog.warn('Checkout rate limit exceeded');
     return rateLimitResponse(rl.remaining, rl.resetAt);
