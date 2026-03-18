@@ -149,6 +149,7 @@ import {
 describe('handleChargeRefunded', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: user found, no existing refund, user has addon tokens, balance query
     mockSelectWhere.mockReturnValue({
       limit: vi.fn().mockResolvedValue([mockUser]),
     });
@@ -175,41 +176,56 @@ describe('handleChargeRefunded', () => {
   });
 
   it('calls reverseAddonTokens for a full refund', async () => {
-    // User has 5000 addon tokens, full refund (amount_refunded == amount)
+    // Select 1: findUserByStripeCustomer -> mockUser
+    // Select 2: fallback idempotency check -> no existing refund
+    // Select 3: user addonTokens lookup
+    // Select 4: getTotalBalance
+    mockSelectWhere
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 5000 }]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) });
     await handleChargeRefunded('cus_abc', 'ch_full', 1000, 1000);
-    // reverseAddonTokens triggers a select (for addonTokens) + update + insert
-    // The second select (inside reverseAddonTokens) is also mocked
     expect(mockUpdate).toHaveBeenCalled();
     expect(mockInsert).toHaveBeenCalled();
   });
 
   it('calls reverseAddonTokens for a partial refund', async () => {
+    mockSelectWhere
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 5000 }]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([mockUser]) });
     await handleChargeRefunded('cus_abc', 'ch_partial', 500, 1000);
     expect(mockUpdate).toHaveBeenCalled();
     expect(mockInsert).toHaveBeenCalled();
   });
 });
 
-describe('reverseAddonTokens', () => {
+describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock returns user with addonTokens
-    mockSelectWhere.mockReturnValue({
-      limit: vi.fn().mockResolvedValue([{ addonTokens: 1000 }]),
-    });
     mockUpdateSet.mockReturnValue({ where: vi.fn().mockResolvedValue({}) });
   });
 
   it('does nothing when user not found', async () => {
-    mockSelectWhere.mockReturnValueOnce({
-      limit: vi.fn().mockResolvedValue([]),
-    });
+    // Select 1: idempotency check -> no existing refund
+    // Select 2: user lookup -> not found
+    mockSelectWhere
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) });
     await reverseAddonTokens('ghost', 'ch_1', 500, 1000);
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
   it('deducts proportional tokens for partial refund', async () => {
-    // 50% refund of user with 1000 addon tokens = 500 deducted
+    // Select 1: idempotency check -> no existing refund
+    // Select 2: user addonTokens
+    // Select 3: getTotalBalance
+    mockSelectWhere
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 1000 }]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 1000, earnedCredits: 0 }]) });
     await reverseAddonTokens('user_abc', 'ch_partial', 500, 1000);
     expect(mockUpdate).toHaveBeenCalled();
     expect(mockInsert).toHaveBeenCalled();
@@ -220,6 +236,10 @@ describe('reverseAddonTokens', () => {
   });
 
   it('deducts all tokens for full refund', async () => {
+    mockSelectWhere
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 1000 }]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 1000, earnedCredits: 0 }]) });
     await reverseAddonTokens('user_abc', 'ch_full', 1000, 1000);
     expect(mockUpdate).toHaveBeenCalled();
     const insertValues = mockInsertValues.mock.calls[0][0];
@@ -227,21 +247,34 @@ describe('reverseAddonTokens', () => {
   });
 
   it('clamps deduction ratio to 1 when refund exceeds total', async () => {
-    // Edge case: amountRefunded > amountTotal — ratio capped at 1
+    mockSelectWhere
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 1000 }]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 1000, earnedCredits: 0 }]) });
     await reverseAddonTokens('user_abc', 'ch_over', 2000, 1000);
     expect(mockUpdate).toHaveBeenCalled();
     const insertValues = mockInsertValues.mock.calls[0][0];
-    // All 1000 tokens deducted (ratio=1.0 => floor(1000*1)=1000)
     expect(insertValues.amount).toBe(-1000);
   });
 
   it('does nothing when calculated deduction is 0', async () => {
-    // Very small refund that rounds down to 0 tokens
-    mockSelectWhere.mockReturnValueOnce({
-      limit: vi.fn().mockResolvedValue([{ addonTokens: 10 }]),
-    });
+    // Select 1: idempotency check -> no existing refund
+    // Select 2: user with 10 addon tokens
+    mockSelectWhere
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([]) })
+      .mockReturnValueOnce({ limit: vi.fn().mockResolvedValue([{ addonTokens: 10 }]) });
     // 1 cent refund of $100 = 0.01 ratio, floor(10 * 0.01) = 0
     await reverseAddonTokens('user_abc', 'ch_tiny', 1, 10000);
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it('skips when refund already exists (idempotency)', async () => {
+    // Select 1: idempotency check -> existing refund found
+    mockSelectWhere.mockReturnValueOnce({
+      limit: vi.fn().mockResolvedValue([{ id: 'existing-txn' }]),
+    });
+    await reverseAddonTokens('user_abc', 'ch_dup', 500, 1000);
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 });
