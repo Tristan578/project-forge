@@ -203,6 +203,13 @@ export class ProviderCircuitBreaker {
         `Proceeding with essential operation.`
       );
     }
+    if (state === 'HALF_OPEN') {
+      return (
+        `WARNING: ${this.provider} circuit breaker is HALF_OPEN ` +
+        `(${this.costAnomalyDetected ? 'cost anomaly' : 'error rate exceeded'}). ` +
+        `Proceeding cautiously — provider was recently unstable.`
+      );
+    }
     return null;
   }
 
