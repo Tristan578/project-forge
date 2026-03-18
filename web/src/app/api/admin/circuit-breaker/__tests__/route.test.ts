@@ -9,7 +9,7 @@ import { NextRequest } from 'next/server';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
-  rateLimitAdminRoute: vi.fn().mockReturnValue(null),
+  rateLimitAdminRoute: vi.fn().mockResolvedValue(null),
 }));
 
 function mockAuthAdmin() {

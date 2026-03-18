@@ -22,7 +22,7 @@ export async function GET() {
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const rateLimitError = rateLimitAdminRoute(clerkId, 'admin-circuit-breaker');
+  const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-circuit-breaker');
   if (rateLimitError) return rateLimitError;
 
   const stats = getAllBreakerStats();
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const rateLimitError = rateLimitAdminRoute(clerkId, 'admin-circuit-breaker-reset');
+  const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-circuit-breaker-reset');
   if (rateLimitError) return rateLimitError;
 
   let body: unknown;
