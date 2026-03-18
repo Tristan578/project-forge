@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { entityHandlers } from '../entityHandlers';
+import { transformHandlers } from '../transformHandlers';
 import { materialHandlers } from '../materialHandlers';
 import { shaderHandlers } from '../shaderHandlers';
 
@@ -95,7 +96,7 @@ describe('entityHandlers', () => {
   // -----------------------------------------------------------------------
   describe('spawn_entity', () => {
     it('calls spawnEntity with type and name', async () => {
-      const { result, store } = await invokeHandler(entityHandlers, 'spawn_entity', {
+      const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', {
         entityType: 'cube',
         name: 'MyCube',
       });
@@ -104,7 +105,7 @@ describe('entityHandlers', () => {
     });
 
     it('calls spawnEntity with type only (no name)', async () => {
-      const { result, store } = await invokeHandler(entityHandlers, 'spawn_entity', {
+      const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', {
         entityType: 'sphere',
       });
       expect(result.success).toBe(true);
@@ -112,7 +113,7 @@ describe('entityHandlers', () => {
     });
 
     it('returns a message containing the entity type', async () => {
-      const { result } = await invokeHandler(entityHandlers, 'spawn_entity', {
+      const { result } = await invokeHandler(transformHandlers, 'spawn_entity', {
         entityType: 'cylinder',
       });
       expect(result.success).toBe(true);
@@ -122,7 +123,7 @@ describe('entityHandlers', () => {
     it('supports different entity types', async () => {
       const types = ['cube', 'sphere', 'plane', 'capsule', 'torus', 'cone', 'point_light', 'directional_light', 'spot_light', 'empty'];
       for (const entityType of types) {
-        const { result, store } = await invokeHandler(entityHandlers, 'spawn_entity', { entityType });
+        const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', { entityType });
         expect(result.success).toBe(true);
         expect(store.spawnEntity).toHaveBeenCalledWith(entityType, undefined);
       }
@@ -276,7 +277,7 @@ describe('entityHandlers', () => {
   // -----------------------------------------------------------------------
   describe('rename_entity', () => {
     it('calls renameEntity with the correct arguments', async () => {
-      const { result, store } = await invokeHandler(entityHandlers, 'rename_entity', {
+      const { result, store } = await invokeHandler(transformHandlers, 'rename_entity', {
         entityId: 'ent1',
         name: 'NewName',
       });

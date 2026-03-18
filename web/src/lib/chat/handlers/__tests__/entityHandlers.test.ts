@@ -5,6 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invokeHandler } from './handlerTestUtils';
 import { entityHandlers } from '../entityHandlers';
+import { transformHandlers } from '../transformHandlers';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -16,19 +17,19 @@ beforeEach(() => {
 
 describe('spawn_entity', () => {
   it('returns error when entityType is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'spawn_entity', {});
+    const { result } = await invokeHandler(transformHandlers, 'spawn_entity', {});
     expect(result.success).toBe(false);
   });
 
   it('returns error for unknown entityType', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'spawn_entity', {
+    const { result } = await invokeHandler(transformHandlers, 'spawn_entity', {
       entityType: 'alien_ship',
     });
     expect(result.success).toBe(false);
   });
 
   it('spawns cube and calls store.spawnEntity', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'spawn_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'spawn_entity', {
       entityType: 'cube',
     });
     expect(result.success).toBe(true);
@@ -36,7 +37,7 @@ describe('spawn_entity', () => {
   });
 
   it('passes name to spawnEntity when provided', async () => {
-    const { store } = await invokeHandler(entityHandlers, 'spawn_entity', {
+    const { store } = await invokeHandler(transformHandlers, 'spawn_entity', {
       entityType: 'sphere',
       name: 'MyBall',
     });
@@ -49,13 +50,13 @@ describe('spawn_entity', () => {
       'point_light', 'directional_light', 'spot_light', 'gltf_model', 'empty',
     ];
     for (const entityType of types) {
-      const { result } = await invokeHandler(entityHandlers, 'spawn_entity', { entityType });
+      const { result } = await invokeHandler(transformHandlers, 'spawn_entity', { entityType });
       expect(result.success).toBe(true);
     }
   });
 
   it('result message includes entityType', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'spawn_entity', {
+    const { result } = await invokeHandler(transformHandlers, 'spawn_entity', {
       entityType: 'torus',
     });
     const data = result.result as { message: string };
@@ -209,7 +210,7 @@ describe('update_transform', () => {
 
 describe('rename_entity', () => {
   it('returns error when name is empty', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'rename_entity', {
+    const { result } = await invokeHandler(transformHandlers, 'rename_entity', {
       entityId: 'ent-1',
       name: '',
     });
@@ -217,7 +218,7 @@ describe('rename_entity', () => {
   });
 
   it('calls store.renameEntity with correct args', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'rename_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'rename_entity', {
       entityId: 'ent-1',
       name: 'NewName',
     });
