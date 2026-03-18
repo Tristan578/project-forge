@@ -299,10 +299,10 @@ describe('POST /api/chat — negative cases', () => {
   // API key errors
   // -------------------------------------------------------------------------
   describe('API key errors', () => {
-    it('returns 402 for NO_API_KEY error code', async () => {
+    it('returns 402 for NO_KEY_CONFIGURED error code', async () => {
       const { ApiKeyError: AKE } = await import('@/lib/keys/resolver');
       vi.mocked(resolveApiKey).mockRejectedValue(
-        new AKE('NO_API_KEY', 'No API key configured'),
+        new AKE('NO_KEY_CONFIGURED', 'No API key configured'),
       );
 
       const res = await POST(makeRequest({
@@ -312,7 +312,7 @@ describe('POST /api/chat — negative cases', () => {
       }));
       expect(res.status).toBe(402);
       const body = await res.json();
-      expect(body.code).toBe('NO_API_KEY');
+      expect(body.code).toBe('NO_KEY_CONFIGURED');
     });
 
     it('re-throws non-ApiKeyError exceptions', async () => {

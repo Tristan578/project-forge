@@ -307,7 +307,7 @@ describe('POST /api/publish — negative cases', () => {
       vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
 
       const body = validBody();
-      delete body.description;
+      delete (body as Record<string, unknown>).description;
       await POST(makeRequest(body));
 
       // moderateContent should be called once for the title only
