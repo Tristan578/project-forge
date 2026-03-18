@@ -127,6 +127,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 220,
     minHeight: 200,
   },
+  tutorial: {
+    id: 'tutorial',
+    title: 'Tutorial Generator',
+    component: 'tutorial',
+    minWidth: 240,
+    minHeight: 200,
+  },
   'effect-bindings': {
     id: 'effect-bindings',
     title: 'Effects',
