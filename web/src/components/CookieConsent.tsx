@@ -5,22 +5,30 @@ import { useState, useCallback } from 'react';
 const STORAGE_KEY = 'forge-cookie-consent';
 
 /**
- * Read consent state from localStorage. Returns false (show banner)
- * when no consent has been stored. Safe to call during SSR — returns
- * true (hide banner) when localStorage is unavailable.
+ * Returns the initial consent state by reading localStorage during the first
+ * client-side render. Returns null during SSR (window is undefined) so the
+ * banner is suppressed server-side — this avoids hydration mismatches because
+ * localStorage is unavailable in the Node.js SSR environment.
+ *
+ * On the client:
+ *  - null in localStorage  → returns false (banner visible, user hasn't responded)
+ *  - 'true' in localStorage → returns true  (banner hidden, user accepted)
+ *  - 'false' in localStorage → returns false (banner visible on next load if they declined)
  */
-function hasStoredConsent(): boolean {
-  if (typeof localStorage === 'undefined') return true;
-  return localStorage.getItem(STORAGE_KEY) !== null;
+function readConsentFromStorage(): boolean | null {
+  if (typeof window === 'undefined') return null;
+  const stored = localStorage.getItem(STORAGE_KEY);
+  // Any stored value ('true' or 'false') means the user has already interacted
+  return stored !== null;
 }
 
 /**
- * Cookie consent banner. Uses a lazy useState initializer to read
- * localStorage, avoiding both SSR hydration mismatches and the
- * react-hooks/set-state-in-effect lint rule.
+ * Cookie consent banner. Uses a lazy useState initializer instead of useEffect
+ * to read localStorage, so consent state is available synchronously on the
+ * first client-side render without causing cascading re-renders.
  */
 export function CookieConsent() {
-  const [consented, setConsented] = useState(hasStoredConsent);
+  const [consented, setConsented] = useState<boolean | null>(readConsentFromStorage);
 
   const handleAccept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, 'true');
@@ -32,7 +40,8 @@ export function CookieConsent() {
     setConsented(true);
   }, []);
 
-  if (consented) return null;
+  // Don't render during SSR (null) or if already consented/interacted
+  if (consented !== false) return null;
 
   return (
     <div
