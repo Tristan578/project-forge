@@ -2,7 +2,7 @@
  * Tests for audioHandlers — adaptive music, snapshots, occlusion, and segments.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { invokeHandler, createMockStore } from './handlerTestUtils';
+import { invokeHandler } from './handlerTestUtils';
 import { audioHandlers } from '../audioHandlers';
 
 // ---------------------------------------------------------------------------
