@@ -31,6 +31,7 @@ export function createMockActions() {
     setTerrainData: vi.fn(),
     setQualityFromEngine: vi.fn(),
     // Transform events
+    setFullGraph: vi.fn(),
     setSceneGraph: vi.fn(),
     setSelection: vi.fn(),
     setPrimaryTransform: vi.fn(),
