@@ -178,8 +178,11 @@ describe('POST /api/chat', () => {
       usageId: 'usage-1',
     } as Awaited<ReturnType<typeof resolveApiKey>>);
 
-    // Default: Anthropic stream succeeds
-    mockCreate.mockReturnValue(makeStreamEvents());
+    // Default: Anthropic stream succeeds (fresh generator per call)
+    mockCreate.mockImplementation(() => makeStreamEvents());
+
+    // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
+    vi.mocked(refundTokens).mockResolvedValue(undefined);
 
     // Re-import to get fresh module
     const mod = await import('../route');
@@ -354,6 +357,7 @@ describe('POST /api/chat', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('text/event-stream');
       expect(res.headers.get('Cache-Control')).toBe('no-cache');
+      await res.text(); // drain stream to prevent async race with next test
     });
 
     it('streams text and usage events', async () => {
@@ -378,7 +382,8 @@ describe('POST /api/chat', () => {
     });
 
     it('uses extended max_tokens when thinking is enabled', async () => {
-      await POST(makeRequest({ ...validBody(), thinking: true }));
+      const res = await POST(makeRequest({ ...validBody(), thinking: true }));
+      await res.text(); // drain stream
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           max_tokens: 16384,
@@ -388,14 +393,16 @@ describe('POST /api/chat', () => {
     });
 
     it('uses 4096 max_tokens without thinking', async () => {
-      await POST(makeRequest(validBody()));
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({ max_tokens: 4096 }),
       );
     });
 
     it('appends scene context to system prompt blocks', async () => {
-      await POST(makeRequest(validBody()));
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           system: expect.arrayContaining([
@@ -457,7 +464,8 @@ describe('POST /api/chat', () => {
 
       mockCreate.mockRejectedValue(new Error('fail'));
 
-      await POST(makeRequest(validBody()));
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
       expect(refundTokens).not.toHaveBeenCalled();
     });
   });
