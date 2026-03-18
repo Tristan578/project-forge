@@ -631,8 +631,41 @@ export async function generateBehaviorTree(description: string): Promise<Behavio
     throw new Error(`AI generation failed: ${response.status}`);
   }
 
-  const data = (await response.json()) as { content?: string; message?: string };
-  const content = data.content ?? data.message ?? '';
+  // /api/chat returns an SSE stream — read text deltas
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let content = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') continue;
+
+      let event: Record<string, unknown>;
+      try {
+        event = JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (event.type === 'text_delta' && typeof event.text === 'string') {
+        content += event.text;
+      }
+      if (event.type === 'error' && typeof event.message === 'string') {
+        throw new Error(event.message);
+      }
+    }
+  }
 
   const tree = parseBehaviorTreeResponse(content);
   if (!tree) {
