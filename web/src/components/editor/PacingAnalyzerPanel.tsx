@@ -243,7 +243,8 @@ export function PacingAnalyzerPanel() {
 
   // Convert scene graph entities to descriptors
   const entities: SceneEntityDescriptor[] = useMemo(() => {
-    const entries = Object.entries(sceneGraph);
+    const nodes = sceneGraph.nodes ?? sceneGraph;
+    const entries = Object.entries(nodes);
     if (entries.length === 0) return [];
 
     // Distribute entities evenly across 0–1 based on their order
