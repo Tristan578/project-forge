@@ -17,7 +17,7 @@ export async function POST(
     if (!authResult.ok) return authResult.response;
 
     // Rate limit: 30 like/unlike actions per minute per user
-    const rl = rateLimit(`like:${authResult.ctx.user.id}`, 30, 60_000);
+    const rl = await rateLimit(`like:${authResult.ctx.user.id}`, 30, 60_000);
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const { id: gameId } = await params;

@@ -34,7 +34,7 @@ function parseTrustedSentryConfig(): { host: string; projectId: string } | null 
 const TRUSTED_SENTRY = parseTrustedSentryConfig();
 
 export async function POST(request: NextRequest) {
-  const rateLimited = rateLimitPublicRoute(request, 'sentry');
+  const rateLimited = await rateLimitPublicRoute(request, 'sentry');
   if (rateLimited) return rateLimited;
 
   try {

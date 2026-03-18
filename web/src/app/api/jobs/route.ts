@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
 
-    const rl = rateLimit(`jobs:${authResult.ctx.user.id}`, 30, 60_000);
+    const rl = await rateLimit(`jobs:${authResult.ctx.user.id}`, 30, 60_000);
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const body = await req.json();

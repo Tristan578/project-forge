@@ -49,7 +49,7 @@ describe('POST /api/billing/checkout', () => {
     process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
     process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
     
-    vi.mocked(rateLimit).mockReturnValue({
+    vi.mocked(rateLimit).mockResolvedValue({
       allowed: true,
       remaining: 4,
       resetAt: Date.now() + 60000,
@@ -78,7 +78,7 @@ describe('POST /api/billing/checkout', () => {
   it('returns 429 if rate limited', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const req = new Request('http://localhost/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier: 'creator' }) });
     const res = await POST(req);

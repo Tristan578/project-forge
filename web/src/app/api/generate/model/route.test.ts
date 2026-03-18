@@ -42,7 +42,7 @@ describe('POST /api/generate/model', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
     vi.mocked(getTokenCost).mockReturnValue(100);
     vi.mocked(MeshyClient).mockImplementation(function () {
@@ -64,7 +64,7 @@ describe('POST /api/generate/model', () => {
   });
 
   it('returns 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
 
     const res = await POST(makeRequest({ prompt: 'dragon', mode: 'text-to-3d' }) as any);
     expect(res.status).toBe(429);

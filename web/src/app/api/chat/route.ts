@@ -223,7 +223,7 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return auth.response;
 
   // 1b. Rate limit: 10 requests per minute per user
-  const rl = rateLimit(`chat:${auth.ctx.user.id}`, 10, 60_000);
+  const rl = await rateLimit(`chat:${auth.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Validate request size (max 1MB — generous limit for conversation history + scene context;

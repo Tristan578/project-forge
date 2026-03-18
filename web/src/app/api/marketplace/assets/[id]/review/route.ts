@@ -20,7 +20,7 @@ export async function POST(
     const db = getDb();
 
     // Rate limit: 20 review submissions per minute per user
-    const rl = rateLimit(`review:${clerkId}`, 20, 60_000);
+    const rl = await rateLimit(`review:${clerkId}`, 20, 60_000);
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const parsed = await parseJsonBody(req);

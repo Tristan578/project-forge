@@ -32,6 +32,8 @@
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
     "@sentry/nextjs": "^10.42.0",
+    "@upstash/ratelimit": "^2.0.8",
+    "@upstash/redis": "^1.37.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "@xyflow/react": "^12.10.1",

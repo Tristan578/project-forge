@@ -78,7 +78,7 @@ describe('POST /api/community/games/[id]/comment', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator', displayName: 'Test' } as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 19, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 19, resetAt: Date.now() + 60000 });
     // getDb() is called at the top of the try block
     const mockDb = { select: vi.fn().mockReturnValue(mockDbChain([])), insert: vi.fn() };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
@@ -102,7 +102,7 @@ describe('POST /api/community/games/[id]/comment', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/community/games/game-1/comment', {
@@ -180,7 +180,7 @@ describe('POST /api/community/games/[id]/comment — auto-flagging', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator', displayName: 'Test' } as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 19, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 19, resetAt: Date.now() + 60000 });
 
     // Default DB: captures the values argument so tests can assert on flagged
     const selectChain = mockDbChain([{ displayName: 'Test' }]);

@@ -37,7 +37,7 @@ describe('POST /api/community/games/[id]/fork', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator', displayName: 'Test' } as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
     // getDb() is called at the top of the try block before auth/rate-limit checks
     const mockDb = { select: vi.fn().mockReturnValue(mockDbChain([])), insert: vi.fn() };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
@@ -58,7 +58,7 @@ describe('POST /api/community/games/[id]/fork', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/community/games/game-1/fork');

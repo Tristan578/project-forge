@@ -15,7 +15,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; slug: string }> }
 ) {
-  const limited = rateLimitPublicRoute(req, 'play-game', 60, 5 * 60 * 1000);
+  const limited = await rateLimitPublicRoute(req, 'play-game', 60, 5 * 60 * 1000);
   if (limited) return limited;
 
   try {

@@ -38,7 +38,7 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: mockUser as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
   });
 
   it('should return 401 when not authenticated', async () => {
@@ -56,7 +56,7 @@ describe('POST /api/marketplace/assets/[id]/purchase', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/marketplace/assets/a1/purchase');

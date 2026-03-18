@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation-appeals');
+    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation-appeals');
     if (rateLimitError) return rateLimitError;
 
     const db = getDb();

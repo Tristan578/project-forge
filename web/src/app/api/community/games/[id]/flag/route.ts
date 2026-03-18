@@ -17,7 +17,7 @@ export async function POST(
     if (!authResult.ok) return authResult.response;
 
     // Rate limit: 10 flags per minute per user
-    const rl = rateLimit(`flag:${authResult.ctx.user.id}`, 10, 60_000);
+    const rl = await rateLimit(`flag:${authResult.ctx.user.id}`, 10, 60_000);
     if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const { id: gameId } = await params;

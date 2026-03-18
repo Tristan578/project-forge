@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 5 purchase requests per minute per user
-  const rl = rateLimit(`tokens-purchase:${authResult.ctx.user.id}`, 5, 60_000);
+  const rl = await rateLimit(`tokens-purchase:${authResult.ctx.user.id}`, 5, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // Only paid tiers can buy tokens

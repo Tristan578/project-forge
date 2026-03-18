@@ -34,7 +34,7 @@ describe('POST /api/community/games/[id]/like', () => {
       ok: true as const,
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator', displayName: 'Test' } as never },
     });
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 });
   });
 
   it('should return 401 when not authenticated', async () => {
@@ -52,7 +52,7 @@ describe('POST /api/community/games/[id]/like', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
     // getDb() is called at top of the try block before rate limit check
     const mockDb = { select: vi.fn().mockReturnValue(mockDbChain([])) };
     vi.mocked(getDb).mockReturnValue(mockDb as never);

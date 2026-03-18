@@ -20,7 +20,7 @@ vi.mock('@/lib/moderation/contentFilter');
 describe('POST /api/publish', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(rateLimit).mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
     vi.mocked(moderateContent).mockReturnValue({ severity: 'pass', reasons: [], cleaned: '' });
   });
 

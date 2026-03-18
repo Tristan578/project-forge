@@ -35,7 +35,7 @@ vi.mock('@/lib/auth/api-auth', () => ({
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(() => ({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 })),
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
   rateLimitResponse: vi.fn(() => new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 })),
 }));
 
@@ -101,7 +101,7 @@ describe('/api/jobs', () => {
 
     it('returns 429 when rate limited', async () => {
       mockAuth(true);
-      vi.mocked(rateLimit).mockReturnValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+      vi.mocked(rateLimit).mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
       const req = new NextRequest('http://localhost/api/jobs', {
         method: 'POST',

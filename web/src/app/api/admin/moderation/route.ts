@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation');
+    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation');
     if (rateLimitError) return rateLimitError;
 
     const db = getDb();
@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
 
-    const rateLimitError = rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation');
+    const rateLimitError = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation');
     if (rateLimitError) return rateLimitError;
 
     const db = getDb();

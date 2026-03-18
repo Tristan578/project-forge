@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const user = await getUserByClerkId(clerkId);
 
   // Rate limit: 10 submissions per minute per user
-  const rl = rateLimit(`feedback:${clerkId}`, 10, 60_000);
+  const rl = await rateLimit(`feedback:${clerkId}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const parsed = await parseJsonBody(req);

@@ -7,7 +7,7 @@ import { rateLimitPublicRoute } from '@/lib/rateLimit';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const limited = rateLimitPublicRoute(req, 'featured-games', 30, 5 * 60 * 1000);
+  const limited = await rateLimitPublicRoute(req, 'featured-games', 30, 5 * 60 * 1000);
   if (limited) return limited;
 
   try {
