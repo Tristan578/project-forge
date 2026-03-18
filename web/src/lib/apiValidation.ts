@@ -149,6 +149,25 @@ export function requireInteger(
 }
 
 /**
+ * Parse and clamp pagination query parameters from a URL search params object.
+ * - `limit` is clamped to [1, maxLimit] (default 20, max 100).
+ * - `offset` is clamped to >= 0 (default 0).
+ * Both are parsed as integers; non-numeric values fall back to defaults.
+ */
+export function parsePaginationParams(
+  searchParams: URLSearchParams,
+  { defaultLimit = 20, maxLimit = 100 }: { defaultLimit?: number; maxLimit?: number } = {}
+): { limit: number; offset: number } {
+  const rawLimit = parseInt(searchParams.get('limit') || String(defaultLimit), 10);
+  const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
+
+  const limit = Math.max(1, Math.min(Number.isFinite(rawLimit) ? rawLimit : defaultLimit, maxLimit));
+  const offset = Math.max(0, Number.isFinite(rawOffset) ? rawOffset : 0);
+
+  return { limit, offset };
+}
+
+/**
  * Validates that a value is one of an allowed set.
  */
 export function requireOneOf<T extends string>(

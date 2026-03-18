@@ -4,6 +4,7 @@ import { gameComments, publishedGames, users } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
+import { parsePaginationParams } from '@/lib/apiValidation';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,8 +26,7 @@ export async function GET(req: NextRequest) {
 
     const db = getDb();
     const searchParams = req.nextUrl.searchParams;
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
-    const offset = parseInt(searchParams.get('offset') || '0', 10);
+    const { limit, offset } = parsePaginationParams(searchParams, { defaultLimit: 50 });
 
     // Fetch flagged comments with author and game info
     const flaggedComments = await db

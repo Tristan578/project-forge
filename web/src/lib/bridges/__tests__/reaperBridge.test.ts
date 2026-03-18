@@ -160,6 +160,24 @@ describe('reaperBridge', () => {
     it('throws on relative path', () => {
       expect(() => reaperBridge.buildNormalizeCommand('voice.wav')).toThrow('Invalid file path');
     });
+
+    it('uses custom script path when provided', () => {
+      const args = reaperBridge.buildNormalizeCommand('/audio/voice.wav', '/scripts/my_normalize.lua');
+      expect(args).toContain('/scripts/my_normalize.lua');
+      expect(args).not.toContain('normalize');
+    });
+
+    it('throws on invalid script path', () => {
+      expect(() => reaperBridge.buildNormalizeCommand('/audio/voice.wav', 'relative/script.lua')).toThrow(
+        'Invalid script path'
+      );
+    });
+
+    it('throws on script path with path traversal', () => {
+      expect(() => reaperBridge.buildNormalizeCommand('/audio/voice.wav', '/scripts/../etc/evil.lua')).toThrow(
+        'Invalid script path'
+      );
+    });
   });
 
   describe('openInReaper', () => {
@@ -336,6 +354,38 @@ describe('reaperBridge', () => {
       );
       expect(result.success).toBe(false);
       expect(result.error).toBe('Invalid file path');
+    });
+
+    it('uses custom script path when provided', async () => {
+      const mockExecFile = vi.mocked(childProcess.execFile);
+      mockExecFile.mockImplementation((_cmd: unknown, _args: unknown, _opts: unknown, cb: unknown) => {
+        (cb as (err: null, stdout: string, stderr: string) => void)(null, '', '');
+        return {} as ReturnType<typeof childProcess.execFile>;
+      });
+
+      const result = await reaperBridge.normalize(
+        '/Applications/REAPER.app/Contents/MacOS/REAPER',
+        '/audio/voice.wav',
+        '/scripts/my_normalize.lua'
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockExecFile).toHaveBeenCalledWith(
+        '/Applications/REAPER.app/Contents/MacOS/REAPER',
+        expect.arrayContaining(['/scripts/my_normalize.lua']),
+        expect.any(Object),
+        expect.any(Function)
+      );
+    });
+
+    it('returns error for invalid script path', async () => {
+      const result = await reaperBridge.normalize(
+        '/Applications/REAPER.app/Contents/MacOS/REAPER',
+        '/audio/voice.wav',
+        'relative/script.lua'
+      );
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Invalid script path');
     });
 
     it('captures exitCode from failed process', async () => {
