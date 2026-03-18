@@ -41,12 +41,12 @@ A feature meets quality standards when:
 | **Correctness** | All acceptance criteria pass, all tests green | `bash .claude/tools/validate-all.sh` |
 | **AI Parity** | Every UI action has MCP command + chat handler | `bash .claude/tools/validate-mcp.sh audit` |
 | **Undo/Redo** | Every user-visible state change is undoable | Manual verification + test |
-| **Type Safety** | Zero TypeScript errors, zero `any` types | `npx tsc --noEmit` |
-| **Lint Clean** | Zero ESLint warnings | `npx eslint --max-warnings 0 .` |
+| **Type Safety** | Zero TypeScript errors, zero `any` types | `bash .claude/tools/validate-frontend.sh tsc` |
+| **Lint Clean** | Zero ESLint warnings | `bash .claude/tools/validate-frontend.sh lint` |
 | **Architecture** | Bridge isolation enforced, sandwich maintained | `bash .claude/tools/validate-rust.sh check` |
 | **Tests Exist** | New functions have tests, coverage doesn't regress | `bash .claude/tools/validate-tests.sh coverage` |
 | **Docs Updated** | Known-limitations, README, rules files current | `bash .claude/tools/validate-docs.sh` |
-| **Manifests Synced** | MCP manifests identical in both locations | `diff mcp-server/manifest/commands.json web/src/data/commands.json` |
+| **Manifests Synced** | MCP manifests identical in both locations | `bash .claude/tools/validate-mcp.sh sync` |
 
 #### Definition of Done (DoD)
 A ticket can be moved to `done` only when:

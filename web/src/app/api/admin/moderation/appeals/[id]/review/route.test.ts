@@ -17,7 +17,20 @@ function makeReviewRequest(body: Record<string, unknown>) {
   });
 }
 
-const params = Promise.resolve({ id: 'appeal-1' });
+const makeParams = () => Promise.resolve({ id: 'appeal-1' });
+
+function makeMockDb(selectResults: unknown[]) {
+  const updateSetWhere = vi.fn().mockResolvedValue(true);
+  const updateSet = vi.fn().mockReturnValue({ where: updateSetWhere });
+  const updateFn = vi.fn().mockReturnValue({ set: updateSet });
+
+  const selectLimit = vi.fn().mockResolvedValue(selectResults);
+  const selectWhere = vi.fn().mockReturnValue({ limit: selectLimit });
+  const selectFrom = vi.fn().mockReturnValue({ where: selectWhere });
+  const selectFn = vi.fn().mockReturnValue({ from: selectFrom });
+
+  return { select: selectFn, update: updateFn };
+}
 
 describe('/api/admin/moderation/appeals/[id]/review POST', () => {
   beforeEach(() => {
@@ -29,7 +42,7 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(assertAdmin).mockReturnValue(mockNextResponse({ error: 'Forbidden' }, { status: 403 }));
 
-    const res = await POST(makeReviewRequest({ decision: 'approve' }), { params });
+    const res = await POST(makeReviewRequest({ decision: 'approve' }), { params: makeParams() });
     expect(res.status).toBe(403);
   });
 
@@ -38,7 +51,7 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_1', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const res = await POST(makeReviewRequest({ decision: 'maybe' }), { params });
+    const res = await POST(makeReviewRequest({ decision: 'maybe' }), { params: makeParams() });
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toContain('decision');
@@ -49,14 +62,9 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_1', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([]),
-    };
-    vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(selectChain) } as unknown as ReturnType<typeof getDb>);
+    vi.mocked(getDb).mockReturnValue(makeMockDb([]) as unknown as ReturnType<typeof getDb>);
 
-    const res = await POST(makeReviewRequest({ decision: 'approve' }), { params });
+    const res = await POST(makeReviewRequest({ decision: 'approve' }), { params: makeParams() });
     expect(res.status).toBe(404);
   });
 
@@ -65,36 +73,24 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_1', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([{ id: 'appeal-1', status: 'approved', contentType: 'comment', contentId: 'c1' }]),
-    };
-    vi.mocked(getDb).mockReturnValue({ select: vi.fn().mockReturnValue(selectChain) } as unknown as ReturnType<typeof getDb>);
+    vi.mocked(getDb).mockReturnValue(makeMockDb([
+      { id: 'appeal-1', status: 'approved', contentType: 'comment', contentId: 'c1' },
+    ]) as unknown as ReturnType<typeof getDb>);
 
-    const res = await POST(makeReviewRequest({ decision: 'approve' }), { params });
+    const res = await POST(makeReviewRequest({ decision: 'approve' }), { params: makeParams() });
     expect(res.status).toBe(409);
   });
 
-  it('approves appeal and unflag comment', async () => {
+  it('approves appeal and unflags comment', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_1', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([{ id: 'appeal-1', status: 'pending', contentType: 'comment', contentId: 'comment-1' }]),
-    };
+    vi.mocked(getDb).mockReturnValue(makeMockDb([
+      { id: 'appeal-1', status: 'pending', contentType: 'comment', contentId: 'comment-1' },
+    ]) as unknown as ReturnType<typeof getDb>);
 
-    const updateChain = { set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(true) }) };
-
-    vi.mocked(getDb).mockReturnValue({
-      select: vi.fn().mockReturnValue(selectChain),
-      update: vi.fn().mockReturnValue(updateChain),
-    } as unknown as ReturnType<typeof getDb>);
-
-    const res = await POST(makeReviewRequest({ decision: 'approve', note: 'Content is fine' }), { params });
+    const res = await POST(makeReviewRequest({ decision: 'approve', note: 'Content is fine' }), { params: makeParams() });
     const data = await res.json();
 
     expect(res.status).toBe(200);
@@ -102,25 +98,16 @@ describe('/api/admin/moderation/appeals/[id]/review POST', () => {
     expect(data.status).toBe('approved');
   });
 
-  it('rejects appeal', async () => {
+  it('rejects appeal without unflagging content', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'admin_1', user } });
     vi.mocked(assertAdmin).mockReturnValue(null);
 
-    const selectChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([{ id: 'appeal-1', status: 'pending', contentType: 'comment', contentId: 'comment-1' }]),
-    };
+    vi.mocked(getDb).mockReturnValue(makeMockDb([
+      { id: 'appeal-1', status: 'pending', contentType: 'comment', contentId: 'comment-1' },
+    ]) as unknown as ReturnType<typeof getDb>);
 
-    const updateChain = { set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue(true) }) };
-
-    vi.mocked(getDb).mockReturnValue({
-      select: vi.fn().mockReturnValue(selectChain),
-      update: vi.fn().mockReturnValue(updateChain),
-    } as unknown as ReturnType<typeof getDb>);
-
-    const res = await POST(makeReviewRequest({ decision: 'reject' }), { params });
+    const res = await POST(makeReviewRequest({ decision: 'reject' }), { params: makeParams() });
     const data = await res.json();
 
     expect(res.status).toBe(200);
