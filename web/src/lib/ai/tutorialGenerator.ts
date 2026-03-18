@@ -404,19 +404,18 @@ async function readSSEStream(reader: ReadableStreamDefaultReader<Uint8Array>): P
       const data = line.slice(6);
       if (data === '[DONE]') continue;
 
+      let event: Record<string, unknown>;
       try {
-        const event = JSON.parse(data) as Record<string, unknown>;
-        if (event.type === 'text_delta' && typeof event.text === 'string') {
-          content += event.text;
-        }
-        if (event.type === 'error' && typeof event.message === 'string') {
-          throw new Error(event.message);
-        }
-      } catch (e) {
-        if (e instanceof Error && e.message !== 'Failed to parse tutorial response as JSON') {
-          if (!data.startsWith('{')) continue;
-          throw e;
-        }
+        event = JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        // Partial JSON chunk — skip and continue reading
+        continue;
+      }
+      if (event.type === 'text_delta' && typeof event.text === 'string') {
+        content += event.text;
+      }
+      if (event.type === 'error' && typeof event.message === 'string') {
+        throw new Error(event.message);
       }
     }
   }
