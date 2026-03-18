@@ -84,7 +84,7 @@ describe('AssetPanel', () => {
   it('shows empty state when no assets', () => {
     setupStore();
     render(<AssetPanel />);
-    expect(screen.getByText(/Drop .glb, .png, or audio files here/)).toBeDefined();
+    expect(screen.getByText(/No assets imported/)).toBeDefined();
   });
 
   it('renders import buttons on assets tab', () => {
@@ -122,7 +122,7 @@ describe('AssetPanel', () => {
     render(<AssetPanel />);
     fireEvent.click(screen.getByText('Materials'));
     fireEvent.click(screen.getByText('Assets'));
-    expect(screen.getByText(/Drop .glb, .png, or audio files here/)).toBeDefined();
+    expect(screen.getByText(/No assets imported/)).toBeDefined();
   });
 
   // ── Asset cards ───────────────────────────────────────────────────────
