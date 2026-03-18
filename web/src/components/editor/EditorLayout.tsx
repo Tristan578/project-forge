@@ -19,6 +19,7 @@ const ScriptEditorPanel = lazy(() => import('./ScriptEditorPanel').then(m => ({ 
 const UIBuilderPanel = lazy(() => import('./UIBuilderPanel').then(m => ({ default: m.UIBuilderPanel })));
 const ShaderEditorPanel = lazy(() => import('./ShaderEditorPanel').then(m => ({ default: m.ShaderEditorPanel })));
 const ChatPanel = lazy(() => import('../chat/ChatPanel').then(m => ({ default: m.ChatPanel })));
+const ModifyPanel = lazy(() => import('./ModifyPanel').then(m => ({ default: m.ModifyPanel })));
 const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m.WelcomeModal })));
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
@@ -50,7 +51,7 @@ const MOBILE_DISMISSED_KEY = 'forge-mobile-dismissed';
 
 // ---- Mobile-only components (unchanged) ----
 
-const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'script', 'ui'];
+const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui'];
 
 function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; onTabChange: (tab: RightPanelTab) => void }) {
   const hasUnread = useChatStore((s) => s.hasUnreadMessages);
@@ -112,6 +113,21 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
       </button>
       <button
         role="tab"
+        id="tab-modify"
+        aria-selected={activeTab === 'modify'}
+        aria-controls="tabpanel-modify"
+        tabIndex={activeTab === 'modify' ? 0 : -1}
+        onClick={() => onTabChange('modify')}
+        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+          activeTab === 'modify'
+            ? 'border-b border-amber-500 text-zinc-200'
+            : 'text-zinc-600 hover:text-zinc-400'
+        }`}
+      >
+        Modify
+      </button>
+      <button
+        role="tab"
         id="tab-script"
         aria-selected={activeTab === 'script'}
         aria-controls="tabpanel-script"
@@ -152,6 +168,7 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
         {activeTab === 'script' && <ScriptEditorPanel />}
         {activeTab === 'ui' && <UIBuilderPanel />}
         {activeTab === 'chat' && <ChatPanel />}
+        {activeTab === 'modify' && <ModifyPanel />}
       </Suspense>
     </div>
   );
