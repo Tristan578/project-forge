@@ -151,6 +151,10 @@ function ProceduralAnimPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
       <ProceduralAnimPanel />
+    </div>
+  );
+}
+
 function AccessibilityPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
@@ -192,7 +196,6 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   timeline: TimelinePanelWrapper,
   taskboard: TaskboardPanelWrapper,
   'procedural-anim': ProceduralAnimPanelWrapper,
-<<<<<<< HEAD
   'effect-bindings': EffectBindingsPanelWrapper,
   tutorial: TutorialPanelWrapper,
   accessibility: AccessibilityPanelWrapper,
