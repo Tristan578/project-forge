@@ -49,6 +49,42 @@ describe('PANEL_DEFINITIONS', () => {
     expect(viewport.unclosable).toBe(true);
     expect(viewport.renderer).toBe('always');
   });
+
+  // ── Structural integrity (catches lesson-learned #32: nesting bugs) ───
+
+  it('no entry contains nested objects that look like panel definitions', () => {
+    for (const [key, def] of Object.entries(PANEL_DEFINITIONS)) {
+      const rawDef = def as unknown as Record<string, unknown>;
+      for (const [field, value] of Object.entries(rawDef)) {
+        if (value && typeof value === 'object' && !Array.isArray(value) && 'id' in (value as Record<string, unknown>)) {
+          throw new Error(
+            `Panel "${key}" has nested object at field "${field}" that looks like ` +
+            `a panel definition (has "id" property). This is likely a missing closing "},". ` +
+            `Nested id: "${(value as Record<string, unknown>).id}"`
+          );
+        }
+      }
+    }
+  });
+
+  it('every entry has only valid PanelDefinition fields (no unexpected keys)', () => {
+    const validKeys = new Set(['id', 'title', 'component', 'minWidth', 'minHeight', 'unclosable', 'renderer']);
+    for (const [key, def] of Object.entries(PANEL_DEFINITIONS)) {
+      for (const field of Object.keys(def)) {
+        expect(validKeys.has(field), `Panel "${key}" has unexpected field "${field}" — possible nesting bug`).toBe(true);
+      }
+    }
+  });
+
+  it('component values are unique (no duplicate registrations)', () => {
+    const components = Object.values(PANEL_DEFINITIONS).map((d) => d.component);
+    const duplicates = components.filter((c, i) => components.indexOf(c) !== i);
+    expect(duplicates, 'Duplicate component values').toEqual([]);
+  });
+
+  it('has at least 10 panels (sanity — detect accidental deletion)', () => {
+    expect(Object.keys(PANEL_DEFINITIONS).length).toBeGreaterThanOrEqual(10);
+  });
 });
 
 describe('UNCLOSABLE_PANELS', () => {
