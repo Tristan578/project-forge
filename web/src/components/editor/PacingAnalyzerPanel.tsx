@@ -251,9 +251,9 @@ export function PacingAnalyzerPanel() {
     return entries.map(([id, node], idx) => ({
       id,
       name: node.name,
-      type: node.entityType ?? 'generic',
+      type: node.components[0] ?? 'generic',
       position: entries.length > 1 ? idx / (entries.length - 1) : 0.5,
-      tags: extractTags(node.name, node.entityType),
+      tags: extractTags(node.name, node.components[0]),
     }));
   }, [sceneGraph]);
 
