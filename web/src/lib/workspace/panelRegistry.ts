@@ -120,6 +120,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 200,
     minHeight: 150,
   },
+  'procedural-anim': {
+    id: 'procedural-anim',
+    title: 'Procedural Animation',
+    component: 'procedural-anim',
+    minWidth: 220,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
