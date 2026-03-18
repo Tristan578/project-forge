@@ -185,11 +185,8 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
         {activeTab === 'script' && <ScriptEditorPanel />}
         {activeTab === 'ui' && <UIBuilderPanel />}
         {activeTab === 'chat' && <ChatPanel />}
-<<<<<<< HEAD
         {activeTab === 'modify' && <ModifyPanel />}
-=======
         {activeTab === 'gdd' && <GDDPanel />}
->>>>>>> ed5eba7a (feat: add GDDPanel component and wire into editor right panel tabs (PF-541))
       </Suspense>
     </div>
   );
