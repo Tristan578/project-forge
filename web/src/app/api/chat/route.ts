@@ -329,6 +329,10 @@ export async function POST(request: NextRequest) {
     }
   }
   if (totalChars > MAX_INPUT_CHARS) {
+    // Refund tokens — they were already deducted by resolveApiKey above
+    if (usageId) {
+      await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
+    }
     return Response.json(
       { error: 'Conversation too long. Please start a new conversation or clear chat.' },
       { status: 413 }
