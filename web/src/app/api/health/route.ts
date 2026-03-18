@@ -53,7 +53,7 @@ export function resetHealthCache(): void {
  */
 export async function GET(req: NextRequest): Promise<NextResponse> {
   // Rate limit: 60 req/min per IP (generous for monitoring tools, blocks hammering)
-  const limited = rateLimitPublicRoute(req, 'health', 60, 60_000);
+  const limited = await rateLimitPublicRoute(req, 'health', 60, 60_000);
   if (limited) return limited;
 
   // Return cached result if still fresh
