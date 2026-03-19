@@ -101,6 +101,10 @@ vi.mock('@/lib/storage/autoSave', () => ({
   setLastExportedScene: vi.fn(),
 }));
 vi.mock('../PerformanceProfiler', () => ({ PerformanceProfiler: () => null }));
+vi.mock('@/hooks/useCelebrations', () => ({
+  useCelebrations: () => ({ activeCelebration: null, dismissCelebration: vi.fn(), triggerMilestone: vi.fn() }),
+}));
+vi.mock('../../ui/Celebration', () => ({ Celebration: () => null }));
 vi.mock('../GenerationStatus', () => ({ GenerationStatus: () => <div data-testid="gen-status">Gen</div> }));
 vi.mock('../HelpMenu', () => ({
   HelpMenu: ({ onOpenShortcuts, onOpenFeedback }: { onOpenShortcuts: () => void; onOpenFeedback: () => void }) => (
