@@ -270,7 +270,9 @@ function gatherState() {
         // Extract entity name from path (e.g. "Player.position" → "Player")
         // and look it up by name — this is a global script, not per-entity
         const eName = field.path.split('.')[0];
-        const matches = forge.scene.findByName(eName);
+        // findByName is a substring match — filter to exact name match
+        const matches = forge.scene.findByName(eName)
+          .filter(id => forge.scene.getEntityName(id) === eName);
         if (matches.length > 0) {
           const t = forge.getTransform(matches[0]);
           if (t) state[field.path] = t.position;
@@ -325,7 +327,8 @@ function loadFromSlot(slot) {
     if (data[field.path] !== undefined) {
       if (field.type === 'position' && Array.isArray(data[field.path])) {
         const eName = field.path.split('.')[0];
-        const matches = forge.scene.findByName(eName);
+        const matches = forge.scene.findByName(eName)
+          .filter(id => forge.scene.getEntityName(id) === eName);
         if (matches.length > 0) forge.setPosition(matches[0], data[field.path][0], data[field.path][1], data[field.path][2]);
       } else {
         forge.state.set(field.path, data[field.path]);
