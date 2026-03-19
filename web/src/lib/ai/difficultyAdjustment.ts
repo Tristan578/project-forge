@@ -267,11 +267,12 @@ function onUpdate(dt) {
 }
 
 // Hook into the collision system to detect player deaths
-forge.physics.onCollisionEnter((a, b) => {
-  // Increment death counter when player entity is destroyed
-  // (Game creators should tag deadly entities appropriately)
-  void a;
-  void b;
+forge.physics.onCollisionEnter((event) => {
+  // Increment death counter when player collides with a damage zone
+  const name = (event.otherEntityName || '').toLowerCase();
+  if (name.includes('damage') || name.includes('hazard') || name.includes('spike') || name.includes('lava')) {
+    deaths++;
+  }
 });
 `;
 }
