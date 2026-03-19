@@ -158,7 +158,8 @@ export class GameAnalyticsAggregator {
   }
 
   addSessions(sessions: PlayerSession[]): void {
-    this.sessions.push(...sessions);
+    // Avoid spread to prevent stack overflow on large arrays (>65k elements)
+    for (const s of sessions) this.sessions.push(s);
   }
 
   getDeathHeatmap(): HeatmapPoint[] {
