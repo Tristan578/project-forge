@@ -343,6 +343,7 @@ describe('POST /api/chat — negative cases', () => {
       // HTTP status is always 200 for streaming
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('text/event-stream');
+      await res.text(); // drain stream to prevent race with next test
     });
 
     it('captures exception with route and model context', async () => {
@@ -411,11 +412,12 @@ describe('POST /api/chat — negative cases', () => {
   // -------------------------------------------------------------------------
   describe('model selection', () => {
     it('defaults to claude-sonnet-4-5-20250929 when model is empty', async () => {
-      await POST(makeRequest({
+      const res = await POST(makeRequest({
         messages: [{ role: 'user', content: 'hi' }],
         model: '',
         sceneContext: '',
       }));
+      await res.text(); // drain stream
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           model: 'claude-sonnet-4-5-20250929',
