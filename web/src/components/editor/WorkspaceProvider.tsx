@@ -37,6 +37,7 @@ import { GameAnalyticsPanel } from './GameAnalyticsPanel';
 import { ArtStylePanel } from './ArtStylePanel';
 import { PlaytestPanel } from './PlaytestPanel';
 import { PhysicsFeelPanel } from './PhysicsFeelPanel';
+import { DifficultyPanel } from './DifficultyPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -269,6 +270,14 @@ function PhysicsFeelPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function DifficultyPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <DifficultyPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -299,6 +308,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'art-style': ArtStylePanelWrapper,
   playtest: PlaytestPanelWrapper,
   'physics-feel': PhysicsFeelPanelWrapper,
+  difficulty: DifficultyPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
