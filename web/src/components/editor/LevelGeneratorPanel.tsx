@@ -167,6 +167,7 @@ export function LevelGeneratorPanel() {
     (templateId: TemplateId) => {
       let result = LEVEL_TEMPLATES[templateId].generate();
       const constraints: LevelConstraint[] = [
+        { type: 'room_count', value: roomCount },
         { type: 'enemy_density', value: enemyDensity },
       ];
       result = applyConstraints(result, constraints);
@@ -175,7 +176,7 @@ export function LevelGeneratorPanel() {
       setErrors([]);
       setDescription(result.name);
     },
-    [enemyDensity, difficulty],
+    [roomCount, enemyDensity, difficulty],
   );
 
   const handleApplyToScene = useCallback(() => {
