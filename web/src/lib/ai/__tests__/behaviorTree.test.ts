@@ -506,6 +506,19 @@ describe('behaviorTree', () => {
   // ---- AI Generation (mocked) ----
 
   describe('generateBehaviorTree', () => {
+    /** Helper: create a mock SSE ReadableStream from text lines */
+    function mockSSEStream(lines: string[]): ReadableStream<Uint8Array> {
+      const encoder = new TextEncoder();
+      const chunks = lines.map((l) => encoder.encode(l + '\n'));
+      let i = 0;
+      return new ReadableStream({
+        pull(controller) {
+          if (i < chunks.length) controller.enqueue(chunks[i++]);
+          else controller.close();
+        },
+      });
+    }
+
     it('throws on non-ok response', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
       await expect(generateBehaviorTree('test')).rejects.toThrow('AI generation failed: 500');
@@ -515,7 +528,10 @@ describe('behaviorTree', () => {
     it('throws on unparseable response', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ content: 'not valid json' }),
+        body: mockSSEStream([
+          'data: {"type":"text_delta","text":"not valid json"}',
+          'data: [DONE]',
+        ]),
       }));
       await expect(generateBehaviorTree('test')).rejects.toThrow('Failed to parse');
       vi.unstubAllGlobals();
@@ -530,7 +546,10 @@ describe('behaviorTree', () => {
       };
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({ content: JSON.stringify(treeData) }),
+        body: mockSSEStream([
+          `data: {"type":"text_delta","text":"${JSON.stringify(treeData).replace(/"/g, '\\"')}"}`,
+          'data: [DONE]',
+        ]),
       }));
       const tree = await generateBehaviorTree('idle NPC');
       expect(tree.name).toBe('Generated');
