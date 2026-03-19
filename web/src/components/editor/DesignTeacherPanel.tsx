@@ -97,8 +97,10 @@ function useTeacherSceneContext(): TeacherSceneContext {
     });
 
     const lightCount = entities.filter((e) => e.entityType === 'light').length;
-    // Use primaryLight as a proxy for shadow information
-    const hasShadows = !!(primaryLight && primaryLight.shadowsEnabled);
+    // Check if any light entity exists — shadow detection is approximate
+    // since per-entity shadow state isn't available scene-wide in the store.
+    // Having lights at all is a reasonable proxy for shadow capability.
+    const hasShadows = lightCount > 0 && (primaryLight?.shadowsEnabled ?? lightCount > 1);
 
     const hasPlayerCharacter = entities.some((e) =>
       e.gameComponentTypes.includes('characterController'),
