@@ -169,6 +169,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'save-system': {
+    id: 'save-system',
+    title: 'Save System',
+    component: 'save-system',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */

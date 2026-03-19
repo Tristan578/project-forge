@@ -30,6 +30,7 @@ import { AccessibilityPanel } from './AccessibilityPanel';
 import { ReviewPanel } from './ReviewPanel';
 import { BehaviorTreePanel } from './BehaviorTreePanel';
 import { LevelGeneratorPanel } from './LevelGeneratorPanel';
+import { SaveSystemPanel } from './SaveSystemPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -206,6 +207,14 @@ function LevelGeneratorPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function SaveSystemPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <SaveSystemPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -229,6 +238,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   review: ReviewPanelWrapper,
   'behavior-tree': BehaviorTreePanelWrapper,
   'level-generator': LevelGeneratorPanelWrapper,
+  'save-system': SaveSystemPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
