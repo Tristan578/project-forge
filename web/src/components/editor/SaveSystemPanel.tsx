@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Save, Loader2, Play, Trash2, Plus, CheckCircle } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
 import {
@@ -108,19 +108,22 @@ export function SaveSystemPanel() {
     });
   }, []);
 
+  // Monotonic counter prevents duplicate IDs after deletions
+  const nextCpId = useRef(1);
+
   // -- Add checkpoint --
   const addCheckpoint = useCallback(() => {
-    const id = `cp_${checkpoints.length + 1}`;
+    const n = nextCpId.current++;
     setCheckpoints((prev) => [
       ...prev,
       {
-        id,
-        name: `Checkpoint ${prev.length + 1}`,
+        id: `cp_${n}`,
+        name: `Checkpoint ${n}`,
         trigger: 'manual' as const,
         position: { x: 0, y: 0, z: 0 },
       },
     ]);
-  }, [checkpoints.length]);
+  }, []);
 
   // -- Remove checkpoint --
   const removeCheckpoint = useCallback((id: string) => {
