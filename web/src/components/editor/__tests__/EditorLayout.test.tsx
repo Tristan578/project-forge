@@ -370,9 +370,9 @@ describe('EditorLayout', () => {
     fireEvent.keyDown(tablist, { key: 'ArrowRight' });
     expect(mockSetRightPanelTab).toHaveBeenCalledWith('chat');
 
-    // ArrowLeft should switch from inspector to review (wraps around to last tab)
+    // ArrowLeft should switch from inspector to behavior (wraps around to last tab)
     mockSetRightPanelTab.mockClear();
     fireEvent.keyDown(tablist, { key: 'ArrowLeft' });
-    expect(mockSetRightPanelTab).toHaveBeenCalledWith('review');
+    expect(mockSetRightPanelTab).toHaveBeenCalledWith('behavior');
   });
 });
