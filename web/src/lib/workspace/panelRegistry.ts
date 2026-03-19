@@ -183,6 +183,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'auto-iteration': {
+    id: 'auto-iteration',
+    title: 'Auto-Iteration',
+    component: 'auto-iteration',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
