@@ -235,7 +235,7 @@ let levelStartTime = 0;
 let lastAdjustTime = 0;
 
 function onStart() {
-  levelStartTime = forge.time.elapsed();
+  levelStartTime = forge.time.elapsed;
   lastAdjustTime = levelStartTime;
   deaths = 0;
 }
@@ -243,7 +243,7 @@ function onStart() {
 function onUpdate(dt) {
   if (!DDA_CONFIG.enabled) return;
 
-  const now = forge.time.elapsed();
+  const now = forge.time.elapsed;
   const elapsed = now - lastAdjustTime;
   if (elapsed < DDA_CONFIG.cooldownSeconds) return;
   lastAdjustTime = now;
