@@ -253,6 +253,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'world-builder': {
+    id: 'world-builder',
+    title: 'World Builder',
+    component: 'world-builder',
+    minWidth: 280,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
