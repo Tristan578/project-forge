@@ -535,7 +535,7 @@ export function parseWorldResponse(raw: string): GameWorld {
   for (const faction of parsed.factions) {
     if (!Array.isArray(faction.traits)) faction.traits = [];
   }
-  for (const event of parsed.events ?? []) {
+  for (const event of parsed.timeline) {
     if (!Array.isArray(event.factionsInvolved)) event.factionsInvolved = [];
   }
 
