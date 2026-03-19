@@ -462,7 +462,7 @@ const actions = {
     const dz = tz - pos[2];
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist < 0.5) return "success";
-    const s = (moveSpeed ?? 3) * forge.deltaTime / dist;
+    const s = (moveSpeed ?? 3) * forge.time.delta / dist;
     forge.translate(entityId, dx * s, 0, dz * s);
     return "running";
   },
@@ -477,14 +477,14 @@ const actions = {
     const dz = tz - pos[2];
     const dist = Math.sqrt(dx * dx + dz * dz);
     if (dist < 0.5) return "success";
-    const s = (moveSpeed ?? 3) * forge.deltaTime / dist;
+    const s = (moveSpeed ?? 3) * forge.time.delta / dist;
     forge.translate(entityId, dx * s, 0, dz * s);
     return "running";
   },
   wait(params) {
     const dur = params.duration ?? waitDuration ?? 2;
-    if (!this._waitStart) this._waitStart = forge.time;
-    if (forge.time - this._waitStart >= dur) {
+    if (!this._waitStart) this._waitStart = forge.time.elapsed;
+    if (forge.time.elapsed - this._waitStart >= dur) {
       this._waitStart = null;
       return "success";
     }
