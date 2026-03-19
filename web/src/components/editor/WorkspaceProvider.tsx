@@ -41,6 +41,7 @@ import { DifficultyPanel } from './DifficultyPanel';
 import { AutoRiggingPanel } from './AutoRiggingPanel';
 import { DesignTeacherPanel } from './DesignTeacherPanel';
 import { EconomyPanel } from './EconomyPanel';
+import { SmartCameraPanel } from './SmartCameraPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -305,6 +306,14 @@ function EconomyPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function SmartCameraPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <SmartCameraPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -339,6 +348,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'auto-rigging': AutoRiggingPanelWrapper,
   'design-teacher': DesignTeacherPanelWrapper,
   economy: EconomyPanelWrapper,
+  'smart-camera': SmartCameraPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
