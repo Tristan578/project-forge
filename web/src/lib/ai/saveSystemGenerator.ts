@@ -120,14 +120,11 @@ export function analyzeSaveNeeds(
   }
 
   for (const node of Object.values(sceneGraph.nodes) as SceneNode[]) {
-    const lowerName = node.name.toLowerCase();
-
-    // Check entity name against heuristic keywords — tokenize by
-    // camelCase, underscore, dash, space, and digits to match individual
-    // words. Prevents "monkey" matching "key" while allowing "myPlayer",
-    // "Player1", "gold_key", "health-potion", etc.
+    // Tokenize the ORIGINAL name (before lowercasing) so camelCase
+    // splits like "PlayerHealth" → ["Player", "Health"] work correctly.
+    // Then lowercase the tokens for case-insensitive keyword matching.
     const nameTokens = new Set(
-      lowerName.split(/(?<=[a-z])(?=[A-Z])|[_\s-]+|(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/)
+      node.name.split(/(?<=[a-z])(?=[A-Z])|[_\s-]+|(?<=[a-zA-Z])(?=[0-9])|(?<=[0-9])(?=[a-zA-Z])/)
         .map((t) => t.toLowerCase()),
     );
     for (const [keyword, fieldType] of Object.entries(ENTITY_TYPE_HINTS)) {
