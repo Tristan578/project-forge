@@ -225,6 +225,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'auto-rigging': {
+    id: 'auto-rigging',
+    title: 'Auto-Rigging',
+    component: 'auto-rigging',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
