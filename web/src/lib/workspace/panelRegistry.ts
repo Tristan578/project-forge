@@ -232,6 +232,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'design-teacher': {
+    id: 'design-teacher',
+    title: 'Design Teacher',
+    component: 'design-teacher',
+    minWidth: 280,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
