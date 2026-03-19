@@ -430,13 +430,24 @@ function generateNodeCode(node: BehaviorNode, level: number = 1): string {
 
 /** Convert a BehaviorTree to an executable TypeScript script for SpawnForge */
 export function behaviorTreeToScript(tree: BehaviorTree): string {
-  // Generate variable declarations
-  const varDecls = tree.variables
-    .map((v) => {
-      const val = v.type === 'vector3' ? JSON.stringify(v.defaultValue) : JSON.stringify(v.defaultValue);
+  // Generate variable declarations — include defaults for all action-referenced
+  // variables to prevent ReferenceError when actions reference variables from
+  // presets other than the one selected.
+  const declaredNames = new Set(tree.variables.map((v) => v.name));
+  const fallbackVars: Record<string, unknown> = {
+    pointA: null, pointB: null, moveSpeed: 3, waitDuration: 2,
+    chaseSpeed: 5, detectionRange: 10, healthThreshold: 0.3,
+    attackRange: 3, spotRange: 12,
+  };
+  const varDecls = [
+    ...tree.variables.map((v) => {
+      const val = JSON.stringify(v.defaultValue);
       return `let ${v.name} = ${val};`;
-    })
-    .join('\n');
+    }),
+    ...Object.entries(fallbackVars)
+      .filter(([name]) => !declaredNames.has(name))
+      .map(([name, val]) => `let ${name} = ${JSON.stringify(val)};`),
+  ].join('\n');
 
   // Generate the tree evaluation code
   const treeCode = generateNodeCode(tree.root, 1);
