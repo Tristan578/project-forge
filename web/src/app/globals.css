@@ -181,3 +181,13 @@ body {
 .animate-shimmer {
   animation: shimmer 2s ease-in-out infinite;
 }
+
+/* Generation progress shimmer sweep — horizontal gradient sweep for indeterminate bars */
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+.animate-shimmer-sweep {
+  animation: shimmer-sweep 1.5s ease-in-out infinite;
+}

@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { Loader2, CheckCircle, XCircle, ChevronDown, Trash2 } from 'lucide-react';
 import { useGenerationStore, type GenerationJob } from '@/stores/generationStore';
+import { GenerationProgress } from '@/components/ui/GenerationProgress';
 
 export function GenerationStatus() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -74,25 +75,32 @@ export function GenerationStatus() {
 }
 
 function JobRow({ job, onRemove }: { job: GenerationJob; onRemove: (id: string) => void }) {
+  const isActive =
+    job.status === 'pending' || job.status === 'processing' || job.status === 'downloading';
+
+  if (isActive) {
+    return (
+      <div className="p-3">
+        <div className="mb-1 truncate text-[10px] text-zinc-500">
+          {job.prompt.slice(0, 60)}{job.prompt.length > 60 ? '...' : ''}
+        </div>
+        <GenerationProgress
+          operation={job.type}
+          progress={job.status === 'processing' ? job.progress : undefined}
+          stage={job.status === 'downloading' ? 'Downloading result...' : undefined}
+        />
+      </div>
+    );
+  }
+
   const icon =
     job.status === 'completed' ? (
       <CheckCircle size={14} className="text-green-400" />
-    ) : job.status === 'failed' ? (
-      <XCircle size={14} className="text-red-400" />
     ) : (
-      <Loader2 size={14} className="animate-spin text-blue-400" />
+      <XCircle size={14} className="text-red-400" />
     );
 
-  const statusLabel =
-    job.status === 'pending'
-      ? 'Pending...'
-      : job.status === 'processing'
-        ? `Processing... ${job.progress}%`
-        : job.status === 'downloading'
-          ? 'Downloading...'
-          : job.status === 'completed'
-            ? 'Completed'
-            : 'Failed';
+  const statusLabel = job.status === 'completed' ? 'Completed' : 'Failed';
 
   return (
     <div className="flex items-start gap-2 p-3 hover:bg-zinc-800/50">
@@ -103,15 +111,14 @@ function JobRow({ job, onRemove }: { job: GenerationJob; onRemove: (id: string) 
         <div className="text-[10px] text-zinc-600">{statusLabel}</div>
         {job.error && <div className="text-[10px] text-red-400">{job.error}</div>}
       </div>
-      {(job.status === 'completed' || job.status === 'failed') && (
-        <button
-          onClick={() => onRemove(job.id)}
-          className="text-zinc-600 hover:text-zinc-400"
-          title="Remove"
-        >
-          <XCircle size={12} />
-        </button>
-      )}
+      <button
+        onClick={() => onRemove(job.id)}
+        className="text-zinc-600 hover:text-zinc-400"
+        title="Remove"
+        aria-label="Remove job"
+      >
+        <XCircle size={12} />
+      </button>
     </div>
   );
 }
