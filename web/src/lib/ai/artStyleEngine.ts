@@ -447,7 +447,7 @@ export function applyStyleToScene(
   for (let i = 0; i < entityIds.length; i++) {
     const paletteKey = paletteKeys[i % paletteKeys.length];
     const mat = buildStyleMaterial(style, paletteKey);
-    dispatch('update_material', { entity_id: entityIds[i], ...mat });
+    dispatch('update_material', { entityId: entityIds[i], ...mat });
   }
 }
 

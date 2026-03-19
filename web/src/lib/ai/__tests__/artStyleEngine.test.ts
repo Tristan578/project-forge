@@ -345,9 +345,9 @@ describe('applyStyleToScene', () => {
     const ids = ['e1', 'e2', 'e3'];
     applyStyleToScene(ART_STYLE_PRESETS['low_poly'], ids, dispatch);
     expect(dispatch).toHaveBeenCalledTimes(3);
-    expect(dispatch).toHaveBeenNthCalledWith(1, 'update_material', expect.objectContaining({ entity_id: 'e1' }));
-    expect(dispatch).toHaveBeenNthCalledWith(2, 'update_material', expect.objectContaining({ entity_id: 'e2' }));
-    expect(dispatch).toHaveBeenNthCalledWith(3, 'update_material', expect.objectContaining({ entity_id: 'e3' }));
+    expect(dispatch).toHaveBeenNthCalledWith(1, 'update_material', expect.objectContaining({ entityId: 'e1' }));
+    expect(dispatch).toHaveBeenNthCalledWith(2, 'update_material', expect.objectContaining({ entityId: 'e2' }));
+    expect(dispatch).toHaveBeenNthCalledWith(3, 'update_material', expect.objectContaining({ entityId: 'e3' }));
   });
 
   it('cycles through palette keys for variety', () => {
@@ -359,8 +359,8 @@ describe('applyStyleToScene', () => {
     const firstCall = dispatch.mock.calls[0][1] as Record<string, unknown>;
     const sixthCall = dispatch.mock.calls[5][1] as Record<string, unknown>;
     // entity 0 -> primary, entity 5 -> background (5%5=0 => primary)
-    expect(firstCall['entity_id']).toBe('e1');
-    expect(sixthCall['entity_id']).toBe('e6');
+    expect(firstCall['entityId']).toBe('e1');
+    expect(sixthCall['entityId']).toBe('e6');
   });
 
   it('does nothing for empty entity list', () => {
