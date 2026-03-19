@@ -253,7 +253,8 @@ function onUpdate(dt) {
   // Simple skill estimate: fewer deaths => higher skill
   const skill = Math.max(0, Math.min(100, 100 - deathsPerMinute * 40));
   const target = skill / 100;
-  const delta = target - currentLevel;
+  const rawDelta = target - currentLevel;
+  const delta = DDA_CONFIG.neverDecrease ? Math.max(0, rawDelta) : rawDelta;
   const adjustment = delta * DDA_CONFIG.adjustmentSpeed * DDA_CONFIG.sensitivity;
 
   currentLevel = Math.max(
