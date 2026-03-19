@@ -3,7 +3,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Bone, ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Wand2 } from 'lucide-react';
 import { useEditorStore } from '@/stores/editorStore';
-import { getCommandDispatcher } from '@/stores/editorStore';
 import {
   RIG_TEMPLATES,
   detectRigType,
@@ -146,16 +145,20 @@ export function AutoRiggingPanel() {
     setSelectedType(type);
   }, []);
 
+  const setSkeleton2d = useEditorStore((s) => s.setSkeleton2d);
+
   const handleApplyRig = useCallback(() => {
     if (!currentRig || !primaryId) return;
-    const dispatcher = getCommandDispatcher();
-    if (!dispatcher) return;
 
+    // Go through the store (not direct dispatch) so Zustand state stays
+    // in sync with the engine — required for save, inspector, and scripts.
     const commands = rigToCommands(currentRig, primaryId);
-    for (const cmd of commands) {
-      dispatcher(cmd.command, cmd.payload);
+    const skeletonCmd = commands.find((c) => c.command === 'set_skeleton_2d');
+    if (skeletonCmd) {
+      const { entityId: _eid, ...skeletonData } = skeletonCmd.payload as Record<string, unknown>;
+      setSkeleton2d(primaryId, skeletonData as unknown as Parameters<typeof setSkeleton2d>[1]);
     }
-  }, [currentRig, primaryId]);
+  }, [currentRig, primaryId, setSkeleton2d]);
 
   const rootBones = useMemo(
     () => currentRig?.bones.filter((b) => !b.parent) ?? [],
