@@ -249,18 +249,18 @@ export function SmartCameraPanel() {
 
   const handleSliderChange = useCallback(
     (field: keyof CameraPreset, value: number) => {
-      const base = activePreset ?? CAMERA_PRESETS['platformer_3d'];
+      const base = activePreset ?? recommended;
       setCustomPreset({ ...base, [field]: value });
     },
-    [activePreset],
+    [activePreset, recommended],
   );
 
   const handleDeadZoneChange = useCallback(
     (axis: 'x' | 'y', value: number) => {
-      const base = activePreset ?? CAMERA_PRESETS['platformer_3d'];
+      const base = activePreset ?? recommended;
       setCustomPreset({ ...base, deadZone: { ...base.deadZone, [axis]: value } });
     },
-    [activePreset],
+    [activePreset, recommended],
   );
 
   const handleBlend = useCallback(() => {
