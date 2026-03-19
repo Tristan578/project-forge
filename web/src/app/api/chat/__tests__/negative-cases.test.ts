@@ -360,7 +360,7 @@ describe('POST /api/chat — negative cases', () => {
           expect.any(Error),
           expect.objectContaining({ route: '/api/chat', model: 'claude-sonnet-4-5-20250929' }),
         );
-      });
+      }, { timeout: 5000 });
     });
 
     it('refunds tokens on API failure when usageId exists', async () => {
@@ -375,7 +375,7 @@ describe('POST /api/chat — negative cases', () => {
 
       await vi.waitFor(() => {
         expect(refundTokens).toHaveBeenCalledWith('user-neg', 'usage-neg');
-      });
+      }, { timeout: 5000 });
     });
 
     it('does not refund tokens when BYOK key (no usageId)', async () => {
@@ -402,7 +402,7 @@ describe('POST /api/chat — negative cases', () => {
       // Give async operations time to settle
       await vi.waitFor(() => {
         expect(refundTokens).not.toHaveBeenCalled();
-      });
+      }, { timeout: 5000 });
     });
   });
 

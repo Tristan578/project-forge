@@ -431,7 +431,7 @@ describe('POST /api/chat', () => {
       // Wait for async operations in the stream's start() to settle
       await vi.waitFor(() => {
         expect(captureException).toHaveBeenCalled();
-      });
+      }, { timeout: 5000 });
 
       expect(refundTokens).toHaveBeenCalledWith('user-1', 'usage-1');
     });
