@@ -267,12 +267,15 @@ function onUpdate(dt) {
 }
 
 // Hook into the collision system to detect player deaths
-forge.physics.onCollisionEnter((event) => {
-  // Increment death counter when player collides with a damage zone
-  const name = (event.otherEntityName || '').toLowerCase();
-  if (name.includes('damage') || name.includes('hazard') || name.includes('spike') || name.includes('lava')) {
-    deaths++;
-  }
-});
+const playerIds = forge.scene.findByName('Player');
+if (playerIds.length > 0) {
+  forge.physics.onCollisionEnter(playerIds[0], (otherId) => {
+    // Increment death counter when player collides with a hazard
+    const name = (forge.scene.getEntityName(otherId) || '').toLowerCase();
+    if (name.includes('damage') || name.includes('hazard') || name.includes('spike') || name.includes('lava')) {
+      deaths++;
+    }
+  });
+}
 `;
 }
