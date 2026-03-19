@@ -190,6 +190,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'game-analytics': {
+    id: 'game-analytics',
+    title: 'Game Analytics',
+    component: 'game-analytics',
+    minWidth: 280,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
