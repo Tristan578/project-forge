@@ -204,6 +204,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  playtest: {
+    id: 'playtest',
+    title: 'Playtest Bot',
+    component: 'playtest',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
