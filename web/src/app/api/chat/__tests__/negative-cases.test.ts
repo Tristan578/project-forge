@@ -381,22 +381,6 @@ describe('POST /api/chat — negative cases', () => {
     });
   });
 
-  // -------------------------------------------------------------------------
-  // Default model fallback
-  // -------------------------------------------------------------------------
-  describe('model selection', () => {
-    it('defaults to claude-sonnet-4-5-20250929 when model is empty', async () => {
-      const res = await POST(makeRequest({
-        messages: [{ role: 'user', content: 'hi' }],
-        model: '',
-        sceneContext: '',
-      }));
-      await res.text(); // drain stream
-      expect(mockCreate).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: 'claude-sonnet-4-5-20250929',
-        }),
-      );
-    });
-  });
+  // Model selection tests removed — this PR migrates the route to resolveChat,
+  // making mockCreate assertions invalid. Model defaults are tested in route.test.ts.
 });
