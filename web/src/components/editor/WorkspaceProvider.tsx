@@ -40,6 +40,7 @@ import { PhysicsFeelPanel } from './PhysicsFeelPanel';
 import { DifficultyPanel } from './DifficultyPanel';
 import { AutoRiggingPanel } from './AutoRiggingPanel';
 import { DesignTeacherPanel } from './DesignTeacherPanel';
+import { EconomyPanel } from './EconomyPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -296,6 +297,14 @@ function DesignTeacherPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function EconomyPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <EconomyPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -329,6 +338,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   difficulty: DifficultyPanelWrapper,
   'auto-rigging': AutoRiggingPanelWrapper,
   'design-teacher': DesignTeacherPanelWrapper,
+  economy: EconomyPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
