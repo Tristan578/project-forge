@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   const { prompt, resolution = '1024', style = 'realistic', tiling = true, entityId, generateMaps } = body;
 
   // Validate
-  if (!prompt || prompt.length < 3 || prompt.length > 500) {
+  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
     return NextResponse.json(
       { error: 'Prompt must be between 3 and 500 characters' },
       { status: 422 }

@@ -179,12 +179,9 @@ describe('POST /api/generate/model — negative cases', () => {
       expect(res.status).toBe(422);
     });
 
-    it('does not reject numeric prompt (missing type check — route only checks length)', async () => {
-      // This documents current behavior: the route does not type-check prompt,
-      // so a number passes the !prompt and .length guards.
+    it('rejects numeric prompt with 422', async () => {
       const res = await POST(makeRequest({ prompt: 12345, mode: 'text-to-3d' }));
-      // Reaches the Meshy call (or fails later) — not a 422
-      expect(res.status).not.toBe(422);
+      expect(res.status).toBe(422);
     });
 
     it('returns 422 when prompt is null (falsy check)', async () => {
