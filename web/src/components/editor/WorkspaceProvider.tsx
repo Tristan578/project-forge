@@ -33,6 +33,7 @@ import { LevelGeneratorPanel } from './LevelGeneratorPanel';
 import { SaveSystemPanel } from './SaveSystemPanel';
 import { NarrativePanel } from './NarrativePanel';
 import AutoIterationPanel from './AutoIterationPanel';
+import { GameAnalyticsPanel } from './GameAnalyticsPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -233,6 +234,14 @@ function AutoIterationPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function GameAnalyticsPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <GameAnalyticsPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -259,6 +268,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'save-system': SaveSystemPanelWrapper,
   narrative: NarrativePanelWrapper,
   'auto-iteration': AutoIterationPanelWrapper,
+  'game-analytics': GameAnalyticsPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
