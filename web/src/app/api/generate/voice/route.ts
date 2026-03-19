@@ -7,6 +7,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 
 export async function POST(request: NextRequest) {
@@ -54,6 +55,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(text);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
+  }
+  const safeText = safety.filtered ?? text;
+
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('voice_generation');
 
@@ -66,7 +77,7 @@ export async function POST(request: NextRequest) {
       'elevenlabs',
       tokenCost,
       'voice_generation',
-      { text, textLength: text.length }
+      { text: safeText, textLength: safeText.length }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -82,7 +93,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateVoice({
-      text,
+      text: safeText,
       voiceId,
       stability,
       similarityBoost,
@@ -103,7 +114,7 @@ export async function POST(request: NextRequest) {
         captureException(refundErr, { route: '/api/generate/voice', action: 'refund', usageId });
       }
     }
-    captureException(err, { route: '/api/generate/voice', text });
+    captureException(err, { route: '/api/generate/voice', text: safeText });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

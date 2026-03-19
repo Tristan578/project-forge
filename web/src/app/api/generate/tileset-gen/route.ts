@@ -6,6 +6,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 
 export async function POST(request: NextRequest) {
@@ -44,6 +45,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(prompt);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
+  }
+  const safePrompt = safety.filtered ?? prompt;
+
   // 3. Resolve API key (Replicate for tiling mode)
   const tokenCost = 50;
 
@@ -56,7 +67,7 @@ export async function POST(request: NextRequest) {
       'replicate',
       tokenCost,
       'tileset_generation',
-      { prompt, tileSize, gridSize }
+      { prompt: safePrompt, tileSize, gridSize }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -72,7 +83,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateTileset({
-      prompt,
+      prompt: safePrompt,
       tileSize,
       gridSize,
     });
@@ -95,7 +106,7 @@ export async function POST(request: NextRequest) {
         captureException(refundErr, { route: '/api/generate/tileset-gen', action: 'refund', usageId });
       }
     }
-    captureException(err, { route: '/api/generate/tileset-gen', prompt });
+    captureException(err, { route: '/api/generate/tileset-gen', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

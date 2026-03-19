@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
 
@@ -66,6 +67,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Invalid provider. Must be one of: ${VALID_PROVIDERS.join(', ')}` }, { status: 400 });
     }
 
+    // 2b. Content safety filter
+    const safety = sanitizePrompt(prompt as string);
+    if (!safety.safe) {
+      return NextResponse.json(
+        { error: safety.reason ?? 'Content rejected by safety filter' },
+        { status: 422 }
+      );
+    }
+    const safePrompt = safety.filtered ?? (prompt as string);
+
     // 3. Resolve provider
     const resolvedProvider = (!provider || provider === 'auto' || provider === 'replicate') ? 'replicate' : 'openai';
     const tokenCost = TOKEN_COSTS[resolvedProvider] ?? 10;
@@ -78,7 +89,7 @@ export async function POST(request: NextRequest) {
         resolvedProvider as 'replicate' | 'openai',
         tokenCost,
         'pixel_art_generation',
-        { prompt, targetSize, palette, style }
+        { prompt: safePrompt, targetSize, palette, style }
       );
       usageId = resolved.usageId;
     } catch (err) {

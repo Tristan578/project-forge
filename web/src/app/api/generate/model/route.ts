@@ -7,6 +7,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
   const { prompt, mode, quality = 'standard', imageBase64, artStyle, negativePrompt } = body;
 
   // Validate
-  if (!prompt || prompt.length < 3 || prompt.length > 500) {
+  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
     return NextResponse.json(
       { error: 'Prompt must be between 3 and 500 characters' },
       { status: 422 }
@@ -49,6 +50,16 @@ export async function POST(request: NextRequest) {
       { status: 422 }
     );
   }
+
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(prompt);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
+  }
+  const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key and deduct tokens
   const operation = mode === 'image-to-3d' ? 'image_to_3d' : (quality === 'high' ? '3d_generation_high' : '3d_generation_standard');
@@ -63,7 +74,7 @@ export async function POST(request: NextRequest) {
       'meshy',
       tokenCost,
       operation,
-      { prompt, mode, quality }
+      { prompt: safePrompt, mode, quality }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -83,11 +94,11 @@ export async function POST(request: NextRequest) {
     if (mode === 'image-to-3d') {
       result = await client.createImageTo3D({
         imageBase64: imageBase64!,
-        prompt,
+        prompt: safePrompt,
       });
     } else {
       result = await client.createTextTo3D({
-        prompt,
+        prompt: safePrompt,
         artStyle,
         negativePrompt,
         quality,
@@ -105,7 +116,7 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/model', prompt, mode });
+    captureException(err, { route: '/api/generate/model', prompt: safePrompt, mode });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -6,6 +6,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 
 export async function POST(request: NextRequest) {
@@ -53,6 +54,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(prompt);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
+  }
+  const safePrompt = safety.filtered ?? prompt;
+
   // 3. Resolve API key (Replicate for ControlNet)
   const tokenCost = frameCount * 15;
 
@@ -65,7 +76,7 @@ export async function POST(request: NextRequest) {
       'replicate',
       tokenCost,
       'sprite_sheet_generation',
-      { prompt: prompt.trim(), frameCount, style, size }
+      { prompt: safePrompt.trim(), frameCount, style, size }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -81,7 +92,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.generateSpriteSheet({
-      prompt: prompt.trim(),
+      prompt: safePrompt.trim(),
       frameCount,
       style,
       size,
@@ -105,7 +116,7 @@ export async function POST(request: NextRequest) {
         captureException(refundErr, { route: '/api/generate/sprite-sheet', action: 'refund', usageId });
       }
     }
-    captureException(err, { route: '/api/generate/sprite-sheet', prompt: prompt.trim() });
+    captureException(err, { route: '/api/generate/sprite-sheet', prompt: safePrompt.trim() });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

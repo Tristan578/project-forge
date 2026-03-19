@@ -7,6 +7,8 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { refundTokens } from '@/lib/tokens/service';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -33,7 +35,7 @@ export async function POST(request: NextRequest) {
   const { prompt, durationSeconds = 30, instrumental = true } = body;
 
   // Validate
-  if (!prompt || prompt.length < 3 || prompt.length > 500) {
+  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
     return NextResponse.json(
       { error: 'Prompt must be between 3 and 500 characters' },
       { status: 422 }
@@ -47,6 +49,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // 2b. Content safety filter
+  const safety = sanitizePrompt(prompt);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
+  }
+  const safePrompt = safety.filtered ?? prompt;
+
   // 3. Resolve API key and deduct tokens
   const tokenCost = getTokenCost('music_generation');
 
@@ -59,7 +71,7 @@ export async function POST(request: NextRequest) {
       'suno',
       tokenCost,
       'music_generation',
-      { prompt, durationSeconds, instrumental }
+      { prompt: safePrompt, durationSeconds, instrumental }
     );
     apiKey = resolved.key;
     usageId = resolved.usageId;
@@ -75,7 +87,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const result = await client.createMusic({
-      prompt,
+      prompt: safePrompt,
       durationSeconds,
       instrumental,
     });
@@ -91,7 +103,11 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
-    captureException(err, { route: '/api/generate/music', prompt });
+    if (usageId) {
+      try { await refundTokens(authResult.ctx.user.id, usageId); }
+      catch (refundErr) { captureException(refundErr, { route: '/api/generate/music', action: 'refund', usageId }); }
+    }
+    captureException(err, { route: '/api/generate/music', prompt: safePrompt });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
