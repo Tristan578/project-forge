@@ -162,6 +162,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'level-generator': {
+    id: 'level-generator',
+    title: 'Level Generator',
+    component: 'level-generator',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
