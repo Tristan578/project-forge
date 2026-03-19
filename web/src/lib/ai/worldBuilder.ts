@@ -534,6 +534,7 @@ export function parseWorldResponse(raw: string): GameWorld {
   // Coerce nested array fields to prevent TypeError on .map()/.join()/.filter()
   for (const faction of parsed.factions) {
     if (!Array.isArray(faction.traits)) faction.traits = [];
+    if (!faction.relationships || typeof faction.relationships !== 'object') faction.relationships = {};
   }
   for (const event of parsed.timeline) {
     if (!Array.isArray(event.factionsInvolved)) event.factionsInvolved = [];
