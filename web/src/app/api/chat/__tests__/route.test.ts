@@ -359,7 +359,19 @@ describe('POST /api/chat', () => {
 
     it('streams text and usage events', async () => {
       const res = await POST(makeRequest(validBody()));
-      const events = await readSSEEvents(res);
+      const rawText = await res.text();
+      console.log('DEBUG raw length:', rawText.length, 'first 500:', rawText.slice(0, 500));
+      console.log('DEBUG mockCreate calls:', mockCreate.mock.calls.length);
+      const events: unknown[] = [];
+      for (const line of rawText.split('\n')) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data !== '[DONE]') {
+            try { events.push(JSON.parse(data)); } catch { /* skip */ }
+          }
+        }
+      }
+      console.log('DEBUG event types:', events.map((e: unknown) => (e as Record<string, unknown>).type));
 
       const textEvents = events.filter((e: unknown) => (e as Record<string, unknown>).type === 'text_delta');
       expect(textEvents.length).toBeGreaterThan(0);
