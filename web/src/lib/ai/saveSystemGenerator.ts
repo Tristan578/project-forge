@@ -122,9 +122,10 @@ export function analyzeSaveNeeds(
   for (const node of Object.values(sceneGraph.nodes) as SceneNode[]) {
     const lowerName = node.name.toLowerCase();
 
-    // Check entity name against heuristic keywords
+    // Check entity name against heuristic keywords (word boundary match
+    // to avoid false positives like "monkey" matching "key")
     for (const [keyword, fieldType] of Object.entries(ENTITY_TYPE_HINTS)) {
-      if (lowerName.includes(keyword)) {
+      if (new RegExp(`(?:^|[_\\s-])${keyword}(?:$|[_\\s-])`, 'i').test(lowerName)) {
         addField(`${node.name}.${fieldType}`, fieldType);
       }
     }
