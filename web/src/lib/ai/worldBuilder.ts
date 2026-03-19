@@ -531,8 +531,19 @@ export function parseWorldResponse(raw: string): GameWorld {
     }
   }
 
-  // Clamp danger levels
+  // Coerce nested array fields to prevent TypeError on .map()/.join()/.filter()
+  for (const faction of parsed.factions) {
+    if (!Array.isArray(faction.traits)) faction.traits = [];
+  }
+  for (const event of parsed.events ?? []) {
+    if (!Array.isArray(event.factionsInvolved)) event.factionsInvolved = [];
+  }
+
+  // Clamp danger levels and coerce region arrays
   for (const region of parsed.regions) {
+    if (!Array.isArray(region.resources)) region.resources = [];
+    if (!Array.isArray(region.landmarks)) region.landmarks = [];
+    if (!Array.isArray(region.connectedTo)) region.connectedTo = [];
     if (typeof region.dangerLevel === 'number') {
       region.dangerLevel = Math.max(1, Math.min(10, Math.round(region.dangerLevel)));
     } else {
