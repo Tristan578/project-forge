@@ -59,6 +59,13 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
+vi.mock('@/lib/ai/contentSafety', () => ({
+  sanitizePrompt: vi.fn((prompt: unknown) => ({
+    safe: true,
+    filtered: typeof prompt === 'string' ? prompt : String(prompt),
+  })),
+}));
+
 // ---------------------------------------------------------------------------
 // Imports
 // ---------------------------------------------------------------------------
