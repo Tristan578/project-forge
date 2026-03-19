@@ -28,6 +28,7 @@ import { EffectBindingsPanel } from './EffectBindingsPanel';
 import { TutorialPanel } from './TutorialPanel';
 import { AccessibilityPanel } from './AccessibilityPanel';
 import { ReviewPanel } from './ReviewPanel';
+import { BehaviorTreePanel } from './BehaviorTreePanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -188,6 +189,14 @@ function EffectBindingsPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function BehaviorTreePanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <BehaviorTreePanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -209,6 +218,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   tutorial: TutorialPanelWrapper,
   accessibility: AccessibilityPanelWrapper,
   review: ReviewPanelWrapper,
+  'behavior-tree': BehaviorTreePanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----

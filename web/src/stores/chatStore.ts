@@ -27,7 +27,7 @@ export interface ChatMessage {
 
 export type ChatModel = 'claude-sonnet-4-5-20250929' | 'claude-haiku-4-5-20251001';
 
-export type RightPanelTab = 'inspector' | 'chat' | 'script' | 'ui' | 'modify' | 'gdd' | 'review';
+export type RightPanelTab = 'inspector' | 'chat' | 'script' | 'ui' | 'modify' | 'gdd' | 'review' | 'behavior';
 
 export interface Conversation {
   id: string;

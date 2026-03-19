@@ -155,6 +155,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 220,
     minHeight: 150,
   },
+  'behavior-tree': {
+    id: 'behavior-tree',
+    title: 'Behavior Tree',
+    component: 'behavior-tree',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
