@@ -5,16 +5,19 @@ const mockOnLCP = vi.fn();
 const mockOnFCP = vi.fn();
 const mockOnCLS = vi.fn();
 const mockOnINP = vi.fn();
+const mockOnTTFB = vi.fn();
 
 vi.mock('web-vitals', () => ({
   onLCP: (...args: unknown[]) => mockOnLCP(...args),
   onFCP: (...args: unknown[]) => mockOnFCP(...args),
   onCLS: (...args: unknown[]) => mockOnCLS(...args),
   onINP: (...args: unknown[]) => mockOnINP(...args),
+  onTTFB: (...args: unknown[]) => mockOnTTFB(...args),
 }));
 
 describe('webVitals', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
@@ -48,6 +51,7 @@ describe('webVitals', () => {
     expect(mockOnFCP).toHaveBeenCalledOnce();
     expect(mockOnCLS).toHaveBeenCalledOnce();
     expect(mockOnINP).toHaveBeenCalledOnce();
+    expect(mockOnTTFB).toHaveBeenCalledOnce();
   });
 
   it('calls custom reporter with adapted metric', async () => {
