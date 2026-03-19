@@ -192,7 +192,17 @@ export function DifficultyPanel() {
   }, []);
 
   const handleConfigChange = useCallback((field: keyof DDAConfig, value: number | boolean) => {
-    setConfig((prev) => ({ ...prev, [field]: value }));
+    setConfig((prev) => {
+      const next = { ...prev, [field]: value };
+      // Cross-validate min/max difficulty to prevent invalid state
+      if (field === 'minDifficulty' && typeof value === 'number' && value > prev.maxDifficulty) {
+        next.maxDifficulty = value;
+      }
+      if (field === 'maxDifficulty' && typeof value === 'number' && value < prev.minDifficulty) {
+        next.minDifficulty = value;
+      }
+      return next;
+    });
     setPresetKey('custom');
   }, []);
 
