@@ -37,7 +37,10 @@ export function Celebration({ title, message, onDismiss }: CelebrationProps) {
   // Keyboard dismiss (Escape)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') dismiss();
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        dismiss();
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
