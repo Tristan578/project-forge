@@ -20,6 +20,7 @@ const UIBuilderPanel = lazy(() => import('./UIBuilderPanel').then(m => ({ defaul
 const ShaderEditorPanel = lazy(() => import('./ShaderEditorPanel').then(m => ({ default: m.ShaderEditorPanel })));
 const ChatPanel = lazy(() => import('../chat/ChatPanel').then(m => ({ default: m.ChatPanel })));
 const ModifyPanel = lazy(() => import('./ModifyPanel').then(m => ({ default: m.ModifyPanel })));
+const GDDPanel = lazy(() => import('./GDDPanel').then(m => ({ default: m.GDDPanel })));
 const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m.WelcomeModal })));
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
@@ -52,7 +53,7 @@ const MOBILE_DISMISSED_KEY = 'forge-mobile-dismissed';
 
 // ---- Mobile-only components (unchanged) ----
 
-const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui'];
+const TAB_ORDER: RightPanelTab[] = ['inspector', 'chat', 'modify', 'script', 'ui', 'gdd'];
 
 function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; onTabChange: (tab: RightPanelTab) => void }) {
   const hasUnread = useChatStore((s) => s.hasUnreadMessages);
@@ -157,6 +158,21 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
       >
         UI
       </button>
+      <button
+        role="tab"
+        id="tab-gdd"
+        aria-selected={activeTab === 'gdd'}
+        aria-controls="tabpanel-gdd"
+        tabIndex={activeTab === 'gdd' ? 0 : -1}
+        onClick={() => onTabChange('gdd')}
+        className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
+          activeTab === 'gdd'
+            ? 'border-b border-amber-500 text-zinc-200'
+            : 'text-zinc-600 hover:text-zinc-400'
+        }`}
+      >
+        GDD
+      </button>
     </div>
   );
 }
@@ -170,6 +186,7 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
         {activeTab === 'ui' && <UIBuilderPanel />}
         {activeTab === 'chat' && <ChatPanel />}
         {activeTab === 'modify' && <ModifyPanel />}
+        {activeTab === 'gdd' && <GDDPanel />}
       </Suspense>
     </div>
   );
