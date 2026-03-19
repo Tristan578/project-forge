@@ -5,6 +5,7 @@
 import { useEditorStore, type SceneGraph, type TransformData, type SnapSettings, type CameraPreset, type CoordinateMode, type EngineMode } from '@/stores/editorStore';
 import { saveAutoSave } from '@/lib/sceneFile';
 import { setLastExportedScene } from '@/lib/storage/autoSave';
+import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import type { SceneNode } from '@/stores/slices/types';
 import type { SetFn, GetFn } from './types';
 
@@ -45,6 +46,8 @@ export function handleTransformEvent(
       // Mark scene as modified and trigger debounced auto-save
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
+      // Invalidate scene context cache so the next AI call rebuilds it
+      invalidateSceneCache();
       return true;
     }
 

@@ -375,9 +375,14 @@ export async function POST(request: NextRequest) {
           },
         ];
         if (sceneContext) {
+          // Add cache_control to the scene context block so Claude API
+          // can cache it server-side. The context only changes when the
+          // scene graph changes (invalidateSceneCache is called on
+          // SCENE_GRAPH_UPDATE events in transformEvents.ts).
           systemBlocks.push({
             type: 'text' as const,
             text: sceneContext,
+            cache_control: { type: 'ephemeral' as const },
           });
         }
 
