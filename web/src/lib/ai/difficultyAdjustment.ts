@@ -35,6 +35,8 @@ export interface DDAConfig {
   maxDifficulty: number;
   adjustmentSpeed: number;
   cooldownSeconds: number;
+  /** When true, difficulty only increases — never decreases (competitive mode) */
+  neverDecrease?: boolean;
 }
 
 export interface EngineCommand {
@@ -86,6 +88,7 @@ export const DDA_PRESETS: Record<string, DDAConfig> = {
     maxDifficulty: 1.0,
     adjustmentSpeed: 0.08,
     cooldownSeconds: 10,
+    neverDecrease: true,
   },
 };
 
@@ -162,12 +165,8 @@ export function calculateDifficultyAdjustment(
   // Delta between where we want to be and where we are
   const delta = targetDifficulty - currentProfile.level;
 
-  // For competitive preset: only increase difficulty (positive delta)
-  const isCompetitive =
-    config.sensitivity >= 0.7 &&
-    config.minDifficulty >= 0.5 &&
-    config.adjustmentSpeed <= 0.08;
-  const effectiveDelta = isCompetitive ? Math.max(0, delta) : delta;
+  // Competitive mode: difficulty only increases, never decreases
+  const effectiveDelta = config.neverDecrease ? Math.max(0, delta) : delta;
 
   // Apply adjustment speed and sensitivity
   const adjustment = effectiveDelta * config.adjustmentSpeed * config.sensitivity;
