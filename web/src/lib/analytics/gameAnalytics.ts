@@ -207,7 +207,7 @@ export class GameAnalyticsAggregator {
     return stages.map((stage, i) => {
       const count = counts[i];
       const prev = i === 0 ? this.sessions.length : counts[i - 1];
-      const dropoffRate = prev > 0 ? 1 - count / prev : 0;
+      const dropoffRate = prev > 0 ? Math.max(0, Math.min(1, 1 - count / prev)) : 0;
       return {
         name: stage,
         count,
