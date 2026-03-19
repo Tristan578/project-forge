@@ -290,8 +290,8 @@ export function SaveSystemPanel() {
         {/* Errors */}
         {errors.length > 0 && (
           <div className="bg-red-900/30 border border-red-700 rounded p-2 space-y-1">
-            {errors.map((err) => (
-              <p key={err} className="text-xs text-red-300">
+            {errors.map((err, i) => (
+              <p key={i} className="text-xs text-red-300">
                 {err}
               </p>
             ))}
