@@ -99,12 +99,12 @@ describe('RIG_TEMPLATES', () => {
 // ---------------------------------------------------------------------------
 
 describe('template bone counts', () => {
-  it('humanoid has 22 bones', () => {
-    expect(RIG_TEMPLATES.humanoid().bones).toHaveLength(22);
+  it('humanoid has 23 bones', () => {
+    expect(RIG_TEMPLATES.humanoid().bones).toHaveLength(23);
   });
 
-  it('quadruped has 18 bones', () => {
-    expect(RIG_TEMPLATES.quadruped().bones).toHaveLength(18);
+  it('quadruped has 19 bones', () => {
+    expect(RIG_TEMPLATES.quadruped().bones).toHaveLength(19);
   });
 
   it('bird has 14 bones', () => {
