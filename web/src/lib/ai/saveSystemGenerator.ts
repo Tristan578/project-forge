@@ -267,8 +267,14 @@ function gatherState() {
   for (const field of PERSISTED_FIELDS) {
     switch (field.type) {
       case 'position': {
-        const t = forge.getTransform(entityId);
-        if (t) state[field.path] = t.position;
+        // Extract entity name from path (e.g. "Player.position" → "Player")
+        // and look it up by name — this is a global script, not per-entity
+        const eName = field.path.split('.')[0];
+        const eid = forge.findEntityByName?.(eName);
+        if (eid) {
+          const t = forge.getTransform(eid);
+          if (t) state[field.path] = t.position;
+        }
         break;
       }
       case 'health': {
@@ -318,7 +324,9 @@ function loadFromSlot(slot) {
   for (const field of PERSISTED_FIELDS) {
     if (data[field.path] !== undefined) {
       if (field.type === 'position' && Array.isArray(data[field.path])) {
-        forge.setPosition(entityId, data[field.path][0], data[field.path][1], data[field.path][2]);
+        const eName = field.path.split('.')[0];
+        const eid = forge.findEntityByName?.(eName);
+        if (eid) forge.setPosition(eid, data[field.path][0], data[field.path][1], data[field.path][2]);
       } else {
         forge.state.set(field.path, data[field.path]);
       }
