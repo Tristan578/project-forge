@@ -197,6 +197,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 280,
     minHeight: 200,
   },
+  'art-style': {
+    id: 'art-style',
+    title: 'Art Style',
+    component: 'art-style',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
