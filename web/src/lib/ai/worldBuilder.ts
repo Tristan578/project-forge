@@ -570,7 +570,11 @@ export async function generateWorld(description: string, preset?: string): Promi
   const fallbackKey = preset ?? 'medieval_fantasy';
   const fallback = WORLD_PRESETS[fallbackKey] ?? WORLD_PRESETS.medieval_fantasy;
 
-  const prompt = buildWorldPrompt(description, preset);
+  let prompt = buildWorldPrompt(description, preset);
+  // Truncate prompt to stay within the 4000-character message limit
+  if (prompt.length > 3900) {
+    prompt = prompt.slice(0, 3900) + '\n\n(Description truncated for length. Generate based on what is provided.)';
+  }
 
   let response: Response;
   try {
@@ -621,9 +625,6 @@ export async function generateWorld(description: string, preset?: string): Promi
         }
       }
       content = chunks.join('');
-    } else {
-      const data = await response.json();
-      content = data.content ?? data.choices?.[0]?.message?.content ?? '';
     }
   } catch {
     return structuredClone(fallback);
