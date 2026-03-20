@@ -615,11 +615,15 @@ export async function generateWorld(description: string, preset?: string): Promi
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       const chunks: string[] = [];
+      let buffer = '';
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        for (const line of text.split('\n')) {
+        buffer += decoder.decode(value, { stream: true });
+        // Process only complete lines; keep the last partial line in buffer
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
           if (line.startsWith('data: ') && line !== 'data: [DONE]') {
             try {
               const parsed = JSON.parse(line.slice(6));
