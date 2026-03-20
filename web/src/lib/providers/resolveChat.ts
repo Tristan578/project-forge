@@ -20,7 +20,7 @@
  */
 
 import type { ResolvedRoute } from './types';
-import { resolveBackend } from './registry';
+import { resolveBackend, resolveBackendWithCircuitBreaker } from './registry';
 import Anthropic from '@anthropic-ai/sdk';
 
 // ---------------------------------------------------------------------------
@@ -66,7 +66,7 @@ export type ResolveChatStreamEvent =
   | { type: 'error'; message: string };
 
 export type ResolveChatResult =
-  | { ok: true; stream: AsyncGenerator<ResolveChatStreamEvent>; backendId: string }
+  | { ok: true; stream: AsyncGenerator<ResolveChatStreamEvent>; backendId: string; circuitBreakerWarning?: string }
   | { ok: false; error: string };
 
 // ---------------------------------------------------------------------------
@@ -297,7 +297,7 @@ export async function resolveChat(
   messages: ChatMessage[],
   options: ResolveChatOptions = {}
 ): Promise<ResolveChatResult> {
-  const route = resolveBackend('chat', options.model);
+  const route = resolveBackendWithCircuitBreaker('chat', options.model);
 
   if (!route) {
     return {
@@ -306,17 +306,24 @@ export async function resolveChat(
     };
   }
 
+  const { circuitBreakerWarning, ...resolvedRoute } = route;
+
   let stream: AsyncGenerator<ResolveChatStreamEvent>;
 
-  if (route.backendId === 'direct') {
+  if (resolvedRoute.backendId === 'direct') {
     // Direct path: use Anthropic SDK (preserves thinking, prompt caching, tool streaming)
-    stream = streamAnthropicDirect(route.apiKey, messages, options);
+    stream = streamAnthropicDirect(resolvedRoute.apiKey, messages, options);
   } else {
     // Gateway / OpenRouter / GitHub Models: OpenAI-compatible endpoint
-    stream = streamOpenAICompat(route, messages, options);
+    stream = streamOpenAICompat(resolvedRoute, messages, options);
   }
 
-  return { ok: true, stream, backendId: route.backendId };
+  return {
+    ok: true,
+    stream,
+    backendId: resolvedRoute.backendId,
+    ...(circuitBreakerWarning !== undefined ? { circuitBreakerWarning } : {}),
+  };
 }
 
 /**

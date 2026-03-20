@@ -123,21 +123,21 @@ export class ProviderCircuitBreaker {
         estimatedCostCents,
       });
 
-      // Check cost anomaly — actual cost is more than multiplier × estimate
+      // Check cost anomaly — actual cost is more than multiplier × estimate.
+      // Open the circuit regardless of current state so the timer is always
+      // reset when a new anomaly is detected (including when already OPEN).
       if (
         estimatedCostCents > 0 &&
         actualCostCents > estimatedCostCents * this.costAnomalyMultiplier
       ) {
         this.costAnomalyDetected = true;
-        if (this.state === 'CLOSED' || this.state === 'HALF_OPEN') {
-          this._openCircuit();
-          return;
-        }
+        this._openCircuit();
+        return;
       }
     }
 
     if (this.state === 'HALF_OPEN') {
-      // Probe succeeded — close the circuit
+      // Probe succeeded with no cost anomaly — close the circuit.
       this._closeCircuit();
     }
   }

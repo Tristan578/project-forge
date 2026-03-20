@@ -271,6 +271,64 @@ describe('ProviderCircuitBreaker — cost anomaly detection', () => {
 
     vi.useRealTimers();
   });
+
+  // PF-721: cost anomaly while already OPEN resets the timer (no stuck state)
+  it('cost anomaly when already OPEN resets the half-open timer', () => {
+    vi.useFakeTimers();
+
+    const cb = makeBreaker({ minRequestsToEvaluate: 1, errorRateThreshold: 0.5, costAnomalyMultiplier: 2, halfOpenAfterMs: 5000 });
+    cb.recordFailure(); // open via error rate
+    expect(cb.getState()).toBe('OPEN');
+
+    // Record a success with cost anomaly while still OPEN (timer not yet elapsed)
+    // This should reopen the circuit and reset the timer
+    vi.advanceTimersByTime(2000);
+    cb.recordSuccess(50, 10); // cost anomaly — timer reset to now
+
+    // 4000ms after the anomaly success (6000ms total), should still be OPEN
+    // because the timer was reset by the anomaly recordSuccess
+    vi.advanceTimersByTime(4000);
+    expect(cb.getState()).toBe('OPEN');
+
+    // 1100ms more (5100ms since reset) — should now be HALF_OPEN
+    vi.advanceTimersByTime(1100);
+    expect(cb.getState()).toBe('HALF_OPEN');
+
+    vi.useRealTimers();
+  });
+
+  // PF-721: HALF_OPEN success with cost anomaly goes back to OPEN (not stuck)
+  it('HALF_OPEN success with cost anomaly transitions back to OPEN, not stuck', () => {
+    vi.useFakeTimers();
+
+    const cb = makeBreaker({ minRequestsToEvaluate: 1, errorRateThreshold: 0.5, costAnomalyMultiplier: 2, halfOpenAfterMs: 1000 });
+    cb.recordFailure(); // open via error rate
+    vi.advanceTimersByTime(1000);
+    expect(cb.getState()).toBe('HALF_OPEN');
+
+    // Probe succeeds at the network level but has cost anomaly
+    cb.recordSuccess(50, 10);
+    // Should be OPEN again (not CLOSED, not stuck in HALF_OPEN)
+    expect(cb.getState()).toBe('OPEN');
+    expect(cb.getStats().costAnomalyDetected).toBe(true);
+
+    vi.useRealTimers();
+  });
+
+  // PF-721: HALF_OPEN success with normal cost transitions to CLOSED
+  it('HALF_OPEN success with normal cost transitions to CLOSED', () => {
+    vi.useFakeTimers();
+
+    const cb = makeBreaker({ minRequestsToEvaluate: 1, errorRateThreshold: 0.5, costAnomalyMultiplier: 2, halfOpenAfterMs: 1000 });
+    cb.recordFailure();
+    vi.advanceTimersByTime(1000);
+    expect(cb.getState()).toBe('HALF_OPEN');
+
+    cb.recordSuccess(15, 10); // 1.5× — below 2× multiplier, normal cost
+    expect(cb.getState()).toBe('CLOSED');
+
+    vi.useRealTimers();
+  });
 });
 
 describe('ProviderCircuitBreaker — reset', () => {
