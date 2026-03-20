@@ -3,6 +3,7 @@ name: validator
 description: Strict QA agent for security and testing.
 model: sonnet
 skills: [arch-validator, testing, test]
+maxTurns: 20
 ---
 # Identity: The QA Lead
 

@@ -66,6 +66,82 @@
           }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/worktree-safety-commit.sh\"",
+            "timeout": 10000
+          }
+        ]
+      }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(npx vitest *)",
+      "Bash(npx eslint *)",
+      "Bash(npx tsc *)",
+      "Bash(npx playwright *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git checkout*)",
+      "Bash(git add*)",
+      "Bash(git commit*)",
+      "Bash(git fetch*)",
+      "Bash(git stash*)",
+      "Bash(git worktree*)",
+      "Bash(git rev-parse*)",
+      "Bash(git remote*)",
+      "Bash(gh pr *)",
+      "Bash(gh issue *)",
+      "Bash(gh run *)",
+      "Bash(gh api *)",
+      "Bash(bash .claude/*)",
+      "Bash(python3 .claude/*)",
+      "Bash(cargo test*)",
+      "Bash(cargo check*)",
+      "Bash(wasm-pack*)",
+      "Bash(curl -s http://localhost:3010/*)",
+      "Bash(cd web *)",
+      "Bash(cd mcp-server *)",
+      "Bash(cd engine *)",
+      "Bash(cd /Users/tristannolan/project-forge*)",
+      "Bash(find *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(sort *)",
+      "Bash(grep *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(ln *)",
+      "Bash(chmod *)",
+      "Bash(echo *)",
+      "Bash(pwd)",
+      "Bash(kill *)",
+      "Bash(lsof *)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Skill"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)",
+      "Bash(git clean -f*)",
+      "Bash(git branch -D *)"
     ]
   }
 }

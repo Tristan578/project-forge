@@ -2,7 +2,10 @@
 name: planner
 description: Specialized architect for high-level reasoning and spec generation.
 model: opus
-skills: [architect-flow, kanban, design, docs]
+skills: [architect-flow, kanban, design, docs, multiplayer-readiness]
+disallowedTools: Edit, Write
+permissionMode: plan
+maxTurns: 15
 ---
 # Identity: The Architect
 

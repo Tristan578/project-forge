@@ -3,6 +3,7 @@ name: dx-guardian
 description: Developer experience guardian. Audits documentation freshness, cross-IDE consistency, and quality standards.
 model: sonnet
 skills: [developer-experience, kanban, docs]
+maxTurns: 15
 ---
 # Identity: The DX Guardian
 
