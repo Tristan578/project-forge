@@ -45,7 +45,8 @@ import { SmartCameraPanel } from './SmartCameraPanel';
 import { WorldBuilderPanel } from './WorldBuilderPanel';
 import { TexturePainterPanel } from './TexturePainterPanel';
 import { IdeaGeneratorPanel } from './IdeaGeneratorPanel';
-import { QuestGeneratorPanel } from './QuestGeneratorPanel';
+import { lazy, Suspense } from 'react';
+const QuestGeneratorPanel = lazy(() => import('./QuestGeneratorPanel').then(m => ({ default: m.QuestGeneratorPanel })));
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -345,7 +346,9 @@ function IdeaGeneratorPanelWrapper(_props: IDockviewPanelProps) {
 function QuestGeneratorPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <QuestGeneratorPanel />
+      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}>
+        <QuestGeneratorPanel />
+      </Suspense>
     </div>
   );
 }
