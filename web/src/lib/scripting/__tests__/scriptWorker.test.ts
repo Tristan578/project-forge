@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // We don't import scriptWorker directly because it's a web worker file that executes immediately on import.
 // Instead, we test the sandboxing logic by simulating the worker environment with dynamic imports.
