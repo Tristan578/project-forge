@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * PF-155: Export pipeline integration tests.
  *

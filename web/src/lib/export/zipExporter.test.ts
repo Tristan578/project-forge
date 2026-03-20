@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { exportAsZip, supportsCompression } from './zipExporter';
 import type { ScriptData } from '@/stores/editorStore';
