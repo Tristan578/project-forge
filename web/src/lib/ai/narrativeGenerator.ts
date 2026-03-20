@@ -524,10 +524,32 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
   // Map from scene ID to its first dialogue node ID
   const sceneEntryNodeMap = new Map<string, string>();
 
-  // First pass: create entry node IDs for each scene
+  // First pass: pre-register all scene IDs so the second pass can look up entries.
+  // We use a placeholder — the real entry is resolved in a second sub-pass below.
   for (const act of arc.acts) {
     for (const scene of act.scenes) {
-      const entryId = `${scene.id}_d0`;
+      sceneEntryNodeMap.set(scene.id, `${scene.id}_d0`); // placeholder
+    }
+  }
+
+  // Resolve actual entry node IDs now that all scene IDs are registered.
+  // When a scene has no dialogue, the entry is the choices node, or a
+  // pass-through to the next scene, or the end node.
+  for (const act of arc.acts) {
+    for (const scene of act.scenes) {
+      const hasDialogue = Array.isArray(scene.dialogue) && scene.dialogue.length > 0;
+      const hasChoices = Array.isArray(scene.choices) && scene.choices.length > 0;
+      let entryId: string;
+      if (hasDialogue) {
+        entryId = `${scene.id}_d0`;
+      } else if (hasChoices) {
+        entryId = `${scene.id}_choices`;
+      } else if (scene.nextSceneId && sceneEntryNodeMap.has(scene.nextSceneId)) {
+        // Empty scene with a next pointer — pass through to the next scene's entry
+        entryId = sceneEntryNodeMap.get(scene.nextSceneId)!;
+      } else {
+        entryId = `${scene.id}_end`;
+      }
       sceneEntryNodeMap.set(scene.id, entryId);
       if (!firstNodeId) firstNodeId = entryId;
     }
@@ -536,7 +558,7 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
   // Second pass: create all nodes
   for (const act of arc.acts) {
     for (const scene of act.scenes) {
-      const dialogueLines = scene.dialogue;
+      const dialogueLines = Array.isArray(scene.dialogue) ? scene.dialogue : [];
       const sceneChoices = scene.choices;
 
       for (let i = 0; i < dialogueLines.length; i++) {

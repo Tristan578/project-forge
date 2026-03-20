@@ -529,7 +529,7 @@ export function levelToCommands(layout: LevelLayout): EngineCommand[] {
 
     // Scale floor to room dimensions (plane is 2x2 base)
     commands.push({
-      command: 'set_transform',
+      command: 'update_transform',
       payload: {
         // entityId will be resolved at execution time
         name: `${room.name} Floor`,
@@ -559,7 +559,7 @@ export function levelToCommands(layout: LevelLayout): EngineCommand[] {
         },
       });
       commands.push({
-        command: 'set_transform',
+        command: 'update_transform',
         payload: {
           name: `${room.name} ${wall.name}`,
           scale: wall.scale,
@@ -622,7 +622,7 @@ export function levelToCommands(layout: LevelLayout): EngineCommand[] {
       const isHorizontal = dx > dy;
 
       commands.push({
-        command: 'set_transform',
+        command: 'update_transform',
         payload: {
           name: `Corridor ${room.name}-${target.name}`,
           scale: isHorizontal
