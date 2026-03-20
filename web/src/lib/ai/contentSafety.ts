@@ -78,12 +78,22 @@ const BLOCKED_REGEXES: RegExp[] = BLOCKED_TERMS.map(buildBlockedRegex);
 // Prompt injection patterns
 // ---------------------------------------------------------------------------
 
-// Use atomic-safe patterns: replace \s+ with [ ]+ (no backtracking on
-// mixed whitespace) to avoid ReDoS on untrusted input (CodeQL cwe-1333).
+// Linear-time injection patterns (CodeQL cwe-1333 / ReDoS hardened).
+// Rules:
+//   - No optional groups wrapping repeated sub-patterns: (x+)? is O(n^2) risk.
+//   - No nested quantifiers: (a+)+ is catastrophic.
+//   - Alternations with unbounded repetition use possessive-equivalent splits
+//     or are rewritten as independent patterns.
+//   - All patterns anchored to [ ]+ (literal space) instead of \s+ to prevent
+//     mixed-whitespace backtracking expansion.
 const INJECTION_PATTERNS: RegExp[] = [
-  /ignore[ ]+(all[ ]+)?previous[ ]+(instructions?|prompts?|rules?)/i,
+  // "ignore previous ..." — split the optional "all" into two patterns
+  /ignore[ ]+previous[ ]+(instructions?|prompts?|rules?)/i,
+  /ignore[ ]+all[ ]+previous[ ]+(instructions?|prompts?|rules?)/i,
   /ignore[ ]+(above|prior|earlier)[ ]+(instructions?|prompts?|context)/i,
-  /disregard[ ]+(all[ ]+)?(previous|prior|above)[ ]/i,
+  // "disregard ..." — split the optional "all" into two patterns
+  /disregard[ ]+(previous|prior|above)[ ]/i,
+  /disregard[ ]+all[ ]+(previous|prior|above)[ ]/i,
   /system[ ]*:[ ]/i,
   /\[[ ]*INST[ ]*\]/i,
   /\[[ ]*SYSTEM[ ]*\]/i,
@@ -95,7 +105,11 @@ const INJECTION_PATTERNS: RegExp[] = [
   /jailbreak/i,
   /do[ ]+anything[ ]+now/i,
   /DAN[ ]+mode/i,
-  /pretend[ ]+(you|there)[ ]+(are|is)[ ]+no[ ]+(rules?|filter|restrictions?)/i,
+  // "pretend you/there are/is no rules/filter/restrictions" —
+  // split the trailing alternation to avoid nested quantifier risk
+  /pretend[ ]+(you|there)[ ]+(are|is)[ ]+no[ ]+rules?/i,
+  /pretend[ ]+(you|there)[ ]+(are|is)[ ]+no[ ]+filter/i,
+  /pretend[ ]+(you|there)[ ]+(are|is)[ ]+no[ ]+restrictions?/i,
 ];
 
 // ---------------------------------------------------------------------------
