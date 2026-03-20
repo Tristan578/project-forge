@@ -24,30 +24,28 @@ import { TilesetPanel } from './TilesetPanel';
 import { TimelinePanel } from './TimelinePanel';
 import { TaskboardPanel } from './TaskboardPanel';
 import { ProceduralAnimPanel } from './ProceduralAnimPanel';
-import { lazy, Suspense } from 'react';
-const EffectBindingsPanel = lazy(() => import('./EffectBindingsPanel').then(m => ({ default: m.EffectBindingsPanel })));
-const TutorialPanel = lazy(() => import('./TutorialPanel').then(m => ({ default: m.TutorialPanel })));
-// Lazy-load AI feature panels to keep shared bundle under 4MB limit
-const AccessibilityPanel = lazy(() => import('./AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
-const ReviewPanel = lazy(() => import('./ReviewPanel').then(m => ({ default: m.ReviewPanel })));
-const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
-const LevelGeneratorPanel = lazy(() => import('./LevelGeneratorPanel').then(m => ({ default: m.LevelGeneratorPanel })));
-const SaveSystemPanel = lazy(() => import('./SaveSystemPanel').then(m => ({ default: m.SaveSystemPanel })));
-const NarrativePanel = lazy(() => import('./NarrativePanel').then(m => ({ default: m.NarrativePanel })));
-const AutoIterationPanel = lazy(() => import('./AutoIterationPanel'));
-const GameAnalyticsPanel = lazy(() => import('./GameAnalyticsPanel').then(m => ({ default: m.GameAnalyticsPanel })));
-const ArtStylePanel = lazy(() => import('./ArtStylePanel').then(m => ({ default: m.ArtStylePanel })));
-const PlaytestPanel = lazy(() => import('./PlaytestPanel').then(m => ({ default: m.PlaytestPanel })));
-const PhysicsFeelPanel = lazy(() => import('./PhysicsFeelPanel').then(m => ({ default: m.PhysicsFeelPanel })));
-const DifficultyPanel = lazy(() => import('./DifficultyPanel').then(m => ({ default: m.DifficultyPanel })));
-const AutoRiggingPanel = lazy(() => import('./AutoRiggingPanel').then(m => ({ default: m.AutoRiggingPanel })));
-const DesignTeacherPanel = lazy(() => import('./DesignTeacherPanel').then(m => ({ default: m.DesignTeacherPanel })));
-const EconomyPanel = lazy(() => import('./EconomyPanel').then(m => ({ default: m.EconomyPanel })));
-const SmartCameraPanel = lazy(() => import('./SmartCameraPanel').then(m => ({ default: m.SmartCameraPanel })));
-const WorldBuilderPanel = lazy(() => import('./WorldBuilderPanel').then(m => ({ default: m.WorldBuilderPanel })));
-const TexturePainterPanel = lazy(() => import('./TexturePainterPanel').then(m => ({ default: m.TexturePainterPanel })));
-const IdeaGeneratorPanel = lazy(() => import('./IdeaGeneratorPanel').then(m => ({ default: m.IdeaGeneratorPanel })));
-const QuestGeneratorPanel = lazy(() => import('./QuestGeneratorPanel').then(m => ({ default: m.QuestGeneratorPanel })));
+import { EffectBindingsPanel } from './EffectBindingsPanel';
+import { TutorialPanel } from './TutorialPanel';
+import { AccessibilityPanel } from './AccessibilityPanel';
+import { ReviewPanel } from './ReviewPanel';
+import { BehaviorTreePanel } from './BehaviorTreePanel';
+import { LevelGeneratorPanel } from './LevelGeneratorPanel';
+import { SaveSystemPanel } from './SaveSystemPanel';
+import { NarrativePanel } from './NarrativePanel';
+import AutoIterationPanel from './AutoIterationPanel';
+import { GameAnalyticsPanel } from './GameAnalyticsPanel';
+import { ArtStylePanel } from './ArtStylePanel';
+import { PlaytestPanel } from './PlaytestPanel';
+import { PhysicsFeelPanel } from './PhysicsFeelPanel';
+import { DifficultyPanel } from './DifficultyPanel';
+import { AutoRiggingPanel } from './AutoRiggingPanel';
+import { DesignTeacherPanel } from './DesignTeacherPanel';
+import { EconomyPanel } from './EconomyPanel';
+import { SmartCameraPanel } from './SmartCameraPanel';
+import { WorldBuilderPanel } from './WorldBuilderPanel';
+import { TexturePainterPanel } from './TexturePainterPanel';
+import { IdeaGeneratorPanel } from './IdeaGeneratorPanel';
+import { QuestGeneratorPanel } from './QuestGeneratorPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -179,7 +177,7 @@ function ProceduralAnimPanelWrapper(_props: IDockviewPanelProps) {
 function ReviewPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><ReviewPanel /></Suspense>
+      <ReviewPanel />
     </div>
   );
 }
@@ -187,7 +185,7 @@ function ReviewPanelWrapper(_props: IDockviewPanelProps) {
 function AccessibilityPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><AccessibilityPanel /></Suspense>
+      <AccessibilityPanel />
     </div>
   );
 }
@@ -195,7 +193,7 @@ function AccessibilityPanelWrapper(_props: IDockviewPanelProps) {
 function TutorialPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><TutorialPanel /></Suspense>
+      <TutorialPanel />
     </div>
   );
 }
@@ -203,7 +201,7 @@ function TutorialPanelWrapper(_props: IDockviewPanelProps) {
 function EffectBindingsPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><EffectBindingsPanel /></Suspense>
+      <EffectBindingsPanel />
     </div>
   );
 }
@@ -211,7 +209,7 @@ function EffectBindingsPanelWrapper(_props: IDockviewPanelProps) {
 function BehaviorTreePanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><BehaviorTreePanel /></Suspense>
+      <BehaviorTreePanel />
     </div>
   );
 }
@@ -219,7 +217,7 @@ function BehaviorTreePanelWrapper(_props: IDockviewPanelProps) {
 function LevelGeneratorPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><LevelGeneratorPanel /></Suspense>
+      <LevelGeneratorPanel />
     </div>
   );
 }
@@ -227,7 +225,7 @@ function LevelGeneratorPanelWrapper(_props: IDockviewPanelProps) {
 function SaveSystemPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><SaveSystemPanel /></Suspense>
+      <SaveSystemPanel />
     </div>
   );
 }
@@ -235,7 +233,7 @@ function SaveSystemPanelWrapper(_props: IDockviewPanelProps) {
 function NarrativePanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><NarrativePanel /></Suspense>
+      <NarrativePanel />
     </div>
   );
 }
@@ -243,7 +241,7 @@ function NarrativePanelWrapper(_props: IDockviewPanelProps) {
 function AutoIterationPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><AutoIterationPanel /></Suspense>
+      <AutoIterationPanel />
     </div>
   );
 }
@@ -251,7 +249,7 @@ function AutoIterationPanelWrapper(_props: IDockviewPanelProps) {
 function GameAnalyticsPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><GameAnalyticsPanel /></Suspense>
+      <GameAnalyticsPanel />
     </div>
   );
 }
@@ -259,7 +257,7 @@ function GameAnalyticsPanelWrapper(_props: IDockviewPanelProps) {
 function ArtStylePanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><ArtStylePanel /></Suspense>
+      <ArtStylePanel />
     </div>
   );
 }
@@ -267,7 +265,7 @@ function ArtStylePanelWrapper(_props: IDockviewPanelProps) {
 function PlaytestPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><PlaytestPanel /></Suspense>
+      <PlaytestPanel />
     </div>
   );
 }
@@ -275,7 +273,7 @@ function PlaytestPanelWrapper(_props: IDockviewPanelProps) {
 function PhysicsFeelPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><PhysicsFeelPanel /></Suspense>
+      <PhysicsFeelPanel />
     </div>
   );
 }
@@ -283,7 +281,7 @@ function PhysicsFeelPanelWrapper(_props: IDockviewPanelProps) {
 function DifficultyPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><DifficultyPanel /></Suspense>
+      <DifficultyPanel />
     </div>
   );
 }
@@ -291,7 +289,7 @@ function DifficultyPanelWrapper(_props: IDockviewPanelProps) {
 function AutoRiggingPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><AutoRiggingPanel /></Suspense>
+      <AutoRiggingPanel />
     </div>
   );
 }
@@ -299,7 +297,7 @@ function AutoRiggingPanelWrapper(_props: IDockviewPanelProps) {
 function DesignTeacherPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><DesignTeacherPanel /></Suspense>
+      <DesignTeacherPanel />
     </div>
   );
 }
@@ -307,7 +305,7 @@ function DesignTeacherPanelWrapper(_props: IDockviewPanelProps) {
 function EconomyPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><EconomyPanel /></Suspense>
+      <EconomyPanel />
     </div>
   );
 }
@@ -315,7 +313,7 @@ function EconomyPanelWrapper(_props: IDockviewPanelProps) {
 function SmartCameraPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><SmartCameraPanel /></Suspense>
+      <SmartCameraPanel />
     </div>
   );
 }
@@ -323,7 +321,7 @@ function SmartCameraPanelWrapper(_props: IDockviewPanelProps) {
 function WorldBuilderPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><WorldBuilderPanel /></Suspense>
+      <WorldBuilderPanel />
     </div>
   );
 }
@@ -331,7 +329,7 @@ function WorldBuilderPanelWrapper(_props: IDockviewPanelProps) {
 function TexturePainterPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><TexturePainterPanel /></Suspense>
+      <TexturePainterPanel />
     </div>
   );
 }
@@ -339,7 +337,7 @@ function TexturePainterPanelWrapper(_props: IDockviewPanelProps) {
 function IdeaGeneratorPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><IdeaGeneratorPanel /></Suspense>
+      <IdeaGeneratorPanel />
     </div>
   );
 }
@@ -347,9 +345,7 @@ function IdeaGeneratorPanelWrapper(_props: IDockviewPanelProps) {
 function QuestGeneratorPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}>
-        <QuestGeneratorPanel />
-      </Suspense>
+      <QuestGeneratorPanel />
     </div>
   );
 }
