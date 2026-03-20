@@ -45,6 +45,7 @@ import { SmartCameraPanel } from './SmartCameraPanel';
 import { WorldBuilderPanel } from './WorldBuilderPanel';
 import { TexturePainterPanel } from './TexturePainterPanel';
 import { IdeaGeneratorPanel } from './IdeaGeneratorPanel';
+import { QuestGeneratorPanel } from './QuestGeneratorPanel';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
@@ -341,6 +342,14 @@ function IdeaGeneratorPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
+function QuestGeneratorPanelWrapper(_props: IDockviewPanelProps) {
+  return (
+    <div className="h-full w-full overflow-hidden bg-zinc-900">
+      <QuestGeneratorPanel />
+    </div>
+  );
+}
+
 // ---- Component registry ----
 const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   'scene-viewport': SceneViewportPanel,
@@ -379,6 +388,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'world-builder': WorldBuilderPanelWrapper,
   'texture-painter': TexturePainterPanelWrapper,
   'idea-generator': IdeaGeneratorPanelWrapper,
+  'quest-generator': QuestGeneratorPanelWrapper,
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
