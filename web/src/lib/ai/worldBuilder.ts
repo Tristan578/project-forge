@@ -3,6 +3,8 @@
  * Pure data module: types, presets, generation prompt builder, and parsers.
  */
 
+import { AI_MODEL_PRIMARY } from './models';
+
 // ---- Core Types ----
 
 export interface Faction {
@@ -577,7 +579,7 @@ export async function generateWorld(description: string, preset?: string): Promi
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: [{ role: 'user', content: prompt }],
-        model: 'claude-sonnet-4-20250514',
+        model: AI_MODEL_PRIMARY,
         max_tokens: 4096,
         stream: false,
       }),
