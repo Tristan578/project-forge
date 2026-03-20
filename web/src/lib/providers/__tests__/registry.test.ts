@@ -458,3 +458,163 @@ describe('registry — capability helpers', () => {
     expect(getConfiguredBackends()).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PF-742: resolveBackendWithCircuitBreaker — direct backend provider mapping
+// ---------------------------------------------------------------------------
+
+describe('registry — resolveBackendWithCircuitBreaker direct backend provider mapping', () => {
+  beforeEach(() => {
+    clearAllProviderEnv();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    Object.assign(process.env, envBackup);
+  });
+
+  it('returns a route for direct backend chat capability without circuitBreakerWarning', async () => {
+    setEnv({ PLATFORM_ANTHROPIC_KEY: 'sk-test' });
+    const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
+    const { resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
+    resetAllBreakers();
+
+    const route = resolveBackendWithCircuitBreaker('chat');
+    expect(route).not.toBeNull();
+    expect(route!.backendId).toBe('direct');
+    // No warning when circuit is CLOSED
+    expect(route!.circuitBreakerWarning).toBeUndefined();
+  });
+
+  it('returns a route for direct backend model3d capability without circuitBreakerWarning', async () => {
+    setEnv({ PLATFORM_MESHY_KEY: 'meshy-test' });
+    const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
+    const { resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
+    resetAllBreakers();
+
+    const route = resolveBackendWithCircuitBreaker('model3d');
+    expect(route).not.toBeNull();
+    expect(route!.backendId).toBe('direct');
+    expect(route!.circuitBreakerWarning).toBeUndefined();
+  });
+
+  it('skips direct backend for model3d when meshy breaker is OPEN', async () => {
+    setEnv({ PLATFORM_MESHY_KEY: 'meshy-test' });
+    const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
+    const { getProviderBreaker, resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
+    resetAllBreakers();
+
+    // Trip the meshy circuit breaker
+    const meshyBreaker = getProviderBreaker('meshy');
+    meshyBreaker.recordFailure();
+    meshyBreaker.recordFailure();
+    meshyBreaker.recordFailure();
+    expect(meshyBreaker.getState()).toBe('OPEN');
+
+    // With meshy OPEN and no other model3d backend, should return null
+    const route = resolveBackendWithCircuitBreaker('model3d');
+    expect(route).toBeNull();
+
+    resetAllBreakers();
+  });
+
+  it('skips direct backend for chat when anthropic breaker is OPEN, falls back to gateway', async () => {
+    setEnv({
+      PLATFORM_ANTHROPIC_KEY: 'sk-test',
+      AI_GATEWAY_API_KEY: 'gw-key',
+    });
+    const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
+    const { getProviderBreaker, resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
+    resetAllBreakers();
+
+    // Trip the anthropic circuit breaker
+    const anthropicBreaker = getProviderBreaker('anthropic');
+    anthropicBreaker.recordFailure();
+    anthropicBreaker.recordFailure();
+    anthropicBreaker.recordFailure();
+    expect(anthropicBreaker.getState()).toBe('OPEN');
+
+    // Should fall back to vercel-gateway (not direct/anthropic)
+    const route = resolveBackendWithCircuitBreaker('chat');
+    expect(route).not.toBeNull();
+    expect(route!.backendId).toBe('vercel-gateway');
+
+    resetAllBreakers();
+  });
+
+  it('returns circuitBreakerWarning when gateway is HALF_OPEN', async () => {
+    vi.useFakeTimers();
+    setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
+    const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
+    const { getProviderBreaker, resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
+    resetAllBreakers();
+
+    const gwBreaker = getProviderBreaker('vercel-gateway');
+    gwBreaker.recordFailure();
+    gwBreaker.recordFailure();
+    gwBreaker.recordFailure();
+    // Advance past halfOpenAfterMs (60s default)
+    vi.advanceTimersByTime(61000);
+    expect(gwBreaker.getState()).toBe('HALF_OPEN');
+
+    const route = resolveBackendWithCircuitBreaker('chat');
+    expect(route).not.toBeNull();
+    expect(route!.circuitBreakerWarning).toBeDefined();
+    expect(route!.circuitBreakerWarning).toContain('HALF_OPEN');
+
+    vi.useRealTimers();
+    resetAllBreakers();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PF-737: resolveBackendWithCircuitBreaker is wired into resolveChat
+// ---------------------------------------------------------------------------
+
+describe('registry — resolveBackendWithCircuitBreaker returns null when breaker is OPEN', () => {
+  beforeEach(() => {
+    clearAllProviderEnv();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    Object.assign(process.env, envBackup);
+  });
+
+  it('returns null when only configured backend has OPEN circuit', async () => {
+    setEnv({ OPENROUTER_API_KEY: 'or-key' });
+    const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
+    const { getProviderBreaker, resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
+    resetAllBreakers();
+
+    const orBreaker = getProviderBreaker('openrouter');
+    orBreaker.recordFailure();
+    orBreaker.recordFailure();
+    orBreaker.recordFailure();
+    expect(orBreaker.getState()).toBe('OPEN');
+
+    const route = resolveBackendWithCircuitBreaker('chat');
+    expect(route).toBeNull();
+
+    resetAllBreakers();
+  });
+
+  it('falls through to next backend when first is OPEN', async () => {
+    setEnv({ AI_GATEWAY_API_KEY: 'gw-key', OPENROUTER_API_KEY: 'or-key' });
+    const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
+    const { getProviderBreaker, resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
+    resetAllBreakers();
+
+    const gwBreaker = getProviderBreaker('vercel-gateway');
+    gwBreaker.recordFailure();
+    gwBreaker.recordFailure();
+    gwBreaker.recordFailure();
+    expect(gwBreaker.getState()).toBe('OPEN');
+
+    const route = resolveBackendWithCircuitBreaker('chat');
+    expect(route).not.toBeNull();
+    expect(route!.backendId).toBe('openrouter');
+
+    resetAllBreakers();
+  });
+});

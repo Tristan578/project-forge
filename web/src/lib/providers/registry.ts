@@ -141,10 +141,30 @@ export function getConfiguredBackends(): ProviderBackend[] {
 
 /**
  * Map backend IDs to circuit breaker provider names.
- * For the 'direct' backend, callers should use the specific provider name
- * (e.g. 'anthropic', 'meshy') rather than 'direct'.
+ * For the 'direct' backend, the provider name depends on the capability being
+ * requested, since 'direct' routes to different upstream providers per capability.
  */
-function backendIdToProviderName(backendId: BackendId): ProviderName | null {
+function backendIdToProviderName(
+  backendId: BackendId,
+  capability?: ProviderCapability
+): ProviderName | null {
+  if (backendId === 'direct') {
+    // Map capabilities to the underlying provider for the direct backend
+    const capabilityProviderMap: Partial<Record<ProviderCapability, ProviderName>> = {
+      chat: 'anthropic',
+      embedding: 'anthropic',
+      model3d: 'meshy',
+      texture: 'meshy',
+      sfx: 'elevenlabs',
+      voice: 'elevenlabs',
+      music: 'suno',
+      image: 'replicate',
+      sprite: 'replicate',
+      bg_removal: 'removebg',
+    };
+    return capability ? (capabilityProviderMap[capability] ?? null) : null;
+  }
+
   const map: Partial<Record<BackendId, ProviderName>> = {
     'vercel-gateway': 'vercel-gateway',
     'openrouter': 'openrouter',
@@ -178,7 +198,7 @@ export function resolveBackendWithCircuitBreaker(
       pinned.isConfigured() &&
       (pinned.capabilities as ProviderCapability[]).includes(capability)
     ) {
-      const providerName = backendIdToProviderName(preferredBackend);
+      const providerName = backendIdToProviderName(preferredBackend, capability);
       if (providerName) {
         const breaker = getProviderBreaker(providerName);
         const blocked = breaker.checkNonEssential();
@@ -199,7 +219,7 @@ export function resolveBackendWithCircuitBreaker(
     if (!backend.isConfigured()) continue;
     if (!(backend.capabilities as ProviderCapability[]).includes(capability)) continue;
 
-    const providerName = backendIdToProviderName(backend.id);
+    const providerName = backendIdToProviderName(backend.id, capability);
     if (providerName) {
       const breaker = getProviderBreaker(providerName);
       const blocked = breaker.checkNonEssential();
@@ -207,9 +227,9 @@ export function resolveBackendWithCircuitBreaker(
     }
 
     const route = buildRoute(backend, capability, preferredModel);
-    const providerName2 = backendIdToProviderName(backend.id);
-    if (providerName2) {
-      const warning = getProviderBreaker(providerName2).checkEssential();
+    const resolvedProviderName = backendIdToProviderName(backend.id, capability);
+    if (resolvedProviderName) {
+      const warning = getProviderBreaker(resolvedProviderName).checkEssential();
       return warning ? { ...route, circuitBreakerWarning: warning } : route;
     }
     return route;
