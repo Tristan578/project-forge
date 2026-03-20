@@ -610,8 +610,10 @@ export async function generateWorld(description: string, preset?: string): Promi
           if (line.startsWith('data: ') && line !== 'data: [DONE]') {
             try {
               const parsed = JSON.parse(line.slice(6));
-              const delta = parsed.delta?.text ?? parsed.choices?.[0]?.delta?.content ?? '';
-              if (delta) chunks.push(delta);
+              // /api/chat SSE format: { type: 'text_delta', text: '...' }
+              if (parsed.type === 'text_delta' && typeof parsed.text === 'string') {
+                chunks.push(parsed.text);
+              }
             } catch {
               // skip unparseable SSE lines
             }
