@@ -1,6 +1,6 @@
-import { defineWorkspace } from 'vitest/config';
-
-export default defineWorkspace([
+const workspace = [
   './vitest.config.node.ts',
   './vitest.config.jsdom.ts',
-]);
+];
+
+export default workspace;
