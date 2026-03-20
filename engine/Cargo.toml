@@ -13,13 +13,15 @@ webgpu = ["bevy/webgpu", "dep:bevy_hanabi"]
 runtime = []
 
 [dependencies]
-wasm-bindgen = "=0.2.108"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde-wasm-bindgen = "0.6"
-console_error_panic_hook = "0.1"
 tracing = "0.1"
 base64 = "0.22"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "=0.2.108"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
 
 [dependencies.bevy]
 version = "0.18.1"
@@ -47,7 +49,7 @@ features = [
     "debug",
 ]
 
-[dependencies.web-sys]
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
 version = "0.3"
 features = [
     "Window",
@@ -56,16 +58,23 @@ features = [
     "HtmlCanvasElement",
 ]
 
-[dependencies.js-sys]
+[target.'cfg(target_arch = "wasm32")'.dependencies.js-sys]
 version = "0.3"
 
-[dependencies.getrandom]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.getrandom]
+version = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.getrandom]
 version = "0.3"
 features = ["wasm_js"]
 
-[dependencies.uuid]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies.uuid]
 version = "1.22"
-features = ["js"]
+features = ["v4"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.uuid]
+version = "1.22"
+features = ["v4", "js"]
 
 [dependencies.transform-gizmo-bevy]
 path = "../.transform-gizmo-fork/crates/transform-gizmo-bevy"
