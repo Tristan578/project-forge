@@ -113,7 +113,7 @@ export async function distributedRateLimit(
 ): Promise<DistributedRateLimitResult> {
   if (!isUpstashConfigured()) {
     // Fall back to in-memory rate limiter
-    const result = rateLimit(key, limit, windowSeconds * 1000);
+    const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
   }
 
@@ -121,7 +121,7 @@ export async function distributedRateLimit(
     return await upstashSlidingWindow(key, limit, windowSeconds);
   } catch {
     // On any Upstash error, fall back to in-memory to avoid blocking requests
-    const result = rateLimit(key, limit, windowSeconds * 1000);
+    const result = await rateLimit(key, limit, windowSeconds * 1000);
     return result;
   }
 }
