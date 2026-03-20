@@ -75,7 +75,7 @@ test.describe('2D Workflows @ui', () => {
     await settingsBtn.click();
 
     // Settings modal renders as a dialog with role="dialog"
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 10_000 });
 
     // Close it

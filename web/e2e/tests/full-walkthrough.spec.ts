@@ -65,7 +65,7 @@ test.describe('Full Demo Walkthrough @engine', () => {
       await exportBtn.click();
 
       // Export dialog should appear
-      const dialog = page.locator('[role="dialog"]');
+      const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
       await expect(dialog).toBeVisible({ timeout: 5000 });
 
       // Should have format options
@@ -111,7 +111,7 @@ test.describe('Full Demo Walkthrough @engine', () => {
     if (await exportBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await exportBtn.click();
 
-      const dialog = page.locator('[role="dialog"]');
+      const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
       await expect(dialog).toBeVisible({ timeout: 5000 });
 
       // Verify export dialog has content

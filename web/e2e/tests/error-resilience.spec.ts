@@ -147,9 +147,9 @@ test.describe('Error Resilience @ui', () => {
 
       for (let i = 0; i < 3; i++) {
         await settingsBtn.click();
-        await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 3000 });
+        await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 3000 });
         await page.keyboard.press('Escape');
-        await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 3000 });
+        await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
       }
 
       // Editor canvas should still be visible

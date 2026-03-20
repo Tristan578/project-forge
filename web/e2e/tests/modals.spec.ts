@@ -8,7 +8,7 @@ test.describe('Modals @ui', () => {
     await expect(settingsBtn).toBeVisible({ timeout: 5000 });
     await settingsBtn.click();
 
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
   });
 
@@ -18,7 +18,7 @@ test.describe('Modals @ui', () => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
 
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     const tokensTab = dialog.getByRole('tab', { name: /tokens/i });
@@ -40,7 +40,7 @@ test.describe('Modals @ui', () => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
 
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     const closeBtn = dialog.getByRole('button', { name: /close/i });
@@ -55,7 +55,7 @@ test.describe('Modals @ui', () => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
 
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     await page.keyboard.press('Escape');
@@ -128,7 +128,7 @@ test.describe('Modals @ui', () => {
     await settingsBtn.click();
 
     // Wait for dialog to be visible before measuring z-index
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // Settings modal backdrop is a fixed overlay with z-[60]

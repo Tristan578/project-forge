@@ -156,7 +156,7 @@ export class EditorPage {
   /** Open settings modal */
   async openSettings() {
     await this.page.getByRole('button', { name: /settings/i }).click();
-    await expect(this.page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+    await expect(this.page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
   }
 
   /** Press keyboard shortcut */

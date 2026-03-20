@@ -69,7 +69,7 @@ test.describe('Accessibility @ui', () => {
       await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
 
-      const dialog = page.locator('[role="dialog"]');
+      const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
       await expect(dialog).toBeVisible({ timeout: 5000 });
 
       // Dialog should have aria-label or aria-labelledby
@@ -102,21 +102,21 @@ test.describe('Accessibility @ui', () => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
 
       // Escape should close it
       await page.keyboard.press('Escape');
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 3000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
     });
 
     test('focus returns to trigger after dialog closes', async ({ page }) => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
 
       await page.keyboard.press('Escape');
-      await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 3000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
 
       // Focus should ideally return to the settings button (or at least somewhere reasonable)
       const focusedTag = await page.evaluate(() => document.activeElement?.tagName);
@@ -127,7 +127,7 @@ test.describe('Accessibility @ui', () => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
 
       // Tab once — focus should land on an interactive element
       await page.keyboard.press('Tab');
