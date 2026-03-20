@@ -736,3 +736,179 @@ fn handle_set_debug_physics2d(payload: serde_json::Value) -> super::CommandResul
         Err("PendingCommands resource not initialized".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn run(command: &str, payload: serde_json::Value) -> Result<(), String> {
+        dispatch(command, &payload).expect("physics dispatch returned None for known command")
+    }
+
+    // === update_physics ===
+
+    #[test]
+    fn update_physics_rejects_missing_entity_id() {
+        let result = run("update_physics", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn update_physics_accepts_full_physics_payload() {
+        // PhysicsData has required non-optional fields (bodyType, colliderShape)
+        let result = run("update_physics", json!({
+            "entityId": "entity-1",
+            "bodyType": "dynamic",
+            "colliderShape": "auto",
+            "restitution": 0.3,
+            "friction": 0.5,
+            "density": 1.0,
+            "gravityScale": 1.0,
+            "lockTranslationX": false,
+            "lockTranslationY": false,
+            "lockTranslationZ": false,
+            "lockRotationX": false,
+            "lockRotationY": false,
+            "lockRotationZ": false,
+            "isSensor": false
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_physics_rejects_missing_required_physics_fields() {
+        // bodyType and colliderShape are required (no default) in PhysicsData
+        let result = run("update_physics", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid"),
+            "Expected parse error for missing physics fields, got: {}",
+            err
+        );
+    }
+
+    // === toggle_physics ===
+
+    #[test]
+    fn toggle_physics_accepts_valid_payload() {
+        let result = run("toggle_physics", json!({
+            "entityId": "entity-1",
+            "enabled": true
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn toggle_physics_rejects_missing_enabled() {
+        let result = run("toggle_physics", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("enabled") || err.contains("Invalid"),
+            "Expected parse error for missing enabled, got: {}",
+            err
+        );
+    }
+
+    // === toggle_debug_physics ===
+
+    #[test]
+    fn toggle_debug_physics_accepts_any_payload() {
+        let result = run("toggle_debug_physics", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === apply_force ===
+
+    #[test]
+    fn apply_force_accepts_entity_id_with_default_force() {
+        // force and torque have #[serde(default)] so they're optional
+        let result = run("apply_force", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn apply_force_accepts_full_payload() {
+        let result = run("apply_force", json!({
+            "entityId": "entity-1",
+            "force": [0.0, 10.0, 0.0],
+            "torque": [0.0, 0.0, 0.0],
+            "isImpulse": false
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn apply_force_rejects_missing_entity_id() {
+        let result = run("apply_force", json!({"force": [0.0, 10.0, 0.0]}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    // === set_physics2d ===
+
+    #[test]
+    fn set_physics2d_rejects_missing_entity_id() {
+        let result = run("set_physics2d", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn set_physics2d_accepts_entity_id() {
+        let result = run("set_physics2d", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(!err.contains("Unknown"), "Should reach 2D physics handler, got: {}", err);
+    }
+
+    // === remove_joint ===
+
+    #[test]
+    fn remove_joint_reaches_physics_handler() {
+        let result = run("remove_joint", json!({"jointId": "joint-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(!err.contains("Unknown"), "Should reach remove_joint handler, got: {}", err);
+    }
+
+    // === list_joints (query) ===
+
+    #[test]
+    fn list_joints_queues_query() {
+        let result = run("list_joints", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === dispatch returns None for unknown commands ===
+
+    #[test]
+    fn dispatch_returns_none_for_unknown_command() {
+        let result = dispatch("definitely_not_physics", &json!({}));
+        assert!(result.is_none(), "Unknown command should return None");
+    }
+}

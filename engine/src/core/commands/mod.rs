@@ -255,3 +255,433 @@ pub(crate) fn default_true() -> bool {
 pub(crate) fn default_volume() -> f32 {
     1.0
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // === CommandResponse tests ===
+
+    #[test]
+    fn command_response_ok_has_success_true_and_no_error() {
+        let resp = CommandResponse::ok();
+        assert!(resp.success);
+        assert!(resp.error.is_none());
+    }
+
+    #[test]
+    fn command_response_err_has_success_false_and_message() {
+        let resp = CommandResponse::err("something went wrong");
+        assert!(!resp.success);
+        assert_eq!(resp.error.as_deref(), Some("something went wrong"));
+    }
+
+    #[test]
+    fn command_response_err_accepts_string_and_str() {
+        let from_string = CommandResponse::err(String::from("owned"));
+        let from_str = CommandResponse::err("borrowed");
+        assert_eq!(from_string.error.as_deref(), Some("owned"));
+        assert_eq!(from_str.error.as_deref(), Some("borrowed"));
+    }
+
+    #[test]
+    fn command_response_ok_serializes_without_error_field() {
+        let resp = CommandResponse::ok();
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"success\":true"));
+        // skip_serializing_if = Option::is_none means "error" field absent
+        assert!(!json.contains("\"error\""));
+    }
+
+    #[test]
+    fn command_response_err_serializes_with_error_field() {
+        let resp = CommandResponse::err("bad input");
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"success\":false"));
+        assert!(json.contains("\"error\":\"bad input\""));
+    }
+
+    // === dispatch routing — unknown command ===
+
+    #[test]
+    fn dispatch_returns_error_for_completely_unknown_command() {
+        let result = dispatch("nonexistent_command_xyz", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unknown command") || err.contains("nonexistent_command_xyz"),
+            "Expected error about unknown command, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_returns_error_for_empty_command_string() {
+        let result = dispatch("", json!({}));
+        assert!(result.is_err());
+    }
+
+    // === dispatch routing — commands reach correct domain ===
+    // When PendingCommands is not initialized, the bridge functions return false.
+    // All commands that queue to PendingCommands return Err("PendingCommands resource not initialized").
+    // This proves the command was routed to the right handler (not "Unknown command").
+
+    #[test]
+    fn dispatch_spawn_entity_reaches_transform_domain() {
+        let result = dispatch("spawn_entity", json!({
+            "entityType": "cube",
+            "name": "TestCube"
+        }));
+        // Should fail with "not initialized", not "Unknown command"
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not initialized"),
+            "Expected pending not initialized, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_update_transform_reaches_transform_domain() {
+        let result = dispatch("update_transform", json!({
+            "entityId": "entity-1",
+            "position": [1.0, 2.0, 3.0]
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_rename_entity_reaches_transform_domain() {
+        let result = dispatch("rename_entity", json!({
+            "entityId": "entity-1",
+            "name": "NewName"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_delete_entities_reaches_transform_domain() {
+        let result = dispatch("delete_entities", json!({
+            "entityIds": ["entity-1", "entity-2"]
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_update_material_reaches_material_domain() {
+        let result = dispatch("update_material", json!({
+            "entityId": "entity-1"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_export_scene_reaches_scene_domain() {
+        let result = dispatch("export_scene", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_load_scene_reaches_scene_domain() {
+        let result = dispatch("load_scene", json!({
+            "json": "{\"entities\":[]}"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_new_scene_reaches_scene_domain() {
+        let result = dispatch("new_scene", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_add_game_component_reaches_game_domain() {
+        let result = dispatch("add_game_component", json!({
+            "entityId": "entity-1",
+            "componentType": "Health"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_apply_force_reaches_physics_domain() {
+        // "apply_force" is a known physics command that maps to domain 2
+        let result = dispatch("apply_force", json!({
+            "entityId": "entity-1",
+            "force": [0.0, 10.0, 0.0]
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Must reach the physics handler, not "Unknown command"
+        assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_set_audio_reaches_audio_domain() {
+        let result = dispatch("set_audio", json!({
+            "entityId": "entity-1"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Must reach audio domain (not "Unknown command")
+        assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_toggle_particle_reaches_particles_domain() {
+        // toggle_particle has simpler payload requirements
+        let result = dispatch("toggle_particle", json!({
+            "entityId": "entity-1",
+            "enabled": true
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_play_animation_reaches_animation_domain() {
+        let result = dispatch("play_animation", json!({
+            "entityId": "entity-1",
+            "clipName": "Walk"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    // === dispatch — engine mode commands ===
+    // play/stop/pause/resume all require PendingCommands too
+
+    #[test]
+    fn dispatch_play_reaches_mode_handler() {
+        let result = dispatch("play", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_stop_reaches_mode_handler() {
+        let result = dispatch("stop", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_get_entity_details_requires_entity_id() {
+        let result = dispatch("get_entity_details", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityId") || err.contains("Missing"),
+            "Expected missing entityId error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_get_entity_details_with_entity_id_reaches_query() {
+        let result = dispatch("get_entity_details", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("not initialized"), "got: {}", err);
+    }
+
+    // === dispatch — invalid payload parsing ===
+
+    #[test]
+    fn dispatch_spawn_entity_rejects_missing_entity_type() {
+        let result = dispatch("spawn_entity", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityType") || err.contains("entity_type") || err.contains("Invalid"),
+            "Expected parse error about entityType, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_spawn_entity_rejects_unknown_entity_type() {
+        let result = dispatch("spawn_entity", json!({
+            "entityType": "totally_not_a_real_type"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unknown entity type") || err.contains("totally_not_a_real_type"),
+            "Expected unknown entity type error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_rename_entity_rejects_missing_entity_id() {
+        let result = dispatch("rename_entity", json!({"name": "NewName"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityId") || err.contains("entity_id") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_load_scene_rejects_missing_json_field() {
+        let result = dispatch("load_scene", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("json") || err.contains("Missing"),
+            "Expected missing json field error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_set_visibility_rejects_missing_visible() {
+        let result = dispatch("set_visibility", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("visible") || err.contains("Missing"),
+            "Expected missing visible error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_set_gizmo_mode_rejects_invalid_mode() {
+        let result = dispatch("set_gizmo_mode", json!({"mode": "warp"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid gizmo mode") || err.contains("warp"),
+            "Expected invalid gizmo mode error, got: {}",
+            err
+        );
+    }
+
+    // === dispatch — update_scene returns explicit "not implemented" ===
+
+    #[test]
+    fn dispatch_update_scene_returns_not_implemented() {
+        let result = dispatch("update_scene", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not implemented"),
+            "Expected not implemented error, got: {}",
+            err
+        );
+    }
+
+    // === dispatch — set_camera returns explicit "not implemented" ===
+
+    #[test]
+    fn dispatch_set_camera_returns_not_implemented() {
+        let result = dispatch("set_camera", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("not implemented"),
+            "Expected not implemented error, got: {}",
+            err
+        );
+    }
+
+    // === dispatch — empty entityIds list returns Ok (nothing to do) ===
+
+    #[test]
+    fn dispatch_delete_entities_with_empty_list_returns_ok() {
+        let result = dispatch("delete_entities", json!({"entityIds": []}));
+        // Empty list is a no-op that returns Ok
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn dispatch_select_entities_with_empty_list_returns_ok() {
+        let result = dispatch("select_entities", json!({"entityIds": []}));
+        assert!(result.is_ok());
+    }
+
+    // === route_domain coverage via dispatch — all 12 domains + 1 unknown ===
+    // We verify each domain is reachable by confirming known commands aren't "Unknown command"
+
+    #[test]
+    fn dispatch_csg_union_reaches_procedural_domain() {
+        let result = dispatch("csg_union", json!({
+            "entityId": "entity-1",
+            "targetId": "entity-2"
+        }));
+        assert!(result.is_err());
+        // Must NOT say "Unknown command" — it reached the handler
+        let err = result.unwrap_err();
+        assert!(
+            !err.contains("Unknown command"),
+            "csg_union should reach procedural domain, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn dispatch_spawn_terrain_reaches_procedural_domain() {
+        let result = dispatch("spawn_terrain", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_set_lod_reaches_performance_domain() {
+        let result = dispatch("set_lod", json!({
+            "entityId": "entity-1",
+            "lodLevel": 0
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_enter_edit_mode_reaches_edit_mode_domain() {
+        let result = dispatch("enter_edit_mode", json!({
+            "entityId": "entity-1"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_set_sprite_data_reaches_sprites_domain() {
+        let result = dispatch("set_sprite_data", json!({
+            "entityId": "entity-1"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+}

@@ -630,6 +630,7 @@ pub fn take_redo_request() -> bool {
 pub fn push_action_from_bridge(action: UndoableAction) -> bool {
     HISTORY_STACK.with(|h| {
         if let Some(ptr) = *h.borrow() {
+            // SAFETY: WASM is single-threaded and we control the lifetime
             unsafe {
                 (*ptr).push(action);
             }

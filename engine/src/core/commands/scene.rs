@@ -320,3 +320,214 @@ fn handle_apply_script_template(payload: serde_json::Value) -> super::CommandRes
         Err("PendingCommands resource not initialized".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn run(command: &str, payload: serde_json::Value) -> Result<(), String> {
+        dispatch(command, &payload).expect("scene dispatch returned None for known command")
+    }
+
+    // === export_scene ===
+
+    #[test]
+    fn export_scene_accepts_any_payload() {
+        let result = run("export_scene", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === load_scene ===
+
+    #[test]
+    fn load_scene_accepts_valid_json_field() {
+        let result = run("load_scene", json!({
+            "json": "{\"entities\":[]}"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn load_scene_rejects_missing_json_field() {
+        let result = run("load_scene", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("json") || err.contains("Missing"),
+            "Expected missing json field error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn load_scene_accepts_complex_scene_json() {
+        let result = run("load_scene", json!({
+            "json": "{\"entities\":[{\"id\":\"e1\",\"name\":\"Cube\",\"type\":\"cube\"}]}"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === new_scene ===
+
+    #[test]
+    fn new_scene_accepts_any_payload() {
+        let result = run("new_scene", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === import_gltf ===
+
+    #[test]
+    fn import_gltf_accepts_valid_payload() {
+        let result = run("import_gltf", json!({
+            "dataBase64": "SGVsbG8=",
+            "name": "my_model.glb"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn import_gltf_rejects_missing_name() {
+        let result = run("import_gltf", json!({
+            "dataBase64": "SGVsbG8="
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("name") || err.contains("Invalid"),
+            "Expected parse error for missing name, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn import_gltf_rejects_missing_data_base64() {
+        let result = run("import_gltf", json!({"name": "model.glb"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("data_base64") || err.contains("dataBase64") || err.contains("Invalid"),
+            "Expected parse error for missing dataBase64, got: {}",
+            err
+        );
+    }
+
+    // === set_script ===
+
+    #[test]
+    fn set_script_accepts_valid_payload() {
+        let result = run("set_script", json!({
+            "entityId": "entity-1",
+            "source": "console.log('hello');"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn set_script_enabled_defaults_to_true() {
+        // enabled has default = true, so it's optional
+        let result = run("set_script", json!({
+            "entityId": "entity-1",
+            "source": ""
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn set_script_rejects_missing_entity_id() {
+        let result = run("set_script", json!({"source": "code"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn set_script_rejects_missing_source() {
+        let result = run("set_script", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("source") || err.contains("Invalid"),
+            "Expected parse error for missing source, got: {}",
+            err
+        );
+    }
+
+    // === remove_script ===
+
+    #[test]
+    fn remove_script_accepts_valid_entity_id() {
+        let result = run("remove_script", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn remove_script_rejects_missing_entity_id() {
+        let result = run("remove_script", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityId") || err.contains("Missing"),
+            "Expected missing entityId error, got: {}",
+            err
+        );
+    }
+
+    // === place_asset ===
+
+    #[test]
+    fn place_asset_accepts_asset_id_without_position() {
+        let result = run("place_asset", json!({"assetId": "asset-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn place_asset_accepts_position() {
+        let result = run("place_asset", json!({
+            "assetId": "asset-1",
+            "position": [1.0, 0.0, 2.0]
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === delete_asset ===
+
+    #[test]
+    fn delete_asset_accepts_valid_asset_id() {
+        let result = run("delete_asset", json!({"assetId": "asset-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === list_assets (query) ===
+
+    #[test]
+    fn list_assets_queues_query() {
+        let result = run("list_assets", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === dispatch returns None for unknown commands ===
+
+    #[test]
+    fn dispatch_returns_none_for_unknown_command() {
+        let result = dispatch("definitely_not_scene", &json!({}));
+        assert!(result.is_none(), "Unknown command should return None");
+    }
+}
