@@ -259,12 +259,15 @@ describe('applyMaterialChanges', () => {
     expect(payload.metallic).toBeCloseTo(0.2);
   });
 
-  it('scales values by intensity', () => {
+  it('lerps toward target values by intensity', () => {
     const dispatch = vi.fn();
     const style = findStyleByName('rusty')!;
     applyMaterialChanges(style, 'e1', dispatch, 0.5);
     const payload = dispatch.mock.calls[0][1] as Record<string, unknown>;
-    expect(payload.perceptualRoughness).toBeCloseTo(0.475);
+    // Lerp from default (roughness=0.5, metallic=0.0) toward target at 50% intensity
+    // roughness: 0.5 + (0.95 - 0.5) * 0.5 = 0.725
+    // metallic: 0.0 + (0.2 - 0.0) * 0.5 = 0.1
+    expect(payload.perceptualRoughness).toBeCloseTo(0.725);
     expect(payload.metallic).toBeCloseTo(0.1);
   });
 
