@@ -6,10 +6,15 @@ name: Copilot Autofix (disabled)
 
 on: workflow_dispatch
 
+permissions:
+  contents: read
+
 jobs:
   noop:
     name: No-op (ghost workflow stub)
     runs-on: ubuntu-latest
     if: false
+    permissions:
+      contents: read
     steps:
       - run: echo "This workflow is disabled"
