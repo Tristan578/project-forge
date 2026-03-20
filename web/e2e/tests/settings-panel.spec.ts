@@ -7,6 +7,9 @@
  */
 import { test, expect } from '../fixtures/editor.fixture';
 
+// Target only the settings dialog, not Next.js error overlays or other modals
+const settingsDialog = '[role="dialog"][aria-labelledby="settings-dialog-title"]';
+
 test.describe('Settings Panel @ui', () => {
   test.beforeEach(async ({ editor, page }) => {
     await editor.loadPage();
@@ -14,11 +17,11 @@ test.describe('Settings Panel @ui', () => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await expect(settingsBtn).toBeVisible({ timeout: 5000 });
     await settingsBtn.click();
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(settingsDialog)).toBeVisible({ timeout: 5000 });
   });
 
   test('settings dialog has correct ARIA attributes', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     await expect(dialog).toHaveAttribute('aria-modal', 'true');
   });
 
@@ -28,7 +31,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('clicking each tab switches the visible panel', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
 
     // Get all tabs
     const tabs = dialog.locator('[role="tab"]');
@@ -54,7 +57,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('arrow keys navigate between tabs', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const tabs = dialog.locator('[role="tab"]');
     const tabCount = await tabs.count();
 
@@ -76,7 +79,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('Home/End keys jump to first/last tab', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const tabs = dialog.locator('[role="tab"]');
     const tabCount = await tabs.count();
 
@@ -95,7 +98,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('tokens tab shows balance section', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const tokensTab = dialog.getByRole('tab', { name: /tokens/i });
 
     if (await tokensTab.isVisible().catch(() => false)) {
@@ -109,7 +112,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('API keys tab shows provider section', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const keysTab = dialog.getByRole('tab', { name: /api.*keys|keys/i });
 
     if (await keysTab.isVisible().catch(() => false)) {
@@ -123,7 +126,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('billing tab shows plan information', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const billingTab = dialog.getByRole('tab', { name: /billing/i });
 
     if (await billingTab.isVisible().catch(() => false)) {
@@ -137,7 +140,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('close button returns focus appropriately', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const closeBtn = dialog.getByRole('button', { name: /close/i });
 
     await closeBtn.click();
@@ -149,7 +152,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('Escape key closes the settings dialog', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     await expect(dialog).toBeVisible();
 
     await page.keyboard.press('Escape');
@@ -157,7 +160,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('dialog has aria-labelledby pointing to title', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const labelledBy = await dialog.getAttribute('aria-labelledby');
     expect(labelledBy).toBe('settings-dialog-title');
 
@@ -168,7 +171,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('tab panels have correct aria-controls and aria-labelledby linkage', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
 
     // Each tab should have aria-controls pointing to a tabpanel
     const tabs = dialog.locator('[role="tab"]');
@@ -194,7 +197,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('arrow key navigation wraps from last to first tab', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const tabs = dialog.locator('[role="tab"]');
     const tabCount = await tabs.count();
 
@@ -218,7 +221,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('API keys tab shows provider list with BYOK section', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const keysTab = dialog.getByRole('tab', { name: /api.*keys|keys/i });
 
     if (!(await keysTab.isVisible().catch(() => false))) return;
@@ -239,7 +242,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('API keys tab shows MCP API Keys section with generate button', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const keysTab = dialog.getByRole('tab', { name: /api.*keys|keys/i });
 
     if (!(await keysTab.isVisible().catch(() => false))) return;
@@ -257,7 +260,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('billing tab shows current plan section', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const billingTab = dialog.getByRole('tab', { name: /billing/i });
 
     await expect(billingTab).toBeVisible({ timeout: 5000 });
@@ -273,7 +276,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('tokens tab shows content when active', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     const tokensTab = dialog.getByRole('tab', { name: /tokens/i });
 
     // Tokens is the default active tab
@@ -289,7 +292,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('backdrop click closes the dialog', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
     await expect(dialog).toBeVisible();
 
     // Click outside the dialog (on the backdrop)
@@ -301,7 +304,7 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('settings can be reopened after closing', async ({ page }) => {
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator(settingsDialog);
 
     // Close with Escape
     await page.keyboard.press('Escape');
