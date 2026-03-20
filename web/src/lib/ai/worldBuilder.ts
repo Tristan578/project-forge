@@ -570,11 +570,13 @@ export async function generateWorld(description: string, preset?: string): Promi
   const fallbackKey = preset ?? 'medieval_fantasy';
   const fallback = WORLD_PRESETS[fallbackKey] ?? WORLD_PRESETS.medieval_fantasy;
 
-  let prompt = buildWorldPrompt(description, preset);
-  // Truncate prompt to stay within the 4000-character message limit
-  if (prompt.length > 3900) {
-    prompt = prompt.slice(0, 3900) + '\n\n(Description truncated for length. Generate based on what is provided.)';
-  }
+  // Truncate the user description (not the full prompt) to stay within
+  // the 4000-char message limit without cutting through the JSON schema
+  const maxDescLength = 1500;
+  const safeDescription = description.length > maxDescLength
+    ? description.slice(0, maxDescLength) + '... (truncated)'
+    : description;
+  const prompt = buildWorldPrompt(safeDescription, preset);
 
   let response: Response;
   try {
