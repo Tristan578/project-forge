@@ -43,6 +43,9 @@ on:
         description: 'Outcome of the security job'
         value: ${{ jobs.security.result }}
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: --cfg=web_sys_unstable_apis

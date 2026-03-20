@@ -22,6 +22,9 @@ on:
     types: [completed]
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   smoke:
     name: Smoke Tests

@@ -981,6 +981,11 @@ function compileScript(entityId_: string, source: string): ScriptInstance {
       ? guardVarNames.map(v => v + '=0;').join('')
       : '';
     const resetFn = resetBody ? 'function __resetGuards(){' + resetBody + '}' : 'function __resetGuards(){}';
+    // CodeQL: js/code-injection — intentional. This is the script sandbox that executes
+    // user-authored game scripts. Multiple security layers protect against abuse:
+    // global shadowing, command whitelist, per-frame command limit, infinite loop watchdog,
+    // rate limiter. See SEC-2 (Script Sandbox Hardening) in CLAUDE.md.
+    // lgtm[js/code-injection]
     // Shadow dangerous globals; sandbox compilation is intentional for script isolation.
     const sandboxCtor = Function; // codeql[js/code-injection]
     const fn = sandboxCtor(
