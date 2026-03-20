@@ -279,7 +279,8 @@ export function WorldBuilderPanel() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // Defer revocation so the browser's download manager can read the blob
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [world]);
 
   return (
