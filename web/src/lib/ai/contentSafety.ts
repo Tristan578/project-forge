@@ -162,12 +162,16 @@ export function checkImageSafety(_url: string): ContentSafetyResult {
 /**
  * Sanitize a user prompt before sending to an AI provider.
  *
- * - Strips prompt injection patterns
+ * - Strips prompt injection patterns (all occurrences, not just the first)
  * - Normalizes whitespace
- * - Trims to a reasonable length (500 chars)
+ * - Trims to a configurable maximum length (default: 500 chars)
  * - Removes control characters
+ * - Returns unsafe if the sanitized prompt is empty (all content was stripped)
+ *
+ * @param prompt - The raw user prompt to sanitize
+ * @param maxLength - Maximum length of the sanitized output (default: 500)
  */
-export function sanitizePrompt(prompt: string): ContentSafetyResult {
+export function sanitizePrompt(prompt: string, maxLength = 500): ContentSafetyResult {
   if (!prompt || prompt.length === 0) {
     return { safe: true, filtered: '' };
   }
@@ -177,17 +181,33 @@ export function sanitizePrompt(prompt: string): ContentSafetyResult {
   // Remove control characters (except newline/tab)
   filtered = filtered.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
-  // Strip injection patterns
+  // Strip injection patterns — use a global flag so ALL occurrences within
+  // a single prompt are removed, not just the first match per pattern.
+  // RegExp.prototype.replace without /g only removes the first occurrence.
   for (const pattern of INJECTION_PATTERNS) {
-    filtered = filtered.replace(pattern, '');
+    const globalPattern = new RegExp(
+      pattern.source,
+      pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g',
+    );
+    filtered = filtered.replace(globalPattern, '');
   }
 
   // Normalize whitespace (collapse multiple spaces, trim)
   filtered = filtered.replace(/\s+/g, ' ').trim();
 
-  // Truncate to 500 characters
-  if (filtered.length > 500) {
-    filtered = filtered.slice(0, 500);
+  // Truncate to configurable maximum length
+  if (filtered.length > maxLength) {
+    filtered = filtered.slice(0, maxLength);
+  }
+
+  // Reject if sanitization stripped everything — an empty prompt after
+  // filtering indicates the input was entirely composed of injection attempts.
+  if (filtered.length === 0) {
+    return {
+      safe: false,
+      reason: 'Prompt was empty after sanitization',
+      filtered: '',
+    };
   }
 
   // Check if the sanitized prompt still contains blocked content

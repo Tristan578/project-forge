@@ -63,6 +63,12 @@ export async function POST(request: NextRequest) {
     );
   }
   const safePrompt = safety.filtered ?? prompt;
+  if (!safePrompt || safePrompt.trim().length === 0) {
+    return NextResponse.json(
+      { error: 'Prompt is empty after sanitization' },
+      { status: 422 }
+    );
+  }
 
   // 3. Resolve API key (Replicate for ControlNet)
   const tokenCost = frameCount * 15;
