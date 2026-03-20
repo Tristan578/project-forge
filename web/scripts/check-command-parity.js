@@ -25,15 +25,42 @@ const handlerFiles = fs
 
 const handlerKeys = new Set();
 
+// Regex for a single handler key line — must match only within a handlers block.
+// Uses a simple, linear-time pattern: no nested quantifiers, no backtracking risk.
+const KEY_LINE_RE = /^\s{2,}['"]?([a-z][a-z0-9_]*)['"]?\s*:/;
+const HANDLERS_OPEN_RE = /(?:export\s+)?const\s+\w+[Hh]andlers\s*[=:]/;
+
 for (const file of handlerFiles) {
   const content = fs.readFileSync(path.join(HANDLERS_DIR, file), 'utf8');
-  const objectBlocks = content.matchAll(
-    /(?:export\s+)?const\s+\w+[Hh]andlers[^=]*=\s*\{([^]*?)\n\};/gm
-  );
-  for (const block of objectBlocks) {
-    const body = block[1];
-    const keyMatches = body.matchAll(/^\s+['"]?([a-z][a-z0-9_]*(?:_[a-z0-9_]+)*)['"]?\s*:/gm);
-    for (const m of keyMatches) {
+  // Scan line by line to avoid multi-line ReDoS (CodeQL cwe-1333).
+  // Track brace depth to know when we are inside a handlers object literal.
+  const lines = content.split('\n');
+  let inHandlers = false;
+  let depth = 0;
+  for (const line of lines) {
+    if (!inHandlers) {
+      if (HANDLERS_OPEN_RE.test(line)) {
+        inHandlers = true;
+        depth = 0;
+        // Count any opening braces on this same line
+        for (const ch of line) {
+          if (ch === '{') depth++;
+          else if (ch === '}') depth--;
+        }
+      }
+      continue;
+    }
+    // Count braces to track when the handlers object closes
+    for (const ch of line) {
+      if (ch === '{') depth++;
+      else if (ch === '}') depth--;
+    }
+    if (depth <= 0) {
+      inHandlers = false;
+      continue;
+    }
+    const m = KEY_LINE_RE.exec(line);
+    if (m) {
       const key = m[1];
       if (key.includes('_') || manifestNames.has(key)) {
         handlerKeys.add(key);

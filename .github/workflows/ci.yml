@@ -8,6 +8,11 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Restrict default token permissions (CWE-732 / CodeQL workflow-missing-permissions).
+# Individual jobs add specific permissions only when needed.
+permissions:
+  contents: read
+
 jobs:
   # ---- Quality Gates (reusable workflow shared with CD) ----
   quality-gates:

@@ -890,12 +890,21 @@ function buildForgeApi(scriptEntityId: string) {
   };
 }
 
-// Globals to shadow in user scripts for sandbox isolation
+// Globals to shadow in user scripts for sandbox isolation.
+// Each name is passed as a parameter to the sandboxed Function with undefined
+// as its value, preventing user code from accessing these APIs.
+//
+// 'Function' and 'eval' are included to block prototype-chain escapes such as
+// (0).constructor.constructor("return fetch")() or indirect eval calls.
+// 'globalThis' and 'self' block direct global scope access.
+// Network/storage APIs are shadowed for defence-in-depth even though the
+// worker has no DOM.
 const SHADOWED_GLOBALS = [
   'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
   'indexedDB', 'caches', 'navigator', 'location',
   'EventSource', 'BroadcastChannel',
   'self', 'globalThis',
+  'Function', 'eval',
 ] as const;
 
 // ─── Resource Limits ────────────────────────────────────────────
