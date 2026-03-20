@@ -274,6 +274,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 260,
     minHeight: 200,
   },
+  'quest-generator': {
+    id: 'quest-generator',
+    title: 'Quest Generator',
+    component: 'quest-generator',
+    minWidth: 260,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */

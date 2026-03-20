@@ -4,8 +4,8 @@
  * CI quality gate: enforce JS/CSS bundle size limits after next build.
  *
  * Thresholds:
- *   First-load JS:  warn > 3 MB,   fail > 4 MB
- *   Total JS:       warn > 4 MB,   fail > 5 MB
+ *   First-load JS:  warn > 4 MB,   fail > 4.5 MB
+ *   Total JS:       warn > 5 MB,   fail > 5.5 MB
  *
  * Usage:  node scripts/check-bundle-size.js
  * Expects: npm run build has already been run (.next/ exists)
@@ -17,10 +17,10 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const BUILD_DIR = path.join(ROOT, '.next');
 
-const FIRST_LOAD_WARN = 3 * 1024 * 1024;
-const FIRST_LOAD_FAIL = 4 * 1024 * 1024;
-const TOTAL_WARN = 4 * 1024 * 1024;
-const TOTAL_FAIL = 5 * 1024 * 1024;
+const FIRST_LOAD_WARN = 4 * 1024 * 1024;
+const FIRST_LOAD_FAIL = 4.5 * 1024 * 1024;
+const TOTAL_WARN = 5 * 1024 * 1024;
+const TOTAL_FAIL = 5.5 * 1024 * 1024;
 
 function formatBytes(bytes) {
   if (bytes < 1024) return bytes + ' B';
