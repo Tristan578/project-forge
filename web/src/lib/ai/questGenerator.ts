@@ -487,7 +487,7 @@ export function validateGenerateOptions(options: GenerateOptions): string[] {
   }
 
   if (options.questCount !== undefined) {
-    if (typeof options.questCount !== 'number' || options.questCount < 1 || options.questCount > 20) {
+    if (typeof options.questCount !== 'number' || !Number.isInteger(options.questCount) || options.questCount < 1 || options.questCount > 20) {
       errors.push('questCount must be between 1 and 20');
     }
   }

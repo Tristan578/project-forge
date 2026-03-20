@@ -24,9 +24,9 @@ import { TilesetPanel } from './TilesetPanel';
 import { TimelinePanel } from './TimelinePanel';
 import { TaskboardPanel } from './TaskboardPanel';
 import { ProceduralAnimPanel } from './ProceduralAnimPanel';
-import { EffectBindingsPanel } from './EffectBindingsPanel';
-import { TutorialPanel } from './TutorialPanel';
 import { lazy, Suspense } from 'react';
+const EffectBindingsPanel = lazy(() => import('./EffectBindingsPanel').then(m => ({ default: m.EffectBindingsPanel })));
+const TutorialPanel = lazy(() => import('./TutorialPanel').then(m => ({ default: m.TutorialPanel })));
 // Lazy-load AI feature panels to keep shared bundle under 4MB limit
 const AccessibilityPanel = lazy(() => import('./AccessibilityPanel').then(m => ({ default: m.AccessibilityPanel })));
 const ReviewPanel = lazy(() => import('./ReviewPanel').then(m => ({ default: m.ReviewPanel })));
@@ -195,7 +195,7 @@ function AccessibilityPanelWrapper(_props: IDockviewPanelProps) {
 function TutorialPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <TutorialPanel />
+      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><TutorialPanel /></Suspense>
     </div>
   );
 }
@@ -203,7 +203,7 @@ function TutorialPanelWrapper(_props: IDockviewPanelProps) {
 function EffectBindingsPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <EffectBindingsPanel />
+      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}><EffectBindingsPanel /></Suspense>
     </div>
   );
 }
