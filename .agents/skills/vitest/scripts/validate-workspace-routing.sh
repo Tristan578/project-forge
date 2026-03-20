@@ -75,7 +75,7 @@ done
 
 JSDOM_CONFIG_CONTENT=$(cat "${WEB_DIR}/vitest.config.jsdom.ts")
 
-for node_dir in "src/lib/" "src/stores/" "src/app/api/"; do
+for node_dir in "src/lib/" "src/stores/" "src/app/" "src/data/"; do
   if echo "${JSDOM_CONFIG_CONTENT}" | grep -qF "${node_dir}"; then
     ISSUES+=("vitest.config.jsdom.ts include pattern references '${node_dir}' (node-only directory)")
   fi
@@ -89,7 +89,8 @@ done
 NODE_PATTERNS=(
   "src/lib/"
   "src/stores/"
-  "src/app/api/"
+  "src/app/"
+  "src/data/"
 )
 JSDOM_PATTERNS=(
   "src/components/"

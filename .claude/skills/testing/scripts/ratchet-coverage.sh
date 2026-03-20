@@ -14,7 +14,8 @@ VITEST_CONFIG="web/vitest.config.node.ts"
 
 # Resolve paths relative to repo root (script may be called from anywhere)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+# scripts/ -> testing/ -> skills/ -> .claude/ -> repo root
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 
 COVERAGE_JSON="${REPO_ROOT}/${COVERAGE_JSON}"
 VITEST_CONFIG="${REPO_ROOT}/${VITEST_CONFIG}"

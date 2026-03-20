@@ -16,8 +16,10 @@ export default defineConfig({
       'src/lib/**/*.test.tsx',
       'src/stores/**/*.test.ts',
       'src/stores/**/*.test.tsx',
-      'src/app/api/**/*.test.ts',
-      'src/app/api/**/*.test.tsx',
+      'src/app/**/*.test.ts',
+      'src/app/**/*.test.tsx',
+      'src/data/**/*.test.ts',
+      'src/data/**/*.test.tsx',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
