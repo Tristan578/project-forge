@@ -135,7 +135,7 @@ test.describe('Keyboard Shortcuts @ui', () => {
     // Focus on a text input to ensure space doesn't trigger play
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
-    const dialog = page.locator('[role="dialog"]');
+    const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // Type space in dialog — should not trigger play mode
@@ -156,13 +156,13 @@ test.describe('Keyboard Shortcuts @ui', () => {
     // Open settings
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
 
     // Press W — should NOT change gizmo mode since modal is open
     await page.keyboard.press('w');
 
     // Dialog should still be visible (shortcut didn't close it or navigate away)
-    await expect(page.locator('[role="dialog"]')).toBeVisible();
+    await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible();
 
     await page.keyboard.press('Escape');
   });

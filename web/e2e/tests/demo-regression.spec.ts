@@ -251,7 +251,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
 
     // Close with Escape and assert the dialog is gone
     await page.keyboard.press('Escape');
-    await expect(page.locator('[role="dialog"]')).not.toBeVisible({ timeout: 3000 });
+    await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
   });
 
   test('sidebar contains tool groups', async ({ page }) => {
