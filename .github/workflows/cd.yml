@@ -181,10 +181,47 @@ jobs:
       - run: npx vitest run
         working-directory: mcp-server
 
+  check-changes:
+    name: Detect Changed Paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      engine-changed: ${{ steps.filter.outputs.engine }}
+      web-changed: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed paths
+        id: filter
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+
+          if echo "$CHANGED" | grep -q '^engine/'; then
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            echo "Engine files changed — WASM build required"
+          else
+            echo "engine=false" >> "$GITHUB_OUTPUT"
+            echo "No engine changes — skipping WASM build"
+          fi
+
+          if echo "$CHANGED" | grep -qE '^web/|^package\.json|^\.github/'; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "Web files changed — deploy required"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
+            echo "No web changes — skipping deploy"
+          fi
+
   build-wasm:
     name: WASM Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: [check-changes]
+    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
     steps:
@@ -423,8 +460,20 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
-    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' && github.event.inputs.promote_to_production != 'true' && (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped') }}
+    needs: [check-changes, lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
+    if: |
+      always() &&
+      vars.VERCEL_DEPLOY_ENABLED == 'true' &&
+      github.event.inputs.promote_to_production != 'true' &&
+      (needs.check-changes.outputs.web-changed == 'true' || needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch') &&
+      needs.lint.result == 'success' &&
+      needs.typecheck.result == 'success' &&
+      needs.test-web.result == 'success' &&
+      needs.test-mcp.result == 'success' &&
+      needs.security.result == 'success' &&
+      (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped')
     permissions:
       contents: read
       deployments: write
@@ -506,7 +555,7 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
+    needs: [check-changes, lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
@@ -517,8 +566,8 @@ jobs:
          needs.typecheck.result == 'success' &&
          needs.test-web.result == 'success' &&
          needs.test-mcp.result == 'success' &&
-         needs.build-wasm.result == 'success' &&
-         needs.e2e.result == 'success' &&
+         (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
+         (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
          needs.security.result == 'success' &&
          (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped'))
       )
