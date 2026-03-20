@@ -379,10 +379,17 @@ describe('generateWorld', () => {
       rules: [],
     };
 
+    const encoder = new TextEncoder();
+    const sseData = `data: {"type":"text_delta","text":"${JSON.stringify(mockWorld).replace(/"/g, '\\"')}"}\ndata: [DONE]\n`;
     vi.mocked(fetch).mockResolvedValue({
       ok: true,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: () => Promise.resolve({ content: JSON.stringify(mockWorld) }),
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(sseData));
+          controller.close();
+        },
+      }),
     } as Response);
 
     const result = await generateWorld('A unique world');
@@ -390,24 +397,24 @@ describe('generateWorld', () => {
     expect(result.name).toBe('AI World');
   });
 
-  it('falls back to preset on fetch error', async () => {
+  it('throws on API error with message from response', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: false,
-      status: 500,
-    } as Response);
+      status: 402,
+      json: () => Promise.resolve({ error: 'Not enough tokens' }),
+    } as unknown as Response);
 
-    const result = await generateWorld('A world', 'cyberpunk_city');
-    expect(result.name).toBe('Neo Meridian');
+    await expect(generateWorld('A world', 'cyberpunk_city')).rejects.toThrow('Not enough tokens');
   });
 
-  it('falls back to medieval_fantasy when no preset specified and fetch fails', async () => {
+  it('throws on API error when no preset specified', async () => {
     vi.mocked(fetch).mockResolvedValue({
       ok: false,
       status: 500,
-    } as Response);
+      json: () => Promise.resolve({ error: 'Internal server error' }),
+    } as unknown as Response);
 
-    const result = await generateWorld('A world');
-    expect(result.name).toBe('Eldoria');
+    await expect(generateWorld('A world')).rejects.toThrow('Internal server error');
   });
 
   it('falls back on parse error from AI response', async () => {
@@ -421,28 +428,9 @@ describe('generateWorld', () => {
     expect(result.name).toBe('The Scarred Earth');
   });
 
-  it('handles response in choices format', async () => {
-    const mockWorld: GameWorld = {
-      name: 'Choices World',
-      description: 'From choices',
-      genre: 'custom',
-      era: 'Now',
-      factions: [{ name: 'F', description: 'D', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: {} }],
-      regions: [{ name: 'R', description: 'D', biome: 'b', dangerLevel: 5, resources: [], landmarks: [], connectedTo: [] }],
-      timeline: [],
-      lore: [],
-      rules: [],
-    };
-
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: () => Promise.resolve({ choices: [{ message: { content: JSON.stringify(mockWorld) } }] }),
-    } as Response);
-
-    const result = await generateWorld('A world');
-    expect(result.name).toBe('Choices World');
-  });
+  // "handles response in choices format" removed — the JSON/choices code path
+  // was deleted in favor of SSE-only streaming. The /api/chat endpoint always
+  // returns text/event-stream.
 });
 
 // ---- worldToMarkdown tests ----
