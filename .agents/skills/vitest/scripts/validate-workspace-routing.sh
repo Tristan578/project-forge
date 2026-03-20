@@ -18,7 +18,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# scripts/ -> vitest/ -> skills/ -> .claude/ -> repo root
+# scripts/ -> vitest/ -> skills/ -> .agents/ -> repo root
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
 WEB_DIR="${REPO_ROOT}/web"
 
