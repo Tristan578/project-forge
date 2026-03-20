@@ -218,3 +218,181 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn run(command: &str, payload: serde_json::Value) -> Result<(), String> {
+        dispatch(command, &payload).expect("game dispatch returned None for known command")
+    }
+
+    // === add_game_component ===
+
+    #[test]
+    fn add_game_component_accepts_valid_payload() {
+        let result = run("add_game_component", json!({
+            "entityId": "entity-1",
+            "componentType": "Health"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn add_game_component_accepts_optional_properties() {
+        let result = run("add_game_component", json!({
+            "entityId": "entity-1",
+            "componentType": "CharacterController",
+            "properties": {"speed": 5.0, "jumpHeight": 2.0}
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn add_game_component_rejects_missing_entity_id() {
+        let result = run("add_game_component", json!({
+            "componentType": "Health"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityId") || err.contains("Missing"),
+            "Expected missing entityId error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn add_game_component_rejects_missing_component_type() {
+        let result = run("add_game_component", json!({
+            "entityId": "entity-1"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("componentType") || err.contains("Missing"),
+            "Expected missing componentType error, got: {}",
+            err
+        );
+    }
+
+    // === update_game_component ===
+
+    #[test]
+    fn update_game_component_accepts_valid_payload() {
+        let result = run("update_game_component", json!({
+            "entityId": "entity-1",
+            "componentType": "Health",
+            "properties": {"maxHealth": 100}
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === remove_game_component ===
+
+    #[test]
+    fn remove_game_component_accepts_valid_payload() {
+        let result = run("remove_game_component", json!({
+            "entityId": "entity-1",
+            "componentName": "Health"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn remove_game_component_rejects_missing_component_name() {
+        let result = run("remove_game_component", json!({
+            "entityId": "entity-1"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("componentName") || err.contains("Missing"),
+            "Expected missing componentName error, got: {}",
+            err
+        );
+    }
+
+    // === list_game_component_types ===
+
+    #[test]
+    fn list_game_component_types_returns_ok() {
+        let result = run("list_game_component_types", json!({}));
+        // This is a synchronous query that returns Ok immediately
+        assert!(result.is_ok(), "list_game_component_types should return Ok");
+    }
+
+    // === get_game_components (query) ===
+
+    #[test]
+    fn get_game_components_queues_query() {
+        let result = run("get_game_components", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === camera_shake ===
+
+    #[test]
+    fn camera_shake_accepts_intensity_and_duration() {
+        let result = run("camera_shake", json!({
+            "intensity": 0.5,
+            "duration": 1.0
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // Should reach handler (not "Unknown")
+        assert!(!err.contains("Unknown"), "Should reach camera_shake handler, got: {}", err);
+    }
+
+    // === mouse_delta ===
+
+    #[test]
+    fn mouse_delta_accepts_empty_payload_with_defaults() {
+        // dx and dy default to 0.0 if missing
+        let result = run("mouse_delta", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn mouse_delta_accepts_dx_dy_values() {
+        let result = run("mouse_delta", json!({"dx": 5.0, "dy": -3.0}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === set_active_game_camera ===
+
+    #[test]
+    fn set_active_game_camera_accepts_entity_id() {
+        let result = run("set_active_game_camera", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn set_active_game_camera_rejects_missing_entity_id() {
+        let result = run("set_active_game_camera", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("Missing"),
+            "Expected missing entity_id error, got: {}",
+            err
+        );
+    }
+
+    // === dispatch returns None for unknown commands ===
+
+    #[test]
+    fn dispatch_returns_none_for_unknown_command() {
+        let result = dispatch("definitely_not_game", &json!({}));
+        assert!(result.is_none(), "Unknown command should return None");
+    }
+}
