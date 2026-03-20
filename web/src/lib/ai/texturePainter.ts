@@ -201,19 +201,18 @@ export function applyMaterialChanges(
   dispatch: CommandDispatcher,
   intensity: number = 1.0,
   currentBaseColor?: [number, number, number, number],
+  currentRoughness: number = 0.5,
+  currentMetallic: number = 0.0,
 ): void {
   const adj = style.materialAdjustments;
   const payload: Record<string, unknown> = { entityId };
 
-  // Lerp toward target values using intensity (0 = keep current, 1 = full target)
-  // For roughness/metallic we assume a neutral default of 0.5 when current is unknown
+  // Lerp from entity's actual current values toward the style's target
   if (adj.roughness !== undefined) {
-    const current = 0.5; // TODO: read from entity when available
-    payload.perceptualRoughness = current + (adj.roughness - current) * intensity;
+    payload.perceptualRoughness = currentRoughness + (adj.roughness - currentRoughness) * intensity;
   }
   if (adj.metallic !== undefined) {
-    const current = 0.0;
-    payload.metallic = current + (adj.metallic - current) * intensity;
+    payload.metallic = currentMetallic + (adj.metallic - currentMetallic) * intensity;
   }
   if (adj.emissive !== undefined) {
     const e = adj.emissive * intensity;
@@ -256,6 +255,11 @@ export function detectCurrentStyle(materialData: MaterialData): TextureStyle | n
       const avgEmissive =
         (materialData.emissive[0] + materialData.emissive[1] + materialData.emissive[2]) / 3;
       score += Math.abs(avgEmissive - adj.emissive);
+    } else {
+      // Penalize materials with significant emissive when style doesn't define it
+      const avgEmissive =
+        (materialData.emissive[0] + materialData.emissive[1] + materialData.emissive[2]) / 3;
+      if (avgEmissive > 0.1) score += avgEmissive;
     }
 
     if (score < bestScore) {
