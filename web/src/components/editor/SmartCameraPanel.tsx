@@ -45,7 +45,8 @@ function buildSceneContext(): SmartCameraSceneContext {
     }
   }
 
-  const projectType = state.projectType ?? '3d';
+  const rawType = state.projectType;
+  const projectType: '2d' | '3d' = rawType === '2d' ? '2d' : '3d';
 
   return { entityNames, componentTypes, gameCameraModes, gameComponentTypes, projectType };
 }
@@ -218,7 +219,8 @@ export function SmartCameraPanel() {
         gameComponentTypes.push(comp.type);
       }
     }
-    const projectType = state.projectType ?? '3d';
+    const rawType = state.projectType;
+    const projectType: '2d' | '3d' = rawType === '2d' ? '2d' : '3d';
     const ctx: SmartCameraSceneContext = { entityNames, componentTypes, gameCameraModes, gameComponentTypes, projectType };
     return detectOptimalCamera(ctx);
   }, [sceneGraph]);
