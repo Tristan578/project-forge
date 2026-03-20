@@ -285,6 +285,7 @@ fn handle_coordinate_mode_shortcut(
 }
 
 /// Emit COORDINATE_MODE_CHANGED event to React.
+#[cfg(target_arch = "wasm32")]
 fn emit_coordinate_mode_changed(mode: CoordinateMode) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -298,6 +299,10 @@ fn emit_coordinate_mode_changed(mode: CoordinateMode) {
         display_name: mode.display_name(),
     });
 }
+
+/// No-op on non-wasm targets.
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_coordinate_mode_changed(_mode: CoordinateMode) {}
 
 /// Payload for transform change events sent to React.
 #[derive(Serialize, Clone, Debug)]
@@ -317,6 +322,7 @@ fn emit_transform_changes(
 ) {
     // Only track changes on the primary selected entity
     if let Some(primary) = selection.primary {
+        #[allow(unused_variables)]
         if let Ok((entity_id, transform)) = query.get(primary) {
             // Check if this is a meaningful change (not just floating point noise)
             let should_emit = last_transforms
@@ -327,20 +333,23 @@ fn emit_transform_changes(
             if should_emit {
                 last_transforms.insert(primary, *transform);
 
-                let (rx, ry, rz) = transform.rotation.to_euler(EulerRot::XYZ);
+                #[cfg(target_arch = "wasm32")]
+                {
+                    let (rx, ry, rz) = transform.rotation.to_euler(EulerRot::XYZ);
 
-                let payload = TransformPayload {
-                    entity_id: entity_id.0.clone(),
-                    position: [
-                        transform.translation.x,
-                        transform.translation.y,
-                        transform.translation.z,
-                    ],
-                    rotation: [rx, ry, rz],
-                    scale: [transform.scale.x, transform.scale.y, transform.scale.z],
-                };
+                    let payload = TransformPayload {
+                        entity_id: entity_id.0.clone(),
+                        position: [
+                            transform.translation.x,
+                            transform.translation.y,
+                            transform.translation.z,
+                        ],
+                        rotation: [rx, ry, rz],
+                        scale: [transform.scale.x, transform.scale.y, transform.scale.z],
+                    };
 
-                crate::bridge::events::emit_event("TRANSFORM_CHANGED", &payload);
+                    crate::bridge::events::emit_event("TRANSFORM_CHANGED", &payload);
+                }
             }
         }
     }

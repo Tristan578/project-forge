@@ -80,6 +80,7 @@ fn detect_snap_modifier(
         snap_settings.snap_enabled = ctrl_pressed;
 
         // Emit event to React when snap state changes
+        #[cfg(target_arch = "wasm32")]
         crate::bridge::events::emit_snap_settings_changed(&snap_settings);
     }
 }

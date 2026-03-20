@@ -7,8 +7,10 @@
 //!
 //! All JS interop MUST go through the bridge layer.
 
+#[cfg(target_arch = "wasm32")]
 pub mod bridge;
 pub mod core;
 
-// Re-export bridge functions for wasm-bindgen
+// Re-export bridge functions for wasm-bindgen (wasm32 only)
+#[cfg(target_arch = "wasm32")]
 pub use bridge::*;

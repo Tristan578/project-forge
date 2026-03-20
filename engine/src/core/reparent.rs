@@ -7,6 +7,7 @@ use bevy::prelude::*;
 
 use super::entity_id::EntityId;
 use super::pending_commands::{PendingCommands, ReparentRequest};
+#[cfg(target_arch = "wasm32")]
 use crate::bridge::events::emit_event;
 
 /// System that processes reparent requests from the bridge.
@@ -111,6 +112,7 @@ fn is_descendant_of(
 }
 
 /// Emit reparent result event to JavaScript.
+#[cfg(target_arch = "wasm32")]
 fn emit_reparent_result(entity_id: &str, success: bool, error: Option<String>) {
     let payload = serde_json::json!({
         "success": success,
@@ -120,3 +122,7 @@ fn emit_reparent_result(entity_id: &str, success: bool, error: Option<String>) {
 
     emit_event("REPARENT_RESULT", &payload);
 }
+
+/// No-op on non-wasm targets.
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_reparent_result(_entity_id: &str, _success: bool, _error: Option<String>) {}
