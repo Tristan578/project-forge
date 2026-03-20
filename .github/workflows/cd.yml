@@ -198,7 +198,12 @@ jobs:
       - name: Detect changed paths
         id: filter
         run: |
-          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          # Use push event's before SHA for accurate diff (handles squash merges)
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE="HEAD~1"
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" HEAD)
 
           if echo "$CHANGED" | grep -q '^engine/'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
@@ -298,6 +303,7 @@ jobs:
     name: E2E (UI)
     runs-on: ubuntu-latest
     needs: [build-wasm]
+    if: ${{ needs.build-wasm.result == 'success' }}
     timeout-minutes: 15
     permissions:
       contents: read
