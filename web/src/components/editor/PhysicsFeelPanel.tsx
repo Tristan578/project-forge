@@ -73,7 +73,15 @@ export function PhysicsFeelPanel() {
   // --- Entity IDs with physics ---
   const physicsEntityIds = useMemo(() => {
     if (!sceneGraph) return [];
-    return Object.keys(sceneGraph.nodes);
+    const PHYSICS_COMPONENTS = new Set([
+      'PhysicsData',
+      'PhysicsEnabled',
+      'RigidBody',
+      'Collider',
+    ]);
+    return Object.values(sceneGraph.nodes)
+      .filter((node) => node.components.some((c) => PHYSICS_COMPONENTS.has(c)))
+      .map((node) => node.entityId);
   }, [sceneGraph]);
 
   // --- Handlers ---
@@ -99,8 +107,7 @@ export function PhysicsFeelPanel() {
     applyPhysicsProfile(currentProfile, dispatch, physicsEntityIds);
     setApplied(true);
     // Reset the "applied" indicator after 2 seconds
-    const timeout = setTimeout(() => setApplied(false), 2000);
-    return () => clearTimeout(timeout);
+    setTimeout(() => setApplied(false), 2000);
   }, [currentProfile, physicsEntityIds]);
 
   const handleCustomGenerate = useCallback(() => {
