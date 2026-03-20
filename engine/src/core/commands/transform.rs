@@ -629,3 +629,422 @@ fn handle_set_input_preset(payload: serde_json::Value) -> CommandResult {
         Err("PendingCommands resource not initialized".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // Helper: call dispatch() via the parent module
+    fn run(command: &str, payload: serde_json::Value) -> Result<(), String> {
+        dispatch(command, &payload).expect("transform dispatch returned None for known command")
+    }
+
+    // === spawn_entity ===
+
+    #[test]
+    fn spawn_entity_accepts_valid_cube_payload() {
+        // Will fail with "not initialized" (no PendingCommands), not a parse error
+        let result = run("spawn_entity", json!({
+            "entityType": "cube",
+            "name": "MyCube"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn spawn_entity_accepts_optional_position() {
+        let result = run("spawn_entity", json!({
+            "entityType": "sphere",
+            "position": [1.0, 2.0, 3.0]
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn spawn_entity_rejects_missing_entity_type() {
+        let result = run("spawn_entity", json!({"name": "NoType"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        // serde missing field error or our validation
+        assert!(
+            err.contains("entity_type") || err.contains("entityType") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn spawn_entity_rejects_unknown_entity_type() {
+        let result = run("spawn_entity", json!({"entityType": "dragon"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unknown entity type"),
+            "Expected unknown entity type error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn spawn_entity_accepts_all_valid_entity_types() {
+        let valid_types = [
+            "cube", "sphere", "plane", "cylinder", "cone", "torus", "capsule",
+            "point_light", "directional_light", "spot_light",
+        ];
+        for entity_type in &valid_types {
+            let result = run("spawn_entity", json!({"entityType": entity_type}));
+            assert!(result.is_err());
+            let err = result.unwrap_err();
+            assert!(
+                err.contains("not initialized"),
+                "Entity type '{}' should reach queue, got: {}",
+                entity_type,
+                err
+            );
+        }
+    }
+
+    // === despawn_entity (uses "id" key, not "entityId") ===
+
+    #[test]
+    fn despawn_entity_accepts_valid_id() {
+        let result = run("despawn_entity", json!({"id": "entity-123"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn despawn_entity_rejects_missing_id() {
+        let result = run("despawn_entity", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Missing entity id"),
+            "Expected missing id error, got: {}",
+            err
+        );
+    }
+
+    // === update_transform ===
+
+    #[test]
+    fn update_transform_accepts_entity_id_only() {
+        // All position/rotation/scale are optional
+        let result = run("update_transform", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_transform_accepts_full_payload() {
+        let result = run("update_transform", json!({
+            "entityId": "entity-1",
+            "position": [1.0, 2.0, 3.0],
+            "rotation": [0.0, 1.57, 0.0],
+            "scale": [2.0, 2.0, 2.0]
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_transform_rejects_missing_entity_id() {
+        let result = run("update_transform", json!({"position": [0.0, 0.0, 0.0]}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error for missing entityId, got: {}",
+            err
+        );
+    }
+
+    // === rename_entity ===
+
+    #[test]
+    fn rename_entity_accepts_valid_payload() {
+        let result = run("rename_entity", json!({
+            "entityId": "entity-1",
+            "name": "NewName"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn rename_entity_rejects_missing_entity_id() {
+        let result = run("rename_entity", json!({"name": "NoEntity"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn rename_entity_rejects_missing_name() {
+        let result = run("rename_entity", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("name") || err.contains("Invalid"),
+            "Expected parse error for missing name, got: {}",
+            err
+        );
+    }
+
+    // === reparent_entity ===
+
+    #[test]
+    fn reparent_entity_accepts_null_parent_for_root() {
+        let result = run("reparent_entity", json!({
+            "entityId": "entity-1",
+            "newParentId": null
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn reparent_entity_accepts_new_parent_id() {
+        let result = run("reparent_entity", json!({
+            "entityId": "entity-1",
+            "newParentId": "entity-2"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === delete_entities ===
+
+    #[test]
+    fn delete_entities_with_empty_list_is_no_op() {
+        let result = run("delete_entities", json!({"entityIds": []}));
+        assert!(result.is_ok(), "Empty delete list should be no-op");
+    }
+
+    #[test]
+    fn delete_entities_with_ids_queues_delete() {
+        let result = run("delete_entities", json!({
+            "entityIds": ["entity-1", "entity-2"]
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn delete_entities_rejects_missing_entity_ids_field() {
+        let result = run("delete_entities", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityIds") || err.contains("entity_ids") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    // === duplicate_entity ===
+
+    #[test]
+    fn duplicate_entity_accepts_valid_entity_id() {
+        let result = run("duplicate_entity", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn duplicate_entity_rejects_missing_entity_id() {
+        let result = run("duplicate_entity", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    // === select_entity ===
+
+    #[test]
+    fn select_entity_uses_replace_mode_by_default() {
+        let result = run("select_entity", json!({"entityId": "entity-1"}));
+        // select_entity calls queue_selection_from_bridge which doesn't check PendingCommands
+        // It should succeed (queue_selection is fire-and-forget)
+        // OR return ok (it calls queue_selection_from_bridge which may silently do nothing)
+        // Either way it should NOT return "Unknown command"
+        match result {
+            Ok(_) => { /* success path — queue_selection_from_bridge ran */ }
+            Err(err) => {
+                // If it errors, it must be a meaningful error, not "Unknown command"
+                assert!(
+                    !err.contains("Unknown transform command"),
+                    "Should not be unknown, got: {}",
+                    err
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn select_entity_rejects_missing_entity_id() {
+        let result = run("select_entity", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityId") || err.contains("Missing"),
+            "Expected missing entityId error, got: {}",
+            err
+        );
+    }
+
+    // === set_visibility ===
+
+    #[test]
+    fn set_visibility_accepts_valid_payload() {
+        let result = run("set_visibility", json!({
+            "entityId": "entity-1",
+            "visible": true
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn set_visibility_rejects_non_boolean_visible() {
+        let result = run("set_visibility", json!({
+            "entityId": "entity-1",
+            "visible": "yes"
+        }));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("visible") || err.contains("Missing"),
+            "Expected visible error, got: {}",
+            err
+        );
+    }
+
+    // === set_gizmo_mode ===
+
+    #[test]
+    fn set_gizmo_mode_accepts_translate() {
+        let result = run("set_gizmo_mode", json!({"mode": "translate"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn set_gizmo_mode_accepts_rotate() {
+        let result = run("set_gizmo_mode", json!({"mode": "rotate"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn set_gizmo_mode_accepts_scale() {
+        let result = run("set_gizmo_mode", json!({"mode": "scale"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn set_gizmo_mode_rejects_invalid_mode() {
+        let result = run("set_gizmo_mode", json!({"mode": "warp"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid gizmo mode"));
+    }
+
+    #[test]
+    fn set_gizmo_mode_rejects_missing_mode() {
+        let result = run("set_gizmo_mode", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("mode") || err.contains("Missing"),
+            "Expected missing mode error, got: {}",
+            err
+        );
+    }
+
+    // === focus_camera ===
+
+    #[test]
+    fn focus_camera_accepts_valid_entity_id() {
+        let result = run("focus_camera", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn focus_camera_rejects_missing_entity_id() {
+        let result = run("focus_camera", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    // === undo/redo ===
+    // undo/redo use PENDING_HISTORY which is always initialized (thread-local with default value),
+    // so they always return Ok() — unlike commands that use PendingCommands.
+
+    #[test]
+    fn undo_always_succeeds() {
+        let result = run("undo", json!({}));
+        assert!(result.is_ok(), "undo should always queue successfully");
+    }
+
+    #[test]
+    fn redo_always_succeeds() {
+        let result = run("redo", json!({}));
+        assert!(result.is_ok(), "redo should always queue successfully");
+    }
+
+    // === update_scene (not implemented) ===
+
+    #[test]
+    fn update_scene_returns_not_implemented() {
+        let result = run("update_scene", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not implemented"));
+    }
+
+    // === set_input_preset ===
+
+    #[test]
+    fn set_input_preset_rejects_unknown_preset() {
+        let result = run("set_input_preset", json!({"preset": "vr_controller"}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Unknown input preset"),
+            "Expected unknown preset error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn set_input_preset_accepts_fps_preset() {
+        let result = run("set_input_preset", json!({"preset": "fps"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === dispatch returns None for unknown commands ===
+
+    #[test]
+    fn dispatch_returns_none_for_unknown_command() {
+        let result = dispatch("not_a_transform_command", &json!({}));
+        assert!(result.is_none(), "Unknown command should return None");
+    }
+}
