@@ -205,8 +205,10 @@ export function TutorialPanel() {
     const a = document.createElement('a');
     a.href = url;
     a.download = 'tutorial.ts';
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }, [plan]);
 
   const handleToggleStep = useCallback((index: number) => {
