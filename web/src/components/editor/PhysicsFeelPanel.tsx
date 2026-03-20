@@ -70,18 +70,13 @@ export function PhysicsFeelPanel() {
     return interpolateProfiles(presetA, presetB, blendT);
   }, [selectedPresetA, selectedPresetB, blendT]);
 
-  // --- Entity IDs with physics ---
+  // --- Entity IDs to apply physics profiles to ---
+  // SceneNode.components is always [] (detect_components() returns vec![] in Rust).
+  // Until the engine emits real component data, apply to all entities —
+  // the engine ignores physics commands on non-physics entities.
   const physicsEntityIds = useMemo(() => {
     if (!sceneGraph) return [];
-    const PHYSICS_COMPONENTS = new Set([
-      'PhysicsData',
-      'PhysicsEnabled',
-      'RigidBody',
-      'Collider',
-    ]);
-    return Object.values(sceneGraph.nodes)
-      .filter((node) => node.components.some((c) => PHYSICS_COMPONENTS.has(c)))
-      .map((node) => node.entityId);
+    return Object.values(sceneGraph.nodes).map((node) => node.entityId);
   }, [sceneGraph]);
 
   // --- Handlers ---
