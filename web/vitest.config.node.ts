@@ -18,6 +18,8 @@ export default defineConfig({
       'src/stores/**/*.test.tsx',
       'src/app/api/**/*.test.ts',
       'src/app/api/**/*.test.tsx',
+      'src/__integration__/**/*.test.ts',
+      'src/__integration__/**/*.test.tsx',
     ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
