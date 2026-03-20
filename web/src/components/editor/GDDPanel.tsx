@@ -180,8 +180,10 @@ export function GDDPanel() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `${gdd.title.replace(/[^a-zA-Z0-9]/g, '_')}_GDD.md`;
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }, [gdd]);
 
   const handleKeyDown = useCallback(
