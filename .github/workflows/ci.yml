@@ -3,6 +3,14 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    paths:
+      - 'web/**'
+      - 'mcp-server/**'
+      - 'engine/**'
+      - 'scripts/**'
+      - '.github/workflows/**'
+      - 'package.json'
+      - 'package-lock.json'
 
 concurrency:
   group: ci-${{ github.ref }}

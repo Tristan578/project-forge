@@ -46,11 +46,11 @@ jobs:
           node-version: 20
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@latest
+        run: npm i -g vercel@50.34.3
 
       - name: Promote previous deployment to production
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           ROLLBACK_URL: ${{ github.event.inputs.rollback_production }}
@@ -181,10 +181,52 @@ jobs:
       - run: npx vitest run
         working-directory: mcp-server
 
+  check-changes:
+    name: Detect Changed Paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      engine-changed: ${{ steps.filter.outputs.engine }}
+      web-changed: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed paths
+        id: filter
+        run: |
+          # Use push event's before SHA for accurate diff (handles squash merges)
+          BEFORE="${{ github.event.before }}"
+          if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            BEFORE="HEAD~1"
+          fi
+          CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+
+          if echo "$CHANGED" | grep -q '^engine/'; then
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            echo "Engine files changed — WASM build required"
+          else
+            echo "engine=false" >> "$GITHUB_OUTPUT"
+            echo "No engine changes — skipping WASM build"
+          fi
+
+          if echo "$CHANGED" | grep -qE '^web/|^package\.json|^\.github/'; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "Web files changed — deploy required"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
+            echo "No web changes — skipping deploy"
+          fi
+
   build-wasm:
     name: WASM Build
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    needs: [check-changes]
+    if: ${{ needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch' }}
     permissions:
       contents: read
     steps:
@@ -198,11 +240,11 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Try downloading editor WASM from CI (same SHA)
+      - name: Try downloading WASM from CI (same SHA)
         id: ci-wasm
         uses: actions/download-artifact@v4
         with:
-          name: wasm-editor-${{ github.sha }}
+          name: wasm-binaries
           path: engine/
         continue-on-error: true
 
@@ -231,18 +273,22 @@ jobs:
         run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGL2 Runtime (stripped editor)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
 
       - name: Run wasm-bindgen (WebGL2 Runtime)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU Runtime (stripped editor)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
 
       - name: Run wasm-bindgen (WebGPU Runtime)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
@@ -261,6 +307,7 @@ jobs:
     name: E2E (UI)
     runs-on: ubuntu-latest
     needs: [build-wasm]
+    if: ${{ needs.build-wasm.result == 'success' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -411,9 +458,9 @@ jobs:
         env:
           WASM_SOURCE_DIR: wasm-upload
           ENGINE_VERSION: ${{ github.sha }}
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.ASSET_R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.ASSET_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.ASSET_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ vars.R2_BUCKET || 'spawnforge-engine' }}
 
   # ---- Stage 1: Deploy to Staging ----
@@ -423,8 +470,20 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
-    if: ${{ vars.VERCEL_DEPLOY_ENABLED == 'true' && github.event.inputs.promote_to_production != 'true' && (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped') }}
+    needs: [check-changes, lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
+    if: |
+      always() &&
+      vars.VERCEL_DEPLOY_ENABLED == 'true' &&
+      github.event.inputs.promote_to_production != 'true' &&
+      (needs.check-changes.outputs.web-changed == 'true' || needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch') &&
+      needs.lint.result == 'success' &&
+      needs.typecheck.result == 'success' &&
+      needs.test-web.result == 'success' &&
+      needs.test-mcp.result == 'success' &&
+      needs.security.result == 'success' &&
+      (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
+      (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped')
     permissions:
       contents: read
       deployments: write
@@ -441,7 +500,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@latest
+        run: npm i -g vercel@50.34.3
 
       - name: Download WASM artifacts
         if: ${{ vars.R2_CDN_ENABLED != 'true' }}
@@ -465,7 +524,7 @@ jobs:
       - name: Pull Vercel environment (staging)
         working-directory: web
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
@@ -473,7 +532,7 @@ jobs:
       - name: Build with Vercel
         working-directory: web
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel build --token="$VERCEL_TOKEN"
@@ -482,7 +541,7 @@ jobs:
         id: deploy
         working-directory: web
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
@@ -494,7 +553,7 @@ jobs:
         id: health-check-staging
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
-          HEALTH_CHECK_STABILIZE_S: '30'
+          HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
@@ -506,7 +565,7 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
+    needs: [check-changes, lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
@@ -517,8 +576,8 @@ jobs:
          needs.typecheck.result == 'success' &&
          needs.test-web.result == 'success' &&
          needs.test-mcp.result == 'success' &&
-         needs.build-wasm.result == 'success' &&
-         needs.e2e.result == 'success' &&
+         (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
+         (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') &&
          needs.security.result == 'success' &&
          (needs.upload-wasm-cdn.result == 'success' || needs.upload-wasm-cdn.result == 'skipped'))
       )
@@ -538,7 +597,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@latest
+        run: npm i -g vercel@50.34.3
 
       - name: Download WASM artifacts
         if: ${{ vars.R2_CDN_ENABLED != 'true' }}
@@ -562,15 +621,15 @@ jobs:
       - name: Capture current production URL (last-known-good)
         id: prev-deploy
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           # Retrieve the URL of the deployment currently aliased to production.
           # This becomes the rollback target if the new deployment fails health checks.
-          prev_url=$(vercel ls --scope "$VERCEL_ORG_ID" --prod \
+          prev_url=$(vercel inspect --scope "$VERCEL_ORG_ID" --prod \
             --token="$VERCEL_TOKEN" 2>/dev/null \
-            | awk 'NR==2 {print $2}' || echo "")
+            | grep -oP 'https://[^ ]+\.vercel\.app' | head -1 || echo "")
           if [[ -n "$prev_url" && "$prev_url" != "http"* ]]; then
             prev_url="https://${prev_url}"
           fi
@@ -580,7 +639,7 @@ jobs:
       - name: Pull Vercel environment (production)
         working-directory: web
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
@@ -588,7 +647,7 @@ jobs:
       - name: Build with Vercel
         working-directory: web
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel build --prod --token="$VERCEL_TOKEN"
@@ -597,7 +656,7 @@ jobs:
         id: deploy
         working-directory: web
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
@@ -609,7 +668,7 @@ jobs:
         id: health-check-production
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
-          HEALTH_CHECK_STABILIZE_S: '30'
+          HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
@@ -617,7 +676,7 @@ jobs:
       - name: Rollback production on health check failure
         if: ${{ failure() && steps.health-check-production.outcome == 'failure' && steps.prev-deploy.outputs.prev_url != '' }}
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}

@@ -108,14 +108,23 @@ jobs:
           echo "/manifest.json OK"
 
       # -- Check 4: WASM binary -------------------------------------------------
-      - name: WASM available (/engine-pkg-webgl2/forge_engine_bg.wasm)
+      # When R2 CDN is enabled, WASM lives at engine.spawnforge.ai, not in Vercel.
+      - name: WASM available
         id: wasm
+        env:
+          R2_CDN_ENABLED: ${{ vars.R2_CDN_ENABLED }}
         run: |
-          WASM_PATH="/engine-pkg-webgl2/forge_engine_bg.wasm"
+          if [ "${R2_CDN_ENABLED:-false}" = "true" ]; then
+            WASM_URL="https://engine.spawnforge.ai/latest/engine-pkg-webgl2/forge_engine_bg.wasm"
+          else
+            WASM_URL="${TARGET_URL}/engine-pkg-webgl2/forge_engine_bg.wasm"
+          fi
+          WASM_PATH="$WASM_URL"
+          echo "Checking WASM at: $WASM_URL"
           RESPONSE=$(curl --silent --head --output /dev/null \
             --write-out "%{http_code}|%{content_type}" \
             --max-time 10 \
-            "$TARGET_URL$WASM_PATH")
+            "$WASM_URL")
           HTTP_CODE=$(echo "$RESPONSE" | cut -d'|' -f1)
           CONTENT_TYPE=$(echo "$RESPONSE" | cut -d'|' -f2)
           echo "http_code=$HTTP_CODE" >> "$GITHUB_OUTPUT"
