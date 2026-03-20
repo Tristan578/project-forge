@@ -1,0 +1,8 @@
+{
+  "success": true,
+  "result": {
+    "entityId": "entity-spawned",
+    "entityType": "cube",
+    "name": "Cube"
+  }
+}
