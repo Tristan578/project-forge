@@ -594,7 +594,14 @@ export async function generateWorld(description: string, preset?: string): Promi
   }
 
   if (!response.ok) {
-    return structuredClone(fallback);
+    // Surface the error to the caller so the UI can show a meaningful message
+    // (e.g., "Not enough tokens" for 402, "Too many requests" for 429)
+    let errorMsg = `AI generation failed (${response.status})`;
+    try {
+      const errBody = await response.json();
+      if (errBody.error) errorMsg = errBody.error;
+    } catch { /* response may not be JSON */ }
+    throw new Error(errorMsg);
   }
 
   let content = '';
