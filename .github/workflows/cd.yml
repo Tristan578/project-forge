@@ -46,7 +46,7 @@ jobs:
           node-version: 20
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@latest
+        run: npm i -g vercel@50.34.3
 
       - name: Promote previous deployment to production
         env:
@@ -240,11 +240,11 @@ jobs:
         with:
           workspaces: engine -> target
 
-      - name: Try downloading editor WASM from CI (same SHA)
+      - name: Try downloading WASM from CI (same SHA)
         id: ci-wasm
         uses: actions/download-artifact@v4
         with:
-          name: wasm-editor-${{ github.sha }}
+          name: wasm-binaries
           path: engine/
         continue-on-error: true
 
@@ -273,18 +273,22 @@ jobs:
         run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGL2 Runtime (stripped editor)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
 
       - name: Run wasm-bindgen (WebGL2 Runtime)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGPU Runtime (stripped editor)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
 
       - name: Run wasm-bindgen (WebGPU Runtime)
+        if: steps.ci-wasm.outcome != 'success'
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
@@ -496,7 +500,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@latest
+        run: npm i -g vercel@50.34.3
 
       - name: Download WASM artifacts
         if: ${{ vars.R2_CDN_ENABLED != 'true' }}
@@ -549,7 +553,7 @@ jobs:
         id: health-check-staging
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
-          HEALTH_CHECK_STABILIZE_S: '30'
+          HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
@@ -593,7 +597,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@latest
+        run: npm i -g vercel@50.34.3
 
       - name: Download WASM artifacts
         if: ${{ vars.R2_CDN_ENABLED != 'true' }}
@@ -623,9 +627,9 @@ jobs:
         run: |
           # Retrieve the URL of the deployment currently aliased to production.
           # This becomes the rollback target if the new deployment fails health checks.
-          prev_url=$(vercel ls --scope "$VERCEL_ORG_ID" --prod \
+          prev_url=$(vercel inspect --scope "$VERCEL_ORG_ID" --prod \
             --token="$VERCEL_TOKEN" 2>/dev/null \
-            | awk 'NR==2 {print $2}' || echo "")
+            | grep -oP 'https://[^ ]+\.vercel\.app' | head -1 || echo "")
           if [[ -n "$prev_url" && "$prev_url" != "http"* ]]; then
             prev_url="https://${prev_url}"
           fi
@@ -664,7 +668,7 @@ jobs:
         id: health-check-production
         env:
           DEPLOY_URL: ${{ steps.deploy.outputs.url }}
-          HEALTH_CHECK_STABILIZE_S: '30'
+          HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
