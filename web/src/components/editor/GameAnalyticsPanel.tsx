@@ -67,13 +67,13 @@ function HeatmapGrid({ points }: { points: HeatmapPoint[] }) {
     );
   }
 
-  const maxCount = Math.max(...points.map((p) => p.count));
+  const maxCount = points.reduce((acc, p) => (p.count > acc ? p.count : acc), 0);
 
   // Determine grid bounds
-  const minX = Math.min(...points.map((p) => p.x));
-  const maxX = Math.max(...points.map((p) => p.x));
-  const minY = Math.min(...points.map((p) => p.y));
-  const maxY = Math.max(...points.map((p) => p.y));
+  const minX = points.reduce((acc, p) => (p.x < acc ? p.x : acc), points[0].x);
+  const maxX = points.reduce((acc, p) => (p.x > acc ? p.x : acc), points[0].x);
+  const minY = points.reduce((acc, p) => (p.y < acc ? p.y : acc), points[0].y);
+  const maxY = points.reduce((acc, p) => (p.y > acc ? p.y : acc), points[0].y);
   const rangeX = maxX - minX || 1;
   const rangeY = maxY - minY || 1;
 
@@ -129,7 +129,7 @@ function FunnelChart({ stages }: { stages: FunnelStage[] }) {
     );
   }
 
-  const maxCount = Math.max(...stages.map((s) => s.count), 1);
+  const maxCount = stages.reduce((acc, s) => (s.count > acc ? s.count : acc), 1);
 
   return (
     <div className="space-y-1.5">
@@ -256,7 +256,7 @@ export function GameAnalyticsPanel({
     link.href = url;
     link.download = 'game-analytics.csv';
     link.click();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }, [sessions]);
 
   return (
