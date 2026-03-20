@@ -226,6 +226,7 @@ pub fn detect_manual_orbit_system(
 }
 
 /// Emit VIEW_PRESET_CHANGED event to React.
+#[cfg(target_arch = "wasm32")]
 fn emit_view_preset_changed(preset: CameraPreset) {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -240,7 +241,12 @@ fn emit_view_preset_changed(preset: CameraPreset) {
     });
 }
 
+/// No-op on non-wasm targets.
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_view_preset_changed(_preset: CameraPreset) {}
+
 /// Emit event when preset is cleared (user manually orbited).
+#[cfg(target_arch = "wasm32")]
 fn emit_view_preset_changed_cleared() {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -254,3 +260,7 @@ fn emit_view_preset_changed_cleared() {
         display_name: None,
     });
 }
+
+/// No-op on non-wasm targets.
+#[cfg(not(target_arch = "wasm32"))]
+fn emit_view_preset_changed_cleared() {}

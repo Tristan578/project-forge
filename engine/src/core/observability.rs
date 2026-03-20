@@ -14,6 +14,7 @@ impl Plugin for ObservabilityPlugin {
 /// System that detects when the first frame has been processed.
 /// Runs once in PostStartup to signal that initialization is complete.
 fn detect_first_frame() {
-    // Emit ready event through the bridge
+    // Emit ready event through the bridge (wasm32 only)
+    #[cfg(target_arch = "wasm32")]
     crate::bridge::emit_init_event("ready", Some("First frame rendered"), None);
 }
