@@ -152,13 +152,13 @@ function backendIdToProviderName(
     // Map capabilities to the underlying provider for the direct backend
     const capabilityProviderMap: Partial<Record<ProviderCapability, ProviderName>> = {
       chat: 'anthropic',
-      embedding: 'anthropic',
+      embedding: 'openai',
       model3d: 'meshy',
       texture: 'meshy',
       sfx: 'elevenlabs',
       voice: 'elevenlabs',
       music: 'suno',
-      image: 'replicate',
+      image: 'openai',
       sprite: 'replicate',
       bg_removal: 'removebg',
     };
