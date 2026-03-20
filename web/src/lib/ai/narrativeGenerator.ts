@@ -524,10 +524,18 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
   // Map from scene ID to its first dialogue node ID
   const sceneEntryNodeMap = new Map<string, string>();
 
-  // First pass: create entry node IDs for each scene
+  // First pass: create entry node IDs for each scene.
+  // When a scene has no dialogue lines, the entry point is the choices node
+  // (if choices exist) or the end node — never _d0 which would not be created.
   for (const act of arc.acts) {
     for (const scene of act.scenes) {
-      const entryId = `${scene.id}_d0`;
+      const hasDialogue = Array.isArray(scene.dialogue) && scene.dialogue.length > 0;
+      const hasChoices = Array.isArray(scene.choices) && scene.choices.length > 0;
+      const entryId = hasDialogue
+        ? `${scene.id}_d0`
+        : hasChoices
+          ? `${scene.id}_choices`
+          : `${scene.id}_end`;
       sceneEntryNodeMap.set(scene.id, entryId);
       if (!firstNodeId) firstNodeId = entryId;
     }
@@ -536,7 +544,7 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
   // Second pass: create all nodes
   for (const act of arc.acts) {
     for (const scene of act.scenes) {
-      const dialogueLines = scene.dialogue;
+      const dialogueLines = Array.isArray(scene.dialogue) ? scene.dialogue : [];
       const sceneChoices = scene.choices;
 
       for (let i = 0; i < dialogueLines.length; i++) {

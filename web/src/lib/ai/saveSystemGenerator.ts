@@ -485,7 +485,7 @@ function parseAIResponse(raw: string): { config: SaveSystemConfig; checkpoints: 
 
   const config: SaveSystemConfig = {
     saveSlots: Math.min(20, Math.max(1, Number(data.config?.saveSlots) || 3)),
-    autoSaveInterval: Math.max(0, Number(data.config?.autoSaveInterval) || 60),
+    autoSaveInterval: Math.max(0, Number(data.config?.autoSaveInterval) ?? 60),
     checkpointTriggers: Array.isArray(data.config?.checkpointTriggers)
       ? data.config.checkpointTriggers.filter((t: string) =>
           ['zone_enter', 'enemy_clear', 'item_pickup', 'manual'].includes(t),
