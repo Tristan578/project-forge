@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * PF-375: Error scenario tests for the export pipeline.
  *

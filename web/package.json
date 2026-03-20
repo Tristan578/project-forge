@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "NODE_OPTIONS='--no-experimental-webstorage' vitest run",
+    "test:changed": "NODE_OPTIONS='--no-experimental-webstorage' vitest run --changed",
     "test:watch": "NODE_OPTIONS='--no-experimental-webstorage' vitest",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",

@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Tests for export expansion features:
  * - Embed export format with postMessage bridge

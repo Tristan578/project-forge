@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * Tests for useScriptRunner hook — worker lifecycle, command dispatch,
  * message handling, watchdog timeout, audio commands, and cleanup.
