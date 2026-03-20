@@ -660,3 +660,193 @@ fn handle_remove_custom_shader_slot(payload: serde_json::Value) -> super::Comman
         Err("PendingCommands resource not initialized".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn run(command: &str, payload: serde_json::Value) -> Result<(), String> {
+        dispatch(command, &payload).expect("material dispatch returned None for known command")
+    }
+
+    // === update_material ===
+
+    #[test]
+    fn update_material_accepts_entity_id_only() {
+        let result = run("update_material", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_material_accepts_full_material_payload() {
+        let result = run("update_material", json!({
+            "entityId": "entity-1",
+            "baseColor": [1.0, 0.0, 0.0, 1.0],
+            "metallic": 0.5,
+            "perceptualRoughness": 0.3,
+            "reflectance": 0.5,
+            "unlit": false
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_material_rejects_missing_entity_id() {
+        let result = run("update_material", json!({"metallic": 0.5}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn update_material_accepts_alpha_mode_blend() {
+        let result = run("update_material", json!({
+            "entityId": "entity-1",
+            "alphaMode": "blend"
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_material_accepts_unknown_alpha_mode_as_opaque() {
+        // Unknown alpha mode falls through to Opaque default
+        let result = run("update_material", json!({
+            "entityId": "entity-1",
+            "alphaMode": "unknown_mode"
+        }));
+        assert!(result.is_err());
+        // Should reach queue (not a parse error), then fail with not initialized
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === update_light ===
+
+    #[test]
+    fn update_light_accepts_entity_id_only() {
+        let result = run("update_light", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_light_accepts_color_and_intensity() {
+        let result = run("update_light", json!({
+            "entityId": "entity-1",
+            "color": [1.0, 1.0, 0.8],
+            "intensity": 500.0,
+            "shadowsEnabled": true
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_light_rejects_missing_entity_id() {
+        let result = run("update_light", json!({"intensity": 100.0}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entity_id") || err.contains("entityId") || err.contains("Invalid"),
+            "Expected parse error, got: {}",
+            err
+        );
+    }
+
+    // === update_ambient_light ===
+
+    #[test]
+    fn update_ambient_light_accepts_empty_payload() {
+        let result = run("update_ambient_light", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn update_ambient_light_accepts_color_and_brightness() {
+        let result = run("update_ambient_light", json!({
+            "color": [0.5, 0.5, 0.5],
+            "brightness": 0.3
+        }));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === update_environment ===
+
+    #[test]
+    fn update_environment_accepts_empty_payload() {
+        let result = run("update_environment", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === remove_custom_shader ===
+
+    #[test]
+    fn remove_custom_shader_accepts_valid_entity_id() {
+        let result = run("remove_custom_shader", json!({"entityId": "entity-1"}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    #[test]
+    fn remove_custom_shader_rejects_missing_entity_id() {
+        let result = run("remove_custom_shader", json!({}));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("entityId") || err.contains("Missing"),
+            "Expected missing entityId, got: {}",
+            err
+        );
+    }
+
+    // === list_shaders (not implemented) ===
+
+    #[test]
+    fn list_shaders_returns_not_implemented() {
+        let result = run("list_shaders", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not implemented"));
+    }
+
+    // === validate_wgsl ===
+
+    #[test]
+    fn validate_wgsl_rejects_missing_source() {
+        let result = run("validate_wgsl", json!({}));
+        assert!(result.is_err());
+        // Missing "source" field should be an error
+        let err = result.unwrap_err();
+        assert!(
+            !err.contains("Unknown material command"),
+            "Should reach validate_wgsl handler, got: {}",
+            err
+        );
+    }
+
+    // === get_post_processing ===
+
+    #[test]
+    fn get_post_processing_queues_query() {
+        let result = run("get_post_processing", json!({}));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not initialized"));
+    }
+
+    // === dispatch returns None for unknown commands ===
+
+    #[test]
+    fn dispatch_returns_none_for_unknown_command() {
+        let result = dispatch("definitely_not_material", &json!({}));
+        assert!(result.is_none(), "Unknown command should return None");
+    }
+}
