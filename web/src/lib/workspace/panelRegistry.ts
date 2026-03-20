@@ -127,6 +127,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 220,
     minHeight: 200,
   },
+  'pacing-analyzer': {
+    id: 'pacing-analyzer',
+    title: 'Pacing Analyzer',
+    component: 'pacing-analyzer',
+    minWidth: 280,
+    minHeight: 200,
+  },
   review: {
     id: 'review',
     title: 'AI Review',
