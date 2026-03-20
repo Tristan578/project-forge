@@ -5,6 +5,9 @@ description: "Taskboard management skill. Use this to view, create, update, and 
 
 # Taskboard Management Protocol
 
+## Active Tickets
+!`curl -s http://localhost:3010/api/tickets?status=in_progress 2>/dev/null | python3 -c "import json,sys; data=json.load(sys.stdin); [print(f'  PF-{t[\"number\"]} [{t[\"priority\"]}] {t[\"title\"][:70]}') for t in (data if isinstance(data,list) else [])]" 2>/dev/null || echo "  Taskboard not running"`
+
 You manage project work via the **taskboard MCP server** (22 tools). The taskboard is the single source of truth for all project work.
 
 **Web UI:** http://localhost:3010

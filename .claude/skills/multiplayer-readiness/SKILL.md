@@ -1,6 +1,8 @@
 ---
 name: multiplayer-readiness
 description: Use when modifying entity state management, physics, scene serialization, input handling, or scripting sandbox. Flags architectural decisions that would make future multiplayer harder. Trigger on "multiplayer", "networking", "state sync", "entity authority", "determinism", or when touching core ECS state flow.
+context: fork
+agent: Explore
 ---
 
 <!-- pattern: Reviewer -->

@@ -5,6 +5,9 @@ description: Runs the standard Plan -> Build -> Verify loop with domain-specific
 
 # The Development Loop
 
+## Current State
+!`git log --oneline -5`
+
 ## Overview
 
 This is the full development cycle for SpawnForge. Every feature goes through Plan → Build → Verify → Update Context. Each phase uses domain-specific skills to ensure consistent, high-quality output aligned with the product vision.
