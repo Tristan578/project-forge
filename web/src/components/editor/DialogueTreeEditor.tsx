@@ -130,17 +130,23 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
     <div className={`rounded border ${isSelected ? 'border-blue-500/50 bg-zinc-800/80' : 'border-zinc-700/50 bg-zinc-800/30'}`}>
       {/* Header */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer" onClick={onSelect}>
-        <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className="text-zinc-500 hover:text-zinc-300">
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        <button
+          onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+          aria-label={expanded ? 'Collapse node' : 'Expand node'}
+          aria-expanded={expanded}
+          className="text-zinc-500 hover:text-zinc-300"
+        >
+          {expanded ? <ChevronDown size={12} aria-hidden="true" /> : <ChevronRight size={12} aria-hidden="true" />}
         </button>
         <NodeTypeIcon type={node.type} />
         <span className="flex-1 truncate text-xs text-zinc-300">{nodeLabel}</span>
         {isStartNode && <span className="rounded bg-green-900/40 px-1.5 py-0.5 text-[9px] text-green-400">START</span>}
         <button
           onClick={(e) => { e.stopPropagation(); removeNode(treeId, node.id); }}
+          aria-label={`Delete node ${nodeLabel}`}
           className="rounded p-0.5 text-zinc-600 hover:text-red-400"
         >
-          <Trash2 size={10} />
+          <Trash2 size={10} aria-hidden="true" />
         </button>
       </div>
 

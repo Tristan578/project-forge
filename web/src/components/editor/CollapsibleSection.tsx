@@ -76,11 +76,11 @@ export function CollapsibleSection({
         aria-expanded={!isCollapsed}
       >
         {isCollapsed ? (
-          <ChevronRight className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
+          <ChevronRight className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" aria-hidden="true" />
         ) : (
-          <ChevronDown className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" />
+          <ChevronDown className="w-3 h-3 text-zinc-500 group-hover:text-zinc-300" aria-hidden="true" />
         )}
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500 group-hover:text-zinc-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400 group-hover:text-zinc-300">
           {title}
         </h3>
         {headerRight && <div className="ml-auto">{headerRight}</div>}

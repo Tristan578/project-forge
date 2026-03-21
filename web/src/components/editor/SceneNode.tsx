@@ -375,6 +375,7 @@ export function SceneNode({
             onKeyDown={handleEditKeyDown}
             onBlur={handleEditBlur}
             onClick={(e) => e.stopPropagation()}
+            aria-label={`Rename entity ${node.name}`}
             className="
               flex-1 min-w-0 text-sm bg-neutral-700 text-white
               border border-blue-500 rounded px-1 py-0.5

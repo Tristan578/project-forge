@@ -165,7 +165,7 @@ export function AudioInspector() {
             Audio
           </h3>
           <InfoTooltip text="Sound attached to this object" />
-          <button onClick={() => navigateDocs('features/audio')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+          <button onClick={() => navigateDocs('features/audio')} className="rounded p-0.5 text-zinc-500 hover:text-zinc-300" title="Documentation">
             <HelpCircle size={12} />
           </button>
         </div>
