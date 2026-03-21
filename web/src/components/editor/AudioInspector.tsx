@@ -21,16 +21,17 @@ interface SliderRowProps {
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, term }: SliderRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+      <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
-      </label>
+      </span>
       <input
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
+        aria-label={label}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
           [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
@@ -53,13 +54,14 @@ interface CheckboxRowProps {
 function CheckboxRow({ label, checked, onChange, term }: CheckboxRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+      <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
-      </label>
+      </span>
       <input
         type="checkbox"
         checked={checked}
+        aria-label={label}
         onChange={(e) => onChange(e.target.checked)}
         className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
           focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
@@ -80,16 +82,17 @@ interface NumberInputRowProps {
 function NumberInputRow({ label, value, min, max, step = 0.1, onChange, term }: NumberInputRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+      <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
-      </label>
+      </span>
       <input
         type="number"
         value={value}
         min={min}
         max={max}
         step={step}
+        aria-label={label}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
           focus:ring-1 focus:ring-blue-500"
@@ -200,12 +203,13 @@ export function AudioInspector() {
         <div className="space-y-3">
           {/* Asset Dropdown */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
               Asset
               <InfoTooltip term="audioAsset" />
-            </label>
+            </span>
             <select
               value={primaryAudio.assetId ?? ''}
+              aria-label="Audio asset"
               onChange={(e) => handleUpdate({ assetId: e.target.value || null })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                 focus:ring-1 focus:ring-blue-500"
@@ -221,12 +225,13 @@ export function AudioInspector() {
 
           {/* Bus Assignment */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
               Bus
               <InfoTooltip term="audioBus" />
-            </label>
+            </span>
             <select
               value={primaryAudio.bus ?? 'sfx'}
+              aria-label="Audio bus"
               onChange={(e) => handleUpdate({ bus: e.target.value })}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                 focus:ring-1 focus:ring-blue-500"
