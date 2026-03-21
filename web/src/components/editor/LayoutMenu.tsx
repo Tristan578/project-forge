@@ -121,6 +121,7 @@ export function LayoutMenu() {
               <input
                 autoFocus
                 value={saveName}
+                aria-label="Preset name"
                 onChange={(e) => setSaveName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSave()}
                 placeholder="Preset name..."

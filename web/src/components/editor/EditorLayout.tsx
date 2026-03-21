@@ -97,7 +97,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'inspector'
             ? 'border-b border-blue-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         Inspector
@@ -112,7 +112,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`relative flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'chat'
             ? 'border-b border-purple-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         AI Chat
@@ -130,7 +130,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'modify'
             ? 'border-b border-amber-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         Modify
@@ -145,7 +145,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'script'
             ? 'border-b border-green-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         Script
@@ -160,7 +160,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'ui'
             ? 'border-b border-orange-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         UI
@@ -175,7 +175,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'gdd'
             ? 'border-b border-amber-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         GDD
@@ -190,7 +190,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'review'
             ? 'border-b border-yellow-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         Review
@@ -205,7 +205,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'behavior'
             ? 'border-b border-teal-500 text-zinc-200'
-            : 'text-zinc-400 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-300'
         }`}
       >
         AI NPC
@@ -292,6 +292,7 @@ function ChatOverlay() {
           <span className="text-xs font-medium text-zinc-400">AI Chat (Ctrl+K to toggle)</span>
           <button
             onClick={() => setChatOverlayOpen(false)}
+            aria-label="Close chat overlay"
             className="rounded p-0.5 text-zinc-400 hover:text-zinc-300"
           >
             <X size={14} />

@@ -141,6 +141,7 @@ export function SceneToolbar() {
         <input
           ref={inputRef}
           value={editValue}
+          aria-label="Scene name"
           onChange={(e) => setEditValue(e.target.value)}
           onBlur={() => {
             if (editValue.trim()) setSceneName(editValue.trim());
