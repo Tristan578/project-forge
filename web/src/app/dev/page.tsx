@@ -18,7 +18,8 @@ const EditorLayout = dynamic(
 
 /**
  * Local development editor — bypasses auth and database.
- * Access at: http://localhost:3000/dev
+ * Access at: https://spawnforge.localhost/dev (with portless, npm run dev)
+ *            http://localhost:3000/dev (npm run dev:raw)
  * Redirects to /sign-in in production builds.
  */
 export default function DevEditorPage() {
