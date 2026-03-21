@@ -99,7 +99,6 @@ All three contributors see the same board on GitHub regardless of which AI tool 
 | Feature | Config | Purpose |
 |---------|--------|---------|
 | Subresource Integrity | `experimental.sri = { algorithm: 'sha256' }` | sha256 integrity hashes injected into `<script>` tags to prevent unauthorized script injection |
-| Agent DevTools | `experimental.agentDevTools = true` | Built-in AI agent debugging panel |
 
 ### WASM Worker Loading
 

@@ -45,8 +45,6 @@ const nextConfig: NextConfig = {
     // Subresource Integrity: inject sha256 integrity hashes into <script> tags
     // to prevent injection of unauthorized scripts in production.
     sri: { algorithm: 'sha256' },
-    // Agent DevTools: enables the built-in AI agent debugging panel in Next.js 16.2.
-    agentDevTools: true,
   },
   images: {
     remotePatterns: [
