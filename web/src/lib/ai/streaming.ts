@@ -149,6 +149,18 @@ export async function readSSEStream(
     }
   }
 
+  // Flush any remaining bytes from the decoder (multi-byte UTF-8 split across final chunks)
+  buffer += decoder.decode();
+
+  // Process any remaining buffered line (stream may not end with newline)
+  if (buffer.trim()) {
+    const event = parseSSELine(buffer);
+    if (event !== null && event.type === 'text_delta') {
+      content += event.text;
+      callbacks?.onText?.(event.text);
+    }
+  }
+
   return content;
 }
 
