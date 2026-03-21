@@ -894,3 +894,19 @@ pub fn emit_performance_stats(
 pub fn emit_custom_wgsl_source_changed(source: &crate::core::custom_wgsl::CustomWgslSource) {
     emit_event("CUSTOM_WGSL_SOURCE_CHANGED", source);
 }
+
+/// Emit an ENGINE_PANIC event to JavaScript.
+///
+/// Called from the panic hook installed by `install_panic_hook()`. Emits the
+/// panic message so the React shell can show a recovery overlay without relying
+/// solely on the `console.error` interceptor (which requires the event callback
+/// to already be set up, and may miss panics that occur during early init).
+pub fn emit_engine_panic(message: &str) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PanicPayload<'a> {
+        message: &'a str,
+    }
+
+    emit_event("ENGINE_PANIC", &PanicPayload { message });
+}

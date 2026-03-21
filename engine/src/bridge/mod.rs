@@ -106,12 +106,45 @@ pub fn emit_init_event(phase: &str, message: Option<&str>, error: Option<&str>) 
     });
 }
 
+/// Install the composite panic hook.
+///
+/// Combines `console_error_panic_hook` (which writes the panic message to the
+/// browser DevTools console) with an `ENGINE_PANIC` event emission so the React
+/// shell receives the panic message through the regular event channel and can
+/// show a recovery overlay without relying on the `console.error` interceptor.
+///
+/// Must be called once before `init_engine` starts Bevy. Safe to call multiple
+/// times — a guard ensures the hook is only installed once.
+fn install_panic_hook() {
+    use std::sync::OnceLock;
+    static HOOK_INSTALLED: OnceLock<bool> = OnceLock::new();
+    if HOOK_INSTALLED.set(true).is_err() {
+        return; // Already installed
+    }
+
+    let original = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // 1. Forward to the original hook (console_error_panic_hook behaviour)
+        original(info);
+
+        // 2. Emit ENGINE_PANIC through the JS event channel so the React shell
+        //    can display a recovery overlay.
+        let msg = info.to_string();
+        events::emit_engine_panic(&msg);
+    }));
+}
+
 /// Initialize the Forge engine and attach to a canvas element.
 /// This function is idempotent - subsequent calls are no-ops.
 #[wasm_bindgen]
 pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
     // Set panic hook for better error messages in browser console
     console_error_panic_hook::set_once();
+
+    // Also install our composite hook that emits ENGINE_PANIC events.
+    // Must be called after console_error_panic_hook::set_once() so we can
+    // wrap whatever hook that function installs.
+    install_panic_hook();
 
     // Singleton check - only initialize once
     if core::Engine::is_initialized() {
