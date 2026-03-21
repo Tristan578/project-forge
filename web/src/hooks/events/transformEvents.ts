@@ -136,6 +136,13 @@ export function handleTransformEvent(
       // Cache for periodic IndexedDB auto-save
       setLastExportedScene(json, name);
 
+      // Keep a rolling sessionStorage backup so EnginePanicRecovery can read
+      // the most-recent scene JSON without triggering a fresh WASM export
+      // (which may fail if the engine has already panicked). PF-823.
+      try {
+        sessionStorage.setItem('forge:scene-last-json', json);
+      } catch { /* sessionStorage may be unavailable in restricted contexts */ }
+
       if (state.autoSaveEnabled) {
         // Auto-save to localStorage with quota management and LRU eviction
         saveAutoSave(json, name);

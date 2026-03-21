@@ -20,6 +20,7 @@ describe('handleTransformEvent', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    sessionStorage.clear();
     actions = createMockActions();
     mockSetGet = createMockSetGet();
     vi.mocked(useEditorStore.getState).mockReturnValue(actions as unknown as StoreState);
@@ -335,6 +336,46 @@ describe('handleTransformEvent', () => {
   });
 
   describe('SCENE_EXPORTED', () => {
+    it('writes forge:scene-last-json to sessionStorage (PF-823)', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
+
+      const payload = { json: '{"entities":[{"id":"e1"}]}', name: 'BackupScene' };
+
+      handleTransformEvent('SCENE_EXPORTED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(sessionStorage.getItem('forge:scene-last-json')).toBe('{"entities":[{"id":"e1"}]}');
+    });
+
+    it('overwrites forge:scene-last-json with the latest export', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
+
+      handleTransformEvent('SCENE_EXPORTED', { json: '{"entities":[]}', name: 'First' }, mockSetGet.set, mockSetGet.get);
+      handleTransformEvent('SCENE_EXPORTED', { json: '{"entities":[{"id":"new"}]}', name: 'Second' }, mockSetGet.set, mockSetGet.get);
+
+      expect(sessionStorage.getItem('forge:scene-last-json')).toBe('{"entities":[{"id":"new"}]}');
+    });
+
+    it('does not throw when sessionStorage is unavailable', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
+
+      const origSessionStorage = globalThis.sessionStorage;
+      Object.defineProperty(globalThis, 'sessionStorage', {
+        value: { setItem: () => { throw new DOMException('SecurityError'); }, getItem: vi.fn(), removeItem: vi.fn() },
+        writable: true,
+        configurable: true,
+      });
+
+      expect(() => {
+        handleTransformEvent('SCENE_EXPORTED', { json: '{}', name: 'Scene' }, mockSetGet.set, mockSetGet.get);
+      }).not.toThrow();
+
+      Object.defineProperty(globalThis, 'sessionStorage', {
+        value: origSessionStorage,
+        writable: true,
+        configurable: true,
+      });
+    });
+
     it('dispatches forge:scene-exported DOM event', () => {
       const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
       vi.mocked(useEditorStore.getState).mockReturnValue({ ...actions, autoSaveEnabled: false } as unknown as StoreState);
