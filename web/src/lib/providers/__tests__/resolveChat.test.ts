@@ -385,6 +385,98 @@ describe('resolveChat — OpenAI-compatible gateway path', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests: resolveChat — circuitBreakerWarning surface (PF-737)
+// ---------------------------------------------------------------------------
+
+describe('resolveChat — circuitBreakerWarning (PF-737)', () => {
+  beforeEach(() => {
+    clearAllProviderEnv();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    Object.assign(process.env, envBackup);
+    vi.restoreAllMocks();
+  });
+
+  it('includes circuitBreakerWarning in result when resolver returns one', async () => {
+    setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
+
+    // Override the registry to inject a warning — simulates a HALF_OPEN or OPEN state
+    vi.doMock('@/lib/providers/registry', () => ({
+      resolveBackend: vi.fn().mockReturnValue({
+        backendId: 'vercel-gateway',
+        apiKey: 'gw-key',
+        endpoint: 'https://ai-gateway.vercel.sh/v1',
+        modelId: undefined,
+        metered: true,
+      }),
+      resolveBackendWithCircuitBreaker: vi.fn().mockReturnValue({
+        backendId: 'vercel-gateway',
+        apiKey: 'gw-key',
+        endpoint: 'https://ai-gateway.vercel.sh/v1',
+        modelId: undefined,
+        metered: true,
+        circuitBreakerWarning: 'WARNING: vercel-gateway circuit breaker is HALF_OPEN (error rate exceeded). Proceeding cautiously.',
+      }),
+    }));
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response('data: [DONE]\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    ));
+
+    const { resolveChat } = await import('@/lib/providers/resolveChat');
+    const result = await resolveChat([{ role: 'user', content: 'hello' }]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // PF-737: circuitBreakerWarning must be surfaced in the result, not discarded
+    expect(result.circuitBreakerWarning).toBeDefined();
+    expect(result.circuitBreakerWarning).toContain('WARNING');
+    expect(result.circuitBreakerWarning).toContain('vercel-gateway');
+  });
+
+  it('does not include circuitBreakerWarning when circuit is healthy', async () => {
+    setEnv({ AI_GATEWAY_API_KEY: 'gw-key' });
+
+    vi.doMock('@/lib/providers/registry', () => ({
+      resolveBackend: vi.fn().mockReturnValue({
+        backendId: 'vercel-gateway',
+        apiKey: 'gw-key',
+        endpoint: 'https://ai-gateway.vercel.sh/v1',
+        modelId: undefined,
+        metered: true,
+      }),
+      resolveBackendWithCircuitBreaker: vi.fn().mockReturnValue({
+        backendId: 'vercel-gateway',
+        apiKey: 'gw-key',
+        endpoint: 'https://ai-gateway.vercel.sh/v1',
+        modelId: undefined,
+        metered: true,
+        // No circuitBreakerWarning — circuit is healthy
+      }),
+    }));
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response('data: [DONE]\n\n', {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    ));
+
+    const { resolveChat } = await import('@/lib/providers/resolveChat');
+    const result = await resolveChat([{ role: 'user', content: 'hello' }]);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.circuitBreakerWarning).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests: resolveChat — system prompt handling
 // ---------------------------------------------------------------------------
 
