@@ -203,6 +203,7 @@ export function applyMaterialChanges(
   currentBaseColor?: [number, number, number, number],
   currentRoughness: number = 0.5,
   currentMetallic: number = 0.0,
+  currentEmissive: number = 0.0,
 ): void {
   const adj = style.materialAdjustments;
   const payload: Record<string, unknown> = { entityId };
@@ -215,7 +216,8 @@ export function applyMaterialChanges(
     payload.metallic = currentMetallic + (adj.metallic - currentMetallic) * intensity;
   }
   if (adj.emissive !== undefined) {
-    const e = adj.emissive * intensity;
+    // Lerp from current emissive (not from zero) toward the style target
+    const e = currentEmissive + (adj.emissive - currentEmissive) * intensity;
     payload.emissive = [e, e, e, 1.0];
   }
   if (adj.opacity !== undefined && adj.opacity < 1.0) {

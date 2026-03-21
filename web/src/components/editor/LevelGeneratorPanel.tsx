@@ -33,11 +33,11 @@ function LevelMinimap({ layout }: { layout: LevelLayout }) {
   const rooms = layout.rooms;
   if (rooms.length === 0) return null;
 
-  // Calculate bounds
-  const minX = Math.min(...rooms.map((r) => r.position.x - r.width / 2));
-  const maxX = Math.max(...rooms.map((r) => r.position.x + r.width / 2));
-  const minY = Math.min(...rooms.map((r) => r.position.y - r.height / 2));
-  const maxY = Math.max(...rooms.map((r) => r.position.y + r.height / 2));
+  // Calculate bounds using reduce to avoid stack overflow on large room arrays
+  const minX = rooms.reduce((acc, r) => Math.min(acc, r.position.x - r.width / 2), Infinity);
+  const maxX = rooms.reduce((acc, r) => Math.max(acc, r.position.x + r.width / 2), -Infinity);
+  const minY = rooms.reduce((acc, r) => Math.min(acc, r.position.y - r.height / 2), Infinity);
+  const maxY = rooms.reduce((acc, r) => Math.max(acc, r.position.y + r.height / 2), -Infinity);
 
   const padding = 10;
   const viewBox = `${minX - padding} ${minY - padding} ${maxX - minX + padding * 2} ${maxY - minY + padding * 2}`;

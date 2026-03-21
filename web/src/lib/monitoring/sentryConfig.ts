@@ -38,9 +38,18 @@ function extractGenerationType(url: string): string {
 
 /** Extract auth error code from error message. */
 function extractAuthCode(message: string): string {
-  // Matches codes like "AUTH_001", "INSUFFICIENT_TOKENS", "INVALID_KEY"
+  // Matches numeric HTTP auth status codes (401, 403) — check first so that a
+  // message like "HTTP 401 Unauthorized" yields "HTTP_401" rather than just "HTTP".
+  // Explicitly excludes 5xx server errors.
+  const statusMatch = message.match(/\b(40[13])\b/);
+  if (statusMatch?.[1]) return `HTTP_${statusMatch[1]}`;
+
+  // Matches symbolic codes like "AUTH_001", "INSUFFICIENT_TOKENS", "INVALID_KEY".
+  // Exclude bare "HTTP" which is a protocol prefix, not a meaningful auth code.
   const codeMatch = message.match(/\b([A-Z_]{4,}(?:_\d+)?)\b/);
-  return codeMatch?.[1] ?? 'AUTH_UNKNOWN';
+  if (codeMatch?.[1] && codeMatch[1] !== 'HTTP') return codeMatch[1];
+
+  return 'AUTH_UNKNOWN';
 }
 
 /** True when the error message looks like a timeout / deadline exceeded. */
@@ -55,7 +64,9 @@ function isRateLimitError(message: string): boolean {
 
 /** True when the error is auth-related. */
 function isAuthError(message: string): boolean {
-  return /unauthorized|unauthenticated|403|401|invalid.?key|api.?key|token.?expired|insufficient.?token/i.test(message);
+  // Use word boundaries around numeric codes to prevent matching substrings
+  // like "5403" or "14010" — also explicitly exclude 5xx server errors.
+  return /unauthorized|unauthenticated|\b40[13]\b|invalid.?key|api.?key|token.?expired|insufficient.?token/i.test(message);
 }
 
 /** True when the error originates from a WASM engine command. */

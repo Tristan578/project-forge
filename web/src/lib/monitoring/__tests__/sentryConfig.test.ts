@@ -147,6 +147,25 @@ describe('extractAuthCode', () => {
     expect(extractAuthCode('INVALID_KEY provided')).toBe('INVALID_KEY'));
   it('returns AUTH_UNKNOWN when no code found', () =>
     expect(extractAuthCode('some vague auth failure')).toBe('AUTH_UNKNOWN'));
+  it('extracts HTTP_401 for 401 status messages (regression PF-825)', () =>
+    expect(extractAuthCode('HTTP 401 Unauthorized')).toBe('HTTP_401'));
+  it('extracts HTTP_403 for 403 status messages (regression PF-825)', () =>
+    expect(extractAuthCode('403 Forbidden')).toBe('HTTP_403'));
+  it('does NOT extract 5xx codes as auth codes (regression PF-825)', () =>
+    expect(extractAuthCode('500 Internal Server Error')).toBe('AUTH_UNKNOWN'));
+  it('does NOT extract 5403 as an auth code (regression PF-825)', () =>
+    expect(extractAuthCode('error code 5403')).toBe('AUTH_UNKNOWN'));
+});
+
+describe('isAuthError (regression PF-825)', () => {
+  it('matches standalone 401 with word boundary', () =>
+    expect(isAuthError('HTTP 401 Unauthorized')).toBe(true));
+  it('matches standalone 403 with word boundary', () =>
+    expect(isAuthError('403 Forbidden')).toBe(true));
+  it('does NOT match 5403 as an auth error', () =>
+    expect(isAuthError('error code 5403')).toBe(false));
+  it('does NOT match 14010 as an auth error', () =>
+    expect(isAuthError('reference 14010')).toBe(false));
 });
 
 // ---------------------------------------------------------------------------

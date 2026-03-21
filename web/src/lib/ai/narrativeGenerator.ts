@@ -535,6 +535,12 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
   // Resolve actual entry node IDs now that all scene IDs are registered.
   // When a scene has no dialogue, the entry is the choices node, or a
   // pass-through to the next scene, or the end node.
+  //
+  // Pass 1: resolve scenes that have direct content (dialogue or choices) or
+  // are terminal. Pass-through scenes (empty dialogue, no choices, nextSceneId)
+  // are marked with a sentinel so we can resolve them in a second pass once all
+  // direct entries are known — this avoids using stale _d0 placeholders.
+  const SENTINEL = '\x00'; // never a valid node ID
   for (const act of arc.acts) {
     for (const scene of act.scenes) {
       const hasDialogue = Array.isArray(scene.dialogue) && scene.dialogue.length > 0;
@@ -544,14 +550,47 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
         entryId = `${scene.id}_d0`;
       } else if (hasChoices) {
         entryId = `${scene.id}_choices`;
-      } else if (scene.nextSceneId && sceneEntryNodeMap.has(scene.nextSceneId)) {
-        // Empty scene with a next pointer — pass through to the next scene's entry
-        entryId = sceneEntryNodeMap.get(scene.nextSceneId)!;
+      } else if (scene.nextSceneId) {
+        // Defer pass-through resolution until all direct entries are computed
+        entryId = SENTINEL;
       } else {
         entryId = `${scene.id}_end`;
       }
       sceneEntryNodeMap.set(scene.id, entryId);
-      if (!firstNodeId) firstNodeId = entryId;
+    }
+  }
+
+  // Pass 2: resolve deferred pass-through scenes.
+  // Scenes whose entry is still SENTINEL are empty scenes that point to another
+  // scene.  Walk the chain (with a cycle-limit) until we find a real entry.
+  for (const act of arc.acts) {
+    for (const scene of act.scenes) {
+      if (sceneEntryNodeMap.get(scene.id) !== SENTINEL) continue;
+      // Follow nextSceneId chain up to a bounded depth to avoid infinite loops
+      let current: NarrativeScene | undefined = scene;
+      let depth = 0;
+      while (
+        current &&
+        current.nextSceneId &&
+        sceneEntryNodeMap.get(current.nextSceneId) === SENTINEL &&
+        depth < 100
+      ) {
+        const nextId: string = current.nextSceneId;
+        current = arc.acts.flatMap((a) => a.scenes).find((s) => s.id === nextId);
+        depth++;
+      }
+      const targetEntry =
+        current?.nextSceneId
+          ? sceneEntryNodeMap.get(current.nextSceneId) ?? `${scene.id}_end`
+          : `${scene.id}_end`;
+      sceneEntryNodeMap.set(scene.id, targetEntry);
+    }
+  }
+
+  // Set firstNodeId from the first scene
+  for (const act of arc.acts) {
+    for (const scene of act.scenes) {
+      if (!firstNodeId) firstNodeId = sceneEntryNodeMap.get(scene.id) ?? null;
     }
   }
 

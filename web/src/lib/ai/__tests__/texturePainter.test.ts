@@ -279,6 +279,31 @@ describe('applyMaterialChanges', () => {
     expect(payload.emissive).toEqual([0.7, 0.7, 0.7, 1.0]);
   });
 
+  it('lerps emissive from currentEmissive rather than from zero (regression PF-785)', () => {
+    const dispatch = vi.fn();
+    const style = findStyleByName('burning')!; // emissive target = 0.7
+    // Apply at 50% intensity starting from currentEmissive = 0.4
+    applyMaterialChanges(style, 'e1', dispatch, 0.5, undefined, 0.5, 0.0, 0.4);
+    const payload = dispatch.mock.calls[0][1] as Record<string, unknown>;
+    // Expected: 0.4 + (0.7 - 0.4) * 0.5 = 0.4 + 0.15 = 0.55
+    expect(payload.emissive).toBeDefined();
+    const emissive = payload.emissive as number[];
+    expect(emissive[0]).toBeCloseTo(0.55);
+    expect(emissive[1]).toBeCloseTo(0.55);
+    expect(emissive[2]).toBeCloseTo(0.55);
+  });
+
+  it('emissive at zero intensity leaves currentEmissive unchanged (regression PF-785)', () => {
+    const dispatch = vi.fn();
+    const style = findStyleByName('burning')!;
+    // Apply at 0 intensity from currentEmissive = 0.3
+    applyMaterialChanges(style, 'e1', dispatch, 0.0, undefined, 0.5, 0.0, 0.3);
+    const payload = dispatch.mock.calls[0][1] as Record<string, unknown>;
+    // Expected: 0.3 + (0.7 - 0.3) * 0.0 = 0.3
+    const emissive = payload.emissive as number[];
+    expect(emissive[0]).toBeCloseTo(0.3);
+  });
+
   it('includes alpha and alphaMode for translucent styles', () => {
     const dispatch = vi.fn();
     const style = findStyleByName('frozen')!;

@@ -67,10 +67,15 @@ export function TexturePainterPanel() {
       const currentBaseColor = primaryMaterial?.baseColor
         ? [primaryMaterial.baseColor[0], primaryMaterial.baseColor[1], primaryMaterial.baseColor[2], primaryMaterial.baseColor[3] ?? 1] as [number, number, number, number]
         : undefined;
+      const emissiveRgb = primaryMaterial?.emissive;
+      const currentEmissive = emissiveRgb
+        ? Math.max(emissiveRgb[0], emissiveRgb[1], emissiveRgb[2])
+        : 0.0;
       applyMaterialChanges(
         selectedStyle, primaryId, dispatch, clampedIntensity, currentBaseColor,
         primaryMaterial?.perceptualRoughness ?? 0.5,
         primaryMaterial?.metallic ?? 0.0,
+        currentEmissive,
       );
     }
   }, [primaryId, description, selectedStyle, targetSlot, intensity, blendMode, primaryMaterial]);
