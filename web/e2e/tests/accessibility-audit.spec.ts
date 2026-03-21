@@ -38,8 +38,7 @@ function formatViolations(violations: Result[]): string {
 // ---------------------------------------------------------------------------
 // Editor page — /dev
 // ---------------------------------------------------------------------------
-// Editor a11y tests skipped: pre-existing violations need dedicated remediation (PF-820)
-editorTest.describe.skip('Editor page axe audit @ui', () => {
+editorTest.describe('Editor page axe audit @ui', () => {
   editorTest.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
@@ -142,8 +141,7 @@ editorTest.describe.skip('Editor page axe audit @ui', () => {
 // ---------------------------------------------------------------------------
 // Settings dialog — /dev with dialog open
 // ---------------------------------------------------------------------------
-// Settings dialog a11y tests skipped: depends on editor with pre-existing violations (PF-820)
-editorTest.describe.skip('Settings dialog axe audit @ui', () => {
+editorTest.describe('Settings dialog axe audit @ui', () => {
   editorTest('settings dialog has no critical WCAG violations', async ({ page, editor }) => {
     await editor.loadPage();
 
@@ -199,8 +197,7 @@ editorTest.describe.skip('Settings dialog axe audit @ui', () => {
 // ---------------------------------------------------------------------------
 // Mobile viewport axe audit
 // ---------------------------------------------------------------------------
-// Mobile editor a11y tests skipped: same pre-existing violations as desktop (PF-820)
-editorTest.describe.skip('Mobile viewport axe audit @ui', () => {
+editorTest.describe('Mobile viewport axe audit @ui', () => {
   editorTest('no critical violations at iPhone 14 viewport (390x844)', async ({ page, editor }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await editor.loadPage();

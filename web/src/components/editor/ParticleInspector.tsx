@@ -595,7 +595,7 @@ export function ParticleInspector() {
                 <div className="space-y-1">
                   <span aria-hidden="true" className="block text-[10px] text-zinc-500">Color (RGBA)</span>
                   <div className="grid grid-cols-4 gap-1">
-                    {([['R', 'Red'], ['G', 'Green'], ['B', 'Blue'], ['A', 'Alpha']] as const).map(([short, full], i) => (
+                    {(['Red', 'Green', 'Blue', 'Alpha'] as const).map((full, i) => (
                       <input
                         key={i}
                         type="number"
