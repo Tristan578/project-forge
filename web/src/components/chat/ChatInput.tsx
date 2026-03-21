@@ -259,7 +259,7 @@ export function ChatInput() {
       {/* Bottom toolbar */}
       <div className="flex items-center gap-2 border-t border-zinc-800 px-2 py-1">
         {tokenEstimate > 0 && (
-          <span className="text-[9px] text-zinc-600" title="Estimated token cost for this message">
+          <span className="text-[9px] text-zinc-500" title="Estimated token cost for this message">
             {formatTokenEstimate(tokenEstimate)} tokens
           </span>
         )}

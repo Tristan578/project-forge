@@ -59,7 +59,7 @@ export function GenerationStatus() {
           {/* Job list */}
           <div className="max-h-80 overflow-y-auto">
             {recentJobs.length === 0 ? (
-              <div className="p-4 text-center text-xs text-zinc-600">No jobs</div>
+              <div className="p-4 text-center text-xs text-zinc-500">No jobs</div>
             ) : (
               <div className="divide-y divide-zinc-800">
                 {recentJobs.map((job) => (
@@ -108,12 +108,12 @@ function JobRow({ job, onRemove }: { job: GenerationJob; onRemove: (id: string) 
       <div className="flex-1 space-y-1">
         <div className="text-xs font-medium text-zinc-300">{job.type}</div>
         <div className="text-[10px] text-zinc-500">{job.prompt.slice(0, 60)}{job.prompt.length > 60 ? '...' : ''}</div>
-        <div className="text-[10px] text-zinc-600">{statusLabel}</div>
+        <div className="text-[10px] text-zinc-500">{statusLabel}</div>
         {job.error && <div className="text-[10px] text-red-400">{job.error}</div>}
       </div>
       <button
         onClick={() => onRemove(job.id)}
-        className="text-zinc-600 hover:text-zinc-400"
+        className="text-zinc-500 hover:text-zinc-300"
         title="Remove"
         aria-label="Remove job"
       >

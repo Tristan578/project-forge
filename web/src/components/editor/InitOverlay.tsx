@@ -19,7 +19,7 @@ function PhaseItem({ phase }: { phase: PhaseStatus }) {
       ? 'text-green-400'
       : phase.status === 'active'
         ? 'text-blue-400'
-        : 'text-zinc-600';
+        : 'text-zinc-500';
 
   const timeStr =
     phase.status === 'done' && phase.duration > 0

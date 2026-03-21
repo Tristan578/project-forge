@@ -134,7 +134,7 @@ export function EntityPicker({ onSelect, onClose }: EntityPickerProps) {
           >
             {getEntityIcon(entity.type)}
             <span className="flex-1 truncate">{entity.name}</span>
-            <span className="text-[9px] text-zinc-600">{entity.entityId}</span>
+            <span className="text-[9px] text-zinc-500">{entity.entityId}</span>
           </button>
         ))}
       </div>

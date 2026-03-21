@@ -242,7 +242,7 @@ export function GenerationProgress({
 
       {/* Estimated time (only when determinate and we have a useful estimate) */}
       {mode === 'determinate' && timeEstimate && (
-        <p className="text-[10px] text-zinc-600">{timeEstimate}</p>
+        <p className="text-[10px] text-zinc-500">{timeEstimate}</p>
       )}
     </div>
   );
