@@ -50,6 +50,7 @@ export function GenerationStatus() {
             <button
               onClick={clearCompleted}
               className="text-xs text-zinc-400 hover:text-zinc-300"
+              aria-label="Clear completed jobs"
               title="Clear completed jobs"
             >
               <Trash2 size={12} />
@@ -113,7 +114,7 @@ function JobRow({ job, onRemove }: { job: GenerationJob; onRemove: (id: string) 
       </div>
       <button
         onClick={() => onRemove(job.id)}
-        className="text-zinc-400 hover:text-zinc-400"
+        className="text-zinc-400 hover:text-zinc-200"
         title="Remove"
         aria-label="Remove job"
       >

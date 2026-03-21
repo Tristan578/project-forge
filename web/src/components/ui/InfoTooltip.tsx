@@ -24,7 +24,7 @@ export function InfoTooltip({ term, text, size = 12 }: InfoTooltipProps) {
 
   return (
     <span
-      className="ml-1 inline-flex cursor-help text-zinc-400 hover:text-zinc-400 transition-colors"
+      className="ml-1 inline-flex cursor-help text-zinc-400 hover:text-zinc-300 transition-colors"
       title={tooltip}
     >
       <HelpCircle size={size} />

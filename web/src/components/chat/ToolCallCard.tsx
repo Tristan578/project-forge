@@ -378,6 +378,7 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
                 undo();
               }}
               className="rounded px-1 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+              aria-label="Undo this action"
               title="Undo this action"
             >
               <Undo2 size={12} />
@@ -416,7 +417,7 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
             <p className="mt-1 text-red-400">{toolCall.error}</p>
           )}
           {toolCall.result != null && (
-            <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap text-zinc-400">
+            <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap text-zinc-500">
               {JSON.stringify(toolCall.result, null, 2)}
             </pre>
           )}
