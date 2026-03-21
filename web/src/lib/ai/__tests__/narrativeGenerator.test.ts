@@ -404,6 +404,68 @@ describe('narrativeToDialogueTree', () => {
     const tree = narrativeToDialogueTree(arc);
     expect(tree.id).toBe('narrative_a_hero_s_journey_');
   });
+
+  it('handles scene with empty dialogue array without crashing (regression PF-764)', () => {
+    // A scene with zero dialogue lines, a nextSceneId, and no choices
+    const arc = makeValidArc();
+    // Add an empty-dialogue pass-through scene before scene_2_1
+    arc.acts[0].scenes.push({
+      id: 'scene_passthrough',
+      name: 'Empty Scene',
+      description: 'No dialogue',
+      dialogue: [],
+      nextSceneId: 'scene_2_1',
+    });
+    // Update scene_1_2 to point to the pass-through instead of directly to scene_2_1
+    arc.acts[0].scenes.find((s) => s.id === 'scene_1_2')!.nextSceneId = 'scene_passthrough';
+
+    expect(() => narrativeToDialogueTree(arc)).not.toThrow();
+    const tree = narrativeToDialogueTree(arc);
+
+    // The pass-through scene's entry should resolve to scene_2_1's entry (scene_2_1_d0)
+    const passEntry = tree.nodes.find((n) => n.id === 'scene_passthrough_d0');
+    // No text nodes created for empty-dialogue scene
+    expect(passEntry).toBeUndefined();
+
+    // scene_1_2's last text node should link to scene_2_1's entry (not scene_passthrough_d0)
+    const scene12Node = tree.nodes.find((n) => n.id === 'scene_1_2_d0');
+    expect(scene12Node).toBeDefined();
+    if (scene12Node?.type === 'text') {
+      // Pass-through should resolve to scene_2_1_d0 not a stale _d0 placeholder
+      expect(scene12Node.next).toBe('scene_2_1_d0');
+    }
+  });
+
+  it('handles chain of empty-dialogue pass-through scenes (regression PF-764)', () => {
+    const arc = makeValidArc();
+    // Create a chain: scene_empty_a -> scene_empty_b -> scene_2_2 (terminal)
+    const terminalScene = arc.acts[1].scenes.find((s) => s.id === 'scene_2_2')!;
+    // Make scene_2_2 not have choices so it's terminal
+    terminalScene.choices = undefined;
+    terminalScene.nextSceneId = undefined;
+
+    arc.acts[0].scenes.push({
+      id: 'scene_empty_a',
+      name: 'Empty A',
+      description: '',
+      dialogue: [],
+      nextSceneId: 'scene_empty_b',
+    });
+    arc.acts[0].scenes.push({
+      id: 'scene_empty_b',
+      name: 'Empty B',
+      description: '',
+      dialogue: [],
+      nextSceneId: 'scene_2_2',
+    });
+
+    expect(() => narrativeToDialogueTree(arc)).not.toThrow();
+    const tree = narrativeToDialogueTree(arc);
+    // The nodes list should not have any undefined IDs
+    for (const node of tree.nodes) {
+      expect(node.id).not.toContain('\x00');
+    }
+  });
 });
 
 // ============================================================================
