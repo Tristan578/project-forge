@@ -9,6 +9,7 @@
 import { create } from 'zustand';
 import { useGenerationHistoryStore } from './generationHistoryStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
+import { trackAIAssetGenerated } from '@/lib/analytics/events';
 
 export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music' | 'sprite' | 'sprite_sheet' | 'tileset' | 'pixel-art';
 export type GenerationStatus = 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
@@ -66,6 +67,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       jobs: { ...state.jobs, [job.id]: job },
     }));
     trackEvent(AnalyticsEvent.AI_GENERATION_STARTED, { type: job.type, provider: job.provider });
+    trackAIAssetGenerated(job.type, job.provider);
 
     // Persist to database (fire-and-forget)
     fetch('/api/jobs', {

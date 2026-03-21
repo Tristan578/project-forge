@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { DockviewApi, SerializedDockview } from 'dockview-react';
 import { LAYOUT_PRESETS, type LayoutPresetId } from '@/lib/workspace/presets';
 import { PANEL_DEFINITIONS } from '@/lib/workspace/panelRegistry';
+import { trackEditorPanelOpened } from '@/lib/analytics/events';
 
 const LAYOUT_STORAGE_KEY = 'forge-workspace-layout';
 const CUSTOM_PRESETS_KEY = 'forge-workspace-custom-presets';
@@ -135,6 +136,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   openPanel: (panelId) => {
     const { api } = get();
     if (!api) return;
+
+    // Track every panel open (both activations and new opens) for analytics.
+    trackEditorPanelOpened(panelId);
 
     // If panel already exists, activate it
     const existing = api.getPanel(panelId);
