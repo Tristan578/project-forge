@@ -7,11 +7,10 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useMarketplaceStore, type MarketplaceAssetView } from '../marketplaceStore';
 
-// Mock fetch globally
-global.fetch = vi.fn();
+const originalFetch = global.fetch;
 
 const mockAsset: MarketplaceAssetView = {
   id: 'asset-1',
@@ -33,6 +32,7 @@ const mockAsset: MarketplaceAssetView = {
 
 describe('marketplaceStore', () => {
   beforeEach(() => {
+    global.fetch = vi.fn();
     // Reset store to initial state
     useMarketplaceStore.setState({
       assets: [],
@@ -49,6 +49,10 @@ describe('marketplaceStore', () => {
     });
     // Clear mocks
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   describe('Initial State', () => {

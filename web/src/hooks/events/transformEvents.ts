@@ -140,6 +140,14 @@ export function handleTransformEvent(
         // Auto-save to localStorage with quota management and LRU eviction
         saveAutoSave(json, name);
       }
+      // Write a sessionStorage backup for panic recovery (PF-823).
+      // This survives page reloads within the same browser session so
+      // EnginePanicRecovery can offer to restore the last known-good scene.
+      try {
+        sessionStorage.setItem('forge:scene-last-json', json);
+      } catch {
+        // sessionStorage may be unavailable (private browsing quota, etc.) — fail silently
+      }
       // Reset sceneModified since the scene has been persisted (PF-528)
       useEditorStore.setState({ sceneModified: false });
       // Dispatch DOM event so SceneToolbar can trigger file download
