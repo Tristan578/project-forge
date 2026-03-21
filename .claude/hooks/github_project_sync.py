@@ -1290,6 +1290,7 @@ def show_status():
         sys.exit(1)
     target_repo = config["repo"]
 
+    print(f"Database: {DB_PATH} ({'exists' if DB_PATH.exists() else 'MISSING'})")
     print(f"GitHub Project: {config['owner']}/{config['repo']} #{config['projectNumber']}")
     print(f"Last sync: {mapping.get('lastSync') or 'never'}")
     print(f"Tracked tickets (map): {len(tmap)}")
