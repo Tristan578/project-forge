@@ -102,7 +102,7 @@ export function ConversationList() {
           {/* Conversation list */}
           <div className="max-h-[240px] overflow-y-auto">
             {conversations.length === 0 ? (
-              <div className="px-3 py-2 text-[10px] text-zinc-600">
+              <div className="px-3 py-2 text-[10px] text-zinc-500">
                 No saved conversations
               </div>
             ) : (
@@ -150,19 +150,19 @@ export function ConversationList() {
                     ) : (
                       <>
                         <span className="flex-1 truncate text-[11px]">{conv.name}</span>
-                        <span className="text-[9px] text-zinc-600">
+                        <span className="text-[9px] text-zinc-500">
                           {conv.messages.length} msg{conv.messages.length !== 1 ? 's' : ''}
                         </span>
                         <button
                           onClick={(e) => { e.stopPropagation(); handleStartRename(conv.id, conv.name); }}
-                          className="hidden text-zinc-600 hover:text-zinc-300 group-hover:block"
+                          className="hidden text-zinc-500 hover:text-zinc-300 group-hover:block"
                           aria-label={`Rename ${conv.name}`}
                         >
                           <Pencil size={10} />
                         </button>
                         <button
                           onClick={(e) => handleDelete(e, conv.id)}
-                          className="hidden text-zinc-600 hover:text-red-400 group-hover:block"
+                          className="hidden text-zinc-500 hover:text-red-400 group-hover:block"
                           aria-label={`Delete ${conv.name}`}
                         >
                           <Trash2 size={10} />

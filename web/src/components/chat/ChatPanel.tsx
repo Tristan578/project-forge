@@ -46,7 +46,7 @@ function StreamingIndicator({ messages, loopIteration }: { messages: { role: str
         {statusText}
       </span>
       {loopIteration > 0 && (
-        <span className="text-[9px] text-zinc-600">
+        <span className="text-[9px] text-zinc-500">
           (agentic loop)
         </span>
       )}
@@ -81,7 +81,7 @@ export function ChatPanel() {
           <span className="text-xs font-medium text-zinc-300">AI Assistant</span>
           <ConversationList />
           {totalSessionTokens > 0 && (
-            <span className="text-[9px] text-zinc-600" title="Session token usage">
+            <span className="text-[9px] text-zinc-500" title="Session token usage">
               {totalSessionTokens.toLocaleString()} tokens
             </span>
           )}
@@ -89,7 +89,7 @@ export function ChatPanel() {
         {messages.length > 0 && (
           <button
             onClick={clearChat}
-            className="text-zinc-600 hover:text-zinc-400"
+            className="text-zinc-500 hover:text-zinc-300"
             title="Clear chat"
             aria-label="Clear chat"
           >

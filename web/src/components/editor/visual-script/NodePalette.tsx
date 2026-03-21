@@ -33,8 +33,8 @@ export function NodePalette({ onClose }: NodePaletteProps) {
       <div className="sticky top-0 z-10 border-b border-zinc-700 bg-zinc-900 p-2">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-semibold text-zinc-400">Node Palette</span>
-          <button onClick={onClose} className="rounded p-0.5 text-zinc-500 hover:text-zinc-300">
-            <X size={14} />
+          <button onClick={onClose} aria-label="Close node palette" className="rounded p-0.5 text-zinc-500 hover:text-zinc-300">
+            <X size={14} aria-hidden="true" />
           </button>
         </div>
         <div className="relative">
@@ -44,6 +44,7 @@ export function NodePalette({ onClose }: NodePaletteProps) {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search nodes..."
+            aria-label="Search nodes"
             className="w-full rounded border border-zinc-700 bg-zinc-800 py-1 pl-7 pr-2 text-xs text-zinc-300 placeholder-zinc-600 focus:border-blue-500 focus:outline-none"
           />
         </div>

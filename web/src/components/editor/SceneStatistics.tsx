@@ -110,7 +110,7 @@ export const SceneStatistics = memo(function SceneStatistics() {
             <span className={`text-xs font-medium tabular-nums ${item.color ?? 'text-zinc-300'}`}>
               {item.value}
             </span>
-            <span className="text-[10px] text-zinc-600">{item.label}</span>
+            <span className="text-[10px] text-zinc-500">{item.label}</span>
           </div>
         ))}
       </div>
@@ -121,7 +121,7 @@ export const SceneStatistics = memo(function SceneStatistics() {
           {/* Component Breakdown */}
           {componentBreakdown.length > 0 && (
             <div>
-              <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
+              <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
                 Components
               </h4>
               <div className="space-y-0.5">
@@ -138,7 +138,7 @@ export const SceneStatistics = memo(function SceneStatistics() {
           {/* Asset Breakdown */}
           {assetBreakdown.length > 0 && (
             <div>
-              <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
+              <h4 className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
                 Assets
               </h4>
               <div className="space-y-0.5">

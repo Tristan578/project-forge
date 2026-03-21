@@ -19,16 +19,17 @@ interface SliderRowProps {
 function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2, onChange, term }: SliderRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+      <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
-      </label>
+      </span>
       <input
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
+        aria-label={label}
         onChange={(e) => onChange(parseFloat(e.target.value))}
         className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
           [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
@@ -51,13 +52,14 @@ interface CheckboxRowProps {
 function CheckboxRow({ label, checked, onChange, term }: CheckboxRowProps & { term?: string }) {
   return (
     <div className="flex items-center gap-2">
-      <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+      <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
-      </label>
+      </span>
       <input
         type="checkbox"
         checked={checked}
+        aria-label={label}
         onChange={(e) => onChange(e.target.checked)}
         className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
           focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
@@ -76,15 +78,16 @@ interface Vec3InputRowProps {
 function Vec3InputRow({ label, value, onChange, step = 0.1, term }: Vec3InputRowProps & { term?: string }) {
   return (
     <div className="space-y-1">
-      <label className="block text-xs text-zinc-400 flex items-center gap-1">
+      <span aria-hidden="true" className="block text-xs text-zinc-400 flex items-center gap-1">
         {label}
         {term && <InfoTooltip term={term} />}
-      </label>
+      </span>
       <div className="grid grid-cols-3 gap-2">
         <input
           type="number"
           value={value[0]}
           step={step}
+          aria-label={`${label} X`}
           onChange={(e) => onChange([parseFloat(e.target.value), value[1], value[2]])}
           className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
             focus:ring-1 focus:ring-blue-500"
@@ -93,6 +96,7 @@ function Vec3InputRow({ label, value, onChange, step = 0.1, term }: Vec3InputRow
           type="number"
           value={value[1]}
           step={step}
+          aria-label={`${label} Y`}
           onChange={(e) => onChange([value[0], parseFloat(e.target.value), value[2]])}
           className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
             focus:ring-1 focus:ring-blue-500"
@@ -101,6 +105,7 @@ function Vec3InputRow({ label, value, onChange, step = 0.1, term }: Vec3InputRow
           type="number"
           value={value[2]}
           step={step}
+          aria-label={`${label} Z`}
           onChange={(e) => onChange([value[0], value[1], parseFloat(e.target.value)])}
           className="rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
             focus:ring-1 focus:ring-blue-500"
@@ -262,7 +267,7 @@ export function ParticleInspector() {
             Particles
           </h3>
           <InfoTooltip text="Particle effects attached to this object" />
-          <button onClick={() => navigateDocs('features/particles')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+          <button onClick={() => navigateDocs('features/particles')} className="rounded p-0.5 text-zinc-500 hover:text-zinc-300" title="Documentation">
             <HelpCircle size={12} />
           </button>
         </div>
@@ -279,12 +284,13 @@ export function ParticleInspector() {
         <div className="space-y-3">
           {/* Preset Dropdown */}
           <div className="flex items-center gap-2">
-            <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+            <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
               Preset
               <InfoTooltip term="particlePreset" />
-            </label>
+            </span>
             <select
               value={primaryParticle.preset}
+              aria-label="Particle preset"
               onChange={(e) => handlePresetChange(e.target.value as ParticlePreset)}
               className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                 focus:ring-1 focus:ring-blue-500"
@@ -307,14 +313,15 @@ export function ParticleInspector() {
 
           {/* Spawner Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Spawner</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Spawner</h4>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Mode
                 <InfoTooltip term="spawnMode" />
-              </label>
+              </span>
               <select
                 value={primaryParticle.spawnerMode.type}
+                aria-label="Spawner mode"
                 onChange={(e) => handleSpawnerModeChange(e.target.value as 'continuous' | 'burst' | 'once')}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
@@ -361,7 +368,7 @@ export function ParticleInspector() {
 
           {/* Lifetime Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Lifetime</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Lifetime</h4>
             <SliderRow
               label="Min (s)"
               value={primaryParticle.lifetimeMin}
@@ -386,14 +393,15 @@ export function ParticleInspector() {
 
           {/* Emission Shape Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Emission Shape</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Emission Shape</h4>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Shape
                 <InfoTooltip term="emissionShape" />
-              </label>
+              </span>
               <select
                 value={primaryParticle.emissionShape.type}
+                aria-label="Emission shape"
                 onChange={(e) => handleEmissionShapeChange(e.target.value as EmissionShape['type'])}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
@@ -482,7 +490,7 @@ export function ParticleInspector() {
 
           {/* Velocity Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Velocity</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Velocity</h4>
             <Vec3InputRow
               label="Min"
               value={primaryParticle.velocityMin}
@@ -501,7 +509,7 @@ export function ParticleInspector() {
 
           {/* Forces Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Forces</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Forces</h4>
             <Vec3InputRow
               label="Acceleration"
               value={primaryParticle.acceleration}
@@ -523,7 +531,7 @@ export function ParticleInspector() {
 
           {/* Size Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Size</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Size</h4>
             <SliderRow
               label="Start Size"
               value={primaryParticle.sizeStart}
@@ -549,7 +557,7 @@ export function ParticleInspector() {
           {/* Color Gradient Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600 flex items-center gap-1">
+              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 flex items-center gap-1">
                 Color Gradient
                 <InfoTooltip term="colorGradient" />
               </h4>
@@ -585,9 +593,9 @@ export function ParticleInspector() {
                   onChange={(v) => handleUpdateGradientStop(index, { position: v })}
                 />
                 <div className="space-y-1">
-                  <label className="block text-[10px] text-zinc-500">Color (RGBA)</label>
+                  <span aria-hidden="true" className="block text-[10px] text-zinc-500">Color (RGBA)</span>
                   <div className="grid grid-cols-4 gap-1">
-                    {[0, 1, 2, 3].map((i) => (
+                    {(['Red', 'Green', 'Blue', 'Alpha'] as const).map((full, i) => (
                       <input
                         key={i}
                         type="number"
@@ -595,6 +603,7 @@ export function ParticleInspector() {
                         min={0}
                         max={1}
                         step={0.01}
+                        aria-label={`Gradient stop ${index} ${full}`}
                         onChange={(e) => {
                           const newColor: [number, number, number, number] = [...stop.color];
                           newColor[i] = parseFloat(e.target.value);
@@ -612,14 +621,15 @@ export function ParticleInspector() {
 
           {/* Rendering Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Rendering</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Rendering</h4>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Blend Mode
                 <InfoTooltip term="blendMode" />
-              </label>
+              </span>
               <select
                 value={primaryParticle.blendMode}
+                aria-label="Blend mode"
                 onChange={(e) => handleUpdate({ blendMode: e.target.value as 'additive' | 'alpha_blend' | 'premultiply' })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"
@@ -630,12 +640,13 @@ export function ParticleInspector() {
               </select>
             </div>
             <div className="flex items-center gap-2">
-              <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
+              <span aria-hidden="true" className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Orientation
                 <InfoTooltip term="particleOrientation" />
-              </label>
+              </span>
               <select
                 value={primaryParticle.orientation}
+                aria-label="Particle orientation"
                 onChange={(e) => handleUpdate({ orientation: e.target.value as 'billboard' | 'velocity_aligned' | 'fixed' })}
                 className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
                   focus:ring-1 focus:ring-blue-500"

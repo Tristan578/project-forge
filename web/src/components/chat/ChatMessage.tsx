@@ -20,7 +20,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
   if (message.role === 'system') {
     return (
-      <div className="px-3 py-1.5 text-center text-xs text-zinc-600">
+      <div className="px-3 py-1.5 text-center text-xs text-zinc-500">
         {message.content}
       </div>
     );
@@ -42,7 +42,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {isUser ? 'You' : 'AI'}
         </span>
         {!isUser && message.tokenCost != null && message.tokenCost > 0 && (
-          <span className="text-[9px] text-zinc-600" title="Token cost for this response">
+          <span className="text-[9px] text-zinc-500" title="Token cost for this response">
             ~{message.tokenCost.toLocaleString()} tokens
           </span>
         )}
@@ -151,7 +151,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             className={`rounded p-1 transition-colors ${
               message.feedback === 'positive'
                 ? 'text-green-400'
-                : 'text-zinc-600 hover:text-green-400'
+                : 'text-zinc-500 hover:text-green-400'
             }`}
             title="Good response"
           >
@@ -165,7 +165,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             className={`rounded p-1 transition-colors ${
               message.feedback === 'negative'
                 ? 'text-red-400'
-                : 'text-zinc-600 hover:text-red-400'
+                : 'text-zinc-500 hover:text-red-400'
             }`}
             title="Bad response"
           >
