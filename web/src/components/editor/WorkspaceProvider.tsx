@@ -113,8 +113,11 @@ const PacingAnalyzerPanel = lazy(() =>
 );
 
 import { useWorkspaceStore } from '@/stores/workspaceStore';
+import { useUserStore } from '@/stores/userStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
+import { canAccessPanel } from '@/lib/ai/tierAccess';
+import { LockedPanelOverlay } from './LockedPanelOverlay';
 
 // ---- Loading skeleton shown while a lazy panel is fetched ----
 function PanelLoadingSkeleton() {
@@ -141,9 +144,36 @@ function withSuspense(Component: React.ComponentType): React.FunctionComponent<I
   };
 }
 
+// ---- Tier-gated lazy panel wrapper ----
+// Wraps a lazy component with both Suspense and a tier access check.
+// If the user's tier is insufficient, renders LockedPanelOverlay instead.
+function withTierGate(
+  panelId: string,
+  Component: React.ComponentType,
+): React.FunctionComponent<IDockviewPanelProps> {
+  return function TierGatedPanel(_props: IDockviewPanelProps) {
+    const tier = useUserStore((s) => s.tier);
+    if (!canAccessPanel(panelId, tier)) {
+      return (
+        <div className="h-full w-full overflow-hidden bg-zinc-900">
+          <LockedPanelOverlay panelId={panelId} />
+        </div>
+      );
+    }
+    return (
+      <div className="h-full w-full overflow-hidden bg-zinc-900">
+        <Suspense fallback={<PanelLoadingSkeleton />}>
+          <Component />
+        </Suspense>
+      </div>
+    );
+  };
+}
+
 // ---- Panel wrappers ----
 // Each dockview panel component receives IDockviewPanelProps.
 // Core panels are wrapped directly; lazy panels use withSuspense().
+// AI / advanced panels that require a subscription use withTierGate().
 
 function SceneViewportPanel(_props: IDockviewPanelProps) {
   return (
@@ -230,36 +260,39 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'asset-browser': AssetPanelWrapper,
   'audio-mixer': AudioMixerPanelWrapper,
   docs: DocsPanelWrapper,
-  // AI / advanced — lazy
+  // AI / advanced — lazy, no tier restriction
   'ui-builder': withSuspense(UIBuilderPanel),
   'dialogue-editor': withSuspense(DialogueTreeEditor),
   tileset: withSuspense(TilesetPanel),
   timeline: withSuspense(TimelinePanel),
   taskboard: withSuspense(TaskboardPanel),
-  'procedural-anim': withSuspense(ProceduralAnimPanel),
   'effect-bindings': withSuspense(EffectBindingsPanel),
-  tutorial: withSuspense(TutorialPanel),
-  accessibility: withSuspense(AccessibilityPanel),
-  review: withSuspense(ReviewPanel),
-  'behavior-tree': withSuspense(BehaviorTreePanel),
-  'level-generator': withSuspense(LevelGeneratorPanel),
-  'save-system': withSuspense(SaveSystemPanel),
-  narrative: withSuspense(NarrativePanel),
-  'auto-iteration': withSuspense(AutoIterationPanel),
-  'game-analytics': withSuspense(GameAnalyticsPanel),
-  'art-style': withSuspense(ArtStylePanel),
-  playtest: withSuspense(PlaytestPanel),
-  'physics-feel': withSuspense(PhysicsFeelPanel),
-  difficulty: withSuspense(DifficultyPanel),
-  'auto-rigging': withSuspense(AutoRiggingPanel),
-  'design-teacher': withSuspense(DesignTeacherPanel),
-  economy: withSuspense(EconomyPanel),
-  'smart-camera': withSuspense(SmartCameraPanel),
-  'world-builder': withSuspense(WorldBuilderPanel),
-  'texture-painter': withSuspense(TexturePainterPanel),
-  'idea-generator': withSuspense(IdeaGeneratorPanel),
-  'quest-generator': withSuspense(QuestGeneratorPanel),
-  'pacing-analyzer': withSuspense(PacingAnalyzerPanel),
+  // AI panels — tier-gated (hobbyist+)
+  tutorial: withTierGate('tutorial', TutorialPanel),
+  accessibility: withTierGate('accessibility', AccessibilityPanel),
+  review: withTierGate('review', ReviewPanel),
+  'design-teacher': withTierGate('design-teacher', DesignTeacherPanel),
+  'idea-generator': withTierGate('idea-generator', IdeaGeneratorPanel),
+  // AI panels — tier-gated (creator+)
+  'behavior-tree': withTierGate('behavior-tree', BehaviorTreePanel),
+  'level-generator': withTierGate('level-generator', LevelGeneratorPanel),
+  'save-system': withTierGate('save-system', SaveSystemPanel),
+  narrative: withTierGate('narrative', NarrativePanel),
+  'game-analytics': withTierGate('game-analytics', GameAnalyticsPanel),
+  'art-style': withTierGate('art-style', ArtStylePanel),
+  'physics-feel': withTierGate('physics-feel', PhysicsFeelPanel),
+  difficulty: withTierGate('difficulty', DifficultyPanel),
+  economy: withTierGate('economy', EconomyPanel),
+  'smart-camera': withTierGate('smart-camera', SmartCameraPanel),
+  'world-builder': withTierGate('world-builder', WorldBuilderPanel),
+  'texture-painter': withTierGate('texture-painter', TexturePainterPanel),
+  'quest-generator': withTierGate('quest-generator', QuestGeneratorPanel),
+  'pacing-analyzer': withTierGate('pacing-analyzer', PacingAnalyzerPanel),
+  'procedural-anim': withTierGate('procedural-anim', ProceduralAnimPanel),
+  // AI panels — tier-gated (pro only)
+  'auto-iteration': withTierGate('auto-iteration', AutoIterationPanel),
+  playtest: withTierGate('playtest', PlaytestPanel),
+  'auto-rigging': withTierGate('auto-rigging', AutoRiggingPanel),
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
