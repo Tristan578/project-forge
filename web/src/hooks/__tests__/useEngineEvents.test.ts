@@ -13,6 +13,7 @@ vi.mock('@/stores/editorStore', () => ({
 }));
 
 vi.mock('../events', () => ({
+  handlePanicEvent: vi.fn().mockReturnValue(false),
   handleTransformEvent: vi.fn().mockReturnValue(false),
   handleMaterialEvent: vi.fn().mockReturnValue(false),
   handlePhysicsEvent: vi.fn().mockReturnValue(false),

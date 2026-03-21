@@ -115,88 +115,64 @@ describe('engine crash state', () => {
   });
 });
 
-describe('ENGINE_PANIC event routing in useEngineEvents', () => {
+describe('handlePanicEvent domain handler', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.mock('@/lib/initLog', () => ({ logInitEvent: vi.fn() }));
     vi.mock('../useEngineStatus', () => ({ emitStatusEvent: vi.fn() }));
     vi.mock('@/lib/monitoring/sentry-client', () => ({ captureException: vi.fn(), setTag: vi.fn() }));
     vi.mock('@/lib/toast', () => ({ showError: vi.fn() }));
-
-    vi.mock('@/stores/editorStore', () => ({
-      useEditorStore: { setState: vi.fn(), getState: vi.fn(() => ({})) },
-      setCommandDispatcher: vi.fn(),
-    }));
-
-    vi.mock('@/lib/throttle/playModeThrottle', () => ({
-      createPlayModeThrottle: () => ({
-        shouldUpdate: vi.fn().mockReturnValue(true),
-        reset: vi.fn(),
-      }),
-    }));
-
-    vi.mock('../selectionBatcher', () => ({
-      createSelectionBatcher: (_cb: unknown) => ({ batch: vi.fn() }),
-    }));
-
-    vi.mock('../events', () => ({
-      handleTransformEvent: vi.fn().mockReturnValue(false),
-      handleMaterialEvent: vi.fn().mockReturnValue(false),
-      handlePhysicsEvent: vi.fn().mockReturnValue(false),
-      handleAudioEvent: vi.fn().mockReturnValue(false),
-      handleAnimationEvent: vi.fn().mockReturnValue(false),
-      handleGameEvent: vi.fn().mockReturnValue(false),
-      handleSpriteEvent: vi.fn().mockReturnValue(false),
-      handleParticleEvent: vi.fn().mockReturnValue(false),
-      handlePerformanceEvent: vi.fn().mockReturnValue(false),
-      handleEditModeEvent: vi.fn().mockReturnValue(false),
-    }));
   });
 
-  it('ENGINE_PANIC event calls setEngineCrashedFromEvent with the message', async () => {
-    const engineModule = await import('../useEngine');
-    const setEngineCrashedFromEventSpy = vi.spyOn(engineModule, 'setEngineCrashedFromEvent');
-    engineModule.resetEngine();
-
-    // We can't easily use renderHook here without jsdom; instead exercise the callback directly.
-    const { renderHook } = await import('@testing-library/react');
-    const { useEngineEvents } = await import('../useEngineEvents');
-
-    let capturedCallback: ((event: unknown) => void) | null = null;
-    const wasmModule = {
-      set_event_callback: vi.fn((cb: (event: unknown) => void) => {
-        capturedCallback = cb;
-      }),
-      handle_command: vi.fn(),
-    };
-
-    renderHook(() => useEngineEvents({ wasmModule }));
-
-    expect(capturedCallback).not.toBeNull();
-
-    capturedCallback!({ type: 'ENGINE_PANIC', payload: { message: 'panicked at vector index' } });
-
-    expect(setEngineCrashedFromEventSpy).toHaveBeenCalledWith('panicked at vector index');
+  it('returns false for non-panic events', async () => {
+    const { handlePanicEvent } = await import('../events/panicEvents');
+    const set = vi.fn();
+    const get = vi.fn();
+    expect(handlePanicEvent('SELECTION_CHANGED', {}, set as never, get as never)).toBe(false);
   });
 
-  it('ENGINE_PANIC event with missing message falls back to Unknown panic', async () => {
+  it('returns true and calls setEngineCrashedFromEvent for ENGINE_PANIC', async () => {
     const engineModule = await import('../useEngine');
-    const setEngineCrashedFromEventSpy = vi.spyOn(engineModule, 'setEngineCrashedFromEvent');
+    const spy = vi.spyOn(engineModule, 'setEngineCrashedFromEvent');
     engineModule.resetEngine();
 
-    const { renderHook } = await import('@testing-library/react');
-    const { useEngineEvents } = await import('../useEngineEvents');
+    const { handlePanicEvent } = await import('../events/panicEvents');
+    const set = vi.fn();
+    const get = vi.fn();
+    const result = handlePanicEvent(
+      'ENGINE_PANIC',
+      { message: 'panicked at vector index' },
+      set as never,
+      get as never,
+    );
 
-    let capturedCallback: ((event: unknown) => void) | null = null;
-    const wasmModule = {
-      set_event_callback: vi.fn((cb: (event: unknown) => void) => { capturedCallback = cb; }),
-      handle_command: vi.fn(),
-    };
+    expect(result).toBe(true);
+    expect(spy).toHaveBeenCalledWith('panicked at vector index');
+  });
 
-    renderHook(() => useEngineEvents({ wasmModule }));
+  it('falls back to Unknown panic when message is missing', async () => {
+    const engineModule = await import('../useEngine');
+    const spy = vi.spyOn(engineModule, 'setEngineCrashedFromEvent');
+    engineModule.resetEngine();
 
-    capturedCallback!({ type: 'ENGINE_PANIC', payload: {} });
+    const { handlePanicEvent } = await import('../events/panicEvents');
+    const set = vi.fn();
+    const get = vi.fn();
+    handlePanicEvent('ENGINE_PANIC', {}, set as never, get as never);
 
-    expect(setEngineCrashedFromEventSpy).toHaveBeenCalledWith('Unknown panic');
+    expect(spy).toHaveBeenCalledWith('Unknown panic');
+  });
+
+  it('falls back to Unknown panic when message is not a string', async () => {
+    const engineModule = await import('../useEngine');
+    const spy = vi.spyOn(engineModule, 'setEngineCrashedFromEvent');
+    engineModule.resetEngine();
+
+    const { handlePanicEvent } = await import('../events/panicEvents');
+    const set = vi.fn();
+    const get = vi.fn();
+    handlePanicEvent('ENGINE_PANIC', { message: 42 }, set as never, get as never);
+
+    expect(spy).toHaveBeenCalledWith('Unknown panic');
   });
 });

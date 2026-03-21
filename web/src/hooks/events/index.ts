@@ -12,4 +12,5 @@ export { handleSpriteEvent } from './spriteEvents';
 export { handleParticleEvent } from './particleEvents';
 export { handlePerformanceEvent } from './performanceEvents';
 export { handleEditModeEvent } from './editModeEvents';
+export { handlePanicEvent } from './panicEvents';
 export type { SetFn, GetFn } from './types';
