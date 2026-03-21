@@ -83,7 +83,7 @@ export function Vec3Input({
   return (
     <div className="space-y-1" onKeyDown={handleKeyDown}>
       <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-zinc-400">{label}</label>
+        <span className="text-xs font-medium text-zinc-400">{label}</span>
         <div className="flex items-center gap-0.5">
           {/* Copy button */}
           {onCopy && (
