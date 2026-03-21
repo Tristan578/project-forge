@@ -158,6 +158,11 @@ export async function checkPayments(): Promise<ServiceHealth> {
   };
 }
 
+/**
+ * @deprecated Use `checkSentry()` instead. This function returns `'Error Tracking (Sentry)'`
+ * which does NOT match the canonical name used by `runAllHealthChecks()`. Kept for backwards
+ * compatibility only — it is NOT called by `runAllHealthChecks()`. (PF-739)
+ */
 export async function checkErrorTracking(): Promise<ServiceHealth> {
   const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN ?? process.env.SENTRY_DSN;
 
@@ -180,6 +185,11 @@ export async function checkErrorTracking(): Promise<ServiceHealth> {
   };
 }
 
+/**
+ * @deprecated Use `checkCloudflareR2()` instead. This function returns `'Asset Storage (R2)'`
+ * which does NOT match the canonical name used by `runAllHealthChecks()`. Kept for backwards
+ * compatibility only — it is NOT called by `runAllHealthChecks()`. (PF-739)
+ */
 export async function checkAssetStorage(): Promise<ServiceHealth> {
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const accessKeyId = process.env.R2_ACCESS_KEY_ID;
