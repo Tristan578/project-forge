@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback } from 'react';
+import { initPostHog } from '@/lib/analytics/posthog';
 
 const STORAGE_KEY = 'forge-cookie-consent';
 
@@ -33,6 +34,9 @@ export function CookieConsent() {
   const handleAccept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, 'true');
     setConsented(true);
+    // Initialize PostHog immediately — the storage event only fires in other
+    // tabs, so we must call initPostHog directly in the originating tab.
+    initPostHog();
   }, []);
 
   const handleDecline = useCallback(() => {
