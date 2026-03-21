@@ -5,12 +5,13 @@
  * model ID mapping (known, passthrough, fallback), capabilities, and metadata.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const envBackup = { ...process.env };
 
 describe('openrouterBackend', () => {
   beforeEach(() => {
+    vi.resetModules();
     delete process.env.OPENROUTER_API_KEY;
   });
 

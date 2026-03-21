@@ -73,10 +73,10 @@ jobs:
     if: ${{ needs.ci-gate.outputs.needs-any-code == 'true' }}
     uses: ./.github/workflows/quality-gates.yml
     with:
-      web-changed: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
-      engine-changed: ${{ needs.ci-gate.outputs.needs-engine == 'true' }}
-      mcp-changed: ${{ needs.ci-gate.outputs.needs-mcp == 'true' }}
-      ci-changed: ${{ needs.ci-gate.outputs.needs-ci == 'true' }}
+      web-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web) }}
+      engine-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-engine) }}
+      mcp-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-mcp) }}
+      ci-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-ci) }}
 
   # ---- CI-only checks ----
 

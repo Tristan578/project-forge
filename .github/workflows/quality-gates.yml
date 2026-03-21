@@ -23,6 +23,10 @@ on:
         description: 'Whether .github/** changed (defaults to true when unset)'
         type: boolean
         default: true
+      can-commit-ratchet:
+        description: 'Whether the ratchet job can commit+push (only true from CD with write perms)'
+        type: boolean
+        default: false
     outputs:
       lint-result:
         description: 'Outcome of the lint job'
@@ -42,6 +46,9 @@ on:
       security-result:
         description: 'Outcome of the security job'
         value: ${{ jobs.security.result }}
+      coverage-ratchet-result:
+        description: 'Outcome of the coverage-ratchet job'
+        value: ${{ jobs.coverage-ratchet.result }}
 
 permissions:
   contents: read
@@ -139,6 +146,53 @@ jobs:
               echo "::warning::vitest exited with code $EXIT_CODE but no test failures detected — likely open handle issue (vitest#3077)"
               exit 0
             fi
+          fi
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: web/coverage/
+          retention-days: 7
+
+  coverage-ratchet:
+    name: Coverage Ratchet
+    needs: test-web
+    if: (inputs.web-changed || inputs.ci-changed) && needs.test-web.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download coverage artifact
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: coverage-report
+          path: web/coverage
+
+      - name: Install jq and bc
+        run: sudo apt-get install -y jq bc
+
+      - name: Run coverage ratchet (informational on PRs, commits on main)
+        run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
+
+      - name: Commit bumped thresholds (main branch only, requires write perms)
+        if: github.ref == 'refs/heads/main' && inputs.can-commit-ratchet
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet web/vitest.config.ts; then
+            echo "No threshold changes to commit."
+          else
+            git add web/vitest.config.ts
+            git commit -m "chore: ratchet coverage thresholds [skip ci]"
+            git push
           fi
 
   test-mcp:

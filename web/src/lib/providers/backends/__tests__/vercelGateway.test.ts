@@ -6,7 +6,7 @@
  * default models export, capabilities, and metadata.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const envBackup = { ...process.env };
 
@@ -18,6 +18,7 @@ function clearVercelEnv(): void {
 
 describe('vercelGatewayBackend', () => {
   beforeEach(() => {
+    vi.resetModules();
     clearVercelEnv();
   });
 
@@ -169,6 +170,10 @@ describe('vercelGatewayBackend', () => {
 });
 
 describe('vercelGatewayDefaultModels', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
   it('exports default models for chat, embedding, and image', async () => {
     const { vercelGatewayDefaultModels } = await import('@/lib/providers/backends/vercelGateway');
     expect(vercelGatewayDefaultModels.chat).toBe('anthropic/claude-sonnet-4-6');
