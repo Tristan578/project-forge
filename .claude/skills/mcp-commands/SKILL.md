@@ -20,9 +20,9 @@ The MCP command set IS the AI's vocabulary. A richer vocabulary = a more capable
 ## Current State
 
 - **306+ MCP commands** across 37 categories
-- Manifests at: `mcp-server/manifest/commands.json` AND `web/src/data/commands.json` (MUST stay in sync)
-- Chat handlers at: `web/src/lib/chat/handlers/` (domain files) + `web/src/lib/chat/executor.legacy.ts` (unmigrated)
-- MCP server at: `mcp-server/src/` with manifest validation tests
+- Manifests at: @mcp-server/manifest/commands.json AND @web/src/data/commands.json (MUST stay in sync)
+- Chat handlers at: @web/src/lib/chat/handlers/ (domain files) + @web/src/lib/chat/executor.legacy.ts (unmigrated)
+- MCP server at: @mcp-server/src/ with manifest validation tests
 
 ## Adding a New MCP Command
 
@@ -88,7 +88,7 @@ Add to `web/src/lib/chat/executor.ts` handler registry or the appropriate domain
 
 ### 4. ToolCallCard Display
 
-Add a human-readable label in `web/src/components/chat/ToolCallCard.tsx`:
+Add a human-readable label in @web/src/components/chat/ToolCallCard.tsx:
 ```typescript
 case 'my_new_command': return 'Applying Effect';
 ```
@@ -150,4 +150,4 @@ Before declaring MCP work complete:
 2. Chat handler test exists with arg validation and dispatch verification
 3. ToolCallCard has a display label
 4. Command description is specific enough for AI to use correctly without examples
-5. If adding a new category, update `validCategories` in `mcp-server/src/manifest.test.ts`
+5. If adding a new category, update `validCategories` in @mcp-server/src/manifest.test.ts
