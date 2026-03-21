@@ -62,7 +62,8 @@ ACTUAL_LINES=$(read_pct "lines")
 # ---------------------------------------------------------------------------
 read_threshold() {
   local metric="$1"
-  grep -oP "${metric}:\s*\K[0-9]+" "${CONFIG_PATH}" | head -1
+  # Use sed instead of grep -P (BSD grep on macOS lacks PCRE support)
+  grep "${metric}:" "${CONFIG_PATH}" | head -1 | sed -E 's/.*'"${metric}"':[[:space:]]*([0-9]+).*/\1/'
 }
 
 THRESHOLD_STATEMENTS=$(read_threshold "statements")
