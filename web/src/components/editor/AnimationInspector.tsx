@@ -75,7 +75,7 @@ export function AnimationInspector() {
   return (
     <div className="border-t border-zinc-800 pt-4 mt-4">
       <div className="mb-3 flex items-center gap-1.5">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Animation
         </h3>
         <InfoTooltip text="Controls animation playback on this object" />
@@ -122,7 +122,7 @@ export function AnimationInspector() {
             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
             [&::-webkit-slider-thumb]:bg-zinc-300"
         />
-        <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+        <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
           {crossfadeDuration.toFixed(1)}s
         </span>
       </div>
@@ -170,7 +170,7 @@ export function AnimationInspector() {
         </button>
 
         {/* Status badge */}
-        <span className="ml-auto text-[10px] text-zinc-500">
+        <span className="ml-auto text-[10px] text-zinc-400">
           {animation.isPlaying && !animation.isPaused
             ? 'Playing'
             : animation.isPaused
@@ -197,7 +197,7 @@ export function AnimationInspector() {
                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                 [&::-webkit-slider-thumb]:bg-zinc-300"
             />
-            <span className="w-16 text-right text-xs tabular-nums text-zinc-500">
+            <span className="w-16 text-right text-xs tabular-nums text-zinc-400">
               {animation.elapsedSecs.toFixed(1)}s / {duration.toFixed(1)}s
             </span>
           </div>
@@ -222,7 +222,7 @@ export function AnimationInspector() {
             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
             [&::-webkit-slider-thumb]:bg-zinc-300"
         />
-        <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+        <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
           {animation.speed.toFixed(1)}x
         </span>
       </div>
@@ -246,7 +246,7 @@ export function AnimationInspector() {
       {animation.availableClips.length > 1 && (
         <div className="border-t border-zinc-800 pt-3">
           <div className="mb-2 flex items-center gap-1.5">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
               Blend Weights
             </h4>
             <InfoTooltip term="blendWeights" />

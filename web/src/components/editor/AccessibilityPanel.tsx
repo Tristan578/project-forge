@@ -147,7 +147,7 @@ function AuditResults({ audit }: { audit: AccessibilityAudit }) {
             />
           </div>
         </div>
-        <div className="text-[10px] text-zinc-500">
+        <div className="text-[10px] text-zinc-400">
           {audit.passedChecks.length}/{audit.totalChecks} checks passed
         </div>
       </div>
@@ -182,7 +182,7 @@ function AuditResults({ audit }: { audit: AccessibilityAudit }) {
                     {severityIcon(issue.severity)}
                     <div className="min-w-0 flex-1">
                       <div className="text-zinc-300">{issue.message}</div>
-                      <div className="mt-0.5 text-zinc-500">{issue.suggestion}</div>
+                      <div className="mt-0.5 text-zinc-400">{issue.suggestion}</div>
                     </div>
                   </div>
                 ))}
@@ -195,7 +195,7 @@ function AuditResults({ audit }: { audit: AccessibilityAudit }) {
       {/* Passed checks */}
       {audit.passedChecks.length > 0 && (
         <div className="space-y-1">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Passed Checks</div>
+          <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">Passed Checks</div>
           {audit.passedChecks.map((check, i) => (
             <div key={i} className="flex items-center gap-2 text-[11px] text-green-500/80">
               <CheckCircle2 size={10} className="shrink-0" />
@@ -253,14 +253,14 @@ function ColorblindPreview({
             aria-label={`Simulate ${mode.label}`}
           >
             <div className="font-medium">{mode.label}</div>
-            <div className="text-zinc-500">{mode.description}</div>
+            <div className="text-zinc-400">{mode.description}</div>
           </button>
         ))}
       </div>
 
       {profile.colorblindMode.enabled && (
         <div className="space-y-1">
-          <label className="text-[10px] text-zinc-500">
+          <label className="text-[10px] text-zinc-400">
             Filter strength: {(profile.colorblindMode.filterStrength * 100).toFixed(0)}%
           </label>
           <input
@@ -323,7 +323,7 @@ function ScreenReaderSection({
         <div className="max-h-32 space-y-1 overflow-y-auto">
           {Array.from(profile.screenReader.entityDescriptions.entries()).map(([id, desc]) => (
             <div key={id} className="rounded bg-zinc-900 px-2 py-1 text-[10px] text-zinc-400">
-              <span className="text-zinc-500">{id.slice(0, 8)}:</span> {desc}
+              <span className="text-zinc-400">{id.slice(0, 8)}:</span> {desc}
             </div>
           ))}
         </div>
@@ -362,17 +362,17 @@ function InputRemappingSection({
           {profile.inputRemapping.remappings.map((remap, i) => (
             <div key={i} className="flex items-center justify-between rounded bg-zinc-800 px-2 py-1 text-[10px]">
               <span className="text-zinc-300">{remap.action}</span>
-              <div className="flex items-center gap-1.5 text-zinc-500">
+              <div className="flex items-center gap-1.5 text-zinc-400">
                 <kbd className="rounded bg-zinc-700 px-1 py-0.5 text-[9px]">{remap.primaryKey}</kbd>
                 {remap.gamepadButton && (
-                  <span className="text-zinc-600">| {remap.gamepadButton}</span>
+                  <span className="text-zinc-400">| {remap.gamepadButton}</span>
                 )}
               </div>
             </div>
           ))}
         </div>
       ) : (
-        <div className="text-[11px] text-zinc-500">No input bindings configured in the scene.</div>
+        <div className="text-[11px] text-zinc-400">No input bindings configured in the scene.</div>
       )}
     </div>
   );
@@ -453,7 +453,7 @@ export function AccessibilityPanel() {
         <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
           Accessibility
         </h3>
-        <span className="text-[10px] text-zinc-600">{entityCount} entities</span>
+        <span className="text-[10px] text-zinc-400">{entityCount} entities</span>
       </div>
 
       {/* Content */}
@@ -517,7 +517,7 @@ export function AccessibilityPanel() {
           </div>
           {profile.subtitles.enabled && (
             <div className="space-y-1">
-              <label className="text-[10px] text-zinc-500">Font size</label>
+              <label className="text-[10px] text-zinc-400">Font size</label>
               <select
                 value={profile.subtitles.fontSize}
                 onChange={(e) =>
@@ -557,7 +557,7 @@ export function AccessibilityPanel() {
           </div>
           {profile.fontSize.enabled && (
             <div className="space-y-1">
-              <label className="text-[10px] text-zinc-500">
+              <label className="text-[10px] text-zinc-400">
                 Scale: {(profile.fontSize.scale * 100).toFixed(0)}%
               </label>
               <input

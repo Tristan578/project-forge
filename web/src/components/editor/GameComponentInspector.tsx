@@ -38,7 +38,7 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2,
           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
           [&::-webkit-slider-thumb]:bg-zinc-300"
       />
-      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
         {value.toFixed(precision)}
       </span>
     </div>
@@ -197,7 +197,7 @@ function ComponentSection({ title, onRemove, children }: ComponentSectionProps) 
         </button>
         <button
           onClick={onRemove}
-          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
         >
           <Trash2 size={12} />
         </button>
@@ -364,11 +364,11 @@ function MovingPlatformSection({ data, onChange, onRemove }: MovingPlatformSecti
         </div>
         {data.waypoints.map((wp, i) => (
           <div key={i} className="flex items-center gap-1">
-            <span className="w-8 text-xs text-zinc-500">{i}</span>
+            <span className="w-8 text-xs text-zinc-400">{i}</span>
             <Vec3Input label="" value={wp} onChange={(v) => updateWaypoint(i, v)} />
             <button
               onClick={() => removeWaypoint(i)}
-              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-400"
             >
               <Trash2 size={12} />
             </button>
@@ -622,7 +622,7 @@ export function GameComponentInspector() {
     <div className="border-t border-zinc-800 pt-4 mt-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Game Components
           </h3>
           <InfoTooltip text="Pre-built behaviors you can add to make objects interactive" />
@@ -696,7 +696,7 @@ export function GameComponentInspector() {
         })}
 
         {(!primaryGameComponents || primaryGameComponents.length === 0) && (
-          <p className="text-xs text-zinc-500">No game components attached</p>
+          <p className="text-xs text-zinc-400">No game components attached</p>
         )}
       </div>
     </div>

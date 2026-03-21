@@ -204,7 +204,7 @@ function SuggestionCard({ suggestion }: { suggestion: PacingSuggestion }) {
         <div>
           <p className="font-medium text-zinc-200">{suggestion.title}</p>
           <p className="mt-0.5 text-zinc-400">{suggestion.description}</p>
-          <p className="mt-1 text-zinc-500">
+          <p className="mt-1 text-zinc-400">
             Range: {(suggestion.range[0] * 100).toFixed(0)}% – {(suggestion.range[1] * 100).toFixed(0)}%
           </p>
         </div>
@@ -373,7 +373,7 @@ export function PacingAnalyzerPanel() {
             )}
           </>
         ) : (
-          <div className="flex flex-col items-center justify-center gap-2 py-8 text-zinc-500">
+          <div className="flex flex-col items-center justify-center gap-2 py-8 text-zinc-400">
             <BarChart3 size={32} />
             <p className="text-xs">Add entities to the scene to analyze pacing</p>
           </div>

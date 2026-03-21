@@ -162,7 +162,7 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
             onChange={(e) => handleParamChange({ targetEntity: e.target.value || null })}
             placeholder="(follow selected)"
             className="flex-1 rounded bg-zinc-800 px-2 py-1 text-xs text-zinc-200 outline-none
-              focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-600"
+              focus:ring-1 focus:ring-blue-500 placeholder:text-zinc-400"
           />
         </div>
 
@@ -361,7 +361,7 @@ export const GameCameraInspector = memo(function GameCameraInspector() {
         )}
 
         {primaryGameCamera.mode === 'fixed' && (
-          <p className="text-xs text-zinc-500 italic">
+          <p className="text-xs text-zinc-400 italic">
             Camera position is set via entity transform
           </p>
         )}

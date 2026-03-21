@@ -87,7 +87,7 @@ function MaterialCard({
     >
       {isCustom && onDelete && (
         <button
-          className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-red-400 group-hover:block z-10"
+          className="absolute right-0.5 top-0.5 hidden rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-red-400 group-hover:block z-10"
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
@@ -178,7 +178,7 @@ export function MaterialLibraryPanel() {
     <div className="flex flex-col gap-1 p-2">
       {/* Search bar */}
       <div className="relative">
-        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400" />
         <input
           type="text"
           value={search}
@@ -197,7 +197,7 @@ export function MaterialLibraryPanel() {
             className={`rounded-full px-2 py-0.5 text-[9px] capitalize transition-colors ${
               activeCategories.has(cat)
                 ? 'bg-zinc-600 text-zinc-200'
-                : 'bg-zinc-800 text-zinc-500 hover:text-zinc-400'
+                : 'bg-zinc-800 text-zinc-400 hover:text-zinc-400'
             }`}
           >
             <span className={`mr-1 inline-block h-1.5 w-1.5 rounded-full ${CATEGORY_COLORS[cat]}`} />
@@ -208,7 +208,7 @@ export function MaterialLibraryPanel() {
 
       {/* No selection warning */}
       {!primaryId && (
-        <p className="text-center text-[10px] text-zinc-600 py-1">
+        <p className="text-center text-[10px] text-zinc-400 py-1">
           Select an entity to apply materials
         </p>
       )}
@@ -218,7 +218,7 @@ export function MaterialLibraryPanel() {
         <>
           <div className="flex items-center gap-1 mt-1">
             <Bookmark size={10} className="text-pink-400" />
-            <span className="text-[9px] font-medium text-zinc-500 uppercase tracking-wider">Custom</span>
+            <span className="text-[9px] font-medium text-zinc-400 uppercase tracking-wider">Custom</span>
           </div>
           <div className="grid grid-cols-5 gap-1">
             {filteredCustom.map((mat) => (
@@ -258,7 +258,7 @@ export function MaterialLibraryPanel() {
       </div>
 
       {filtered.length === 0 && filteredCustom.length === 0 && (
-        <p className="text-center text-[10px] text-zinc-600 py-4">
+        <p className="text-center text-[10px] text-zinc-400 py-4">
           No materials found
         </p>
       )}

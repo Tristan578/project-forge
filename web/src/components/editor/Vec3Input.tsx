@@ -125,7 +125,7 @@ export function Vec3Input({
                 p-0.5 rounded transition-opacity duration-150
                 ${showReset
                   ? 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700 opacity-60 hover:opacity-100'
-                  : 'text-zinc-600 opacity-0 pointer-events-none'
+                  : 'text-zinc-400 opacity-0 pointer-events-none'
                 }
                 disabled:opacity-30 disabled:cursor-not-allowed
               `}

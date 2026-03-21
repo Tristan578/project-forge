@@ -63,7 +63,7 @@ export function TerrainInspector() {
             Terrain
           </h3>
           <InfoTooltip text="Procedurally generated landscape" />
-          <button onClick={() => navigateDocs('features/terrain')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+          <button onClick={() => navigateDocs('features/terrain')} className="rounded p-0.5 text-zinc-400 hover:text-zinc-400" title="Documentation">
             <HelpCircle size={12} />
           </button>
         </div>
@@ -104,7 +104,7 @@ export function TerrainInspector() {
 
       {/* Noise Settings */}
       <div className="space-y-3">
-        <h4 className="text-xs font-medium text-zinc-500 uppercase">Noise</h4>
+        <h4 className="text-xs font-medium text-zinc-400 uppercase">Noise</h4>
 
         <div className="space-y-2">
           <label className="text-xs text-zinc-400 flex items-center gap-1">

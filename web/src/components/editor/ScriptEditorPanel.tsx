@@ -16,7 +16,7 @@ const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false 
 // Dynamic import VisualScriptEditor with SSR disabled (React Flow doesn't support SSR)
 const VisualScriptEditor = dynamic(
   () => import('./VisualScriptEditor').then(mod => ({ default: mod.VisualScriptEditor })),
-  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-zinc-600 text-xs">Loading graph editor...</div> }
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center text-zinc-400 text-xs">Loading graph editor...</div> }
 );
 
 const DEFAULT_SCRIPT = `function onStart() {
@@ -172,9 +172,9 @@ export function ScriptEditorPanel() {
   if (!primaryId) {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-zinc-900 p-4">
-        <FileCode size={32} className="mb-2 text-zinc-600" />
-        <p className="text-xs text-zinc-500">Select an entity to edit its script</p>
-        <p className="mt-2 text-[10px] text-zinc-600">
+        <FileCode size={32} className="mb-2 text-zinc-400" />
+        <p className="text-xs text-zinc-400">Select an entity to edit its script</p>
+        <p className="mt-2 text-[10px] text-zinc-400">
           Or open the Script Explorer to manage standalone scripts
         </p>
         <div className="mt-4 w-full max-w-xs rounded border border-zinc-800 bg-zinc-800/50 px-3 py-2">
@@ -182,7 +182,7 @@ export function ScriptEditorPanel() {
             <span className="rounded bg-blue-900/40 px-1 py-0.5 text-blue-400">TypeScript</span>
             {' '}forge.* API
           </p>
-          <div className="space-y-0.5 text-[10px] text-zinc-600">
+          <div className="space-y-0.5 text-[10px] text-zinc-400">
             <p><span className="text-zinc-400">forge.transform</span> — position, rotation, scale</p>
             <p><span className="text-zinc-400">forge.input</span> — keyboard, mouse, gamepad</p>
             <p><span className="text-zinc-400">forge.physics</span> — forces, collisions, raycast</p>
@@ -201,7 +201,7 @@ export function ScriptEditorPanel() {
       <div className="flex h-full flex-col bg-zinc-900 p-4">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-zinc-300">Script</h2>
-          <span className="text-xs text-zinc-500">{primaryName}</span>
+          <span className="text-xs text-zinc-400">{primaryName}</span>
         </div>
         <div className="flex flex-1 flex-col items-center justify-center gap-4">
           <EmptyState
@@ -211,7 +211,7 @@ export function ScriptEditorPanel() {
             action={{ label: 'Add Script', onClick: handleAddScript }}
           />
           <div className="w-full">
-            <p className="mb-1.5 text-center text-[10px] uppercase tracking-wider text-zinc-600">
+            <p className="mb-1.5 text-center text-[10px] uppercase tracking-wider text-zinc-400">
               Or start from a template
             </p>
             <div className="grid grid-cols-2 gap-1">
@@ -222,7 +222,7 @@ export function ScriptEditorPanel() {
                   className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-left hover:border-zinc-600 hover:bg-zinc-700"
                 >
                   <div className="text-xs text-zinc-300">{t.name}</div>
-                  <div className="mt-0.5 text-[10px] text-zinc-600 line-clamp-2">{t.description}</div>
+                  <div className="mt-0.5 text-[10px] text-zinc-400 line-clamp-2">{t.description}</div>
                 </button>
               ))}
             </div>
@@ -280,7 +280,7 @@ export function ScriptEditorPanel() {
           <button
             onClick={handleSave}
             disabled={!isDirty}
-            className="rounded p-1 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 disabled:opacity-30"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 disabled:opacity-30"
             title="Save (Ctrl+S)"
           >
             <Save size={14} />
@@ -289,7 +289,7 @@ export function ScriptEditorPanel() {
           {/* Remove */}
           <button
             onClick={handleRemoveScript}
-            className="rounded p-1 text-zinc-500 hover:bg-zinc-700 hover:text-red-400"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-red-400"
             title="Remove script"
           >
             <Trash2 size={14} />
@@ -301,13 +301,13 @@ export function ScriptEditorPanel() {
       <div className="flex items-center gap-1 border-b border-zinc-800 px-2 py-1">
         <button
           onClick={() => setViewMode('code')}
-          className={`rounded px-2 py-0.5 text-xs ${viewMode === 'code' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`rounded px-2 py-0.5 text-xs ${viewMode === 'code' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}`}
         >
           Code
         </button>
         <button
           onClick={() => setViewMode('graph')}
-          className={`rounded px-2 py-0.5 text-xs ${viewMode === 'graph' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`rounded px-2 py-0.5 text-xs ${viewMode === 'graph' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-400 hover:text-zinc-300'}`}
         >
           Graph
         </button>
@@ -351,19 +351,19 @@ export function ScriptEditorPanel() {
       {showConsole && (
         <div className="border-t border-zinc-800">
           <div className="flex items-center justify-between px-2 py-0.5">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               Console
             </span>
             <div className="flex items-center gap-1">
               <button
                 onClick={clearScriptLogs}
-                className="text-[10px] text-zinc-600 hover:text-zinc-400"
+                className="text-[10px] text-zinc-400 hover:text-zinc-400"
               >
                 Clear
               </button>
               <button
                 onClick={() => setShowConsole(false)}
-                className="text-[10px] text-zinc-600 hover:text-zinc-400"
+                className="text-[10px] text-zinc-400 hover:text-zinc-400"
               >
                 Hide
               </button>
@@ -384,7 +384,7 @@ export function ScriptEditorPanel() {
                       ? 'text-red-400'
                       : log.level === 'warn'
                         ? 'text-amber-400'
-                        : 'text-zinc-500'
+                        : 'text-zinc-400'
                   }`}
                 >
                   {log.message}
@@ -397,7 +397,7 @@ export function ScriptEditorPanel() {
       {!showConsole && (
         <button
           onClick={() => setShowConsole(true)}
-          className="border-t border-zinc-800 px-2 py-0.5 text-left text-[10px] text-zinc-600 hover:text-zinc-400"
+          className="border-t border-zinc-800 px-2 py-0.5 text-left text-[10px] text-zinc-400 hover:text-zinc-400"
         >
           Show Console ({filteredLogs.length})
         </button>

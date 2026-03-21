@@ -33,12 +33,12 @@ export function NodePalette({ onClose }: NodePaletteProps) {
       <div className="sticky top-0 z-10 border-b border-zinc-700 bg-zinc-900 p-2">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-semibold text-zinc-400">Node Palette</span>
-          <button onClick={onClose} className="rounded p-0.5 text-zinc-500 hover:text-zinc-300">
+          <button onClick={onClose} className="rounded p-0.5 text-zinc-400 hover:text-zinc-300">
             <X size={14} />
           </button>
         </div>
         <div className="relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
             type="text"
             value={search}
@@ -59,7 +59,7 @@ export function NodePalette({ onClose }: NodePaletteProps) {
             >
               <span className={`text-[10px] ${expandedCategory === cat.category ? 'rotate-90' : ''} transition-transform`}>▶</span>
               {cat.label}
-              <span className="ml-auto text-[10px] text-zinc-600">{cat.nodes.length}</span>
+              <span className="ml-auto text-[10px] text-zinc-400">{cat.nodes.length}</span>
             </button>
 
             {(expandedCategory === cat.category || search) && (

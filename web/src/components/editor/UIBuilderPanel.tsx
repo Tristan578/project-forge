@@ -54,7 +54,7 @@ export function UIBuilderPanel() {
           <ScreenList />
         </div>
         <button
-          className="rounded p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="rounded p-1 text-zinc-400 hover:text-zinc-300 transition-colors"
           title="UI Settings"
         >
           <Settings size={16} />
@@ -64,14 +64,14 @@ export function UIBuilderPanel() {
       {/* Content area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {!activeScreenId ? (
-          <div className="flex items-center justify-center h-32 text-zinc-600 text-sm">
+          <div className="flex items-center justify-center h-32 text-zinc-400 text-sm">
             Select or create a screen to begin
           </div>
         ) : (
           <div className="flex flex-col gap-4 p-3">
             {/* Widget Palette */}
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
                 Add Widget
               </h3>
               <WidgetPalette />
@@ -79,7 +79,7 @@ export function UIBuilderPanel() {
 
             {/* Widget Tree */}
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
                 Widget Tree
               </h3>
               <WidgetTree />
@@ -89,14 +89,14 @@ export function UIBuilderPanel() {
             {selectedWidgetId ? (
               <>
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
                     Widget Properties
                   </h3>
                   <WidgetPropertyPanel />
                 </div>
 
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
                     Widget Style
                   </h3>
                   <WidgetStyleEditor />
@@ -104,7 +104,7 @@ export function UIBuilderPanel() {
               </>
             ) : (
               <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
                   Screen Settings
                 </h3>
                 <ScreenSettingsPanel />

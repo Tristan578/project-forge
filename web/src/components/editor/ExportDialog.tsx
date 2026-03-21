@@ -244,7 +244,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   }`}
                 >
                   <div className="font-medium">{preset.name}</div>
-                  <div className="mt-0.5 text-zinc-500">{preset.description}</div>
+                  <div className="mt-0.5 text-zinc-400">{preset.description}</div>
                 </button>
               ))}
             </div>
@@ -286,7 +286,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   className="text-blue-500"
                 />
                 <span className="text-sm text-zinc-300">ZIP Bundle</span>
-                <span className="text-xs text-zinc-500">(Assets separated)</span>
+                <span className="text-xs text-zinc-400">(Assets separated)</span>
               </label>
               <label className="flex items-center gap-2">
                 <input
@@ -297,7 +297,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   className="text-blue-500"
                 />
                 <span className="text-sm text-zinc-300">PWA (Progressive Web App)</span>
-                <span className="text-xs text-zinc-500">(Installable)</span>
+                <span className="text-xs text-zinc-400">(Installable)</span>
               </label>
               <label className="flex items-center gap-2">
                 <input
@@ -308,7 +308,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   className="text-blue-500"
                 />
                 <span className="text-sm text-zinc-300">Embed (iframe)</span>
-                <span className="text-xs text-zinc-500">(For websites)</span>
+                <span className="text-xs text-zinc-400">(For websites)</span>
               </label>
             </div>
           </div>
@@ -342,7 +342,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                 <option value="landscape">Landscape</option>
                 <option value="portrait">Portrait</option>
               </select>
-              <p className="mt-1 text-xs text-zinc-500">Lock screen orientation on mobile devices</p>
+              <p className="mt-1 text-xs text-zinc-400">Lock screen orientation on mobile devices</p>
             </div>
           )}
 
@@ -380,7 +380,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
               />
               <span className="text-sm text-zinc-300">Include Debug Info</span>
             </label>
-            <p className="mt-1 text-xs text-zinc-500">Includes console logs and error messages</p>
+            <p className="mt-1 text-xs text-zinc-400">Includes console logs and error messages</p>
           </div>
 
           {/* Texture Compression */}
@@ -408,7 +408,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                 <div>
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-medium text-zinc-300">Quality</label>
-                    <span className="text-xs text-zinc-500">{compressionQuality}%</span>
+                    <span className="text-xs text-zinc-400">{compressionQuality}%</span>
                   </div>
                   <input
                     type="range"
@@ -420,7 +420,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                     className="mt-1 w-full accent-blue-500"
                   />
                 </div>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-zinc-400">
                   Est. size reduction: ~{Math.round((1 - estimateCompression(1000, COMPRESSION_PRESETS[compressionPreset]?.format as CompressionFormat ?? 'webp', compressionQuality) / 1000) * 100)}%
                 </p>
               </div>
@@ -438,7 +438,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                 <Palette size={16} />
                 Customize Loading Screen
               </span>
-              <span className="text-xs text-zinc-500">
+              <span className="text-xs text-zinc-400">
                 {showLoadingCustomization ? 'Hide' : 'Show'}
               </span>
             </button>

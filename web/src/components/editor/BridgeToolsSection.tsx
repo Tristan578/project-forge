@@ -37,9 +37,9 @@ export function BridgeToolsSection() {
   const statusColor = (status: string) => {
     switch (status) {
       case 'connected': return 'text-green-400';
-      case 'not_found': return 'text-zinc-500';
+      case 'not_found': return 'text-zinc-400';
       case 'error': return 'text-red-400';
-      default: return 'text-zinc-500';
+      default: return 'text-zinc-400';
     }
   };
 
@@ -54,12 +54,12 @@ export function BridgeToolsSection() {
 
   return (
     <div className="space-y-3">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
         Bridge Tools
       </h3>
 
       {Object.values(bridgeTools).length === 0 && (
-        <p className="text-xs text-zinc-600">No tools discovered yet.</p>
+        <p className="text-xs text-zinc-400">No tools discovered yet.</p>
       )}
 
       {Object.values(bridgeTools).map((tool) => (
@@ -70,7 +70,7 @@ export function BridgeToolsSection() {
           <div>
             <span className="text-sm text-zinc-200">{tool.name}</span>
             {tool.activeVersion && (
-              <span className="ml-2 text-xs text-zinc-500">v{tool.activeVersion}</span>
+              <span className="ml-2 text-xs text-zinc-400">v{tool.activeVersion}</span>
             )}
           </div>
           <span className={`text-xs ${statusColor(tool.status)}`}>

@@ -36,7 +36,7 @@ function FieldRow({
         className="accent-blue-500"
       />
       <span className="truncate flex-1">{field.path}</span>
-      <span className="text-zinc-500">{field.type}</span>
+      <span className="text-zinc-400">{field.type}</span>
     </label>
   );
 }
@@ -52,11 +52,11 @@ function CheckpointRow({
     <div className="flex items-center gap-2 text-xs text-zinc-300 bg-zinc-800 px-2 py-1.5 rounded">
       <CheckCircle size={12} className="text-green-400 shrink-0" />
       <span className="truncate flex-1">{checkpoint.name}</span>
-      <span className="text-zinc-500">{checkpoint.trigger}</span>
+      <span className="text-zinc-400">{checkpoint.trigger}</span>
       <button
         type="button"
         onClick={onRemove}
-        className="text-zinc-500 hover:text-red-400 transition-colors duration-150"
+        className="text-zinc-400 hover:text-red-400 transition-colors duration-150"
         aria-label={`Remove checkpoint ${checkpoint.name}`}
       >
         <Trash2 size={12} />
@@ -198,7 +198,7 @@ export function SaveSystemPanel() {
 
           {detectedFields.length > 0 && (
             <div className="space-y-1 mt-2">
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-zinc-400">
                 {detectedFields.length} field(s) detected
               </p>
               {detectedFields.map((field) => (
@@ -274,7 +274,7 @@ export function SaveSystemPanel() {
           </div>
 
           {checkpoints.length === 0 && (
-            <p className="text-xs text-zinc-500 italic">
+            <p className="text-xs text-zinc-400 italic">
               No checkpoints yet. Click &ldquo;Add&rdquo; to create one.
             </p>
           )}
@@ -307,7 +307,7 @@ export function SaveSystemPanel() {
             type="button"
             onClick={handleGenerate}
             disabled={isGenerating}
-            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-xs font-medium transition-colors duration-150 focus:ring-2 focus:ring-green-500 focus:outline-none"
+            className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-xs font-medium transition-colors duration-150 focus:ring-2 focus:ring-green-500 focus:outline-none"
           >
             {isGenerating ? (
               <Loader2 size={12} className="animate-spin" />

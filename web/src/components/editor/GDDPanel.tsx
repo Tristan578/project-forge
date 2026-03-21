@@ -95,7 +95,7 @@ function GDDResultView({
       {/* Mechanics */}
       {gdd.mechanics.length > 0 && (
         <div>
-          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-1">
+          <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 mb-1">
             Key Mechanics
           </h4>
           <div className="flex flex-wrap gap-1">
@@ -208,7 +208,7 @@ export function GDDPanel() {
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
         {/* Prompt input */}
         <div>
-          <label htmlFor="gdd-prompt" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500 mb-1">
+          <label htmlFor="gdd-prompt" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400 mb-1">
             Game Idea
           </label>
           <textarea
@@ -218,11 +218,11 @@ export function GDDPanel() {
             onKeyDown={handleKeyDown}
             placeholder="Describe your game idea... e.g., 'a platformer where you collect stars in a haunted castle'"
             rows={3}
-            className="w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
+            className="w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-400 focus:border-amber-600 focus:outline-none focus:ring-1 focus:ring-amber-600"
             disabled={isGenerating}
           />
           {prompt.trim() && (
-            <div className="mt-1 flex gap-2 text-[10px] text-zinc-600">
+            <div className="mt-1 flex gap-2 text-[10px] text-zinc-400">
               {detectedGenre && !genre && (
                 <span>Detected genre: <span className="text-zinc-400">{detectedGenre}</span></span>
               )}
@@ -236,7 +236,7 @@ export function GDDPanel() {
         {/* Options */}
         <div className="flex gap-2">
           <div className="flex-1">
-            <label htmlFor="gdd-genre" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500 mb-1">
+            <label htmlFor="gdd-genre" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400 mb-1">
               Genre
             </label>
             <select
@@ -253,7 +253,7 @@ export function GDDPanel() {
             </select>
           </div>
           <div className="flex-1">
-            <label htmlFor="gdd-scope" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500 mb-1">
+            <label htmlFor="gdd-scope" className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400 mb-1">
               Scope
             </label>
             <select
@@ -288,7 +288,7 @@ export function GDDPanel() {
             </>
           )}
         </button>
-        <p className="text-[10px] text-zinc-600 text-center">
+        <p className="text-[10px] text-zinc-400 text-center">
           Ctrl+Enter to generate
         </p>
 
@@ -308,7 +308,7 @@ export function GDDPanel() {
         {!gdd && !isGenerating && !error && (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
             <FileText size={28} className="text-zinc-700" />
-            <p className="text-[11px] text-zinc-500 max-w-[200px]">
+            <p className="text-[11px] text-zinc-400 max-w-[200px]">
               Describe your game idea and generate a structured design document in seconds.
             </p>
           </div>

@@ -136,7 +136,7 @@ export function PhysicsFeelPanel() {
 
       {/* Preset Gallery */}
       <div>
-        <label className="text-xs text-zinc-500 mb-1 block">Preset A</label>
+        <label className="text-xs text-zinc-400 mb-1 block">Preset A</label>
         <div className="grid grid-cols-2 gap-1.5">
           {PRESET_KEYS.map((key) => {
             const preset = PHYSICS_PRESETS[key];
@@ -153,7 +153,7 @@ export function PhysicsFeelPanel() {
                 aria-label={`Select ${preset.name} as Preset A`}
               >
                 <div className="font-medium">{preset.name}</div>
-                <div className="text-zinc-500 mt-0.5 line-clamp-2">{preset.description}</div>
+                <div className="text-zinc-400 mt-0.5 line-clamp-2">{preset.description}</div>
               </button>
             );
           })}
@@ -163,8 +163,8 @@ export function PhysicsFeelPanel() {
       {/* Blend Control */}
       <div className="border-t border-zinc-800 pt-3">
         <div className="flex items-center gap-2 mb-2">
-          <Blend className="w-3.5 h-3.5 text-zinc-500" />
-          <label className="text-xs text-zinc-500">
+          <Blend className="w-3.5 h-3.5 text-zinc-400" />
+          <label className="text-xs text-zinc-400">
             Blend with Preset B
           </label>
         </div>
@@ -181,7 +181,7 @@ export function PhysicsFeelPanel() {
           ))}
         </select>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-500 w-6">A</span>
+          <span className="text-xs text-zinc-400 w-6">A</span>
           <input
             type="range"
             min={0}
@@ -192,7 +192,7 @@ export function PhysicsFeelPanel() {
             className="flex-1 accent-blue-500"
             aria-label="Blend factor between Preset A and Preset B"
           />
-          <span className="text-xs text-zinc-500 w-6">B</span>
+          <span className="text-xs text-zinc-400 w-6">B</span>
           <span className="text-xs text-zinc-400 w-10 text-right">
             {Math.round(blendT * 100)}%
           </span>
@@ -201,7 +201,7 @@ export function PhysicsFeelPanel() {
 
       {/* Parameter Preview */}
       <div className="border-t border-zinc-800 pt-3">
-        <h3 className="text-xs font-semibold uppercase text-zinc-500 mb-2">
+        <h3 className="text-xs font-semibold uppercase text-zinc-400 mb-2">
           Current Values
         </h3>
         <div className="space-y-2">
@@ -238,7 +238,7 @@ export function PhysicsFeelPanel() {
           applied
             ? 'bg-green-600/30 border border-green-500/50 text-green-300'
             : physicsEntityIds.length === 0
-              ? 'bg-zinc-800 border border-zinc-700 text-zinc-600 cursor-not-allowed'
+              ? 'bg-zinc-800 border border-zinc-700 text-zinc-400 cursor-not-allowed'
               : 'bg-blue-600 hover:bg-blue-500 text-white'
         }`}
         aria-label="Apply physics profile to all entities"
@@ -265,11 +265,11 @@ export function PhysicsFeelPanel() {
         {analysis && (
           <div className="mt-2 p-2 bg-zinc-800/50 rounded text-xs space-y-1">
             <div>
-              <span className="text-zinc-500">Closest feel: </span>
+              <span className="text-zinc-400">Closest feel: </span>
               <span className="text-blue-300 font-medium">{analysis.currentFeel}</span>
             </div>
             <div>
-              <span className="text-zinc-500">Similarity: </span>
+              <span className="text-zinc-400">Similarity: </span>
               <span className="text-zinc-300">{Math.round(analysis.similarity * 100)}%</span>
             </div>
             {analysis.suggestions.length > 0 && (
@@ -287,7 +287,7 @@ export function PhysicsFeelPanel() {
       <div className="border-t border-zinc-800 pt-3">
         <div className="flex items-center gap-2 mb-2">
           <Sparkles className="w-3.5 h-3.5 text-yellow-400" />
-          <label className="text-xs text-zinc-500">Custom Feel</label>
+          <label className="text-xs text-zinc-400">Custom Feel</label>
         </div>
         <div className="flex gap-1.5">
           <input

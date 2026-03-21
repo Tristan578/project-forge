@@ -101,7 +101,7 @@ export function MarketplacePage() {
         <div className="border-b border-zinc-800 p-4 space-y-3">
           <div className="flex items-center gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
               <input
                 type="text"
                 placeholder="Search assets..."
@@ -145,7 +145,7 @@ export function MarketplacePage() {
           )}
 
           {assets.length === 0 && !loading && (
-            <div className="text-center py-12 text-zinc-500">
+            <div className="text-center py-12 text-zinc-400">
               No assets found. Try adjusting your filters.
             </div>
           )}
@@ -157,7 +157,7 @@ export function MarketplacePage() {
           </div>
 
           {loading && assets.length === 0 && (
-            <div className="text-center py-12 text-zinc-500">Loading...</div>
+            <div className="text-center py-12 text-zinc-400">Loading...</div>
           )}
 
           {hasMore && assets.length > 0 && (
@@ -165,7 +165,7 @@ export function MarketplacePage() {
               <button
                 onClick={handleLoadMore}
                 disabled={loading}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded transition-colors"
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white rounded transition-colors"
               >
                 {loading ? 'Loading...' : 'Load More'}
               </button>

@@ -136,10 +136,10 @@ export function Physics2dInspector() {
   return (
     <div className="border-t border-zinc-800 pt-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
           2D Physics
         </h3>
-        <button onClick={() => navigateDocs('features/physics-2d')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+        <button onClick={() => navigateDocs('features/physics-2d')} className="rounded p-0.5 text-zinc-400 hover:text-zinc-400" title="Documentation">
           <HelpCircle size={12} />
         </button>
       </div>

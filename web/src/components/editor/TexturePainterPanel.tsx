@@ -77,7 +77,7 @@ export function TexturePainterPanel() {
 
   if (!primaryId) {
     return (
-      <div className="p-4 text-sm text-zinc-500">
+      <div className="p-4 text-sm text-zinc-400">
         Select an entity to paint textures.
       </div>
     );
@@ -110,7 +110,7 @@ export function TexturePainterPanel() {
           ))}
         </div>
         {selectedStyle && (
-          <p className="mt-1.5 text-xs text-zinc-500">{selectedStyle.description}</p>
+          <p className="mt-1.5 text-xs text-zinc-400">{selectedStyle.description}</p>
         )}
       </div>
 
@@ -168,7 +168,7 @@ export function TexturePainterPanel() {
       <div className="mb-4">
         <label className="mb-1 flex items-center justify-between text-xs font-medium text-zinc-400">
           <span>Intensity</span>
-          <span className="text-zinc-500">{Math.round(intensity * 100)}%</span>
+          <span className="text-zinc-400">{Math.round(intensity * 100)}%</span>
         </label>
         <input
           type="range"

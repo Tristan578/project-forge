@@ -61,7 +61,7 @@ function StatCard({
 function HeatmapGrid({ points }: { points: HeatmapPoint[] }) {
   if (points.length === 0) {
     return (
-      <p className="py-4 text-center text-xs text-zinc-500">
+      <p className="py-4 text-center text-xs text-zinc-400">
         No death data recorded yet.
       </p>
     );
@@ -123,7 +123,7 @@ function HeatmapGrid({ points }: { points: HeatmapPoint[] }) {
 function FunnelChart({ stages }: { stages: FunnelStage[] }) {
   if (stages.length === 0) {
     return (
-      <p className="py-4 text-center text-xs text-zinc-500">
+      <p className="py-4 text-center text-xs text-zinc-400">
         No funnel data available.
       </p>
     );
@@ -143,7 +143,7 @@ function FunnelChart({ stages }: { stages: FunnelStage[] }) {
               <span className="text-zinc-300">
                 {stage.name.replace(/_/g, ' ')}
               </span>
-              <span className="text-zinc-500">
+              <span className="text-zinc-400">
                 {stage.count}
                 {dropoffPct > 0 && (
                   <span className="ml-1 text-red-400">
@@ -168,7 +168,7 @@ function FunnelChart({ stages }: { stages: FunnelStage[] }) {
 function SessionList({ sessions }: { sessions: PlayerSession[] }) {
   if (sessions.length === 0) {
     return (
-      <p className="py-4 text-center text-xs text-zinc-500">
+      <p className="py-4 text-center text-xs text-zinc-400">
         No sessions recorded yet.
       </p>
     );
@@ -196,7 +196,7 @@ function SessionList({ sessions }: { sessions: PlayerSession[] }) {
             <span className="truncate text-zinc-300" title={session.sessionId}>
               {session.sessionId.slice(0, 18)}...
             </span>
-            <div className="flex items-center gap-2 text-zinc-500">
+            <div className="flex items-center gap-2 text-zinc-400">
               <span>{durationSec}s</span>
               <span>{eventCount} events</span>
               {deaths > 0 && (

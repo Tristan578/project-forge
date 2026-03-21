@@ -337,7 +337,7 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
       case 'rejected':
         return <XCircle size={14} className="text-red-400/60" />;
       case 'undone':
-        return <RotateCcw size={14} className="text-zinc-500" />;
+        return <RotateCcw size={14} className="text-zinc-400" />;
     }
   })();
 
@@ -360,16 +360,16 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
         onClick={() => setExpanded(!expanded)}
       >
         {statusIcon}
-        <span className={`font-medium ${isRejected || isUndone ? 'text-zinc-500 line-through' : 'text-zinc-300'}`}>
+        <span className={`font-medium ${isRejected || isUndone ? 'text-zinc-400 line-through' : 'text-zinc-300'}`}>
           {label}
         </span>
-        {summary && <span className="truncate text-zinc-500">{summary}</span>}
+        {summary && <span className="truncate text-zinc-400">{summary}</span>}
         <span className="ml-auto flex items-center gap-1">
           {isRejected && (
             <span className="text-[9px] text-red-400/60">Rejected</span>
           )}
           {isUndone && (
-            <span className="text-[9px] text-zinc-500">Undone</span>
+            <span className="text-[9px] text-zinc-400">Undone</span>
           )}
           {toolCall.status === 'success' && toolCall.undoable && (
             <button
@@ -377,13 +377,13 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
                 e.stopPropagation();
                 undo();
               }}
-              className="rounded px-1 py-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+              className="rounded px-1 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
               title="Undo this action"
             >
               <Undo2 size={12} />
             </button>
           )}
-          {expanded ? <ChevronDown size={12} className="text-zinc-500" /> : <ChevronRight size={12} className="text-zinc-500" />}
+          {expanded ? <ChevronDown size={12} className="text-zinc-400" /> : <ChevronRight size={12} className="text-zinc-400" />}
         </span>
       </button>
 
@@ -409,14 +409,14 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
 
       {expanded && (
         <div className="border-t border-zinc-700 px-2 py-1.5">
-          <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-zinc-500">
+          <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-zinc-400">
             {JSON.stringify(toolCall.input, null, 2)}
           </pre>
           {toolCall.error && (
             <p className="mt-1 text-red-400">{toolCall.error}</p>
           )}
           {toolCall.result != null && (
-            <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap text-zinc-500">
+            <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap text-zinc-400">
               {JSON.stringify(toolCall.result, null, 2)}
             </pre>
           )}

@@ -512,7 +512,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
             <button
               onClick={() => setShowGrid((g) => !g)}
               className={`rounded p-1.5 transition-colors ${
-                showGrid ? 'text-blue-400' : 'text-zinc-500'
+                showGrid ? 'text-blue-400' : 'text-zinc-400'
               } hover:bg-zinc-800`}
               title="Toggle grid"
             >
@@ -563,7 +563,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
           <div className="flex w-44 flex-col border-l border-zinc-800 p-3">
             {/* Current Color */}
             <div className="mb-3">
-              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
                 Color
               </label>
               <div className="flex items-center gap-2">
@@ -595,7 +595,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
 
             {/* Palette */}
             <div className="mb-3">
-              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
                 Palette
               </label>
               <div className="grid grid-cols-4 gap-1">
@@ -615,7 +615,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
 
             {/* Preview */}
             <div className="mb-3">
-              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
                 Preview
               </label>
               <div
@@ -650,7 +650,7 @@ export const PixelArtEditor = memo(function PixelArtEditor({
             </div>
 
             {/* Info */}
-            <div className="mt-auto text-[10px] text-zinc-600">
+            <div className="mt-auto text-[10px] text-zinc-400">
               <p>{canvasSize}x{canvasSize}px</p>
               <p>Zoom: {zoom}x</p>
             </div>

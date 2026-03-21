@@ -33,7 +33,7 @@ export function LockedPanelOverlay({ panelId, requiredTier }: LockedPanelOverlay
         <p className="text-sm font-semibold text-zinc-200">
           {tierLabel} plan required
         </p>
-        <p className="text-xs text-zinc-500">
+        <p className="text-xs text-zinc-400">
           Upgrade to unlock this AI feature and accelerate your game development.
         </p>
       </div>

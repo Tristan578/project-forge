@@ -211,7 +211,7 @@ export function AssetUploadDialog({ onClose, onSuccess }: AssetUploadDialogProps
           <button
             onClick={handleSubmit}
             disabled={submitting || !name || !description}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded transition-colors"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white rounded transition-colors"
           >
             {submitting ? 'Creating...' : 'Create Listing'}
           </button>

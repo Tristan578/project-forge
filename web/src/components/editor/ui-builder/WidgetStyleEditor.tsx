@@ -41,7 +41,7 @@ export function WidgetStyleEditor() {
           {/* Background & Border */}
           <div className="space-y-2">
             <label className="block">
-              <span className="text-zinc-500">Background Color</span>
+              <span className="text-zinc-400">Background Color</span>
               <input
                 type="text"
                 value={widget.style.backgroundColor || ''}
@@ -53,7 +53,7 @@ export function WidgetStyleEditor() {
 
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-zinc-500">Border Width</span>
+                <span className="text-zinc-400">Border Width</span>
                 <input
                   type="number"
                   min="0"
@@ -64,7 +64,7 @@ export function WidgetStyleEditor() {
               </label>
 
               <label className="block">
-                <span className="text-zinc-500">Border Color</span>
+                <span className="text-zinc-400">Border Color</span>
                 <input
                   type="color"
                   value={widget.style.borderColor}
@@ -75,7 +75,7 @@ export function WidgetStyleEditor() {
             </div>
 
             <label className="block">
-              <span className="text-zinc-500">Border Radius (px)</span>
+              <span className="text-zinc-400">Border Radius (px)</span>
               <input
                 type="number"
                 min="0"
@@ -88,11 +88,11 @@ export function WidgetStyleEditor() {
 
           {/* Padding */}
           <div>
-            <span className="text-zinc-500 block mb-1">Padding (px)</span>
+            <span className="text-zinc-400 block mb-1">Padding (px)</span>
             <div className="grid grid-cols-4 gap-1">
               {['T', 'R', 'B', 'L'].map((label, index) => (
                 <label key={label} className="block">
-                  <span className="text-zinc-600 text-[10px]">{label}</span>
+                  <span className="text-zinc-400 text-[10px]">{label}</span>
                   <input
                     type="number"
                     min="0"
@@ -107,7 +107,7 @@ export function WidgetStyleEditor() {
 
           {/* Opacity */}
           <label className="block">
-            <span className="text-zinc-500">Opacity</span>
+            <span className="text-zinc-400">Opacity</span>
             <input
               type="range"
               min="0"
@@ -117,13 +117,13 @@ export function WidgetStyleEditor() {
               onChange={(e) => handleChange('opacity', parseFloat(e.target.value))}
               className="mt-1 w-full"
             />
-            <span className="text-zinc-600 text-[10px]">{widget.style.opacity.toFixed(2)}</span>
+            <span className="text-zinc-400 text-[10px]">{widget.style.opacity.toFixed(2)}</span>
           </label>
 
           {/* Font Properties */}
           <div className="space-y-2 border-t border-zinc-700 pt-2">
             <label className="block">
-              <span className="text-zinc-500">Font Family</span>
+              <span className="text-zinc-400">Font Family</span>
               <select
                 value={widget.style.fontFamily}
                 onChange={(e) => handleChange('fontFamily', e.target.value)}
@@ -138,7 +138,7 @@ export function WidgetStyleEditor() {
 
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-zinc-500">Font Size</span>
+                <span className="text-zinc-400">Font Size</span>
                 <input
                   type="number"
                   min="0"
@@ -149,7 +149,7 @@ export function WidgetStyleEditor() {
               </label>
 
               <label className="block">
-                <span className="text-zinc-500">Font Weight</span>
+                <span className="text-zinc-400">Font Weight</span>
                 <select
                   value={widget.style.fontWeight}
                   onChange={(e) => handleChange('fontWeight', e.target.value)}
@@ -162,7 +162,7 @@ export function WidgetStyleEditor() {
             </div>
 
             <label className="block">
-              <span className="text-zinc-500">Text Color</span>
+              <span className="text-zinc-400">Text Color</span>
               <input
                 type="color"
                 value={widget.style.color}
@@ -172,7 +172,7 @@ export function WidgetStyleEditor() {
             </label>
 
             <label className="block">
-              <span className="text-zinc-500">Text Align</span>
+              <span className="text-zinc-400">Text Align</span>
               <select
                 value={widget.style.textAlign}
                 onChange={(e) => handleChange('textAlign', e.target.value)}
@@ -188,7 +188,7 @@ export function WidgetStyleEditor() {
           {/* Transform */}
           <div className="space-y-2 border-t border-zinc-700 pt-2">
             <label className="block">
-              <span className="text-zinc-500">Rotation (deg)</span>
+              <span className="text-zinc-400">Rotation (deg)</span>
               <input
                 type="number"
                 step="15"
@@ -200,7 +200,7 @@ export function WidgetStyleEditor() {
 
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-zinc-500">Scale X</span>
+                <span className="text-zinc-400">Scale X</span>
                 <input
                   type="number"
                   step="0.1"
@@ -211,7 +211,7 @@ export function WidgetStyleEditor() {
               </label>
 
               <label className="block">
-                <span className="text-zinc-500">Scale Y</span>
+                <span className="text-zinc-400">Scale Y</span>
                 <input
                   type="number"
                   step="0.1"

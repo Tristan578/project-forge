@@ -125,15 +125,15 @@ export function EditModeInspector() {
       <div className="rounded-md border border-zinc-800 bg-zinc-900/50 p-2 text-xs">
         <div className="grid grid-cols-3 gap-2 text-center">
           <div>
-            <div className="text-zinc-500">Vertices</div>
+            <div className="text-zinc-400">Vertices</div>
             <div className="font-medium text-zinc-200">{vertexCount}</div>
           </div>
           <div>
-            <div className="text-zinc-500">Edges</div>
+            <div className="text-zinc-400">Edges</div>
             <div className="font-medium text-zinc-200">{edgeCount}</div>
           </div>
           <div>
-            <div className="text-zinc-500">Faces</div>
+            <div className="text-zinc-400">Faces</div>
             <div className="font-medium text-zinc-200">{faceCount}</div>
           </div>
         </div>
@@ -167,7 +167,7 @@ export function EditModeInspector() {
             onChange={(e) => setExtrudeDistance(parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-right text-xs text-zinc-500">Distance: {extrudeDistance.toFixed(1)}</div>
+          <div className="text-right text-xs text-zinc-400">Distance: {extrudeDistance.toFixed(1)}</div>
         </div>
 
         {/* Inset */}
@@ -188,7 +188,7 @@ export function EditModeInspector() {
             onChange={(e) => setInsetAmount(parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-right text-xs text-zinc-500">Amount: {insetAmount.toFixed(2)}</div>
+          <div className="text-right text-xs text-zinc-400">Amount: {insetAmount.toFixed(2)}</div>
         </div>
 
         {/* Subdivide */}
@@ -208,7 +208,7 @@ export function EditModeInspector() {
             onChange={(e) => setSubdivideLevel(parseInt(e.target.value))}
             className="w-full"
           />
-          <div className="text-right text-xs text-zinc-500">Level: {subdivideLevel}</div>
+          <div className="text-right text-xs text-zinc-400">Level: {subdivideLevel}</div>
         </div>
 
         {/* Delete */}

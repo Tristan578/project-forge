@@ -49,7 +49,7 @@ function AssetCard({ asset }: { asset: AssetMetadata }) {
       title={canPlace ? `Click to place ${asset.name} in scene` : asset.name}
     >
       <button
-        className="absolute right-1 top-1 hidden rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-red-400 group-hover:block"
+        className="absolute right-1 top-1 hidden rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-red-400 group-hover:block"
         onClick={(e) => {
           e.stopPropagation();
           deleteAsset(asset.id);
@@ -63,7 +63,7 @@ function AssetCard({ asset }: { asset: AssetMetadata }) {
         {icon}
       </div>
       <span className="max-w-full truncate text-[10px] text-zinc-400">{asset.name}</span>
-      <span className="text-[9px] text-zinc-600">{formatFileSize(asset.fileSize)}</span>
+      <span className="text-[9px] text-zinc-400">{formatFileSize(asset.fileSize)}</span>
     </div>
   );
 }
@@ -237,7 +237,7 @@ export const AssetPanel = memo(function AssetPanel() {
             className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
               activeTab === 'assets'
                 ? 'border-b-2 border-blue-400 text-zinc-300'
-                : 'text-zinc-500 hover:text-zinc-400'
+                : 'text-zinc-400 hover:text-zinc-400'
             }`}
           >
             <FolderOpen size={12} />
@@ -248,7 +248,7 @@ export const AssetPanel = memo(function AssetPanel() {
             className={`flex items-center gap-1 px-3 py-1.5 text-xs font-medium transition-colors ${
               activeTab === 'materials'
                 ? 'border-b-2 border-purple-400 text-zinc-300'
-                : 'text-zinc-500 hover:text-zinc-400'
+                : 'text-zinc-400 hover:text-zinc-400'
             }`}
           >
             <Palette size={12} />

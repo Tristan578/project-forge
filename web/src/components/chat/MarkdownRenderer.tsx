@@ -108,7 +108,7 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         return (
           <div className="my-2 overflow-x-auto rounded-md border border-zinc-700 bg-zinc-900">
             <div className="flex items-center justify-between border-b border-zinc-700 px-3 py-1">
-              <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+              <span className="text-[10px] uppercase tracking-wider text-zinc-400">
                 {language}
               </span>
             </div>

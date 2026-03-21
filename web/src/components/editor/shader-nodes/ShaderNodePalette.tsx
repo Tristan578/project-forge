@@ -62,16 +62,16 @@ export function ShaderNodePalette({ onClose }: ShaderNodePaletteProps) {
                 className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-zinc-800"
               >
                 {isExpanded ? (
-                  <ChevronDown className="h-3 w-3 text-zinc-500" />
+                  <ChevronDown className="h-3 w-3 text-zinc-400" />
                 ) : (
-                  <ChevronRight className="h-3 w-3 text-zinc-500" />
+                  <ChevronRight className="h-3 w-3 text-zinc-400" />
                 )}
                 <div
                   className="h-2 w-2 rounded-full"
                   style={{ backgroundColor: category.color }}
                 />
                 <span className="text-xs font-medium text-zinc-300">{category.label}</span>
-                <span className="ml-auto text-xs text-zinc-600">{nodes.length}</span>
+                <span className="ml-auto text-xs text-zinc-400">{nodes.length}</span>
               </button>
 
               {/* Node list */}
@@ -85,7 +85,7 @@ export function ShaderNodePalette({ onClose }: ShaderNodePaletteProps) {
                       className="mb-1 cursor-move rounded border border-zinc-800 bg-zinc-900 px-2 py-1.5 hover:border-zinc-700 hover:bg-zinc-800"
                     >
                       <div className="text-xs font-medium text-zinc-300">{node.label}</div>
-                      <div className="mt-0.5 text-[10px] text-zinc-600">{node.description}</div>
+                      <div className="mt-0.5 text-[10px] text-zinc-400">{node.description}</div>
                     </div>
                   ))}
                 </div>

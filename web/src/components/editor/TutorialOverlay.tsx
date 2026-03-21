@@ -318,7 +318,7 @@ function TutorialBubble({
         </div>
         <button
           onClick={onSkip}
-          className="rounded p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="rounded p-1 text-zinc-400 hover:text-zinc-300 transition-colors"
           title="Skip tutorial"
         >
           <X size={16} />

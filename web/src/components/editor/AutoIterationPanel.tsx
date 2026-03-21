@@ -51,7 +51,7 @@ const IssueBadge = memo(function IssueBadge({ issue }: IssueBadgeProps) {
           </span>
         </div>
         <p className="mt-1 text-xs text-zinc-300">{issue.description}</p>
-        <p className="mt-0.5 text-[10px] text-zinc-500">{issue.evidence}</p>
+        <p className="mt-0.5 text-[10px] text-zinc-400">{issue.evidence}</p>
       </div>
     </div>
   );
@@ -88,7 +88,7 @@ const FixCard = memo(function FixCard({ fix, selected, onToggle }: FixCardProps)
         <div className="min-w-0 flex-1">
           <p className="text-xs text-zinc-300">{fix.description}</p>
           <div className="mt-1 flex items-center gap-2">
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[10px] text-zinc-400">
               Confidence: {confidencePct}%
             </span>
             <div className="h-1 w-16 rounded-full bg-zinc-700">
@@ -98,11 +98,11 @@ const FixCard = memo(function FixCard({ fix, selected, onToggle }: FixCardProps)
               />
             </div>
           </div>
-          <p className="mt-0.5 text-[10px] text-zinc-500">{fix.estimatedImpact}</p>
+          <p className="mt-0.5 text-[10px] text-zinc-400">{fix.estimatedImpact}</p>
         </div>
         <button
           onClick={handleToggleExpand}
-          className="shrink-0 rounded p-0.5 text-zinc-500 transition-colors duration-150 hover:bg-zinc-700 hover:text-zinc-300"
+          className="shrink-0 rounded p-0.5 text-zinc-400 transition-colors duration-150 hover:bg-zinc-700 hover:text-zinc-300"
           aria-label={expanded ? 'Collapse changes' : 'Expand changes'}
         >
           {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -112,7 +112,7 @@ const FixCard = memo(function FixCard({ fix, selected, onToggle }: FixCardProps)
         <div className="mt-2 space-y-1 border-t border-zinc-700 pt-2">
           {fix.changes.map((change, i) => (
             <div key={i} className="text-[10px] text-zinc-400">
-              <span className="text-zinc-500">{change.component}.{change.property}:</span>{' '}
+              <span className="text-zinc-400">{change.component}.{change.property}:</span>{' '}
               <span className="text-red-400">{String(change.oldValue ?? 'none')}</span>
               {' -> '}
               <span className="text-green-400">{String(change.newValue)}</span>
@@ -143,17 +143,17 @@ const ReportEntry = memo(function ReportEntry({ report }: ReportEntryProps) {
         className="flex w-full items-center gap-2 text-left"
         aria-label={`Iteration ${report.iterationNumber} details`}
       >
-        {expanded ? <ChevronDown className="h-3 w-3 text-zinc-500" /> : <ChevronRight className="h-3 w-3 text-zinc-500" />}
+        {expanded ? <ChevronDown className="h-3 w-3 text-zinc-400" /> : <ChevronRight className="h-3 w-3 text-zinc-400" />}
         <span className="text-xs font-medium text-zinc-300">
           Iteration #{report.iterationNumber}
         </span>
-        <span className="text-[10px] text-zinc-500">{dateStr}</span>
+        <span className="text-[10px] text-zinc-400">{dateStr}</span>
       </button>
       {expanded && (
         <div className="mt-2 border-t border-zinc-700 pt-2">
           <p className="text-[10px] text-zinc-400">{report.summary}</p>
           {report.fixesApplied.map((fix, i) => (
-            <div key={i} className="mt-1 text-[10px] text-zinc-500">
+            <div key={i} className="mt-1 text-[10px] text-zinc-400">
               <CheckCircle2 className="mr-1 inline h-3 w-3 text-green-400" />
               {fix.description}
             </div>
@@ -299,7 +299,7 @@ function AutoIterationPanel() {
             <MetricInput label="Engagement Score" value={engagementScore} onChange={setEngagementScore} min={0} max={100} />
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="mb-0.5 block text-[10px] text-zinc-500">Quit Scene</label>
+                <label className="mb-0.5 block text-[10px] text-zinc-400">Quit Scene</label>
                 <input
                   type="text"
                   value={quitScene}
@@ -311,7 +311,7 @@ function AutoIterationPanel() {
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="mb-0.5 block text-[10px] text-zinc-500">Spike Scene</label>
+                <label className="mb-0.5 block text-[10px] text-zinc-400">Spike Scene</label>
                 <input
                   type="text"
                   value={spikeScene}
@@ -450,7 +450,7 @@ const MetricInput = memo(function MetricInput({ label, value, onChange, min, max
 
   return (
     <div>
-      <label className="mb-0.5 block text-[10px] text-zinc-500">{label}</label>
+      <label className="mb-0.5 block text-[10px] text-zinc-400">{label}</label>
       <input
         type="number"
         value={value}

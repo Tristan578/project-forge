@@ -80,7 +80,7 @@ export function TilesetPanel() {
   if (tilesetEntries.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-        <p className="text-xs text-zinc-500">No tilesets imported yet</p>
+        <p className="text-xs text-zinc-400">No tilesets imported yet</p>
         <button
           onClick={handleImportClick}
           className="flex items-center gap-2 rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700"
@@ -104,12 +104,12 @@ export function TilesetPanel() {
       {/* Header */}
       <div className="shrink-0 border-b border-zinc-800 p-3">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Tileset
           </h3>
           <button
             onClick={handleImportClick}
-            className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-zinc-400"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-400"
             title="Import Tileset"
           >
             <Upload size={14} />

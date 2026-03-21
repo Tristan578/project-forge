@@ -62,7 +62,7 @@ export function SpriteInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
         Sprite
       </h3>
 
@@ -126,7 +126,7 @@ export function SpriteInspector() {
               {spriteData.textureAssetId && (
                 <button
                   onClick={handleClearTexture}
-                  className="rounded p-1 text-zinc-500 hover:text-red-400"
+                  className="rounded p-1 text-zinc-400 hover:text-red-400"
                   title="Clear texture"
                 >
                   <X size={12} />
@@ -160,7 +160,7 @@ export function SpriteInspector() {
 
         {/* Appearance Section */}
         <div className="border-t border-zinc-800 pt-2">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
             Appearance
           </h4>
 
@@ -299,7 +299,7 @@ export function SpriteInspector() {
 
         {/* Sorting Section */}
         <div className="border-t border-zinc-800 pt-2">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
             Sorting
           </h4>
 
@@ -336,7 +336,7 @@ export function SpriteInspector() {
 
         {/* Anchor Section */}
         <div className="border-t border-zinc-800 pt-2">
-          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
+          <h4 className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
             Anchor
           </h4>
 
@@ -351,7 +351,7 @@ export function SpriteInspector() {
                     className={`h-8 rounded border text-[10px] transition-colors ${
                       isActive
                         ? 'border-blue-500 bg-blue-900/30 text-blue-400'
-                        : 'border-zinc-700 bg-zinc-800 text-zinc-500 hover:border-zinc-600 hover:bg-zinc-700'
+                        : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600 hover:bg-zinc-700'
                     }`}
                     title={anchor}
                   >

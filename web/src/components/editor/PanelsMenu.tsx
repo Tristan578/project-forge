@@ -47,7 +47,7 @@ export function PanelsMenu() {
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
         title="Show/hide panels"
       >
         <PanelTopOpen size={13} />
@@ -56,7 +56,7 @@ export function PanelsMenu() {
 
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 py-1 shadow-xl text-xs">
-          <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+          <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
             Toggle Panels
           </div>
           {PANEL_LIST.map((panel) => {
@@ -74,7 +74,7 @@ export function PanelsMenu() {
                 )}
                 <span>{panel.title}</span>
                 {isOpen && (
-                  <span className="ml-auto text-[10px] text-zinc-600">open</span>
+                  <span className="ml-auto text-[10px] text-zinc-400">open</span>
                 )}
               </button>
             );

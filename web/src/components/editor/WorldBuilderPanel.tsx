@@ -37,12 +37,12 @@ function FactionCard({ faction }: { faction: Faction }) {
       {expanded && (
         <div className="mt-2 space-y-1 pl-5 text-[11px] text-zinc-400">
           <p>{faction.description}</p>
-          <p><span className="text-zinc-500">Leader:</span> {faction.leader}</p>
-          <p><span className="text-zinc-500">Territory:</span> {faction.territory}</p>
-          <p><span className="text-zinc-500">Traits:</span> {faction.traits.join(', ')}</p>
+          <p><span className="text-zinc-400">Leader:</span> {faction.leader}</p>
+          <p><span className="text-zinc-400">Territory:</span> {faction.territory}</p>
+          <p><span className="text-zinc-400">Traits:</span> {faction.traits.join(', ')}</p>
           {Object.keys(faction.relationships).length > 0 && (
             <div className="mt-1">
-              <span className="text-zinc-500">Relationships:</span>
+              <span className="text-zinc-400">Relationships:</span>
               <ul className="ml-3 mt-0.5">
                 {Object.entries(faction.relationships).map(([name, rel]) => (
                   <li key={name}>
@@ -99,17 +99,17 @@ function RegionNode({ region, allRegions }: { region: Region; allRegions: Region
         <span className="text-xs font-medium text-zinc-200">{region.name}</span>
         <span className="ml-auto flex items-center gap-1">
           <span className={`inline-block h-2 w-2 rounded-full ${dangerColor}`} />
-          <span className="text-[10px] text-zinc-500">{region.dangerLevel}/10</span>
+          <span className="text-[10px] text-zinc-400">{region.dangerLevel}/10</span>
         </span>
       </button>
       {expanded && (
         <div className="mt-2 space-y-1 pl-5 text-[11px] text-zinc-400">
           <p>{region.description}</p>
-          <p><span className="text-zinc-500">Biome:</span> {region.biome}</p>
-          <p><span className="text-zinc-500">Resources:</span> {region.resources.join(', ')}</p>
-          <p><span className="text-zinc-500">Landmarks:</span> {region.landmarks.join(', ')}</p>
+          <p><span className="text-zinc-400">Biome:</span> {region.biome}</p>
+          <p><span className="text-zinc-400">Resources:</span> {region.resources.join(', ')}</p>
+          <p><span className="text-zinc-400">Landmarks:</span> {region.landmarks.join(', ')}</p>
           {validConnections.length > 0 && (
-            <p><span className="text-zinc-500">Connected to:</span> {validConnections.join(', ')}</p>
+            <p><span className="text-zinc-400">Connected to:</span> {validConnections.join(', ')}</p>
           )}
         </div>
       )}
@@ -127,7 +127,7 @@ function TimelineView({ events }: { events: GameWorld['timeline'] }) {
           <div className="text-[10px] text-blue-400">Year {event.year}</div>
           <div className="text-xs font-medium text-zinc-200">{event.name}</div>
           <div className="text-[11px] text-zinc-400">{event.description}</div>
-          <div className="text-[10px] text-zinc-500 italic">{event.impact}</div>
+          <div className="text-[10px] text-zinc-400 italic">{event.impact}</div>
           {event.factionsInvolved.length > 0 && (
             <div className="mt-0.5 flex flex-wrap gap-1">
               {event.factionsInvolved.map((f) => (
@@ -183,7 +183,7 @@ function LoreBrowser({ entries }: { entries: GameWorld['lore'] }) {
           <div key={i} className="rounded border border-zinc-700 bg-zinc-800/50 p-2">
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-zinc-200">{entry.title}</span>
-              <span className="rounded bg-zinc-700 px-1 py-0.5 text-[9px] capitalize text-zinc-500">
+              <span className="rounded bg-zinc-700 px-1 py-0.5 text-[9px] capitalize text-zinc-400">
                 {entry.category}
               </span>
             </div>
@@ -220,7 +220,7 @@ function Section({
         {icon}
         <span className="text-xs font-semibold uppercase text-zinc-400">{title}</span>
         {count != null && (
-          <span className="ml-auto rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">
+          <span className="ml-auto rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
             {count}
           </span>
         )}
@@ -294,7 +294,7 @@ export function WorldBuilderPanel() {
       <div className="flex-1 overflow-y-auto p-3">
         {/* Input section */}
         <div className="mb-4 space-y-2">
-          <label className="block text-[11px] text-zinc-500" htmlFor="world-desc">
+          <label className="block text-[11px] text-zinc-400" htmlFor="world-desc">
             Describe your world concept
           </label>
           <textarea
@@ -302,11 +302,11 @@ export function WorldBuilderPanel() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="A steampunk world where clockwork automatons have gained sentience..."
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             rows={3}
           />
 
-          <label className="block text-[11px] text-zinc-500" htmlFor="world-preset">
+          <label className="block text-[11px] text-zinc-400" htmlFor="world-preset">
             Genre preset (optional)
           </label>
           <select
@@ -363,7 +363,7 @@ export function WorldBuilderPanel() {
               <div className="flex items-start justify-between">
                 <div>
                   <h2 className="text-sm font-bold text-zinc-100">{world.name}</h2>
-                  <div className="mt-0.5 flex gap-2 text-[10px] text-zinc-500">
+                  <div className="mt-0.5 flex gap-2 text-[10px] text-zinc-400">
                     <span>{world.genre}</span>
                     <span>|</span>
                     <span>{world.era}</span>
@@ -431,7 +431,7 @@ export function WorldBuilderPanel() {
                 <div key={i} className="rounded border border-zinc-700 bg-zinc-800/50 p-2">
                   <div className="text-xs font-medium text-zinc-200">{rule.name}</div>
                   <p className="mt-0.5 text-[11px] text-zinc-400">{rule.description}</p>
-                  <p className="mt-0.5 text-[10px] italic text-zinc-500">{rule.gameplayEffect}</p>
+                  <p className="mt-0.5 text-[10px] italic text-zinc-400">{rule.gameplayEffect}</p>
                 </div>
               ))}
             </Section>
@@ -442,10 +442,10 @@ export function WorldBuilderPanel() {
         {!world && !loading && (
           <div className="flex flex-col items-center justify-center py-12 text-center">
             <Globe size={32} className="mb-3 text-zinc-700" />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Describe a world concept or select a genre preset to get started.
             </p>
-            <p className="mt-1 text-[10px] text-zinc-600">
+            <p className="mt-1 text-[10px] text-zinc-400">
               The AI will generate factions, regions, history, and lore for your game.
             </p>
           </div>

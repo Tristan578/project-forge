@@ -103,7 +103,7 @@ function PresetCard({
           </span>
         </div>
       </div>
-      <p className="mt-1 text-[10px] text-zinc-500">
+      <p className="mt-1 text-[10px] text-zinc-400">
         {GENRE_DESCRIPTIONS[presetKey] ?? ''}
       </p>
     </button>
@@ -296,7 +296,7 @@ export function SmartCameraPanel() {
       <div className="flex-1 space-y-3 overflow-y-auto p-3">
         {/* Preset gallery */}
         <div>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Genre Presets
           </h3>
           <div className="space-y-1.5">
@@ -317,12 +317,12 @@ export function SmartCameraPanel() {
         <div>
           <button
             onClick={() => setShowSliders((s) => !s)}
-            className="flex w-full items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
+            className="flex w-full items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-400 transition-colors"
             aria-expanded={showSliders}
           >
             <SlidersHorizontal className="h-3 w-3" />
             Parameters
-            <span className="ml-auto text-zinc-600">{showSliders ? '−' : '+'}</span>
+            <span className="ml-auto text-zinc-400">{showSliders ? '−' : '+'}</span>
           </button>
 
           {showSliders && (
@@ -341,7 +341,7 @@ export function SmartCameraPanel() {
         {/* Blend section */}
         {selectedKey && (
           <div>
-            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Blend Presets
             </h3>
             <div className="space-y-1.5">
@@ -382,7 +382,7 @@ export function SmartCameraPanel() {
         {/* Live preview description */}
         {current && (
           <div className="rounded border border-zinc-800 bg-zinc-800/50 p-2">
-            <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <h3 className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Preview
             </h3>
             <div className="space-y-0.5 text-[10px] text-zinc-400">
@@ -410,7 +410,7 @@ export function SmartCameraPanel() {
           Apply to Selected Entity
         </button>
         {!primaryId && (
-          <p className="mt-1 text-center text-[10px] text-zinc-600">
+          <p className="mt-1 text-center text-[10px] text-zinc-400">
             Select an entity to apply a camera preset
           </p>
         )}

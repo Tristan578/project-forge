@@ -109,7 +109,7 @@ export function EntityPicker({ onSelect, onClose }: EntityPickerProps) {
   if (filtered.length === 0) {
     return (
       <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-md border border-zinc-700 bg-zinc-900 p-2 shadow-lg">
-        <p className="text-xs text-zinc-500">No entities found</p>
+        <p className="text-xs text-zinc-400">No entities found</p>
       </div>
     );
   }
@@ -134,7 +134,7 @@ export function EntityPicker({ onSelect, onClose }: EntityPickerProps) {
           >
             {getEntityIcon(entity.type)}
             <span className="flex-1 truncate">{entity.name}</span>
-            <span className="text-[9px] text-zinc-600">{entity.entityId}</span>
+            <span className="text-[9px] text-zinc-400">{entity.entityId}</span>
           </button>
         ))}
       </div>

@@ -55,7 +55,7 @@ function EffectRow({
 }) {
   return (
     <div className="flex items-center gap-2 rounded bg-zinc-800 px-2 py-1.5">
-      <GripVertical size={14} className="shrink-0 text-zinc-500" aria-hidden="true" />
+      <GripVertical size={14} className="shrink-0 text-zinc-400" aria-hidden="true" />
       <span className="min-w-[90px] text-xs text-zinc-300">
         {EFFECT_LABELS[effect.type] ?? effect.type}
       </span>
@@ -82,7 +82,7 @@ function EffectRow({
       </button>
       <button
         onClick={onRemove}
-        className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-700 hover:text-red-400"
+        className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-red-400"
         aria-label={`Remove ${EFFECT_LABELS[effect.type]}`}
         title="Remove"
       >
@@ -184,7 +184,7 @@ function BindingCard({
         </button>
         <button
           onClick={() => onRemove(index)}
-          className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-700 hover:text-red-400"
+          className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-700 hover:text-red-400"
           aria-label="Remove binding"
           title="Remove binding"
         >
@@ -289,7 +289,7 @@ export function EffectBindingsPanel() {
       <div className="flex items-center gap-2 border-b border-zinc-800 px-3 py-2">
         <Sparkles size={16} className="text-amber-400" aria-hidden="true" />
         <h2 className="text-sm font-semibold text-zinc-200">Effect Bindings</h2>
-        <span className="ml-auto text-[10px] text-zinc-500">{bindings.length} binding{bindings.length !== 1 ? 's' : ''}</span>
+        <span className="ml-auto text-[10px] text-zinc-400">{bindings.length} binding{bindings.length !== 1 ? 's' : ''}</span>
       </div>
 
       {/* Toolbar */}
@@ -335,7 +335,7 @@ export function EffectBindingsPanel() {
       {/* Preset picker dropdown */}
       {showPresets && (
         <div className="border-b border-zinc-800 bg-zinc-850 px-3 py-2">
-          <p className="mb-1.5 text-[10px] font-semibold uppercase text-zinc-500">Built-in Presets</p>
+          <p className="mb-1.5 text-[10px] font-semibold uppercase text-zinc-400">Built-in Presets</p>
           <div className="flex flex-wrap gap-1">
             {presetKeys.map((key) => (
               <button
@@ -354,9 +354,9 @@ export function EffectBindingsPanel() {
       <div className="flex-1 overflow-y-auto p-3">
         {bindings.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-center">
-            <Sparkles size={32} className="mb-3 text-zinc-600" />
+            <Sparkles size={32} className="mb-3 text-zinc-400" />
             <p className="text-sm text-zinc-400">No effect bindings yet</p>
-            <p className="mt-1 text-xs text-zinc-500">
+            <p className="mt-1 text-xs text-zinc-400">
               Add a preset or create a custom event binding to add game juice.
             </p>
           </div>

@@ -162,7 +162,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
                 <ExternalLink className="w-4 h-4" />
               </a>
             ) : (
-              <div className="text-zinc-500">Preview not available</div>
+              <div className="text-zinc-400">Preview not available</div>
             )}
           </div>
 
@@ -208,7 +208,7 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-zinc-800 rounded p-3">
-              <div className="text-xs text-zinc-500">Rating</div>
+              <div className="text-xs text-zinc-400">Rating</div>
               <div className="flex items-center gap-2">
                 <StarRating value={game.avgRating} size="sm" />
                 <span className="text-sm text-zinc-300">
@@ -217,19 +217,19 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
               </div>
             </div>
             <div className="bg-zinc-800 rounded p-3">
-              <div className="text-xs text-zinc-500">Plays</div>
+              <div className="text-xs text-zinc-400">Plays</div>
               <div className="text-lg font-semibold text-zinc-100">
                 {game.playCount}
               </div>
             </div>
             <div className="bg-zinc-800 rounded p-3">
-              <div className="text-xs text-zinc-500">Likes</div>
+              <div className="text-xs text-zinc-400">Likes</div>
               <div className="text-lg font-semibold text-zinc-100">
                 {game.likeCount}
               </div>
             </div>
             <div className="bg-zinc-800 rounded p-3">
-              <div className="text-xs text-zinc-500">Comments</div>
+              <div className="text-xs text-zinc-400">Comments</div>
               <div className="text-lg font-semibold text-zinc-100">
                 {game.comments.length}
               </div>

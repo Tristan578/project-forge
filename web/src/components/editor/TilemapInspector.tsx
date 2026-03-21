@@ -83,7 +83,7 @@ export function TilemapInspector() {
   if (!tilemapData) {
     return (
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Tilemap
         </h3>
         <button
@@ -100,7 +100,7 @@ export function TilemapInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
         Tilemap
       </h3>
 
@@ -127,7 +127,7 @@ export function TilemapInspector() {
           <label className="text-xs text-zinc-400">Map Size (tiles)</label>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-xs text-zinc-500">Width</label>
+              <label className="text-xs text-zinc-400">Width</label>
               <input
                 type="number"
                 value={tilemapData.mapSize[0]}
@@ -138,7 +138,7 @@ export function TilemapInspector() {
               />
             </div>
             <div>
-              <label className="text-xs text-zinc-500">Height</label>
+              <label className="text-xs text-zinc-400">Height</label>
               <input
                 type="number"
                 value={tilemapData.mapSize[1]}
@@ -154,7 +154,7 @@ export function TilemapInspector() {
         {/* Tile Size (read-only) */}
         <div className="space-y-1">
           <label className="text-xs text-zinc-400">Tile Size (px)</label>
-          <div className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-500">
+          <div className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-400">
             {tilemapData.tileSize[0]} × {tilemapData.tileSize[1]}
           </div>
         </div>
@@ -190,7 +190,7 @@ export function TilemapInspector() {
             <label className="text-xs text-zinc-400">Layers</label>
             <button
               onClick={handleAddLayer}
-              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
               title="Add Layer"
             >
               <Plus size={12} />
@@ -214,7 +214,7 @@ export function TilemapInspector() {
                 {/* Visibility toggle */}
                 <button
                   onClick={() => handleUpdateLayer(index, { visible: !layer.visible })}
-                  className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                  className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
                   title={layer.visible ? 'Hide layer' : 'Show layer'}
                 >
                   {layer.visible ? <Eye size={12} /> : <EyeOff size={12} />}
@@ -223,7 +223,7 @@ export function TilemapInspector() {
                 {/* Collision toggle */}
                 <button
                   onClick={() => handleUpdateLayer(index, { isCollision: !layer.isCollision })}
-                  className={`rounded p-1 ${layer.isCollision ? 'text-yellow-500' : 'text-zinc-600'} hover:bg-zinc-800`}
+                  className={`rounded p-1 ${layer.isCollision ? 'text-yellow-500' : 'text-zinc-400'} hover:bg-zinc-800`}
                   title={layer.isCollision ? 'Collision enabled' : 'Collision disabled'}
                 >
                   <Shield size={12} />
@@ -244,7 +244,7 @@ export function TilemapInspector() {
                 {/* Delete button */}
                 <button
                   onClick={() => handleRemoveLayer(index)}
-                  className="rounded p-1 text-zinc-600 hover:bg-zinc-800 hover:text-red-500"
+                  className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-red-500"
                   title="Delete layer"
                 >
                   <Trash2 size={12} />

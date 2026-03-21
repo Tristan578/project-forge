@@ -83,7 +83,7 @@ export function ProfileTab() {
           </div>
         )}
         <div>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-zinc-400">
             Avatar managed by your Clerk account
           </p>
         </div>
@@ -127,7 +127,7 @@ export function ProfileTab() {
         ) : (
           <div className="flex items-center justify-between">
             <span className="text-sm text-zinc-300">
-              {displayName || <span className="italic text-zinc-500">Not set</span>}
+              {displayName || <span className="italic text-zinc-400">Not set</span>}
             </span>
             <button
               onClick={handleEdit}
@@ -141,7 +141,7 @@ export function ProfileTab() {
         {saveError && (
           <p className="mt-2 text-xs text-red-400">{saveError}</p>
         )}
-        <p className="mt-1 text-xs text-zinc-500">
+        <p className="mt-1 text-xs text-zinc-400">
           {draft.length > 0 && editing ? `${draft.length}/50` : '50 characters max'}
         </p>
       </div>

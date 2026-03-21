@@ -42,7 +42,7 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange, tool
           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
           [&::-webkit-slider-thumb]:bg-zinc-300"
       />
-      <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+      <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
         {value.toFixed(2)}
       </span>
     </div>
@@ -118,7 +118,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
           </select>
           {textureRef && (
             <button
-              className="shrink-0 rounded p-0.5 text-zinc-500 hover:text-red-400"
+              className="shrink-0 rounded p-0.5 text-zinc-400 hover:text-red-400"
               onClick={() => removeTexture(entityId, slot)}
               title="Remove texture"
             >
@@ -138,14 +138,14 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
           </button>
           {textureRef && (
             <button
-              className="rounded p-0.5 text-zinc-500 hover:text-red-400"
+              className="rounded p-0.5 text-zinc-400 hover:text-red-400"
               onClick={() => removeTexture(entityId, slot)}
               title="Remove texture"
             >
               <X size={12} />
             </button>
           )}
-          <span className="truncate text-[10px] text-zinc-600">
+          <span className="truncate text-[10px] text-zinc-400">
             {assetName ?? (textureRef ? textureRef.slice(0, 8) + '...' : 'none')}
           </span>
         </>
@@ -170,7 +170,7 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
   return (
     <div className="mt-2 border-t border-zinc-800 pt-2">
       <button
-        className="mb-2 flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-600 hover:text-zinc-400"
+        className="mb-2 flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-400"
         onClick={() => setOpen(!open)}
       >
         {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
@@ -330,7 +330,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
   return (
     <div className="border-t border-zinc-800 pt-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Material
         </h3>
         <button
@@ -341,7 +341,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
           <Layers className="h-3 w-3" />
           Shader Editor
         </button>
-        <button onClick={() => navigateDocs('features/materials')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+        <button onClick={() => navigateDocs('features/materials')} className="rounded p-0.5 text-zinc-400 hover:text-zinc-400" title="Documentation">
           <HelpCircle size={12} />
         </button>
       </div>
@@ -460,7 +460,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
             }}
             className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
           />
-          <span className="text-xs text-zinc-500">{baseColorHex}</span>
+          <span className="text-xs text-zinc-400">{baseColorHex}</span>
         </div>
 
         {/* Alpha (opacity) */}
@@ -496,7 +496,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
               [&::-webkit-slider-thumb]:bg-zinc-300"
           />
-          <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+          <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
             {primaryMaterial.metallic.toFixed(2)}
           </span>
         </div>
@@ -516,7 +516,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
               [&::-webkit-slider-thumb]:bg-zinc-300"
           />
-          <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+          <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
             {primaryMaterial.perceptualRoughness.toFixed(2)}
           </span>
         </div>
@@ -536,7 +536,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
               [&::-webkit-slider-thumb]:bg-zinc-300"
           />
-          <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+          <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
             {primaryMaterial.reflectance.toFixed(2)}
           </span>
         </div>
@@ -553,7 +553,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
             }}
             className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
           />
-          <span className="text-xs text-zinc-500">{emissiveHex}</span>
+          <span className="text-xs text-zinc-400">{emissiveHex}</span>
         </div>
 
         {/* Emissive intensity */}
@@ -603,7 +603,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
         {/* Texture Slots */}
         <div className="mt-2 border-t border-zinc-800 pt-2">
           <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
               Textures<InfoTooltip term="textures" />
             </h4>
             <button
@@ -675,7 +675,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
           <SliderRow label="Diffuse" value={primaryMaterial.diffuseTransmission ?? 0} onChange={(v) => handleUpdate({ diffuseTransmission: v })} tooltipTerm="diffuseTransmission" />
           <div>
             <SliderRow label="IOR" value={primaryMaterial.ior ?? 1.5} min={1.0} max={3.0} step={0.01} onChange={(v) => handleUpdate({ ior: v })} tooltipTerm="ior" />
-            <div className="ml-24 mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-zinc-600">
+            <div className="ml-24 mt-0.5 flex flex-wrap gap-x-2 text-[9px] text-zinc-400">
               {Object.entries(IOR_HINTS).map(([name, val]) => (
                 <span key={name}>{name} {val}</span>
               ))}
@@ -691,7 +691,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               className="h-3 w-3 rounded border-zinc-600 bg-zinc-800 text-blue-500"
               title="Infinite attenuation distance"
             />
-            <span className="text-[10px] text-zinc-500">Infinite</span>
+            <span className="text-[10px] text-zinc-400">Infinite</span>
             {primaryMaterial.attenuationDistance != null && (
               <input
                 type="range"
@@ -718,7 +718,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               }}
               className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
             />
-            <span className="text-xs text-zinc-500">{attColorHex}</span>
+            <span className="text-xs text-zinc-400">{attColorHex}</span>
           </div>
           {/* Tooltip warning for alpha mode */}
           {(primaryMaterial.specularTransmission ?? 0) > 0 && primaryMaterial.alphaMode === 'opaque' && (

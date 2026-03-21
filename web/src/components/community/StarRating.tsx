@@ -46,7 +46,7 @@ export function StarRating({
               className={`${starSize} ${
                 star <= displayRating
                   ? 'fill-yellow-400 text-yellow-400'
-                  : 'fill-none text-zinc-600'
+                  : 'fill-none text-zinc-400'
               }`}
             />
           </button>

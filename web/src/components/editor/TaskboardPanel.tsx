@@ -150,7 +150,7 @@ function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
       <div className="flex items-start gap-1.5">
         <GripVertical
           size={12}
-          className="mt-0.5 shrink-0 text-zinc-600 group-hover:text-zinc-500"
+          className="mt-0.5 shrink-0 text-zinc-400 group-hover:text-zinc-400"
           aria-hidden="true"
         />
         <div className="flex flex-1 flex-col gap-1 min-w-0">
@@ -160,7 +160,7 @@ function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
               <AssigneeBadge assignee={task.assignee} />
               <button
                 onClick={handleRemove}
-                className="rounded p-0.5 text-zinc-600 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
+                className="rounded p-0.5 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100 hover:text-red-400"
                 title="Remove task"
                 aria-label="Remove task"
               >
@@ -203,7 +203,7 @@ function TaskCard({ task, onDragStart, onDragEnd, onRemove }: TaskCardProps) {
           {task.result && (
             <p className="mt-1 text-[10px] text-emerald-400">{task.result}</p>
           )}
-          <p className="mt-1 text-[9px] text-zinc-600">
+          <p className="mt-1 text-[9px] text-zinc-400">
             Created {new Date(task.createdAt).toLocaleString()}
           </p>
         </div>
@@ -268,7 +268,7 @@ function AddTaskForm({ onAdd, onCancel }: AddTaskFormProps) {
             className={`flex items-center gap-0.5 px-1.5 py-0.5 transition-colors ${
               assignee === 'user'
                 ? 'bg-zinc-600 text-zinc-200'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
           >
             <User size={9} />
@@ -281,7 +281,7 @@ function AddTaskForm({ onAdd, onCancel }: AddTaskFormProps) {
             className={`flex items-center gap-0.5 px-1.5 py-0.5 transition-colors ${
               assignee === 'ai'
                 ? 'bg-purple-800 text-purple-200'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
           >
             <Bot size={9} />
@@ -294,7 +294,7 @@ function AddTaskForm({ onAdd, onCancel }: AddTaskFormProps) {
         <button
           type="button"
           onClick={onCancel}
-          className="text-[10px] text-zinc-500 hover:text-zinc-300"
+          className="text-[10px] text-zinc-400 hover:text-zinc-300"
         >
           Cancel
         </button>
@@ -414,7 +414,7 @@ function Column({
           {onClearCompleted && tasks.length > 0 && (
             <button
               onClick={onClearCompleted}
-              className="rounded p-0.5 text-zinc-600 hover:text-red-400"
+              className="rounded p-0.5 text-zinc-400 hover:text-red-400"
               title="Clear completed tasks"
               aria-label="Clear completed tasks"
             >
@@ -424,7 +424,7 @@ function Column({
           {config.id === 'todo' && (
             <button
               onClick={handleShowForm}
-              className="rounded p-0.5 text-zinc-600 hover:text-zinc-300"
+              className="rounded p-0.5 text-zinc-400 hover:text-zinc-300"
               title="Add task"
               aria-label="Add task"
             >
@@ -546,7 +546,7 @@ export function TaskboardPanel() {
       <div className="flex shrink-0 items-center gap-2 border-b border-zinc-800 px-3 py-2">
         <ListTodo size={14} className="text-zinc-400" />
         <span className="text-xs font-semibold text-zinc-300">Tasks</span>
-        <span className="ml-auto text-[10px] text-zinc-600">{tasks.length} total</span>
+        <span className="ml-auto text-[10px] text-zinc-400">{tasks.length} total</span>
       </div>
 
       {/* Kanban columns */}

@@ -88,7 +88,7 @@ function StrategySelector({
 function DiscoveryList({ discoveries }: { discoveries: BotDiscovery[] }) {
   if (discoveries.length === 0) {
     return (
-      <div className="text-xs text-zinc-500 italic py-2">No issues found.</div>
+      <div className="text-xs text-zinc-400 italic py-2">No issues found.</div>
     );
   }
 

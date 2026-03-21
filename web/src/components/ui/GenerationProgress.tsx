@@ -200,7 +200,7 @@ export function GenerationProgress({
             type="button"
             onClick={onCancel}
             aria-label={`Cancel ${operationLabel} generation`}
-            className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-500"
+            className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-zinc-500"
           >
             <X size={14} aria-hidden="true" />
           </button>
@@ -233,7 +233,7 @@ export function GenerationProgress({
         </span>
 
         {/* Right side: percentage or time estimate */}
-        <span className="shrink-0 text-xs tabular-nums text-zinc-500">
+        <span className="shrink-0 text-xs tabular-nums text-zinc-400">
           {mode === 'determinate' && progress !== undefined
             ? `${Math.round(progress)}%`
             : timeEstimate}
@@ -242,7 +242,7 @@ export function GenerationProgress({
 
       {/* Estimated time (only when determinate and we have a useful estimate) */}
       {mode === 'determinate' && timeEstimate && (
-        <p className="text-[10px] text-zinc-600">{timeEstimate}</p>
+        <p className="text-[10px] text-zinc-400">{timeEstimate}</p>
       )}
     </div>
   );

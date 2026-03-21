@@ -135,7 +135,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
             <button
               onClick={handleResetAll}
               aria-label="Reset all shortcuts to defaults"
-              className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+              className="flex items-center gap-1 rounded px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
               title="Reset all to defaults"
             >
               <RotateCcw size={10} />
@@ -153,7 +153,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
 
         {/* Static (mouse) shortcuts */}
         <div className="mb-3">
-          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-500">Mouse</h3>
+          <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-400">Mouse</h3>
           <div className="space-y-1">
             {staticShortcuts.map((s) => (
               <div key={s.keys} className="flex items-center justify-between text-sm">
@@ -170,7 +170,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
         <div className="grid grid-cols-2 gap-4">
           {Object.entries(grouped).map(([category, categoryBindings]) => (
             <div key={category}>
-              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-500">
+              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-400">
                 {category}
               </h3>
               <div className="space-y-1">
@@ -187,7 +187,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
                           <button
                             onClick={() => handleReset(binding.action)}
                             aria-label={`Reset ${binding.label} to default`}
-                            className="opacity-0 group-hover:opacity-100 rounded p-0.5 text-zinc-600 hover:text-zinc-400 transition-opacity"
+                            className="opacity-0 group-hover:opacity-100 rounded p-0.5 text-zinc-400 hover:text-zinc-400 transition-opacity"
                             title="Reset to default"
                           >
                             <RotateCcw size={10} />
@@ -216,7 +216,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
           ))}
         </div>
 
-        <p className="mt-4 text-center text-[10px] text-zinc-600">
+        <p className="mt-4 text-center text-[10px] text-zinc-400">
           Click any shortcut to rebind it. Press <kbd className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-400">Esc</kbd> to cancel.
           Press <kbd className="rounded bg-zinc-800 px-1 py-0.5 font-mono text-zinc-400">?</kbd> to toggle this panel.
         </p>

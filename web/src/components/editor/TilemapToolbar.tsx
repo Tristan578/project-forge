@@ -61,7 +61,7 @@ export function TilemapToolbar() {
 
       {/* Layer selector */}
       <div className="flex items-center gap-2">
-        <label className="text-xs text-zinc-500">Layer:</label>
+        <label className="text-xs text-zinc-400">Layer:</label>
         <select
           value={activeLayerIndex}
           onChange={(e) => setActiveLayerIndex(parseInt(e.target.value, 10))}

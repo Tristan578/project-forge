@@ -58,7 +58,7 @@ export function JointInspector() {
       <div className="border-t border-zinc-800 px-3 py-2">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <h3 className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Joint</h3>
+            <h3 className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">Joint</h3>
             <InfoTooltip text="A physical connection between two objects" />
           </div>
         </div>
@@ -81,7 +81,7 @@ export function JointInspector() {
     <div className="border-t border-zinc-800 px-3 py-2">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <h3 className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Joint</h3>
+          <h3 className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">Joint</h3>
           <InfoTooltip text="A physical connection between two objects" />
         </div>
         <button
@@ -96,7 +96,7 @@ export function JointInspector() {
         {/* Joint Type */}
         <label className="block">
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-zinc-500">Type</span>
+            <span className="text-[10px] text-zinc-400">Type</span>
             <InfoTooltip term="jointType" />
           </div>
           <select
@@ -113,7 +113,7 @@ export function JointInspector() {
         {/* Connected Entity */}
         <label className="block">
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-zinc-500">Connected To</span>
+            <span className="text-[10px] text-zinc-400">Connected To</span>
             <InfoTooltip term="jointConnectedTo" />
           </div>
           <select
@@ -131,7 +131,7 @@ export function JointInspector() {
         {/* Anchor Self */}
         <div>
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-zinc-500">Anchor (Self)</span>
+            <span className="text-[10px] text-zinc-400">Anchor (Self)</span>
             <InfoTooltip term="jointAnchorSelf" />
           </div>
           <div className="mt-0.5 flex gap-1">
@@ -155,7 +155,7 @@ export function JointInspector() {
         {/* Anchor Other */}
         <div>
           <div className="flex items-center gap-1">
-            <span className="text-[10px] text-zinc-500">Anchor (Other)</span>
+            <span className="text-[10px] text-zinc-400">Anchor (Other)</span>
             <InfoTooltip term="jointAnchorOther" />
           </div>
           <div className="mt-0.5 flex gap-1">
@@ -180,7 +180,7 @@ export function JointInspector() {
         {showAxis && (
           <div>
             <div className="flex items-center gap-1">
-              <span className="text-[10px] text-zinc-500">Axis</span>
+              <span className="text-[10px] text-zinc-400">Axis</span>
               <InfoTooltip term="jointAxis" />
             </div>
             <div className="mt-0.5 flex gap-1">
@@ -214,13 +214,13 @@ export function JointInspector() {
                 })}
                 className="h-3 w-3"
               />
-              <span className="text-[10px] text-zinc-500">Limits</span>
+              <span className="text-[10px] text-zinc-400">Limits</span>
               <InfoTooltip term="jointLimits" />
             </label>
             {primaryJoint.limits && (
               <div className="mt-1 flex gap-1">
                 <label className="flex-1">
-                  <span className="text-[9px] text-zinc-600">Min</span>
+                  <span className="text-[9px] text-zinc-400">Min</span>
                   <input
                     type="number"
                     step="0.1"
@@ -232,7 +232,7 @@ export function JointInspector() {
                   />
                 </label>
                 <label className="flex-1">
-                  <span className="text-[9px] text-zinc-600">Max</span>
+                  <span className="text-[9px] text-zinc-400">Max</span>
                   <input
                     type="number"
                     step="0.1"
@@ -260,14 +260,14 @@ export function JointInspector() {
                 })}
                 className="h-3 w-3"
               />
-              <span className="text-[10px] text-zinc-500">Motor</span>
+              <span className="text-[10px] text-zinc-400">Motor</span>
               <InfoTooltip term="jointMotor" />
             </label>
             {primaryJoint.motor && (
               <div className="mt-1 flex gap-1">
                 <label className="flex-1">
                   <div className="flex items-center gap-0.5">
-                    <span className="text-[9px] text-zinc-600">Velocity</span>
+                    <span className="text-[9px] text-zinc-400">Velocity</span>
                     <InfoTooltip term="jointMotorVelocity" />
                   </div>
                   <input
@@ -282,7 +282,7 @@ export function JointInspector() {
                 </label>
                 <label className="flex-1">
                   <div className="flex items-center gap-0.5">
-                    <span className="text-[9px] text-zinc-600">Max Force</span>
+                    <span className="text-[9px] text-zinc-400">Max Force</span>
                     <InfoTooltip term="jointMotorMaxForce" />
                   </div>
                   <input

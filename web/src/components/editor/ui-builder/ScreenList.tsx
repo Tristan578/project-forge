@@ -48,7 +48,7 @@ export function ScreenList() {
       {showDropdown && (
         <div className="absolute top-full left-0 right-0 z-10 mt-1 max-h-60 overflow-y-auto rounded border border-zinc-700 bg-zinc-800 shadow-lg">
           {screens.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-zinc-600">No screens</div>
+            <div className="px-3 py-2 text-xs text-zinc-400">No screens</div>
           ) : (
             screens.map((screen) => (
               <button
@@ -63,7 +63,7 @@ export function ScreenList() {
               >
                 <div className="flex items-center justify-between">
                   <span className="truncate">{screen.name}</span>
-                  <span className="text-[10px] text-zinc-600">{screen.widgets.length} widgets</span>
+                  <span className="text-[10px] text-zinc-400">{screen.widgets.length} widgets</span>
                 </div>
               </button>
             ))

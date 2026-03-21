@@ -36,7 +36,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
   return (
     <div className="space-y-2 rounded border border-zinc-700 bg-zinc-800/50 p-2">
       <div className="flex items-center justify-between">
-        <span className="text-zinc-500 text-xs font-semibold">Data Binding</span>
+        <span className="text-zinc-400 text-xs font-semibold">Data Binding</span>
         <button
           onClick={handleToggle}
           className="text-xs text-blue-400 hover:text-blue-300"
@@ -48,7 +48,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
       {binding && (
         <div className="space-y-2">
           <label className="block">
-            <span className="text-zinc-500 text-xs">State Key</span>
+            <span className="text-zinc-400 text-xs">State Key</span>
             <input
               type="text"
               value={binding.stateKey}
@@ -59,7 +59,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
           </label>
 
           <label className="block">
-            <span className="text-zinc-500 text-xs">Direction</span>
+            <span className="text-zinc-400 text-xs">Direction</span>
             <select
               value={binding.direction}
               onChange={(e) => handleChange('direction', e.target.value)}
@@ -72,7 +72,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
           </label>
 
           <label className="block">
-            <span className="text-zinc-500 text-xs">Transform</span>
+            <span className="text-zinc-400 text-xs">Transform</span>
             <select
               value={binding.transform?.type || 'none'}
               onChange={(e) => {
@@ -96,7 +96,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
           {/* Transform-specific fields */}
           {binding.transform?.type === 'format' && (
             <label className="block">
-              <span className="text-zinc-500 text-xs">Template</span>
+              <span className="text-zinc-400 text-xs">Template</span>
               <input
                 type="text"
                 value={binding.transform.template}
@@ -112,7 +112,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
           {binding.transform?.type === 'clamp' && (
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-zinc-500 text-xs">Min</span>
+                <span className="text-zinc-400 text-xs">Min</span>
                 <input
                   type="number"
                   value={binding.transform.min}
@@ -127,7 +127,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
                 />
               </label>
               <label className="block">
-                <span className="text-zinc-500 text-xs">Max</span>
+                <span className="text-zinc-400 text-xs">Max</span>
                 <input
                   type="number"
                   value={binding.transform.max}
@@ -146,7 +146,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
 
           {binding.transform?.type === 'multiply' && (
             <label className="block">
-              <span className="text-zinc-500 text-xs">Factor</span>
+              <span className="text-zinc-400 text-xs">Factor</span>
               <input
                 type="number"
                 step="0.1"
@@ -161,7 +161,7 @@ export function DataBindingEditor({ screenId, widgetId, property, binding }: Dat
 
           {binding.transform?.type === 'round' && (
             <label className="block">
-              <span className="text-zinc-500 text-xs">Decimals</span>
+              <span className="text-zinc-400 text-xs">Decimals</span>
               <input
                 type="number"
                 min="0"

@@ -256,11 +256,11 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
             >
-              <Upload size={32} className="mb-3 text-zinc-500" />
+              <Upload size={32} className="mb-3 text-zinc-400" />
               <p className="mb-1 text-sm text-zinc-300">
                 Drop a sprite sheet image here
               </p>
-              <p className="mb-3 text-xs text-zinc-500">PNG, JPG, or WebP</p>
+              <p className="mb-3 text-xs text-zinc-400">PNG, JPG, or WebP</p>
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded bg-blue-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
@@ -291,7 +291,7 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
               <div className="flex items-center gap-3 rounded bg-zinc-800 px-3 py-2">
                 <ImageIcon size={14} className="text-zinc-400" />
                 <span className="text-xs text-zinc-300">{fileName}</span>
-                <span className="text-xs text-zinc-500">
+                <span className="text-xs text-zinc-400">
                   {imageWidth} x {imageHeight} px
                 </span>
                 <button
@@ -301,7 +301,7 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
                     setFrames([]);
                     setError(null);
                   }}
-                  className="ml-auto text-xs text-zinc-500 hover:text-zinc-300"
+                  className="ml-auto text-xs text-zinc-400 hover:text-zinc-300"
                 >
                   Change
                 </button>
@@ -363,7 +363,7 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
                     {clipCount > 0 && (
                       <div className="mt-1 space-y-0.5">
                         {Object.entries(clips).map(([name, clip]) => (
-                          <div key={name} className="text-zinc-500">
+                          <div key={name} className="text-zinc-400">
                             {name}: frames {clip.frames[0]}-{clip.frames[clip.frames.length - 1]}
                             {clip.looping ? ' (loop)' : ''}
                           </div>
@@ -408,7 +408,7 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
                             className="h-12 w-12 object-contain"
                             style={{ imageRendering: 'pixelated' }}
                           />
-                          <span className="mt-0.5 text-[10px] text-zinc-500">{frame.index}</span>
+                          <span className="mt-0.5 text-[10px] text-zinc-400">{frame.index}</span>
                         </button>
                       );
                     })}
@@ -427,7 +427,7 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
 
         {/* Footer */}
         <div className="flex items-center justify-between border-t border-zinc-700 px-4 py-3">
-          <p className="text-xs text-zinc-500">
+          <p className="text-xs text-zinc-400">
             {!primaryId && 'Select an entity to import to.'}
           </p>
           <div className="flex gap-2">

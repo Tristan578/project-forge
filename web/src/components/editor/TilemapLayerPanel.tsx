@@ -54,12 +54,12 @@ export function TilemapLayerPanel() {
       {/* Header */}
       <div className="shrink-0 border-b border-zinc-800 p-3">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Layers
           </h3>
           <button
             onClick={handleAddLayer}
-            className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
             title="Add Layer"
           >
             <Plus size={14} />
@@ -83,7 +83,7 @@ export function TilemapLayerPanel() {
                 }`}
               >
                 {/* Drag handle */}
-                <div className="cursor-move text-zinc-600" title="Drag to reorder">
+                <div className="cursor-move text-zinc-400" title="Drag to reorder">
                   <GripVertical size={14} />
                 </div>
 
@@ -105,7 +105,7 @@ export function TilemapLayerPanel() {
                     e.stopPropagation();
                     handleUpdateLayer(index, { visible: !layer.visible });
                   }}
-                  className="rounded p-1 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+                  className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
                   title={layer.visible ? 'Hide layer' : 'Show layer'}
                 >
                   {layer.visible ? <Eye size={12} /> : <EyeOff size={12} />}
@@ -118,7 +118,7 @@ export function TilemapLayerPanel() {
                     handleUpdateLayer(index, { isCollision: !layer.isCollision });
                   }}
                   className={`rounded p-1 ${
-                    layer.isCollision ? 'text-yellow-500' : 'text-zinc-600'
+                    layer.isCollision ? 'text-yellow-500' : 'text-zinc-400'
                   } hover:bg-zinc-700`}
                   title={layer.isCollision ? 'Collision enabled' : 'Collision disabled'}
                 >
@@ -127,7 +127,7 @@ export function TilemapLayerPanel() {
 
                 {/* Opacity display */}
                 <div
-                  className="text-xs text-zinc-500"
+                  className="text-xs text-zinc-400"
                   title={`Opacity: ${(layer.opacity * 100).toFixed(0)}%`}
                 >
                   {(layer.opacity * 100).toFixed(0)}%
@@ -140,7 +140,7 @@ export function TilemapLayerPanel() {
                       e.stopPropagation();
                       handleRemoveLayer(index);
                     }}
-                    className="rounded p-1 text-zinc-600 hover:bg-zinc-700 hover:text-red-500"
+                    className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-red-500"
                     title="Delete layer"
                   >
                     <Trash2 size={12} />
@@ -155,7 +155,7 @@ export function TilemapLayerPanel() {
       {/* Opacity slider for active layer */}
       {tilemapData.layers[activeLayerIndex] && (
         <div className="shrink-0 border-t border-zinc-800 p-3">
-          <label className="mb-1 block text-xs text-zinc-500">Layer Opacity</label>
+          <label className="mb-1 block text-xs text-zinc-400">Layer Opacity</label>
           <input
             type="range"
             min={0}
@@ -165,7 +165,7 @@ export function TilemapLayerPanel() {
             onChange={(e) => handleUpdateLayer(activeLayerIndex, { opacity: parseFloat(e.target.value) })}
             className="w-full"
           />
-          <div className="mt-1 text-center text-xs text-zinc-500">
+          <div className="mt-1 text-center text-xs text-zinc-400">
             {(tilemapData.layers[activeLayerIndex].opacity * 100).toFixed(0)}%
           </div>
         </div>

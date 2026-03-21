@@ -109,7 +109,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             className={`flex items-center gap-1.5 px-4 py-2 text-sm transition-colors ${
               activeTab === 'tokens'
                 ? 'border-b-2 border-blue-500 text-zinc-200'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
           >
             <Coins size={14} />
@@ -125,7 +125,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             className={`flex items-center gap-1.5 px-4 py-2 text-sm transition-colors ${
               activeTab === 'keys'
                 ? 'border-b-2 border-blue-500 text-zinc-200'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
           >
             <Key size={14} />
@@ -141,7 +141,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             className={`flex items-center gap-1.5 px-4 py-2 text-sm transition-colors ${
               activeTab === 'billing'
                 ? 'border-b-2 border-blue-500 text-zinc-200'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
           >
             <CreditCard size={14} />

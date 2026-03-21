@@ -378,7 +378,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
 
   if (!primaryId || !primaryAnimationClip) {
     return (
-      <div className="flex h-full items-center justify-center bg-zinc-900 text-sm text-zinc-500">
+      <div className="flex h-full items-center justify-center bg-zinc-900 text-sm text-zinc-400">
         Select an entity with an animation clip to view timeline
       </div>
     );
@@ -416,7 +416,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
           {viewState.recordingEnabled && 'Recording'}
         </button>
         <div className="mx-2 h-4 w-px bg-zinc-700" />
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-zinc-400">
           {primaryName} | {viewState.playheadTime.toFixed(2)}s / {primaryAnimationClip.duration.toFixed(2)}s
         </span>
         <div className="flex-1" />
@@ -427,7 +427,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
         >
           <ZoomOut className="h-3.5 w-3.5" />
         </button>
-        <span className="text-xs text-zinc-500">{viewState.zoom.toFixed(1)}x</span>
+        <span className="text-xs text-zinc-400">{viewState.zoom.toFixed(1)}x</span>
         <button
           onClick={handleZoomIn}
           className="rounded bg-zinc-800 p-1 text-zinc-300 hover:bg-zinc-700 transition-colors"
@@ -441,7 +441,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
       <div className="flex flex-1 overflow-hidden">
         <div className="w-48 border-r border-zinc-800 bg-zinc-900">
           <div
-            className="h-[30px] border-b border-zinc-800 bg-zinc-950 px-2 text-[10px] font-medium text-zinc-500 flex items-center"
+            className="h-[30px] border-b border-zinc-800 bg-zinc-950 px-2 text-[10px] font-medium text-zinc-400 flex items-center"
           >
             PROPERTY
           </div>
@@ -459,7 +459,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
                 >
                   <div className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
                   <span className="text-xs text-zinc-300">{label}</span>
-                  <span className="ml-auto text-[10px] text-zinc-600">{track.keyframes.length}</span>
+                  <span className="ml-auto text-[10px] text-zinc-400">{track.keyframes.length}</span>
                 </div>
               );
             })}

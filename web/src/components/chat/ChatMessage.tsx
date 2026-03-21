@@ -20,7 +20,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
 
   if (message.role === 'system') {
     return (
-      <div className="px-3 py-1.5 text-center text-xs text-zinc-600">
+      <div className="px-3 py-1.5 text-center text-xs text-zinc-400">
         {message.content}
       </div>
     );
@@ -42,7 +42,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {isUser ? 'You' : 'AI'}
         </span>
         {!isUser && message.tokenCost != null && message.tokenCost > 0 && (
-          <span className="text-[9px] text-zinc-600" title="Token cost for this response">
+          <span className="text-[9px] text-zinc-400" title="Token cost for this response">
             ~{message.tokenCost.toLocaleString()} tokens
           </span>
         )}
@@ -75,7 +75,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <span>Reasoning</span>
           </button>
           {thinkingOpen && (
-            <div className="mt-1 rounded border border-amber-900/30 bg-amber-950/20 px-2.5 py-2 text-[11px] text-zinc-500 leading-relaxed max-h-40 overflow-y-auto">
+            <div className="mt-1 rounded border border-amber-900/30 bg-amber-950/20 px-2.5 py-2 text-[11px] text-zinc-400 leading-relaxed max-h-40 overflow-y-auto">
               {message.thinking}
             </div>
           )}
@@ -131,7 +131,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
           {!isUser && allToolsDone && successfulUndoable.length >= 2 && (
             <button
               onClick={() => batchUndoMessage(message.id)}
-              className="mt-1.5 flex items-center gap-1 rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-500 hover:border-zinc-600 hover:text-zinc-300 transition-colors"
+              className="mt-1.5 flex items-center gap-1 rounded border border-zinc-700 px-2 py-1 text-[10px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-300 transition-colors"
             >
               <RotateCcw size={11} />
               Undo All ({successfulUndoable.length} actions)
@@ -151,7 +151,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             className={`rounded p-1 transition-colors ${
               message.feedback === 'positive'
                 ? 'text-green-400'
-                : 'text-zinc-600 hover:text-green-400'
+                : 'text-zinc-400 hover:text-green-400'
             }`}
             title="Good response"
           >
@@ -165,7 +165,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             className={`rounded p-1 transition-colors ${
               message.feedback === 'negative'
                 ? 'text-red-400'
-                : 'text-zinc-600 hover:text-red-400'
+                : 'text-zinc-400 hover:text-red-400'
             }`}
             title="Bad response"
           >

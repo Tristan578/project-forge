@@ -71,7 +71,7 @@ function TreeNameEditor({ tree }: { tree: DialogueTree }) {
   const updateTree = useDialogueStore((s) => s.updateTree);
   return (
     <div className="mb-3">
-      <label className="mb-1 block text-xs text-zinc-500">Tree Name</label>
+      <label className="mb-1 block text-xs text-zinc-400">Tree Name</label>
       <input
         type="text"
         value={tree.name}
@@ -130,7 +130,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
     <div className={`rounded border ${isSelected ? 'border-blue-500/50 bg-zinc-800/80' : 'border-zinc-700/50 bg-zinc-800/30'}`}>
       {/* Header */}
       <div className="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer" onClick={onSelect}>
-        <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className="text-zinc-500 hover:text-zinc-300">
+        <button onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }} className="text-zinc-400 hover:text-zinc-300">
           {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </button>
         <NodeTypeIcon type={node.type} />
@@ -138,7 +138,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
         {isStartNode && <span className="rounded bg-green-900/40 px-1.5 py-0.5 text-[9px] text-green-400">START</span>}
         <button
           onClick={(e) => { e.stopPropagation(); removeNode(treeId, node.id); }}
-          className="rounded p-0.5 text-zinc-600 hover:text-red-400"
+          className="rounded p-0.5 text-zinc-400 hover:text-red-400"
         >
           <Trash2 size={10} />
         </button>
@@ -161,7 +161,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {node.type === 'text' && (
             <>
               <div>
-                <label className="block text-[10px] text-zinc-500">Speaker</label>
+                <label className="block text-[10px] text-zinc-400">Speaker</label>
                 <input
                   type="text"
                   value={(node as TextNode).speaker}
@@ -170,7 +170,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-zinc-500">Text</label>
+                <label className="block text-[10px] text-zinc-400">Text</label>
                 <textarea
                   value={(node as TextNode).text}
                   onChange={(e) => updateNode(treeId, node.id, { text: e.target.value })}
@@ -179,7 +179,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-zinc-500">Next Node</label>
+                <label className="block text-[10px] text-zinc-400">Next Node</label>
                 <select
                   value={(node as TextNode).next ?? ''}
                   onChange={(e) => updateNode(treeId, node.id, { next: e.target.value || null })}
@@ -198,7 +198,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {node.type === 'choice' && (
             <>
               <div>
-                <label className="block text-[10px] text-zinc-500">Prompt Text (optional)</label>
+                <label className="block text-[10px] text-zinc-400">Prompt Text (optional)</label>
                 <input
                   type="text"
                   value={(node as ChoiceNode).text ?? ''}
@@ -208,7 +208,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
               </div>
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] text-zinc-500">Choices</label>
+                  <label className="text-[10px] text-zinc-400">Choices</label>
                   <button
                     onClick={() => {
                       const choices = [...(node as ChoiceNode).choices, {
@@ -225,7 +225,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                 </div>
                 {(node as ChoiceNode).choices.map((ch, idx) => (
                   <div key={ch.id} className="flex items-center gap-1">
-                    <span className="text-[10px] text-zinc-600 w-4">{idx + 1}.</span>
+                    <span className="text-[10px] text-zinc-400 w-4">{idx + 1}.</span>
                     <input
                       type="text"
                       value={ch.text}
@@ -255,7 +255,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                         const choices = (node as ChoiceNode).choices.filter((_, i) => i !== idx);
                         updateNode(treeId, node.id, { choices });
                       }}
-                      className="text-zinc-600 hover:text-red-400"
+                      className="text-zinc-400 hover:text-red-400"
                     >
                       <Trash2 size={10} />
                     </button>
@@ -269,7 +269,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {node.type === 'condition' && (
             <>
               <div>
-                <label className="block text-[10px] text-zinc-500">Variable</label>
+                <label className="block text-[10px] text-zinc-400">Variable</label>
                 <input
                   type="text"
                   value={
@@ -290,7 +290,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
               </div>
               <div className="flex gap-2">
                 <div className="flex-1">
-                  <label className="block text-[10px] text-zinc-500">If True → Node</label>
+                  <label className="block text-[10px] text-zinc-400">If True → Node</label>
                   <select
                     value={(node as ConditionNode).onTrue ?? ''}
                     onChange={(e) => updateNode(treeId, node.id, { onTrue: e.target.value || null })}
@@ -301,7 +301,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                   </select>
                 </div>
                 <div className="flex-1">
-                  <label className="block text-[10px] text-zinc-500">If False → Node</label>
+                  <label className="block text-[10px] text-zinc-400">If False → Node</label>
                   <select
                     value={(node as ConditionNode).onFalse ?? ''}
                     onChange={(e) => updateNode(treeId, node.id, { onFalse: e.target.value || null })}
@@ -319,7 +319,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
           {node.type === 'action' && (
             <>
               <div>
-                <label className="block text-[10px] text-zinc-500">Next Node</label>
+                <label className="block text-[10px] text-zinc-400">Next Node</label>
                 <select
                   value={(node as ActionNode).next ?? ''}
                   onChange={(e) => updateNode(treeId, node.id, { next: e.target.value || null })}
@@ -329,7 +329,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
                   {nodeOptions.map((n) => (<option key={n.id} value={n.id}>{n.id.slice(0, 10)}</option>))}
                 </select>
               </div>
-              <div className="text-[10px] text-zinc-500">
+              <div className="text-[10px] text-zinc-400">
                 {(node as ActionNode).actions.length} actions configured
               </div>
             </>
@@ -337,7 +337,7 @@ function NodeItem({ node, treeId, tree, isSelected, isStartNode, onSelect }: Nod
 
           {/* End node — no fields */}
           {node.type === 'end' && (
-            <div className="text-[10px] text-zinc-500 italic">This node ends the dialogue.</div>
+            <div className="text-[10px] text-zinc-400 italic">This node ends the dialogue.</div>
           )}
         </div>
       )}
@@ -381,7 +381,7 @@ function AddNodeMenu({ treeId }: { treeId: string }) {
     <div className="relative mt-2">
       <button
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center justify-center gap-1 rounded border border-dashed border-zinc-700 py-1.5 text-xs text-zinc-500 hover:border-zinc-500 hover:text-zinc-300"
+        className="flex w-full items-center justify-center gap-1 rounded border border-dashed border-zinc-700 py-1.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-300"
       >
         <Plus size={12} /> Add Node
       </button>
@@ -420,7 +420,7 @@ export function DialogueTreeEditor() {
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="shrink-0 border-b border-zinc-800 px-3 py-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Dialogue Editor</h3>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Dialogue Editor</h3>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-2">
@@ -430,7 +430,7 @@ export function DialogueTreeEditor() {
           <>
             <TreeNameEditor tree={tree} />
 
-            <div className="mb-2 text-[10px] text-zinc-500">
+            <div className="mb-2 text-[10px] text-zinc-400">
               {tree.nodes.length} nodes · Start: {tree.startNodeId.slice(0, 10)}
             </div>
 
@@ -451,10 +451,10 @@ export function DialogueTreeEditor() {
             <AddNodeMenu treeId={tree.id} />
           </>
         ) : (
-          <div className="mt-8 text-center text-xs text-zinc-500">
+          <div className="mt-8 text-center text-xs text-zinc-400">
             <MessageSquare size={32} className="mx-auto mb-2 text-zinc-700" />
             <p>Select or create a dialogue tree</p>
-            <p className="mt-1 text-zinc-600">Trees define branching conversations for NPCs</p>
+            <p className="mt-1 text-zinc-400">Trees define branching conversations for NPCs</p>
           </div>
         )}
       </div>

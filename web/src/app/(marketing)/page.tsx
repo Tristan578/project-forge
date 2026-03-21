@@ -463,7 +463,7 @@ export default function LandingPage() {
                               />
                             ) : value === false ? (
                               <Minus
-                                className="mx-auto h-5 w-5 text-zinc-600"
+                                className="mx-auto h-5 w-5 text-zinc-400"
                                 aria-label="No"
                               />
                             ) : (
@@ -574,7 +574,7 @@ export default function LandingPage() {
                   &ldquo;Testimonial placeholder — real quotes coming
                   soon.&rdquo;
                 </p>
-                <div className="mt-4 text-sm font-medium text-zinc-500">
+                <div className="mt-4 text-sm font-medium text-zinc-400">
                   Creator {i}
                 </div>
               </div>
@@ -606,8 +606,8 @@ export default function LandingPage() {
       {/* ---- Footer ---- */}
       <footer className="border-t border-zinc-800 px-6 py-8">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 sm:flex-row">
-          <div className="text-sm text-zinc-500">SpawnForge</div>
-          <div className="flex items-center gap-6 text-sm text-zinc-500">
+          <div className="text-sm text-zinc-400">SpawnForge</div>
+          <div className="flex items-center gap-6 text-sm text-zinc-400">
             <Link href="/pricing" className="hover:text-zinc-300">
               Pricing
             </Link>

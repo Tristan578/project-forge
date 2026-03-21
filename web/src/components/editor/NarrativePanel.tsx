@@ -61,7 +61,7 @@ function PresetPicker({
         ))}
       </select>
       {selected && NARRATIVE_PRESETS[selected] && (
-        <p className="text-[10px] text-zinc-500">
+        <p className="text-[10px] text-zinc-400">
           {NARRATIVE_PRESETS[selected].description}
         </p>
       )}
@@ -89,8 +89,8 @@ function CharacterCard({ character }: { character: Character }) {
           {character.role}
         </span>
       </div>
-      <p className="mt-1 text-[10px] text-zinc-500">{character.description}</p>
-      <p className="mt-0.5 text-[10px] text-zinc-600 italic">
+      <p className="mt-1 text-[10px] text-zinc-400">{character.description}</p>
+      <p className="mt-0.5 text-[10px] text-zinc-400 italic">
         Motivation: {character.motivation}
       </p>
     </div>
@@ -158,21 +158,21 @@ function SceneNode({
 
       {isExpanded && (
         <div className="ml-4 mt-1 space-y-1">
-          <p className="text-[10px] text-zinc-500">{scene.description}</p>
+          <p className="text-[10px] text-zinc-400">{scene.description}</p>
 
           {scene.dialogue.map((line, i) => (
             <div key={i} className="text-[10px]">
               <span className="font-medium text-zinc-400">
                 {line.speaker}
                 {line.emotion && (
-                  <span className="text-zinc-600 italic">
+                  <span className="text-zinc-400 italic">
                     {' '}
                     ({line.emotion})
                   </span>
                 )}
                 :
               </span>{' '}
-              <span className="text-zinc-500">{line.text}</span>
+              <span className="text-zinc-400">{line.text}</span>
             </div>
           ))}
 
@@ -189,7 +189,7 @@ function SceneNode({
                   />
                   <div>
                     <span className="text-zinc-300">{choice.text}</span>
-                    <span className="ml-1 text-zinc-600">
+                    <span className="ml-1 text-zinc-400">
                       -&gt; {choice.nextSceneId}
                     </span>
                     {choice.affectsEnding && (
@@ -204,7 +204,7 @@ function SceneNode({
           )}
 
           {scene.nextSceneId && !hasChoices && (
-            <p className="text-[10px] text-zinc-600">
+            <p className="text-[10px] text-zinc-400">
               Next: {scene.nextSceneId}
             </p>
           )}
@@ -240,14 +240,14 @@ function ActSection({ act }: { act: Act }) {
         <span>
           Act {act.number}: {act.name}
         </span>
-        <span className="ml-auto text-[10px] font-normal text-zinc-500">
+        <span className="ml-auto text-[10px] font-normal text-zinc-400">
           {act.scenes.length} scenes
         </span>
       </button>
 
       {expanded && (
         <div className="space-y-2 p-2 pt-0">
-          <p className="text-[10px] text-zinc-500 italic">
+          <p className="text-[10px] text-zinc-400 italic">
             Turning point: {act.turningPoint}
           </p>
           {act.scenes.map((scene: NarrativeScene) => (
@@ -281,8 +281,8 @@ function BranchingVisualizer({ arc }: { arc: NarrativeArc }) {
             </span>
             {data.targets.length > 0 ? (
               <>
-                <span className="text-zinc-600">-&gt;</span>
-                <span className="text-zinc-500">
+                <span className="text-zinc-400">-&gt;</span>
+                <span className="text-zinc-400">
                   {data.targets
                     .map(
                       (t) => graph.get(t)?.sceneName ?? t,
@@ -291,7 +291,7 @@ function BranchingVisualizer({ arc }: { arc: NarrativeArc }) {
                 </span>
               </>
             ) : (
-              <span className="text-zinc-600 italic">(end)</span>
+              <span className="text-zinc-400 italic">(end)</span>
             )}
           </div>
         ))}
@@ -423,7 +423,7 @@ export function NarrativePanel() {
             {/* Title and meta */}
             <div>
               <h3 className="text-sm font-bold text-zinc-100">{arc.title}</h3>
-              <p className="text-[10px] text-zinc-500">
+              <p className="text-[10px] text-zinc-400">
                 {arc.genre} | Themes: {arc.themes.join(', ')}
               </p>
             </div>
@@ -492,7 +492,7 @@ export function NarrativePanel() {
         {!arc && !loading && !error && (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <BookOpen size={32} className="mb-2 text-zinc-700" />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Enter a story premise and click Generate to create a branching
               narrative with acts, scenes, dialogue, and multiple endings.
             </p>

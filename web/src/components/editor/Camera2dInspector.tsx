@@ -21,7 +21,7 @@ export function Camera2dInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
         2D Camera
       </h3>
 
@@ -41,7 +41,7 @@ export function Camera2dInspector() {
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
               [&::-webkit-slider-thumb]:bg-zinc-300"
           />
-          <span className="w-10 text-right text-xs tabular-nums text-zinc-500">
+          <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
             {camera2dData.zoom.toFixed(1)}
           </span>
         </div>

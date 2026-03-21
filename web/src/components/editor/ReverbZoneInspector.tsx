@@ -32,7 +32,7 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2,
           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
           [&::-webkit-slider-thumb]:bg-zinc-300"
       />
-      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
         {value.toFixed(precision)}
       </span>
     </div>
@@ -171,11 +171,11 @@ export function ReverbZoneInspector({ entityId }: { entityId: string }) {
     <div className="border-t border-zinc-800 pt-4 mt-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Reverb Zone
           </h3>
           <InfoTooltip text="Spatial reverb effect region" />
-          <button onClick={() => navigateDocs('features/audio')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+          <button onClick={() => navigateDocs('features/audio')} className="rounded p-0.5 text-zinc-400 hover:text-zinc-400" title="Documentation">
             <HelpCircle size={12} />
           </button>
         </div>

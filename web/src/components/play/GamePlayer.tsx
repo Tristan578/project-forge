@@ -166,7 +166,7 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
               ? 'Game Not Found'
               : 'Something Went Wrong'}
           </h1>
-          <p className="mb-6 text-sm text-zinc-500">{error}</p>
+          <p className="mb-6 text-sm text-zinc-400">{error}</p>
           <Link
             href="/"
             className="inline-flex items-center gap-2 rounded bg-zinc-800 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-700"
@@ -184,8 +184,8 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-zinc-950">
         <div className="flex flex-col items-center gap-3">
-          <Loader2 size={32} className="animate-spin text-zinc-500" />
-          <p className="text-sm text-zinc-500">Loading game...</p>
+          <Loader2 size={32} className="animate-spin text-zinc-400" />
+          <p className="text-sm text-zinc-400">Loading game...</p>
         </div>
       </div>
     );
@@ -202,7 +202,7 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
         <div className="flex items-center gap-3">
           <Link
             href="/"
-            className="rounded p-1 text-zinc-500 transition-colors hover:text-zinc-300"
+            className="rounded p-1 text-zinc-400 transition-colors hover:text-zinc-300"
             title="Back to SpawnForge"
           >
             <ArrowLeft size={18} />
@@ -211,14 +211,14 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
             <h1 className="text-sm font-medium text-zinc-200">
               {gameData?.title}
             </h1>
-            <p className="text-xs text-zinc-600">
+            <p className="text-xs text-zinc-400">
               by {gameData?.creatorName}
             </p>
           </div>
         </div>
         <button
           onClick={toggleFullscreen}
-          className="rounded p-1.5 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+          className="rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
           title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         >
           {isFullscreen ? <Minimize size={16} /> : <Maximize size={16} />}
@@ -245,8 +245,8 @@ export function GamePlayer({ userId, slug }: GamePlayerProps) {
         {/* Engine loading overlay */}
         {engineState === 'loading' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950">
-            <Loader2 size={32} className="mb-3 animate-spin text-zinc-500" />
-            <p className="text-sm text-zinc-500">Starting engine...</p>
+            <Loader2 size={32} className="mb-3 animate-spin text-zinc-400" />
+            <p className="text-sm text-zinc-400">Starting engine...</p>
           </div>
         )}
       </div>
