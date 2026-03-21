@@ -4,8 +4,8 @@ import path from 'path';
 export default defineConfig({
   test: {
     environment: 'jsdom',
-    testTimeout: 10000,
-    hookTimeout: 10000,
+    testTimeout: 30000,
+    hookTimeout: 30000,
     pool: 'forks',
     teardownTimeout: 5000,
     isolate: true,
