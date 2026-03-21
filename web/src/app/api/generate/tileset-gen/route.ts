@@ -5,7 +5,8 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
   if (!authResult.ok) return authResult.response;
 
   // 1b. Rate limit: 10 generation requests per 5 minutes per user
-  const rl = await rateLimit(`gen-tileset:${authResult.ctx.user.id}`, 10, 300_000);
+  const rl = await distributedRateLimit(`gen-tileset:${authResult.ctx.user.id}`, 10, 300);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Parse request

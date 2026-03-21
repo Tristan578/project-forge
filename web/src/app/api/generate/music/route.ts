@@ -6,7 +6,8 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { refundTokens } from '@/lib/tokens/service';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
@@ -15,8 +16,8 @@ export async function POST(request: NextRequest) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  // 1b. Rate limit: 10 generation requests per 5 minutes per user
-  const rl = await rateLimit(`gen-music:${authResult.ctx.user.id}`, 10, 300_000);
+  // 1b. Rate limit: 10 generation requests per 5 minutes per user (distributed)
+  const rl = await distributedRateLimit(`gen-music:${authResult.ctx.user.id}`, 10, 300);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Parse request
