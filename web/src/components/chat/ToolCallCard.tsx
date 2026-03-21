@@ -417,7 +417,7 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
             <p className="mt-1 text-red-400">{toolCall.error}</p>
           )}
           {toolCall.result != null && (
-            <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap text-zinc-500">
+            <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap text-zinc-400">
               {JSON.stringify(toolCall.result, null, 2)}
             </pre>
           )}
