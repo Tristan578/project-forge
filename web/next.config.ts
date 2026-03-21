@@ -41,6 +41,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   compress: true,
+  experimental: {
+    // Subresource Integrity: inject sha256 integrity hashes into <script> tags
+    // to prevent injection of unauthorized scripts in production.
+    sri: { algorithm: 'sha256' },
+  },
   images: {
     remotePatterns: [
       {

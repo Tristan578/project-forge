@@ -86,6 +86,31 @@ All three contributors see the same board on GitHub regardless of which AI tool 
 6. **Auto-migration**: The sync script auto-adds these columns on first run, so new developers get them automatically.
 7. **Project isolation**: Tickets from other local projects (e.g., Ember) have `sync_repo = NULL` and are NEVER visible to the sync script.
 
+## Framework Versions
+
+| Package | Version | Notes |
+|---------|---------|-------|
+| Next.js | 16.2.0 | Turbopack default; webpack used for dev (`--webpack` flag) |
+| React | 19.2.4 | Server components + Actions |
+| eslint-config-next | 16.2.0 | Must match Next.js version |
+
+### Next.js 16.2 Experimental Features (enabled in `web/next.config.ts`)
+
+| Feature | Config | Purpose |
+|---------|--------|---------|
+| Subresource Integrity | `experimental.sri = { algorithm: 'sha256' }` | sha256 integrity hashes injected into `<script>` tags to prevent unauthorized script injection |
+
+### WASM Worker Loading
+
+`web/src/hooks/useEngine.ts` uses `import(/* webpackIgnore: true */ url)` to dynamically load
+the WASM JS glue file from the CDN path at runtime. This pattern is required because:
+- The engine binary path is determined at runtime (WebGPU vs WebGL2 detection)
+- The WASM file itself is fetched via `fetch()` with an AbortController for cancellation
+- `webpackIgnore` prevents bundlers from trying to statically analyse the dynamic import URL
+
+Next.js 16.2 Web Worker origin support (allowing same-origin workers from CDN) is not required
+here because WASM loads directly in the main thread, not in a Worker.
+
 ## Architecture Overview
 
 SpawnForge is an AI-native 2D/3D game engine for the browser.
