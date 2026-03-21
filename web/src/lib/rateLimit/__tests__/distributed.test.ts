@@ -227,3 +227,62 @@ describe('rateLimit/index — re-exports', () => {
     expect(typeof rateLimit).toBe('function');
   });
 });
+
+// ---------------------------------------------------------------------------
+// PF-738: RateLimitResult type shape — in-memory fallback must match
+// distributed result shape so callers can use both interchangeably.
+// ---------------------------------------------------------------------------
+
+describe('PF-738: distributedRateLimit result shape matches in-memory RateLimitResult', () => {
+  it('fallback result has allowed, remaining, and resetAt fields (type-compatible shape)', async () => {
+    const { rateLimit } = await import('@/lib/rateLimit');
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 7, resetAt: Date.now() + 60_000 });
+
+    const result = await distributedRateLimit('shape-test-key', 10, 60);
+
+    // PF-738: the distributed result must expose the same surface area as
+    // the in-memory RateLimitResult so consumers can use them interchangeably
+    expect(typeof result.allowed).toBe('boolean');
+    expect(typeof result.remaining).toBe('number');
+    expect(typeof result.resetAt).toBe('number');
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(7);
+  });
+
+  it('fallback denied result has allowed=false with remaining=0', async () => {
+    const { rateLimit } = await import('@/lib/rateLimit');
+    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
+
+    const result = await distributedRateLimit('shape-denied-key', 5, 30);
+
+    expect(result.allowed).toBe(false);
+    expect(result.remaining).toBe(0);
+    expect(result.resetAt).toBeGreaterThan(Date.now());
+  });
+
+  it('Upstash result has the same shape as the in-memory fallback result', async () => {
+    process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
+    process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+
+    mockFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () => [
+        { result: 3 },  // ZREMRANGEBYSCORE
+        { result: 1 },  // ZADD
+        { result: 4 },  // ZCARD (4 out of 10)
+        { result: 1 },  // EXPIRE
+      ],
+    });
+
+    const result = await distributedRateLimit('upstash-shape-key', 10, 60);
+
+    // Must have the same three fields as RateLimitResult
+    expect(typeof result.allowed).toBe('boolean');
+    expect(typeof result.remaining).toBe('number');
+    expect(typeof result.resetAt).toBe('number');
+    expect(result.allowed).toBe(true);
+    expect(result.remaining).toBe(6); // 10 - 4
+  });
+});
