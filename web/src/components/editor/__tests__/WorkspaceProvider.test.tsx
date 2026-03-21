@@ -43,20 +43,46 @@ vi.mock('dockview-react/dist/styles/dockview.css', () => ({}));
 
 // ── Panel component stubs (all panels imported by WorkspaceProvider) ───────
 
+// Core + supplemental eager panels
 vi.mock('../CanvasArea', () => ({ CanvasArea: () => null }));
 vi.mock('../SceneHierarchy', () => ({ SceneHierarchy: () => null }));
 vi.mock('../InspectorPanel', () => ({ InspectorPanel: () => null }));
 vi.mock('../ScriptEditorPanel', () => ({ ScriptEditorPanel: () => null }));
 vi.mock('../ScriptExplorerPanel', () => ({ ScriptExplorerPanel: () => null }));
 vi.mock('../SceneSettings', () => ({ SceneSettings: () => null }));
-vi.mock('../UIBuilderPanel', () => ({ UIBuilderPanel: () => null }));
 vi.mock('../AssetPanel', () => ({ AssetPanel: () => null }));
 vi.mock('../AudioMixerPanel', () => ({ AudioMixerPanel: () => null }));
 vi.mock('../DocsPanel', () => ({ DocsPanel: () => null }));
+// Lazy AI/advanced panels
+vi.mock('../UIBuilderPanel', () => ({ UIBuilderPanel: () => null }));
 vi.mock('../DialogueTreeEditor', () => ({ DialogueTreeEditor: () => null }));
 vi.mock('../TilesetPanel', () => ({ TilesetPanel: () => null }));
 vi.mock('../TimelinePanel', () => ({ TimelinePanel: () => null }));
 vi.mock('../TaskboardPanel', () => ({ TaskboardPanel: () => null }));
+vi.mock('../ProceduralAnimPanel', () => ({ ProceduralAnimPanel: () => null }));
+vi.mock('../EffectBindingsPanel', () => ({ EffectBindingsPanel: () => null }));
+vi.mock('../TutorialPanel', () => ({ TutorialPanel: () => null }));
+vi.mock('../AccessibilityPanel', () => ({ AccessibilityPanel: () => null }));
+vi.mock('../ReviewPanel', () => ({ ReviewPanel: () => null }));
+vi.mock('../BehaviorTreePanel', () => ({ BehaviorTreePanel: () => null }));
+vi.mock('../LevelGeneratorPanel', () => ({ LevelGeneratorPanel: () => null }));
+vi.mock('../SaveSystemPanel', () => ({ SaveSystemPanel: () => null }));
+vi.mock('../NarrativePanel', () => ({ NarrativePanel: () => null }));
+vi.mock('../AutoIterationPanel', () => ({ default: () => null }));
+vi.mock('../GameAnalyticsPanel', () => ({ GameAnalyticsPanel: () => null }));
+vi.mock('../ArtStylePanel', () => ({ ArtStylePanel: () => null }));
+vi.mock('../PlaytestPanel', () => ({ PlaytestPanel: () => null }));
+vi.mock('../PhysicsFeelPanel', () => ({ PhysicsFeelPanel: () => null }));
+vi.mock('../DifficultyPanel', () => ({ DifficultyPanel: () => null }));
+vi.mock('../AutoRiggingPanel', () => ({ AutoRiggingPanel: () => null }));
+vi.mock('../DesignTeacherPanel', () => ({ DesignTeacherPanel: () => null }));
+vi.mock('../EconomyPanel', () => ({ EconomyPanel: () => null }));
+vi.mock('../SmartCameraPanel', () => ({ SmartCameraPanel: () => null }));
+vi.mock('../WorldBuilderPanel', () => ({ WorldBuilderPanel: () => null }));
+vi.mock('../TexturePainterPanel', () => ({ TexturePainterPanel: () => null }));
+vi.mock('../IdeaGeneratorPanel', () => ({ IdeaGeneratorPanel: () => null }));
+vi.mock('../QuestGeneratorPanel', () => ({ QuestGeneratorPanel: () => null }));
+vi.mock('../PacingAnalyzerPanel', () => ({ PacingAnalyzerPanel: () => null }));
 
 // ── Workspace lib mocks ────────────────────────────────────────────────────
 
