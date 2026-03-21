@@ -88,6 +88,15 @@ function clearEngineCrash(): void {
 }
 
 /**
+ * Mark the engine as crashed from an ENGINE_PANIC event emitted via the Rust
+ * bridge. Exported so `useEngineEvents` can route ENGINE_PANIC events here
+ * without duplicating crash-state logic.
+ */
+export function setEngineCrashedFromEvent(message: string): void {
+  setEngineCrashed(message);
+}
+
+/**
  * Install a global interceptor for WASM panics.
  * After detecting a panic, sets engineCrashed state so components can react.
  */

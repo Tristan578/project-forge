@@ -21,6 +21,7 @@ import {
 } from './events';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
 import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
+import { setEngineCrashedFromEvent } from './useEngine';
 
 /**
  * Events that carry high-frequency runtime data and can be throttled to 10fps
@@ -123,6 +124,18 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
         if (!playThrottle.shouldUpdate(isPlayMode)) {
           return;
         }
+      }
+
+      // ENGINE_PANIC is emitted by the Rust bridge panic hook. Route it to the
+      // crash-state machinery so EnginePanicRecovery can show the overlay.
+      // Must be handled before the domain handler chain to guarantee it always
+      // surfaces — no domain handler would claim this event type.
+      if (type === 'ENGINE_PANIC') {
+        const message = typeof payload['message'] === 'string'
+          ? payload['message']
+          : 'Unknown panic';
+        setEngineCrashedFromEvent(message);
+        return;
       }
 
       // Delegate to domain handlers (return true if handled)

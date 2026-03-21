@@ -13,6 +13,7 @@ import { trackProjectOpen } from '@/lib/workspace/recentProjects';
 import { EditorErrorBoundary } from '@/components/editor/EditorErrorBoundary';
 import { WasmErrorBoundary } from '@/components/editor/WasmErrorBoundary';
 import { EngineCrashOverlay } from '@/components/editor/EngineCrashOverlay';
+import { EnginePanicRecovery } from '@/components/editor/EnginePanicRecovery';
 
 export default function EditorPage() {
   const params = useParams();
@@ -63,6 +64,7 @@ export default function EditorPage() {
     <EditorErrorBoundary>
       <WasmErrorBoundary>
         <EngineCrashOverlay />
+        <EnginePanicRecovery />
         <EditorLayout />
       </WasmErrorBoundary>
     </EditorErrorBoundary>
