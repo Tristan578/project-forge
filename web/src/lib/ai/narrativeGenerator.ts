@@ -575,7 +575,7 @@ export function narrativeToDialogueTree(arc: NarrativeArc): DialogueTree {
         sceneEntryNodeMap.get(current.nextSceneId) === SENTINEL &&
         depth < 100
       ) {
-        const nextId = current.nextSceneId;
+        const nextId: string = current.nextSceneId;
         current = arc.acts.flatMap((a) => a.scenes).find((s) => s.id === nextId);
         depth++;
       }
