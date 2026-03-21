@@ -53,9 +53,6 @@ const nextConfig: NextConfig = {
     // Inline prefetch payloads into the page HTML to reduce waterfall requests
     // on navigation, improving LCP for App Router navigations (16.2+).
     prefetchInlining: true,
-    // Cache RSC navigation payloads in the browser for instant back/forward
-    // navigation on previously visited routes (16.2+).
-    cachedNavigations: true,
     // Use the new scroll restoration handler that correctly restores scroll
     // position across App Router navigations (16.2+).
     appNewScrollHandler: true,
