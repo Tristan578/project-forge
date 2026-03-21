@@ -5,7 +5,7 @@
  * model passthrough, and negative cases (missing keys, unknown providers).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const envBackup = { ...process.env };
 
@@ -27,6 +27,7 @@ function clearDirectEnv(): void {
 
 describe('directBackend', () => {
   beforeEach(() => {
+    vi.resetModules();
     clearDirectEnv();
   });
 

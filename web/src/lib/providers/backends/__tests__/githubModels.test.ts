@@ -6,12 +6,13 @@
  * fallback behavior, capabilities, and metadata.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const envBackup = { ...process.env };
 
 describe('githubModelsBackend', () => {
   beforeEach(() => {
+    vi.resetModules();
     delete process.env.GITHUB_MODELS_PAT;
   });
 
