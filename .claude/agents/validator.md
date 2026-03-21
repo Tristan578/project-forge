@@ -30,6 +30,9 @@ bash .claude/tools/validate-mcp.sh full
 # 4. Documentation integrity
 bash .claude/tools/validate-docs.sh
 
+# 5. Regression test enforcement (for bug-fix PRs)
+bash .claude/skills/testing/scripts/check-regression-test.sh <PR_NUMBER>
+
 # OR run everything at once:
 bash .claude/tools/validate-all.sh
 ```
@@ -50,12 +53,28 @@ For each acceptance criterion in the spec:
 - API routes require auth via `api-auth.ts`
 - No dynamic code execution in production code
 
+## Bug Fix Regression Test Check
+
+For any PR with a `bug` label **or** a body containing `Fixes #NNN` / `Closes #NNN`:
+
+```bash
+bash .claude/skills/testing/scripts/check-regression-test.sh <PR_NUMBER>
+```
+
+- Exit 0 with "Regression test found" — pass
+- Exit 1 with "Bug fix PR missing regression test" — **BLOCK the PR**
+- Exit 0 with "Not a bug fix PR — regression test check skipped" — not applicable
+
+The script checks that at least one `.test.ts` or `.test.tsx` file appears in the diff.
+If none exists, require the author to add a regression test before merging.
+
 ## Anti-Patterns to Flag
 
 | Pattern | Severity |
 |---------|----------|
 | `eslint-disable` at file level | BLOCK |
 | Missing test for new function | BLOCK |
+| Bug fix PR with no regression test | BLOCK |
 | `cargo check` without WASM target | BLOCK |
 | Manifest out of sync | BLOCK |
 | Missing undo/redo support | WARN |
@@ -75,6 +94,7 @@ Checks Run:
 - [x] MCP tests (N passed)
 - [x] Manifest sync
 - [x] Documentation
+- [x] Regression test (if bug-fix PR)
 
 Issues Found: N
 - [severity] description

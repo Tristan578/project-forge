@@ -145,6 +145,45 @@ describe('myHandler', () => {
 - Every bug fix gets a test that would have caught it
 - Every "it worked but now it doesn't" gets a regression test
 
+## Regression Test Requirements for Bug Fixes
+
+**Policy:** Every PR that fixes a bug MUST include a regression test. No exceptions.
+
+A PR is considered a bug fix if it has the `bug` label **or** its body contains
+`Fixes #NNN` or `Closes #NNN` referencing an issue.
+
+### What counts as a regression test
+
+A regression test is a `.test.ts` or `.test.tsx` file added or modified in the PR diff
+that exercises the exact scenario that caused the bug. The test must:
+
+1. Reproduce the failure condition (the test should fail on the buggy code)
+2. Pass on the fixed code
+3. Be named descriptively so the link to the bug is clear
+
+```typescript
+// Good: names the specific bug scenario
+it('does not return NaN when tokenCount is undefined (regression for PF-730)', () => {
+  const result = computeCost(undefined, 0.01);
+  expect(result).toBe(0);
+  expect(Number.isNaN(result)).toBe(false);
+});
+```
+
+### Enforcement
+
+The validator agent runs this check on every bug-fix PR:
+
+```bash
+bash .claude/skills/testing/scripts/check-regression-test.sh <PR_NUMBER>
+```
+
+- Detects `bug` label or `Fixes`/`Closes` in the PR body
+- Scans the diff for `.test.ts` / `.test.tsx` files
+- Exits 1 with an actionable error if no test files are found
+
+PRs that fail this check are **blocked** until a regression test is added.
+
 ## Anti-Patterns (Never Do These)
 
 | Anti-Pattern | Why It's Bad | Do This Instead |
