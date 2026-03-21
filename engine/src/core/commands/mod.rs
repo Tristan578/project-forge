@@ -246,6 +246,33 @@ fn handle_mode_change(request: ModeChangeRequest) -> CommandResult {
     }
 }
 
+/// Dispatch a batch of commands from a JSON array.
+///
+/// Accepts a `serde_json::Value` that must be an array of objects, each with
+/// at minimum a `"command"` string field and an optional `"payload"` object.
+/// Returns a `Vec<CommandResponse>` in the same order as the input.
+///
+/// Processing is sequential (WASM is single-threaded). If a command fails,
+/// execution continues — all responses are returned.
+pub fn dispatch_batch(batch: serde_json::Value) -> Vec<CommandResponse> {
+    let items = match batch.as_array() {
+        Some(arr) => arr,
+        None => return vec![CommandResponse::err("Batch payload must be a JSON array")],
+    };
+
+    items.iter().map(|item| {
+        let command = match item.get("command").and_then(|v| v.as_str()) {
+            Some(cmd) => cmd,
+            None => return CommandResponse::err("Missing \"command\" field in batch item"),
+        };
+        let payload = item.get("payload").cloned().unwrap_or(serde_json::Value::Null);
+        match dispatch(command, payload) {
+            Ok(()) => CommandResponse::ok(),
+            Err(e) => CommandResponse::err(e),
+        }
+    }).collect()
+}
+
 /// Helper for default `true` in serde.
 pub(crate) fn default_true() -> bool {
     true
@@ -683,5 +710,100 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(!err.contains("Unknown command"), "got: {}", err);
+    }
+
+    // === dispatch_batch tests (PF-663) ===
+
+    #[test]
+    fn dispatch_batch_returns_error_for_non_array() {
+        let result = dispatch_batch(json!({"command": "play"}));
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].success);
+        let err = result[0].error.as_deref().unwrap_or("");
+        assert!(err.contains("array"), "expected array error, got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_batch_returns_error_for_item_missing_command_field() {
+        let result = dispatch_batch(json!([{"payload": {}}]));
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].success);
+        let err = result[0].error.as_deref().unwrap_or("");
+        assert!(err.contains("command"), "expected missing command error, got: {}", err);
+    }
+
+    #[test]
+    fn dispatch_batch_returns_empty_vec_for_empty_array() {
+        let result = dispatch_batch(json!([]));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn dispatch_batch_processes_all_items_and_returns_one_response_per_item() {
+        // Two commands — each reaches a handler but fails with "not initialized"
+        // (no PendingCommands resource in unit-test context)
+        let result = dispatch_batch(json!([
+            {"command": "spawn_entity", "payload": {"entityType": "cube", "name": "A"}},
+            {"command": "rename_entity", "payload": {"entityId": "e1", "name": "B"}}
+        ]));
+        assert_eq!(result.len(), 2);
+        // Both fail with "not initialized", not "Unknown command"
+        for resp in &result {
+            assert!(!resp.success);
+            let err = resp.error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("not initialized"),
+                "Expected not-initialized error, got: {}",
+                err
+            );
+        }
+    }
+
+    #[test]
+    fn dispatch_batch_continues_after_first_failure() {
+        // First item: known bad command; second: good command that fails with not initialized
+        let result = dispatch_batch(json!([
+            {"command": "nonexistent_xyz"},
+            {"command": "spawn_entity", "payload": {"entityType": "cube"}}
+        ]));
+        assert_eq!(result.len(), 2);
+        // First: unknown command error
+        assert!(!result[0].success);
+        let first_err = result[0].error.as_deref().unwrap_or("");
+        assert!(
+            first_err.contains("Unknown command") || first_err.contains("nonexistent_xyz"),
+            "got: {}",
+            first_err
+        );
+        // Second: reached the handler (not initialized)
+        assert!(!result[1].success);
+        let second_err = result[1].error.as_deref().unwrap_or("");
+        assert!(
+            second_err.contains("not initialized"),
+            "got: {}",
+            second_err
+        );
+    }
+
+    #[test]
+    fn dispatch_batch_uses_null_payload_when_payload_field_absent() {
+        // delete_entities with no payload → no entityIds → returns Ok (empty list no-op)
+        let result = dispatch_batch(json!([
+            {"command": "delete_entities", "payload": {"entityIds": []}}
+        ]));
+        assert_eq!(result.len(), 1);
+        assert!(result[0].success, "expected ok for empty delete, got: {:?}", result[0].error);
+    }
+
+    #[test]
+    fn dispatch_batch_mixes_ok_and_err_responses() {
+        // Empty delete is a no-op Ok; play needs PendingCommands
+        let result = dispatch_batch(json!([
+            {"command": "delete_entities", "payload": {"entityIds": []}},
+            {"command": "play"}
+        ]));
+        assert_eq!(result.len(), 2);
+        assert!(result[0].success, "first should be Ok");
+        assert!(!result[1].success, "second should fail (not initialized)");
     }
 }

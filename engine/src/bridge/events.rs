@@ -500,6 +500,82 @@ pub fn emit_quality_changed(settings: &crate::core::quality::QualitySettings) {
     emit_event("QUALITY_CHANGED", settings);
 }
 
+/// Emit a delta play-tick event.
+///
+/// Only includes entities that changed or are new (`changed`), entities that were
+/// removed (`removed`), and the current input state. The JS runtime merges this
+/// delta into its local entity-state cache rather than replacing it wholesale.
+pub fn emit_play_tick_delta(
+    changed: &[(String, [f32; 3], [f32; 3], [f32; 3], String, String, f32)],
+    removed: &[String],
+    input_state: &crate::core::input::InputState,
+) {
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EntityState {
+        position: [f32; 3],
+        rotation: [f32; 3],
+        scale: [f32; 3],
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct EntityInfo {
+        name: String,
+        #[serde(rename = "type")]
+        entity_type: String,
+        collider_radius: f32,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PlayTickDeltaPayload {
+        changed_entities: std::collections::HashMap<String, EntityState>,
+        changed_entity_infos: std::collections::HashMap<String, EntityInfo>,
+        removed_entity_ids: Vec<String>,
+        input_state: InputStatePayload,
+    }
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct InputStatePayload {
+        pressed: std::collections::HashMap<String, bool>,
+        just_pressed: std::collections::HashMap<String, bool>,
+        just_released: std::collections::HashMap<String, bool>,
+        axes: std::collections::HashMap<String, f32>,
+    }
+
+    let mut changed_entities = std::collections::HashMap::new();
+    let mut changed_entity_infos = std::collections::HashMap::new();
+
+    for (id, pos, rot, scale, name, etype, collider_r) in changed {
+        changed_entities.insert(id.clone(), EntityState {
+            position: *pos,
+            rotation: *rot,
+            scale: *scale,
+        });
+        changed_entity_infos.insert(id.clone(), EntityInfo {
+            name: name.clone(),
+            entity_type: etype.clone(),
+            collider_radius: *collider_r,
+        });
+    }
+
+    let input_payload = InputStatePayload {
+        pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.pressed)).collect(),
+        just_pressed: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_pressed)).collect(),
+        just_released: input_state.actions.iter().map(|(k, v)| (k.clone(), v.just_released)).collect(),
+        axes: input_state.actions.iter().map(|(k, v)| (k.clone(), v.axis_value)).collect(),
+    };
+
+    emit_event("PLAY_TICK_DELTA", &PlayTickDeltaPayload {
+        changed_entities,
+        changed_entity_infos,
+        removed_entity_ids: removed.to_vec(),
+        input_state: input_payload,
+    });
+}
+
 /// Emit a collision event (started or stopped).
 pub fn emit_collision_event(entity_a: &str, entity_b: &str, started: bool) {
     #[derive(Serialize)]

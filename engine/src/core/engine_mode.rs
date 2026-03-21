@@ -131,6 +131,35 @@ pub fn snapshot_scene(
     tilemap_skeleton2d_query: &Query<(&EntityId, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&super::skeleton2d::SkeletonData2d>, Option<&super::skeleton2d::SkeletonEnabled2d>, Option<&super::skeletal_animation2d::SkeletalAnimation2d>, Option<&LodData>)>,
     selection: &Selection,
 ) -> SceneSnapshot {
+    use std::collections::HashMap;
+
+    // Materialize each secondary query into a HashMap keyed by entity-ID string.
+    // This converts N×M inner-loop lookups (O(N²)) to O(N) total.
+    type ScriptAudioRow = (Option<ScriptData>, Option<AudioData>);
+    let script_audio_map: HashMap<&str, ScriptAudioRow> = script_audio_query.iter()
+        .map(|(eid, sd, ad)| (eid.0.as_str(), (sd.cloned(), ad.cloned())))
+        .collect();
+
+    type ReverbParticleShaderRow = (Option<super::reverb_zone::ReverbZoneData>, bool, Option<ParticleData>, bool, Option<ShaderEffectData>);
+    let reverb_particle_shader_map: HashMap<&str, ReverbParticleShaderRow> = reverb_particle_shader_query.iter()
+        .map(|(eid, rzd, rze, pd, pe, sed)| (eid.0.as_str(), (rzd.cloned(), rze.is_some(), pd.cloned(), pe.is_some(), sed.cloned())))
+        .collect();
+
+    type CsgSpriteRow = (Option<CsgMeshData>, Option<super::sprite::SpriteData>);
+    let csg_sprite_map: HashMap<&str, CsgSpriteRow> = csg_sprite_query.iter()
+        .map(|(eid, cmd, sd)| (eid.0.as_str(), (cmd.cloned(), sd.cloned())))
+        .collect();
+
+    type ProceduralJointGcCameraRow = (Option<super::procedural_mesh::ProceduralMeshData>, Option<JointData>, Option<super::game_components::GameComponents>, Option<GameCameraData>, bool);
+    let procedural_joint_gc_camera_map: HashMap<&str, ProceduralJointGcCameraRow> = procedural_joint_gc_camera_query.iter()
+        .map(|(eid, pmd, jd, gc, gcd, agc)| (eid.0.as_str(), (pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some())))
+        .collect();
+
+    type TilemapSkeleton2dRow = (Option<TilemapData>, bool, Option<super::skeleton2d::SkeletonData2d>, bool, Option<Vec<super::skeletal_animation2d::SkeletalAnimation2d>>, Option<LodData>);
+    let tilemap_skeleton2d_map: HashMap<&str, TilemapSkeleton2dRow> = tilemap_skeleton2d_query.iter()
+        .map(|(eid, tmd, tme, sd, se, sa, ld)| (eid.0.as_str(), (tmd.cloned(), tme.is_some(), sd.cloned(), se.is_some(), sa.cloned().map(|a| vec![a]), ld.cloned())))
+        .collect();
+
     let mut entities = Vec::new();
 
     for (_, eid, ename, transform, visible, ent_type, mat_data, light_data, phys_data, phys_enabled, mesh, point_light, dir_light, spot_light, asset_ref) in query.iter() {
@@ -149,34 +178,25 @@ pub fn snapshot_scene(
             continue; // Skip non-forge entities (camera, lights from scene setup, etc.)
         };
 
-        // Look up script & audio data
-        let (script_data, audio_data) = script_audio_query.iter()
-            .find(|(saeid, _, _)| saeid.0 == eid.0)
-            .map(|(_, sd, ad)| (sd.cloned(), ad.cloned()))
+        // O(1) lookups via pre-built HashMaps (was O(N) per entity)
+        let (script_data, audio_data) = script_audio_map.get(eid.0.as_str())
+            .map(|(sd, ad)| (sd.clone(), ad.clone()))
             .unwrap_or((None, None));
 
-        // Look up reverb, particle, & shader data
-        let (reverb_zone_data, reverb_zone_enabled, particle_data, particle_enabled, shader_effect_data) = reverb_particle_shader_query.iter()
-            .find(|(rpseid, _, _, _, _, _)| rpseid.0 == eid.0)
-            .map(|(_, rzd, rze, pd, pe, sed)| (rzd.cloned(), rze.is_some(), pd.cloned(), pe.is_some(), sed.cloned()))
+        let (reverb_zone_data, reverb_zone_enabled, particle_data, particle_enabled, shader_effect_data) = reverb_particle_shader_map.get(eid.0.as_str())
+            .map(|(rzd, rze, pd, pe, sed)| (rzd.clone(), *rze, pd.clone(), *pe, sed.clone()))
             .unwrap_or((None, false, None, false, None));
 
-        // Look up csg & sprite data
-        let (csg_mesh_data, sprite_data) = csg_sprite_query.iter()
-            .find(|(cseid, _, _)| cseid.0 == eid.0)
-            .map(|(_, cmd, sd)| (cmd.cloned(), sd.cloned()))
+        let (csg_mesh_data, sprite_data) = csg_sprite_map.get(eid.0.as_str())
+            .map(|(cmd, sd)| (cmd.clone(), sd.clone()))
             .unwrap_or((None, None));
 
-        // Look up procedural mesh, joint, game component, and game camera data
-        let (procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = procedural_joint_gc_camera_query.iter()
-            .find(|(pmeid, _, _, _, _, _)| pmeid.0 == eid.0)
-            .map(|(_, pmd, jd, gc, gcd, agc)| (pmd.cloned(), jd.cloned(), gc.cloned(), gcd.cloned(), agc.is_some()))
+        let (procedural_mesh_data, joint_data, game_components, game_camera_data, active_game_camera) = procedural_joint_gc_camera_map.get(eid.0.as_str())
+            .map(|(pmd, jd, gc, gcd, agc)| (pmd.clone(), jd.clone(), gc.clone(), gcd.clone(), *agc))
             .unwrap_or((None, None, None, None, false));
 
-        // Look up tilemap, skeleton2d, & LOD data
-        let (tilemap_data, tilemap_enabled, skeleton2d_data, skeleton2d_enabled, skeletal_animations, lod_data) = tilemap_skeleton2d_query.iter()
-            .find(|(tseid, _, _, _, _, _, _)| tseid.0 == eid.0)
-            .map(|(_, tmd, tme, sd, se, sa, ld)| (tmd.cloned(), tme.is_some(), sd.cloned(), se.is_some(), sa.cloned().map(|a| vec![a]), ld.cloned()))
+        let (tilemap_data, tilemap_enabled, skeleton2d_data, skeleton2d_enabled, skeletal_animations, lod_data) = tilemap_skeleton2d_map.get(eid.0.as_str())
+            .map(|(tmd, tme, sd, se, sa, ld)| (tmd.clone(), *tme, sd.clone(), *se, sa.clone(), ld.clone()))
             .unwrap_or((None, false, None, false, None, None));
 
         let mut snap = EntitySnapshot::new(

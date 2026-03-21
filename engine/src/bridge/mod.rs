@@ -231,6 +231,27 @@ pub fn handle_command(command: &str, payload: JsValue) -> Result<JsValue, JsValu
         .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
+/// Handle a batch of commands from JavaScript.
+///
+/// Accepts a JsValue that deserialises to a JSON array of `{ command, payload? }` objects.
+/// Returns a JsValue array of `CommandResponse` objects in the same order.
+///
+/// This avoids the per-call JS↔WASM boundary overhead when dispatching many commands
+/// in a single frame (e.g., during AI compound actions or scene import).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn handle_command_batch(batch: JsValue) -> Result<JsValue, JsValue> {
+    use serde::Serialize as _;
+
+    let batch_value: serde_json::Value = serde_wasm_bindgen::from_value(batch)
+        .unwrap_or(serde_json::Value::Null);
+
+    let responses = core::commands::dispatch_batch(batch_value);
+
+    responses.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 /// Update engine state from JSON scene graph (legacy API).
 #[wasm_bindgen]
 pub fn update_scene(scene_json: &str) -> Result<(), JsValue> {
@@ -281,6 +302,7 @@ impl Plugin for SelectionPlugin {
             .init_resource::<core::lod::SimplificationBackend>()
             .init_resource::<core::custom_wgsl::CustomShaderRegistry>()
             .init_resource::<core::sprite::SortingLayerConfig>()
+            .init_resource::<scripts::PlayTickCache>()
             .add_message::<SelectionChangedEvent>();
 
         #[cfg(not(feature = "runtime"))]
