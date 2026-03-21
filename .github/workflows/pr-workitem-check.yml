@@ -132,7 +132,13 @@ jobs:
 
           if [ "$VERIFIED" = false ]; then
             echo ""
-            echo "::warning::Referenced tickets not found as GitHub Issues. Run 'sync-push' to sync your local taskboard to GitHub."
+            echo "::error::Referenced tickets not found as GitHub Issues."
+            echo "All taskboard tickets must be synced to GitHub before creating a PR."
+            echo ""
+            echo "How to fix:"
+            echo "  1. Run '/sync-push' to sync your local taskboard to GitHub"
+            echo "  2. Then re-push or re-run this check"
+            exit 1
           fi
 
           echo ""
