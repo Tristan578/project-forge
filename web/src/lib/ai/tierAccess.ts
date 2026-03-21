@@ -1,24 +1,86 @@
 /**
  * Tier-based access control for AI panels.
  *
- * Maps each AI panel ID to the minimum subscription tier required to use it.
- * The four tiers in ascending capability order are:
- *   starter < hobbyist < creator < pro
+ * Maps subscription tiers to the AI panel IDs they may access.
+ * Panel IDs match the keys in PANEL_DEFINITIONS (panelRegistry.ts).
  *
- * Rules (from product spec):
- *   - Core editing panels (scene, hierarchy, inspector, assets, docs) are always free.
- *   - Hobbyist+ gets basic AI panels (review, tutorial, design-teacher, idea-generator).
- *   - Creator+ gets advanced AI panels (world-builder, narrative, economy, …).
- *   - Pro gets all panels including the most powerful ones (auto-iteration, playtest).
+ * Tier hierarchy (lowest → highest access):
+ *   starter → hobbyist → creator → pro
  */
 
 import type { Tier } from '@/stores/userStore';
 
 // ---------------------------------------------------------------------------
-// Tier ordering
+// Panel tier requirements
 // ---------------------------------------------------------------------------
 
-/** Numeric rank for comparison — higher is more capable. */
+/**
+ * Panels available to ALL tiers (free panels).
+ * These are the core editor panels — not AI-feature panels.
+ */
+const FREE_PANELS: ReadonlySet<string> = new Set([
+  'scene-viewport',
+  'scene-hierarchy',
+  'inspector',
+  'script-editor',
+  'script-explorer',
+  'scene-settings',
+  'asset-browser',
+  'audio-mixer',
+  'docs',
+  'timeline',
+  'tileset',
+  'dialogue-editor',
+  'ui-builder',
+  'taskboard',
+]);
+
+/**
+ * AI panels unlocked at hobbyist tier (and above).
+ */
+const HOBBYIST_PANELS: ReadonlySet<string> = new Set([
+  'level-generator',
+  'narrative',
+  'pacing-analyzer',
+  'idea-generator',
+  'quest-generator',
+  'art-style',
+  'review',
+  'tutorial',
+]);
+
+/**
+ * AI panels unlocked at creator tier (and above).
+ */
+const CREATOR_PANELS: ReadonlySet<string> = new Set([
+  'behavior-tree',
+  'procedural-anim',
+  'effect-bindings',
+  'auto-iteration',
+  'game-analytics',
+  'auto-rigging',
+  'design-teacher',
+  'difficulty',
+  'economy',
+  'smart-camera',
+  'accessibility',
+  'physics-feel',
+  'save-system',
+  'playtest',
+  'world-builder',
+]);
+
+/**
+ * AI panels that require pro tier.
+ */
+const PRO_PANELS: ReadonlySet<string> = new Set([
+  'texture-painter',
+]);
+
+// ---------------------------------------------------------------------------
+// Tier ordering for comparisons
+// ---------------------------------------------------------------------------
+
 const TIER_RANK: Record<Tier, number> = {
   starter: 0,
   hobbyist: 1,
@@ -26,86 +88,74 @@ const TIER_RANK: Record<Tier, number> = {
   pro: 3,
 };
 
-/** Returns true if `tier` meets or exceeds `required`. */
-export function tierAtLeast(tier: Tier, required: Tier): boolean {
-  return TIER_RANK[tier] >= TIER_RANK[required];
-}
-
 // ---------------------------------------------------------------------------
-// Panel tier requirements
+// Public API
 // ---------------------------------------------------------------------------
 
 /**
- * Minimum tier required to access a panel.
- * Panels absent from this map are always accessible (free / non-AI panels).
- */
-export const PANEL_TIER_REQUIREMENTS: Partial<Record<string, Tier>> = {
-  // ---------- Hobbyist+ ----------
-  review: 'hobbyist',
-  tutorial: 'hobbyist',
-  'design-teacher': 'hobbyist',
-  'idea-generator': 'hobbyist',
-  accessibility: 'hobbyist',
-
-  // ---------- Creator+ ----------
-  'world-builder': 'creator',
-  narrative: 'creator',
-  economy: 'creator',
-  'behavior-tree': 'creator',
-  'level-generator': 'creator',
-  'save-system': 'creator',
-  'art-style': 'creator',
-  'physics-feel': 'creator',
-  difficulty: 'creator',
-  'pacing-analyzer': 'creator',
-  'quest-generator': 'creator',
-  'smart-camera': 'creator',
-  'texture-painter': 'creator',
-  'procedural-anim': 'creator',
-
-  // ---------- Pro only ----------
-  'auto-iteration': 'pro',
-  playtest: 'pro',
-  'auto-rigging': 'pro',
-  'game-analytics': 'pro',
-};
-
-// ---------------------------------------------------------------------------
-// Access helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Returns true if `tier` is allowed to open `panelId`.
- * Panels without a tier requirement are always accessible.
+ * Returns true when `tier` may open `panelId`.
+ *
+ * @example
+ * canAccessPanel('level-generator', 'hobbyist') // true
+ * canAccessPanel('level-generator', 'starter')  // false
  */
 export function canAccessPanel(panelId: string, tier: Tier): boolean {
-  const required = PANEL_TIER_REQUIREMENTS[panelId];
-  if (required === undefined) return true;
-  return tierAtLeast(tier, required);
+  if (FREE_PANELS.has(panelId)) return true;
+  const rank = TIER_RANK[tier] ?? 0;
+  if (HOBBYIST_PANELS.has(panelId)) return rank >= TIER_RANK.hobbyist;
+  if (CREATOR_PANELS.has(panelId)) return rank >= TIER_RANK.creator;
+  if (PRO_PANELS.has(panelId)) return rank >= TIER_RANK.pro;
+  // Unknown panel IDs default to accessible (don't hide panels we don't know about).
+  return true;
 }
 
 /**
- * Returns the list of panel IDs accessible for `tier`.
- * Accepts an optional full list of panel IDs to check against;
- * defaults to all panels that have a tier requirement (plus all free panels
- * in the provided list).
+ * Returns the sorted list of panel IDs accessible at `tier`.
+ *
+ * @example
+ * getAvailablePanels('starter') // ['scene-viewport', 'inspector', ...]
  */
-export function getAvailablePanels(tier: Tier, allPanelIds?: string[]): string[] {
-  const ids = allPanelIds ?? Object.keys(PANEL_TIER_REQUIREMENTS);
-  return ids.filter((id) => canAccessPanel(id, tier));
+export function getAvailablePanels(tier: Tier): string[] {
+  const all = [
+    ...FREE_PANELS,
+    ...HOBBYIST_PANELS,
+    ...CREATOR_PANELS,
+    ...PRO_PANELS,
+  ];
+  return all.filter((id) => canAccessPanel(id, tier)).sort();
 }
 
 /**
- * Returns the minimum tier required for `panelId`, or null if no restriction.
+ * Returns the minimum tier required to access a panel, or null if the panel
+ * is free / unknown.
+ *
+ * Useful for rendering upgrade prompts ("Requires Creator tier").
  */
 export function getRequiredTier(panelId: string): Tier | null {
-  return PANEL_TIER_REQUIREMENTS[panelId] ?? null;
+  if (FREE_PANELS.has(panelId)) return null;
+  if (HOBBYIST_PANELS.has(panelId)) return 'hobbyist';
+  if (CREATOR_PANELS.has(panelId)) return 'creator';
+  if (PRO_PANELS.has(panelId)) return 'pro';
+  return null;
 }
 
-/** Human-readable display label for each tier. */
-export const TIER_LABELS: Record<Tier, string> = {
-  starter: 'Starter',
-  hobbyist: 'Hobbyist',
-  creator: 'Creator',
-  pro: 'Pro',
-};
+/**
+ * Returns a human-readable label for a tier.
+ */
+export function tierLabel(tier: Tier): string {
+  const labels: Record<Tier, string> = {
+    starter: 'Starter',
+    hobbyist: 'Hobbyist',
+    creator: 'Creator',
+    pro: 'Pro',
+  };
+  return labels[tier];
+}
+
+/**
+ * True when `candidate` is strictly higher than `current`.
+ * Used to determine whether to show an upgrade CTA.
+ */
+export function isHigherTier(candidate: Tier, current: Tier): boolean {
+  return (TIER_RANK[candidate] ?? 0) > (TIER_RANK[current] ?? 0);
+}

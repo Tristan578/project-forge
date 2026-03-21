@@ -1,120 +1,85 @@
 import { describe, it, expect } from 'vitest';
 import {
-  tierAtLeast,
   canAccessPanel,
   getAvailablePanels,
   getRequiredTier,
-  PANEL_TIER_REQUIREMENTS,
-  TIER_LABELS,
+  tierLabel,
+  isHigherTier,
 } from '../tierAccess';
 import type { Tier } from '@/stores/userStore';
-
-// ---------------------------------------------------------------------------
-// tierAtLeast
-// ---------------------------------------------------------------------------
-
-describe('tierAtLeast', () => {
-  const tiers: Tier[] = ['starter', 'hobbyist', 'creator', 'pro'];
-
-  it('returns true when tier equals the required tier', () => {
-    for (const t of tiers) {
-      expect(tierAtLeast(t, t)).toBe(true);
-    }
-  });
-
-  it('returns true when tier is higher than required', () => {
-    expect(tierAtLeast('hobbyist', 'starter')).toBe(true);
-    expect(tierAtLeast('creator', 'starter')).toBe(true);
-    expect(tierAtLeast('creator', 'hobbyist')).toBe(true);
-    expect(tierAtLeast('pro', 'starter')).toBe(true);
-    expect(tierAtLeast('pro', 'hobbyist')).toBe(true);
-    expect(tierAtLeast('pro', 'creator')).toBe(true);
-  });
-
-  it('returns false when tier is lower than required', () => {
-    expect(tierAtLeast('starter', 'hobbyist')).toBe(false);
-    expect(tierAtLeast('starter', 'creator')).toBe(false);
-    expect(tierAtLeast('starter', 'pro')).toBe(false);
-    expect(tierAtLeast('hobbyist', 'creator')).toBe(false);
-    expect(tierAtLeast('hobbyist', 'pro')).toBe(false);
-    expect(tierAtLeast('creator', 'pro')).toBe(false);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // canAccessPanel
 // ---------------------------------------------------------------------------
 
 describe('canAccessPanel', () => {
-  it('returns true for panels without a tier requirement (free panels)', () => {
-    // Core panels not in PANEL_TIER_REQUIREMENTS
-    expect(canAccessPanel('scene-viewport', 'starter')).toBe(true);
-    expect(canAccessPanel('scene-hierarchy', 'starter')).toBe(true);
-    expect(canAccessPanel('inspector', 'starter')).toBe(true);
-    expect(canAccessPanel('asset-browser', 'starter')).toBe(true);
-    expect(canAccessPanel('docs', 'starter')).toBe(true);
-    expect(canAccessPanel('unknown-panel', 'starter')).toBe(true);
+  // ---- Free panels accessible to all tiers ----
+  const FREE_SAMPLE = ['scene-viewport', 'inspector', 'docs', 'audio-mixer', 'asset-browser'];
+  for (const panelId of FREE_SAMPLE) {
+    for (const tier of ['starter', 'hobbyist', 'creator', 'pro'] as Tier[]) {
+      it(`allows ${tier} to access free panel "${panelId}"`, () => {
+        expect(canAccessPanel(panelId, tier)).toBe(true);
+      });
+    }
+  }
+
+  // ---- Hobbyist panels ----
+  it('denies starter from hobbyist panel "level-generator"', () => {
+    expect(canAccessPanel('level-generator', 'starter')).toBe(false);
   });
 
-  describe('hobbyist panels', () => {
-    const hobbyistPanels = ['review', 'tutorial', 'design-teacher', 'idea-generator', 'accessibility'];
-
-    it('blocks starter from hobbyist panels', () => {
-      for (const panelId of hobbyistPanels) {
-        expect(canAccessPanel(panelId, 'starter')).toBe(false);
-      }
-    });
-
-    it('allows hobbyist and above to access hobbyist panels', () => {
-      for (const panelId of hobbyistPanels) {
-        expect(canAccessPanel(panelId, 'hobbyist')).toBe(true);
-        expect(canAccessPanel(panelId, 'creator')).toBe(true);
-        expect(canAccessPanel(panelId, 'pro')).toBe(true);
-      }
-    });
+  it('allows hobbyist to access "level-generator"', () => {
+    expect(canAccessPanel('level-generator', 'hobbyist')).toBe(true);
   });
 
-  describe('creator panels', () => {
-    const creatorPanels = [
-      'world-builder',
-      'narrative',
-      'economy',
-      'behavior-tree',
-      'level-generator',
-      'pacing-analyzer',
-    ];
-
-    it('blocks starter and hobbyist from creator panels', () => {
-      for (const panelId of creatorPanels) {
-        expect(canAccessPanel(panelId, 'starter')).toBe(false);
-        expect(canAccessPanel(panelId, 'hobbyist')).toBe(false);
-      }
-    });
-
-    it('allows creator and pro to access creator panels', () => {
-      for (const panelId of creatorPanels) {
-        expect(canAccessPanel(panelId, 'creator')).toBe(true);
-        expect(canAccessPanel(panelId, 'pro')).toBe(true);
-      }
-    });
+  it('allows creator to access "level-generator" (higher tier)', () => {
+    expect(canAccessPanel('level-generator', 'creator')).toBe(true);
   });
 
-  describe('pro panels', () => {
-    const proPanels = ['auto-iteration', 'playtest', 'auto-rigging', 'game-analytics'];
+  it('allows pro to access "level-generator" (highest tier)', () => {
+    expect(canAccessPanel('level-generator', 'pro')).toBe(true);
+  });
 
-    it('blocks starter, hobbyist, and creator from pro panels', () => {
-      for (const panelId of proPanels) {
-        expect(canAccessPanel(panelId, 'starter')).toBe(false);
-        expect(canAccessPanel(panelId, 'hobbyist')).toBe(false);
-        expect(canAccessPanel(panelId, 'creator')).toBe(false);
-      }
-    });
+  it('denies starter from hobbyist panel "pacing-analyzer"', () => {
+    expect(canAccessPanel('pacing-analyzer', 'starter')).toBe(false);
+  });
 
-    it('allows pro to access pro panels', () => {
-      for (const panelId of proPanels) {
-        expect(canAccessPanel(panelId, 'pro')).toBe(true);
-      }
-    });
+  it('allows hobbyist to access "pacing-analyzer"', () => {
+    expect(canAccessPanel('pacing-analyzer', 'hobbyist')).toBe(true);
+  });
+
+  // ---- Creator panels ----
+  it('denies starter from creator panel "behavior-tree"', () => {
+    expect(canAccessPanel('behavior-tree', 'starter')).toBe(false);
+  });
+
+  it('denies hobbyist from creator panel "behavior-tree"', () => {
+    expect(canAccessPanel('behavior-tree', 'hobbyist')).toBe(false);
+  });
+
+  it('allows creator to access "behavior-tree"', () => {
+    expect(canAccessPanel('behavior-tree', 'creator')).toBe(true);
+  });
+
+  it('allows pro to access "behavior-tree"', () => {
+    expect(canAccessPanel('behavior-tree', 'pro')).toBe(true);
+  });
+
+  it('denies starter from "auto-iteration"', () => {
+    expect(canAccessPanel('auto-iteration', 'starter')).toBe(false);
+  });
+
+  it('allows creator to access "texture-painter" is false (pro only)', () => {
+    expect(canAccessPanel('texture-painter', 'creator')).toBe(false);
+  });
+
+  it('allows pro to access "texture-painter"', () => {
+    expect(canAccessPanel('texture-painter', 'pro')).toBe(true);
+  });
+
+  // ---- Unknown panel IDs default to accessible ----
+  it('allows access to unknown panel IDs (do not block unknown panels)', () => {
+    expect(canAccessPanel('some-future-panel', 'starter')).toBe(true);
   });
 });
 
@@ -123,48 +88,60 @@ describe('canAccessPanel', () => {
 // ---------------------------------------------------------------------------
 
 describe('getAvailablePanels', () => {
-  it('returns only panels whose tier requirement the user meets', () => {
-    const allPanels = Object.keys(PANEL_TIER_REQUIREMENTS);
-
-    const starterPanels = getAvailablePanels('starter', allPanels);
-    expect(starterPanels).toHaveLength(0); // starter can't access any AI panel
-
-    const hobbyistPanels = getAvailablePanels('hobbyist', allPanels);
-    expect(hobbyistPanels).toContain('review');
-    expect(hobbyistPanels).toContain('tutorial');
-    expect(hobbyistPanels).not.toContain('world-builder');
-    expect(hobbyistPanels).not.toContain('auto-iteration');
-
-    const creatorPanels = getAvailablePanels('creator', allPanels);
-    expect(creatorPanels).toContain('review'); // hobbyist panels included
-    expect(creatorPanels).toContain('world-builder');
-    expect(creatorPanels).not.toContain('auto-iteration'); // pro only
-
-    const proPanels = getAvailablePanels('pro', allPanels);
-    expect(proPanels).toEqual(allPanels); // pro gets everything
+  it('returns a non-empty array for all tiers', () => {
+    for (const tier of ['starter', 'hobbyist', 'creator', 'pro'] as Tier[]) {
+      expect(getAvailablePanels(tier).length).toBeGreaterThan(0);
+    }
   });
 
-  it('returns free panels (not in PANEL_TIER_REQUIREMENTS) when included in allPanelIds', () => {
-    const mixed = ['scene-viewport', 'review', 'world-builder', 'auto-iteration'];
-
-    const starterResult = getAvailablePanels('starter', mixed);
-    expect(starterResult).toEqual(['scene-viewport']); // only the free panel
-
-    const hobbyistResult = getAvailablePanels('hobbyist', mixed);
-    expect(hobbyistResult).toContain('scene-viewport');
-    expect(hobbyistResult).toContain('review');
-    expect(hobbyistResult).not.toContain('world-builder');
-
-    const proResult = getAvailablePanels('pro', mixed);
-    expect(proResult).toEqual(mixed);
+  it('higher tiers have at least as many panels as lower tiers', () => {
+    const starter = getAvailablePanels('starter').length;
+    const hobbyist = getAvailablePanels('hobbyist').length;
+    const creator = getAvailablePanels('creator').length;
+    const pro = getAvailablePanels('pro').length;
+    expect(hobbyist).toBeGreaterThanOrEqual(starter);
+    expect(creator).toBeGreaterThanOrEqual(hobbyist);
+    expect(pro).toBeGreaterThanOrEqual(creator);
   });
 
-  it('defaults to keying over PANEL_TIER_REQUIREMENTS when no allPanelIds given', () => {
-    const result = getAvailablePanels('pro');
-    // Should include all keyed panels
-    expect(result).toContain('review');
-    expect(result).toContain('world-builder');
-    expect(result).toContain('auto-iteration');
+  it('starter panels include core free panels', () => {
+    const panels = getAvailablePanels('starter');
+    expect(panels).toContain('scene-viewport');
+    expect(panels).toContain('inspector');
+    expect(panels).toContain('docs');
+  });
+
+  it('starter panels do not include locked AI panels', () => {
+    const panels = getAvailablePanels('starter');
+    expect(panels).not.toContain('level-generator');
+    expect(panels).not.toContain('behavior-tree');
+    expect(panels).not.toContain('texture-painter');
+  });
+
+  it('hobbyist panels include hobbyist AI panels', () => {
+    const panels = getAvailablePanels('hobbyist');
+    expect(panels).toContain('level-generator');
+    expect(panels).toContain('pacing-analyzer');
+  });
+
+  it('hobbyist panels do not include creator panels', () => {
+    const panels = getAvailablePanels('hobbyist');
+    expect(panels).not.toContain('behavior-tree');
+    expect(panels).not.toContain('texture-painter');
+  });
+
+  it('pro panels include all panels', () => {
+    const panels = getAvailablePanels('pro');
+    expect(panels).toContain('texture-painter');
+    expect(panels).toContain('behavior-tree');
+    expect(panels).toContain('level-generator');
+    expect(panels).toContain('scene-viewport');
+  });
+
+  it('returns panels in sorted order', () => {
+    const panels = getAvailablePanels('pro');
+    const sorted = [...panels].sort();
+    expect(panels).toEqual(sorted);
   });
 });
 
@@ -173,48 +150,65 @@ describe('getAvailablePanels', () => {
 // ---------------------------------------------------------------------------
 
 describe('getRequiredTier', () => {
-  it('returns the required tier for gated panels', () => {
-    expect(getRequiredTier('review')).toBe('hobbyist');
-    expect(getRequiredTier('world-builder')).toBe('creator');
-    expect(getRequiredTier('auto-iteration')).toBe('pro');
-  });
-
   it('returns null for free panels', () => {
     expect(getRequiredTier('scene-viewport')).toBeNull();
     expect(getRequiredTier('inspector')).toBeNull();
-    expect(getRequiredTier('unknown-panel')).toBeNull();
+    expect(getRequiredTier('docs')).toBeNull();
+  });
+
+  it('returns "hobbyist" for hobbyist-tier panels', () => {
+    expect(getRequiredTier('level-generator')).toBe('hobbyist');
+    expect(getRequiredTier('pacing-analyzer')).toBe('hobbyist');
+    expect(getRequiredTier('idea-generator')).toBe('hobbyist');
+  });
+
+  it('returns "creator" for creator-tier panels', () => {
+    expect(getRequiredTier('behavior-tree')).toBe('creator');
+    expect(getRequiredTier('auto-iteration')).toBe('creator');
+    expect(getRequiredTier('design-teacher')).toBe('creator');
+  });
+
+  it('returns "pro" for pro-tier panels', () => {
+    expect(getRequiredTier('texture-painter')).toBe('pro');
+  });
+
+  it('returns null for unknown panel IDs', () => {
+    expect(getRequiredTier('nonexistent-panel')).toBeNull();
   });
 });
 
 // ---------------------------------------------------------------------------
-// TIER_LABELS
+// tierLabel
 // ---------------------------------------------------------------------------
 
-describe('TIER_LABELS', () => {
-  it('provides human-readable labels for all tiers', () => {
-    expect(TIER_LABELS.starter).toBe('Starter');
-    expect(TIER_LABELS.hobbyist).toBe('Hobbyist');
-    expect(TIER_LABELS.creator).toBe('Creator');
-    expect(TIER_LABELS.pro).toBe('Pro');
+describe('tierLabel', () => {
+  it('returns human-readable labels', () => {
+    expect(tierLabel('starter')).toBe('Starter');
+    expect(tierLabel('hobbyist')).toBe('Hobbyist');
+    expect(tierLabel('creator')).toBe('Creator');
+    expect(tierLabel('pro')).toBe('Pro');
   });
 });
 
 // ---------------------------------------------------------------------------
-// PANEL_TIER_REQUIREMENTS completeness
+// isHigherTier
 // ---------------------------------------------------------------------------
 
-describe('PANEL_TIER_REQUIREMENTS', () => {
-  it('only contains valid tier values', () => {
-    const validTiers = new Set<string>(['starter', 'hobbyist', 'creator', 'pro']);
-    for (const [panelId, tier] of Object.entries(PANEL_TIER_REQUIREMENTS)) {
-      expect(validTiers.has(tier as string), `${panelId} has invalid tier: ${tier}`).toBe(true);
-    }
+describe('isHigherTier', () => {
+  it('returns true when candidate is strictly higher than current', () => {
+    expect(isHigherTier('hobbyist', 'starter')).toBe(true);
+    expect(isHigherTier('creator', 'hobbyist')).toBe(true);
+    expect(isHigherTier('pro', 'creator')).toBe(true);
+    expect(isHigherTier('pro', 'starter')).toBe(true);
   });
 
-  it('does not include core non-AI panels', () => {
-    const corePanels = ['scene-viewport', 'scene-hierarchy', 'inspector', 'asset-browser', 'docs', 'audio-mixer'];
-    for (const panelId of corePanels) {
-      expect(PANEL_TIER_REQUIREMENTS[panelId]).toBeUndefined();
-    }
+  it('returns false for equal tiers', () => {
+    expect(isHigherTier('starter', 'starter')).toBe(false);
+    expect(isHigherTier('pro', 'pro')).toBe(false);
+  });
+
+  it('returns false when candidate is lower than current', () => {
+    expect(isHigherTier('starter', 'hobbyist')).toBe(false);
+    expect(isHigherTier('hobbyist', 'pro')).toBe(false);
   });
 });

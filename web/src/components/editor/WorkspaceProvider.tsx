@@ -131,14 +131,16 @@ function PanelLoadingSkeleton() {
   );
 }
 
-// ---- Lazy panel wrapper — wraps each lazy component in Suspense ----
-function withSuspense(Component: React.ComponentType): React.FunctionComponent<IDockviewPanelProps> {
+// ---- Lazy panel wrapper — wraps each lazy component in Suspense + tier access lock ----
+function withSuspense(Component: React.ComponentType, panelId: string): React.FunctionComponent<IDockviewPanelProps> {
   return function LazyPanelWrapper(_props: IDockviewPanelProps) {
     return (
       <div className="h-full w-full overflow-hidden bg-zinc-900">
-        <Suspense fallback={<PanelLoadingSkeleton />}>
-          <Component />
-        </Suspense>
+        <LockedPanelOverlay panelId={panelId}>
+          <Suspense fallback={<PanelLoadingSkeleton />}>
+            <Component />
+          </Suspense>
+        </LockedPanelOverlay>
       </div>
     );
   };

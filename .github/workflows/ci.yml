@@ -8,82 +8,16 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Restrict default token permissions (CWE-732 / CodeQL workflow-missing-permissions).
-# Individual jobs add specific permissions only when needed.
-permissions:
-  contents: read
-
 jobs:
-  # ---- CI Gate ----
-  # Always runs on every PR. Detects which paths changed and sets outputs
-  # so downstream jobs can skip when not needed. The ruleset requires only
-  # this check — it always posts a result, solving the path-filter + required-checks conflict.
-  ci-gate:
-    name: CI Gate
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    outputs:
-      needs-web: ${{ steps.changes.outputs.web }}
-      needs-engine: ${{ steps.changes.outputs.engine }}
-      needs-mcp: ${{ steps.changes.outputs.mcp }}
-      needs-ci: ${{ steps.changes.outputs.ci }}
-      needs-any-code: ${{ steps.changes.outputs.any-code }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect changed paths
-        id: changes
-        run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
-
-          web=false; engine=false; mcp=false; ci=false
-
-          echo "$CHANGED" | grep -q '^web/' && web=true
-          echo "$CHANGED" | grep -q '^engine/' && engine=true
-          echo "$CHANGED" | grep -q '^mcp-server/' && mcp=true
-          echo "$CHANGED" | grep -qE '^\.github/workflows/|^scripts/|^package\.json|^package-lock\.json|^\.claude/skills/.*/scripts/' && ci=true
-
-          any_code=false
-          if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ]; then
-            any_code=true
-          fi
-
-          echo "web=$web" >> "$GITHUB_OUTPUT"
-          echo "engine=$engine" >> "$GITHUB_OUTPUT"
-          echo "mcp=$mcp" >> "$GITHUB_OUTPUT"
-          echo "ci=$ci" >> "$GITHUB_OUTPUT"
-          echo "any-code=$any_code" >> "$GITHUB_OUTPUT"
-
-          echo "Changed paths detected:"
-          echo "  web=$web engine=$engine mcp=$mcp ci=$ci any-code=$any_code"
-          if [ "$any_code" = "false" ]; then
-            echo "No code changes — downstream jobs will be skipped"
-          fi
-
   # ---- Quality Gates (reusable workflow shared with CD) ----
   quality-gates:
     name: Quality Gates
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-any-code == 'true' }}
     uses: ./.github/workflows/quality-gates.yml
-    with:
-      web-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-web) }}
-      engine-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-engine) }}
-      mcp-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-mcp) }}
-      ci-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-ci) }}
 
   # ---- CI-only checks ----
 
   command-parity:
     name: MCP Command Parity
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-mcp == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -97,8 +31,6 @@ jobs:
 
   build-nextjs:
     name: Next.js Production Build
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -126,8 +58,6 @@ jobs:
   # Only UI-only E2E tests (@ui) run in CI — they test React shell without WASM.
   test-e2e-ui:
     name: E2E UI Tests
-    needs: [ci-gate]
-    if: ${{ needs.ci-gate.outputs.needs-web == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -151,3 +81,58 @@ jobs:
       - name: Run UI-only E2E tests
         working-directory: web
         run: npx playwright test --grep @ui --project=chromium
+
+  # ---------------------------------------------------------------------------
+  # Performance Benchmark Regression Detection
+  #
+  # STATUS: Commented out — enable once a stable baseline has been committed to
+  #         the benchmarks/ directory (see scripts/run-benchmarks.sh).
+  #
+  # HOW TO ENABLE:
+  #   1. Run `bash scripts/run-benchmarks.sh` locally on a representative machine.
+  #   2. Commit the output as benchmarks/baseline.json.
+  #   3. Uncomment the job below and update the --baseline flag accordingly.
+  #
+  # HOW IT WORKS:
+  #   - Runs the benchmark test suite via vitest (web/src/lib/perf/__tests__/).
+  #   - Produces benchmarks/latest.json with per-test timing measurements.
+  #   - Compares against the stored baseline; exits 1 if any metric exceeds 2x.
+  #   - Uploads both reports as CI artifacts for manual inspection.
+  #
+  # STABILITY NOTE:
+  #   CI runners have variable load. Ratios are used (not absolute numbers).
+  #   Raise --threshold to 3.0 if false positives occur on the CI runner.
+  #
+  # benchmark-regression:
+  #   name: Performance Benchmark Regression
+  #   runs-on: ubuntu-latest
+  #   timeout-minutes: 15
+  #   permissions:
+  #     contents: read
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #
+  #     - uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+  #         cache: npm
+  #         cache-dependency-path: web/package-lock.json
+  #
+  #     - run: npm ci
+  #       working-directory: web
+  #
+  #     - name: Run benchmark suite and check for regressions
+  #       run: |
+  #         bash scripts/run-benchmarks.sh \
+  #           --baseline benchmarks/baseline.json \
+  #           --output   benchmarks/latest.json \
+  #           --threshold 2.0
+  #
+  #     - name: Upload benchmark reports
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: benchmark-reports-${{ github.run_id }}
+  #         path: benchmarks/
+  #         retention-days: 30
+  # ---------------------------------------------------------------------------

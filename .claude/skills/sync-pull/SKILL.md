@@ -7,7 +7,7 @@ Pull changes from the GitHub Project board (SpawnForge #2) into the local taskbo
 1. Fetches all items from the GitHub Project via `gh project item-list`
 2. For tracked items: compares GitHub status with last-synced status; updates local ticket if changed
 3. For untracked draft items: creates a new local ticket and adds it to the mapping
-4. Saves the updated mapping to `.claude/hooks/github-project-map.json`
+4. Saves the updated mapping to @.claude/hooks/github-project-map.json
 
 ## Behavior
 
@@ -40,8 +40,8 @@ This runs automatically via the **SessionStart hook** when a Claude Code session
 
 ## Configuration
 
-- Config: `.claude/hooks/github-sync-config.json` (project IDs, field mappings)
-- Mapping: `.claude/hooks/github-project-map.json` (ticket ↔ GitHub item ID mapping)
+- Config: @.claude/hooks/github-sync-config.json (project IDs, field mappings)
+- Mapping: @.claude/hooks/github-project-map.json (ticket <> GitHub item ID mapping)
 
 ## Prerequisites
 

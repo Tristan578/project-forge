@@ -1,6 +1,8 @@
 ---
 name: pr-code-review
 description: Use when reviewing a pull request for bugs, security issues, and regressions. Analyzes the full diff with codebase context and posts inline GitHub comments with severity markers. Modeled after Claude Code Review's multi-agent approach. Invoke with /pr-code-review <PR number>.
+context: fork
+agent: Explore
 ---
 
 # PR Code Review

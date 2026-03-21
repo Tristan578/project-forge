@@ -8,6 +8,9 @@ argument-hint: "[pr_number | 'all']"
 
 # PR Babysitter
 
+## Live PR State
+!`gh pr list --state open --json number,title,headRefName --jq '.[] | "#\(.number) \(.title[:60]) [\(.headRefName)]"' 2>/dev/null || echo "gh CLI not available"`
+
 Monitor open pull requests for CI failures and review comments (Sentry, Copilot, human reviewers), then automatically address them.
 
 ## When to Run

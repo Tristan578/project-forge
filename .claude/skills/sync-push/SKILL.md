@@ -8,7 +8,7 @@ Push local taskboard ticket changes to the GitHub Project board (SpawnForge #2).
 2. Compares each ticket's status with the last-synced status in the mapping file
 3. Creates new draft items on GitHub for untracked tickets
 4. Updates status on GitHub for tickets whose status changed locally
-5. Saves the updated mapping to `.claude/hooks/github-project-map.json`
+5. Saves the updated mapping to @.claude/hooks/github-project-map.json
 
 ## Behavior
 
@@ -40,8 +40,8 @@ This runs automatically via the **Stop hook** after every Claude response. You t
 
 ## Configuration
 
-- Config: `.claude/hooks/github-sync-config.json` (project IDs, field mappings)
-- Mapping: `.claude/hooks/github-project-map.json` (ticket ↔ GitHub item ID mapping)
+- Config: @.claude/hooks/github-sync-config.json (project IDs, field mappings)
+- Mapping: @.claude/hooks/github-project-map.json (ticket <> GitHub item ID mapping)
 
 ## Prerequisites
 

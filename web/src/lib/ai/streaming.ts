@@ -1,214 +1,195 @@
 /**
- * Unified SSE streaming helper for AI generation endpoints.
+ * Unified SSE streaming helper for SpawnForge AI routes.
  *
- * Standardises the Server-Sent Events envelope used by all AI feature modules
- * that call /api/chat. Instead of duplicating the SSE reader logic across
- * tutorialGenerator, worldBuilder, behaviorTree, etc., every module imports
- * the helpers here.
+ * All AI routes that produce server-sent events must use this module to ensure
+ * a consistent event envelope format:
  *
- * Envelope event types:
- *   data    — incremental text chunk        { type: 'text_delta', text: string }
- *   progress — percentage 0–100             { type: 'progress', percent: number }
- *   error   — fatal error, abort streaming  { type: 'error', message: string }
- *   done    — stream finished               { type: 'done' } or data: [DONE]
+ *   { type: 'data',     ... }   — streaming payload chunk
+ *   { type: 'progress', ... }   — progress update (e.g. polling status)
+ *   { type: 'error',    ... }   — error during generation
+ *   { type: 'done',     ... }   — generation complete
+ *
+ * Usage:
+ *   const { send, response } = createSSEResponse();
+ *   // Pass `response` to the outer Response immediately.
+ *   // Drive the stream from a background task via the returned helpers.
  */
 
 // ---------------------------------------------------------------------------
-// Envelope event types
+// Event envelope types
 // ---------------------------------------------------------------------------
 
-export interface SSETextDelta {
-  type: 'text_delta';
-  text: string;
+export interface SSEDataEvent {
+  type: 'data';
+  [key: string]: unknown;
 }
 
-export interface SSEProgress {
+export interface SSEProgressEvent {
   type: 'progress';
-  percent: number;
+  message: string;
+  percent?: number;
 }
 
-export interface SSEError {
+export interface SSEErrorEvent {
   type: 'error';
   message: string;
+  code?: string;
 }
 
-export interface SSEDone {
+export interface SSEDoneEvent {
   type: 'done';
+  [key: string]: unknown;
 }
 
-export type SSEEnvelopeEvent = SSETextDelta | SSEProgress | SSEError | SSEDone;
+export type SSEEvent = SSEDataEvent | SSEProgressEvent | SSEErrorEvent | SSEDoneEvent;
 
 // ---------------------------------------------------------------------------
-// Streaming options & callbacks
+// Stream builder
 // ---------------------------------------------------------------------------
 
-export interface StreamCallbacks {
-  /** Called for each incremental text chunk. */
-  onText?: (chunk: string) => void;
-  /** Called when a progress event arrives (0–100). */
-  onProgress?: (percent: number) => void;
-  /** Called when an error event arrives. Streaming stops after this. */
-  onError?: (message: string) => void;
+export interface SSEStreamHandle {
+  /**
+   * Enqueue a single typed SSE event to the client.
+   * Serialises the event as `data: <json>\n\n`.
+   */
+  send: (event: SSEEvent) => void;
+  /**
+   * Close the stream cleanly. Must be called once all events are sent.
+   * Calling close() a second time is a no-op.
+   */
+  close: () => void;
+  /**
+   * The Response object to return from the route handler.
+   * This must be returned *before* any await that could delay headers.
+   */
+  response: Response;
+}
+
+/**
+ * Create a streaming `text/event-stream` Response together with a handle that
+ * lets the caller push events into it asynchronously.
+ *
+ * Pattern:
+ * ```ts
+ * export async function POST(req: NextRequest) {
+ *   const { send, close, response } = createSSEResponse();
+ *   // Return response immediately so the browser opens the stream.
+ *   void runGeneration().then(result => {
+ *     send({ type: 'done', ...result });
+ *     close();
+ *   }).catch(err => {
+ *     send({ type: 'error', message: String(err) });
+ *     close();
+ *   });
+ *   return response;
+ * }
+ * ```
+ */
+export function createSSEResponse(): SSEStreamHandle {
+  const encoder = new TextEncoder();
+  let controllerRef: ReadableStreamDefaultController | null = null;
+  let closed = false;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      controllerRef = controller;
+    },
+  });
+
+  const response = new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+
+  function send(event: SSEEvent): void {
+    if (closed || !controllerRef) return;
+    try {
+      controllerRef.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    } catch {
+      // Stream was closed externally — swallow to avoid cascading errors.
+    }
+  }
+
+  function close(): void {
+    if (closed || !controllerRef) return;
+    closed = true;
+    try {
+      controllerRef.close();
+    } catch {
+      // Already closed.
+    }
+  }
+
+  return { send, close, response };
 }
 
 // ---------------------------------------------------------------------------
-// Parse a single SSE "data:" line into an envelope event
+// Adapter: ResolveChatStreamEvent → SSEEvent
 // ---------------------------------------------------------------------------
 
 /**
- * Parse one `data: <payload>` line from an SSE stream.
- * Returns null for lines that should be skipped (e.g. heartbeats, [DONE]).
+ * Map a `ResolveChatStreamEvent` (from resolveChat) to the canonical SSEEvent
+ * shape so chat routes can use the same helper.
  */
-export function parseSSELine(line: string): SSEEnvelopeEvent | null {
-  if (!line.startsWith('data: ')) return null;
+export function chatEventToSSE(
+  event: { type: string; [key: string]: unknown },
+): SSEEvent {
+  if (event.type === 'error') {
+    return {
+      type: 'error',
+      message: typeof event.message === 'string' ? event.message : 'Unknown error',
+    };
+  }
+  if (event.type === 'turn_complete') {
+    return {
+      type: 'done',
+      stop_reason: event.stop_reason,
+    };
+  }
+  // text_delta, tool_start, usage, thinking_delta etc. are forwarded as data.
+  // Spread the event first, then override `type` so the 'data' envelope type wins.
+  const { type: _originalType, ...rest } = event;
+  return { ...rest, type: 'data' } as SSEDataEvent;
+}
 
-  const payload = line.slice(6).trim();
-  if (payload === '[DONE]') return { type: 'done' };
-  if (payload === '') return null;
+// ---------------------------------------------------------------------------
+// Legacy adapter: existing chat/route.ts sends raw JSON — this wrapper allows
+// gradual migration without breaking the chat panel.
+// ---------------------------------------------------------------------------
 
-  let parsed: unknown;
+/**
+ * Convert a raw event object to the legacy `data: <json>\n\n` format.
+ * Existing consumers (ChatPanel) still parse the underlying event type from
+ * the payload, so we preserve that shape under `data`.
+ */
+export function encodeRawSSE(event: unknown): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+// ---------------------------------------------------------------------------
+// Parse helpers (client-side)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a raw SSE `data:` line into an SSEEvent.
+ * Returns null when the line should be skipped (empty, `[DONE]`, etc.).
+ */
+export function parseSSELine(line: string): SSEEvent | null {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed === 'data: [DONE]') return null;
+  if (!trimmed.startsWith('data: ')) return null;
   try {
-    parsed = JSON.parse(payload);
+    const parsed = JSON.parse(trimmed.slice('data: '.length)) as unknown;
+    if (typeof parsed === 'object' && parsed !== null && 'type' in parsed) {
+      return parsed as SSEEvent;
+    }
+    return null;
   } catch {
     return null;
   }
-
-  if (
-    typeof parsed !== 'object' ||
-    parsed === null ||
-    !('type' in parsed) ||
-    typeof (parsed as Record<string, unknown>).type !== 'string'
-  ) {
-    return null;
-  }
-
-  const evt = parsed as Record<string, unknown>;
-
-  switch (evt.type) {
-    case 'text_delta':
-      return typeof evt.text === 'string' ? { type: 'text_delta', text: evt.text } : null;
-    case 'progress':
-      return typeof evt.percent === 'number'
-        ? { type: 'progress', percent: Math.min(100, Math.max(0, evt.percent)) }
-        : null;
-    case 'error':
-      return typeof evt.message === 'string' ? { type: 'error', message: evt.message } : null;
-    case 'done':
-      return { type: 'done' };
-    default:
-      return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Low-level: read all chunks from a ReadableStream and return accumulated text
-// ---------------------------------------------------------------------------
-
-/**
- * Consume an SSE `ReadableStreamDefaultReader` to completion and return the
- * accumulated text content.  Fires optional callbacks for each event type.
- *
- * Throws if an `error` event is received from the stream.
- */
-export async function readSSEStream(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  callbacks?: StreamCallbacks,
-): Promise<string> {
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let content = '';
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-
-    // Process only complete (newline-terminated) lines; carry the remainder.
-    const lines = buffer.split('\n');
-    buffer = lines.pop() ?? '';
-
-    for (const line of lines) {
-      const event = parseSSELine(line);
-      if (event === null) continue;
-
-      switch (event.type) {
-        case 'text_delta':
-          content += event.text;
-          callbacks?.onText?.(event.text);
-          break;
-        case 'progress':
-          callbacks?.onProgress?.(event.percent);
-          break;
-        case 'error':
-          callbacks?.onError?.(event.message);
-          throw new Error(event.message);
-        case 'done':
-          break;
-      }
-    }
-  }
-
-  // Flush any remaining bytes from the decoder (multi-byte UTF-8 split across final chunks)
-  buffer += decoder.decode();
-
-  // Process any remaining buffered line (stream may not end with newline)
-  if (buffer.trim()) {
-    const event = parseSSELine(buffer);
-    if (event !== null && event.type === 'text_delta') {
-      content += event.text;
-      callbacks?.onText?.(event.text);
-    }
-  }
-
-  return content;
-}
-
-// ---------------------------------------------------------------------------
-// High-level: POST to /api/chat and stream the response
-// ---------------------------------------------------------------------------
-
-export interface ChatStreamOptions {
-  messages: Array<{ role: 'user' | 'assistant'; content: string }>;
-  model: string;
-  sceneContext?: string;
-  thinking?: boolean;
-  systemOverride?: string;
-  callbacks?: StreamCallbacks;
-}
-
-/**
- * POST a request to /api/chat, verify the response, then stream SSE events
- * back to the caller and return the accumulated text content.
- *
- * This is the single canonical way to call the chat API from AI feature
- * modules.  Centralising it ensures consistent error handling and streaming
- * behaviour across all modules.
- */
-export async function streamChat(options: ChatStreamOptions): Promise<string> {
-  const { messages, model, sceneContext = '', thinking = false, systemOverride, callbacks } = options;
-
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, model, sceneContext, thinking, systemOverride }),
-  });
-
-  if (!response.ok) {
-    let errorMsg = `Chat request failed: ${response.status}`;
-    try {
-      const errorData = (await response.json()) as Record<string, unknown>;
-      if (typeof errorData.error === 'string') {
-        errorMsg = errorData.error;
-      }
-    } catch {
-      /* response body may not be JSON */
-    }
-    throw new Error(errorMsg);
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body from /api/chat');
-
-  return readSSEStream(reader, callbacks);
 }
