@@ -8,6 +8,12 @@
   "git": {
     "deploymentEnabled": false
   },
+  "crons": [
+    {
+      "path": "/api/cron/health-monitor",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/engine-pkg-webgl2/(.*)",
