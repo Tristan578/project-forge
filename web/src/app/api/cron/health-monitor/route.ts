@@ -1,7 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import 'server-only';
+import { type NextRequest, NextResponse } from 'next/server';
 import {
-  checkDatabase,
-  checkRateLimiting,
+  runAllHealthChecks,
+  computeCriticalStatus,
   type ServiceHealth,
 } from '@/lib/monitoring/healthChecks';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -10,118 +11,101 @@ import { logger } from '@/lib/logging/logger';
 /**
  * GET /api/cron/health-monitor
  *
- * Synthetic monitoring endpoint invoked every 5 minutes by Vercel Cron.
- * Checks the three services that must be healthy for SpawnForge to function:
- *   1. /api/health — application layer (HTTP reachability)
- *   2. Database (Neon) — direct ping
- *   3. Rate Limiting (Upstash Redis) — config + connectivity
+ * Runs every 5 minutes via Vercel Cron. Executes all service health checks and
+ * reports any failures to Sentry as structured exceptions so on-call engineers
+ * are alerted without manual polling.
  *
- * On any failure, captures a structured exception to Sentry so on-call
- * engineers receive an alert without polling the endpoint manually.
+ * Auth: Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` on every
+ * invocation. Requests without a matching secret are rejected 401. If
+ * CRON_SECRET is not configured, all requests are rejected to prevent open
+ * access in production.
  *
- * Auth: Vercel Cron sets the `Authorization: Bearer <CRON_SECRET>` header
- * on every invocation. Requests without a valid secret are rejected 401.
+ * HTTP status: always 200 on authorized requests — Vercel treats non-200 as a
+ * cron failure and backs off. Service failures are signalled via Sentry only.
  */
-export async function GET(req: NextRequest): Promise<NextResponse> {
-  // Verify CRON_SECRET to prevent unauthenticated invocations.
+
+function isAuthorizedCron(req: NextRequest): boolean {
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-    if (token !== cronSecret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-  }
+  if (!cronSecret) return false;
+  const authHeader = req.headers.get('authorization');
+  return authHeader === `Bearer ${cronSecret}`;
+}
 
-  const startedAt = new Date().toISOString();
-  const checks: Array<{ name: string; status: ServiceHealth['status']; error?: string }> = [];
-  const failures: string[] = [];
-
-  // --- 1. /api/health reachability ---
-  try {
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? process.env.VERCEL_URL;
-    if (appUrl) {
-      const base = appUrl.startsWith('http') ? appUrl : `https://${appUrl}`;
-      const res = await fetch(`${base}/api/health`, {
-        method: 'GET',
-        headers: { 'x-synthetic-monitor': '1' },
-        signal: AbortSignal.timeout(8_000),
-      });
-      if (res.ok) {
-        checks.push({ name: '/api/health', status: 'healthy' });
-      } else {
-        const msg = `HTTP ${res.status}`;
-        checks.push({ name: '/api/health', status: 'down', error: msg });
-        failures.push(`/api/health: ${msg}`);
-      }
-    } else {
-      // URL not configured — skip without flagging as failure (local/test environments)
-      checks.push({ name: '/api/health', status: 'healthy' });
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    checks.push({ name: '/api/health', status: 'down', error: msg });
-    failures.push(`/api/health: ${msg}`);
-  }
-
-  // --- 2. Database (Neon) ping ---
-  try {
-    const dbHealth = await checkDatabase();
-    checks.push({ name: dbHealth.name, status: dbHealth.status, error: dbHealth.error });
-    if (dbHealth.status === 'down') {
-      failures.push(`${dbHealth.name}: ${dbHealth.error ?? 'down'}`);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    checks.push({ name: 'Database (Neon)', status: 'down', error: msg });
-    failures.push(`Database (Neon): ${msg}`);
-  }
-
-  // --- 3. Redis ping (Upstash) ---
-  try {
-    const redisHealth = await checkRateLimiting();
-    checks.push({ name: redisHealth.name, status: redisHealth.status, error: redisHealth.error });
-    if (redisHealth.status === 'down') {
-      failures.push(`${redisHealth.name}: ${redisHealth.error ?? 'down'}`);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    checks.push({ name: 'Rate Limiting (Upstash)', status: 'down', error: msg });
-    failures.push(`Rate Limiting (Upstash): ${msg}`);
-  }
-
-  // --- Report failures to Sentry ---
-  if (failures.length > 0) {
-    const error = new Error(`Synthetic monitor detected failures: ${failures.join('; ')}`);
+function reportFailuresToSentry(
+  failedServices: ServiceHealth[],
+  overallStatus: string,
+): void {
+  for (const service of failedServices) {
+    const error = new Error(
+      `[synthetic-monitor] ${service.name} is ${service.status}: ${service.error ?? 'no details'}`,
+    );
     captureException(error, {
       source: 'cron/health-monitor',
-      checks,
-      failures,
-      startedAt,
+      service: service.name,
+      status: service.status,
+      latencyMs: service.latencyMs,
+      overallStatus,
+      tags: { type: 'synthetic-monitor', service: service.name },
     });
-    logger.error('Synthetic health monitor failure', {
+  }
+}
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  if (!isAuthorizedCron(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  const log = logger.child({ endpoint: 'GET /api/cron/health-monitor' });
+  log.info('Synthetic health monitor starting');
+
+  const report = await runAllHealthChecks();
+  const criticalStatus = computeCriticalStatus(report.services);
+
+  const failedServices = report.services.filter((s) => s.status !== 'healthy');
+  const criticalFailures = report.services.filter(
+    (s) =>
+      (s.name === 'Database (Neon)' || s.name === 'Clerk') && s.status !== 'healthy',
+  );
+
+  if (failedServices.length > 0) {
+    reportFailuresToSentry(failedServices, report.overall);
+    logger.error('Synthetic health monitor detected failures', {
       endpoint: 'GET /api/cron/health-monitor',
-      failures,
-      checks,
-    });
-  } else {
-    logger.info('Synthetic health monitor passed', {
-      endpoint: 'GET /api/cron/health-monitor',
-      checkCount: checks.length,
+      failureCount: failedServices.length,
+      criticalFailureCount: criticalFailures.length,
+      failures: failedServices.map((s) => ({ name: s.name, status: s.status })),
     });
   }
 
-  const overallStatus = failures.length === 0 ? 'ok' : 'degraded';
+  const summary = {
+    overall: report.overall,
+    criticalStatus,
+    checkedAt: report.timestamp,
+    environment: report.environment,
+    version: report.version,
+    serviceCount: report.services.length,
+    failureCount: failedServices.length,
+    criticalFailureCount: criticalFailures.length,
+    failures: failedServices.map((s) => ({
+      name: s.name,
+      status: s.status,
+      latencyMs: s.latencyMs,
+      error: s.error,
+    })),
+  };
 
-  return NextResponse.json(
-    {
-      status: overallStatus,
-      startedAt,
-      checks,
-      failureCount: failures.length,
-    },
-    { status: failures.length === 0 ? 200 : 503 },
-  );
+  log.info('Synthetic health monitor complete', {
+    overall: report.overall,
+    criticalStatus,
+    failureCount: failedServices.length,
+    criticalFailureCount: criticalFailures.length,
+  });
+
+  // Always return 200 — Vercel cron considers non-200 a failure and backs off.
+  // Service failures are communicated exclusively via Sentry.
+  return NextResponse.json(summary, { status: 200 });
 }
 
 export const dynamic = 'force-dynamic';
+// Allow up to 30s for all 9 health checks to complete
+export const maxDuration = 30;

@@ -2,33 +2,38 @@
  * Tests for GET /api/cron/health-monitor
  *
  * Covers:
- * - CRON_SECRET auth enforcement (valid token, missing token, wrong token, no secret configured)
- * - All-healthy path: 200 with status "ok"
- * - DB failure: 503 with status "degraded", Sentry exception captured
- * - Redis failure: 503 with status "degraded", Sentry exception captured
- * - /api/health HTTP failure: 503 with status "degraded", Sentry exception captured
- * - Multiple failures: all appear in failureCount
- * - checkDatabase throws (unexpected error): treated as "down"
- * - No app URL configured: /api/health check skipped (treated as healthy)
+ * - CRON_SECRET auth (valid, missing header, wrong token, env var not set)
+ * - All-healthy path: 200 with zero failures
+ * - Sentry captureException called for each failed service
+ * - Sentry captureException NOT called when all healthy
+ * - DB down: failure captured with structured context
+ * - Redis/Upstash down: failure captured
+ * - Multiple failures: one captureException per failed service
+ * - Degraded services also trigger captureException
+ * - Response shape: required fields always present
+ * - HTTP status is always 200 on authorized requests (Vercel cron contract)
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 // ---------------------------------------------------------------------------
-// Hoisted mocks
+// Hoisted mocks — must be declared before any imports that use them
 // ---------------------------------------------------------------------------
 
-const mockCheckDatabase = vi.fn();
-const mockCheckRateLimiting = vi.fn();
+const mockRunAllHealthChecks = vi.fn();
+const mockComputeCriticalStatus = vi.fn();
 const mockCaptureException = vi.fn();
 const mockLoggerInfo = vi.fn();
 const mockLoggerError = vi.fn();
+const mockLoggerWarn = vi.fn();
 const mockLoggerChild = vi.fn();
 
+vi.mock('server-only', () => ({}));
+
 vi.mock('@/lib/monitoring/healthChecks', () => ({
-  checkDatabase: (...args: unknown[]) => mockCheckDatabase(...args),
-  checkRateLimiting: (...args: unknown[]) => mockCheckRateLimiting(...args),
+  runAllHealthChecks: (...args: unknown[]) => mockRunAllHealthChecks(...args),
+  computeCriticalStatus: (...args: unknown[]) => mockComputeCriticalStatus(...args),
 }));
 
 vi.mock('@/lib/monitoring/sentry-server', () => ({
@@ -39,8 +44,15 @@ vi.mock('@/lib/logging/logger', () => ({
   logger: {
     info: (...args: unknown[]) => mockLoggerInfo(...args),
     error: (...args: unknown[]) => mockLoggerError(...args),
-    warn: vi.fn(),
-    child: (...args: unknown[]) => { mockLoggerChild(...args); return { info: vi.fn(), error: vi.fn(), warn: vi.fn() }; },
+    warn: (...args: unknown[]) => mockLoggerWarn(...args),
+    child: (...args: unknown[]) => {
+      mockLoggerChild(...args);
+      return {
+        info: (...a: unknown[]) => mockLoggerInfo(...a),
+        error: (...a: unknown[]) => mockLoggerError(...a),
+        warn: (...a: unknown[]) => mockLoggerWarn(...a),
+      };
+    },
   },
 }));
 
@@ -48,28 +60,39 @@ vi.mock('@/lib/logging/logger', () => ({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeRequest(opts: { token?: string; noAuth?: boolean } = {}): NextRequest {
+type ServiceStatus = 'healthy' | 'degraded' | 'down';
+
+function makeService(name: string, status: ServiceStatus, error?: string) {
+  return { name, status, latencyMs: status === 'healthy' ? 5 : 0, lastChecked: new Date().toISOString(), error };
+}
+
+function allHealthyReport() {
+  const services = [
+    makeService('Database (Neon)', 'healthy'),
+    makeService('Payments (Stripe)', 'healthy'),
+    makeService('Rate Limiting (Upstash)', 'healthy'),
+    makeService('Engine CDN', 'healthy'),
+    makeService('AI Providers', 'healthy'),
+    makeService('Clerk', 'healthy'),
+    makeService('Anthropic', 'healthy'),
+    makeService('Sentry', 'healthy'),
+    makeService('Cloudflare R2', 'healthy'),
+  ];
+  return {
+    overall: 'healthy' as ServiceStatus,
+    timestamp: new Date().toISOString(),
+    services,
+    environment: 'test',
+    version: 'abc12345',
+  };
+}
+
+function makeRequest(opts: { token?: string; noHeader?: boolean } = {}): NextRequest {
   const headers: Record<string, string> = {};
-  if (!opts.noAuth && opts.token !== undefined) {
-    headers['authorization'] = `Bearer ${opts.token}`;
+  if (!opts.noHeader) {
+    headers['authorization'] = `Bearer ${opts.token ?? 'valid-secret'}`;
   }
   return new NextRequest('http://localhost/api/cron/health-monitor', { headers });
-}
-
-function healthyDb() {
-  return { name: 'Database (Neon)', status: 'healthy' as const, latencyMs: 5, lastChecked: new Date().toISOString() };
-}
-
-function healthyRedis() {
-  return { name: 'Rate Limiting (Upstash)', status: 'healthy' as const, latencyMs: 0, lastChecked: new Date().toISOString() };
-}
-
-function downDb(error = 'connection refused') {
-  return { name: 'Database (Neon)', status: 'down' as const, latencyMs: 0, lastChecked: new Date().toISOString(), error };
-}
-
-function downRedis(error = 'UPSTASH_REDIS_REST_URL not configured') {
-  return { name: 'Rate Limiting (Upstash)', status: 'down' as const, latencyMs: 0, lastChecked: new Date().toISOString(), error };
 }
 
 // ---------------------------------------------------------------------------
@@ -80,9 +103,10 @@ describe('GET /api/cron/health-monitor', () => {
   beforeEach(() => {
     vi.unstubAllEnvs();
     vi.clearAllMocks();
-    // Default: all services healthy, no app URL so /api/health check is skipped
-    mockCheckDatabase.mockResolvedValue(healthyDb());
-    mockCheckRateLimiting.mockResolvedValue(healthyRedis());
+    vi.stubEnv('CRON_SECRET', 'valid-secret');
+    const report = allHealthyReport();
+    mockRunAllHealthChecks.mockResolvedValue(report);
+    mockComputeCriticalStatus.mockReturnValue('healthy');
   });
 
   afterEach(() => {
@@ -91,39 +115,41 @@ describe('GET /api/cron/health-monitor', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Auth
+  // Authorization
   // -------------------------------------------------------------------------
 
-  describe('CRON_SECRET auth', () => {
-    it('returns 401 when CRON_SECRET is set and no authorization header is provided', async () => {
-      vi.stubEnv('CRON_SECRET', 'supersecret');
+  describe('authorization', () => {
+    it('returns 401 when CRON_SECRET env var is not set', async () => {
+      vi.stubEnv('CRON_SECRET', '');
       const { GET } = await import('@/app/api/cron/health-monitor/route');
-      const res = await GET(makeRequest({ noAuth: true }));
+      const res = await GET(makeRequest({ noHeader: true }));
       expect(res.status).toBe(401);
       const body = await res.json() as { error: string };
       expect(body.error).toBe('Unauthorized');
     });
 
-    it('returns 401 when CRON_SECRET is set and token does not match', async () => {
-      vi.stubEnv('CRON_SECRET', 'supersecret');
+    it('returns 401 when no Authorization header is sent', async () => {
       const { GET } = await import('@/app/api/cron/health-monitor/route');
-      const res = await GET(makeRequest({ token: 'wrongtoken' }));
+      const res = await GET(makeRequest({ noHeader: true }));
       expect(res.status).toBe(401);
     });
 
-    it('passes when CRON_SECRET is set and token matches', async () => {
-      vi.stubEnv('CRON_SECRET', 'supersecret');
+    it('returns 401 when Authorization header has wrong secret', async () => {
       const { GET } = await import('@/app/api/cron/health-monitor/route');
-      const res = await GET(makeRequest({ token: 'supersecret' }));
+      const res = await GET(makeRequest({ token: 'wrong-secret' }));
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 200 when Authorization header matches CRON_SECRET', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest({ token: 'valid-secret' }));
       expect(res.status).toBe(200);
     });
 
-    it('passes when CRON_SECRET is not configured (open access)', async () => {
-      vi.stubEnv('CRON_SECRET', '');
+    it('does not run health checks on unauthorized requests', async () => {
       const { GET } = await import('@/app/api/cron/health-monitor/route');
-      const res = await GET(makeRequest({ noAuth: true }));
-      // When CRON_SECRET is empty string it's falsy, so auth check is skipped
-      expect(res.status).toBe(200);
+      await GET(makeRequest({ noHeader: true }));
+      expect(mockRunAllHealthChecks).not.toHaveBeenCalled();
     });
   });
 
@@ -131,167 +157,190 @@ describe('GET /api/cron/health-monitor', () => {
   // All-healthy path
   // -------------------------------------------------------------------------
 
-  it('returns 200 with status ok when all checks pass', async () => {
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    expect(res.status).toBe(200);
-    const body = await res.json() as { status: string; failureCount: number; checks: unknown[] };
-    expect(body.status).toBe('ok');
-    expect(body.failureCount).toBe(0);
-    expect(body.checks).toHaveLength(3); // /api/health + db + redis
-  });
+  describe('all services healthy', () => {
+    it('returns HTTP 200', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      expect(res.status).toBe(200);
+    });
 
-  it('does not capture Sentry exception when all checks pass', async () => {
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    await GET(makeRequest({ noAuth: true }));
-    expect(mockCaptureException).not.toHaveBeenCalled();
-  });
+    it('returns overall=healthy and zero failures', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as { overall: string; failureCount: number };
+      expect(body.overall).toBe('healthy');
+      expect(body.failureCount).toBe(0);
+    });
 
-  it('logs info when all checks pass', async () => {
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    await GET(makeRequest({ noAuth: true }));
-    expect(mockLoggerInfo).toHaveBeenCalledWith(
-      'Synthetic health monitor passed',
-      expect.objectContaining({ checkCount: 3 }),
-    );
-  });
+    it('does not call captureException', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockCaptureException).not.toHaveBeenCalled();
+    });
 
-  // -------------------------------------------------------------------------
-  // DB failure
-  // -------------------------------------------------------------------------
-
-  it('returns 503 with status degraded when DB is down', async () => {
-    mockCheckDatabase.mockResolvedValue(downDb('pg: ECONNREFUSED'));
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    expect(res.status).toBe(503);
-    const body = await res.json() as { status: string; failureCount: number };
-    expect(body.status).toBe('degraded');
-    expect(body.failureCount).toBe(1);
-  });
-
-  it('captures Sentry exception when DB is down', async () => {
-    mockCheckDatabase.mockResolvedValue(downDb('pg: ECONNREFUSED'));
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    await GET(makeRequest({ noAuth: true }));
-    expect(mockCaptureException).toHaveBeenCalledOnce();
-    const [err, ctx] = mockCaptureException.mock.calls[0] as [Error, Record<string, unknown>];
-    expect(err).toBeInstanceOf(Error);
-    expect(err.message).toContain('Database (Neon)');
-    expect((ctx.failures as string[]).some((f: string) => f.includes('Database (Neon)'))).toBe(true);
-  });
-
-  it('logs error when DB is down', async () => {
-    mockCheckDatabase.mockResolvedValue(downDb());
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    await GET(makeRequest({ noAuth: true }));
-    expect(mockLoggerError).toHaveBeenCalledWith(
-      'Synthetic health monitor failure',
-      expect.objectContaining({ failures: expect.any(Array) }),
-    );
+    it('does not log errors', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockLoggerError).not.toHaveBeenCalled();
+    });
   });
 
   // -------------------------------------------------------------------------
-  // Redis failure
+  // Service failures trigger Sentry
   // -------------------------------------------------------------------------
 
-  it('returns 503 with status degraded when Redis is down', async () => {
-    mockCheckRateLimiting.mockResolvedValue(downRedis());
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    expect(res.status).toBe(503);
-    const body = await res.json() as { failureCount: number };
-    expect(body.failureCount).toBe(1);
+  describe('DB down', () => {
+    beforeEach(() => {
+      const report = allHealthyReport();
+      report.services[0] = makeService('Database (Neon)', 'down', 'ECONNREFUSED');
+      report.overall = 'down';
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('down');
+    });
+
+    it('returns HTTP 200 even when DB is down (Vercel cron contract)', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      expect(res.status).toBe(200);
+    });
+
+    it('calls captureException with a structured Error', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockCaptureException).toHaveBeenCalledOnce();
+      const [err] = mockCaptureException.mock.calls[0] as [Error];
+      expect(err).toBeInstanceOf(Error);
+      expect(err.message).toContain('Database (Neon)');
+      expect(err.message).toContain('down');
+    });
+
+    it('includes service context in captureException call', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      const [_err, ctx] = mockCaptureException.mock.calls[0] as [Error, Record<string, unknown>];
+      expect(ctx.service).toBe('Database (Neon)');
+      expect(ctx.status).toBe('down');
+      expect(ctx.source).toBe('cron/health-monitor');
+    });
+
+    it('reports failureCount=1 in response body', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as { failureCount: number; criticalFailureCount: number };
+      expect(body.failureCount).toBe(1);
+      expect(body.criticalFailureCount).toBe(1);
+    });
+
+    it('logs an error', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockLoggerError).toHaveBeenCalled();
+    });
   });
 
-  it('captures Sentry exception when Redis is down', async () => {
-    mockCheckRateLimiting.mockResolvedValue(downRedis('no url'));
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    await GET(makeRequest({ noAuth: true }));
-    expect(mockCaptureException).toHaveBeenCalledOnce();
-    const [_err, ctx] = mockCaptureException.mock.calls[0] as [Error, Record<string, unknown>];
-    expect((ctx.failures as string[]).some((f: string) => f.includes('Rate Limiting'))).toBe(true);
+  describe('Redis degraded (non-critical)', () => {
+    beforeEach(() => {
+      const report = allHealthyReport();
+      report.services[2] = makeService('Rate Limiting (Upstash)', 'degraded', 'vars missing');
+      report.overall = 'degraded';
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('healthy'); // Redis is not critical
+    });
+
+    it('calls captureException for degraded non-critical services too', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockCaptureException).toHaveBeenCalledOnce();
+      const [err] = mockCaptureException.mock.calls[0] as [Error];
+      expect(err.message).toContain('Rate Limiting (Upstash)');
+      expect(err.message).toContain('degraded');
+    });
+
+    it('reports zero criticalFailureCount when only non-critical services fail', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as { failureCount: number; criticalFailureCount: number };
+      expect(body.failureCount).toBe(1);
+      expect(body.criticalFailureCount).toBe(0);
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // Multiple failures
-  // -------------------------------------------------------------------------
+  describe('multiple services down', () => {
+    beforeEach(() => {
+      const report = allHealthyReport();
+      report.services[0] = makeService('Database (Neon)', 'down', 'timeout');
+      report.services[5] = makeService('Clerk', 'down', 'JWKS unreachable');
+      report.overall = 'down';
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('down');
+    });
 
-  it('reports both failures when both DB and Redis are down', async () => {
-    mockCheckDatabase.mockResolvedValue(downDb());
-    mockCheckRateLimiting.mockResolvedValue(downRedis());
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    expect(res.status).toBe(503);
-    const body = await res.json() as { failureCount: number };
-    expect(body.failureCount).toBe(2);
-    // Sentry called once with both failures in context
-    expect(mockCaptureException).toHaveBeenCalledOnce();
-    const [_err, ctx] = mockCaptureException.mock.calls[0] as [Error, Record<string, unknown>];
-    expect((ctx.failures as string[]).length).toBe(2);
-  });
+    it('calls captureException once per failed service', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      await GET(makeRequest());
+      expect(mockCaptureException).toHaveBeenCalledTimes(2);
+    });
 
-  // -------------------------------------------------------------------------
-  // Unexpected throws
-  // -------------------------------------------------------------------------
-
-  it('treats thrown errors from checkDatabase as "down" and captures to Sentry', async () => {
-    mockCheckDatabase.mockRejectedValue(new Error('unexpected crash'));
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    expect(res.status).toBe(503);
-    const body = await res.json() as { checks: Array<{ name: string; status: string }> };
-    const dbCheck = body.checks.find((c) => c.name === 'Database (Neon)');
-    expect(dbCheck?.status).toBe('down');
-    expect(mockCaptureException).toHaveBeenCalled();
-  });
-
-  it('treats thrown errors from checkRateLimiting as "down"', async () => {
-    mockCheckRateLimiting.mockRejectedValue(new Error('redis crash'));
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    expect(res.status).toBe(503);
-    const body = await res.json() as { checks: Array<{ name: string; status: string }> };
-    const redisCheck = body.checks.find((c) => c.name === 'Rate Limiting (Upstash)');
-    expect(redisCheck?.status).toBe('down');
-  });
-
-  // -------------------------------------------------------------------------
-  // /api/health HTTP check
-  // -------------------------------------------------------------------------
-
-  it('skips /api/health HTTP check when no app URL is configured', async () => {
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
-    vi.stubEnv('VERCEL_URL', '');
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    // Still 200 — /api/health is treated as passing when URL unknown
-    expect(res.status).toBe(200);
-  });
-
-  it('reports /api/health as down when HTTP check returns non-ok status', async () => {
-    vi.stubEnv('NEXT_PUBLIC_APP_URL', 'http://localhost:9999');
-    // fetch will reject (no server on 9999)
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED')));
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    expect(res.status).toBe(503);
-    const body = await res.json() as { checks: Array<{ name: string; status: string }> };
-    const healthCheck = body.checks.find((c) => c.name === '/api/health');
-    expect(healthCheck?.status).toBe('down');
+    it('reports failureCount=2 and criticalFailureCount=2', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as { failureCount: number; criticalFailureCount: number };
+      expect(body.failureCount).toBe(2);
+      expect(body.criticalFailureCount).toBe(2);
+    });
   });
 
   // -------------------------------------------------------------------------
   // Response shape
   // -------------------------------------------------------------------------
 
-  it('always includes startedAt, checks, failureCount in the response body', async () => {
-    const { GET } = await import('@/app/api/cron/health-monitor/route');
-    const res = await GET(makeRequest({ noAuth: true }));
-    const body = await res.json() as Record<string, unknown>;
-    expect(typeof body.startedAt).toBe('string');
-    expect(Array.isArray(body.checks)).toBe(true);
-    expect(typeof body.failureCount).toBe('number');
-    expect(typeof body.status).toBe('string');
+  describe('response shape', () => {
+    it('returns JSON with required fields', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as Record<string, unknown>;
+      expect(typeof body.overall).toBe('string');
+      expect(typeof body.criticalStatus).toBe('string');
+      expect(typeof body.checkedAt).toBe('string');
+      expect(typeof body.serviceCount).toBe('number');
+      expect(typeof body.failureCount).toBe('number');
+      expect(typeof body.criticalFailureCount).toBe('number');
+      expect(Array.isArray(body.failures)).toBe(true);
+    });
+
+    it('always returns HTTP 200 regardless of service failures', async () => {
+      const report = allHealthyReport();
+      report.services[0] = makeService('Database (Neon)', 'down', 'oops');
+      report.overall = 'down';
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('down');
+
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      expect(res.status).toBe(200);
+    });
+
+    it('includes failures array with name/status/latencyMs/error for each failed service', async () => {
+      const report = allHealthyReport();
+      report.services[0] = makeService('Database (Neon)', 'down', 'ECONNREFUSED');
+      report.overall = 'down';
+      mockRunAllHealthChecks.mockResolvedValue(report);
+      mockComputeCriticalStatus.mockReturnValue('down');
+
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as { failures: Array<{ name: string; status: string; latencyMs: number; error: string }> };
+      expect(body.failures).toHaveLength(1);
+      expect(body.failures[0].name).toBe('Database (Neon)');
+      expect(body.failures[0].status).toBe('down');
+      expect(body.failures[0].error).toBe('ECONNREFUSED');
+    });
+
+    it('reports zero failures when all services are healthy', async () => {
+      const { GET } = await import('@/app/api/cron/health-monitor/route');
+      const res = await GET(makeRequest());
+      const body = await res.json() as { failures: unknown[] };
+      expect(body.failures).toHaveLength(0);
+    });
   });
 });
