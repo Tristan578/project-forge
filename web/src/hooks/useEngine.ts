@@ -88,6 +88,14 @@ function clearEngineCrash(): void {
 }
 
 /**
+ * Public entry point for the ENGINE_PANIC event handler in useEngineEvents.
+ * Marks the engine as crashed and notifies all listeners.
+ */
+export function setEngineCrashedFromEvent(message: string): void {
+  setEngineCrashed(message);
+}
+
+/**
  * Install a global interceptor for WASM panics.
  * After detecting a panic, sets engineCrashed state so components can react.
  */
@@ -277,8 +285,39 @@ export function resetEngine(): void {
   }
   wasmModule = null;
   initPromise = null;
+  panicInterceptorInstalled = false;
   setLoadingState({ phase: 'idle' });
   clearEngineCrash();
+}
+
+/**
+ * Restart the WASM engine without a full page reload.
+ *
+ * This is the recovery path after an ENGINE_PANIC event.  It:
+ * 1. Resets all module-level engine state
+ * 2. Re-loads the WASM module
+ * 3. Re-initialises the engine on the given canvas
+ *
+ * The caller is responsible for replaying any scene state after the returned
+ * promise resolves.
+ */
+export async function restartEngine(canvasId: string): Promise<WasmModule> {
+  resetEngine();
+
+  const wasm = await loadWasm();
+
+  const canvas = typeof document !== 'undefined' ? document.getElementById(canvasId) : null;
+  if (!canvas) {
+    throw new Error(`Canvas element "${canvasId}" not found — cannot restart engine`);
+  }
+
+  wasm.init_engine(canvasId);
+  setLoadingState({ phase: 'ready', progress: 100 });
+  if (typeof window !== 'undefined') {
+    (window as unknown as Record<string, unknown>).__FORGE_ENGINE_READY = true;
+  }
+
+  return wasm;
 }
 
 export interface UseEngineOptions {

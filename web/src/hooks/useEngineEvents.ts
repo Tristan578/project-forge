@@ -21,6 +21,7 @@ import {
 } from './events';
 import { createSelectionBatcher, type SelectionPayload } from './selectionBatcher';
 import { createPlayModeThrottle } from '@/lib/throttle/playModeThrottle';
+import { setEngineCrashedFromEvent } from './useEngine';
 
 /**
  * Events that carry high-frequency runtime data and can be throttled to 10fps
@@ -96,6 +97,15 @@ export function useEngineEvents({ wasmModule }: UseEngineEventsOptions): void {
     const handleEvent = (rawEvent: unknown) => {
       const parsedEvent = rawEvent as { type: string; payload: Record<string, unknown> };
       const { type, payload } = parsedEvent;
+
+      // ENGINE_PANIC events come from the Rust panic hook.  Route them to the
+      // crash-state module so the recovery overlay can appear.  These events
+      // must never be throttled or batched.
+      if (type === 'ENGINE_PANIC') {
+        const message = (payload as Record<string, unknown>).message as string | undefined;
+        setEngineCrashedFromEvent(message ?? 'Unknown panic');
+        return;
+      }
 
       // Intercept SELECTION_CHANGED and route through the batcher so that
       // rapid back-to-back emissions (one per selection request) coalesce
