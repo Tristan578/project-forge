@@ -6,6 +6,7 @@
  */
 
 import { create } from 'zustand';
+import { trackCommandDispatched } from '@/lib/analytics/events';
 
 // Import all slices
 import {
@@ -117,7 +118,13 @@ type CommandDispatcher = (command: string, payload: unknown) => void;
 let _dispatchCommand: CommandDispatcher | null = null;
 
 export function setCommandDispatcher(dispatcher: CommandDispatcher): void {
-  _dispatchCommand = dispatcher;
+  // Wrap dispatcher to emit Vercel analytics for every engine command.
+  // Tracking is fire-and-forget and never blocks the dispatch path.
+  const tracked: CommandDispatcher = (command, payload) => {
+    trackCommandDispatched(command);
+    dispatcher(command, payload);
+  };
+  _dispatchCommand = tracked;
 
   // Set dispatcher for all slices
   setSelectionDispatcher(dispatcher);

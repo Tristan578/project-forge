@@ -87,3 +87,7 @@ export function trackEditorPanelOpened(panel: string) {
   track('editor_panel_opened', { panel, env });
 }
 
+export function trackCommandDispatched(command: string) {
+  track('command_dispatched', { command, env });
+}
+
