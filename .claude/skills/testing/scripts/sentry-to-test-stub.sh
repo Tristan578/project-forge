@@ -211,6 +211,10 @@ fi
 ISSUE_ID_ACTUAL="$(echo "$EXTRACTED" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['issue_id'])")"
 ERROR_MESSAGE="$(echo "$EXTRACTED" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['error_message'])")"
 ERROR_TYPE="$(echo "$EXTRACTED" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['error_type'])")"
+
+# Escape single quotes for safe JS string interpolation
+ERROR_MESSAGE_JS="${ERROR_MESSAGE//\'/\\\'}"
+ERROR_TYPE_JS="${ERROR_TYPE//\'/\\\'}"
 SOURCE_FILE="$(echo "$EXTRACTED" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['source_file'])")"
 SOURCE_LINE="$(echo "$EXTRACTED" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['source_line'])")"
 BASENAME="$(echo "$EXTRACTED" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['basename'])")"
@@ -246,8 +250,8 @@ cat > "$OUTPUT_FILE" <<STUBEOF
  */
 import { describe, it, expect } from 'vitest';
 
-describe('Regression: ${ERROR_MESSAGE}', () => {
-  it('should not throw ${ERROR_TYPE}', () => {
+describe('Regression: ${ERROR_MESSAGE_JS}', () => {
+  it('should not throw ${ERROR_TYPE_JS}', () => {
     // TODO: Set up the conditions that triggered the bug
     // Source: ${SOURCE_FILE}:${SOURCE_LINE}
 
