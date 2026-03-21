@@ -23,6 +23,10 @@ on:
         description: 'Whether .github/** changed (defaults to true when unset)'
         type: boolean
         default: true
+      can-commit-ratchet:
+        description: 'Whether the ratchet job can commit+push (only true from CD with write perms)'
+        type: boolean
+        default: false
     outputs:
       lint-result:
         description: 'Outcome of the lint job'
@@ -178,8 +182,8 @@ jobs:
       - name: Run coverage ratchet (informational on PRs, commits on main)
         run: bash .claude/skills/testing/scripts/ratchet-coverage.sh web/coverage
 
-      - name: Commit bumped thresholds (main branch only)
-        if: github.ref == 'refs/heads/main'
+      - name: Commit bumped thresholds (main branch only, requires write perms)
+        if: github.ref == 'refs/heads/main' && inputs.can-commit-ratchet
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
