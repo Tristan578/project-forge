@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { existsSync } from 'fs';
 import { execFile } from 'child_process';
+import { randomBytes } from 'crypto';
 
 const ASEPRITE_BIN = process.env.ASEPRITE_PATH
   || '/Applications/Aseprite.app/Contents/MacOS/aseprite';
@@ -25,6 +26,9 @@ function runAseprite(args: string[]): Promise<{ stdout: string; stderr: string; 
   });
 }
 
+// Generate a unique suffix per test-worker process to avoid concurrent temp-file collisions
+const UNIQUE_ID = randomBytes(4).toString('hex');
+
 describe.skipIf(!HAS_ASEPRITE)('Aseprite Integration', () => {
   beforeAll(() => {
     console.log(`Using Aseprite at: ${ASEPRITE_BIN}`);
@@ -37,30 +41,37 @@ describe.skipIf(!HAS_ASEPRITE)('Aseprite Integration', () => {
   });
 
   it('creates a sprite via Lua script', async () => {
-    const { writeFileSync } = await import('fs');
-    const script = 'local spr = Sprite(32, 32)\nspr:saveAs("/tmp/integration_test.png")\nprint("OK:" .. spr.width .. "x" .. spr.height)\napp.exit()';
-    writeFileSync('/tmp/integration_test.lua', script);
+    const { writeFileSync, unlinkSync } = await import('fs');
+    const luaPath = `/tmp/integration_test_${UNIQUE_ID}.lua`;
+    const pngPath = `/tmp/integration_test_${UNIQUE_ID}.png`;
+    // Clean up any pre-existing file from a prior run
+    if (existsSync(pngPath)) unlinkSync(pngPath);
 
-    const { stdout, exitCode } = await runAseprite(['--batch', '--script', '/tmp/integration_test.lua']);
+    const script = `local spr = Sprite(32, 32)\nspr:saveAs("${pngPath}")\nprint("OK:" .. spr.width .. "x" .. spr.height)\napp.exit()`;
+    writeFileSync(luaPath, script);
+
+    const { stdout, exitCode } = await runAseprite(['--batch', '--script', luaPath]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('OK:32x32');
-    expect(existsSync('/tmp/integration_test.png')).toBe(true);
+    expect(existsSync(pngPath)).toBe(true);
   });
 
   it('handles script errors gracefully', async () => {
     const { writeFileSync } = await import('fs');
-    writeFileSync('/tmp/integration_bad.lua', 'this is not valid lua');
+    const luaPath = `/tmp/integration_bad_${UNIQUE_ID}.lua`;
+    writeFileSync(luaPath, 'this is not valid lua');
 
-    const { exitCode } = await runAseprite(['--batch', '--script', '/tmp/integration_bad.lua']);
+    const { exitCode } = await runAseprite(['--batch', '--script', luaPath]);
     expect(exitCode).toBeGreaterThanOrEqual(0);
   });
 
   it('creates animation frames', async () => {
     const { writeFileSync } = await import('fs');
+    const luaPath = `/tmp/integration_anim_${UNIQUE_ID}.lua`;
     const script = 'local spr = Sprite(16, 16)\nfor i = 2, 4 do spr:newFrame() end\nprint("OK:frames:" .. #spr.frames)\napp.exit()';
-    writeFileSync('/tmp/integration_anim.lua', script);
+    writeFileSync(luaPath, script);
 
-    const { stdout, exitCode } = await runAseprite(['--batch', '--script', '/tmp/integration_anim.lua']);
+    const { stdout, exitCode } = await runAseprite(['--batch', '--script', luaPath]);
     expect(exitCode).toBe(0);
     expect(stdout).toContain('OK:frames:4');
   });
