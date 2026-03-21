@@ -57,7 +57,39 @@ PROJECT_ROOT = _find_main_repo_root()
 _MAIN_HOOKS = PROJECT_ROOT / ".claude" / "hooks"
 CONFIG_PATH = _MAIN_HOOKS / "github-sync-config.json"
 MAP_PATH = _MAIN_HOOKS / "github-project-map.json"
-DB_PATH = PROJECT_ROOT / ".claude" / "taskboard.db"
+
+
+def _find_taskboard_db() -> Path:
+    """Resolve the taskboard SQLite DB path.
+
+    Priority:
+    1. TASKBOARD_DB env var (explicit override)
+    2. OS-default data directory (where `taskboard start` writes by default)
+    3. Legacy .claude/taskboard.db (backwards compat)
+    """
+    env_path = os.environ.get("TASKBOARD_DB")
+    if env_path:
+        return Path(env_path)
+
+    import platform
+    system = platform.system()
+    if system == "Darwin":
+        default = Path.home() / "Library" / "Application Support" / "taskboard" / "taskboard.db"
+    elif system == "Linux":
+        xdg = os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))
+        default = Path(xdg) / "taskboard" / "taskboard.db"
+    else:
+        default = Path.home() / ".taskboard" / "taskboard.db"
+
+    if default.exists() and default.stat().st_size > 0:
+        return default
+
+    # Fallback to legacy path
+    legacy = PROJECT_ROOT / ".claude" / "taskboard.db"
+    return legacy
+
+
+DB_PATH = _find_taskboard_db()
 
 
 def load_config():

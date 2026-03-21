@@ -38,6 +38,21 @@ cd project-forge && python3 .claude/hooks/github_project_sync.py status
 
 This runs automatically via the **Stop hook** after every Claude response. You typically don't need to invoke it manually unless doing bulk operations or troubleshooting.
 
+## MANDATORY: Run Before Creating Any PR
+
+Every PR must link to a GitHub issue (`Closes #NNNN`). Tickets only become GitHub issues after sync-push runs. If you skip this step, the CI work item check will **fail**.
+
+```bash
+# 1. Sync tickets to GitHub
+python3 .claude/hooks/github_project_sync.py push
+
+# 2. Find the GitHub issue number for your ticket
+gh issue list --search "PF-XXX in:title" --limit 1
+
+# 3. Use the issue number in your PR body
+# Closes #NNNN
+```
+
 ## Configuration
 
 - Config: `.claude/hooks/github-sync-config.json` (project IDs, field mappings)
@@ -46,5 +61,14 @@ This runs automatically via the **Stop hook** after every Claude response. You t
 ## Prerequisites
 
 - `gh` CLI authenticated (`gh auth status`)
-- Taskboard API running (`taskboard start --port 3010 --db .claude/taskboard.db`)
+- Taskboard API running (`taskboard start --port 3010`)
 - GitHub Project "SpawnForge" (#2) exists with Todo/In Progress/Done columns
+
+## DB Path Resolution
+
+The sync script auto-detects the taskboard SQLite DB:
+1. `TASKBOARD_DB` env var (explicit override)
+2. OS default: `~/Library/Application Support/taskboard/taskboard.db` (macOS) or `~/.local/share/taskboard/taskboard.db` (Linux)
+3. Legacy fallback: `.claude/taskboard.db`
+
+Do NOT pass `--db .claude/taskboard.db` to `taskboard start` — let it use its default path.
