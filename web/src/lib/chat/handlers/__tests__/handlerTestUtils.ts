@@ -194,6 +194,12 @@ export function createMockStore(overrides: Record<string, unknown> = {}): ToolCa
 
     // Asset
     assetRegistry: {},
+    importGltf: vi.fn(),
+    loadTexture: vi.fn(),
+    removeTexture: vi.fn(),
+    placeAsset: vi.fn(),
+    deleteAsset: vi.fn(),
+    importAudio: vi.fn(),
 
     // Export
     isExporting: false,
