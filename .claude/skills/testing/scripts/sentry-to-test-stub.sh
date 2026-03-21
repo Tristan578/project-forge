@@ -261,14 +261,27 @@ describe('Regression: __ERROR_MESSAGE_JS__', () => {
 });
 STUBEOF
 
-# Replace placeholders with actual values (safe — no shell expansion)
+# Escape sed special characters in replacement strings:
+#   & = backreference to matched pattern
+#   | = our delimiter
+#   \ = escape character
+escape_sed() { printf '%s' "$1" | sed -e 's/[&|\\]/\\&/g'; }
+
+SED_ISSUE_ID="$(escape_sed "$ISSUE_ID_ACTUAL")"
+SED_ERROR_MSG_JS="$(escape_sed "$ERROR_MESSAGE_JS")"
+SED_ERROR_TYPE_JS="$(escape_sed "$ERROR_TYPE_JS")"
+SED_ERROR_MSG="$(escape_sed "$ERROR_MESSAGE")"
+SED_SOURCE_FILE="$(escape_sed "$SOURCE_FILE")"
+SED_SOURCE_LINE="$(escape_sed "$SOURCE_LINE")"
+
+# Replace placeholders with escaped values
 sed -i.bak \
-  -e "s|__ISSUE_ID__|${ISSUE_ID_ACTUAL}|g" \
-  -e "s|__ERROR_MESSAGE_JS__|${ERROR_MESSAGE_JS}|g" \
-  -e "s|__ERROR_TYPE_JS__|${ERROR_TYPE_JS}|g" \
-  -e "s|__ERROR_MESSAGE__|${ERROR_MESSAGE}|g" \
-  -e "s|__SOURCE_FILE__|${SOURCE_FILE}|g" \
-  -e "s|__SOURCE_LINE__|${SOURCE_LINE}|g" \
+  -e "s|__ISSUE_ID__|${SED_ISSUE_ID}|g" \
+  -e "s|__ERROR_MESSAGE_JS__|${SED_ERROR_MSG_JS}|g" \
+  -e "s|__ERROR_TYPE_JS__|${SED_ERROR_TYPE_JS}|g" \
+  -e "s|__ERROR_MESSAGE__|${SED_ERROR_MSG}|g" \
+  -e "s|__SOURCE_FILE__|${SED_SOURCE_FILE}|g" \
+  -e "s|__SOURCE_LINE__|${SED_SOURCE_LINE}|g" \
   "$OUTPUT_FILE"
 rm -f "${OUTPUT_FILE}.bak"
 
