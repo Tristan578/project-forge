@@ -1,4 +1,5 @@
 import * as Sentry from '@sentry/nextjs';
+import { configureSentryFingerprinting } from '@/lib/monitoring/sentryConfig';
 
 const DSN = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const IS_PROD = process.env.NODE_ENV === 'production';
@@ -22,4 +23,9 @@ if (DSN) {
     replaysSessionSampleRate: IS_PROD ? 0.1 : 1.0,
     replaysOnErrorSampleRate: 1.0,
   });
+
+  // Apply consistent fingerprinting rules so similar AI module errors are
+  // grouped into single Sentry issues rather than creating hundreds of separate
+  // noise issues.
+  configureSentryFingerprinting();
 }
