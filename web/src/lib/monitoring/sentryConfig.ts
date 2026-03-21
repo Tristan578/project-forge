@@ -57,11 +57,17 @@ function extractGenerationType(text: string): string | null {
  * E.g. "spawn_entity" -> "spawn_entity", "update_material abc-123" -> "update_material"
  */
 function extractCommandType(message: string): string {
-  const match = /(?:command|cmd)[:\s]+([a-z_]+)/i.exec(message);
+  // Match "command: spawn_entity" or "cmd: spawn_entity" (colon required)
+  const match = /\b(?:command|cmd):\s*([a-z][a-z0-9_]*)\b/i.exec(message);
   if (match?.[1]) return match[1].toLowerCase();
-  // Fall back to first snake_case word in the message
-  const wordMatch = /\b([a-z][a-z0-9]*(?:_[a-z0-9]+)+)\b/.exec(message);
-  return wordMatch?.[1] ?? 'unknown_command';
+  // Fall back to first snake_case token (underscore-separated, starts with letter)
+  // Exclude common English verbs/nouns that happen to contain underscores
+  const wordMatch = /\b([a-z][a-z0-9]*(?:_[a-z0-9]+){1,})\b/.exec(message);
+  const candidate = wordMatch?.[1];
+  // Reject generic words that are not command slugs
+  const genericWords = new Set(['handle_command', 'engine_command', 'command_failed', 'no_such']);
+  if (candidate && !genericWords.has(candidate)) return candidate;
+  return 'unknown_command';
 }
 
 /**
