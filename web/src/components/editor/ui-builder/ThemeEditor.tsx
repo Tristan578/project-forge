@@ -96,7 +96,7 @@ export function ThemeEditor() {
       {/* Color settings */}
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
-          <span className="text-zinc-500">Primary Color</span>
+          <span className="text-zinc-400">Primary Color</span>
           <input
             type="color"
             value={currentTheme.primaryColor}
@@ -106,7 +106,7 @@ export function ThemeEditor() {
         </label>
 
         <label className="block">
-          <span className="text-zinc-500">Secondary Color</span>
+          <span className="text-zinc-400">Secondary Color</span>
           <input
             type="color"
             value={currentTheme.secondaryColor}
@@ -116,7 +116,7 @@ export function ThemeEditor() {
         </label>
 
         <label className="block">
-          <span className="text-zinc-500">Background Color</span>
+          <span className="text-zinc-400">Background Color</span>
           <input
             type="color"
             value={currentTheme.backgroundColor}
@@ -126,7 +126,7 @@ export function ThemeEditor() {
         </label>
 
         <label className="block">
-          <span className="text-zinc-500">Text Color</span>
+          <span className="text-zinc-400">Text Color</span>
           <input
             type="color"
             value={currentTheme.textColor}
@@ -138,7 +138,7 @@ export function ThemeEditor() {
 
       {/* Font settings */}
       <label className="block">
-        <span className="text-zinc-500">Font Family</span>
+        <span className="text-zinc-400">Font Family</span>
         <select
           value={currentTheme.fontFamily}
           onChange={(e) => handleChange('fontFamily', e.target.value)}
@@ -153,7 +153,7 @@ export function ThemeEditor() {
 
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
-          <span className="text-zinc-500">Font Size (px)</span>
+          <span className="text-zinc-400">Font Size (px)</span>
           <input
             type="number"
             min="0"
@@ -164,7 +164,7 @@ export function ThemeEditor() {
         </label>
 
         <label className="block">
-          <span className="text-zinc-500">Border Radius (px)</span>
+          <span className="text-zinc-400">Border Radius (px)</span>
           <input
             type="number"
             min="0"

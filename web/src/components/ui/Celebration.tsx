@@ -78,7 +78,7 @@ export function Celebration({ title, message, onDismiss }: CelebrationProps) {
       <div className="celebration-card pointer-events-auto relative flex flex-col items-center gap-3 rounded-2xl border border-zinc-700 bg-zinc-900/95 px-8 py-6 text-center shadow-2xl backdrop-blur-sm">
         <button
           onClick={dismiss}
-          className="absolute right-3 top-3 rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="absolute right-3 top-3 rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
           aria-label="Dismiss celebration"
         >
           <X size={14} />

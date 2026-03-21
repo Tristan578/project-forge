@@ -70,7 +70,7 @@ function ScoreBadge({ report }: { report: BalanceReport }) {
   return (
     <div className="flex items-center gap-2">
       <span className={`text-lg font-bold ${color}`}>{report.score}</span>
-      <span className="text-[10px] text-zinc-500">/100</span>
+      <span className="text-[10px] text-zinc-400">/100</span>
       {report.passed ? (
         <CheckCircle size={14} className="text-green-400" />
       ) : (
@@ -187,7 +187,7 @@ export function EconomyPanel() {
 
       {/* Generation controls */}
       <div className="space-y-2 border-b border-zinc-800 p-3">
-        <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400">
           Preset
         </label>
         <select
@@ -202,7 +202,7 @@ export function EconomyPanel() {
           ))}
         </select>
 
-        <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+        <label className="block text-[10px] font-medium uppercase tracking-wider text-zinc-400">
           Game Description
         </label>
         <textarea
@@ -229,8 +229,8 @@ export function EconomyPanel() {
       {!economy && (
         <div className="flex flex-1 items-center justify-center p-6 text-center">
           <div className="space-y-2">
-            <Coins size={32} className="mx-auto text-zinc-600" />
-            <p className="text-zinc-500">
+            <Coins size={32} className="mx-auto text-zinc-400" />
+            <p className="text-zinc-400">
               Select a preset or describe your game to generate a balanced economy.
             </p>
           </div>
@@ -253,7 +253,7 @@ export function EconomyPanel() {
                       ) : issue.severity === 'warning' ? (
                         <AlertTriangle size={11} className="mt-0.5 shrink-0 text-yellow-400" />
                       ) : (
-                        <CheckCircle size={11} className="mt-0.5 shrink-0 text-zinc-500" />
+                        <CheckCircle size={11} className="mt-0.5 shrink-0 text-zinc-400" />
                       )}
                       <span className="text-zinc-400">{issue.message}</span>
                     </div>
@@ -273,9 +273,9 @@ export function EconomyPanel() {
                 <div key={c.name} className="rounded bg-zinc-800 p-2">
                   <div className="flex items-center justify-between">
                     <span className="font-medium text-zinc-200">{c.name}</span>
-                    <span className="text-[10px] text-zinc-500">+{c.earnRate}/tick</span>
+                    <span className="text-[10px] text-zinc-400">+{c.earnRate}/tick</span>
                   </div>
-                  <div className="mt-1 text-[10px] text-zinc-500">
+                  <div className="mt-1 text-[10px] text-zinc-400">
                     Sinks: {c.sinks.join(', ') || 'none'}
                   </div>
                 </div>
@@ -288,7 +288,7 @@ export function EconomyPanel() {
             <div className="overflow-x-auto">
               <table className="w-full text-[11px]">
                 <thead>
-                  <tr className="text-left text-zinc-500">
+                  <tr className="text-left text-zinc-400">
                     <th className="pb-1 pr-2">Name</th>
                     <th className="pb-1 pr-2">Price</th>
                     <th className="pb-1 pr-2">Unlock</th>
@@ -303,7 +303,7 @@ export function EconomyPanel() {
                         {item.price} {item.currency}
                       </td>
                       <td className="py-1 pr-2">Lv.{item.unlockLevel}</td>
-                      <td className="py-1 text-zinc-500">{item.category}</td>
+                      <td className="py-1 text-zinc-400">{item.category}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -334,8 +334,8 @@ export function EconomyPanel() {
                               style={{ width: `${Math.max(4, Number(pct))}%`, minWidth: '4px' }}
                             />
                             <span className="text-zinc-300">{entry.item}</span>
-                            <span className="text-zinc-500 ml-auto">{pct}%</span>
-                            <span className="text-zinc-600">
+                            <span className="text-zinc-400 ml-auto">{pct}%</span>
+                            <span className="text-zinc-400">
                               ({entry.minQuantity}-{entry.maxQuantity})
                             </span>
                           </div>
@@ -352,13 +352,13 @@ export function EconomyPanel() {
           <Section title="Progression" icon={<TrendingUp size={12} />}>
             <div className="space-y-2">
               <div className="flex justify-between text-[11px]">
-                <span className="text-zinc-500">Levels: {economy.progression.levels}</span>
-                <span className="text-zinc-500">
+                <span className="text-zinc-400">Levels: {economy.progression.levels}</span>
+                <span className="text-zinc-400">
                   XP range: {economy.progression.xpPerLevel[0]} - {economy.progression.xpPerLevel[economy.progression.xpPerLevel.length - 1]}
                 </span>
               </div>
               <div className="rounded bg-zinc-800 p-2">
-                <div className="text-[10px] text-zinc-500 mb-1">XP Curve</div>
+                <div className="text-[10px] text-zinc-400 mb-1">XP Curve</div>
                 <XpCurveChart xpPerLevel={economy.progression.xpPerLevel} />
               </div>
             </div>

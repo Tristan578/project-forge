@@ -71,10 +71,10 @@ export function PhysicsInspector() {
   return (
     <div className="border-t border-zinc-800 pt-4">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Physics
         </h3>
-        <button onClick={() => navigateDocs('features/physics')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+        <button onClick={() => navigateDocs('features/physics')} className="rounded p-0.5 text-zinc-400 hover:text-zinc-400" title="Documentation">
           <HelpCircle size={12} />
         </button>
       </div>
@@ -135,7 +135,7 @@ export function PhysicsInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {primaryPhysics.restitution.toFixed(2)}
               </span>
             </div>
@@ -155,7 +155,7 @@ export function PhysicsInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {primaryPhysics.friction.toFixed(2)}
               </span>
             </div>
@@ -175,7 +175,7 @@ export function PhysicsInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {primaryPhysics.density.toFixed(1)}
               </span>
             </div>
@@ -195,14 +195,14 @@ export function PhysicsInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {primaryPhysics.gravityScale.toFixed(1)}
               </span>
             </div>
 
             {/* Lock Axes */}
             <div className="pt-1">
-              <span className="text-xs text-zinc-500">Lock Translation</span>
+              <span className="text-xs text-zinc-400">Lock Translation</span>
               <div className="mt-1 flex gap-4">
                 <CheckboxRow label="X" checked={primaryPhysics.lockTranslationX} onChange={(v) => handleUpdate({ lockTranslationX: v })} />
                 <CheckboxRow label="Y" checked={primaryPhysics.lockTranslationY} onChange={(v) => handleUpdate({ lockTranslationY: v })} />
@@ -210,7 +210,7 @@ export function PhysicsInspector() {
               </div>
             </div>
             <div className="pt-1">
-              <span className="text-xs text-zinc-500">Lock Rotation</span>
+              <span className="text-xs text-zinc-400">Lock Rotation</span>
               <div className="mt-1 flex gap-4">
                 <CheckboxRow label="X" checked={primaryPhysics.lockRotationX} onChange={(v) => handleUpdate({ lockRotationX: v })} />
                 <CheckboxRow label="Y" checked={primaryPhysics.lockRotationY} onChange={(v) => handleUpdate({ lockRotationY: v })} />

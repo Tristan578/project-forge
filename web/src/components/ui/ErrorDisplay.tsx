@@ -111,7 +111,7 @@ function BannerError({
           type="button"
           onClick={onDismiss}
           aria-label="Dismiss"
-          className="shrink-0 rounded p-0.5 text-zinc-500 transition-colors hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500"
+          className="shrink-0 rounded p-0.5 text-zinc-400 transition-colors hover:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-500"
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </button>

@@ -200,16 +200,16 @@ function LessonCard({ lesson }: { lesson: DesignLesson }) {
             <div className="mt-2 space-y-2 border-t border-zinc-700 pt-2">
               <p className="text-xs text-zinc-300">{lesson.explanation}</p>
               <div className="rounded bg-zinc-900/50 p-2">
-                <p className="text-[11px] text-zinc-500">Example:</p>
+                <p className="text-[11px] text-zinc-400">Example:</p>
                 <p className="text-xs text-zinc-400">{lesson.example}</p>
               </div>
             </div>
           )}
         </div>
         {expanded ? (
-          <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
         ) : (
-          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
         )}
       </div>
     </button>
@@ -221,7 +221,7 @@ function DecisionView({ data }: { data: DesignDecision }) {
     <div className="space-y-3">
       <h4 className="text-sm font-medium text-zinc-200">{data.decision}</h4>
       <div>
-        <p className="text-[11px] font-medium uppercase text-zinc-500">
+        <p className="text-[11px] font-medium uppercase text-zinc-400">
           Reasoning
         </p>
         <ul className="mt-1 space-y-1">
@@ -246,7 +246,7 @@ function DecisionView({ data }: { data: DesignDecision }) {
       )}
       {data.alternatives.length > 0 && (
         <div>
-          <p className="text-[11px] font-medium uppercase text-zinc-500">
+          <p className="text-[11px] font-medium uppercase text-zinc-400">
             Alternatives Considered
           </p>
           {data.alternatives.map((alt, i) => (
@@ -257,7 +257,7 @@ function DecisionView({ data }: { data: DesignDecision }) {
               <p className="text-xs font-medium text-zinc-300">
                 {alt.description}
               </p>
-              <p className="mt-1 text-[11px] text-zinc-500">
+              <p className="mt-1 text-[11px] text-zinc-400">
                 {alt.whyNotChosen}
               </p>
             </div>
@@ -266,7 +266,7 @@ function DecisionView({ data }: { data: DesignDecision }) {
       )}
       {data.tradeoffs.length > 0 && (
         <div>
-          <p className="text-[11px] font-medium uppercase text-zinc-500">
+          <p className="text-[11px] font-medium uppercase text-zinc-400">
             Tradeoffs
           </p>
           <ul className="mt-1 space-y-1">
@@ -289,13 +289,13 @@ function CritiqueView({ critique }: { critique: DesignCritique }) {
       <div className="flex items-center gap-3">
         <div className="text-2xl font-bold text-zinc-200">
           {critique.overallScore}
-          <span className="text-sm font-normal text-zinc-500">/10</span>
+          <span className="text-sm font-normal text-zinc-400">/10</span>
         </div>
         <p className="flex-1 text-xs text-zinc-400">{critique.summary}</p>
       </div>
       {critique.strengths.length > 0 && (
         <div>
-          <p className="text-[11px] font-medium uppercase text-zinc-500">
+          <p className="text-[11px] font-medium uppercase text-zinc-400">
             Strengths
           </p>
           <ul className="mt-1 space-y-1">
@@ -313,7 +313,7 @@ function CritiqueView({ critique }: { critique: DesignCritique }) {
       )}
       {critique.improvements.length > 0 && (
         <div>
-          <p className="text-[11px] font-medium uppercase text-zinc-500">
+          <p className="text-[11px] font-medium uppercase text-zinc-400">
             Improvements
           </p>
           <ul className="mt-1 space-y-1">
@@ -330,7 +330,7 @@ function CritiqueView({ critique }: { critique: DesignCritique }) {
         </div>
       )}
       <div className="space-y-2">
-        <p className="text-[11px] font-medium uppercase text-zinc-500">
+        <p className="text-[11px] font-medium uppercase text-zinc-400">
           Scores
         </p>
         {critique.scores.map((s) => (
@@ -339,7 +339,7 @@ function CritiqueView({ critique }: { critique: DesignCritique }) {
               <span className="text-xs text-zinc-300">{s.principle}</span>
             </div>
             <ScoreBar score={s.score} />
-            <p className="mt-0.5 text-[11px] text-zinc-500">{s.feedback}</p>
+            <p className="mt-0.5 text-[11px] text-zinc-400">{s.feedback}</p>
           </div>
         ))}
       </div>
@@ -355,7 +355,7 @@ function PrincipleCard({ principle }: { principle: DesignPrinciple }) {
       className="w-full rounded-lg border border-zinc-700 bg-zinc-800/50 p-3 text-left transition-colors hover:border-zinc-600"
     >
       <div className="flex items-start gap-2">
-        <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+        <BookOpen className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-zinc-200">
@@ -367,16 +367,16 @@ function PrincipleCard({ principle }: { principle: DesignPrinciple }) {
             <div className="mt-2 space-y-2">
               <p className="text-xs text-zinc-300">{principle.description}</p>
               <div className="rounded bg-zinc-900/50 p-2">
-                <p className="text-[11px] text-zinc-500">Example:</p>
+                <p className="text-[11px] text-zinc-400">Example:</p>
                 <p className="text-xs text-zinc-400">{principle.example}</p>
               </div>
             </div>
           )}
         </div>
         {expanded ? (
-          <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <ChevronDown className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
         ) : (
-          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-500" />
+          <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-zinc-400" />
         )}
       </div>
     </button>
@@ -462,7 +462,7 @@ export function DesignTeacherPanel() {
             className={`flex flex-1 items-center justify-center gap-1 px-2 py-1.5 text-xs transition-colors ${
               activeTab === tab.id
                 ? 'border-b-2 border-blue-500 text-blue-400'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
           >
             {tab.icon}
@@ -476,12 +476,12 @@ export function DesignTeacherPanel() {
         {activeTab === 'lessons' && (
           <div className="space-y-2">
             {lessons.length === 0 ? (
-              <p className="text-center text-xs text-zinc-500">
+              <p className="text-center text-xs text-zinc-400">
                 No lessons detected for the current scene state. Keep building!
               </p>
             ) : (
               <>
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-zinc-400">
                   Based on your current scene, here are design principles to consider:
                 </p>
                 {lessons.map((lesson, i) => (
@@ -494,7 +494,7 @@ export function DesignTeacherPanel() {
 
         {activeTab === 'explain' && (
           <div className="space-y-3">
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Describe a design decision and get an explanation of the principles behind it.
             </p>
             <div className="flex gap-2">
@@ -525,7 +525,7 @@ export function DesignTeacherPanel() {
         {activeTab === 'reference' && (
           <div className="space-y-3">
             <div className="relative">
-              <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+              <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
               <input
                 type="text"
                 value={searchQuery}
@@ -541,7 +541,7 @@ export function DesignTeacherPanel() {
                 className={`rounded px-2 py-0.5 text-[10px] transition-colors ${
                   selectedCategory === null
                     ? 'bg-zinc-600 text-zinc-100'
-                    : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-300'
                 }`}
                 aria-label="Show all categories"
               >
@@ -556,7 +556,7 @@ export function DesignTeacherPanel() {
                   className={`rounded px-2 py-0.5 text-[10px] transition-colors ${
                     selectedCategory === cat
                       ? 'bg-zinc-600 text-zinc-100'
-                      : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                      : 'bg-zinc-800 text-zinc-400 hover:text-zinc-300'
                   }`}
                   aria-label={`Filter by ${CATEGORY_LABELS[cat]}`}
                 >
@@ -566,7 +566,7 @@ export function DesignTeacherPanel() {
             </div>
             <div className="space-y-2">
               {filteredPrinciples.length === 0 ? (
-                <p className="text-center text-xs text-zinc-500">
+                <p className="text-center text-xs text-zinc-400">
                   No principles match your search.
                 </p>
               ) : (
@@ -575,7 +575,7 @@ export function DesignTeacherPanel() {
                 ))
               )}
             </div>
-            <p className="text-center text-[10px] text-zinc-600">
+            <p className="text-center text-[10px] text-zinc-400">
               {DESIGN_PRINCIPLES.length} principles across{' '}
               {ALL_CATEGORIES.length} categories
             </p>

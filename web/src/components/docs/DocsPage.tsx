@@ -129,9 +129,9 @@ export function DocsPage() {
   if (error) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-950 p-4">
-        <BookOpen size={32} className="mb-3 text-zinc-600" />
+        <BookOpen size={32} className="mb-3 text-zinc-400" />
         <p className="text-sm text-red-400">{error}</p>
-        <p className="mt-2 text-xs text-zinc-600">
+        <p className="mt-2 text-xs text-zinc-400">
           Documentation is available when running the dev server.
         </p>
       </div>
@@ -165,13 +165,13 @@ export function DocsPage() {
             {/* Search */}
             <div className="mb-4">
               <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-                <Search size={14} className="text-zinc-500" />
+                <Search size={14} className="text-zinc-400" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search docs..."
-                  className="flex-1 bg-transparent text-sm text-zinc-300 outline-none placeholder:text-zinc-600"
+                  className="flex-1 bg-transparent text-sm text-zinc-300 outline-none placeholder:text-zinc-400"
                 />
               </div>
             </div>
@@ -190,16 +190,16 @@ export function DocsPage() {
                       <span className="text-sm font-medium text-zinc-300">{result.title}</span>
                     </div>
                     {result.matchSection && (
-                      <span className="text-xs text-zinc-500">in: {result.matchSection}</span>
+                      <span className="text-xs text-zinc-400">in: {result.matchSection}</span>
                     )}
-                    <span className="mt-0.5 text-xs text-zinc-600 line-clamp-2">
+                    <span className="mt-0.5 text-xs text-zinc-400 line-clamp-2">
                       {result.snippet}
                     </span>
                   </button>
                 ))}
               </div>
             ) : searchQuery ? (
-              <div className="flex flex-col items-center gap-2 py-8 text-zinc-600">
+              <div className="flex flex-col items-center gap-2 py-8 text-zinc-400">
                 <Search size={20} />
                 <span className="text-sm">No results</span>
               </div>
@@ -217,7 +217,7 @@ export function DocsPage() {
                       >
                         {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                         {CATEGORY_LABELS[cat] ?? cat}
-                        <span className="text-xs text-zinc-600">({catDocs.length})</span>
+                        <span className="text-xs text-zinc-400">({catDocs.length})</span>
                       </button>
                       {isExpanded && (
                         <div className="ml-2 space-y-0.5">
@@ -228,7 +228,7 @@ export function DocsPage() {
                               className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm transition-colors ${
                                 activePath === doc.path
                                   ? 'bg-zinc-800 text-blue-400'
-                                  : 'text-zinc-500 hover:bg-zinc-800/50 hover:text-zinc-300'
+                                  : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-300'
                               }`}
                             >
                               <FileText size={12} />
@@ -259,13 +259,13 @@ export function DocsPage() {
           {/* Search */}
           <div className="mb-4">
             <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2">
-              <Search size={14} className="text-zinc-500" />
+              <Search size={14} className="text-zinc-400" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search docs..."
-                className="flex-1 bg-transparent text-sm text-zinc-300 outline-none placeholder:text-zinc-600"
+                className="flex-1 bg-transparent text-sm text-zinc-300 outline-none placeholder:text-zinc-400"
               />
             </div>
           </div>
@@ -282,7 +282,7 @@ export function DocsPage() {
                     <FileText size={12} className="text-blue-400" />
                     <span className="text-sm font-medium text-zinc-300">{result.title}</span>
                   </div>
-                  <span className="mt-1 text-xs text-zinc-600 line-clamp-2">{result.snippet}</span>
+                  <span className="mt-1 text-xs text-zinc-400 line-clamp-2">{result.snippet}</span>
                 </button>
               ))}
             </div>
@@ -313,13 +313,13 @@ function DocContent({
       <div className="flex items-center gap-2 border-b border-zinc-800 px-6 py-3">
         <button
           onClick={onBack}
-          className="rounded p-1 text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
+          className="rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
           title="Back to docs home"
         >
           <Home size={14} />
         </button>
         <ChevronRight size={12} className="text-zinc-700" />
-        <span className="text-xs text-zinc-500">
+        <span className="text-xs text-zinc-400">
           {CATEGORY_LABELS[doc.category] ?? doc.category}
         </span>
         <ChevronRight size={12} className="text-zinc-700" />
@@ -329,7 +329,7 @@ function DocContent({
       {/* Table of contents (if sections exist) */}
       {doc.sections.length > 1 && (
         <div className="border-b border-zinc-800 px-6 py-3">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">
             On this page
           </h3>
           <div className="space-y-1">
@@ -390,7 +390,7 @@ function DocsHome({
           <FileText size={20} className="text-blue-400" />
           <div>
             <div className="text-sm font-semibold text-zinc-200">{indexDoc.title}</div>
-            <div className="text-xs text-zinc-500">
+            <div className="text-xs text-zinc-400">
               Start here for an overview of SpawnForge
             </div>
           </div>
@@ -423,7 +423,7 @@ function DocsHome({
                     </button>
                   ))}
                   {catDocs.length > 5 && (
-                    <p className="px-2 text-xs text-zinc-600">
+                    <p className="px-2 text-xs text-zinc-400">
                       + {catDocs.length - 5} more
                     </p>
                   )}
@@ -502,7 +502,7 @@ function MarkdownContent({ content }: { content: string }) {
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
       elements.push(
         <div key={i} className="ml-4 flex gap-2 text-zinc-400">
-          <span className="text-zinc-600">&#8226;</span>
+          <span className="text-zinc-400">&#8226;</span>
           <span>{formatInline(line.slice(2))}</span>
         </div>
       );
@@ -510,7 +510,7 @@ function MarkdownContent({ content }: { content: string }) {
       const num = line.match(/^(\d+)\.\s(.*)/)!;
       elements.push(
         <div key={i} className="ml-4 flex gap-2 text-zinc-400">
-          <span className="text-zinc-600">{num[1]}.</span>
+          <span className="text-zinc-400">{num[1]}.</span>
           <span>{formatInline(num[2])}</span>
         </div>
       );

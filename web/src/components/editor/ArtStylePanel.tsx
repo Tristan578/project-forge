@@ -28,7 +28,7 @@ function ColorSwatch({ hex, label }: { hex: string; label: string }) {
         style={{ backgroundColor: hex }}
         title={`${label}: ${hex}`}
       />
-      <span className="text-[9px] text-zinc-500">{label}</span>
+      <span className="text-[9px] text-zinc-400">{label}</span>
     </div>
   );
 }
@@ -91,7 +91,7 @@ function ConsistencyReport({ report }: { report: StyleConsistencyReport }) {
           {report.deviations.map((d) => (
             <div key={d.entityId} className="rounded bg-zinc-900 p-1.5 text-[10px]">
               <span className="font-medium text-zinc-300">{d.entityName}</span>
-              <ul className="ml-2 mt-0.5 list-disc text-zinc-500">
+              <ul className="ml-2 mt-0.5 list-disc text-zinc-400">
                 {d.reasons.map((r, i) => (
                   <li key={i}>{r}</li>
                 ))}

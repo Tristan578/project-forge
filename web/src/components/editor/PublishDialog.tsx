@@ -94,7 +94,7 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
             <Globe size={20} />
             Publish Game
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:text-zinc-300">
+          <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:text-zinc-300">
             <X size={18} />
           </button>
         </div>
@@ -107,7 +107,7 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
               <span>Game published successfully!</span>
             </div>
             <div className="rounded bg-zinc-800 p-3">
-              <p className="mb-1 text-xs text-zinc-500">Share this URL:</p>
+              <p className="mb-1 text-xs text-zinc-400">Share this URL:</p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-sm text-blue-400 break-all">{window.location.origin}{publishedUrl}</code>
                 <button
@@ -143,7 +143,7 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
                 {slugAvailable === true && <Check size={16} className="text-green-400" />}
                 {slugAvailable === false && <AlertCircle size={16} className="text-red-400" />}
               </div>
-              <p className="mt-1 text-[10px] text-zinc-600">
+              <p className="mt-1 text-[10px] text-zinc-400">
                 3-50 characters, lowercase letters, numbers, and hyphens
               </p>
             </div>
@@ -184,7 +184,7 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
                   {tags.map((tag) => (
                     <span key={tag} className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
                       {tag}
-                      <button onClick={() => handleRemoveTag(tag)} className="text-zinc-500 hover:text-zinc-300">
+                      <button onClick={() => handleRemoveTag(tag)} className="text-zinc-400 hover:text-zinc-300">
                         <X size={10} />
                       </button>
                     </span>

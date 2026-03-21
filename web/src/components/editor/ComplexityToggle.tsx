@@ -105,7 +105,7 @@ export function ComplexityToggle({ compact = false }: ComplexityToggleProps) {
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-xs font-semibold text-zinc-300">Complexity Level</h3>
-          <p className="mt-0.5 text-[10px] text-zinc-500">
+          <p className="mt-0.5 text-[10px] text-zinc-400">
             Controls which editor features are visible. Critical features are always available.
           </p>
         </div>
@@ -137,7 +137,7 @@ export function ComplexityToggle({ compact = false }: ComplexityToggleProps) {
                   </span>
                 )}
               </div>
-              <p className="mt-0.5 text-[10px] text-zinc-500">{COMPLEXITY_DESCRIPTIONS[lvl]}</p>
+              <p className="mt-0.5 text-[10px] text-zinc-400">{COMPLEXITY_DESCRIPTIONS[lvl]}</p>
               {unlocks.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-1">
                   {unlocks.map((feat) => (
@@ -152,7 +152,7 @@ export function ComplexityToggle({ compact = false }: ComplexityToggleProps) {
         })}
       </div>
 
-      <p className="text-[10px] text-zinc-600">
+      <p className="text-[10px] text-zinc-400">
         Keyboard shortcuts and critical workflows (save, undo, play, AI chat) are always available regardless of level.
       </p>
     </div>
@@ -201,7 +201,7 @@ function ComplexityDropdown({ currentLevel, onSelect, onClose, alignRight }: Dro
                   </span>
                 )}
               </div>
-              <p className="mt-0.5 text-[10px] text-zinc-500">{COMPLEXITY_DESCRIPTIONS[lvl]}</p>
+              <p className="mt-0.5 text-[10px] text-zinc-400">{COMPLEXITY_DESCRIPTIONS[lvl]}</p>
             </button>
           );
         })}

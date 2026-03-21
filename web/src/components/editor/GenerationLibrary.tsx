@@ -75,7 +75,7 @@ export function GenerationLibrary({ onClose, onRegenerate }: GenerationLibraryPr
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-blue-400" />
           <h2 className="font-semibold text-zinc-200">Generation Library</h2>
-          <span className="text-xs text-zinc-500">({allEntries.length})</span>
+          <span className="text-xs text-zinc-400">({allEntries.length})</span>
         </div>
         <button
           onClick={onClose}
@@ -89,7 +89,7 @@ export function GenerationLibrary({ onClose, onRegenerate }: GenerationLibraryPr
       {/* Search + Filter */}
       <div className="border-b border-zinc-700 px-4 py-2 space-y-2">
         <div className="relative">
-          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input
             type="text"
             value={searchQuery}
@@ -118,7 +118,7 @@ export function GenerationLibrary({ onClose, onRegenerate }: GenerationLibraryPr
       {/* Entries List */}
       <div className="flex-1 overflow-y-auto">
         {entries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-2 p-8 text-zinc-500">
+          <div className="flex flex-col items-center justify-center gap-2 p-8 text-zinc-400">
             <Sparkles size={32} />
             <p className="text-sm">
               {allEntries.length === 0
@@ -163,7 +163,7 @@ export function GenerationLibrary({ onClose, onRegenerate }: GenerationLibraryPr
           ) : (
             <button
               onClick={() => setShowClearConfirm(true)}
-              className="flex items-center gap-1 text-xs text-zinc-500 hover:text-red-400 transition-colors"
+              className="flex items-center gap-1 text-xs text-zinc-400 hover:text-red-400 transition-colors"
             >
               <Trash2 size={12} />
               Clear history
@@ -213,7 +213,7 @@ function EntryRow({
         <p className="truncate text-sm text-zinc-200" title={entry.prompt}>
           {entry.prompt}
         </p>
-        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-500">
+        <div className="mt-0.5 flex items-center gap-2 text-[10px] text-zinc-400">
           <span className="flex items-center gap-0.5">
             <Clock size={10} />
             {formatDate(entry.createdAt)}
@@ -229,7 +229,7 @@ function EntryRow({
             href={entry.resultUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded p-1 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-200"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
             title="Download result"
           >
             <Download size={14} />
@@ -238,7 +238,7 @@ function EntryRow({
         {onRegenerate && (
           <button
             onClick={onRegenerate}
-            className="rounded p-1 text-zinc-500 hover:bg-zinc-700 hover:text-blue-400"
+            className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-blue-400"
             title="Regenerate with same prompt"
           >
             <RotateCcw size={14} />
@@ -246,7 +246,7 @@ function EntryRow({
         )}
         <button
           onClick={onRemove}
-          className="rounded p-1 text-zinc-500 hover:bg-zinc-700 hover:text-red-400"
+          className="rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-red-400"
           title="Remove from library"
         >
           <Trash2 size={14} />

@@ -132,7 +132,7 @@ function SliderField({ label, value, min, max, step, onChange, format }: SliderF
         onChange={(e) => onChange(Number(e.target.value))}
         className="flex-1 accent-blue-500 h-1"
       />
-      <span className="w-12 text-right font-mono text-zinc-500">{display}</span>
+      <span className="w-12 text-right font-mono text-zinc-400">{display}</span>
     </label>
   );
 }
@@ -267,7 +267,7 @@ export function DifficultyPanel() {
 
       {/* Preset selector */}
       <div className="space-y-1">
-        <span className="text-zinc-500 text-[10px] uppercase tracking-wider">Preset</span>
+        <span className="text-zinc-400 text-[10px] uppercase tracking-wider">Preset</span>
         <div className="grid grid-cols-2 gap-1">
           {Object.keys(DDA_PRESETS).map((key) => (
             <button
@@ -286,13 +286,13 @@ export function DifficultyPanel() {
           ))}
         </div>
         {presetKey !== 'custom' && PRESET_DESCRIPTIONS[presetKey] && (
-          <p className="text-[10px] text-zinc-500 mt-1">{PRESET_DESCRIPTIONS[presetKey]}</p>
+          <p className="text-[10px] text-zinc-400 mt-1">{PRESET_DESCRIPTIONS[presetKey]}</p>
         )}
       </div>
 
       {/* Config sliders */}
       <div className="space-y-2">
-        <span className="text-zinc-500 text-[10px] uppercase tracking-wider">Settings</span>
+        <span className="text-zinc-400 text-[10px] uppercase tracking-wider">Settings</span>
         <SliderField
           label="Sensitivity"
           value={config.sensitivity}
@@ -338,7 +338,7 @@ export function DifficultyPanel() {
 
       {/* Difficulty curve preview */}
       <div className="space-y-1">
-        <span className="text-zinc-500 text-[10px] uppercase tracking-wider">Difficulty Curve</span>
+        <span className="text-zinc-400 text-[10px] uppercase tracking-wider">Difficulty Curve</span>
         <CurvePreview config={config} currentLevel={profile.level} />
       </div>
 
@@ -351,13 +351,13 @@ export function DifficultyPanel() {
 
       {/* Profile breakdown */}
       <div className="space-y-1">
-        <span className="text-zinc-500 text-[10px] uppercase tracking-wider">Active Multipliers</span>
+        <span className="text-zinc-400 text-[10px] uppercase tracking-wider">Active Multipliers</span>
         <ProfileDisplay profile={profile} />
       </div>
 
       {/* Simulation controls */}
       <div className="space-y-2 rounded border border-zinc-700 p-2">
-        <span className="text-zinc-500 text-[10px] uppercase tracking-wider">Simulate Player</span>
+        <span className="text-zinc-400 text-[10px] uppercase tracking-wider">Simulate Player</span>
         <SliderField
           label="Deaths/min"
           value={simDeaths}

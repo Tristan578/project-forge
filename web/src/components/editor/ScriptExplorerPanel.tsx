@@ -186,7 +186,7 @@ export function ScriptExplorerPanel() {
         <div className="flex items-center gap-1">
           <button
             onClick={handleImport}
-            className="rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
             title="Import script"
           >
             <Upload size={12} />
@@ -194,7 +194,7 @@ export function ScriptExplorerPanel() {
           <div className="relative">
             <button
               onClick={() => setShowNewMenu(!showNewMenu)}
-              className="rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+              className="rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
               title="New script"
             >
               <Plus size={12} />
@@ -209,7 +209,7 @@ export function ScriptExplorerPanel() {
                   Blank Script
                 </button>
                 <div className="my-1 border-t border-zinc-700" />
-                <p className="px-3 py-0.5 text-[10px] uppercase tracking-wider text-zinc-600">
+                <p className="px-3 py-0.5 text-[10px] uppercase tracking-wider text-zinc-400">
                   From Template
                 </p>
                 {SCRIPT_TEMPLATES.map((t) => (
@@ -234,7 +234,7 @@ export function ScriptExplorerPanel() {
           className={`flex-1 py-1 text-center text-[10px] font-medium ${
             tab === 'entity'
               ? 'border-b border-blue-500 text-blue-400'
-              : 'text-zinc-500 hover:text-zinc-300'
+              : 'text-zinc-400 hover:text-zinc-300'
           }`}
         >
           Entity ({entityEntries.length})
@@ -244,7 +244,7 @@ export function ScriptExplorerPanel() {
           className={`flex-1 py-1 text-center text-[10px] font-medium ${
             tab === 'library'
               ? 'border-b border-blue-500 text-blue-400'
-              : 'text-zinc-500 hover:text-zinc-300'
+              : 'text-zinc-400 hover:text-zinc-300'
           }`}
         >
           Library ({libraryScripts.length})
@@ -254,13 +254,13 @@ export function ScriptExplorerPanel() {
       {/* Search */}
       <div className="border-b border-zinc-800 px-2 py-1">
         <div className="flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-1">
-          <Search size={11} className="text-zinc-500" />
+          <Search size={11} className="text-zinc-400" />
           <input
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filter scripts..."
-            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder:text-zinc-600 outline-none"
+            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder:text-zinc-400 outline-none"
           />
         </div>
       </div>
@@ -269,7 +269,7 @@ export function ScriptExplorerPanel() {
       <div className="flex-1 overflow-y-auto">
         {tab === 'entity' ? (
           filteredEntity.length === 0 ? (
-            <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-600">
+            <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-400">
               <FileCode size={24} />
               <span>{entityEntries.length === 0 ? 'No entity scripts' : 'No matches'}</span>
               {entityEntries.length === 0 && (
@@ -285,24 +285,24 @@ export function ScriptExplorerPanel() {
                 onClick={() => handleEntityClick(entry)}
                 className="flex w-full items-center gap-2 border-b border-zinc-800/50 px-2 py-1.5 text-left transition-colors hover:bg-zinc-800/50"
               >
-                <FileCode size={12} className={entry.enabled ? 'text-green-400' : 'text-zinc-600'} />
+                <FileCode size={12} className={entry.enabled ? 'text-green-400' : 'text-zinc-400'} />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-zinc-300">{entry.entityName}</div>
-                  <div className="text-[10px] text-zinc-600">
+                  <div className="text-[10px] text-zinc-400">
                     {entry.sourceLength} chars {!entry.enabled && '(disabled)'}
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
                   <span
                     onClick={(e) => handleToggle(e, entry)}
-                    className="cursor-pointer text-zinc-500 hover:text-zinc-300"
+                    className="cursor-pointer text-zinc-400 hover:text-zinc-300"
                     title={entry.enabled ? 'Disable' : 'Enable'}
                   >
                     {entry.enabled ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
                   </span>
                   <span
                     onClick={(e) => handleDeleteEntity(e, entry)}
-                    className="cursor-pointer text-zinc-500 hover:text-red-400"
+                    className="cursor-pointer text-zinc-400 hover:text-red-400"
                     title="Remove script"
                   >
                     <Trash2 size={11} />
@@ -312,7 +312,7 @@ export function ScriptExplorerPanel() {
             ))
           )
         ) : filteredLibrary.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-600">
+          <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-400">
             <Library size={24} />
             <span>{libraryScripts.length === 0 ? 'No library scripts' : 'No matches'}</span>
             <span className="text-center text-[10px]">
@@ -328,7 +328,7 @@ export function ScriptExplorerPanel() {
               <Library size={12} className="text-purple-400" />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-zinc-300">{script.name}</div>
-                <div className="text-[10px] text-zinc-600">
+                <div className="text-[10px] text-zinc-400">
                   {script.description || `${script.source.length} chars`}
                   {script.tags.length > 0 && ` · ${script.tags.join(', ')}`}
                 </div>
@@ -337,7 +337,7 @@ export function ScriptExplorerPanel() {
                 {primaryId && (
                   <button
                     onClick={(e) => handleAttachToEntity(e, script)}
-                    className="rounded p-0.5 text-zinc-500 hover:text-green-400"
+                    className="rounded p-0.5 text-zinc-400 hover:text-green-400"
                     title="Attach to selected entity"
                   >
                     <FileCode size={11} />
@@ -345,21 +345,21 @@ export function ScriptExplorerPanel() {
                 )}
                 <button
                   onClick={(e) => handleDuplicate(e, script.id)}
-                  className="rounded p-0.5 text-zinc-500 hover:text-zinc-300"
+                  className="rounded p-0.5 text-zinc-400 hover:text-zinc-300"
                   title="Duplicate"
                 >
                   <Copy size={11} />
                 </button>
                 <button
                   onClick={(e) => handleExport(e, script.id)}
-                  className="rounded p-0.5 text-zinc-500 hover:text-zinc-300"
+                  className="rounded p-0.5 text-zinc-400 hover:text-zinc-300"
                   title="Export JSON"
                 >
                   <Download size={11} />
                 </button>
                 <button
                   onClick={(e) => handleDeleteLibrary(e, script.id)}
-                  className="rounded p-0.5 text-zinc-500 hover:text-red-400"
+                  className="rounded p-0.5 text-zinc-400 hover:text-red-400"
                   title="Delete"
                 >
                   <Trash2 size={11} />

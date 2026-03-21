@@ -127,7 +127,7 @@ export function HelpMenu({ onOpenShortcuts, onOpenFeedback }: HelpMenuProps) {
             setOpen(true);
           }
         }}
-        className="rounded p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+        className="rounded p-1 text-zinc-400 hover:text-zinc-300 transition-colors"
         title="Help"
         aria-label="Help menu"
         aria-expanded={open}
@@ -204,9 +204,9 @@ const MenuItem = forwardRef<
       disabled={disabled}
       className="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
     >
-      <span className="text-zinc-500">{icon}</span>
+      <span className="text-zinc-400">{icon}</span>
       <span className="flex-1 text-left">{label}</span>
-      {shortcut && <span className="text-[10px] text-zinc-600">{shortcut}</span>}
+      {shortcut && <span className="text-[10px] text-zinc-400">{shortcut}</span>}
     </button>
   );
 });

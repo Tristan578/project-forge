@@ -170,7 +170,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
                 />
               ))}
               {PALETTES[palette].colors.length > 32 && (
-                <span className="text-xs text-zinc-500 ml-1">
+                <span className="text-xs text-zinc-400 ml-1">
                   +{PALETTES[palette].colors.length - 32} more
                 </span>
               )}
@@ -191,7 +191,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
             </select>
             {dithering !== 'none' && (
               <div className="mt-2">
-                <label className="text-xs text-zinc-500">
+                <label className="text-xs text-zinc-400">
                   Intensity: {Math.round(ditheringIntensity * 100)}%
                 </label>
                 <input
@@ -225,7 +225,7 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
               className={`px-4 py-2 text-sm font-medium rounded ${
                 canSubmit
                   ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                  : 'bg-zinc-700 text-zinc-500 cursor-not-allowed'
+                  : 'bg-zinc-700 text-zinc-400 cursor-not-allowed'
               }`}
             >
               {isSubmitting ? 'Generating...' : 'Generate'}

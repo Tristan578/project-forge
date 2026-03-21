@@ -59,7 +59,7 @@ export function LayoutMenu() {
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
         title="Layout presets"
       >
         <LayoutGrid size={13} />
@@ -69,7 +69,7 @@ export function LayoutMenu() {
       {open && (
         <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded border border-zinc-700 bg-zinc-900 py-1 shadow-xl text-xs">
           {/* Built-in presets */}
-          <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+          <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
             Presets
           </div>
           {Object.values(LAYOUT_PRESETS).map((preset) => (
@@ -82,7 +82,7 @@ export function LayoutMenu() {
               {activePreset !== preset.id && <span className="w-3" />}
               <div>
                 <div>{preset.name}</div>
-                <div className="text-[10px] text-zinc-500">{preset.description}</div>
+                <div className="text-[10px] text-zinc-400">{preset.description}</div>
               </div>
             </button>
           ))}
@@ -91,7 +91,7 @@ export function LayoutMenu() {
           {customPresets.length > 0 && (
             <>
               <div className="my-1 h-px bg-zinc-800" />
-              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
                 Custom
               </div>
               {customPresets.map((preset, i) => (
@@ -104,7 +104,7 @@ export function LayoutMenu() {
                   </button>
                   <button
                     onClick={() => deleteCustomPreset(i)}
-                    className="text-zinc-600 hover:text-red-400"
+                    className="text-zinc-400 hover:text-red-400"
                     title="Delete preset"
                   >
                     <RotateCcw size={10} />
@@ -124,7 +124,7 @@ export function LayoutMenu() {
                 onChange={(e) => setSaveName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSave()}
                 placeholder="Preset name..."
-                className="flex-1 rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300 outline-none placeholder:text-zinc-600"
+                className="flex-1 rounded bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300 outline-none placeholder:text-zinc-400"
               />
               <button
                 onClick={handleSave}

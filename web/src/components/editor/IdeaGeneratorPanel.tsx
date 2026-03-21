@@ -68,14 +68,14 @@ function IdeaCard({
           </div>
           <div className="mt-1 flex items-center gap-2">
             <ScoreBadge score={idea.score} />
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[10px] text-zinc-400">
               {idea.genreMix.primary.name} + {idea.genreMix.secondary.name}
             </span>
           </div>
         </div>
         <button
           onClick={() => setExpanded((e) => !e)}
-          className="shrink-0 rounded p-1 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+          className="shrink-0 rounded p-1 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
           aria-label={expanded ? 'Collapse' : 'Expand'}
         >
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -92,7 +92,7 @@ function IdeaCard({
         <div className="mt-3 space-y-2 border-t border-zinc-700 pt-3">
           {/* Mechanics */}
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               Mechanics
             </div>
             <div className="mt-1 flex flex-wrap gap-1">
@@ -110,7 +110,7 @@ function IdeaCard({
 
           {/* Hooks */}
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               Hooks
             </div>
             <ul className="mt-1 list-inside list-disc text-[11px] text-zinc-400">
@@ -122,7 +122,7 @@ function IdeaCard({
 
           {/* Target Audience */}
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               Target Audience
             </div>
             <p className="mt-0.5 text-[11px] text-zinc-400">
@@ -216,7 +216,7 @@ function FilterSection({
 
           {/* Max complexity */}
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               Max Complexity
             </div>
             <div className="mt-1 flex gap-1">
@@ -243,7 +243,7 @@ function FilterSection({
 
           {/* Genre filter */}
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               Genres
             </div>
             <div className="mt-1 flex flex-wrap gap-1">
@@ -266,7 +266,7 @@ function FilterSection({
 
           {/* Mechanic filter */}
           <div>
-            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-400">
               Mechanics
             </div>
             <div className="mt-1 flex flex-wrap gap-1">
@@ -290,7 +290,7 @@ function FilterSection({
           {activeCount > 0 && (
             <button
               onClick={() => onFiltersChange({})}
-              className="text-[10px] text-zinc-500 underline hover:text-zinc-300"
+              className="text-[10px] text-zinc-400 underline hover:text-zinc-300"
             >
               Clear all filters
             </button>
@@ -383,7 +383,7 @@ export function IdeaGeneratorPanel() {
         {!hasIdeas && !isGenerating && (
           <div className="mt-8 text-center">
             <Lightbulb size={32} className="mx-auto text-zinc-700" />
-            <p className="mt-2 text-xs text-zinc-500">
+            <p className="mt-2 text-xs text-zinc-400">
               Click the button to generate game ideas by remixing genres and mechanics
             </p>
           </div>

@@ -109,7 +109,7 @@ export function InputBindingsPanel() {
         onClick={() => setCollapsed(!collapsed)}
         aria-expanded={!collapsed}
         aria-label={collapsed ? 'Expand input bindings' : 'Collapse input bindings'}
-        className="flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wide text-zinc-500 hover:text-zinc-300"
+        className="flex w-full items-center justify-between text-xs font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-300"
       >
         <span className="flex items-center gap-1.5">
           <Keyboard className="w-3.5 h-3.5" aria-hidden="true" />
@@ -141,7 +141,7 @@ export function InputBindingsPanel() {
 
           {/* Bindings list */}
           {inputBindings.length === 0 ? (
-            <p className="text-xs text-zinc-500 italic">No bindings configured</p>
+            <p className="text-xs text-zinc-400 italic">No bindings configured</p>
           ) : (
             <div className="space-y-2">
               {inputBindings.map((binding) => (
@@ -152,12 +152,12 @@ export function InputBindingsPanel() {
                   <div className="flex items-center justify-between mb-1">
                     <span className="font-medium text-zinc-300">{binding.actionName}</span>
                     <div className="flex items-center gap-1">
-                      <span className="text-zinc-600 text-[10px]">{binding.actionType}</span>
+                      <span className="text-zinc-400 text-[10px]">{binding.actionType}</span>
                       {isEditing && (
                         <button
                           onClick={() => removeInputBinding(binding.actionName)}
                           aria-label={`Remove ${binding.actionName} binding`}
-                          className="text-zinc-600 hover:text-red-400"
+                          className="text-zinc-400 hover:text-red-400"
                           title="Remove binding"
                         >
                           <X className="w-3 h-3" />
@@ -179,7 +179,7 @@ export function InputBindingsPanel() {
                             setRebindTarget({ actionName: binding.actionName, field: 'sources' })
                           }
                           aria-label={`Rebind ${binding.actionName}`}
-                          className={`rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 ${
+                          className={`rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 ${
                             rebindTarget?.actionName === binding.actionName && rebindTarget.field === 'sources'
                               ? 'bg-blue-600 text-white'
                               : ''
@@ -194,7 +194,7 @@ export function InputBindingsPanel() {
                   ) : (
                     <div className="space-y-1">
                       <div className="flex items-center gap-1">
-                        <span className="text-zinc-500 w-4">+</span>
+                        <span className="text-zinc-400 w-4">+</span>
                         {(binding.positiveKeys ?? []).map((k, i) => (
                           <span key={i} className="rounded bg-zinc-700 px-1.5 py-0.5 text-zinc-300">
                             {formatKeyCode(k)}
@@ -206,7 +206,7 @@ export function InputBindingsPanel() {
                               setRebindTarget({ actionName: binding.actionName, field: 'positiveKeys' })
                             }
                             aria-label={`Rebind ${binding.actionName} positive key`}
-                            className={`rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 ${
+                            className={`rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 ${
                               rebindTarget?.actionName === binding.actionName && rebindTarget.field === 'positiveKeys'
                                 ? 'bg-blue-600 text-white'
                                 : ''
@@ -219,7 +219,7 @@ export function InputBindingsPanel() {
                         )}
                       </div>
                       <div className="flex items-center gap-1">
-                        <span className="text-zinc-500 w-4">-</span>
+                        <span className="text-zinc-400 w-4">-</span>
                         {(binding.negativeKeys ?? []).map((k, i) => (
                           <span key={i} className="rounded bg-zinc-700 px-1.5 py-0.5 text-zinc-300">
                             {formatKeyCode(k)}
@@ -231,7 +231,7 @@ export function InputBindingsPanel() {
                               setRebindTarget({ actionName: binding.actionName, field: 'negativeKeys' })
                             }
                             aria-label={`Rebind ${binding.actionName} negative key`}
-                            className={`rounded px-1.5 py-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300 ${
+                            className={`rounded px-1.5 py-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300 ${
                               rebindTarget?.actionName === binding.actionName && rebindTarget.field === 'negativeKeys'
                                 ? 'bg-blue-600 text-white'
                                 : ''
@@ -254,7 +254,7 @@ export function InputBindingsPanel() {
           {isEditing && !addingNew && (
             <button
               onClick={() => setAddingNew(true)}
-              className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300"
+              className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-300"
             >
               <Plus className="w-3 h-3" />
               Add Binding

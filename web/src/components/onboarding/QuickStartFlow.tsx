@@ -162,14 +162,14 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
                 {step === 2 && 'Describe your game'}
                 {step === 3 && 'Your game is ready!'}
               </h2>
-              <p className="text-xs text-zinc-500">
+              <p className="text-xs text-zinc-400">
                 Step {step} of 3 — less than 60 seconds to a playable game
               </p>
             </div>
           </div>
           <button
             onClick={handleSkipWithStorage}
-            className="flex h-7 w-7 items-center justify-center rounded text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
+            className="flex h-7 w-7 items-center justify-center rounded text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
             aria-label="Skip quickstart"
           >
             <X className="h-4 w-4" />
@@ -234,7 +234,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
                   className="w-full resize-none rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   placeholder={selectedCard.placeholder}
                 />
-                <p className="text-xs text-zinc-500">
+                <p className="text-xs text-zinc-400">
                   AI will use a pre-built template to build your game — you can customize everything afterwards.
                 </p>
               </div>
@@ -311,7 +311,7 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
                   localStorage.setItem(STORAGE_KEY, '1');
                   onComplete();
                 }}
-                className="text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+                className="text-sm text-zinc-400 hover:text-zinc-300 transition-colors"
               >
                 Edit first, play later
               </button>

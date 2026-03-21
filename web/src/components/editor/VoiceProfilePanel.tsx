@@ -48,11 +48,11 @@ export function VoiceProfilePanel() {
         <div className="flex items-center gap-1.5">
           <Users size={13} className="text-purple-400" />
           <span className="font-medium text-zinc-300">Voice Profiles</span>
-          <span className="text-[10px] text-zinc-600">({profileList.length})</span>
+          <span className="text-[10px] text-zinc-400">({profileList.length})</span>
         </div>
         <button
           onClick={() => setShowAdd(!showAdd)}
-          className="rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+          className="rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
           title="Add voice profile"
         >
           <Plus size={14} />
@@ -74,7 +74,7 @@ export function VoiceProfilePanel() {
       {/* Profile list */}
       <div className="flex-1 overflow-y-auto">
         {profileList.length === 0 && !showAdd ? (
-          <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-600">
+          <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-400">
             <Mic size={20} />
             <span>No voice profiles</span>
             <span className="text-[10px]">Add profiles to ensure consistent character voices</span>
@@ -106,7 +106,7 @@ export function VoiceProfilePanel() {
       {/* Unmapped speakers hint */}
       {unmappedSpeakers.length > 0 && (
         <div className="border-t border-zinc-800 px-2 py-1.5">
-          <span className="text-[10px] text-zinc-600">
+          <span className="text-[10px] text-zinc-400">
             {unmappedSpeakers.length} speaker{unmappedSpeakers.length > 1 ? 's' : ''} without
             profiles: {unmappedSpeakers.slice(0, 3).join(', ')}
             {unmappedSpeakers.length > 3 ? '...' : ''}
@@ -170,7 +170,7 @@ function AddProfileForm({
             setSpeaker('__custom__');
           }}
           placeholder="Speaker name"
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-600"
+          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-400"
         />
       )}
 
@@ -180,7 +180,7 @@ function AddProfileForm({
           value={customSpeaker}
           onChange={(e) => setCustomSpeaker(e.target.value)}
           placeholder="Speaker name"
-          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-600"
+          className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-300 outline-none placeholder:text-zinc-400"
         />
       )}
 
@@ -259,7 +259,7 @@ function ProfileRow({
       >
         <Mic size={11} className="text-purple-400" />
         <span className="flex-1 truncate font-medium text-zinc-300">{profile.speaker}</span>
-        <span className="text-[10px] text-zinc-600">{profile.voiceLabel}</span>
+        <span className="text-[10px] text-zinc-400">{profile.voiceLabel}</span>
       </button>
 
       {/* Edit panel */}
@@ -267,7 +267,7 @@ function ProfileRow({
         <div className="space-y-2 bg-zinc-800/50 px-2 py-2">
           {/* Voice select */}
           <div>
-            <label className="mb-0.5 block text-[10px] text-zinc-500">Voice</label>
+            <label className="mb-0.5 block text-[10px] text-zinc-400">Voice</label>
             <select
               value={voiceIdx}
               onChange={(e) => setVoiceIdx(Number(e.target.value))}
@@ -284,8 +284,8 @@ function ProfileRow({
           {/* Stability slider */}
           <div>
             <div className="flex items-center justify-between">
-              <label className="text-[10px] text-zinc-500">Stability</label>
-              <span className="text-[10px] text-zinc-600">{stability.toFixed(2)}</span>
+              <label className="text-[10px] text-zinc-400">Stability</label>
+              <span className="text-[10px] text-zinc-400">{stability.toFixed(2)}</span>
             </div>
             <input
               type="range"
@@ -301,8 +301,8 @@ function ProfileRow({
           {/* Similarity boost slider */}
           <div>
             <div className="flex items-center justify-between">
-              <label className="text-[10px] text-zinc-500">Similarity</label>
-              <span className="text-[10px] text-zinc-600">{similarityBoost.toFixed(2)}</span>
+              <label className="text-[10px] text-zinc-400">Similarity</label>
+              <span className="text-[10px] text-zinc-400">{similarityBoost.toFixed(2)}</span>
             </div>
             <input
               type="range"
@@ -318,8 +318,8 @@ function ProfileRow({
           {/* Style slider */}
           <div>
             <div className="flex items-center justify-between">
-              <label className="text-[10px] text-zinc-500">Style</label>
-              <span className="text-[10px] text-zinc-600">{style.toFixed(2)}</span>
+              <label className="text-[10px] text-zinc-400">Style</label>
+              <span className="text-[10px] text-zinc-400">{style.toFixed(2)}</span>
             </div>
             <input
               type="range"

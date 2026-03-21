@@ -42,7 +42,7 @@ export function AssetCard({ asset }: AssetCardProps) {
               className="w-full h-full object-cover group-hover:scale-105 transition-transform"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-zinc-600">
+            <div className="w-full h-full flex items-center justify-center text-zinc-400">
               <div className="text-center">
                 <div className={`${categoryColor} w-16 h-16 rounded-full mx-auto mb-2 flex items-center justify-center`}>
                   <span className="text-2xl font-bold text-white">
@@ -80,13 +80,13 @@ export function AssetCard({ asset }: AssetCardProps) {
           <h3 className="text-sm font-semibold text-zinc-200 truncate group-hover:text-blue-400 transition-colors">
             {asset.name}
           </h3>
-          <p className="text-xs text-zinc-500 mt-1">by {asset.sellerName}</p>
+          <p className="text-xs text-zinc-400 mt-1">by {asset.sellerName}</p>
 
           <div className="flex items-center justify-between mt-2">
             <div className="flex items-center gap-1 text-xs text-zinc-400">
               <Star className="w-3 h-3 fill-yellow-500 text-yellow-500" />
               <span>{asset.avgRating.toFixed(1)}</span>
-              <span className="text-zinc-600">({asset.ratingCount})</span>
+              <span className="text-zinc-400">({asset.ratingCount})</span>
             </div>
 
             <div className="flex items-center gap-1 text-xs text-zinc-400">

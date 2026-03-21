@@ -259,7 +259,7 @@ export function ChatInput() {
       {/* Bottom toolbar */}
       <div className="flex items-center gap-2 border-t border-zinc-800 px-2 py-1">
         {tokenEstimate > 0 && (
-          <span className="text-[9px] text-zinc-600" title="Estimated token cost for this message">
+          <span className="text-[9px] text-zinc-400" title="Estimated token cost for this message">
             {formatTokenEstimate(tokenEstimate)} tokens
           </span>
         )}
@@ -280,7 +280,7 @@ export function ChatInput() {
           className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] transition-colors ${
             thinkingEnabled
               ? 'bg-amber-600/20 text-amber-400'
-              : 'text-zinc-500 hover:text-zinc-300'
+              : 'text-zinc-400 hover:text-zinc-300'
           }`}
           title={thinkingEnabled ? 'Disable extended thinking' : 'Enable extended thinking'}
         >
@@ -294,7 +294,7 @@ export function ChatInput() {
           className={`flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] transition-colors ${
             approvalMode
               ? 'bg-amber-600/20 text-amber-400'
-              : 'text-zinc-500 hover:text-zinc-300'
+              : 'text-zinc-400 hover:text-zinc-300'
           }`}
           title={approvalMode ? 'Disable command preview' : 'Enable command preview — review AI actions before execution'}
         >
@@ -305,7 +305,7 @@ export function ChatInput() {
         <button
           onClick={() => fileInputRef.current?.click()}
           aria-label="Attach image"
-          className="text-zinc-500 hover:text-zinc-300"
+          className="text-zinc-400 hover:text-zinc-300"
           title="Attach image"
         >
           <Paperclip size={13} />
@@ -315,7 +315,7 @@ export function ChatInput() {
           onClick={toggleVoice}
           aria-label={isRecording ? 'Stop recording' : 'Voice input'}
           aria-pressed={isRecording}
-          className={`${isRecording ? 'text-red-400 animate-pulse' : 'text-zinc-500 hover:text-zinc-300'}`}
+          className={`${isRecording ? 'text-red-400 animate-pulse' : 'text-zinc-400 hover:text-zinc-300'}`}
           title={isRecording ? 'Stop recording' : 'Voice input'}
         >
           {isRecording ? <MicOff size={13} /> : <Mic size={13} />}

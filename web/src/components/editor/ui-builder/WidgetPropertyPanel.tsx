@@ -48,7 +48,7 @@ export function WidgetPropertyPanel() {
       {/* Common properties */}
       <div className="space-y-2">
         <label className="block">
-          <span className="text-zinc-500">Name</span>
+          <span className="text-zinc-400">Name</span>
           <input
             type="text"
             value={widget.name}
@@ -59,7 +59,7 @@ export function WidgetPropertyPanel() {
 
         <div className="grid grid-cols-2 gap-2">
           <label className="block">
-            <span className="text-zinc-500">X (%)</span>
+            <span className="text-zinc-400">X (%)</span>
             <input
               type="number"
               min="0"
@@ -72,7 +72,7 @@ export function WidgetPropertyPanel() {
           </label>
 
           <label className="block">
-            <span className="text-zinc-500">Y (%)</span>
+            <span className="text-zinc-400">Y (%)</span>
             <input
               type="number"
               min="0"
@@ -87,7 +87,7 @@ export function WidgetPropertyPanel() {
 
         <div className="grid grid-cols-2 gap-2">
           <label className="block">
-            <span className="text-zinc-500">Width (%)</span>
+            <span className="text-zinc-400">Width (%)</span>
             <input
               type="number"
               min="0"
@@ -100,7 +100,7 @@ export function WidgetPropertyPanel() {
           </label>
 
           <label className="block">
-            <span className="text-zinc-500">Height (%)</span>
+            <span className="text-zinc-400">Height (%)</span>
             <input
               type="number"
               min="0"
@@ -114,7 +114,7 @@ export function WidgetPropertyPanel() {
         </div>
 
         <label className="block">
-          <span className="text-zinc-500">Anchor</span>
+          <span className="text-zinc-400">Anchor</span>
           <select
             value={widget.anchor}
             onChange={(e) => handleChange('anchor', e.target.value)}
@@ -140,7 +140,7 @@ export function WidgetPropertyPanel() {
               onChange={(e) => handleChange('visible', e.target.checked)}
               className="rounded border-zinc-700 bg-zinc-800 text-blue-600"
             />
-            <span className="text-zinc-500">Visible</span>
+            <span className="text-zinc-400">Visible</span>
           </label>
 
           <label className="flex items-center gap-2">
@@ -150,19 +150,19 @@ export function WidgetPropertyPanel() {
               onChange={(e) => handleChange('interactable', e.target.checked)}
               className="rounded border-zinc-700 bg-zinc-800 text-blue-600"
             />
-            <span className="text-zinc-500">Interactable</span>
+            <span className="text-zinc-400">Interactable</span>
           </label>
         </div>
       </div>
 
       {/* Type-specific properties */}
       <div className="border-t border-zinc-800 pt-3">
-        <h4 className="text-zinc-500 font-semibold mb-2">Type-Specific Settings</h4>
+        <h4 className="text-zinc-400 font-semibold mb-2">Type-Specific Settings</h4>
 
         {widget.type === 'text' && (
           <div className="space-y-2">
             <label className="block">
-              <span className="text-zinc-500">Content</span>
+              <span className="text-zinc-400">Content</span>
               <textarea
                 value={widget.config.content}
                 onChange={(e) => handleConfigChange('content', e.target.value)}
@@ -182,7 +182,7 @@ export function WidgetPropertyPanel() {
         {widget.type === 'image' && (
           <div className="space-y-2">
             <label className="block">
-              <span className="text-zinc-500">Asset ID</span>
+              <span className="text-zinc-400">Asset ID</span>
               <input
                 type="text"
                 value={widget.config.assetId || ''}
@@ -192,7 +192,7 @@ export function WidgetPropertyPanel() {
               />
             </label>
             <label className="block">
-              <span className="text-zinc-500">Fit</span>
+              <span className="text-zinc-400">Fit</span>
               <select
                 value={widget.config.fit}
                 onChange={(e) => handleConfigChange('fit', e.target.value)}
@@ -210,7 +210,7 @@ export function WidgetPropertyPanel() {
         {widget.type === 'button' && (
           <div className="space-y-2">
             <label className="block">
-              <span className="text-zinc-500">Label</span>
+              <span className="text-zinc-400">Label</span>
               <input
                 type="text"
                 value={widget.config.label}
@@ -219,7 +219,7 @@ export function WidgetPropertyPanel() {
               />
             </label>
             <label className="block">
-              <span className="text-zinc-500">Action</span>
+              <span className="text-zinc-400">Action</span>
               <select
                 value={widget.config.action.type}
                 onChange={(e) => handleConfigChange('action', { type: e.target.value })}
@@ -247,7 +247,7 @@ export function WidgetPropertyPanel() {
             />
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-zinc-500">Min</span>
+                <span className="text-zinc-400">Min</span>
                 <input
                   type="number"
                   value={widget.config.min}
@@ -256,7 +256,7 @@ export function WidgetPropertyPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-zinc-500">Max</span>
+                <span className="text-zinc-400">Max</span>
                 <input
                   type="number"
                   value={widget.config.max}
@@ -266,7 +266,7 @@ export function WidgetPropertyPanel() {
               </label>
             </div>
             <label className="block">
-              <span className="text-zinc-500">Direction</span>
+              <span className="text-zinc-400">Direction</span>
               <select
                 value={widget.config.direction}
                 onChange={(e) => handleConfigChange('direction', e.target.value)}
@@ -279,7 +279,7 @@ export function WidgetPropertyPanel() {
             </label>
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-zinc-500">Fill Color</span>
+                <span className="text-zinc-400">Fill Color</span>
                 <input
                   type="color"
                   value={widget.config.fillColor}
@@ -288,7 +288,7 @@ export function WidgetPropertyPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-zinc-500">Track Color</span>
+                <span className="text-zinc-400">Track Color</span>
                 <input
                   type="color"
                   value={widget.config.trackColor}
@@ -310,7 +310,7 @@ export function WidgetPropertyPanel() {
             />
             <div className="grid grid-cols-3 gap-2">
               <label className="block">
-                <span className="text-zinc-500">Min</span>
+                <span className="text-zinc-400">Min</span>
                 <input
                   type="number"
                   value={widget.config.min}
@@ -319,7 +319,7 @@ export function WidgetPropertyPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-zinc-500">Max</span>
+                <span className="text-zinc-400">Max</span>
                 <input
                   type="number"
                   value={widget.config.max}
@@ -328,7 +328,7 @@ export function WidgetPropertyPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-zinc-500">Step</span>
+                <span className="text-zinc-400">Step</span>
                 <input
                   type="number"
                   value={widget.config.step}
@@ -350,7 +350,7 @@ export function WidgetPropertyPanel() {
             />
             <div className="grid grid-cols-2 gap-2">
               <label className="block">
-                <span className="text-zinc-500">On Label</span>
+                <span className="text-zinc-400">On Label</span>
                 <input
                   type="text"
                   value={widget.config.onLabel}
@@ -359,7 +359,7 @@ export function WidgetPropertyPanel() {
                 />
               </label>
               <label className="block">
-                <span className="text-zinc-500">Off Label</span>
+                <span className="text-zinc-400">Off Label</span>
                 <input
                   type="text"
                   value={widget.config.offLabel}

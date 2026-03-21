@@ -149,7 +149,7 @@ export function UIPreviewRenderer({
 
       default:
         content = (
-          <div className="flex items-center justify-center text-xs text-zinc-600">
+          <div className="flex items-center justify-center text-xs text-zinc-400">
             {widget.type}
           </div>
         );

@@ -97,7 +97,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'inspector'
             ? 'border-b border-blue-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         Inspector
@@ -112,7 +112,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`relative flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'chat'
             ? 'border-b border-purple-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         AI Chat
@@ -130,7 +130,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'modify'
             ? 'border-b border-amber-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         Modify
@@ -145,7 +145,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'script'
             ? 'border-b border-green-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         Script
@@ -160,7 +160,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-2.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'ui'
             ? 'border-b border-orange-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         UI
@@ -175,7 +175,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'gdd'
             ? 'border-b border-amber-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         GDD
@@ -190,7 +190,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'review'
             ? 'border-b border-yellow-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         Review
@@ -205,7 +205,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
         className={`flex-1 px-2 py-1.5 text-[10px] font-medium uppercase tracking-wider transition-colors ${
           activeTab === 'behavior'
             ? 'border-b border-teal-500 text-zinc-200'
-            : 'text-zinc-600 hover:text-zinc-400'
+            : 'text-zinc-400 hover:text-zinc-400'
         }`}
       >
         AI NPC
@@ -219,7 +219,7 @@ function RightPanelContent({ activeTab }: { activeTab: RightPanelTab }) {
   return (
     <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
       {activeTab === 'inspector' && <InspectorPanel />}
-      <Suspense fallback={<div className="p-4 text-zinc-500">Loading...</div>}>
+      <Suspense fallback={<div className="p-4 text-zinc-400">Loading...</div>}>
         {activeTab === 'script' && <ScriptEditorPanel />}
         {activeTab === 'ui' && <UIBuilderPanel />}
         {activeTab === 'chat' && <ChatPanel />}
@@ -292,13 +292,13 @@ function ChatOverlay() {
           <span className="text-xs font-medium text-zinc-400">AI Chat (Ctrl+K to toggle)</span>
           <button
             onClick={() => setChatOverlayOpen(false)}
-            className="rounded p-0.5 text-zinc-500 hover:text-zinc-300"
+            className="rounded p-0.5 text-zinc-400 hover:text-zinc-300"
           >
             <X size={14} />
           </button>
         </div>
         <div className="flex-1 overflow-hidden">
-          <Suspense fallback={<div className="p-4 text-zinc-500">Loading chat...</div>}>
+          <Suspense fallback={<div className="p-4 text-zinc-400">Loading chat...</div>}>
             <ChatPanel />
           </Suspense>
         </div>
@@ -492,7 +492,7 @@ export function EditorLayout() {
             {sceneName !== 'Untitled' && (
               <>
                 <span className="text-zinc-700">/</span>
-                <span className="truncate text-[10px] text-zinc-500">{sceneName}</span>
+                <span className="truncate text-[10px] text-zinc-400">{sceneName}</span>
               </>
             )}
           </div>
@@ -556,7 +556,7 @@ export function EditorLayout() {
         <div className="flex items-center gap-3">
           <span className="text-xs font-semibold text-zinc-400">SpawnForge</span>
           <div className="h-3 w-px bg-zinc-700" />
-          <span className="max-w-[200px] truncate text-xs text-zinc-500" title={sceneName}>
+          <span className="max-w-[200px] truncate text-xs text-zinc-400" title={sceneName}>
             {sceneName}
           </span>
           <SceneToolbar />

@@ -105,7 +105,7 @@ export function DocsPanel() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center bg-zinc-900">
-        <p className="text-xs text-zinc-500">Loading documentation...</p>
+        <p className="text-xs text-zinc-400">Loading documentation...</p>
       </div>
     );
   }
@@ -113,9 +113,9 @@ export function DocsPanel() {
   if (error) {
     return (
       <div className="flex h-full flex-col items-center justify-center bg-zinc-900 p-4">
-        <BookOpen size={24} className="mb-2 text-zinc-600" />
+        <BookOpen size={24} className="mb-2 text-zinc-400" />
         <p className="text-xs text-red-400">{error}</p>
-        <p className="mt-1 text-[10px] text-zinc-600">Documentation is available when running the dev server</p>
+        <p className="mt-1 text-[10px] text-zinc-400">Documentation is available when running the dev server</p>
       </div>
     );
   }
@@ -128,12 +128,12 @@ export function DocsPanel() {
         <div className="flex items-center gap-2 border-b border-zinc-800 px-2 py-1.5">
           <button
             onClick={goBack}
-            className="rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+            className="rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
             title="Back"
           >
             <ArrowLeft size={14} />
           </button>
-          <span className="text-[10px] text-zinc-600">{activeDoc.category}</span>
+          <span className="text-[10px] text-zinc-400">{activeDoc.category}</span>
           <ChevronRight size={10} className="text-zinc-700" />
           <span className="truncate font-medium text-zinc-300">{activeDoc.title}</span>
         </div>
@@ -160,13 +160,13 @@ export function DocsPanel() {
       {/* Search */}
       <div className="border-b border-zinc-800 px-2 py-1">
         <div className="flex items-center gap-1 rounded bg-zinc-800 px-1.5 py-1">
-          <Search size={11} className="text-zinc-500" />
+          <Search size={11} className="text-zinc-400" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search docs..."
-            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder:text-zinc-600 outline-none"
+            className="flex-1 bg-transparent text-xs text-zinc-300 placeholder:text-zinc-400 outline-none"
           />
         </div>
       </div>
@@ -184,17 +184,17 @@ export function DocsPanel() {
                 <div className="flex items-center gap-1">
                   <FileText size={11} className="text-blue-400" />
                   <span className="font-medium text-zinc-300">{result.title}</span>
-                  <span className="text-[10px] text-zinc-600">({result.score})</span>
+                  <span className="text-[10px] text-zinc-400">({result.score})</span>
                 </div>
                 {result.matchSection && (
-                  <span className="text-[10px] text-zinc-500">in: {result.matchSection}</span>
+                  <span className="text-[10px] text-zinc-400">in: {result.matchSection}</span>
                 )}
-                <span className="mt-0.5 text-[10px] text-zinc-600 line-clamp-2">{result.snippet}</span>
+                <span className="mt-0.5 text-[10px] text-zinc-400 line-clamp-2">{result.snippet}</span>
               </button>
             ))}
           </div>
         ) : searchQuery ? (
-          <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-600">
+          <div className="flex flex-col items-center gap-2 px-3 py-8 text-zinc-400">
             <Search size={24} />
             <span>No results for &quot;{searchQuery}&quot;</span>
           </div>
@@ -211,7 +211,7 @@ export function DocsPanel() {
                   >
                     {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                     {CATEGORY_LABELS[cat] ?? cat}
-                    <span className="text-[10px] text-zinc-600">({catDocs.length})</span>
+                    <span className="text-[10px] text-zinc-400">({catDocs.length})</span>
                   </button>
                   {isExpanded && (
                     <div className="ml-2">
@@ -219,7 +219,7 @@ export function DocsPanel() {
                         <button
                           key={doc.path}
                           onClick={() => navigateTo(doc.path)}
-                          className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                          className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300"
                         >
                           <FileText size={11} />
                           <span className="truncate">{doc.title}</span>
@@ -277,7 +277,7 @@ function MarkdownContent({ content }: { content: string }) {
     } else if (line.startsWith('- ') || line.startsWith('* ')) {
       elements.push(
         <div key={i} className="ml-3 flex gap-1 text-zinc-400">
-          <span className="text-zinc-600">•</span>
+          <span className="text-zinc-400">•</span>
           <span>{formatInline(line.slice(2))}</span>
         </div>
       );
@@ -285,7 +285,7 @@ function MarkdownContent({ content }: { content: string }) {
       const num = line.match(/^(\d+)\.\s(.*)/)!;
       elements.push(
         <div key={i} className="ml-3 flex gap-1 text-zinc-400">
-          <span className="text-zinc-600">{num[1]}.</span>
+          <span className="text-zinc-400">{num[1]}.</span>
           <span>{formatInline(num[2])}</span>
         </div>
       );

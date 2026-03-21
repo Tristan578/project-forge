@@ -76,7 +76,7 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
       </div>
 
       {/* Volume Label */}
-      <div className="text-[10px] text-zinc-500 text-center tabular-nums">
+      <div className="text-[10px] text-zinc-400 text-center tabular-nums">
         {Math.round(bus.volume * 100)}%
       </div>
 
@@ -88,7 +88,7 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
         className={`px-2 py-1 text-xs font-bold rounded transition-colors ${
           bus.muted
             ? 'bg-red-900/50 text-red-400 border border-red-700'
-            : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-400'
+            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-400'
         }`}
       >
         M
@@ -103,7 +103,7 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
           className={`px-2 py-1 text-xs font-bold rounded transition-colors ${
             bus.soloed
               ? 'bg-yellow-900/50 text-yellow-400 border border-yellow-700'
-              : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-400'
+              : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-400'
           }`}
         >
           S
@@ -279,7 +279,7 @@ function MixerStrip({ bus, isMaster, onVolumeChange, onMuteToggle, onSoloToggle,
             aria-label={`Add effect to ${bus.name}`}
             aria-expanded={showEffectMenu}
             aria-haspopup="true"
-            className="w-full px-2 py-1 text-[10px] rounded bg-zinc-800 text-zinc-500 hover:bg-zinc-700 hover:text-zinc-400"
+            className="w-full px-2 py-1 text-[10px] rounded bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-400"
           >
             +FX
           </button>
@@ -334,7 +334,7 @@ export const AudioMixerPanel = memo(function AudioMixerPanel() {
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
         <div className="flex items-center gap-2">
-          <SlidersHorizontal size={14} className="text-zinc-500" />
+          <SlidersHorizontal size={14} className="text-zinc-400" />
           <span className="text-xs font-semibold text-zinc-400">Audio Mixer</span>
         </div>
         <div className="flex items-center gap-2">

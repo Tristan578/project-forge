@@ -98,7 +98,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
           {/* Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
-              Prompt <span className="text-zinc-600">(3-500 chars)</span>
+              Prompt <span className="text-zinc-400">(3-500 chars)</span>
             </label>
             <textarea
               value={prompt}
@@ -107,7 +107,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
               placeholder="A medieval wooden treasure chest with iron bands and ornate lock"
               className="h-20 w-full resize-none rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-blue-500 disabled:opacity-50"
             />
-            <div className="mt-1 text-right text-[10px] text-zinc-600">
+            <div className="mt-1 text-right text-[10px] text-zinc-400">
               {prompt.length}/500
             </div>
           </div>
@@ -160,7 +160,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
           {/* Negative Prompt */}
           <div>
             <label className="mb-1 block text-xs font-medium text-zinc-300">
-              Negative Prompt <span className="text-zinc-600">(optional)</span>
+              Negative Prompt <span className="text-zinc-400">(optional)</span>
             </label>
             <input
               type="text"

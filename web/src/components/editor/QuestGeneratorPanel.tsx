@@ -20,11 +20,11 @@ function ObjectiveList({ quest }: { quest: Quest }) {
     <ul className="ml-4 space-y-1">
       {quest.objectives.map((obj) => (
         <li key={obj.id} className="text-xs text-zinc-400">
-          <span className={obj.optional ? 'italic text-zinc-500' : ''}>
+          <span className={obj.optional ? 'italic text-zinc-400' : ''}>
             {obj.optional ? '(Optional) ' : ''}
             {obj.description}
           </span>
-          <span className="ml-1 text-zinc-600">
+          <span className="ml-1 text-zinc-400">
             [{obj.current}/{obj.required}]
           </span>
         </li>
@@ -54,7 +54,7 @@ function QuestCard({ quest, isExpanded, onToggle }: {
   onToggle: () => void;
 }) {
   const statusColors: Record<string, string> = {
-    locked: 'text-zinc-600',
+    locked: 'text-zinc-400',
     available: 'text-green-400',
     active: 'text-blue-400',
     completed: 'text-emerald-400',
@@ -74,14 +74,14 @@ function QuestCard({ quest, isExpanded, onToggle }: {
           </span>
           <span className="text-sm font-medium text-zinc-200">{quest.title}</span>
         </div>
-        <span className="text-xs text-zinc-500">Lv.{quest.level}</span>
+        <span className="text-xs text-zinc-400">Lv.{quest.level}</span>
       </button>
 
       {isExpanded && (
         <div className="mt-2 space-y-2">
           <p className="text-xs text-zinc-400">{quest.description}</p>
-          <p className="text-xs italic text-zinc-500">{quest.narrativeHook}</p>
-          <div className="text-xs text-zinc-500">
+          <p className="text-xs italic text-zinc-400">{quest.narrativeHook}</p>
+          <div className="text-xs text-zinc-400">
             NPC: {quest.giverNpc} | Location: {quest.location}
           </div>
 
@@ -195,8 +195,8 @@ export function QuestGeneratorPanel() {
               </option>
             ))}
           </select>
-          <p className="mt-1 text-xs text-zinc-500">{selectedTemplate.description}</p>
-          <p className="mt-0.5 text-xs text-zinc-600">
+          <p className="mt-1 text-xs text-zinc-400">{selectedTemplate.description}</p>
+          <p className="mt-0.5 text-xs text-zinc-400">
             Arc: {selectedTemplate.arcDescription}
           </p>
         </div>
@@ -214,7 +214,7 @@ export function QuestGeneratorPanel() {
             rows={3}
             maxLength={200}
           />
-          <div className="mt-0.5 text-right text-xs text-zinc-600">
+          <div className="mt-0.5 text-right text-xs text-zinc-400">
             {description.length}/200
           </div>
         </div>
@@ -232,7 +232,7 @@ export function QuestGeneratorPanel() {
             onChange={(e) => setDifficulty(Number(e.target.value))}
             className="w-full accent-blue-500"
           />
-          <div className="flex justify-between text-xs text-zinc-600">
+          <div className="flex justify-between text-xs text-zinc-400">
             <span>Easy</span>
             <span>Hard</span>
           </div>
@@ -270,7 +270,7 @@ export function QuestGeneratorPanel() {
         <button
           onClick={handleGenerate}
           disabled={!canGenerate}
-          className="w-full rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500"
+          className="w-full rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
         >
           Generate Quest Chain
         </button>

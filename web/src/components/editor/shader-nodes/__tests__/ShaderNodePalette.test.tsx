@@ -143,8 +143,8 @@ describe('ShaderNodePalette', () => {
 
   it('shows a count badge next to each category header', () => {
     const { container } = render(<ShaderNodePalette onClose={onClose} />);
-    // Count badges are xs text with a number, rendered as .text-zinc-600
-    const badges = container.querySelectorAll('.text-zinc-600');
+    // Count badges are xs text with a number, rendered as .text-zinc-400
+    const badges = container.querySelectorAll('.text-zinc-400');
     expect(badges.length).toBeGreaterThan(0);
   });
 });

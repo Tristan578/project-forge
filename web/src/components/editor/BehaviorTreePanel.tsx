@@ -68,13 +68,13 @@ function TreeNodeView({ node, depth }: { node: BehaviorNode; depth: number }) {
         aria-label={`${node.type}: ${node.name}`}
       >
         {hasChildren ? (
-          expanded ? <ChevronDown size={12} className="shrink-0 text-zinc-500" /> : <ChevronRight size={12} className="shrink-0 text-zinc-500" />
+          expanded ? <ChevronDown size={12} className="shrink-0 text-zinc-400" /> : <ChevronRight size={12} className="shrink-0 text-zinc-400" />
         ) : (
           <span className="w-3 shrink-0" />
         )}
         <span className={`shrink-0 font-mono text-[10px] ${colorClass}`}>{icon}</span>
         <span className="text-zinc-300">{node.name}</span>
-        <span className="ml-auto text-[10px] text-zinc-600">{node.type}</span>
+        <span className="ml-auto text-[10px] text-zinc-400">{node.type}</span>
       </button>
       {hasChildren && expanded && node.children!.map((child) => (
         <TreeNodeView key={child.id} node={child} depth={depth + 1} />
@@ -90,12 +90,12 @@ function VariableEditor({ variables }: { variables: BehaviorVariable[] }) {
 
   return (
     <div className="space-y-1.5">
-      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Variables</h4>
+      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Variables</h4>
       {variables.map((v) => (
         <div key={v.name} className="flex items-center gap-2 text-xs">
           <span className="min-w-0 truncate text-zinc-300">{v.name}</span>
-          <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-500">{v.type}</span>
-          <span className="ml-auto truncate text-zinc-500">{JSON.stringify(v.defaultValue)}</span>
+          <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">{v.type}</span>
+          <span className="ml-auto truncate text-zinc-400">{JSON.stringify(v.defaultValue)}</span>
         </div>
       ))}
     </div>
@@ -168,7 +168,7 @@ export function BehaviorTreePanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {/* Description Input */}
         <div className="space-y-1.5">
-          <label htmlFor="bt-description" className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <label htmlFor="bt-description" className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             Describe NPC Behavior
           </label>
           <textarea
@@ -176,7 +176,7 @@ export function BehaviorTreePanel() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="e.g. patrol between points A and B, chase the player when they get close, retreat when health is low"
-            className="w-full resize-none rounded border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            className="w-full resize-none rounded border border-zinc-700 bg-zinc-900 px-2.5 py-2 text-xs text-zinc-200 placeholder:text-zinc-400 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
             rows={3}
             disabled={isGenerating}
           />
@@ -210,7 +210,7 @@ export function BehaviorTreePanel() {
         {/* Preset Library */}
         {showPresets && (
           <div className="space-y-1 rounded border border-zinc-700 bg-zinc-900/50 p-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               Preset Behaviors
             </h4>
             {Object.entries(BEHAVIOR_PRESETS).map(([key, factory]) => {
@@ -223,7 +223,7 @@ export function BehaviorTreePanel() {
                   aria-label={`Apply ${preview.name} preset`}
                 >
                   <span className="text-xs font-medium text-zinc-200">{preview.name}</span>
-                  <span className="text-[10px] text-zinc-500">{preview.description}</span>
+                  <span className="text-[10px] text-zinc-400">{preview.description}</span>
                 </button>
               );
             })}
@@ -242,10 +242,10 @@ export function BehaviorTreePanel() {
         {currentTree && (
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                 Tree: {currentTree.name}
               </h4>
-              <span className="text-[10px] text-zinc-600">
+              <span className="text-[10px] text-zinc-400">
                 {countNodes(currentTree.root)} nodes, depth {getTreeDepth(currentTree.root)}
               </span>
             </div>
@@ -296,7 +296,7 @@ export function BehaviorTreePanel() {
         {!currentTree && !isGenerating && !error && (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
             <TreePine size={24} className="text-zinc-700" />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Describe NPC behavior in plain English or pick a preset to generate a behavior tree.
             </p>
           </div>

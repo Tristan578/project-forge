@@ -93,7 +93,7 @@ export function CommentSection({ comments, gameId, onAddComment }: CommentSectio
           maxLength={1000}
         />
         <div className="flex justify-between items-center">
-          <span className="text-xs text-zinc-500">{content.length}/1000</span>
+          <span className="text-xs text-zinc-400">{content.length}/1000</span>
           <button
             type="submit"
             disabled={!content.trim()}
@@ -118,14 +118,14 @@ export function CommentSection({ comments, gameId, onAddComment }: CommentSectio
                     <span className="text-sm font-semibold text-zinc-100">
                       {comment.authorName}
                     </span>
-                    <span className="text-xs text-zinc-500 ml-2">
+                    <span className="text-xs text-zinc-400 ml-2">
                       {formatDate(comment.createdAt)}
                     </span>
                   </div>
                   <button
                     onClick={() => handleFlag(comment.id)}
                     disabled={flaggedIds.has(comment.id)}
-                    className={`text-zinc-500 hover:text-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed ${flaggedIds.has(comment.id) ? 'text-red-500' : ''}`}
+                    className={`text-zinc-400 hover:text-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed ${flaggedIds.has(comment.id) ? 'text-red-500' : ''}`}
                     title={flaggedIds.has(comment.id) ? 'Reported' : 'Report comment'}
                   >
                     <Flag className="w-4 h-4" />
@@ -150,14 +150,14 @@ export function CommentSection({ comments, gameId, onAddComment }: CommentSectio
                           <span className="text-sm font-semibold text-zinc-100">
                             {reply.authorName}
                           </span>
-                          <span className="text-xs text-zinc-500 ml-2">
+                          <span className="text-xs text-zinc-400 ml-2">
                             {formatDate(reply.createdAt)}
                           </span>
                         </div>
                         <button
                           onClick={() => handleFlag(reply.id)}
                           disabled={flaggedIds.has(reply.id)}
-                          className={`text-zinc-500 hover:text-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed ${flaggedIds.has(reply.id) ? 'text-red-500' : ''}`}
+                          className={`text-zinc-400 hover:text-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed ${flaggedIds.has(reply.id) ? 'text-red-500' : ''}`}
                           title={flaggedIds.has(reply.id) ? 'Reported' : 'Report comment'}
                         >
                           <Flag className="w-4 h-4" />
@@ -174,7 +174,7 @@ export function CommentSection({ comments, gameId, onAddComment }: CommentSectio
       </div>
 
       {comments.length === 0 && (
-        <div className="text-center py-8 text-zinc-500">
+        <div className="text-center py-8 text-zinc-400">
           No comments yet. Be the first to comment!
         </div>
       )}

@@ -19,7 +19,7 @@ function PhaseItem({ phase }: { phase: PhaseStatus }) {
       ? 'text-green-400'
       : phase.status === 'active'
         ? 'text-blue-400'
-        : 'text-zinc-600';
+        : 'text-zinc-400';
 
   const timeStr =
     phase.status === 'done' && phase.duration > 0
@@ -168,7 +168,7 @@ export function InitOverlay() {
             )}
 
             <div className="mt-4 flex items-center justify-between border-t border-zinc-800 pt-4">
-              <div className="text-xs text-zinc-500">
+              <div className="text-xs text-zinc-400">
                 Elapsed: {(totalElapsed / 1000).toFixed(1)}s
                 {retryCount > 0 && ` | Attempt ${retryCount + 1}/3`}
               </div>

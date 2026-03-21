@@ -46,7 +46,7 @@ function StreamingIndicator({ messages, loopIteration }: { messages: { role: str
         {statusText}
       </span>
       {loopIteration > 0 && (
-        <span className="text-[9px] text-zinc-600">
+        <span className="text-[9px] text-zinc-400">
           (agentic loop)
         </span>
       )}
@@ -81,7 +81,7 @@ export function ChatPanel() {
           <span className="text-xs font-medium text-zinc-300">AI Assistant</span>
           <ConversationList />
           {totalSessionTokens > 0 && (
-            <span className="text-[9px] text-zinc-600" title="Session token usage">
+            <span className="text-[9px] text-zinc-400" title="Session token usage">
               {totalSessionTokens.toLocaleString()} tokens
             </span>
           )}
@@ -89,7 +89,7 @@ export function ChatPanel() {
         {messages.length > 0 && (
           <button
             onClick={clearChat}
-            className="text-zinc-600 hover:text-zinc-400"
+            className="text-zinc-400 hover:text-zinc-400"
             title="Clear chat"
             aria-label="Clear chat"
           >
@@ -103,7 +103,7 @@ export function ChatPanel() {
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
             <MessageSquare size={28} className="text-zinc-700" />
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-zinc-400">
               Describe what you want to build.
             </p>
             <SuggestionChips className="max-w-[280px] justify-center" />

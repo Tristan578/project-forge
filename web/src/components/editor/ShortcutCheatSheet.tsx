@@ -31,7 +31,7 @@ function ShortcutKeyDisplay({ shortcut }: { shortcut: ShortcutEntry }) {
     <span className="flex items-center gap-0.5 shrink-0">
       {parts.map((part, i) => (
         <span key={`${part}-${i}`} className="flex items-center gap-0.5">
-          {i > 0 && <span className="text-[10px] text-zinc-600">+</span>}
+          {i > 0 && <span className="text-[10px] text-zinc-400">+</span>}
           <KeyBadge>{part}</KeyBadge>
         </span>
       ))}
@@ -158,7 +158,7 @@ export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
         {/* Search */}
         <div className="border-b border-zinc-800 px-5 py-2">
           <div className="relative">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400" />
             <input
               ref={searchInputRef}
               type="text"
@@ -174,7 +174,7 @@ export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
         {/* Shortcuts list */}
         <div className="flex-1 overflow-y-auto px-5 py-3">
           {orderedCategories.length === 0 && (
-            <p className="py-8 text-center text-sm text-zinc-500">
+            <p className="py-8 text-center text-sm text-zinc-400">
               No shortcuts match &ldquo;{search}&rdquo;
             </p>
           )}
@@ -182,7 +182,7 @@ export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {orderedCategories.map((category) => (
               <div key={category}>
-                <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
+                <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-400">
                   {category}
                 </h3>
                 <div className="space-y-1.5">
@@ -203,7 +203,7 @@ export function ShortcutCheatSheet({ open, onClose }: ShortcutCheatSheetProps) {
 
         {/* Footer */}
         <div className="border-t border-zinc-800 px-5 py-2">
-          <p className="text-center text-[10px] text-zinc-600">
+          <p className="text-center text-[10px] text-zinc-400">
             Press <KeyBadge>?</KeyBadge> to toggle this overlay.
             Press <KeyBadge>Esc</KeyBadge> to close.
           </p>

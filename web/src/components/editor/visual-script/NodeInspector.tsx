@@ -17,7 +17,7 @@ export function NodeInspector({ node, onNodeDataChange }: NodeInspectorProps) {
 
   if (!node) {
     return (
-      <div className="p-3 text-center text-xs text-zinc-600">
+      <div className="p-3 text-center text-xs text-zinc-400">
         Select a node to edit its properties
       </div>
     );
@@ -35,11 +35,11 @@ export function NodeInspector({ node, onNodeDataChange }: NodeInspectorProps) {
         <div className="text-xs font-semibold text-zinc-300" style={{ color: def.color }}>
           {def.label}
         </div>
-        <p className="mt-0.5 text-[10px] text-zinc-600">{def.description}</p>
+        <p className="mt-0.5 text-[10px] text-zinc-400">{def.description}</p>
       </div>
 
       {editableInputs.length === 0 ? (
-        <p className="text-[10px] text-zinc-600">No editable properties</p>
+        <p className="text-[10px] text-zinc-400">No editable properties</p>
       ) : (
         <div className="space-y-2">
           {editableInputs.map(port => {

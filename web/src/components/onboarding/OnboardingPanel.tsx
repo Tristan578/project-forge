@@ -60,11 +60,11 @@ export function OnboardingPanel() {
                       {isCompleted ? (
                         <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
                       ) : (
-                        <Circle className="w-5 h-5 text-zinc-600 flex-shrink-0" />
+                        <Circle className="w-5 h-5 text-zinc-400 flex-shrink-0" />
                       )}
                     </div>
                     <p className="text-sm text-zinc-400 mb-3">{tutorial.description}</p>
-                    <div className="flex items-center gap-3 text-xs text-zinc-500">
+                    <div className="flex items-center gap-3 text-xs text-zinc-400">
                       <span className="capitalize">{tutorial.difficulty}</span>
                       <span>•</span>
                       <span>{tutorial.estimatedMinutes} min</span>
@@ -102,7 +102,7 @@ export function OnboardingPanel() {
                       {isCompleted ? (
                         <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
                       ) : (
-                        <Circle className="w-5 h-5 text-zinc-600 flex-shrink-0 mt-0.5" />
+                        <Circle className="w-5 h-5 text-zinc-400 flex-shrink-0 mt-0.5" />
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-zinc-200">{task.label}</div>
@@ -138,7 +138,7 @@ export function OnboardingPanel() {
                       {isCompleted ? (
                         <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
                       ) : (
-                        <Circle className="w-5 h-5 text-zinc-600 flex-shrink-0 mt-0.5" />
+                        <Circle className="w-5 h-5 text-zinc-400 flex-shrink-0 mt-0.5" />
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="font-medium text-zinc-200">{task.label}</div>
@@ -175,7 +175,7 @@ export function OnboardingPanel() {
                   >
                     {!isUnlocked && (
                       <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-lg">
-                        <Lock className="w-6 h-6 text-zinc-500" />
+                        <Lock className="w-6 h-6 text-zinc-400" />
                       </div>
                     )}
                     <div

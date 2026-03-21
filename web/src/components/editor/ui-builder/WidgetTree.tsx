@@ -52,7 +52,7 @@ export function WidgetTree() {
 
   if (activeScreen.widgets.length === 0) {
     return (
-      <div className="rounded border border-zinc-700 bg-zinc-800 px-3 py-4 text-center text-xs text-zinc-600">
+      <div className="rounded border border-zinc-700 bg-zinc-800 px-3 py-4 text-center text-xs text-zinc-400">
         No widgets. Add one from the palette above.
       </div>
     );
@@ -78,7 +78,7 @@ export function WidgetTree() {
               {hasChildren && (
                 <button
                   onClick={() => toggleExpanded(widget.id)}
-                  className="shrink-0 text-zinc-600 hover:text-zinc-400"
+                  className="shrink-0 text-zinc-400 hover:text-zinc-400"
                 >
                   {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                 </button>
@@ -89,7 +89,7 @@ export function WidgetTree() {
                 onClick={() => selectWidget(widget.id)}
                 className="flex-1 text-left truncate"
               >
-                <span className="text-zinc-600 text-[10px]">{widget.type}</span>{' '}
+                <span className="text-zinc-400 text-[10px]">{widget.type}</span>{' '}
                 <span>{widget.name}</span>
               </button>
 
@@ -98,7 +98,7 @@ export function WidgetTree() {
                 <button
                   onClick={() => handleMoveUp(widget.id)}
                   disabled={index === 0}
-                  className="p-0.5 text-zinc-600 hover:text-zinc-400 disabled:opacity-30"
+                  className="p-0.5 text-zinc-400 hover:text-zinc-400 disabled:opacity-30"
                   title="Move up"
                 >
                   ↑
@@ -106,21 +106,21 @@ export function WidgetTree() {
                 <button
                   onClick={() => handleMoveDown(widget.id)}
                   disabled={index === activeScreen.widgets.length - 1}
-                  className="p-0.5 text-zinc-600 hover:text-zinc-400 disabled:opacity-30"
+                  className="p-0.5 text-zinc-400 hover:text-zinc-400 disabled:opacity-30"
                   title="Move down"
                 >
                   ↓
                 </button>
                 <button
                   onClick={() => handleDuplicate(widget.id)}
-                  className="p-0.5 text-zinc-600 hover:text-zinc-400"
+                  className="p-0.5 text-zinc-400 hover:text-zinc-400"
                   title="Duplicate"
                 >
                   <Copy size={10} />
                 </button>
                 <button
                   onClick={() => handleRemove(widget.id)}
-                  className="p-0.5 text-zinc-600 hover:text-red-400"
+                  className="p-0.5 text-zinc-400 hover:text-red-400"
                   title="Delete"
                 >
                   <Trash2 size={10} />
@@ -144,7 +144,7 @@ export function WidgetTree() {
                           : 'bg-zinc-800 border border-transparent hover:bg-zinc-750 text-zinc-400'
                       }`}
                     >
-                      <span className="text-zinc-600 text-[10px]">{child.type}</span>{' '}
+                      <span className="text-zinc-400 text-[10px]">{child.type}</span>{' '}
                       <span className="flex-1 truncate">{child.name}</span>
                     </div>
                   );

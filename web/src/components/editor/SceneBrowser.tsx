@@ -105,7 +105,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
           className="flex max-h-80 flex-col gap-1 overflow-y-auto p-2"
         >
           {scenes.length === 0 && (
-            <p className="py-6 text-center text-xs text-zinc-500">No scenes yet. Create one below.</p>
+            <p className="py-6 text-center text-xs text-zinc-400">No scenes yet. Create one below.</p>
           )}
           {scenes.map((scene) => {
             const isActive = scene.id === activeSceneId;
@@ -138,7 +138,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                     <span className="ml-2 rounded bg-zinc-700 px-1 py-0.5 text-xs text-zinc-400">start</span>
                   )}
                   {isActive && (
-                    <span className="ml-2 text-xs text-zinc-500">{count} {count === 1 ? 'entity' : 'entities'}</span>
+                    <span className="ml-2 text-xs text-zinc-400">{count} {count === 1 ? 'entity' : 'entities'}</span>
                   )}
                 </div>
 
@@ -165,7 +165,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity [.scene-row:hover_&]:opacity-100">
                     <button
                       onClick={(e) => handleDuplicate(scene.id, e)}
-                      className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+                      className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
                       aria-label={`Duplicate ${scene.name}`}
                       title="Duplicate scene"
                     >
@@ -173,7 +173,7 @@ export function SceneBrowser({ isOpen, onClose }: SceneBrowserProps) {
                     </button>
                     <button
                       onClick={(e) => handleDeleteRequest(scene.id, e)}
-                      className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-700 hover:text-red-400"
+                      className="flex h-5 w-5 items-center justify-center rounded text-zinc-400 hover:bg-zinc-700 hover:text-red-400"
                       aria-label={`Delete ${scene.name}`}
                       title="Delete scene"
                     >

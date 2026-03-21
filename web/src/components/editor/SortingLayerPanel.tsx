@@ -94,7 +94,7 @@ export function SortingLayerPanel() {
               {!isDefault && (
                 <button
                   onClick={() => handleDeleteLayer(layer.name)}
-                  className="shrink-0 text-zinc-500 hover:text-red-400"
+                  className="shrink-0 text-zinc-400 hover:text-red-400"
                   title="Delete layer"
                 >
                   <Trash2 size={12} />

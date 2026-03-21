@@ -101,7 +101,7 @@ export function ModifyPanel() {
 
       {/* Description input */}
       <div>
-        <label htmlFor="modify-description" className="mb-1 block text-xs text-zinc-500">
+        <label htmlFor="modify-description" className="mb-1 block text-xs text-zinc-400">
           What would you like to change?
         </label>
         <textarea
@@ -117,14 +117,14 @@ export function ModifyPanel() {
 
       {/* Scope toggle */}
       <div className="flex items-center gap-2">
-        <span className="text-xs text-zinc-500">Scope:</span>
+        <span className="text-xs text-zinc-400">Scope:</span>
         <div className="flex rounded border border-zinc-700">
           <button
             onClick={() => setScope('selected')}
             className={`px-2 py-0.5 text-xs transition-colors ${
               scope === 'selected'
                 ? 'bg-zinc-700 text-white'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
             title="Only modify selected entities"
             aria-pressed={scope === 'selected'}
@@ -136,7 +136,7 @@ export function ModifyPanel() {
             className={`px-2 py-0.5 text-xs transition-colors ${
               scope === 'scene'
                 ? 'bg-zinc-700 text-white'
-                : 'text-zinc-500 hover:text-zinc-300'
+                : 'text-zinc-400 hover:text-zinc-300'
             }`}
             title="Modify any entity in the scene"
             aria-pressed={scope === 'scene'}
@@ -185,7 +185,7 @@ export function ModifyPanel() {
       {plan && (panelState === 'planned' || panelState === 'executing' || panelState === 'done') && (
         <div className="rounded border border-zinc-700 bg-zinc-800/50 p-2">
           <div className="mb-2 text-xs text-zinc-300">{plan.summary}</div>
-          <div className="mb-2 flex items-center gap-3 text-xs text-zinc-500">
+          <div className="mb-2 flex items-center gap-3 text-xs text-zinc-400">
             <span>{plan.steps.length} step{plan.steps.length !== 1 ? 's' : ''}</span>
             <span>{plan.affectedEntities.length} entit{plan.affectedEntities.length !== 1 ? 'ies' : 'y'}</span>
             <span>Confidence: {Math.round(plan.confidence * 100)}%</span>
@@ -194,7 +194,7 @@ export function ModifyPanel() {
           {/* Expandable steps */}
           <button
             onClick={() => setShowSteps(!showSteps)}
-            className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300"
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-300"
             aria-expanded={showSteps}
           >
             {showSteps ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -222,7 +222,7 @@ export function ModifyPanel() {
                     <div className="min-w-0 flex-1">
                       <span className="font-mono text-zinc-400">{step.command}</span>
                       {step.entityId && (
-                        <span className="ml-1 text-zinc-600">({step.entityId})</span>
+                        <span className="ml-1 text-zinc-400">({step.entityId})</span>
                       )}
                       {result && !result.success && result.error && (
                         <p className="mt-0.5 text-red-400">{result.error}</p>

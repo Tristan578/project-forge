@@ -33,7 +33,7 @@ export function ScreenSettingsPanel() {
     <div className="space-y-3 text-xs">
       {/* Screen name */}
       <label className="block">
-        <span className="text-zinc-500">Screen Name</span>
+        <span className="text-zinc-400">Screen Name</span>
         <input
           type="text"
           value={activeScreen.name}
@@ -55,7 +55,7 @@ export function ScreenSettingsPanel() {
         </label>
 
         <label className="block">
-          <span className="text-zinc-500">Show on key</span>
+          <span className="text-zinc-400">Show on key</span>
           <input
             type="text"
             value={activeScreen.showOnKey || ''}
@@ -78,7 +78,7 @@ export function ScreenSettingsPanel() {
 
       {/* Background */}
       <label className="block">
-        <span className="text-zinc-500">Background Color</span>
+        <span className="text-zinc-400">Background Color</span>
         <input
           type="text"
           value={activeScreen.backgroundColor}
@@ -90,7 +90,7 @@ export function ScreenSettingsPanel() {
 
       {/* Z-index */}
       <label className="block">
-        <span className="text-zinc-500">Z-Index</span>
+        <span className="text-zinc-400">Z-Index</span>
         <input
           type="number"
           value={activeScreen.zIndex}
@@ -101,10 +101,10 @@ export function ScreenSettingsPanel() {
 
       {/* Transition */}
       <div className="space-y-2 border-t border-zinc-800 pt-3">
-        <h4 className="text-zinc-500 font-semibold">Transition</h4>
+        <h4 className="text-zinc-400 font-semibold">Transition</h4>
 
         <label className="block">
-          <span className="text-zinc-500">Type</span>
+          <span className="text-zinc-400">Type</span>
           <select
             value={activeScreen.transition.type}
             onChange={(e) => handleTransitionChange('type', e.target.value)}
@@ -121,7 +121,7 @@ export function ScreenSettingsPanel() {
         </label>
 
         <label className="block">
-          <span className="text-zinc-500">Duration (ms)</span>
+          <span className="text-zinc-400">Duration (ms)</span>
           <input
             type="number"
             min="0"
@@ -133,7 +133,7 @@ export function ScreenSettingsPanel() {
         </label>
 
         <label className="block">
-          <span className="text-zinc-500">Easing</span>
+          <span className="text-zinc-400">Easing</span>
           <select
             value={activeScreen.transition.easing}
             onChange={(e) => handleTransitionChange('easing', e.target.value)}

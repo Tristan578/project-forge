@@ -210,7 +210,7 @@ export function ShaderEditorPanel() {
       <div className="flex items-center justify-between border-b border-zinc-700 bg-zinc-900 px-4 py-2">
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold text-zinc-300">Shader Editor</h2>
-          <span className="text-xs text-zinc-500">{activeGraph?.name || 'Untitled'}</span>
+          <span className="text-xs text-zinc-400">{activeGraph?.name || 'Untitled'}</span>
         </div>
         <div className="flex items-center gap-2">
           <button

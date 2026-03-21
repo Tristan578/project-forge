@@ -215,7 +215,7 @@ export function AdminDashboard() {
                 ))}
                 {data.costSummary.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                    <td colSpan={5} className="px-4 py-8 text-center text-zinc-400">
                       No cost data in the last 30 days
                     </td>
                   </tr>
@@ -273,7 +273,7 @@ export function AdminDashboard() {
                       <button
                         onClick={() => saveTokenConfig(config)}
                         disabled={saving === config.id}
-                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded px-3 py-1 text-sm"
+                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-400 text-white rounded px-3 py-1 text-sm"
                       >
                         {saving === config.id ? 'Saving...' : 'Save'}
                       </button>
@@ -282,7 +282,7 @@ export function AdminDashboard() {
                 ))}
                 {data.tokenConfigs.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-zinc-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-zinc-400">
                       No token configs found
                     </td>
                   </tr>
@@ -347,7 +347,7 @@ export function AdminDashboard() {
                       <button
                         onClick={() => saveTierConfig(config)}
                         disabled={saving === config.id}
-                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded px-3 py-1 text-sm"
+                        className="bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-400 text-white rounded px-3 py-1 text-sm"
                       >
                         {saving === config.id ? 'Saving...' : 'Save'}
                       </button>
@@ -356,7 +356,7 @@ export function AdminDashboard() {
                 ))}
                 {data.tierConfigs.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-zinc-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-zinc-400">
                       No tier configs found
                     </td>
                   </tr>
@@ -396,7 +396,7 @@ export function AdminDashboard() {
                 ))}
                 {data.recentTransactions.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                    <td colSpan={5} className="px-4 py-8 text-center text-zinc-400">
                       No recent transactions
                     </td>
                   </tr>

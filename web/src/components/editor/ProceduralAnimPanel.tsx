@@ -99,7 +99,7 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
           Procedural Animation
         </h2>
         {!primaryId && (
-          <p className="mt-1 text-xs text-zinc-500">Select an entity to generate animations</p>
+          <p className="mt-1 text-xs text-zinc-400">Select an entity to generate animations</p>
         )}
       </div>
 
@@ -127,8 +127,8 @@ export const ProceduralAnimPanel = memo(function ProceduralAnimPanel() {
             );
           })}
         </div>
-        <p className="mt-2 text-xs text-zinc-500">{typeInfo.description}</p>
-        <div className="mt-1 flex gap-3 text-xs text-zinc-500">
+        <p className="mt-2 text-xs text-zinc-400">{typeInfo.description}</p>
+        <div className="mt-1 flex gap-3 text-xs text-zinc-400">
           <span>Duration: {typeInfo.defaultDuration}s</span>
           <span>{typeInfo.looping ? 'Looping' : 'One-shot'}</span>
         </div>

@@ -151,7 +151,7 @@ export function WelcomeModal() {
             <div className="mb-3 rounded border border-zinc-700 bg-zinc-800/50 p-3">
               <div className="mb-2 flex items-center gap-2">
                 <Clock size={14} className="text-zinc-400" />
-                <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500">Recent Projects</h3>
+                <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-400">Recent Projects</h3>
               </div>
               <div className="space-y-1">
                 {recentProjects.map((p) => (
@@ -161,7 +161,7 @@ export function WelcomeModal() {
                     className="flex items-center justify-between rounded px-2 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700/50 transition-colors"
                   >
                     <span className="truncate">{p.name}</span>
-                    <span className="ml-2 shrink-0 text-[10px] text-zinc-600">
+                    <span className="ml-2 shrink-0 text-[10px] text-zinc-400">
                       {formatRelativeTime(p.openedAt)}
                     </span>
                   </a>
@@ -205,7 +205,7 @@ export function WelcomeModal() {
           </div>
 
           <div className="flex items-center justify-between">
-            <label className="flex items-center gap-2 text-xs text-zinc-500">
+            <label className="flex items-center gap-2 text-xs text-zinc-400">
               <input
                 type="checkbox"
                 checked={dontShowAgain}

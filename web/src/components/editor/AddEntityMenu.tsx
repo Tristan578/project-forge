@@ -196,7 +196,7 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
         className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
           open
             ? 'bg-blue-600 text-white'
-            : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+            : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
         }`}
       >
         <Plus size={20} />
@@ -211,7 +211,7 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
         >
           {/* Mesh primitives */}
           <div role="group" aria-label="Meshes">
-            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
               Meshes
             </div>
             {meshItems.map((item) => renderMenuItem(item, () => handleSpawn(item.type)))}
@@ -221,7 +221,7 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
 
           {/* Procedural */}
           <div role="group" aria-label="Procedural">
-            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
               Procedural
             </div>
             {renderProceduralItem('extrude_circle', 'Extrude Circle', <Circle size={16} />, handleExtrudeCircle)}
@@ -232,7 +232,7 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
 
           {/* Environment */}
           <div role="group" aria-label="Environment">
-            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
               Environment
             </div>
             {environmentItems.map((item) => renderMenuItem(item, () => handleSpawn(item.type)))}
@@ -242,7 +242,7 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
 
           {/* Lights */}
           <div role="group" aria-label="Lights">
-            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-500">
+            <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-zinc-400">
               Lights
             </div>
             {lightItems.map((item) => renderMenuItem(item, () => handleSpawn(item.type)))}

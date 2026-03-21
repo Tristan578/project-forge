@@ -191,7 +191,7 @@ describe('PixelArtEditor', () => {
     const gridBtn = screen.getByTitle('Toggle grid');
     expect(gridBtn.className).toContain('text-blue-400'); // On by default
     fireEvent.click(gridBtn);
-    expect(gridBtn.className).toContain('text-zinc-500'); // Off
+    expect(gridBtn.className).toContain('text-zinc-400'); // Off
     fireEvent.click(gridBtn);
     expect(gridBtn.className).toContain('text-blue-400'); // On again
   });

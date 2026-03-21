@@ -98,7 +98,7 @@ export function SceneSettings() {
 
       {/* Quality Preset */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Quality Preset
         </h3>
         <div className="flex items-center gap-2">
@@ -115,14 +115,14 @@ export function SceneSettings() {
             <option value="ultra">Ultra</option>
           </select>
         </div>
-        <p className="mt-1 text-[9px] text-zinc-600">
+        <p className="mt-1 text-[9px] text-zinc-400">
           Adjusts MSAA, shadows, bloom, sharpening, and particle density
         </p>
       </div>
 
       {/* Ambient Light */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Ambient Light<InfoTooltip term="ambientLight" />
         </h3>
 
@@ -139,7 +139,7 @@ export function SceneSettings() {
               }}
               className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
             />
-            <span className="text-xs text-zinc-500">{ambientColorHex}</span>
+            <span className="text-xs text-zinc-400">{ambientColorHex}</span>
           </div>
 
           {/* Brightness */}
@@ -154,7 +154,7 @@ export function SceneSettings() {
               onChange={(e) => handleAmbientUpdate({ brightness: parseFloat(e.target.value) })}
               className={sliderClass}
             />
-            <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+            <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
               {ambientLight.brightness.toFixed(0)}
             </span>
           </div>
@@ -165,10 +165,10 @@ export function SceneSettings() {
       <div className="border-t border-zinc-800 pt-4">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-1">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
               Environment
             </h3>
-            <button onClick={() => navigateDocs('features/scene-management')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+            <button onClick={() => navigateDocs('features/scene-management')} className="rounded p-0.5 text-zinc-400 hover:text-zinc-400" title="Documentation">
               <HelpCircle size={12} />
             </button>
           </div>
@@ -212,7 +212,7 @@ export function SceneSettings() {
               }}
               className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
             />
-            <span className="text-xs text-zinc-500">{clearColorHex}</span>
+            <span className="text-xs text-zinc-400">{clearColorHex}</span>
           </div>
 
           {/* Skybox Preset */}
@@ -256,7 +256,7 @@ export function SceneSettings() {
                 onChange={(e) => updateSkybox({ brightness: parseFloat(e.target.value) })}
                 className={sliderClass}
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {environment.skyboxBrightness.toFixed(0)}
               </span>
             </div>
@@ -275,7 +275,7 @@ export function SceneSettings() {
                 onChange={(e) => updateSkybox({ iblIntensity: parseFloat(e.target.value) })}
                 className={sliderClass}
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {environment.iblIntensity.toFixed(0)}
               </span>
             </div>
@@ -294,7 +294,7 @@ export function SceneSettings() {
                 onChange={(e) => updateSkybox({ rotation: parseFloat(e.target.value) })}
                 className={sliderClass}
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {environment.iblRotationDegrees.toFixed(0)}°
               </span>
             </div>
@@ -304,7 +304,7 @@ export function SceneSettings() {
 
       {/* Fog */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Fog<InfoTooltip term="fog" />
         </h3>
 
@@ -336,7 +336,7 @@ export function SceneSettings() {
                   }}
                   className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
                 />
-                <span className="text-xs text-zinc-500">{fogColorHex}</span>
+                <span className="text-xs text-zinc-400">{fogColorHex}</span>
               </div>
 
               {/* Fog Start */}
@@ -351,7 +351,7 @@ export function SceneSettings() {
                   onChange={(e) => handleEnvUpdate({ fogStart: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {environment.fogStart.toFixed(0)}
                 </span>
               </div>
@@ -368,7 +368,7 @@ export function SceneSettings() {
                   onChange={(e) => handleEnvUpdate({ fogEnd: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {environment.fogEnd.toFixed(0)}
                 </span>
               </div>
@@ -379,7 +379,7 @@ export function SceneSettings() {
 
       {/* Bloom */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Bloom<InfoTooltip term="bloom" />
         </h3>
 
@@ -411,7 +411,7 @@ export function SceneSettings() {
                   onChange={(e) => updateBloom({ intensity: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.bloom.intensity.toFixed(2)}
                 </span>
               </div>
@@ -428,7 +428,7 @@ export function SceneSettings() {
                   onChange={(e) => updateBloom({ lowFrequencyBoost: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.bloom.lowFrequencyBoost.toFixed(2)}
                 </span>
               </div>
@@ -445,7 +445,7 @@ export function SceneSettings() {
                   onChange={(e) => updateBloom({ highPassFrequency: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.bloom.highPassFrequency.toFixed(2)}
                 </span>
               </div>
@@ -462,7 +462,7 @@ export function SceneSettings() {
                   onChange={(e) => updateBloom({ prefilterThreshold: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.bloom.prefilterThreshold.toFixed(1)}
                 </span>
               </div>
@@ -479,7 +479,7 @@ export function SceneSettings() {
                   onChange={(e) => updateBloom({ prefilterThresholdSoftness: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.bloom.prefilterThresholdSoftness.toFixed(2)}
                 </span>
               </div>
@@ -504,7 +504,7 @@ export function SceneSettings() {
 
       {/* Chromatic Aberration */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Chromatic Aberration<InfoTooltip term="chromaticAberration" />
         </h3>
 
@@ -536,7 +536,7 @@ export function SceneSettings() {
                   onChange={(e) => updateChromaticAberration({ intensity: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.chromaticAberration.intensity.toFixed(3)}
                 </span>
               </div>
@@ -553,7 +553,7 @@ export function SceneSettings() {
                   onChange={(e) => updateChromaticAberration({ maxSamples: parseInt(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.chromaticAberration.maxSamples}
                 </span>
               </div>
@@ -564,7 +564,7 @@ export function SceneSettings() {
 
       {/* Color Grading */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Color Grading<InfoTooltip term="colorGrading" />
         </h3>
 
@@ -599,7 +599,7 @@ export function SceneSettings() {
                   onChange={(e) => updateColorGrading({ global: { ...postProcessing.colorGrading.global, exposure: parseFloat(e.target.value) } })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.colorGrading.global.exposure.toFixed(2)}
                 </span>
               </div>
@@ -616,7 +616,7 @@ export function SceneSettings() {
                   onChange={(e) => updateColorGrading({ global: { ...postProcessing.colorGrading.global, temperature: parseFloat(e.target.value) } })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.colorGrading.global.temperature.toFixed(2)}
                 </span>
               </div>
@@ -633,7 +633,7 @@ export function SceneSettings() {
                   onChange={(e) => updateColorGrading({ global: { ...postProcessing.colorGrading.global, tint: parseFloat(e.target.value) } })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.colorGrading.global.tint.toFixed(2)}
                 </span>
               </div>
@@ -650,7 +650,7 @@ export function SceneSettings() {
                   onChange={(e) => updateColorGrading({ global: { ...postProcessing.colorGrading.global, hue: parseFloat(e.target.value) } })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {Math.round((postProcessing.colorGrading.global.hue * 180) / Math.PI)}°
                 </span>
               </div>
@@ -667,7 +667,7 @@ export function SceneSettings() {
                   onChange={(e) => updateColorGrading({ global: { ...postProcessing.colorGrading.global, postSaturation: parseFloat(e.target.value) } })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.colorGrading.global.postSaturation.toFixed(2)}
                 </span>
               </div>
@@ -679,7 +679,7 @@ export function SceneSettings() {
                   className={`flex-1 rounded px-2 py-1 text-xs font-medium ${
                     colorGradingSection === 'shadows'
                       ? 'bg-zinc-700 text-zinc-200'
-                      : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-750'
+                      : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-750'
                   }`}
                   title="Adjust the darkest parts of the image"
                 >
@@ -690,7 +690,7 @@ export function SceneSettings() {
                   className={`flex-1 rounded px-2 py-1 text-xs font-medium ${
                     colorGradingSection === 'midtones'
                       ? 'bg-zinc-700 text-zinc-200'
-                      : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-750'
+                      : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-750'
                   }`}
                   title="Adjust the middle brightness values"
                 >
@@ -701,7 +701,7 @@ export function SceneSettings() {
                   className={`flex-1 rounded px-2 py-1 text-xs font-medium ${
                     colorGradingSection === 'highlights'
                       ? 'bg-zinc-700 text-zinc-200'
-                      : 'bg-zinc-800 text-zinc-500 hover:bg-zinc-750'
+                      : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-750'
                   }`}
                   title="Adjust the brightest parts of the image"
                 >
@@ -730,7 +730,7 @@ export function SceneSettings() {
                         onChange={(e) => updateSection({ saturation: parseFloat(e.target.value) })}
                         className={sliderClass}
                       />
-                      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                         {section.saturation.toFixed(2)}
                       </span>
                     </div>
@@ -747,7 +747,7 @@ export function SceneSettings() {
                         onChange={(e) => updateSection({ contrast: parseFloat(e.target.value) })}
                         className={sliderClass}
                       />
-                      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                         {section.contrast.toFixed(2)}
                       </span>
                     </div>
@@ -764,7 +764,7 @@ export function SceneSettings() {
                         onChange={(e) => updateSection({ gamma: parseFloat(e.target.value) })}
                         className={sliderClass}
                       />
-                      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                         {section.gamma.toFixed(2)}
                       </span>
                     </div>
@@ -781,7 +781,7 @@ export function SceneSettings() {
                         onChange={(e) => updateSection({ gain: parseFloat(e.target.value) })}
                         className={sliderClass}
                       />
-                      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                         {section.gain.toFixed(2)}
                       </span>
                     </div>
@@ -798,7 +798,7 @@ export function SceneSettings() {
                         onChange={(e) => updateSection({ lift: parseFloat(e.target.value) })}
                         className={sliderClass}
                       />
-                      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                         {section.lift.toFixed(2)}
                       </span>
                     </div>
@@ -812,7 +812,7 @@ export function SceneSettings() {
 
       {/* Sharpening (CAS) */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Sharpening<InfoTooltip term="sharpening" />
         </h3>
 
@@ -844,7 +844,7 @@ export function SceneSettings() {
                   onChange={(e) => updateSharpening({ sharpeningStrength: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.sharpening.sharpeningStrength.toFixed(2)}
                 </span>
               </div>
@@ -868,7 +868,7 @@ export function SceneSettings() {
       {/* SSAO (WebGPU only) */}
       {typeof navigator !== 'undefined' && !!(navigator as Navigator & { gpu?: unknown }).gpu && (
         <div className="border-t border-zinc-800 pt-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
             SSAO<InfoTooltip term="ssao" />
           </h3>
 
@@ -914,7 +914,7 @@ export function SceneSettings() {
 
       {/* Depth of Field */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Depth of Field<InfoTooltip term="depthOfField" />
         </h3>
 
@@ -973,7 +973,7 @@ export function SceneSettings() {
                   onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, focalDistance: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.depthOfField.focalDistance.toFixed(1)}
                 </span>
               </div>
@@ -990,7 +990,7 @@ export function SceneSettings() {
                   onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, apertureFStops: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.depthOfField.apertureFStops.toFixed(1)}
                 </span>
               </div>
@@ -1007,7 +1007,7 @@ export function SceneSettings() {
                   onChange={(e) => updateDepthOfField({ ...postProcessing.depthOfField!, maxCircleOfConfusionDiameter: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.depthOfField.maxCircleOfConfusionDiameter.toFixed(2)}
                 </span>
               </div>
@@ -1018,7 +1018,7 @@ export function SceneSettings() {
 
       {/* Motion Blur */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Motion Blur<InfoTooltip term="motionBlur" />
         </h3>
 
@@ -1056,7 +1056,7 @@ export function SceneSettings() {
                   onChange={(e) => updateMotionBlur({ ...postProcessing.motionBlur!, shutterAngle: parseFloat(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.motionBlur.shutterAngle.toFixed(2)}
                 </span>
               </div>
@@ -1073,7 +1073,7 @@ export function SceneSettings() {
                   onChange={(e) => updateMotionBlur({ ...postProcessing.motionBlur!, samples: parseInt(e.target.value) })}
                   className={sliderClass}
                 />
-                <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+                <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                   {postProcessing.motionBlur.samples}
                 </span>
               </div>
@@ -1084,7 +1084,7 @@ export function SceneSettings() {
 
       {/* Mobile Controls */}
       <div className="border-t border-zinc-800 pt-4">
-        <h3 className="mb-3 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+        <h3 className="mb-3 flex items-center gap-1 text-xs font-semibold uppercase tracking-wide text-zinc-400">
           <Smartphone size={12} />
           Mobile Controls
         </h3>
@@ -1148,7 +1148,7 @@ export function SceneSettings() {
                         joystick: { ...mobileTouchConfig.joystick!, size: parseInt(e.target.value) },
                       })}
                       className={sliderClass} />
-                    <span className="w-12 text-right text-xs tabular-nums text-zinc-500">{mobileTouchConfig.joystick.size}px</span>
+                    <span className="w-12 text-right text-xs tabular-nums text-zinc-400">{mobileTouchConfig.joystick.size}px</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <label className="w-20 shrink-0 text-xs text-zinc-400">Opacity</label>
@@ -1158,7 +1158,7 @@ export function SceneSettings() {
                         joystick: { ...mobileTouchConfig.joystick!, opacity: parseFloat(e.target.value) },
                       })}
                       className={sliderClass} />
-                    <span className="w-12 text-right text-xs tabular-nums text-zinc-500">{(mobileTouchConfig.joystick.opacity * 100).toFixed(0)}%</span>
+                    <span className="w-12 text-right text-xs tabular-nums text-zinc-400">{(mobileTouchConfig.joystick.opacity * 100).toFixed(0)}%</span>
                   </div>
                 </>
               )}
@@ -1171,7 +1171,7 @@ export function SceneSettings() {
                 <div key={btn.id} className="flex items-center gap-2 rounded bg-zinc-800/50 px-2 py-1">
                   <span className="w-6 text-center text-sm">{btn.icon}</span>
                   <span className="flex-1 text-xs text-zinc-300">{btn.action}</span>
-                  <span className="text-[10px] text-zinc-500">{btn.size}px</span>
+                  <span className="text-[10px] text-zinc-400">{btn.size}px</span>
                 </div>
               ))}
 
@@ -1181,7 +1181,7 @@ export function SceneSettings() {
                 <input type="checkbox" checked={mobileTouchConfig.autoReduceQuality}
                   onChange={(e) => updateMobileTouchConfig({ autoReduceQuality: e.target.checked })}
                   className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500 focus:ring-1 focus:ring-blue-500 focus:ring-offset-0" />
-                <span className="text-[10px] text-zinc-500">Reduce quality on mobile</span>
+                <span className="text-[10px] text-zinc-400">Reduce quality on mobile</span>
               </div>
 
               {/* Orientation */}

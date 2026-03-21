@@ -55,16 +55,16 @@ function BoneTreeNode({ bone, allBones, depth }: {
       >
         {children.length > 0 ? (
           expanded ? (
-            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-500" />
+            <ChevronDown className="h-3 w-3 shrink-0 text-zinc-400" />
           ) : (
-            <ChevronRight className="h-3 w-3 shrink-0 text-zinc-500" />
+            <ChevronRight className="h-3 w-3 shrink-0 text-zinc-400" />
           )
         ) : (
           <span className="inline-block h-3 w-3 shrink-0" />
         )}
         <Bone className="h-3 w-3 shrink-0 text-zinc-400" />
         <span className="truncate">{bone.name}</span>
-        <span className="ml-auto text-[10px] text-zinc-500">L={bone.length.toFixed(2)}</span>
+        <span className="ml-auto text-[10px] text-zinc-400">L={bone.length.toFixed(2)}</span>
       </button>
       {expanded && children.map((child) => (
         <BoneTreeNode key={child.name} bone={child} allBones={allBones} depth={depth + 1} />
@@ -187,11 +187,11 @@ export function AutoRiggingPanel() {
 
         {/* Target entity */}
         <div className="rounded bg-zinc-800 px-2 py-1.5 text-xs">
-          <span className="text-zinc-500">Target: </span>
+          <span className="text-zinc-400">Target: </span>
           {primaryId ? (
             <span className="text-zinc-200">{primaryName ?? primaryId}</span>
           ) : (
-            <span className="italic text-zinc-500">Select an entity</span>
+            <span className="italic text-zinc-400">Select an entity</span>
           )}
         </div>
 
@@ -202,14 +202,14 @@ export function AutoRiggingPanel() {
           </label>
           <textarea
             id="rig-description"
-            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             rows={2}
             placeholder="e.g. a medieval knight in armor"
             value={description}
             onChange={handleDescriptionChange}
           />
           {detectedType && selectedType === 'auto' && (
-            <p className="mt-0.5 text-[10px] text-zinc-500">
+            <p className="mt-0.5 text-[10px] text-zinc-400">
               Detected: <span className="text-zinc-400">{detectedType}</span>
             </p>
           )}
@@ -264,7 +264,7 @@ export function AutoRiggingPanel() {
                   aria-label={`Select ${type} template`}
                 >
                   <span className="block font-medium capitalize">{type}</span>
-                  <span className="text-[10px] text-zinc-500">{tmpl.bones.length} bones</span>
+                  <span className="text-[10px] text-zinc-400">{tmpl.bones.length} bones</span>
                 </button>
               );
             })}
@@ -304,7 +304,7 @@ export function AutoRiggingPanel() {
                     />
                   ))}
                   {rootBones.length === 0 && (
-                    <p className="p-2 text-center text-xs italic text-zinc-500">
+                    <p className="p-2 text-center text-xs italic text-zinc-400">
                       No bones in template
                     </p>
                   )}
@@ -319,7 +319,7 @@ export function AutoRiggingPanel() {
                   IK Chains ({currentRig.ik_chains.length})
                 </p>
                 {currentRig.ik_chains.map((chain) => (
-                  <div key={chain.name} className="text-[10px] text-zinc-500">
+                  <div key={chain.name} className="text-[10px] text-zinc-400">
                     {chain.name}: {chain.startBone} → {chain.endBone}
                     {chain.poleTarget && ` (pole: ${chain.poleTarget})`}
                   </div>

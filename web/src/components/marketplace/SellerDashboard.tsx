@@ -200,9 +200,9 @@ export function SellerDashboard() {
           <h2 className="text-lg font-semibold text-zinc-200 mb-4">Your Listings</h2>
 
           {loading ? (
-            <div className="text-center py-8 text-zinc-500">Loading...</div>
+            <div className="text-center py-8 text-zinc-400">Loading...</div>
           ) : assets.length === 0 ? (
-            <div className="text-center py-8 text-zinc-500">
+            <div className="text-center py-8 text-zinc-400">
               No listings yet. Create your first asset!
             </div>
           ) : (
@@ -223,7 +223,7 @@ export function SellerDashboard() {
                         {asset.status.replace('_', ' ')}
                       </span>
                     </div>
-                    <div className="flex items-center gap-4 mt-1 text-xs text-zinc-500">
+                    <div className="flex items-center gap-4 mt-1 text-xs text-zinc-400">
                       <span>{asset.category.replace('_', ' ')}</span>
                       <span>
                         {asset.priceTokens === 0 ? 'Free' : `${asset.priceTokens} tokens`}

@@ -66,11 +66,11 @@ function MechanicItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium text-zinc-200">{mechanic.name}</span>
-          <span className="text-[10px] text-zinc-500">
+          <span className="text-[10px] text-zinc-400">
             complexity {mechanic.complexity}/5
           </span>
         </div>
-        <p className="text-[10px] text-zinc-500 leading-tight">{mechanic.description}</p>
+        <p className="text-[10px] text-zinc-400 leading-tight">{mechanic.description}</p>
       </div>
     </label>
   );
@@ -96,7 +96,7 @@ function TutorialStepCard({
         className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-zinc-700/50"
         aria-expanded={isExpanded}
       >
-        <GripVertical size={12} className="shrink-0 text-zinc-600" />
+        <GripVertical size={12} className="shrink-0 text-zinc-400" />
         <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-600 text-[10px] font-bold text-white">
           {step.order}
         </span>
@@ -104,25 +104,25 @@ function TutorialStepCard({
           {step.mechanic}
         </span>
         {isExpanded ? (
-          <ChevronDown size={12} className="text-zinc-500" />
+          <ChevronDown size={12} className="text-zinc-400" />
         ) : (
-          <ChevronRight size={12} className="text-zinc-500" />
+          <ChevronRight size={12} className="text-zinc-400" />
         )}
       </button>
       {isExpanded && (
         <div className="space-y-1.5 border-t border-zinc-700 px-3 py-2">
           <p className="text-xs text-zinc-300">{step.instruction}</p>
           <div className="flex flex-col gap-0.5">
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[10px] text-zinc-400">
               <span className="font-medium text-zinc-400">Trigger:</span>{' '}
               {step.triggerCondition}
             </span>
-            <span className="text-[10px] text-zinc-500">
+            <span className="text-[10px] text-zinc-400">
               <span className="font-medium text-zinc-400">Complete:</span>{' '}
               {step.completionCondition}
             </span>
             {step.hint && (
-              <span className="text-[10px] text-zinc-500">
+              <span className="text-[10px] text-zinc-400">
                 <span className="font-medium text-zinc-400">Hint:</span>{' '}
                 {step.hint}
               </span>
@@ -238,7 +238,7 @@ export function TutorialPanel() {
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         {/* Step 1: Detect */}
         <section>
-          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
             1. Detect Mechanics
           </h3>
           <button
@@ -263,7 +263,7 @@ export function TutorialPanel() {
         {/* Step 2: Select Mechanics */}
         {hasDetected && detectedMechanics.length > 0 && (
           <section>
-            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               2. Select Mechanics ({selectedCount}/{detectedMechanics.length})
             </h3>
             <div className="space-y-0.5">
@@ -282,7 +282,7 @@ export function TutorialPanel() {
         {/* Step 3: Generate */}
         {hasDetected && detectedMechanics.length > 0 && (
           <section>
-            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <h3 className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
               3. Generate Tutorial
             </h3>
             <button
@@ -318,10 +318,10 @@ export function TutorialPanel() {
         {plan && (
           <section>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                 Tutorial Plan
               </h3>
-              <div className="flex items-center gap-2 text-[10px] text-zinc-500">
+              <div className="flex items-center gap-2 text-[10px] text-zinc-400">
                 <span>{plan.estimatedDuration}</span>
                 <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-zinc-400">
                   {plan.difficulty}
@@ -368,8 +368,8 @@ export function TutorialPanel() {
         {/* Empty state */}
         {!hasDetected && (
           <div className="flex flex-col items-center gap-2 py-8 text-center">
-            <BookOpen size={24} className="text-zinc-600" />
-            <p className="text-xs text-zinc-500">
+            <BookOpen size={24} className="text-zinc-400" />
+            <p className="text-xs text-zinc-400">
               Detect game mechanics in your scene to generate a progressive tutorial that teaches players step-by-step.
             </p>
           </div>

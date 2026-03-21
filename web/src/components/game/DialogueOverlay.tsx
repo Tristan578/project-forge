@@ -126,7 +126,7 @@ export function DialogueOverlay() {
       {/* History panel */}
       {showHistory && runtimeHistory.length > 0 && (
         <div className="mb-2 w-[600px] max-w-[90vw] max-h-48 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900/95 p-3 pointer-events-auto">
-          <div className="mb-2 flex items-center gap-1.5 text-xs text-zinc-500">
+          <div className="mb-2 flex items-center gap-1.5 text-xs text-zinc-400">
             <History size={12} />
             <span>Dialogue History</span>
           </div>
@@ -154,7 +154,7 @@ export function DialogueOverlay() {
           <div className="px-4 py-3">
             <p className="text-sm leading-relaxed text-zinc-200">{typewriterText}</p>
             {typewriterDone && (
-              <div className="mt-2 text-right text-xs text-zinc-500">
+              <div className="mt-2 text-right text-xs text-zinc-400">
                 <ChevronRight size={12} className="inline" /> Space to continue
               </div>
             )}
@@ -185,7 +185,7 @@ export function DialogueOverlay() {
         )}
 
         {/* Bottom bar */}
-        <div className="flex items-center justify-between border-t border-zinc-800 px-4 py-1.5 text-xs text-zinc-500">
+        <div className="flex items-center justify-between border-t border-zinc-800 px-4 py-1.5 text-xs text-zinc-400">
           <button
             onClick={() => setShowHistory((prev) => !prev)}
             className="flex items-center gap-1 hover:text-zinc-300 transition-colors"

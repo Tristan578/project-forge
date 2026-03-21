@@ -35,7 +35,7 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, precision = 2,
           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
           [&::-webkit-slider-thumb]:bg-zinc-300"
       />
-      <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+      <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
         {value.toFixed(precision)}
       </span>
     </div>
@@ -258,11 +258,11 @@ export function ParticleInspector() {
     <div className="border-t border-zinc-800 pt-4 mt-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-1">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Particles
           </h3>
           <InfoTooltip text="Particle effects attached to this object" />
-          <button onClick={() => navigateDocs('features/particles')} className="rounded p-0.5 text-zinc-600 hover:text-zinc-400" title="Documentation">
+          <button onClick={() => navigateDocs('features/particles')} className="rounded p-0.5 text-zinc-400 hover:text-zinc-400" title="Documentation">
             <HelpCircle size={12} />
           </button>
         </div>
@@ -307,7 +307,7 @@ export function ParticleInspector() {
 
           {/* Spawner Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Spawner</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Spawner</h4>
             <div className="flex items-center gap-2">
               <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Mode
@@ -361,7 +361,7 @@ export function ParticleInspector() {
 
           {/* Lifetime Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Lifetime</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Lifetime</h4>
             <SliderRow
               label="Min (s)"
               value={primaryParticle.lifetimeMin}
@@ -386,7 +386,7 @@ export function ParticleInspector() {
 
           {/* Emission Shape Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Emission Shape</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Emission Shape</h4>
             <div className="flex items-center gap-2">
               <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Shape
@@ -482,7 +482,7 @@ export function ParticleInspector() {
 
           {/* Velocity Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Velocity</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Velocity</h4>
             <Vec3InputRow
               label="Min"
               value={primaryParticle.velocityMin}
@@ -501,7 +501,7 @@ export function ParticleInspector() {
 
           {/* Forces Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Forces</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Forces</h4>
             <Vec3InputRow
               label="Acceleration"
               value={primaryParticle.acceleration}
@@ -523,7 +523,7 @@ export function ParticleInspector() {
 
           {/* Size Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Size</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Size</h4>
             <SliderRow
               label="Start Size"
               value={primaryParticle.sizeStart}
@@ -549,7 +549,7 @@ export function ParticleInspector() {
           {/* Color Gradient Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
             <div className="flex items-center justify-between">
-              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600 flex items-center gap-1">
+              <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 flex items-center gap-1">
                 Color Gradient
                 <InfoTooltip term="colorGradient" />
               </h4>
@@ -564,11 +564,11 @@ export function ParticleInspector() {
             {primaryParticle.colorGradient.map((stop, index) => (
               <div key={index} className="space-y-1 rounded bg-zinc-800/50 p-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-zinc-500">Stop {index + 1}</span>
+                  <span className="text-[10px] text-zinc-400">Stop {index + 1}</span>
                   {primaryParticle.colorGradient.length > 2 && (
                     <button
                       onClick={() => handleRemoveGradientStop(index)}
-                      className="rounded p-0.5 text-zinc-500 hover:bg-zinc-700 hover:text-red-400"
+                      className="rounded p-0.5 text-zinc-400 hover:bg-zinc-700 hover:text-red-400"
                       title="Remove stop"
                     >
                       <Minus className="h-3 w-3" />
@@ -585,7 +585,7 @@ export function ParticleInspector() {
                   onChange={(v) => handleUpdateGradientStop(index, { position: v })}
                 />
                 <div className="space-y-1">
-                  <label className="block text-[10px] text-zinc-500">Color (RGBA)</label>
+                  <label className="block text-[10px] text-zinc-400">Color (RGBA)</label>
                   <div className="grid grid-cols-4 gap-1">
                     {[0, 1, 2, 3].map((i) => (
                       <input
@@ -612,7 +612,7 @@ export function ParticleInspector() {
 
           {/* Rendering Section */}
           <div className="border-t border-zinc-700 pt-3 space-y-2">
-            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-600">Rendering</h4>
+            <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">Rendering</h4>
             <div className="flex items-center gap-2">
               <label className="w-20 shrink-0 text-xs text-zinc-400 flex items-center gap-1">
                 Blend Mode

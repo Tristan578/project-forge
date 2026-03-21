@@ -42,12 +42,12 @@ export function EmptyState({ icon: Icon, title, description, action, className =
     >
       <Icon
         size={28}
-        className="text-zinc-600"
+        className="text-zinc-400"
         aria-hidden="true"
       />
       <div className="space-y-1">
         <p className="text-sm font-medium text-zinc-400">{title}</p>
-        <p className="text-xs text-zinc-500 max-w-[220px]">{description}</p>
+        <p className="text-xs text-zinc-400 max-w-[220px]">{description}</p>
       </div>
       {action && (
         <button

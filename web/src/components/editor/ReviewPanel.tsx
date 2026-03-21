@@ -179,7 +179,7 @@ export function ReviewPanel() {
           <div className="flex items-center gap-1">
             <button
               onClick={handleCopy}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800 transition-colors"
               title="Copy review as markdown"
               aria-label="Copy review as markdown"
             >
@@ -189,7 +189,7 @@ export function ReviewPanel() {
             <button
               onClick={handleGenerateReview}
               disabled={loading}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-50"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-400 hover:text-zinc-300 hover:bg-zinc-800 transition-colors disabled:opacity-50"
               title="Re-generate review"
               aria-label="Re-generate review"
             >
@@ -204,8 +204,8 @@ export function ReviewPanel() {
         {/* Empty state / generate button */}
         {!review && !loading && !error && (
           <div className="flex flex-col items-center justify-center gap-3 py-8 text-center">
-            <Star size={32} className="text-zinc-600" />
-            <p className="text-xs text-zinc-500 max-w-[200px]">
+            <Star size={32} className="text-zinc-400" />
+            <p className="text-xs text-zinc-400 max-w-[200px]">
               Get an AI-powered professional review of your game with scores and improvement suggestions.
             </p>
             <button
@@ -221,7 +221,7 @@ export function ReviewPanel() {
         {loading && (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
             <Loader2 size={24} className="text-yellow-400 animate-spin" />
-            <p className="text-xs text-zinc-500">Analyzing your game...</p>
+            <p className="text-xs text-zinc-400">Analyzing your game...</p>
           </div>
         )}
 
@@ -253,7 +253,7 @@ export function ReviewPanel() {
 
             {/* Score bars */}
             <div className="space-y-2">
-              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400">
                 Scores
               </h4>
               <ScoreBar label="Fun Factor" score={review.scores.funFactor} />
@@ -299,7 +299,7 @@ export function ReviewPanel() {
               <div>
                 <button
                   onClick={() => setReviewExpanded((prev) => !prev)}
-                  className="flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 hover:text-zinc-300 transition-colors"
+                  className="flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-400 hover:text-zinc-300 transition-colors"
                 >
                   <span>Full Review</span>
                   {reviewExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}

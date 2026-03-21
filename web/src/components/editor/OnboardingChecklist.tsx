@@ -193,14 +193,14 @@ export function OnboardingChecklist() {
         <div className="flex items-center gap-1">
           <button
             onClick={() => setCollapsed((c) => !c)}
-            className="rounded p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="rounded p-1 text-zinc-400 hover:text-zinc-300 transition-colors"
             title={collapsed ? 'Expand' : 'Collapse'}
           >
             {collapsed ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
           <button
             onClick={handleDismiss}
-            className="rounded p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
+            className="rounded p-1 text-zinc-400 hover:text-zinc-300 transition-colors"
             title="Dismiss checklist"
           >
             <X size={14} />
@@ -234,7 +234,7 @@ export function OnboardingChecklist() {
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
                   Basics
                 </h4>
-                <span className="text-xs text-zinc-500">
+                <span className="text-xs text-zinc-400">
                   {basicsCompleted}/{basicsTasks.length}
                 </span>
               </div>
@@ -261,7 +261,7 @@ export function OnboardingChecklist() {
                   </span>
                 )}
                 {basicsAllDone && (
-                  <span className="text-xs text-zinc-500">
+                  <span className="text-xs text-zinc-400">
                     {advancedCompleted}/{advancedTasks.length}
                   </span>
                 )}
@@ -319,7 +319,7 @@ function TaskItem({
       {completed ? (
         <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-green-500" />
       ) : (
-        <Circle size={16} className="mt-0.5 shrink-0 text-zinc-600" />
+        <Circle size={16} className="mt-0.5 shrink-0 text-zinc-400" />
       )}
       <div className="flex-1">
         <div
@@ -329,7 +329,7 @@ function TaskItem({
         >
           {task.title}
         </div>
-        <div className="text-xs text-zinc-500">{task.description}</div>
+        <div className="text-xs text-zinc-400">{task.description}</div>
       </div>
     </div>
   );

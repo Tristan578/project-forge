@@ -12,7 +12,7 @@ export default function Error({ error, reset }: ErrorProps) {
     <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
       <div className="text-center space-y-6 px-4">
         <div className="space-y-2">
-          <p className="text-zinc-500 text-sm font-mono uppercase tracking-widest">
+          <p className="text-zinc-400 text-sm font-mono uppercase tracking-widest">
             500
           </p>
           <h1 className="text-3xl font-bold text-zinc-100">

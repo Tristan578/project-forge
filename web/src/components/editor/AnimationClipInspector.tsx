@@ -154,7 +154,7 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
     <div className="border-t border-zinc-800 pt-4 mt-4">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-1.5">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
             Keyframe Animation
           </h3>
           <InfoTooltip text="Frame-by-frame animation you create for this object" />
@@ -270,14 +270,14 @@ export const AnimationClipInspector = memo(function AnimationClipInspector() {
                     <div className="flex items-center gap-2">
                       {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                       <span className="font-medium">{targetLabel}</span>
-                      <span className="text-xs text-zinc-500">{track.keyframes.length} keyframe{track.keyframes.length !== 1 ? 's' : ''}</span>
+                      <span className="text-xs text-zinc-400">{track.keyframes.length} keyframe{track.keyframes.length !== 1 ? 's' : ''}</span>
                     </div>
                   </button>
 
                   {isExpanded && (
                     <div className="px-3 pb-3 space-y-2">
                       {track.keyframes.length > 0 && (
-                        <div className="flex items-center gap-2 text-[10px] text-zinc-600">
+                        <div className="flex items-center gap-2 text-[10px] text-zinc-400">
                           <div className="flex w-16 items-center gap-0.5">
                             <span>Time</span>
                             <InfoTooltip term="keyframeTime" />

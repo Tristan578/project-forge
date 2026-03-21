@@ -153,29 +153,29 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
           {/* Info Grid */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <div className="text-sm text-zinc-500">Price</div>
+              <div className="text-sm text-zinc-400">Price</div>
               <div className="text-lg font-semibold text-zinc-200">
                 {asset.priceTokens === 0 ? 'Free' : `${asset.priceTokens} tokens`}
               </div>
             </div>
             <div>
-              <div className="text-sm text-zinc-500">License</div>
+              <div className="text-sm text-zinc-400">License</div>
               <div className="text-lg font-semibold text-zinc-200 capitalize">
                 {asset.license}
               </div>
             </div>
             <div>
-              <div className="text-sm text-zinc-500">Rating</div>
+              <div className="text-sm text-zinc-400">Rating</div>
               <div className="flex items-center gap-2">
                 <Star className="w-4 h-4 fill-yellow-500 text-yellow-500" />
                 <span className="text-lg font-semibold text-zinc-200">
                   {asset.avgRating.toFixed(1)}
                 </span>
-                <span className="text-sm text-zinc-500">({asset.ratingCount} reviews)</span>
+                <span className="text-sm text-zinc-400">({asset.ratingCount} reviews)</span>
               </div>
             </div>
             <div>
-              <div className="text-sm text-zinc-500">Downloads</div>
+              <div className="text-sm text-zinc-400">Downloads</div>
               <div className="flex items-center gap-2">
                 <Download className="w-4 h-4 text-zinc-400" />
                 <span className="text-lg font-semibold text-zinc-200">{asset.downloadCount}</span>
@@ -223,7 +223,7 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
               <div>
                 <div className="text-sm font-semibold text-zinc-200">{asset.seller.name}</div>
                 {asset.seller.bio && (
-                  <div className="text-xs text-zinc-500 mt-1">{asset.seller.bio}</div>
+                  <div className="text-xs text-zinc-400 mt-1">{asset.seller.bio}</div>
                 )}
               </div>
               {asset.seller.portfolioUrl && (
@@ -253,7 +253,7 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
               <button
                 onClick={handlePurchase}
                 disabled={purchasing}
-                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold rounded transition-colors"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white font-semibold rounded transition-colors"
               >
                 <ShoppingCart className="w-4 h-4" />
                 {purchasing ? 'Purchasing...' : asset.priceTokens === 0 ? 'Get Free' : 'Purchase'}
@@ -277,7 +277,7 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
                         className={`w-6 h-6 ${
                           star <= rating
                             ? 'fill-yellow-500 text-yellow-500'
-                            : 'text-zinc-600'
+                            : 'text-zinc-400'
                         }`}
                       />
                     </button>
@@ -293,7 +293,7 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
                 <button
                   onClick={handleReview}
                   disabled={rating === 0 || submittingReview}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-semibold rounded transition-colors"
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-700 disabled:text-zinc-400 text-white font-semibold rounded transition-colors"
                 >
                   {submittingReview ? 'Submitting...' : 'Submit Review'}
                 </button>
@@ -323,7 +323,7 @@ export function AssetDetailModal({ assetId, onClose }: AssetDetailModalProps) {
                           ))}
                         </div>
                       </div>
-                      <div className="text-xs text-zinc-500">
+                      <div className="text-xs text-zinc-400">
                         {new Date(review.createdAt).toLocaleDateString()}
                       </div>
                     </div>

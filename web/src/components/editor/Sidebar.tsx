@@ -26,7 +26,7 @@ function ToolButton({ icon, active, onClick, title }: ToolButtonProps) {
       className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
         active
           ? 'bg-zinc-800 text-white'
-          : 'text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300'
+          : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'
       }`}
     >
       {icon}

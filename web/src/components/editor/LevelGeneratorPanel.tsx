@@ -117,7 +117,7 @@ function RoomList({ layout }: { layout: LevelLayout }) {
             />
             <span className="text-zinc-200">{room.name}</span>
           </div>
-          <span className="text-zinc-500">{room.entities.length} entities</span>
+          <span className="text-zinc-400">{room.entities.length} entities</span>
         </div>
       ))}
     </div>
@@ -230,7 +230,7 @@ export function LevelGeneratorPanel() {
           <div>
             <label htmlFor="room-count" className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Room Count</span>
-              <span className="text-zinc-500">{roomCount}</span>
+              <span className="text-zinc-400">{roomCount}</span>
             </label>
             <input
               id="room-count"
@@ -245,7 +245,7 @@ export function LevelGeneratorPanel() {
           <div>
             <label htmlFor="enemy-density" className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Enemy Density</span>
-              <span className="text-zinc-500">{Math.round(enemyDensity * 100)}%</span>
+              <span className="text-zinc-400">{Math.round(enemyDensity * 100)}%</span>
             </label>
             <input
               id="enemy-density"
@@ -260,7 +260,7 @@ export function LevelGeneratorPanel() {
           <div>
             <label htmlFor="difficulty" className="flex items-center justify-between text-xs text-zinc-400 mb-1">
               <span>Difficulty</span>
-              <span className="text-zinc-500">{difficulty}/10</span>
+              <span className="text-zinc-400">{difficulty}/10</span>
             </label>
             <input
               id="difficulty"
@@ -279,7 +279,7 @@ export function LevelGeneratorPanel() {
           type="button"
           onClick={handleGenerate}
           disabled={generating || !description.trim()}
-          className="w-full flex items-center justify-center gap-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 disabled:text-zinc-500 px-3 py-2 text-sm font-medium text-white transition-colors duration-150"
+          className="w-full flex items-center justify-center gap-2 rounded bg-cyan-600 hover:bg-cyan-500 disabled:bg-zinc-700 disabled:text-zinc-400 px-3 py-2 text-sm font-medium text-white transition-colors duration-150"
           aria-label="Generate level from description"
         >
           <Sparkles className="w-4 h-4" />
@@ -322,7 +322,7 @@ export function LevelGeneratorPanel() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold text-zinc-300">{layout.name}</p>
-              <span className="text-xs text-zinc-500">
+              <span className="text-xs text-zinc-400">
                 {layout.rooms.length} rooms | ~{layout.estimatedPlaytime}
               </span>
             </div>

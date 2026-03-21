@@ -42,7 +42,7 @@ export function LightInspector() {
 
   return (
     <div className="border-t border-zinc-800 pt-4">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-400">
         Light ({typeLabel})
       </h3>
 
@@ -59,7 +59,7 @@ export function LightInspector() {
             }}
             className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
           />
-          <span className="text-xs text-zinc-500">{colorHex}</span>
+          <span className="text-xs text-zinc-400">{colorHex}</span>
         </div>
 
         {/* Intensity */}
@@ -77,7 +77,7 @@ export function LightInspector() {
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
               [&::-webkit-slider-thumb]:bg-zinc-300"
           />
-          <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+          <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
             {primaryLight.intensity.toFixed(0)}
           </span>
         </div>
@@ -98,7 +98,7 @@ export function LightInspector() {
                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                 [&::-webkit-slider-thumb]:bg-zinc-300"
             />
-            <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+            <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
               {primaryLight.range.toFixed(1)}
             </span>
           </div>
@@ -120,7 +120,7 @@ export function LightInspector() {
                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                 [&::-webkit-slider-thumb]:bg-zinc-300"
             />
-            <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+            <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
               {primaryLight.radius.toFixed(2)}
             </span>
           </div>
@@ -143,7 +143,7 @@ export function LightInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {radToDeg(primaryLight.innerAngle).toFixed(0)}
               </span>
             </div>
@@ -161,7 +161,7 @@ export function LightInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {radToDeg(primaryLight.outerAngle).toFixed(0)}
               </span>
             </div>
@@ -197,7 +197,7 @@ export function LightInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {primaryLight.shadowDepthBias.toFixed(2)}
               </span>
             </div>
@@ -215,7 +215,7 @@ export function LightInspector() {
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
                   [&::-webkit-slider-thumb]:bg-zinc-300"
               />
-              <span className="w-12 text-right text-xs tabular-nums text-zinc-500">
+              <span className="w-12 text-right text-xs tabular-nums text-zinc-400">
                 {primaryLight.shadowNormalBias.toFixed(1)}
               </span>
             </div>
