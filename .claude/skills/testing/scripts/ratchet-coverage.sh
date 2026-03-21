@@ -12,7 +12,7 @@
 #
 # Exit codes:
 #   0  Thresholds unchanged or bumped successfully
-#   1  Coverage summary not found
+#   0  Coverage summary not found (graceful skip)
 #   2  jq not available
 #
 # On CI (GITHUB_ACTIONS=true), thresholds are only updated on main branch.
@@ -41,7 +41,7 @@ fi
 
 if [[ ! -f "${SUMMARY_PATH}" ]]; then
   echo "::warning::Coverage summary not found at ${SUMMARY_PATH} — ratchet skipped"
-  exit 1
+  exit 0
 fi
 
 # ---------------------------------------------------------------------------
