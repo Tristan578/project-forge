@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "portless -- next dev --webpack",
+    "dev:raw": "next dev --webpack",
     "build": "next build",
     "analyze": "ANALYZE=true next build",
     "start": "next start",
@@ -76,6 +77,7 @@
     "eslint": "^9",
     "eslint-config-next": "^16.2.0",
     "jsdom": "^29.0.0",
+    "portless": "^0.7.2",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "4.0.18"
@@ -86,5 +88,9 @@
   "overrides": {
     "esbuild": ">=0.25.0",
     "dompurify": ">=3.3.2"
+  },
+  "portless": {
+    "name": "spawnforge",
+    "tld": "localhost"
   }
 }
