@@ -115,6 +115,7 @@ const PacingAnalyzerPanel = lazy(() =>
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { UNCLOSABLE_PANELS } from '@/lib/workspace/panelRegistry';
 import { LAYOUT_PRESETS } from '@/lib/workspace/presets';
+import { LockedPanelOverlay } from './LockedPanelOverlay';
 
 // ---- Loading skeleton shown while a lazy panel is fetched ----
 function PanelLoadingSkeleton() {
@@ -128,14 +129,16 @@ function PanelLoadingSkeleton() {
   );
 }
 
-// ---- Lazy panel wrapper — wraps each lazy component in Suspense ----
-function withSuspense(Component: React.ComponentType): React.FunctionComponent<IDockviewPanelProps> {
+// ---- Lazy panel wrapper — wraps each lazy component in Suspense + tier access lock ----
+function withSuspense(Component: React.ComponentType, panelId: string): React.FunctionComponent<IDockviewPanelProps> {
   return function LazyPanelWrapper(_props: IDockviewPanelProps) {
     return (
       <div className="h-full w-full overflow-hidden bg-zinc-900">
-        <Suspense fallback={<PanelLoadingSkeleton />}>
-          <Component />
-        </Suspense>
+        <LockedPanelOverlay panelId={panelId}>
+          <Suspense fallback={<PanelLoadingSkeleton />}>
+            <Component />
+          </Suspense>
+        </LockedPanelOverlay>
       </div>
     );
   };
@@ -230,36 +233,36 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'asset-browser': AssetPanelWrapper,
   'audio-mixer': AudioMixerPanelWrapper,
   docs: DocsPanelWrapper,
-  // AI / advanced — lazy
-  'ui-builder': withSuspense(UIBuilderPanel),
-  'dialogue-editor': withSuspense(DialogueTreeEditor),
-  tileset: withSuspense(TilesetPanel),
-  timeline: withSuspense(TimelinePanel),
-  taskboard: withSuspense(TaskboardPanel),
-  'procedural-anim': withSuspense(ProceduralAnimPanel),
-  'effect-bindings': withSuspense(EffectBindingsPanel),
-  tutorial: withSuspense(TutorialPanel),
-  accessibility: withSuspense(AccessibilityPanel),
-  review: withSuspense(ReviewPanel),
-  'behavior-tree': withSuspense(BehaviorTreePanel),
-  'level-generator': withSuspense(LevelGeneratorPanel),
-  'save-system': withSuspense(SaveSystemPanel),
-  narrative: withSuspense(NarrativePanel),
-  'auto-iteration': withSuspense(AutoIterationPanel),
-  'game-analytics': withSuspense(GameAnalyticsPanel),
-  'art-style': withSuspense(ArtStylePanel),
-  playtest: withSuspense(PlaytestPanel),
-  'physics-feel': withSuspense(PhysicsFeelPanel),
-  difficulty: withSuspense(DifficultyPanel),
-  'auto-rigging': withSuspense(AutoRiggingPanel),
-  'design-teacher': withSuspense(DesignTeacherPanel),
-  economy: withSuspense(EconomyPanel),
-  'smart-camera': withSuspense(SmartCameraPanel),
-  'world-builder': withSuspense(WorldBuilderPanel),
-  'texture-painter': withSuspense(TexturePainterPanel),
-  'idea-generator': withSuspense(IdeaGeneratorPanel),
-  'quest-generator': withSuspense(QuestGeneratorPanel),
-  'pacing-analyzer': withSuspense(PacingAnalyzerPanel),
+  // AI / advanced — lazy (panelId forwarded for tier access gating)
+  'ui-builder': withSuspense(UIBuilderPanel, 'ui-builder'),
+  'dialogue-editor': withSuspense(DialogueTreeEditor, 'dialogue-editor'),
+  tileset: withSuspense(TilesetPanel, 'tileset'),
+  timeline: withSuspense(TimelinePanel, 'timeline'),
+  taskboard: withSuspense(TaskboardPanel, 'taskboard'),
+  'procedural-anim': withSuspense(ProceduralAnimPanel, 'procedural-anim'),
+  'effect-bindings': withSuspense(EffectBindingsPanel, 'effect-bindings'),
+  tutorial: withSuspense(TutorialPanel, 'tutorial'),
+  accessibility: withSuspense(AccessibilityPanel, 'accessibility'),
+  review: withSuspense(ReviewPanel, 'review'),
+  'behavior-tree': withSuspense(BehaviorTreePanel, 'behavior-tree'),
+  'level-generator': withSuspense(LevelGeneratorPanel, 'level-generator'),
+  'save-system': withSuspense(SaveSystemPanel, 'save-system'),
+  narrative: withSuspense(NarrativePanel, 'narrative'),
+  'auto-iteration': withSuspense(AutoIterationPanel, 'auto-iteration'),
+  'game-analytics': withSuspense(GameAnalyticsPanel, 'game-analytics'),
+  'art-style': withSuspense(ArtStylePanel, 'art-style'),
+  playtest: withSuspense(PlaytestPanel, 'playtest'),
+  'physics-feel': withSuspense(PhysicsFeelPanel, 'physics-feel'),
+  difficulty: withSuspense(DifficultyPanel, 'difficulty'),
+  'auto-rigging': withSuspense(AutoRiggingPanel, 'auto-rigging'),
+  'design-teacher': withSuspense(DesignTeacherPanel, 'design-teacher'),
+  economy: withSuspense(EconomyPanel, 'economy'),
+  'smart-camera': withSuspense(SmartCameraPanel, 'smart-camera'),
+  'world-builder': withSuspense(WorldBuilderPanel, 'world-builder'),
+  'texture-painter': withSuspense(TexturePainterPanel, 'texture-painter'),
+  'idea-generator': withSuspense(IdeaGeneratorPanel, 'idea-generator'),
+  'quest-generator': withSuspense(QuestGeneratorPanel, 'quest-generator'),
+  'pacing-analyzer': withSuspense(PacingAnalyzerPanel, 'pacing-analyzer'),
 };
 
 // ---- Custom tab that hides close button for unclosable panels ----
