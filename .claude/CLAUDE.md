@@ -145,10 +145,13 @@ Labels: [bug/feature/refactor/test/docs]
 | `list_tickets` | Filter tickets by status/project |
 
 ### Web UI
-Taskboard web UI: `http://localhost:3010` (start with: `taskboard start --db .claude/taskboard.db`)
+Taskboard web UI: `http://localhost:3010` (start with: `taskboard start --port 3010`)
+
+**Do NOT pass `--db .claude/taskboard.db`** — let the taskboard use its default OS path.
 
 ### Rules for Claude
 - **Before starting work:** Check the board (`get_board`), pick a ticket, move to `in_progress`
+- **Before creating ANY PR:** Run `python3 .claude/hooks/github_project_sync.py push` to sync tickets to GitHub. Find the GitHub issue number with `gh issue list --search "PF-XXX in:title" --limit 1`. Include `Closes #NNNN` (GitHub issue number) in the PR body. **CI will fail without this.**
 - **After completing work:** Move ticket to `done`, verify acceptance criteria met
 - **Discovering new work:** Create a ticket FIRST, then do the work
 - **Bug found during development:** Create a bug ticket with reproduction steps in GWT format
