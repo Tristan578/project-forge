@@ -1,10 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useUserStore } from '../userStore';
+
+const originalFetch = global.fetch;
 
 describe('userStore actions', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     global.fetch = vi.fn();
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   it('canPublish returns true for non-starter tiers', () => {

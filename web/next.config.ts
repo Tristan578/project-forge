@@ -41,10 +41,24 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   compress: true,
+  // Forward browser console logs to the terminal during `next dev` (16.2+).
+  // Enables real-time visibility into client-side errors without opening DevTools.
+  logging: {
+    browserToTerminal: true,
+  },
   experimental: {
     // Subresource Integrity: inject sha256 integrity hashes into <script> tags
     // to prevent injection of unauthorized scripts in production.
     sri: { algorithm: 'sha256' },
+    // Inline prefetch payloads into the page HTML to reduce waterfall requests
+    // on navigation, improving LCP for App Router navigations (16.2+).
+    prefetchInlining: true,
+    // Cache RSC navigation payloads in the browser for instant back/forward
+    // navigation on previously visited routes (16.2+).
+    cachedNavigations: true,
+    // Use the new scroll restoration handler that correctly restores scroll
+    // position across App Router navigations (16.2+).
+    appNewScrollHandler: true,
   },
   images: {
     remotePatterns: [

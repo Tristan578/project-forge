@@ -7,11 +7,10 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useCommunityStore, type GalleryGame } from '../communityStore';
 
-// Mock fetch globally
-global.fetch = vi.fn();
+const originalFetch = global.fetch;
 
 const mockGame: GalleryGame = {
   id: 'game-1',
@@ -33,6 +32,7 @@ const mockGame: GalleryGame = {
 
 describe('communityStore', () => {
   beforeEach(() => {
+    global.fetch = vi.fn();
     // Reset store to initial state
     useCommunityStore.setState({
       games: [],
@@ -49,6 +49,10 @@ describe('communityStore', () => {
     });
     // Clear mocks
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
   });
 
   describe('Initial State', () => {
