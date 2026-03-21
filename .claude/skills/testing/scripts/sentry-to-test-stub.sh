@@ -240,26 +240,37 @@ fi
 # ---------------------------------------------------------------------------
 # Write the test stub
 # ---------------------------------------------------------------------------
-cat > "$OUTPUT_FILE" <<STUBEOF
+cat > "$OUTPUT_FILE" <<'STUBEOF'
 /**
- * Regression test for Sentry issue #${ISSUE_ID_ACTUAL}
- * Error: ${ERROR_MESSAGE}
- * File: ${SOURCE_FILE}:${SOURCE_LINE}
+ * Regression test for Sentry issue #__ISSUE_ID__
+ * Error: __ERROR_MESSAGE__
+ * File: __SOURCE_FILE__:__SOURCE_LINE__
  *
  * TODO: Fill in the reproduction steps and assertions
  */
 import { describe, it, expect } from 'vitest';
 
-describe('Regression: ${ERROR_MESSAGE_JS}', () => {
-  it('should not throw ${ERROR_TYPE_JS}', () => {
+describe('Regression: __ERROR_MESSAGE_JS__', () => {
+  it('should not throw __ERROR_TYPE_JS__', () => {
     // TODO: Set up the conditions that triggered the bug
-    // Source: ${SOURCE_FILE}:${SOURCE_LINE}
+    // Source: __SOURCE_FILE__:__SOURCE_LINE__
 
     // TODO: Add assertion
     expect(true).toBe(true); // placeholder
   });
 });
 STUBEOF
+
+# Replace placeholders with actual values (safe — no shell expansion)
+sed -i.bak \
+  -e "s|__ISSUE_ID__|${ISSUE_ID_ACTUAL}|g" \
+  -e "s|__ERROR_MESSAGE_JS__|${ERROR_MESSAGE_JS}|g" \
+  -e "s|__ERROR_TYPE_JS__|${ERROR_TYPE_JS}|g" \
+  -e "s|__ERROR_MESSAGE__|${ERROR_MESSAGE}|g" \
+  -e "s|__SOURCE_FILE__|${SOURCE_FILE}|g" \
+  -e "s|__SOURCE_LINE__|${SOURCE_LINE}|g" \
+  "$OUTPUT_FILE"
+rm -f "${OUTPUT_FILE}.bak"
 
 pass "Test stub written to: $OUTPUT_FILE"
 echo ""
