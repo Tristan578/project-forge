@@ -218,7 +218,6 @@ describe('streamChat', () => {
       model: 'claude-sonnet-4-5-20250929',
     });
 
-    // eslint-disable-next-line @typescript-eslint/unbound-method
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
