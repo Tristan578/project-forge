@@ -40,6 +40,7 @@ fi
 ERRORS=""
 
 # 1. TypeScript check (fast, catches type errors from merge conflicts)
+# WEB_DIR is already the cwd — no need to cd again
 if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
   if ! npx tsc --noEmit 2>&1 | tail -5; then
     ERRORS="${ERRORS}TypeScript errors found. "
@@ -47,6 +48,7 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
 fi
 
 # 2. ESLint on changed files only (fast, ~2-3s per file)
+# Paths are relative to web/ since that is the cwd
 TS_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
 if [ -n "$TS_FILES" ]; then
   # shellcheck disable=SC2086
@@ -57,7 +59,7 @@ fi
 
 # 3. Run panelRegistry structural test (catches #1 agent bug)
 if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
-  if ! (cd "$WEB_DIR" && npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts) 2>&1 | tail -5; then
+  if ! npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts 2>&1 | tail -5; then
     ERRORS="${ERRORS}panelRegistry structural test failed. "
   fi
 fi
