@@ -3,7 +3,8 @@ import { authenticateClerkSession } from '@/lib/auth/api-auth';
 import { getUserByClerkId } from '@/lib/auth/user-service';
 import { getDb } from '@/lib/db/client';
 import { feedback } from '@/lib/db/schema';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 
 const VALID_TYPES = ['bug', 'feature', 'general'] as const;
@@ -15,8 +16,8 @@ export async function POST(req: NextRequest) {
 
   const user = await getUserByClerkId(clerkId);
 
-  // Rate limit: 10 submissions per minute per user
-  const rl = await rateLimit(`feedback:${clerkId}`, 10, 60_000);
+  // Rate limit: 10 submissions per minute per user (distributed)
+  const rl = await distributedRateLimit(`feedback:${clerkId}`, 10, 60);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const parsed = await parseJsonBody(req);

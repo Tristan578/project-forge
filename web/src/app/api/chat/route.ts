@@ -3,7 +3,6 @@ export const maxDuration = 120; // seconds — AI streaming + tool calls need mo
 import { NextRequest } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
-import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
@@ -13,7 +12,7 @@ import {
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
@@ -220,13 +219,14 @@ function onUpdate(dt) {
 - Always respond with what you did and suggest next steps`;
 
 export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const auth = await authenticateRequest();
-  if (!auth.ok) return auth.response;
-
-  // 1b. Rate limit: 10 requests per minute per user
-  const rl = await rateLimit(`chat:${auth.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  // 1. Authenticate + rate-limit via shared middleware pipeline
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `chat:${id}`, max: 10, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
+  const auth = { ctx: mid.authContext! };
 
   // 2. Validate request size (max 1MB — generous limit for conversation history + scene context;
   //    the more precise MAX_INPUT_CHARS check below enforces the actual token budget)
