@@ -158,11 +158,11 @@ update_threshold() {
   local metric="$1"
   local new_val="$2"
   # Replace: `  statements: 55,` → `  statements: NEW,`
-  # Uses a portable sed pattern that works on both GNU and BSD sed
+  # Uses POSIX patterns — \s and \+ are GNU extensions that fail on macOS BSD sed
   if [[ "$(uname)" == "Darwin" ]]; then
-    sed -i '' "s/\(${metric}:\s*\)[0-9]\+/\1${new_val}/" "${CONFIG_PATH}"
+    sed -i '' "s/\(${metric}:[[:space:]]*\)[0-9][0-9]*/\1${new_val}/" "${CONFIG_PATH}"
   else
-    sed -i "s/\(${metric}:\s*\)[0-9]\+/\1${new_val}/" "${CONFIG_PATH}"
+    sed -i "s/\(${metric}:[[:space:]]*\)[0-9][0-9]*/\1${new_val}/" "${CONFIG_PATH}"
   fi
 }
 
