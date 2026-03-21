@@ -77,7 +77,16 @@ As a [persona], I want [specific goal] so that [measurable benefit].
    - Team assigned (metadata)
    - Subtasks defined (at least 3 implementation steps)
 5. Fix any validation gaps BEFORE moving to `in_progress`
-6. Move the ticket to `in_progress` using `move_ticket`
+6. **Sync ticket to GitHub** — run `/sync-push` so the ticket becomes a GitHub issue. You need the GitHub issue number (`#NNNN`) to link PRs with `Closes #NNNN`.
+7. Move the ticket to `in_progress` using `move_ticket`
+
+### Before Creating Any PR
+
+**MANDATORY** — every PR must link to a GitHub issue:
+1. Run `/sync-push` to ensure your ticket exists as a GitHub issue
+2. Find the GitHub issue number: `gh issue list --search "PF-XXX in:title" --limit 1`
+3. Include `Closes #NNNN` (GitHub issue number, NOT `PF-XXX`) in the PR body
+4. The CI work item check will **fail** if the PF-XXX ticket isn't found as a GitHub issue
 
 ### During Work
 
