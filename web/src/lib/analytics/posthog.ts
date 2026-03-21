@@ -2,7 +2,12 @@
  * PostHog analytics client wrapper.
  *
  * Initializes with NEXT_PUBLIC_POSTHOG_KEY env var.
- * Graceful no-op when key is missing or in non-production environments.
+ * Graceful no-op when key is missing, in non-production environments,
+ * or when the user has not granted cookie consent (GDPR compliance).
+ *
+ * Consent is stored in localStorage under the key 'forge-cookie-consent'.
+ * PostHog only loads after the user explicitly clicks "Accept".
+ * Default: opted out.
  */
 
 import posthog from 'posthog-js';
@@ -20,12 +25,26 @@ export enum AnalyticsEvent {
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY ?? '';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+const CONSENT_STORAGE_KEY = 'forge-cookie-consent';
 
 let initialized = false;
 
-/** Initialize PostHog client. Only works in production with a valid key. */
+/**
+ * Returns true only when the user has explicitly accepted cookies.
+ * Safe to call during SSR — returns false when window is unavailable.
+ */
+export function hasConsented(): boolean {
+  if (typeof window === 'undefined') return false;
+  return localStorage.getItem(CONSENT_STORAGE_KEY) === 'true';
+}
+
+/**
+ * Initialize PostHog client.
+ * Only runs in production with a valid key AND when the user has consented.
+ */
 export function initPostHog(): void {
   if (initialized || !POSTHOG_KEY || !IS_PRODUCTION) return;
+  if (!hasConsented()) return;
 
   posthog.init(POSTHOG_KEY, {
     api_host: 'https://us.i.posthog.com',

@@ -15,6 +15,8 @@ vi.mock('posthog-js', () => ({
   },
 }));
 
+const CONSENT_KEY = 'forge-cookie-consent';
+
 describe('posthog analytics wrapper', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -22,27 +24,36 @@ describe('posthog analytics wrapper', () => {
     // Reset env vars
     vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', '');
     vi.stubEnv('NODE_ENV', 'test');
+    // Clear consent state between tests
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(CONSENT_KEY);
+    }
   });
 
-  it('does not initialize when key is missing', async () => {
-    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', '');
+  // ── Consent guard ──────────────────────────────────────────────────────────
+
+  it('does not initialize when consent has not been granted', async () => {
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
     vi.stubEnv('NODE_ENV', 'production');
+    // No localStorage entry = no consent
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     expect(mockInit).not.toHaveBeenCalled();
   });
 
-  it('does not initialize in non-production environment', async () => {
+  it('does not initialize when consent was declined', async () => {
     vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
-    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'false');
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     expect(mockInit).not.toHaveBeenCalled();
   });
 
-  it('initializes in production with a valid key', async () => {
+  it('initializes when consent was accepted', async () => {
     vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
     vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     expect(mockInit).toHaveBeenCalledWith('phc_test123', expect.objectContaining({
@@ -51,6 +62,60 @@ describe('posthog analytics wrapper', () => {
       capture_pageview: false,
     }));
   });
+
+  // ── hasConsented ───────────────────────────────────────────────────────────
+
+  it('hasConsented returns false when nothing is stored', async () => {
+    const mod = await import('@/lib/analytics/posthog');
+    expect(mod.hasConsented()).toBe(false);
+  });
+
+  it('hasConsented returns false when consent is declined', async () => {
+    localStorage.setItem(CONSENT_KEY, 'false');
+    const mod = await import('@/lib/analytics/posthog');
+    expect(mod.hasConsented()).toBe(false);
+  });
+
+  it('hasConsented returns true when consent is accepted', async () => {
+    localStorage.setItem(CONSENT_KEY, 'true');
+    const mod = await import('@/lib/analytics/posthog');
+    expect(mod.hasConsented()).toBe(true);
+  });
+
+  // ── Existing guards (key + env) ────────────────────────────────────────────
+
+  it('does not initialize when key is missing', async () => {
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', '');
+    vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
+    const mod = await import('@/lib/analytics/posthog');
+    mod.initPostHog();
+    expect(mockInit).not.toHaveBeenCalled();
+  });
+
+  it('does not initialize in non-production environment', async () => {
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
+    vi.stubEnv('NODE_ENV', 'development');
+    localStorage.setItem(CONSENT_KEY, 'true');
+    const mod = await import('@/lib/analytics/posthog');
+    mod.initPostHog();
+    expect(mockInit).not.toHaveBeenCalled();
+  });
+
+  it('initializes in production with a valid key and consent', async () => {
+    vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
+    vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
+    const mod = await import('@/lib/analytics/posthog');
+    mod.initPostHog();
+    expect(mockInit).toHaveBeenCalledWith('phc_test123', expect.objectContaining({
+      api_host: 'https://us.i.posthog.com',
+      person_profiles: 'identified_only',
+      capture_pageview: false,
+    }));
+  });
+
+  // ── Event tracking ─────────────────────────────────────────────────────────
 
   it('trackEvent is a no-op when not initialized', async () => {
     const mod = await import('@/lib/analytics/posthog');
@@ -61,6 +126,7 @@ describe('posthog analytics wrapper', () => {
   it('trackEvent calls posthog.capture when initialized', async () => {
     vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
     vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     mod.trackEvent('test_event', { key: 'value' });
@@ -76,6 +142,7 @@ describe('posthog analytics wrapper', () => {
   it('identifyUser calls posthog.identify when initialized', async () => {
     vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
     vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     mod.identifyUser('user123', { tier: 'pro' });
@@ -85,6 +152,7 @@ describe('posthog analytics wrapper', () => {
   it('trackPageView calls posthog.capture with $pageview event', async () => {
     vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
     vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     mod.trackPageView('/editor');
@@ -94,6 +162,7 @@ describe('posthog analytics wrapper', () => {
   it('resetAnalytics calls posthog.reset when initialized', async () => {
     vi.stubEnv('NEXT_PUBLIC_POSTHOG_KEY', 'phc_test123');
     vi.stubEnv('NODE_ENV', 'production');
+    localStorage.setItem(CONSENT_KEY, 'true');
     const mod = await import('@/lib/analytics/posthog');
     mod.initPostHog();
     mod.resetAnalytics();
