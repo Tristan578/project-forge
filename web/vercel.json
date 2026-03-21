@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
+  "crons": [
+    {
+      "path": "/api/cron/health-monitor",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": ".next",
