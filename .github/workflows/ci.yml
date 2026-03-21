@@ -9,6 +9,7 @@ on:
       - 'engine/**'
       - 'scripts/**'
       - '.github/workflows/**'
+      - '.claude/skills/**/scripts/**'
       - 'package.json'
       - 'package-lock.json'
 
