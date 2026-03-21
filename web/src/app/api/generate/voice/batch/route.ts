@@ -4,7 +4,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 
 interface BatchItem {
   nodeId: string;
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 5 batch requests per 5 minutes per user
-  const rl = await rateLimit(`gen-voice-batch:${authResult.ctx.user.id}`, 5, 300_000);
+  const rl = await distributedRateLimit(`gen-voice-batch:${authResult.ctx.user.id}`, 5, 300);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   let body: {

@@ -1,22 +1,22 @@
 export const maxDuration = 180; // seconds — 3D model generation (Meshy) is very slow
 
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 export async function POST(request: NextRequest) {
-  // 1. Authenticate
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // 1b. Rate limit: 10 generation requests per 5 minutes per user
-  const rl = await rateLimit(`gen-model:${authResult.ctx.user.id}`, 10, 300_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  // 1. Authenticate + rate-limit (distributed, 10 req / 5 min per user)
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `gen-model:${id}`, max: 10, windowSeconds: 300 },
+  });
+  if (mid.error) return mid.error;
+  const authResult = { ctx: mid.authContext! };
 
   // 2. Parse request
   let body: {

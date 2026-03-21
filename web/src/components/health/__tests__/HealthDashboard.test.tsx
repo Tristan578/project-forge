@@ -30,15 +30,19 @@ function makeReport(
   };
 }
 
+// Service names MUST match the `name` field returned by each check function in
+// lib/monitoring/healthChecks.ts. If these drift, the status page will silently
+// drop services from its response (PF-739).
 const allHealthyServices: ServiceHealth[] = [
   makeService('Database (Neon)', 'healthy'),
-  makeService('Authentication (Clerk)', 'healthy'),
   makeService('Payments (Stripe)', 'healthy'),
-  makeService('Error Tracking (Sentry)', 'healthy'),
-  makeService('Asset Storage (R2)', 'healthy'),
   makeService('Rate Limiting (Upstash)', 'healthy'),
   makeService('Engine CDN', 'healthy'),
   makeService('AI Providers', 'healthy'),
+  makeService('Clerk', 'healthy'),          // checkClerk() → 'Clerk'
+  makeService('Anthropic', 'healthy'),       // checkAnthropic() → 'Anthropic'
+  makeService('Sentry', 'healthy'),          // checkSentry() → 'Sentry'
+  makeService('Cloudflare R2', 'healthy'),   // checkCloudflareR2() → 'Cloudflare R2'
 ];
 
 describe('HealthDashboard', () => {
@@ -87,8 +91,8 @@ describe('HealthDashboard', () => {
     const { container } = render(<HealthDashboard initialReport={report} />);
 
     const grid = container.querySelector('[data-testid="service-grid"]');
-    // 8 service cards should be present
-    expect(grid?.children).toHaveLength(8);
+    // 9 service cards: DB, Stripe, Upstash, CDN, AI Providers, Clerk, Anthropic, Sentry, R2
+    expect(grid?.children).toHaveLength(9);
   });
 
   it('displays the service name in each card', () => {
@@ -96,7 +100,7 @@ describe('HealthDashboard', () => {
     render(<HealthDashboard initialReport={report} />);
 
     expect(screen.getByText('Database (Neon)')).toBeDefined();
-    expect(screen.getByText('Authentication (Clerk)')).toBeDefined();
+    expect(screen.getByText('Clerk')).toBeDefined();
     expect(screen.getByText('Engine CDN')).toBeDefined();
   });
 
