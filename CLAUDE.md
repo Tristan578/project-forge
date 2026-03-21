@@ -35,7 +35,7 @@ cd web && npx eslint --max-warnings 0 .
 # TypeScript
 cd web && npx tsc --noEmit
 
-# Unit tests (4700+)
+# Unit tests (12,620+)
 cd web && npx vitest run
 
 # Unit tests with coverage

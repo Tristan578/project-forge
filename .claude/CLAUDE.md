@@ -170,7 +170,7 @@ Key rules:
 |-------|------|--------|---------|
 | 1-2 | Foundation | DONE | |
 | 3 | Rendering & Materials | DONE | |
-| 4-A | MCP Server (322 commands, 37 categories) | DONE | Initial 143, expanded across subsequent phases |
+| 4-A | MCP Server (327 commands, 37 categories) | DONE | Initial 143, expanded across subsequent phases |
 | 4-B | AI Chat Panel | DONE | ChatPanel, ChatInput (image upload, voice, model selection), entity @-mentions, thinking mode, approval mode, batch undo, feedback, conversation persistence, streaming |
 | 5-A | Play/Edit Mode | DONE | |
 | 5-B | Input System | DONE | |
@@ -200,10 +200,10 @@ Key rules:
 | 32 | Chat UX Enhancements | DONE | Entity @-mentions, command preview/approval, response feedback, batch undo |
 | 35 | Quality Presets | DONE | Low/Medium/High/Ultra rendering presets (MSAA, shadows, bloom, sharpening, particles) |
 | 36 | Material Library Browser | DONE | 56 presets across 9 categories, CSS sphere previews, custom material saving |
-| T-1 | Test Infrastructure | DONE | 312 tests (287 web + 25 MCP), fixtures, store/executor/sceneFile/material/hierarchy/script/clipboard/search tests |
+| T-1 | Test Infrastructure | DONE | Initial test foundation: fixtures, store/executor/sceneFile/material/hierarchy/script/clipboard/search tests |
 | H-1 | Prefab System | DONE | Entity templates, 8 built-in prefabs, localStorage persistence, search, import/export, 5 MCP commands |
 | H-2 | Multi-Scene / Level System | DONE | Multiple named scenes per project, scene switching, duplicate, import/export, 7 MCP commands |
-| T-2 | Test Coverage Expansion | DONE | 475 tests (450 web + 25 MCP), export pipeline, audio manager, chat/user stores, dndUtils |
+| T-2 | Test Coverage Expansion | DONE | 12,620+ web tests across 184+ files, export pipeline, audio manager, chat/user stores, dndUtils, API routes, db, generate, dialogue, UI builder, component tests |
 | G-3 | Skybox & Environment Maps | DONE | Procedural cubemap presets (Studio, Sunset, Overcast, Night, Bright Day), Skybox component, IBL, 3 MCP commands |
 | G-4 | Collision Events & Raycasting | DONE | Rapier CollisionEvent reading, forge.physics.onCollisionEnter/Exit, raycast API, 1 MCP command |
 | 26 | Physics Joints | DONE | 6 joint types (fixed, revolute, spherical, prismatic, rope, spring), JointInspector, limits/motors, 4 MCP commands |
@@ -289,9 +289,17 @@ When adding a **new ECS component**, update these domain-scoped files:
 - `/rust-engine` — Bevy 0.18 ECS, commands, bridge, WASM patterns
 - `/frontend` — React 19, Next.js 16, Zustand 5, Tailwind 4 patterns
 - `/mcp-commands` — MCP manifest, chat handlers, AI parity
-- `/testing` — Test patterns, coverage targets, anti-patterns
+- `/testing` — Test patterns, coverage targets, anti-patterns (knowledge)
+- `/run-tests` — Execute test suites: lint, tsc, vitest, playwright, mcp (action)
+- `/troubleshoot` — Diagnose failures: WASM build, CI, dev server, production, E2E, engine panics, services
 - `/docs` — Documentation types, freshness rules, writing standards
 - `/design` — Architecture decisions, performance budgets, spec format
+- `/infra-services` — Vercel, R2, Neon, Upstash, Clerk, Stripe, Sentry, PostHog, GitHub Actions
+- `/kanban` — Taskboard management
+- `/babysit-prs` — Monitor and fix open PRs
+- `/pr-code-review` — SpawnForge-specific PR review with 11-category checklist
+- `/build` — WASM engine build (WebGL2 + WebGPU)
+- `/multiplayer-readiness` — Flag changes that make future multiplayer harder
 
 ### Validation Tools (`.claude/tools/`)
 - `validate-rust.sh` — Architecture boundaries, bridge isolation, unsafe audit
