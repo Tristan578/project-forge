@@ -894,3 +894,36 @@ pub fn emit_performance_stats(
 pub fn emit_custom_wgsl_source_changed(source: &crate::core::custom_wgsl::CustomWgslSource) {
     emit_event("CUSTOM_WGSL_SOURCE_CHANGED", source);
 }
+
+/// Emit an ENGINE_PANIC event to JavaScript with the panic message.
+///
+/// This is called from the custom panic hook installed in `init_engine` so that
+/// React can display a recovery overlay and offer to re-initialize the engine.
+///
+/// # Safety
+/// This function is intentionally callable from a panic context.  It must not
+/// panic itself, so all operations that could fail are silently discarded.
+pub fn emit_engine_panic(message: &str) {
+    EVENT_CALLBACK.with(|cb| {
+        if let Some(callback) = cb.borrow().as_ref() {
+            // Build a minimal JSON value without allocating a HashMap, to reduce
+            // the chance of a secondary panic during OOM conditions.
+            let event_json = format!(
+                r#"{{"type":"ENGINE_PANIC","payload":{{"message":{}}}}}"#,
+                serde_json::Value::String(message.to_string()),
+            );
+
+            match serde_json::from_str::<serde_json::Value>(&event_json) {
+                Ok(event_value) => {
+                    match event_value.serialize(&Serializer::json_compatible()) {
+                        Ok(js_value) => {
+                            let _ = callback.call1(&JsValue::NULL, &js_value);
+                        }
+                        Err(_) => {}
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+    });
+}

@@ -110,8 +110,29 @@ pub fn emit_init_event(phase: &str, message: Option<&str>, error: Option<&str>) 
 /// This function is idempotent - subsequent calls are no-ops.
 #[wasm_bindgen]
 pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
-    // Set panic hook for better error messages in browser console
-    console_error_panic_hook::set_once();
+    // Install a custom panic hook that:
+    // 1. Forwards the panic message to browser console (via console_error_panic_hook)
+    // 2. Emits an ENGINE_PANIC event to JavaScript so React can show a recovery overlay
+    //
+    // We use std::panic::set_hook (not console_error_panic_hook::set_once) so we can
+    // chain our own logic.  The hook is set unconditionally each call — that is safe
+    // because this function is idempotent after the singleton guard above.
+    std::panic::set_hook(Box::new(|panic_info| {
+        // Let console_error_panic_hook write the stack trace to the browser console first.
+        console_error_panic_hook::hook(panic_info);
+
+        // Build a short summary string from the panic payload.
+        let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
+            format!("panicked at '{}' ({})", s, panic_info.location().map(|l| l.to_string()).unwrap_or_default())
+        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
+            format!("panicked at '{}' ({})", s, panic_info.location().map(|l| l.to_string()).unwrap_or_default())
+        } else {
+            format!("panicked ({})", panic_info.location().map(|l| l.to_string()).unwrap_or_default())
+        };
+
+        // Emit the ENGINE_PANIC event so the JS recovery overlay can appear.
+        events::emit_engine_panic(&msg);
+    }));
 
     // Singleton check - only initialize once
     if core::Engine::is_initialized() {
