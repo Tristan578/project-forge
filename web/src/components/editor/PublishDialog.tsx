@@ -88,14 +88,19 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="publish-dialog-title"
+        className="w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl"
+      >
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-zinc-200">
-            <Globe size={20} />
+          <h2 id="publish-dialog-title" className="flex items-center gap-2 text-lg font-semibold text-zinc-200">
+            <Globe size={20} aria-hidden="true" />
             Publish Game
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-500 hover:text-zinc-300">
-            <X size={18} />
+          <button onClick={onClose} aria-label="Close publish dialog" className="rounded p-1 text-zinc-400 hover:text-zinc-300">
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
 
@@ -103,19 +108,20 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
           // Success state
           <div className="space-y-4">
             <div className="flex items-center gap-2 rounded-lg bg-green-900/30 p-4 text-green-400">
-              <Check size={20} />
+              <Check size={20} aria-hidden="true" />
               <span>Game published successfully!</span>
             </div>
             <div className="rounded bg-zinc-800 p-3">
-              <p className="mb-1 text-xs text-zinc-500">Share this URL:</p>
+              <p className="mb-1 text-xs text-zinc-400">Share this URL:</p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-sm text-blue-400 break-all">{window.location.origin}{publishedUrl}</code>
                 <button
                   onClick={() => handleCopyUrl(`${window.location.origin}${publishedUrl}`)}
                   className="shrink-0 rounded p-1.5 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200"
+                  aria-label="Copy published URL"
                   title="Copy URL"
                 >
-                  {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                  {copied ? <Check size={14} className="text-green-400" aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
                 </button>
               </div>
             </div>
@@ -128,40 +134,42 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
           // Form
           <div className="space-y-4">
             <div>
-              <label className="mb-1 block text-xs text-zinc-400">Title</label>
-              <input type="text" value={title} onChange={(e) => setTitle(e.target.value)}
+              <label htmlFor="publish-title" className="mb-1 block text-xs text-zinc-400">Title</label>
+              <input id="publish-title" type="text" value={title} onChange={(e) => setTitle(e.target.value)}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-blue-500 focus:outline-none"
                 placeholder="My Awesome Game" />
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-zinc-400">URL Slug</label>
+              <label htmlFor="publish-slug" className="mb-1 block text-xs text-zinc-400">URL Slug</label>
               <div className="flex items-center gap-2">
-                <input type="text" value={slug} onChange={(e) => handleSlugChange(e.target.value)}
+                <input id="publish-slug" type="text" value={slug} onChange={(e) => handleSlugChange(e.target.value)}
                   className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-blue-500 focus:outline-none"
-                  placeholder="my-awesome-game" />
-                {slugAvailable === true && <Check size={16} className="text-green-400" />}
-                {slugAvailable === false && <AlertCircle size={16} className="text-red-400" />}
+                  placeholder="my-awesome-game"
+                  aria-describedby="publish-slug-hint" />
+                {slugAvailable === true && <Check size={16} className="text-green-400" aria-hidden="true" />}
+                {slugAvailable === false && <AlertCircle size={16} className="text-red-400" aria-hidden="true" />}
               </div>
-              <p className="mt-1 text-[10px] text-zinc-600">
+              <p id="publish-slug-hint" className="mt-1 text-[10px] text-zinc-500">
                 3-50 characters, lowercase letters, numbers, and hyphens
               </p>
             </div>
 
             <div>
-              <label className="mb-1 block text-xs text-zinc-400">Description (optional)</label>
-              <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+              <label htmlFor="publish-description" className="mb-1 block text-xs text-zinc-400">Description (optional)</label>
+              <textarea id="publish-description" value={description} onChange={(e) => setDescription(e.target.value)}
                 className="w-full rounded border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-300 focus:border-blue-500 focus:outline-none"
                 rows={2} placeholder="A brief description of your game" />
             </div>
 
             <div>
-              <label className="mb-1 flex items-center gap-1 text-xs text-zinc-400">
-                <Tag size={12} />
+              <label htmlFor="publish-tag-input" className="mb-1 flex items-center gap-1 text-xs text-zinc-400">
+                <Tag size={12} aria-hidden="true" />
                 Tags (up to 5)
               </label>
               <div className="flex gap-2">
                 <input
+                  id="publish-tag-input"
                   type="text"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}
@@ -184,8 +192,8 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
                   {tags.map((tag) => (
                     <span key={tag} className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
                       {tag}
-                      <button onClick={() => handleRemoveTag(tag)} className="text-zinc-500 hover:text-zinc-300">
-                        <X size={10} />
+                      <button onClick={() => handleRemoveTag(tag)} aria-label={`Remove tag ${tag}`} className="text-zinc-400 hover:text-zinc-300">
+                        <X size={10} aria-hidden="true" />
                       </button>
                     </span>
                   ))}

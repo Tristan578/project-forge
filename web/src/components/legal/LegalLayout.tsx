@@ -48,7 +48,7 @@ export function LegalLayout({
               <span aria-hidden="true">&larr;</span> Back to home
             </Link>
             <nav className="hidden lg:block">
-              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-400">
                 On this page
               </h2>
               <ul className="space-y-2 border-l border-zinc-800 pl-4">
@@ -74,7 +74,7 @@ export function LegalLayout({
               <h1 className="mb-3 text-4xl font-bold tracking-tight">
                 {title}
               </h1>
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-zinc-400">
                 Last updated: {lastUpdated}
               </p>
             </header>
@@ -88,7 +88,7 @@ export function LegalLayout({
 
       {/* Footer */}
       <footer className="mt-16 border-t border-zinc-800 px-6 py-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 text-sm text-zinc-500 sm:flex-row sm:justify-between">
+        <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 text-sm text-zinc-400 sm:flex-row sm:justify-between">
           <p>&copy; {new Date().getFullYear()} SpawnForge. All rights reserved.</p>
           <nav className="flex gap-6">
             <Link href="/terms" className="hover:text-zinc-300">
