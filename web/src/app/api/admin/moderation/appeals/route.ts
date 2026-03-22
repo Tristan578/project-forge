@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { moderationAppeals, users } from '@/lib/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, count } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 
@@ -37,25 +37,35 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const appeals = await db
-      .select({
-        id: moderationAppeals.id,
-        contentId: moderationAppeals.contentId,
-        contentType: moderationAppeals.contentType,
-        reason: moderationAppeals.reason,
-        status: moderationAppeals.status,
-        userId: moderationAppeals.userId,
-        userName: users.displayName,
-        userEmail: users.email,
-        createdAt: moderationAppeals.createdAt,
-        reviewedAt: moderationAppeals.reviewedAt,
-      })
-      .from(moderationAppeals)
-      .leftJoin(users, eq(moderationAppeals.userId, users.id))
-      .where(eq(moderationAppeals.status, statusFilter as 'pending' | 'approved' | 'rejected'))
-      .orderBy(desc(moderationAppeals.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const statusValue = statusFilter as 'pending' | 'approved' | 'rejected';
+
+    const [appeals, countResult] = await Promise.all([
+      db
+        .select({
+          id: moderationAppeals.id,
+          contentId: moderationAppeals.contentId,
+          contentType: moderationAppeals.contentType,
+          reason: moderationAppeals.reason,
+          status: moderationAppeals.status,
+          userId: moderationAppeals.userId,
+          userName: users.displayName,
+          userEmail: users.email,
+          createdAt: moderationAppeals.createdAt,
+          reviewedAt: moderationAppeals.reviewedAt,
+        })
+        .from(moderationAppeals)
+        .leftJoin(users, eq(moderationAppeals.userId, users.id))
+        .where(eq(moderationAppeals.status, statusValue))
+        .orderBy(desc(moderationAppeals.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ total: count() })
+        .from(moderationAppeals)
+        .where(eq(moderationAppeals.status, statusValue)),
+    ]);
+
+    const total = countResult[0]?.total ?? 0;
 
     return NextResponse.json({
       items: appeals.map((a) => ({
@@ -70,7 +80,7 @@ export async function GET(req: NextRequest) {
         createdAt: a.createdAt.toISOString(),
         reviewedAt: a.reviewedAt?.toISOString() ?? null,
       })),
-      total: appeals.length,
+      total,
     });
   } catch (error) {
     console.error('Failed to fetch appeals:', error);

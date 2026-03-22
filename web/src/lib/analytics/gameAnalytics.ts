@@ -294,7 +294,7 @@ export function sessionsToCSV(sessions: PlayerSession[]): string {
   for (const session of sessions) {
     if (session.events.length === 0) {
       rows.push(
-        `${session.sessionId},${session.startTime},${session.endTime ?? ''},${session.duration},,,,`
+        `${session.sessionId},${session.startTime},${session.endTime ?? ''},${session.duration},,,,,`
       );
     } else {
       for (const event of session.events) {
