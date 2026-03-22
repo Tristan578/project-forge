@@ -235,10 +235,14 @@ function buildModelMessages(
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      const text = typeof msg.content === 'string'
+      // Pass structured content (image + text parts) directly to AI SDK
+      // Only stringify if it's not already a string or valid content array
+      const content = typeof msg.content === 'string'
         ? msg.content
-        : JSON.stringify(msg.content);
-      result.push({ role: 'user' as const, content: text });
+        : Array.isArray(msg.content)
+          ? msg.content
+          : String(msg.content);
+      result.push({ role: 'user' as const, content });
     } else if (msg.role === 'assistant') {
       const text = typeof msg.content === 'string'
         ? msg.content
@@ -473,10 +477,18 @@ export async function POST(request: NextRequest) {
       stopWhen: stepCountIs(10),
       experimental_telemetry: { isEnabled: true },
       ...(providerOptions ? { providerOptions } : {}),
+      // Handle mid-stream errors: refund tokens when the stream fails after starting
+      onError: async ({ error }) => {
+        captureException(error, { route: '/api/chat', model, phase: 'mid-stream' });
+        if (usageId) {
+          await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
+        }
+      },
     });
 
     return result.toUIMessageStreamResponse();
   } catch (err) {
+    // Handles synchronous errors (invalid params, model not found, etc.)
     captureException(err, { route: '/api/chat', model });
 
     if (usageId) {
