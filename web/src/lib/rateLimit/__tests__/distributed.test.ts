@@ -148,7 +148,8 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(callBody[2][1]).toBe('pipeline-key');
     expect(callBody[3][0]).toBe('EXPIRE');
     expect(callBody[3][1]).toBe('pipeline-key');
-    expect(callBody[3][2]).toBe('30'); // windowSeconds
+    // windowSeconds must be a number (not a string) — Redis sorted-set scores require numeric values
+    expect(callBody[3][2]).toBe(30); // windowSeconds as number
   });
 
   it('provides a resetAt timestamp in the future', async () => {
@@ -189,21 +190,28 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(result.allowed).toBe(false);
   });
 
-  it('attempts cleanup ZREM when over limit', async () => {
+  it('attempts cleanup via Lua EVAL when over limit', async () => {
     // Over-limit: ZCARD = 6 for limit = 5
     mockFetch
       .mockResolvedValueOnce(makePipelineResponse(6))
-      .mockResolvedValueOnce({ ok: true, json: async () => [{ result: 1 }] });
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ result: 1 }) });
 
     await distributedRateLimit('cleanup-key', 5, 60);
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    const cleanupBody = JSON.parse(mockFetch.mock.calls[1][1].body as string) as string[][];
-    expect(cleanupBody[0][0]).toBe('ZREM');
-    expect(cleanupBody[0][1]).toBe('cleanup-key');
+    // Second call must go to the /eval endpoint (Lua EVAL for atomic remove-if-over-limit)
+    const [evalUrl, evalInit] = mockFetch.mock.calls[1] as [string, RequestInit];
+    expect(evalUrl).toBe('https://redis.upstash.io/eval');
+    expect(evalInit.method).toBe('POST');
+    // Body is [luaScript, numkeys, key, member]
+    const evalBody = JSON.parse(evalInit.body as string) as [string, number, string, string];
+    expect(typeof evalBody[0]).toBe('string'); // Lua script
+    expect(evalBody[0]).toContain('ZREM');     // script performs ZREM
+    expect(evalBody[1]).toBe(1);               // numkeys = 1
+    expect(evalBody[2]).toBe('cleanup-key');   // KEYS[1]
   });
 
-  it('does not throw if ZREM cleanup fails', async () => {
+  it('does not throw if Lua EVAL cleanup fails', async () => {
     mockFetch
       .mockResolvedValueOnce(makePipelineResponse(6))
       .mockRejectedValueOnce(new Error('cleanup failed'));
