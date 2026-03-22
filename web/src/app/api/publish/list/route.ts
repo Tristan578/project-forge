@@ -5,29 +5,40 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET() {
-  const session = await authenticateClerkSession();
-  if (!session.ok) return session.response;
-  const clerkId = session.clerkId;
+  try {
+    const session = await authenticateClerkSession();
+    if (!session.ok) return session.response;
+    const clerkId = session.clerkId;
 
+<<<<<<< HEAD
   const rl = await rateLimit(`user:publish-list:${clerkId}`, 30, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const user = await getUserByClerkId(clerkId);
   if (!user) return NextResponse.json({ publications: [] });
+=======
+    const user = await getUserByClerkId(clerkId);
+    if (!user) return NextResponse.json({ publications: [] });
+>>>>>>> 381bb161 (Add Sentry captureException to moderation, openapi, play, projects, and publish routes (batch 6))
 
-  const db = getDb();
+    const db = getDb();
 
-  const publications = await db.select()
-    .from(publishedGames)
-    .where(eq(publishedGames.userId, user.id))
-    .orderBy(desc(publishedGames.updatedAt));
+    const publications = await db.select()
+      .from(publishedGames)
+      .where(eq(publishedGames.userId, user.id))
+      .orderBy(desc(publishedGames.updatedAt));
 
-  return NextResponse.json({
-    publications: publications.map(p => ({
-      ...p,
-      url: p.cdnUrl || `/play/${clerkId}/${p.slug}`,
-    })),
-  });
+    return NextResponse.json({
+      publications: publications.map(p => ({
+        ...p,
+        url: p.cdnUrl || `/play/${clerkId}/${p.slug}`,
+      })),
+    });
+  } catch (err) {
+    captureException(err, { route: '/api/publish/list', method: 'GET' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
