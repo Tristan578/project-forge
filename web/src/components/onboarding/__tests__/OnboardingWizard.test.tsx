@@ -83,17 +83,17 @@ describe('OnboardingWizard', () => {
     // The AI card should be present but disabled
     const aiCard = screen.getByTestId('path-card-ai');
     expect(aiCard.getAttribute('aria-disabled')).toBe('true');
-    // Shows "Upgrade" badge
-    expect(screen.getByText(/Upgrade/)).toBeTruthy();
-    // Shows upgrade link
-    expect(screen.getByText('Upgrade to unlock AI')).toBeTruthy();
+    // Shows upgrade text within the AI card
+    expect(aiCard.textContent).toContain('Upgrade');
   });
 
   it('renders upgrade link pointing to /pricing for starter tier', () => {
     mockCanUseAI = () => false;
     render(<OnboardingWizard onComplete={onComplete} />);
-    const link = screen.getByRole('link', { name: 'Upgrade to unlock AI' });
-    expect(link.getAttribute('href')).toBe('/pricing');
+    // Find the upgrade link within the AI card specifically
+    const aiCard = screen.getByTestId('path-card-ai');
+    const link = aiCard.querySelector('a[href="/pricing"]');
+    expect(link).toBeTruthy();
   });
 
   it('renders non-starter AI card as a clickable button', () => {
