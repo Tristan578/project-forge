@@ -2,6 +2,9 @@ import { create } from 'zustand';
 import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 import { showError } from '@/lib/toast';
 import { AI_MODEL_PRIMARY, AI_MODEL_FAST } from '@/lib/ai/models';
+import { readUIMessageStream, isToolUIPart, uiMessageChunkSchema } from 'ai';
+import { parseJsonEventStream } from '@ai-sdk/provider-utils';
+import type { UIMessage, UIMessageChunk } from 'ai';
 
 export interface ToolCallStatus {
   id: string;
@@ -64,6 +67,15 @@ interface ChatState {
   activeConversationId: string | null;
 
   sendMessage: (text: string, images?: string[], entityRefs?: Record<string, string>) => Promise<void>;
+  /**
+   * Send a message and stream the response via the AI SDK UI message stream
+   * protocol. This is the Phase 3 path — uses the rewritten /api/chat route
+   * which returns toUIMessageStreamResponse() format.
+   *
+   * chatStore remains the single source of truth. The AI SDK stream is read
+   * and translated back into ChatMessage updates.
+   */
+  sendMessageViaSDK: (text: string, images?: string[], entityRefs?: Record<string, string>) => Promise<void>;
   stopStreaming: () => void;
   setModel: (model: ChatModel) => void;
   setRightPanelTab: (tab: RightPanelTab) => void;
@@ -474,6 +486,233 @@ export const useChatStore = create<ChatState>((set, get) => ({
           output: prev.output + turnTokens.output,
         },
       });
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        // User cancelled
+      } else {
+        const errorMessage = err instanceof Error ? err.message : 'Chat request failed';
+        set({ error: errorMessage });
+        showError(`AI chat error: ${errorMessage}`);
+      }
+    } finally {
+      set({ isStreaming: false, abortController: null, loopIteration: 0 });
+
+      // Sync current messages to the active conversation so they persist
+      const { messages: finalMessages, activeConversationId: convId, conversations: convs } = get();
+      if (convId) {
+        const syncedConversations = convs.map((c) =>
+          c.id === convId
+            ? { ...c, messages: finalMessages.slice(-MAX_STORED_MESSAGES), updatedAt: Date.now() }
+            : c
+        );
+        set({ conversations: syncedConversations });
+        saveConversationsToStorage(syncedConversations, convId);
+      }
+    }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Phase 3: sendMessageViaSDK — AI SDK UI message stream transport
+  // ---------------------------------------------------------------------------
+
+  sendMessageViaSDK: async (text: string, images?: string[], entityRefs?: Record<string, string>) => {
+    const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab } = get();
+    if (isStreaming) return;
+
+    // Track AI chat usage
+    try { const { trackAIChatMessageSent } = await import('@/lib/analytics/events'); trackAIChatMessageSent(activeModel); } catch { /* analytics non-critical */ }
+
+    // Append entity reference context to the message if @-mentions were used
+    let messageContent = text;
+    if (entityRefs && Object.keys(entityRefs).length > 0) {
+      const refList = Object.entries(entityRefs)
+        .map(([name, id]) => `${name} (id: ${id})`)
+        .join(', ');
+      messageContent += `\n\n[Referenced entities: ${refList}]`;
+    }
+
+    const userMessage: ChatMessage = {
+      id: nextId(),
+      role: 'user',
+      content: messageContent,
+      images,
+      entityRefs,
+      timestamp: Date.now(),
+    };
+
+    const assistantMessage: ChatMessage = {
+      id: nextId(),
+      role: 'assistant',
+      content: '',
+      toolCalls: [],
+      timestamp: Date.now(),
+    };
+
+    const abortController = new AbortController();
+
+    set({
+      messages: [...messages, userMessage, assistantMessage],
+      isStreaming: true,
+      error: null,
+      abortController,
+      loopIteration: 0,
+      hasUnreadMessages: rightPanelTab !== 'chat',
+    });
+
+    const assistantMsgId = assistantMessage.id;
+
+    function updateAssistant(cb: (msg: ChatMessage) => ChatMessage) {
+      const state = get();
+      const msgs = state.messages.map((m) =>
+        m.id === assistantMsgId ? cb(m) : m
+      );
+      set({ messages: msgs });
+    }
+
+    try {
+      const { useEditorStore } = await import('./editorStore');
+      const editorState = useEditorStore.getState();
+      const { buildSceneContext } = await import('../lib/chat/context');
+      const sceneContext = buildSceneContext(editorState);
+
+      // Build API messages from conversation history
+      const allMessages = [...messages, userMessage];
+      const apiMessages = buildTruncatedApiMessages(allMessages);
+
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: apiMessages,
+          model: activeModel,
+          sceneContext,
+          thinking: thinkingEnabled,
+        }),
+        signal: abortController.signal,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errorData.error || `Chat request failed: ${response.status}`);
+      }
+
+      if (!response.body) throw new Error('No response body');
+
+      // Parse the AI SDK UI message stream.
+      // The route returns raw SSE bytes (ReadableStream<Uint8Array>).
+      // Step 1: parse bytes → UIMessageChunk via parseJsonEventStream + uiMessageChunkSchema.
+      // Step 2: pass UIMessageChunk stream to readUIMessageStream → UIMessage snapshots.
+      const chunkStream = parseJsonEventStream<UIMessageChunk>({
+        stream: response.body as ReadableStream<Uint8Array>,
+        schema: uiMessageChunkSchema,
+      }).pipeThrough(
+        new TransformStream({
+          transform(parseResult, controller) {
+            if (parseResult.success) {
+              controller.enqueue(parseResult.value);
+            }
+          },
+        })
+      );
+
+      const uiMessageStream = readUIMessageStream<UIMessage>({
+        stream: chunkStream,
+        onError: (err) => {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          set({ error: errMsg });
+        },
+      });
+
+      for await (const uiMsg of uiMessageStream) {
+        // Translate UIMessage parts back into chatStore ChatMessage format
+        let textContent = '';
+        let thinkingContent = '';
+
+        for (const part of uiMsg.parts ?? []) {
+          if (part.type === 'text') {
+            // AI SDK v6 TextUIPart
+            textContent += part.text;
+          } else if (part.type === 'reasoning') {
+            // AI SDK v6 ReasoningUIPart (extended thinking)
+            thinkingContent += part.text;
+          } else if (isToolUIPart(part)) {
+            // AI SDK v6: tool parts use type `tool-<toolName>` (static) or `dynamic-tool`.
+            // Use isToolUIPart() helper — never check for removed `tool-invocation` type.
+            const toolId = part.toolCallId;
+            const toolName = part.type === 'dynamic-tool'
+              ? part.toolName
+              : part.type.slice('tool-'.length); // strip "tool-" prefix to get tool name
+
+            if (part.state === 'input-streaming' || part.state === 'input-available') {
+              // Tool input arriving — add to tool calls if not already present
+              const toolInput = (part.input as Record<string, unknown>) ?? {};
+              updateAssistant((msg) => {
+                const existing = (msg.toolCalls || []).find((t) => t.id === toolId);
+                if (existing) {
+                  // Update input as it streams in
+                  return {
+                    ...msg,
+                    toolCalls: (msg.toolCalls || []).map((t) =>
+                      t.id === toolId ? { ...t, input: toolInput } : t
+                    ),
+                  };
+                }
+                return {
+                  ...msg,
+                  toolCalls: [
+                    ...(msg.toolCalls || []),
+                    {
+                      id: toolId,
+                      name: toolName,
+                      input: toolInput,
+                      status: 'pending' as const,
+                      undoable: true,
+                    },
+                  ],
+                };
+              });
+            } else if (part.state === 'output-available') {
+              // Tool output available — execute tool client-side and update status
+              const { executeToolCall } = await import('../lib/chat/executor');
+              const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
+              const toolInput = (part.input as Record<string, unknown>) ?? {};
+              const result = await executeToolCall(toolName, toolInput, currentEditorState);
+
+              updateAssistant((msg) => ({
+                ...msg,
+                toolCalls: (msg.toolCalls || []).map((t) =>
+                  t.id === toolId
+                    ? {
+                        ...t,
+                        input: toolInput,
+                        status: result.success ? 'success' as const : 'error' as const,
+                        result: result.result,
+                        error: result.error,
+                      }
+                    : t
+                ),
+              }));
+            } else if (part.state === 'output-error') {
+              // Tool errored on server side
+              updateAssistant((msg) => ({
+                ...msg,
+                toolCalls: (msg.toolCalls || []).map((t) =>
+                  t.id === toolId
+                    ? { ...t, status: 'error' as const, error: part.errorText }
+                    : t
+                ),
+              }));
+            }
+          }
+        }
+
+        // Update text + thinking content
+        updateAssistant((msg) => ({
+          ...msg,
+          content: textContent || msg.content,
+          ...(thinkingContent ? { thinking: thinkingContent } : {}),
+        }));
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name === 'AbortError') {
         // User cancelled

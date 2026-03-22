@@ -6,7 +6,6 @@ import path from 'path';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
-import { getChatTools } from '@/lib/chat/tools';
 import {
   sanitizeChatInput,
   validateBodySize,
@@ -16,10 +15,14 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
-import { resolveChat, resolveChatRoute } from '@/lib/providers/resolveChat';
-import type { AnthropicContentBlock } from '@/lib/providers/resolveChat';
-import Anthropic from '@anthropic-ai/sdk';
-import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { resolveChatRoute } from '@/lib/providers/resolveChat';
+import { streamText, stepCountIs } from 'ai';
+import { gateway } from '@ai-sdk/gateway';
+import { anthropic } from '@ai-sdk/anthropic';
+import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
+import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
+import manifestJson from '@/data/commands.json';
+import type { UserModelMessage, AssistantModelMessage } from '@ai-sdk/provider-utils';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -219,6 +222,73 @@ function onUpdate(dt) {
 - Use forge.ui.showText with percentage coordinates (0-100 for x and y)
 - Always respond with what you did and suggest next steps`;
 
+// ---------------------------------------------------------------------------
+// Build ModelMessage[] from incoming request messages
+// ---------------------------------------------------------------------------
+
+type IncomingMessage = { role: string; content: unknown };
+
+function buildModelMessages(
+  messages: IncomingMessage[],
+): Array<UserModelMessage | AssistantModelMessage> {
+  const result: Array<UserModelMessage | AssistantModelMessage> = [];
+
+  for (const msg of messages) {
+    if (msg.role === 'user') {
+      // Pass structured content (image + text parts) directly to AI SDK
+      // Only stringify if it's not already a string or valid content array
+      const content = typeof msg.content === 'string'
+        ? msg.content
+        : Array.isArray(msg.content)
+          ? msg.content
+          : String(msg.content);
+      result.push({ role: 'user' as const, content });
+    } else if (msg.role === 'assistant') {
+      const text = typeof msg.content === 'string'
+        ? msg.content
+        : JSON.stringify(msg.content);
+      result.push({ role: 'assistant' as const, content: [{ type: 'text' as const, text }] });
+    }
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Load manifest tools for AI SDK
+// ---------------------------------------------------------------------------
+
+interface ManifestCommand {
+  name: string;
+  description: string;
+  category: string;
+  parameters: {
+    type: string;
+    properties?: Record<string, unknown>;
+    required?: string[];
+  };
+  tokenCost: number;
+  requiredScope: string;
+}
+
+const manifest = manifestJson as { version: string; commands: ManifestCommand[] };
+
+function getSdkTools() {
+  const writeTools = manifest.commands
+    .filter((cmd) => cmd.requiredScope.endsWith(':write') || cmd.category === 'query')
+    .map((cmd) => ({
+      name: cmd.name,
+      description: cmd.description,
+      parameters: {
+        type: cmd.parameters.type || 'object',
+        properties: cmd.parameters.properties || {},
+        required: cmd.parameters.required || [],
+      },
+    }));
+
+  return convertManifestToolsToSdkTools(writeTools);
+}
+
 export async function POST(request: NextRequest) {
   // 1. Authenticate + rate-limit via shared middleware pipeline
   const mid = await withApiMiddleware(request, {
@@ -241,7 +311,7 @@ export async function POST(request: NextRequest) {
 
   // 3. Parse request
   let body: {
-    messages: { role: string; content: unknown }[];
+    messages: IncomingMessage[];
     model: string;
     sceneContext: string;
     thinking?: boolean;
@@ -287,7 +357,6 @@ export async function POST(request: NextRequest) {
   }
 
   // 5. Resolve API key for billing — determines which key to use and deducts tokens.
-  // resolveChat() below picks the actual backend (gateway vs direct) independently.
   const estimatedCost = getTokenCost(
     'chat_message',
     messages.length > 3 ? 'long' : 'short'
@@ -296,7 +365,6 @@ export async function POST(request: NextRequest) {
   let usageId: string | undefined;
 
   // Only deduct tokens / check tier when using the direct (platform key) path.
-  // Gateway backends (Vercel AI Gateway, OpenRouter) bill differently.
   const chatRoute = resolveChatRoute(model);
   const usingDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
 
@@ -319,7 +387,6 @@ export async function POST(request: NextRequest) {
   }
 
   // 5b. Server-side token budget validation
-  // Rough estimate: 4 chars/token. Reject if messages exceed reasonable budget.
   const MAX_INPUT_CHARS = 600000; // ~150k tokens (well within Claude's window)
   let totalChars = 0;
   for (const msg of messages) {
@@ -333,13 +400,17 @@ export async function POST(request: NextRequest) {
             totalChars += b.text.length;
           } else if (b.type === 'tool_result' && typeof b.content === 'string') {
             totalChars += b.content.length;
+          } else if ('source' in b) {
+            const src = b.source;
+            if (typeof src === 'object' && src !== null && 'data' in src && typeof (src as Record<string, unknown>).data === 'string') {
+              totalChars += ((src as Record<string, unknown>).data as string).length;
+            }
           }
         }
       }
     }
   }
   if (totalChars > MAX_INPUT_CHARS) {
-    // Refund tokens — they were already deducted by resolveApiKey above
     if (usageId) {
       await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
     }
@@ -349,120 +420,87 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 6. Build request parameters
-  const tools = getChatTools();
+  // 6. Build system prompt with optional scene context and doc context
+  const effectiveSystemPrompt =
+    typeof systemOverride === 'string' && systemOverride.length > 0
+      ? systemOverride
+      : SYSTEM_PROMPT;
 
-  // Convert messages to internal ChatMessage format for resolveChat
-  const chatMessages = messages
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({
-      role: m.role as 'user' | 'assistant',
-      content: m.content as string | AnthropicContentBlock[],
-    }));
+  let systemText = effectiveSystemPrompt;
+  if (sceneContext) {
+    systemText += '\n\n' + sceneContext;
+  }
 
-  // 7. Stream response via provider registry
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      function send(data: unknown) {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+  // Inject relevant documentation when the user appears to be asking a how-to question
+  const lastUserMessage = [...messages]
+    .reverse()
+    .find((m) => m.role === 'user' && typeof m.content === 'string');
+  if (lastUserMessage && typeof lastUserMessage.content === 'string') {
+    try {
+      const docsEntries = await getDocsEntries();
+      const docCtx = buildDocContext(lastUserMessage.content, docsEntries);
+      if (docCtx) {
+        systemText += '\n\n' + docCtx;
       }
+    } catch {
+      // Doc context is best-effort — never block the chat request
+    }
+  }
 
-      try {
-        // Build system prompt with cache_control for prompt caching
-        // The static system prompt gets cached; sceneContext changes per request
-        const effectiveSystemPrompt =
-          typeof systemOverride === 'string' && systemOverride.length > 0
-            ? systemOverride
-            : SYSTEM_PROMPT;
-        const systemBlocks: Anthropic.TextBlockParam[] = [
-          {
-            type: 'text' as const,
-            text: effectiveSystemPrompt,
-            cache_control: { type: 'ephemeral' as const },
-          },
-        ];
-        if (sceneContext) {
-          // Add cache_control to the scene context block so Claude API
-          // can cache it server-side. The context only changes when the
-          // scene graph changes (invalidateSceneCache is called on
-          // SCENE_GRAPH_UPDATE events in transformEvents.ts).
-          systemBlocks.push({
-            type: 'text' as const,
-            text: sceneContext,
-            cache_control: { type: 'ephemeral' as const },
-          });
-        }
+  // 7. Select AI SDK model based on resolved backend
+  const canonicalModel = model || AI_MODEL_PRIMARY;
+  const isDirectBackend = !chatRoute || chatRoute.backendId === 'direct';
 
-        // Inject relevant documentation when the user appears to be asking a how-to question
-        const lastUserMessage = [...messages]
-          .reverse()
-          .find((m) => m.role === 'user' && typeof m.content === 'string');
-        if (lastUserMessage && typeof lastUserMessage.content === 'string') {
-          try {
-            const docsEntries = await getDocsEntries();
-            const docCtx = buildDocContext(lastUserMessage.content, docsEntries);
-            if (docCtx) {
-              systemBlocks.push({
-                type: 'text' as const,
-                text: docCtx,
-              });
-            }
-          } catch {
-            // Doc context is best-effort — never block the chat request
-          }
-        }
+  let modelInstance: ReturnType<typeof gateway> | ReturnType<typeof anthropic>;
+  if (isDirectBackend) {
+    // Direct Anthropic path — preserves thinking mode and prompt caching
+    modelInstance = anthropic(canonicalModel);
+  } else {
+    // Gateway path — model ID must be in provider/model format
+    const gatewayModel = canonicalModel.includes('/')
+      ? canonicalModel
+      : AI_MODELS.gatewayChat;
+    modelInstance = gateway(gatewayModel);
+  }
 
-        // Add cache_control to the last tool definition for tool caching
-        const cachedTools = tools.map((tool, i) => {
-          if (i === tools.length - 1) {
-            return {
-              ...tool,
-              cache_control: { type: 'ephemeral' as const },
-            };
-          }
-          return tool;
-        });
+  // 8. Provider options for thinking mode (Anthropic only)
+  const providerOptions = thinking && isDirectBackend ? {
+    anthropic: { thinking: { type: 'enabled' as const, budgetTokens: 10000 } },
+  } : undefined;
 
-        // Dispatch through provider registry — routes to gateway or direct Anthropic
-        const chatResult = await resolveChat(chatMessages, {
-          model: model || AI_MODEL_PRIMARY,
-          systemBlocks,
-          tools: cachedTools as Anthropic.Tool[],
-          thinking,
-          maxTokens: thinking ? 16384 : 4096,
-        });
+  // 9. Convert messages and tools
+  const modelMessages = buildModelMessages(messages);
+  const tools = getSdkTools();
 
-        if (!chatResult.ok) {
-          send({ type: 'error', message: chatResult.error });
-          return;
-        }
-
-        for await (const event of chatResult.stream) {
-          send(event);
-        }
-      } catch (err) {
-        captureException(err, { route: '/api/chat', model });
-
-        // Refund tokens on API failure (only on direct/metered path)
+  // 10. Stream via AI SDK and return UI message stream response
+  try {
+    const result = streamText({
+      model: modelInstance,
+      system: systemText,
+      messages: modelMessages,
+      tools,
+      stopWhen: stepCountIs(10),
+      experimental_telemetry: { isEnabled: true },
+      ...(providerOptions ? { providerOptions } : {}),
+      // Handle mid-stream errors: refund tokens when the stream fails after starting
+      onError: async ({ error }) => {
+        captureException(error, { route: '/api/chat', model, phase: 'mid-stream' });
         if (usageId) {
           await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
         }
+      },
+    });
 
-        const message = err instanceof Error ? err.message : 'AI API error';
-        send({ type: 'error', message });
-      } finally {
-        controller.close();
-      }
-    },
-  });
+    return result.toUIMessageStreamResponse();
+  } catch (err) {
+    // Handles synchronous errors (invalid params, model not found, etc.)
+    captureException(err, { route: '/api/chat', model });
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-    },
-  });
+    if (usageId) {
+      await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
+    }
+
+    const message = err instanceof Error ? err.message : 'AI API error';
+    return Response.json({ error: message }, { status: 500 });
+  }
 }
