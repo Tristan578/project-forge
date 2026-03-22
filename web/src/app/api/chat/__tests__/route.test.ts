@@ -63,13 +63,43 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
-// Mock resolveChat and resolveChatRoute so tests don't depend on any backend being configured
-const mockResolveChatStream = vi.fn();
+// Mock resolveChatRoute so tests don't depend on any backend being configured
 vi.mock('@/lib/providers/resolveChat', () => ({
+  // resolveChat is no longer used by route.ts (migrated to AI SDK streamText)
   resolveChat: vi.fn(),
   // Always return a direct backend route so the route handler calls resolveApiKey for billing
   resolveChatRoute: vi.fn(() => ({ backendId: 'direct', apiKey: '', metered: true })),
 }));
+
+// Mock AI SDK streamText — route.ts calls streamText().toUIMessageStreamResponse()
+// Use importOriginal to preserve 'tool' and other exports used by toolAdapter.ts
+vi.mock('ai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ai')>();
+  return {
+    ...actual,
+    streamText: vi.fn().mockReturnValue({
+      toUIMessageStreamResponse: vi.fn().mockReturnValue(
+        new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+        }),
+      ),
+    }),
+    stepCountIs: vi.fn().mockReturnValue(() => false),
+  };
+});
+
+// Mock AI SDK providers
+vi.mock('@ai-sdk/gateway', () => ({
+  gateway: vi.fn().mockReturnValue({ provider: 'gateway' }),
+}));
+vi.mock('@ai-sdk/anthropic', () => ({
+  anthropic: vi.fn().mockReturnValue({ provider: 'anthropic' }),
+}));
+
 // Keep @anthropic-ai/sdk mock for modules that still import it indirectly
 vi.mock('@anthropic-ai/sdk', () => {
   class MockAnthropic {
@@ -87,7 +117,7 @@ import { resolveApiKey } from '@/lib/keys/resolver';
 import { validateBodySize, detectPromptInjection } from '@/lib/chat/sanitizer';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { resolveChat } from '@/lib/providers/resolveChat';
+import { streamText } from 'ai';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -108,33 +138,6 @@ function validBody() {
   };
 }
 
-/**
- * Create an async generator that yields ResolveChatStreamEvent objects.
- * Matches the shape produced by resolveChat (not raw Anthropic SDK events).
- */
-async function* makeResolveChatStream() {
-  yield { type: 'usage' as const, inputTokens: 100 };
-  yield { type: 'text_start' as const };
-  yield { type: 'text_delta' as const, text: 'Hello!' };
-  yield { type: 'content_block_stop' as const, index: 0 };
-  yield { type: 'usage' as const, outputTokens: 10 };
-  yield { type: 'turn_complete' as const, stop_reason: 'end_turn' };
-}
-
-/** Read an SSE response body into parsed events */
-async function readSSEEvents(response: Response): Promise<unknown[]> {
-  const text = await response.text();
-  const events: unknown[] = [];
-  for (const line of text.split('\n')) {
-    if (line.startsWith('data: ')) {
-      const data = line.slice(6);
-      if (data !== '[DONE]') {
-        try { events.push(JSON.parse(data)); } catch { /* skip */ }
-      }
-    }
-  }
-  return events;
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -168,13 +171,18 @@ describe('POST /api/chat', () => {
       usageId: 'usage-1',
     } as Awaited<ReturnType<typeof resolveApiKey>>);
 
-    // Default: resolveChat succeeds and emits the standard event sequence
-    mockResolveChatStream.mockImplementation(makeResolveChatStream);
-    vi.mocked(resolveChat).mockImplementation(async (_messages, _options) => ({
-      ok: true as const,
-      stream: mockResolveChatStream(),
-      backendId: 'direct',
-    }));
+    // Default: streamText returns a UI message stream response (AI SDK pattern)
+    vi.mocked(streamText).mockReturnValue({
+      toUIMessageStreamResponse: vi.fn().mockReturnValue(
+        new Response('f:{"messageId":"msg-1"}\n0:"Hello"\n', {
+          status: 200,
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+        }),
+      ),
+    } as unknown as ReturnType<typeof streamText>);
 
     // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
     vi.mocked(refundTokens).mockResolvedValue(undefined);
@@ -361,42 +369,41 @@ describe('POST /api/chat', () => {
     // content via an async generator mock that races on CI runners.
     // Stream content is verified by "sends turn_complete event" below.
 
-    it('sends turn_complete event', async () => {
+    it('streams a response via AI SDK streamText', async () => {
       const res = await POST(makeRequest(validBody()));
-      const events = await readSSEEvents(res);
-
-      const turnComplete = events.find((e: unknown) => (e as Record<string, unknown>).type === 'turn_complete');
-      expect(turnComplete).toBeDefined();
-      expect((turnComplete as Record<string, unknown>).stop_reason).toBe('end_turn');
+      expect(res.status).toBe(200);
+      // streamText must have been called (route uses AI SDK, not resolveChat)
+      expect(streamText).toHaveBeenCalled();
+      await res.text(); // drain stream
     });
 
-    it('uses extended max_tokens when thinking is enabled', async () => {
+    it('passes thinking providerOptions when thinking is enabled', async () => {
       const res = await POST(makeRequest({ ...validBody(), thinking: true }));
       await res.text(); // drain stream
-      expect(resolveChat).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.objectContaining({ maxTokens: 16384, thinking: true }),
-      );
-    });
-
-    it('uses 4096 max_tokens without thinking', async () => {
-      const res = await POST(makeRequest(validBody()));
-      await res.text(); // drain stream
-      expect(resolveChat).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.objectContaining({ maxTokens: 4096 }),
-      );
-    });
-
-    it('appends scene context to system prompt blocks', async () => {
-      const res = await POST(makeRequest(validBody()));
-      await res.text(); // drain stream
-      expect(resolveChat).toHaveBeenCalledWith(
-        expect.any(Array),
+      expect(streamText).toHaveBeenCalledWith(
         expect.objectContaining({
-          systemBlocks: expect.arrayContaining([
-            expect.objectContaining({ type: 'text', text: '## Scene\nEmpty' }),
-          ]),
+          providerOptions: expect.objectContaining({
+            anthropic: expect.objectContaining({
+              thinking: expect.objectContaining({ type: 'enabled' }),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('does not pass thinking providerOptions without thinking flag', async () => {
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
+      const callArg = vi.mocked(streamText).mock.calls[0][0] as Record<string, unknown>;
+      expect(callArg.providerOptions).toBeUndefined();
+    });
+
+    it('appends scene context to system prompt string', async () => {
+      const res = await POST(makeRequest(validBody()));
+      await res.text(); // drain stream
+      expect(streamText).toHaveBeenCalledWith(
+        expect.objectContaining({
+          system: expect.stringContaining('## Scene\nEmpty'),
         }),
       );
     });
@@ -407,20 +414,14 @@ describe('POST /api/chat', () => {
   // -------------------------------------------------------------------------
   describe('error handling', () => {
     it('captures exception and refunds tokens on API failure', async () => {
-      // Make resolveChat throw to simulate an API error inside the stream
-      vi.mocked(resolveChat).mockRejectedValue(new Error('API overloaded'));
+      // Make streamText throw synchronously — caught by the try/catch in the route,
+      // which returns 500 and calls captureException + refundTokens.
+      vi.mocked(streamText).mockImplementation(() => { throw new Error('API overloaded'); });
 
       const res = await POST(makeRequest(validBody()));
-      expect(res.status).toBe(200); // Stream response is always 200
+      expect(res.status).toBe(500);
 
-      // Consume the stream to let the async start() complete
-      await res.text();
-
-      // Wait for async operations in the stream's start() to settle
-      await vi.waitFor(() => {
-        expect(captureException).toHaveBeenCalled();
-      }, { timeout: 5000 });
-
+      expect(captureException).toHaveBeenCalled();
       expect(refundTokens).toHaveBeenCalledWith('user-1', 'usage-1');
     });
 
@@ -452,7 +453,7 @@ describe('POST /api/chat', () => {
         metered: false,
       } as Awaited<ReturnType<typeof resolveApiKey>>);
 
-      vi.mocked(resolveChat).mockRejectedValue(new Error('fail'));
+      vi.mocked(streamText).mockImplementation(() => { throw new Error('fail'); });
 
       const res = await POST(makeRequest(validBody()));
       await res.text(); // drain stream
