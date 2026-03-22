@@ -3,6 +3,7 @@ import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 
 export async function PUT(request: NextRequest) {
   const authResult = await authenticateRequest();
@@ -11,6 +12,9 @@ export async function PUT(request: NextRequest) {
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
+
+  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-economics-config');
+  if (limited) return limited;
 
   const body = await request.json();
   const db = getDb();

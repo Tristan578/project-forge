@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { eq } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import {
   users,
   projects,
@@ -26,6 +27,8 @@ export async function GET() {
   if (!authResult.ok) return authResult.response;
 
   const userId = authResult.ctx.user.id;
+  const rl = await rateLimit(`user:export-data:${userId}`, 5, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   try {
     const db = getDb();
