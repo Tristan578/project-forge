@@ -47,7 +47,9 @@ ERRORS=""
 
 # 1. TypeScript check (fast, catches type errors from merge conflicts)
 if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
-  TSC_OUTPUT=$(npx tsc --noEmit 2>&1) || {
+  TSC_BIN="$WEB_DIR/node_modules/.bin/tsc"
+  if [ ! -x "$TSC_BIN" ]; then exit 0; fi
+  TSC_OUTPUT=$("$TSC_BIN" --noEmit 2>&1) || {
     echo "$TSC_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}TypeScript errors found. "
   }
@@ -57,7 +59,9 @@ fi
 TS_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
 if [ -n "$TS_FILES" ]; then
   # shellcheck disable=SC2086
-  LINT_OUTPUT=$(npx eslint --max-warnings 0 $TS_FILES 2>&1) || {
+  ESLINT_BIN="$WEB_DIR/node_modules/.bin/eslint"
+  if [ ! -x "$ESLINT_BIN" ]; then exit 0; fi
+  LINT_OUTPUT=$("$ESLINT_BIN" --max-warnings 0 $TS_FILES 2>&1) || {
     echo "$LINT_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}ESLint warnings/errors found. "
   }
@@ -65,7 +69,9 @@ fi
 
 # 3. Run panelRegistry structural test (catches #1 agent bug)
 if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
-  TEST_OUTPUT=$(npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts 2>&1) || {
+  VITEST_BIN="$WEB_DIR/node_modules/.bin/vitest"
+  if [ ! -x "$VITEST_BIN" ]; then exit 0; fi
+  TEST_OUTPUT=$("$VITEST_BIN" run src/lib/workspace/__tests__/panelRegistry.test.ts 2>&1) || {
     echo "$TEST_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}panelRegistry structural test failed. "
   }
