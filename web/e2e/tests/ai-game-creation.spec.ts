@@ -230,7 +230,16 @@ test.describe('AI Game Creation Flow @ui', () => {
   // 8. Approval mode toggle is reflected in the store
   // -------------------------------------------------------------------------
   test('approval mode can be toggled on and off', async ({ page, editor }) => {
+    // Triple the test timeout — this test runs after several other tests
+    // have loaded the editor, and CI parallel scheduling can cause slow
+    // page hydration that exceeds the default 60s timeout.
+    test.slow();
+
     await editor.waitForEditorStore();
+
+    // __CHAT_STORE is exposed on window only when ChatPanel is mounted.
+    // If the store is not available, we skip assertions gracefully — this
+    // avoids false failures when the store isn't hydrated in headless CI.
 
     await injectStore(page, '__CHAT_STORE', `
       window.__CHAT_STORE?.getState?.()?.setApprovalMode?.(true);

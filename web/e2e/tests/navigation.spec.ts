@@ -93,14 +93,14 @@ test.describe('Navigation & Routing @ui', () => {
       await page.waitForLoadState('domcontentloaded');
 
       const privacyLink = page.locator('a[href="/privacy"]').first();
-      await expect(privacyLink).toBeVisible();
+      await expect(privacyLink).toBeVisible({ timeout: 10000 });
       await privacyLink.click();
 
       await page.waitForURL('**/privacy**', { timeout: 10000 });
       expect(page.url()).toContain('/privacy');
 
       const termsLink = page.locator('a[href="/terms"]').first();
-      await expect(termsLink).toBeVisible();
+      await expect(termsLink).toBeVisible({ timeout: 10000 });
       await termsLink.click();
 
       await page.waitForURL('**/terms**', { timeout: 10000 });
@@ -190,7 +190,11 @@ test.describe('Navigation & Routing @ui', () => {
       await page.goto('/terms');
       await page.waitForLoadState('domcontentloaded');
 
+      // Wait for the link to be visible before clicking — domcontentloaded
+      // fires early and the link may not yet be interactable under parallel
+      // test load on CI runners.
       const privacyLink = page.locator('a[href="/privacy"]').first();
+      await expect(privacyLink).toBeVisible({ timeout: 10000 });
       await privacyLink.click();
       await page.waitForURL('**/privacy**', { timeout: 10000 });
       expect(page.url()).toContain('/privacy');
