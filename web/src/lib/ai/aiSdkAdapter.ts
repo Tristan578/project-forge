@@ -22,7 +22,7 @@ import type { ResolveChatStreamEvent, ChatMessage, ResolveChatOptions } from '@/
 import type { ResolvedRoute } from '@/lib/providers/types';
 import { convertManifestToolsToSdkTools } from '@/lib/ai/toolAdapter';
 import type { ManifestTool } from '@/lib/ai/toolAdapter';
-import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { AI_MODEL_PRIMARY, AI_MODELS } from '@/lib/ai/models';
 
 // ---------------------------------------------------------------------------
 // Anthropic model ID mapping for the gateway (provider/model format)
@@ -31,19 +31,22 @@ import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 /**
  * Map a canonical SpawnForge model name to the gateway format string.
  * Gateway uses `provider/model` format (e.g. `anthropic/claude-sonnet-4-6`).
+ *
+ * Derives the mapping from AI_MODELS (the single source of truth) rather
+ * than maintaining a duplicate local map that can drift out of sync.
  */
 function toGatewayModelId(canonicalModel: string): string {
   // Already in gateway format
   if (canonicalModel.includes('/')) return canonicalModel;
-
-  // Map canonical SpawnForge names to gateway identifiers
-  const modelMap: Record<string, string> = {
-    'claude-sonnet-4.6': 'anthropic/claude-sonnet-4.6',
-    'claude-sonnet-4.5': 'anthropic/claude-sonnet-4.5',
-    'claude-opus-4': 'anthropic/claude-opus-4',
-    'claude-haiku-4.5': 'anthropic/claude-haiku-4.5',
-  };
-  return modelMap[canonicalModel] ?? `anthropic/${canonicalModel}`;
+  // Map known canonical model IDs to their gateway equivalents via AI_MODELS
+  if (canonicalModel === AI_MODELS.chat || canonicalModel.includes('sonnet')) {
+    return AI_MODELS.gatewayChat;
+  }
+  if (canonicalModel === AI_MODELS.fast || canonicalModel.includes('haiku')) {
+    return AI_MODELS.gatewayChat; // haiku routes to chat gateway by default
+  }
+  // Fallback: construct gateway ID from canonical name
+  return `anthropic/${canonicalModel}`;
 }
 
 /**
