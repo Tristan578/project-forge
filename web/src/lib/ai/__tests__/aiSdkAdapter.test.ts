@@ -90,7 +90,7 @@ describe('streamViaSdk — text streaming', () => {
   it('yields text_start on text-start event', async () => {
     vi.mocked(streamText).mockReturnValue({
       fullStream: makeFullStream([{ type: 'text-start', id: '1' }]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -104,7 +104,7 @@ describe('streamViaSdk — text streaming', () => {
       fullStream: makeFullStream([
         { type: 'text-delta', id: '1', text: 'Hello world' },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -120,7 +120,7 @@ describe('streamViaSdk — text streaming', () => {
         { type: 'text-delta', id: '1', text: 'bar' },
         { type: 'text-delta', id: '1', text: 'baz' },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -146,7 +146,7 @@ describe('streamViaSdk — thinking streaming', () => {
   it('yields thinking_start on reasoning-start event', async () => {
     vi.mocked(streamText).mockReturnValue({
       fullStream: makeFullStream([{ type: 'reasoning-start', id: '1' }]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(directRoute, simpleMessages, { thinking: true }),
@@ -160,7 +160,7 @@ describe('streamViaSdk — thinking streaming', () => {
       fullStream: makeFullStream([
         { type: 'reasoning-delta', id: '1', text: 'Let me think...' },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(directRoute, simpleMessages, { thinking: true }),
@@ -192,7 +192,7 @@ describe('streamViaSdk — tool call streaming', () => {
           providerExecuted: false,
         },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -215,7 +215,7 @@ describe('streamViaSdk — tool call streaming', () => {
           delta: '{"entityType":"cube"}',
         },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -232,7 +232,7 @@ describe('streamViaSdk — tool call streaming', () => {
       fullStream: makeFullStream([
         { type: 'tool-input-end', id: 'tool-123' },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -262,7 +262,7 @@ describe('streamViaSdk — finish and usage', () => {
           response: {},
         },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -285,7 +285,7 @@ describe('streamViaSdk — finish and usage', () => {
           totalUsage: { inputTokens: 10, outputTokens: 5 },
         },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -307,7 +307,7 @@ describe('streamViaSdk — finish and usage', () => {
           totalUsage: { inputTokens: 10, outputTokens: 5 },
         },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -329,7 +329,7 @@ describe('streamViaSdk — finish and usage', () => {
           totalUsage: { inputTokens: 10, outputTokens: 5 },
         },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -356,7 +356,7 @@ describe('streamViaSdk — error handling', () => {
       fullStream: makeFullStream([
         { type: 'error', error: new Error('Rate limit exceeded') },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -373,7 +373,7 @@ describe('streamViaSdk — error handling', () => {
       fullStream: makeFullStream([
         { type: 'error', error: 'Connection timeout' },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -425,7 +425,7 @@ describe('streamViaSdk — provider selection', () => {
     vi.clearAllMocks();
     vi.mocked(streamText).mockReturnValue({
       fullStream: makeFullStream([]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
   });
 
   it('uses anthropic() provider for direct backend', async () => {
@@ -502,7 +502,7 @@ describe('streamViaSdk — message conversion', () => {
     vi.clearAllMocks();
     vi.mocked(streamText).mockReturnValue({
       fullStream: makeFullStream([]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
   });
 
   it('passes system prompt string', async () => {
@@ -587,7 +587,7 @@ describe('streamViaSdk — ignored part types', () => {
         { type: 'text-delta', id: '1', text: 'visible' },
         { type: 'raw', rawValue: { someInternal: 'data' } },
       ]),
-    } as ReturnType<typeof streamText>);
+    } as unknown as ReturnType<typeof streamText>);
 
     const events = await collectEvents(
       streamViaSdk(gatewayRoute, simpleMessages, {}),
@@ -595,13 +595,12 @@ describe('streamViaSdk — ignored part types', () => {
 
     // Only the text_delta should produce a ResolveChatStreamEvent
     expect(events).toContainEqual({ type: 'text_delta', text: 'visible' });
-    // 'start', 'start-step', 'source', 'raw' should not appear as ResolveChatStreamEvents
-    const unexpectedTypes = events.filter(
-      (e) =>
-        e.type === 'start' ||
-        e.type === 'start-step' ||
-        e.type === 'source' ||
-        e.type === 'raw',
+    // 'start', 'start-step', 'source', 'raw' are SDK-internal types that must
+    // never leak into the ResolveChatStreamEvent envelope. Cast through unknown
+    // to avoid TS unreachable-comparison errors (the types don't overlap by design).
+    const ignoredTypes = new Set(['start', 'start-step', 'source', 'raw']);
+    const unexpectedTypes = events.filter((e) =>
+      ignoredTypes.has((e as unknown as { type: string }).type),
     );
     expect(unexpectedTypes).toHaveLength(0);
   });
