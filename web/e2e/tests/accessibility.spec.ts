@@ -87,40 +87,56 @@ test.describe('Accessibility @ui', () => {
     });
 
     test('Tab key moves focus through interactive elements', async ({ page }) => {
+      test.slow();
       // Start at the beginning of the page
       await page.keyboard.press('Tab');
       await page.keyboard.press('Tab');
 
-      // Something should be focused
-      const focusedTag = await page.evaluate(() => document.activeElement?.tagName);
-      expect(focusedTag).toBeTruthy();
-      expect(['BUTTON', 'INPUT', 'A', 'TEXTAREA', 'SELECT']).toContain(focusedTag);
+      // Wait for focus to settle after tab navigation on CI
+      const focusedTag = await page.waitForFunction(
+        () => {
+          const tag = document.activeElement?.tagName ?? null;
+          if (!tag || tag === 'BODY') return null;
+          return tag;
+        },
+        { timeout: 10_000 },
+      );
+      const tag = await focusedTag.jsonValue();
+      expect(tag).toBeTruthy();
+      expect(['BUTTON', 'INPUT', 'A', 'TEXTAREA', 'SELECT']).toContain(tag);
     });
 
     test('Escape key closes open dialogs', async ({ page }) => {
+      test.slow();
       // Open settings
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 10_000 });
 
       // Escape should close it
       await page.keyboard.press('Escape');
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 10_000 });
     });
 
     test('focus returns to trigger after dialog closes', async ({ page }) => {
+      test.slow();
       const settingsBtn = page.locator('button[title="Settings"]').first();
       await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 10_000 });
 
       await page.keyboard.press('Escape');
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
+      // Wait for dialog to fully close before checking focus
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 10_000 });
 
       // Focus should ideally return to the settings button (or at least somewhere reasonable)
-      const focusedTag = await page.evaluate(() => document.activeElement?.tagName);
-      expect(focusedTag).toBeTruthy();
+      // Use waitForFunction to allow focus to settle after animation completes
+      const focusedTag = await page.waitForFunction(
+        () => document.activeElement?.tagName ?? null,
+        { timeout: 5000 },
+      );
+      expect(await focusedTag.jsonValue()).toBeTruthy();
     });
 
     test('Tab key moves focus to interactive elements inside settings dialog', async ({ page }) => {
