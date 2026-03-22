@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments, featuredGames } from '@/lib/db/schema';
 import { eq, sql, and, gt } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -119,6 +120,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ games: formattedGames });
   } catch (error) {
+    captureException(error, { route: '/api/community/games/featured' });
     console.error('Failed to fetch featured games:', error);
     return NextResponse.json(
       { error: 'Failed to fetch featured games' },
