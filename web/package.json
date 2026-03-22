@@ -25,6 +25,9 @@
     "check:bundle-size": "node scripts/check-bundle-size.js"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.63",
+    "@ai-sdk/gateway": "^3.0.77",
+    "@ai-sdk/react": "^3.0.136",
     "@anthropic-ai/sdk": "^0.78.0",
     "@aws-sdk/client-s3": "^3.1004.0",
     "@aws-sdk/s3-request-presigner": "^3.1004.0",
@@ -39,6 +42,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "@xyflow/react": "^12.10.1",
+    "ai": "^6.0.134",
     "bcryptjs": "^3.0.3",
     "dockview-react": "^5.1.0",
     "dotenv": "^17.3.1",
