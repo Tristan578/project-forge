@@ -136,18 +136,21 @@ function parsePathData(d: string): [number, number][] {
         result.push([currentX, currentY]);
       }
     } else if (cmd === 'L' || cmd === 'l') {
-      const x = parseFloat(tokens[i] ?? 'NaN');
-      const y = parseFloat(tokens[i + 1] ?? 'NaN');
-      i += 2;
-      if (isNaN(x) || isNaN(y)) continue;
-      if (cmd === 'l') {
-        currentX += x;
-        currentY += y;
-      } else {
-        currentX = x;
-        currentY = y;
+      // SVG spec: repeated coordinate pairs after L/l are implicit lineto commands
+      while (i < tokens.length && !isNaN(parseFloat(tokens[i]))) {
+        const x = parseFloat(tokens[i] ?? 'NaN');
+        const y = parseFloat(tokens[i + 1] ?? 'NaN');
+        i += 2;
+        if (isNaN(x) || isNaN(y)) break;
+        if (cmd === 'l') {
+          currentX += x;
+          currentY += y;
+        } else {
+          currentX = x;
+          currentY = y;
+        }
+        result.push([currentX, currentY]);
       }
-      result.push([currentX, currentY]);
     } else if (cmd === 'H' || cmd === 'h') {
       const x = parseFloat(tokens[i] ?? 'NaN');
       i++;

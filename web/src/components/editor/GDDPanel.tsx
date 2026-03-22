@@ -21,10 +21,11 @@ function GDDSectionView({ section, level }: { section: GDDSection; level: number
   const hasSubsections = section.subsections && section.subsections.length > 0;
 
   const headingSize = level === 0 ? 'text-xs font-semibold' : 'text-[11px] font-medium';
-  const paddingLeft = level > 0 ? `pl-${Math.min(level * 3, 9)}` : '';
+  // Use inline style instead of dynamic Tailwind class — PurgeCSS cannot detect `pl-${...}` at build time
+  const indentPx = level > 0 ? Math.min(level * 12, 36) : 0;
 
   return (
-    <div className={`${paddingLeft}`}>
+    <div style={indentPx > 0 ? { paddingLeft: `${indentPx}px` } : undefined}>
       <button
         onClick={() => setExpanded((prev) => !prev)}
         className={`flex w-full items-center gap-1.5 py-1 text-left text-zinc-300 hover:text-white transition-colors ${headingSize}`}
