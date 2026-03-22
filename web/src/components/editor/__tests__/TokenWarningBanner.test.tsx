@@ -39,19 +39,19 @@ describe('TokenWarningBanner', () => {
     expect(container.innerHTML).toBe('');
   });
 
-  it('renders nothing when token balance is above 10%', () => {
+  it('renders nothing when token balance is above 20%', () => {
     mockState.tokenBalance = { monthlyRemaining: 5000, monthlyTotal: 10000, addon: 0, total: 5000, nextRefillDate: null };
     const { container } = render(<TokenWarningBanner />);
     expect(container.querySelector('[data-testid="token-warning-banner"]')).toBeNull();
   });
 
-  it('shows token warning when balance is below 10%', () => {
+  it('shows token warning when balance is below 20%', () => {
     mockState.tokenBalance = { monthlyRemaining: 500, monthlyTotal: 10000, addon: 0, total: 500, nextRefillDate: null };
     render(<TokenWarningBanner />);
     const banner = screen.getByTestId('token-warning-banner');
     expect(banner).toBeDefined();
     expect(banner.getAttribute('role')).toBe('alert');
-    expect(screen.getByText(/below 10%/)).toBeDefined();
+    expect(screen.getByText(/below 20%/)).toBeDefined();
   });
 
   it('shows remaining token count in the banner', () => {
@@ -129,14 +129,14 @@ describe('TokenWarningBanner', () => {
     expect(container.querySelector('[data-testid="token-warning-banner"]')).toBeNull();
   });
 
-  it('shows warning below 10% boundary', () => {
-    mockState.tokenBalance = { monthlyRemaining: 999, monthlyTotal: 10000, addon: 0, total: 999, nextRefillDate: null };
+  it('shows warning below 20% boundary', () => {
+    mockState.tokenBalance = { monthlyRemaining: 1999, monthlyTotal: 10000, addon: 0, total: 1999, nextRefillDate: null };
     render(<TokenWarningBanner />);
     expect(screen.getByTestId('token-warning-banner')).toBeDefined();
   });
 
-  it('does not show warning at exactly 10%', () => {
-    mockState.tokenBalance = { monthlyRemaining: 1000, monthlyTotal: 10000, addon: 0, total: 1000, nextRefillDate: null };
+  it('does not show warning at exactly 20%', () => {
+    mockState.tokenBalance = { monthlyRemaining: 2000, monthlyTotal: 10000, addon: 0, total: 2000, nextRefillDate: null };
     const { container } = render(<TokenWarningBanner />);
     expect(container.querySelector('[data-testid="token-warning-banner"]')).toBeNull();
   });
