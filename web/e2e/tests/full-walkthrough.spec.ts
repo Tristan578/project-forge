@@ -45,11 +45,9 @@ test.describe('Full Demo Walkthrough @engine', () => {
     await expect(playBtn).toBeVisible({ timeout: 5000 });
     await playBtn.click();
 
-    // Give the engine a moment to enter play mode
-    await page.waitForTimeout(1000);
-
-    // Find and click stop button
+    // Wait for the stop button to appear — its presence confirms play mode is active
     const stopBtn = page.locator('button[title*="Stop"], button[title*="stop"]').first();
+    await stopBtn.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {/* engine may not reach play in headless */});
     if (await stopBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await stopBtn.click();
     }
@@ -97,7 +95,9 @@ test.describe('Full Demo Walkthrough @engine', () => {
     const playBtn = page.locator('button[title*="Play"], button[title*="play"]').first();
     if (await playBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
       await playBtn.click();
-      await page.waitForTimeout(500);
+      // Wait for play-mode stop button to appear before proceeding
+      const stopBtnInFlow = page.locator('button[title*="Stop"], button[title*="stop"]').first();
+      await stopBtnInFlow.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {/* headless may not reach play */});
 
       // Step 4: Stop play mode
       const stopBtn = page.locator('button[title*="Stop"], button[title*="stop"]').first();
