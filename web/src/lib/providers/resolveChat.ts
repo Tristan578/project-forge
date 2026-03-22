@@ -33,9 +33,9 @@ import { AI_MODELS, AI_MODEL_PRIMARY } from '@/lib/ai/models';
 import { streamViaSdk } from '@/lib/ai/aiSdkAdapter';
 import type { ManifestTool } from '@/lib/ai/toolAdapter';
 
-// Feature flag: set USE_AI_SDK=true to route through AI SDK v5 adapter.
-// When false (default), the existing Anthropic SDK / fetch-based paths run unchanged.
-const USE_AI_SDK = process.env.USE_AI_SDK === 'true';
+// Feature flag: the AI SDK v5 adapter path is now ON by default.
+// Set USE_AI_SDK=false to revert to the legacy Anthropic SDK / fetch-based paths as a safety valve.
+const USE_AI_SDK = process.env.USE_AI_SDK !== 'false';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -331,7 +331,7 @@ export async function resolveChat(
   let stream: AsyncGenerator<ResolveChatStreamEvent>;
 
   if (USE_AI_SDK) {
-    // AI SDK v5 adapter path (feature-flagged — off by default)
+    // AI SDK v5 adapter path (default — disable with USE_AI_SDK=false)
     stream = streamViaSdk(resolvedRoute, messages, options, options.manifestTools);
   } else if (resolvedRoute.backendId === 'direct') {
     // Direct path: use Anthropic SDK (preserves thinking, prompt caching, tool streaming)
