@@ -77,6 +77,7 @@ export function createMockActions() {
     // Particle events
     setPrimaryParticle: vi.fn(),
     setParticleEnabled: vi.fn(),
+    setEntityParticle: vi.fn(),
     // Animation events
     setEntityAnimation: vi.fn(),
     // Sprite events
