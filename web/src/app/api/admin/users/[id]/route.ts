@@ -19,7 +19,7 @@ export async function GET(
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-users-get');
+  const limited = await rateLimitAdminRoute(clerkId, 'admin-users-get');
   if (limited) return limited;
 
   const { id } = await params;
@@ -44,7 +44,7 @@ export async function PATCH(
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-users-patch');
+  const limited = await rateLimitAdminRoute(clerkId, 'admin-users-patch');
   if (limited) return limited;
 
   const { id } = await params;

@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
 
-    const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-moderation-bulk');
+    const limited = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation-bulk');
     if (limited) return limited;
 
     const body = await req.json() as unknown;

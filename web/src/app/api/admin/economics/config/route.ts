@@ -13,7 +13,7 @@ export async function PUT(request: NextRequest) {
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-economics-config');
+  const limited = await rateLimitAdminRoute(clerkId, 'admin-economics-config');
   if (limited) return limited;
 
   const body = await request.json();
