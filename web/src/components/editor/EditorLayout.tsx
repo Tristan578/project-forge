@@ -27,6 +27,7 @@ const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => (
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
 const QuickStartFlow = lazy(() => import('../onboarding/QuickStartFlow').then(m => ({ default: m.QuickStartFlow })));
 const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
+const OnboardingWizard = lazy(() => import('../onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
 
 import { WorkspaceProvider } from './WorkspaceProvider';
 import { SceneTransitionOverlay } from './SceneTransitionOverlay';
@@ -44,6 +45,7 @@ import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useEditorStore, getCommandDispatcher } from '@/stores/editorStore';
 import { useGenerationStore } from '@/stores/generationStore';
+import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout';
 import { useGenerationPolling } from '@/hooks/useGenerationPolling';
 import { startAutoSave } from '@/lib/storage/autoSave';
@@ -307,50 +309,54 @@ function ChatOverlay() {
   );
 }
 
-// ---- Quick Start / Welcome gate ----
-
-const QUICKSTART_STORAGE_KEY = 'forge-quickstart-completed';
-const WELCOME_STORAGE_KEY = 'forge-welcomed';
+// ---- Onboarding gate ----
 // No-op subscribe — localStorage doesn't fire events in the same tab
 const noopSubscribe = () => () => {};
 
+const LEGACY_QUICKSTART_KEY = 'forge-quickstart-completed';
+const LEGACY_WELCOME_KEY = 'forge-welcomed';
+const ONBOARDING_COMPLETED_KEY = 'forge-onboarding-completed';
+
 /**
- * Shows QuickStartFlow for brand-new users (neither quickstart nor welcome completed).
- * Falls back to WelcomeModal for returning users who skipped quickstart previously.
- * Prevents both modals from appearing simultaneously.
+ * Shows the new OnboardingWizard for brand-new users.
+ * Falls back to WelcomeModal for users who completed the legacy quickstart/welcome flow.
+ * Users with any legacy key (forge-quickstart-completed, forge-welcomed) are treated as
+ * returning users and never shown the new wizard.
  */
-function QuickStartGate() {
-  const quickstartDone = useSyncExternalStore(
+function OnboardingGate() {
+  const onboardingCompleted = useOnboardingStore((s) => s.onboardingCompleted);
+  const isNewUser = useOnboardingStore((s) => s.isNewUser);
+  const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
+
+  // Check legacy localStorage keys for backward compatibility
+  const legacyDone = useSyncExternalStore(
     noopSubscribe,
-    () => !!localStorage.getItem(QUICKSTART_STORAGE_KEY),
+    () =>
+      !!localStorage.getItem(LEGACY_QUICKSTART_KEY) ||
+      !!localStorage.getItem(LEGACY_WELCOME_KEY) ||
+      !!localStorage.getItem(ONBOARDING_COMPLETED_KEY),
     () => true, // SSR: treat as done to avoid hydration mismatch
   );
-  const welcomeDone = useSyncExternalStore(
-    noopSubscribe,
-    () => !!localStorage.getItem(WELCOME_STORAGE_KEY),
-    () => true,
-  );
 
-  const [quickstartDismissed, setQuickstartDismissed] = useState(false);
+  const [wizardDismissed, setWizardDismissed] = useState(false);
 
-  const handleComplete = useCallback(() => {
-    localStorage.setItem(WELCOME_STORAGE_KEY, '1');
-    setQuickstartDismissed(true);
-  }, []);
+  const handleWizardComplete = useCallback(() => {
+    localStorage.setItem(ONBOARDING_COMPLETED_KEY, '1');
+    completeOnboarding();
+    setWizardDismissed(true);
+  }, [completeOnboarding]);
 
-  const handleSkip = useCallback(() => {
-    localStorage.setItem(WELCOME_STORAGE_KEY, '1');
-    setQuickstartDismissed(true);
-  }, []);
-
-  // Show QuickStartFlow to truly new users who haven't done either modal
-  if (!quickstartDone && !welcomeDone && !quickstartDismissed) {
-    return (
-      <QuickStartFlow onComplete={handleComplete} onSkip={handleSkip} />
-    );
+  // Legacy users: just show WelcomeModal (existing behavior, gated behind legacy flag)
+  if (legacyDone) {
+    return <WelcomeModal />;
   }
 
-  // Show WelcomeModal for returning users who haven't dismissed it
+  // New users who haven't completed onboarding yet
+  if (isNewUser && !onboardingCompleted && !wizardDismissed) {
+    return <OnboardingWizard onComplete={handleWizardComplete} />;
+  }
+
+  // Returning users (onboarding done) — show WelcomeModal for tips
   return <WelcomeModal />;
 }
 
@@ -530,7 +536,7 @@ export function EditorLayout() {
         <TutorialOverlay />
         <OnboardingChecklist />
         <Suspense fallback={null}>
-          <QuickStartGate />
+          <OnboardingGate />
           <ShaderEditorPanel />
           <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
           <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />

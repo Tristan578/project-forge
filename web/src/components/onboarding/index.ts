@@ -4,3 +4,4 @@ export { AchievementToast } from './AchievementToast';
 export { ContextualTipToast } from './ContextualTipToast';
 export { WelcomeWizard } from './WelcomeWizard';
 export { WhatsNewModal } from './WhatsNewModal';
+export { OnboardingWizard } from './OnboardingWizard';
