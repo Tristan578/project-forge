@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { parseJsonBody, optionalString } from '@/lib/apiValidation';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function PATCH(
   req: NextRequest,
@@ -15,6 +16,9 @@ export async function PATCH(
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:seller-asset-patch:${user.id}`, 10, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 

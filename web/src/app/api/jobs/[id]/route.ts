@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { generationJobs } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,9 @@ export async function PATCH(
   try {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
+
+    const rl = await rateLimit(`user:job-update:${authResult.ctx.user.id}`, 60, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const { id } = await params;
     const body = await req.json();

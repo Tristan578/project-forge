@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db/client';
 import { marketplaceAssets } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 const VALID_CATEGORIES = ['model_3d', 'sprite', 'texture', 'audio', 'script', 'prefab', 'template', 'shader', 'animation'] as const;
 const VALID_LICENSES = ['standard', 'extended'] as const;
@@ -13,6 +14,9 @@ export async function GET() {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:seller-assets-list:${user.id}`, 30, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 
@@ -47,6 +51,9 @@ export async function POST(req: NextRequest) {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:seller-assets-create:${user.id}`, 10, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 
