@@ -1,6 +1,29 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+export type OnboardingPath = 'ai' | 'template' | 'blank' | 'tour';
+export type VisibilityTier = 'novice' | 'intermediate' | 'advanced' | 'expert';
+
+// Legacy localStorage keys — if any are set, the user is NOT new
+const LEGACY_KEYS = ['forge-quickstart-completed', 'forge-welcomed'];
+
+function checkLegacyKeys(): boolean {
+  if (typeof window === 'undefined') return false;
+  return LEGACY_KEYS.some((key) => !!localStorage.getItem(key));
+}
+
+const BASIC_TASK_IDS = new Set([
+  'create-entity',
+  'customize-material',
+  'add-physics',
+  'write-script',
+  'use-ai-chat',
+  'export-game',
+]);
+
+const BASIC_TASKS_FOR_INTERMEDIATE = 3;
+const ADVANCED_TASKS_FOR_ADVANCED = 3;
+
 export interface OnboardingState {
   // Tutorial state
   activeTutorial: string | null;
@@ -28,6 +51,14 @@ export interface OnboardingState {
   showOnboardingPanel: boolean;
   showAchievementToast: boolean;
 
+  // Phase 1 additions — onboarding wizard state
+  onboardingPath: OnboardingPath | null;
+  onboardingStartedAt: number | null;
+  featureVisibilityTier: VisibilityTier;
+  firstInteractions: Record<string, boolean>;
+  onboardingCompleted: boolean;
+  dismissWizard: () => void;
+
   // Actions
   startTutorial: (id: string) => void;
   advanceTutorial: () => void;
@@ -41,6 +72,13 @@ export interface OnboardingState {
   setShowOnboardingPanel: (show: boolean) => void;
   dismissWhatsNew: () => void;
   recordVisit: () => void;
+
+  // Phase 1 new actions
+  selectPath: (path: OnboardingPath) => void;
+  setVisibilityTier: (tier: VisibilityTier) => void;
+  recordFirstInteraction: (panelId: string) => void;
+  completeOnboarding: () => void;
+  autoPromoteVisibilityTier: () => void;
 }
 
 export const useOnboardingStore = create<OnboardingState>()(
@@ -60,12 +98,19 @@ export const useOnboardingStore = create<OnboardingState>()(
       unlockedAchievements: [],
       lastAchievementShown: null,
 
-      lastVisitTimestamp: Date.now(),
+      lastVisitTimestamp: 0,
       isNewUser: true,
       showWhatsNew: false,
 
       showOnboardingPanel: false,
       showAchievementToast: false,
+
+      // Phase 1 initial state
+      onboardingPath: null,
+      onboardingStartedAt: null,
+      featureVisibilityTier: 'novice',
+      firstInteractions: {},
+      onboardingCompleted: false,
 
       // Actions
       startTutorial: (id: string) => {
@@ -110,12 +155,7 @@ export const useOnboardingStore = create<OnboardingState>()(
 
       completeTask: (taskId: string) => {
         const state = get();
-        const isBasic = taskId.startsWith('create-') || 
-          taskId === 'customize-material' ||
-          taskId === 'add-physics' ||
-          taskId === 'write-script' ||
-          taskId === 'use-ai-chat' ||
-          taskId === 'export-game';
+        const isBasic = BASIC_TASK_IDS.has(taskId) || taskId.startsWith('create-');
 
         if (isBasic) {
           set({
@@ -132,6 +172,9 @@ export const useOnboardingStore = create<OnboardingState>()(
             },
           });
         }
+
+        // Auto-promote tier after updating tasks
+        get().autoPromoteVisibilityTier();
       },
 
       dismissTip: (tipId: string) => {
@@ -174,7 +217,10 @@ export const useOnboardingStore = create<OnboardingState>()(
       recordVisit: () => {
         const state = get();
         const now = Date.now();
-        const daysSinceLastVisit = (now - state.lastVisitTimestamp) / (1000 * 60 * 60 * 24);
+        const daysSinceLastVisit =
+          state.lastVisitTimestamp > 0
+            ? (now - state.lastVisitTimestamp) / (1000 * 60 * 60 * 24)
+            : 0;
 
         set({
           lastVisitTimestamp: now,
@@ -182,9 +228,69 @@ export const useOnboardingStore = create<OnboardingState>()(
           showWhatsNew: daysSinceLastVisit > 7,
         });
       },
+
+      // Phase 1 new actions
+      selectPath: (path: OnboardingPath) => {
+        set({
+          onboardingPath: path,
+          onboardingStartedAt: Date.now(),
+        });
+      },
+
+      setVisibilityTier: (tier: VisibilityTier) => {
+        set({ featureVisibilityTier: tier });
+      },
+
+      recordFirstInteraction: (panelId: string) => {
+        const state = get();
+        if (state.firstInteractions[panelId]) return;
+        set({
+          firstInteractions: {
+            ...state.firstInteractions,
+            [panelId]: true,
+          },
+        });
+      },
+
+      completeOnboarding: () => {
+        set({
+          onboardingCompleted: true,
+          isNewUser: false,
+          lastVisitTimestamp: Date.now(),
+        });
+      },
+
+      dismissWizard: () => {
+        set({
+          onboardingCompleted: true,
+          isNewUser: false,
+        });
+      },
+
+      autoPromoteVisibilityTier: () => {
+        const state = get();
+        const basicCount = Object.values(state.basicTasks).filter(Boolean).length;
+        const advancedCount = Object.values(state.advancedTasks).filter(Boolean).length;
+        const current = state.featureVisibilityTier;
+
+        if (current === 'novice' && basicCount >= BASIC_TASKS_FOR_INTERMEDIATE) {
+          set({ featureVisibilityTier: 'intermediate' });
+        } else if (current === 'intermediate' && advancedCount >= ADVANCED_TASKS_FOR_ADVANCED) {
+          set({ featureVisibilityTier: 'advanced' });
+        }
+      },
     }),
     {
-      name: 'forge-onboarding',
+      name: 'forge-onboarding-v2',
+      // Migrate legacy key if it exists — users on old key should not see wizard
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const hasLegacy = checkLegacyKeys();
+        if (hasLegacy && state.isNewUser) {
+          state.isNewUser = false;
+          state.onboardingCompleted = true;
+        }
+      },
     }
   )
 );
