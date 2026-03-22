@@ -3,12 +3,13 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { Send, Square, Paperclip, Mic, MicOff, Brain, Shield } from 'lucide-react';
 import { useChatStore, type ChatModel } from '@/stores/chatStore';
+import { AI_MODEL_PRIMARY, AI_MODEL_FAST } from '@/lib/ai/models';
 import { EntityPicker } from './EntityPicker';
 import { estimateTokenCount, formatTokenEstimate } from '@/lib/chat/tokenCounter';
 
 const MODEL_OPTIONS: { value: ChatModel; label: string }[] = [
-  { value: 'claude-sonnet-4-5-20250929', label: 'Sonnet 4.5' },
-  { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5' },
+  { value: AI_MODEL_PRIMARY, label: 'Sonnet 4.5' },
+  { value: AI_MODEL_FAST, label: 'Haiku 4.5' },
 ];
 
 export function ChatInput() {

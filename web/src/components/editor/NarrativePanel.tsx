@@ -28,6 +28,7 @@ import type {
   Choice,
 } from '@/lib/ai/narrativeGenerator';
 import { useDialogueStore } from '@/stores/dialogueStore';
+import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 
 // ============================================================================
 // Sub-components
@@ -310,7 +311,7 @@ async function defaultFetchFn(prompt: string): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: [{ role: 'user', content: prompt }],
-      model: 'claude-sonnet-4-20250514',
+      model: AI_MODEL_PRIMARY,
     }),
   });
   if (!resp.ok) throw new Error(`API error: ${resp.status}`);

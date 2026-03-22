@@ -7,12 +7,13 @@
  */
 
 import type { ProviderBackend, ProviderCapability } from '../types';
+import { AI_MODELS } from '@/lib/ai/models';
 
 const ENDPOINT = 'https://ai-gateway.vercel.sh/v1';
 
 const DEFAULT_MODELS: Record<string, string> = {
-  chat: 'anthropic/claude-sonnet-4-6',
-  embedding: 'google/gemini-embedding-2-preview',
+  chat: AI_MODELS.gatewayChat,
+  embedding: AI_MODELS.gatewayEmbedding,
   image: 'openai/dall-e-3',
 };
 

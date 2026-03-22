@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { DocEntry } from './docsIndex';
+import { AI_MODELS } from '@/lib/ai/models';
 
 export interface SemanticChunk {
   path: string;
@@ -21,7 +22,7 @@ export interface SearchResult {
   similarity: number;
 }
 
-const EMBEDDING_MODEL = 'gemini-embedding-2-preview';
+const EMBEDDING_MODEL = AI_MODELS.embedding;
 const DEFAULT_TOP_K = 5;
 
 /** Compute cosine similarity between two equal-length vectors */

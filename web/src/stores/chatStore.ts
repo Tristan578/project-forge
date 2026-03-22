@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { estimateMessageTokens } from '../lib/chat/tokenCounter';
 import { showError } from '@/lib/toast';
+import { AI_MODEL_PRIMARY, AI_MODEL_FAST } from '@/lib/ai/models';
 
 export interface ToolCallStatus {
   id: string;
@@ -25,7 +26,7 @@ export interface ChatMessage {
   entityRefs?: Record<string, string>; // @DisplayName → entity ID
 }
 
-export type ChatModel = 'claude-sonnet-4-5-20250929' | 'claude-haiku-4-5-20251001';
+export type ChatModel = typeof AI_MODEL_PRIMARY | typeof AI_MODEL_FAST;
 
 export type RightPanelTab = 'inspector' | 'chat' | 'script' | 'ui' | 'modify' | 'gdd' | 'review' | 'behavior';
 
@@ -272,7 +273,7 @@ async function streamOneTurn(
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   isStreaming: false,
-  activeModel: 'claude-sonnet-4-5-20250929',
+  activeModel: AI_MODEL_PRIMARY,
   rightPanelTab: 'inspector',
   error: null,
   abortController: null,
