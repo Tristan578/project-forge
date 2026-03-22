@@ -34,6 +34,8 @@ declare namespace forge {
     function getEntities(): Array<{ id: string; name: string; type: string; position: [number, number, number] }>;
     /** Find entities whose name contains the search string (case-insensitive) */
     function findByName(name: string): string[];
+    /** Find entities whose name exactly matches the string (case-sensitive) */
+    function findByNameExact(name: string): string[];
     /** Get entity display name */
     function getEntityName(entityId: string): string | null;
     /** Get entity type (e.g. "cube", "sphere", "point_light") */
