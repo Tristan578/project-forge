@@ -7,6 +7,7 @@ import { getDb } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
 import type { ApiKeyScope } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const VALID_SCOPES: ApiKeyScope[] = ['scene:read', 'scene:write', 'ai:generate', 'project:manage'];
 
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
   const keyHash = await bcrypt.hash(rawKey, 12);
 
   const db = getDb();
+  try {
   const [record] = await db
     .insert(apiKeys)
     .values({
@@ -63,6 +65,10 @@ export async function POST(req: Request) {
     createdAt: record.createdAt.toISOString(),
     warning: 'Save this key now. It cannot be retrieved again.',
   });
+  } catch (err) {
+    captureException(err, { route: '/api/keys/api-key', method: 'POST' });
+    return NextResponse.json({ error: 'Failed to create API key' }, { status: 500 });
+  }
 }
 
 /** GET /api/keys/api-key — list API keys (no secrets) */
@@ -70,24 +76,29 @@ export async function GET() {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  const db = getDb();
-  const keys = await db
-    .select({
-      id: apiKeys.id,
-      name: apiKeys.name,
-      prefix: apiKeys.keyPrefix,
-      scopes: apiKeys.scopes,
-      lastUsed: apiKeys.lastUsed,
-      createdAt: apiKeys.createdAt,
-    })
-    .from(apiKeys)
-    .where(eq(apiKeys.userId, authResult.ctx.user.id));
+  try {
+    const db = getDb();
+    const keys = await db
+      .select({
+        id: apiKeys.id,
+        name: apiKeys.name,
+        prefix: apiKeys.keyPrefix,
+        scopes: apiKeys.scopes,
+        lastUsed: apiKeys.lastUsed,
+        createdAt: apiKeys.createdAt,
+      })
+      .from(apiKeys)
+      .where(eq(apiKeys.userId, authResult.ctx.user.id));
 
-  return NextResponse.json({
-    keys: keys.map((k) => ({
-      ...k,
-      lastUsed: k.lastUsed?.toISOString() ?? null,
-      createdAt: k.createdAt.toISOString(),
-    })),
-  });
+    return NextResponse.json({
+      keys: keys.map((k) => ({
+        ...k,
+        lastUsed: k.lastUsed?.toISOString() ?? null,
+        createdAt: k.createdAt.toISOString(),
+      })),
+    });
+  } catch (err) {
+    captureException(err, { route: '/api/keys/api-key', method: 'GET' });
+    return NextResponse.json({ error: 'Failed to list API keys' }, { status: 500 });
+  }
 }

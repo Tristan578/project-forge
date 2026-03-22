@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, users } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -90,7 +91,7 @@ export async function GET(
       },
     });
   } catch (error) {
-    console.error('Failed to fetch published game:', error);
+    captureException(error, { route: '/api/play/[userId]/[slug]' });
     return NextResponse.json(
       { error: 'Failed to load game' },
       { status: 500 }
