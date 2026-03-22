@@ -87,9 +87,9 @@ export interface CapabilitiesResponse {
  * Returns which AI capabilities are available based on configured API keys.
  * Checks env vars server-side so secrets are never exposed to the client.
  */
-export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
+export async function GET(req: NextRequest): Promise<NextResponse> {
   const limited = await rateLimitPublicRoute(req, 'capabilities', 30, 60_000);
-  if (limited) return limited as NextResponse<CapabilitiesResponse>;
+  if (limited) return limited;
 
   try {
     const allCapabilities: ProviderCapability[] = [
@@ -140,7 +140,7 @@ export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesRe
     return NextResponse.json({ capabilities, available, unavailable });
   } catch (error) {
     captureException(error, { route: '/api/capabilities' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 }) as NextResponse<CapabilitiesResponse>;
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
