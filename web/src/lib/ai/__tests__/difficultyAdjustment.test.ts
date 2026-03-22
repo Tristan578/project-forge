@@ -31,7 +31,7 @@ function makeProfile(overrides: Partial<DifficultyProfile> = {}): DifficultyProf
 }
 
 function makeConfig(overrides: Partial<DDAConfig> = {}): DDAConfig {
-  return { ...DDA_PRESETS.standard, ...overrides };
+  return { ...DDA_PRESETS.standard, isCompetitive: false, ...overrides };
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +141,36 @@ describe('calculateDifficultyAdjustment', () => {
     expect(result.level).toBeGreaterThanOrEqual(0.8);
   });
 
+  it('isCompetitive=true prevents difficulty decrease', () => {
+    const profile = makeProfile({ level: 0.7 });
+    const result = calculateDifficultyAdjustment(
+      makePerformance({ deathsPerMinute: 5, timePerLevel: 600 }),
+      profile,
+      makeConfig({ isCompetitive: true }),
+    );
+    expect(result.level).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it('isCompetitive=false allows difficulty to decrease', () => {
+    const profile = makeProfile({ level: 0.7 });
+    const result = calculateDifficultyAdjustment(
+      makePerformance({ deathsPerMinute: 5, timePerLevel: 600 }),
+      profile,
+      makeConfig({ isCompetitive: false }),
+    );
+    expect(result.level).toBeLessThan(0.7);
+  });
+
+  it('neverDecrease=true still works for backwards compatibility', () => {
+    const profile = makeProfile({ level: 0.7 });
+    const result = calculateDifficultyAdjustment(
+      makePerformance({ deathsPerMinute: 5, timePerLevel: 600 }),
+      profile,
+      makeConfig({ isCompetitive: false, neverDecrease: true }),
+    );
+    expect(result.level).toBeGreaterThanOrEqual(0.7);
+  });
+
   it('adjusts enemy multipliers proportionally to level', () => {
     const profile = makeProfile({ level: 0.5 });
     const result = calculateDifficultyAdjustment(
@@ -211,6 +241,14 @@ describe('DDA_PRESETS', () => {
     expect(config.minDifficulty).toBeLessThan(config.maxDifficulty);
     expect(config.adjustmentSpeed).toBeGreaterThan(0);
     expect(config.cooldownSeconds).toBeGreaterThan(0);
+    expect(typeof config.isCompetitive).toBe('boolean');
+  });
+
+  it('only the competitive preset has isCompetitive=true', () => {
+    const competitivePresets = Object.entries(DDA_PRESETS)
+      .filter(([, cfg]) => cfg.isCompetitive)
+      .map(([name]) => name);
+    expect(competitivePresets).toEqual(['competitive']);
   });
 
   it('gentle has wider range than hardcore', () => {
