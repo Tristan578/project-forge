@@ -107,8 +107,9 @@ test.describe('Help & Onboarding @ui', () => {
         { timeout: 30_000 },
       );
 
-      // Wait a moment for modal to potentially appear
-      await page.waitForTimeout(2000);
+      // Wait for network idle so any deferred data fetches complete before checking
+      // that no onboarding modal appeared.
+      await page.waitForLoadState('networkidle');
 
       // No onboarding overlay should appear
       const onboardingOverlay = page.locator('.fixed').filter({ hasText: /what kind of game|welcome|getting started/i }).first();

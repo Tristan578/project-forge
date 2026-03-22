@@ -28,8 +28,10 @@ test.describe('Error Resilience @ui', () => {
 
       await editor.loadPage();
 
-      // Wait for any delayed errors
-      await page.waitForTimeout(2000);
+      // Wait for all deferred async initialisation to settle before checking errors.
+      // `networkidle` fires once the page has had no network requests for 500ms,
+      // which is a reliable proxy for "all lazy effects have run".
+      await page.waitForLoadState('networkidle');
 
       expect(errors).toEqual([]);
     });
@@ -45,7 +47,8 @@ test.describe('Error Resilience @ui', () => {
       });
 
       await editor.loadPage();
-      await page.waitForTimeout(2000);
+      // Wait for any async effects to complete before asserting no rejections.
+      await page.waitForLoadState('networkidle');
 
       expect(rejections).toEqual([]);
     });
@@ -159,14 +162,14 @@ test.describe('Error Resilience @ui', () => {
     test('window resize does not crash the editor', async ({ page }) => {
       // Resize to mobile width
       await page.setViewportSize({ width: 375, height: 667 });
-      await page.waitForTimeout(500);
+      // Wait for the canvas to remain visible at the new viewport before resizing again
+      await expect(page.locator('canvas').first()).toBeVisible({ timeout: 5_000 });
 
       // Resize back to desktop
       await page.setViewportSize({ width: 1280, height: 720 });
-      await page.waitForTimeout(500);
 
       // Editor should still be functional
-      await expect(page.locator('canvas').first()).toBeVisible();
+      await expect(page.locator('canvas').first()).toBeVisible({ timeout: 5_000 });
     });
 
     test('double-clicking on canvas does not produce errors', async ({ page }) => {
@@ -179,7 +182,8 @@ test.describe('Error Resilience @ui', () => {
       await expect(canvas).toBeVisible({ timeout: 10000 });
 
       await canvas.dblclick();
-      await page.waitForTimeout(1000);
+      // Use networkidle to wait for any async handlers triggered by the click
+      await page.waitForLoadState('networkidle');
 
       // Filter out known harmless errors
       const criticalErrors = errors.filter(

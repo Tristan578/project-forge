@@ -382,8 +382,8 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
     expect(mobileBox).not.toBeNull();
 
     await page.setViewportSize({ width: 1440, height: 900 });
-    // Allow layout to settle after resize
-    await page.waitForTimeout(300);
+    // Wait for the canvas to respond to the viewport change before measuring
+    await expect(canvas).toBeVisible({ timeout: 5_000 });
 
     const desktopBox = await canvas.boundingBox();
     expect(desktopBox).not.toBeNull();
