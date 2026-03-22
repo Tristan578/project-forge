@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getProject, updateProject, deleteProject } from '@/lib/projects/service';
 import { parseJsonBody, requireString, requireObject, optionalString } from '@/lib/apiValidation';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /**
  * GET /api/projects/[id]
@@ -10,6 +11,9 @@ import { parseJsonBody, requireString, requireObject, optionalString } from '@/l
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:project-get:${authResult.ctx.user.id}`, 30, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { id } = await params;
   const project = await getProject(authResult.ctx.user.id, id);
@@ -29,6 +33,9 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:project-put:${authResult.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { id } = await params;
   const parsed = await parseJsonBody(req);
@@ -87,6 +94,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:project-delete:${authResult.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { id } = await params;
   const deleted = await deleteProject(authResult.ctx.user.id, id);

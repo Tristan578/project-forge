@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { logger } from '@/lib/logging/logger';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
@@ -15,6 +16,8 @@ export async function GET() {
   if (!authResult.ok) return authResult.response;
 
   const user = authResult.ctx.user;
+  const rl = await rateLimit(`user:billing-status:${user.id}`, 30, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
   const reqLog = logger.child({ endpoint: 'GET /api/billing/status', userId: user.id });
 
   // Calculate next refill date (30 days after billing cycle start)
