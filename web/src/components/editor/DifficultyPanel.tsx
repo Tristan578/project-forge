@@ -293,6 +293,16 @@ export function DifficultyPanel() {
       {/* Config sliders */}
       <div className="space-y-2">
         <span className="text-zinc-400 text-[10px] uppercase tracking-wider">Settings</span>
+        <label className="flex items-center gap-2 text-zinc-300">
+          <input
+            type="checkbox"
+            checked={config.isCompetitive}
+            onChange={(e) => handleConfigChange('isCompetitive', e.target.checked)}
+            className="accent-orange-500"
+          />
+          <span>Competitive mode</span>
+          <span className="ml-auto text-[10px] text-zinc-500">never decreases</span>
+        </label>
         <SliderField
           label="Sensitivity"
           value={config.sensitivity}
@@ -346,6 +356,16 @@ export function DifficultyPanel() {
       <div className="flex items-center gap-2 rounded bg-zinc-800 p-2">
         <Zap size={12} className="text-yellow-400" />
         <span className="text-zinc-300">Current Level</span>
+        {config.isCompetitive && (
+          <span
+            className="ml-1 inline-flex items-center gap-1 rounded-full bg-orange-900/60 px-1.5 py-0.5 text-[10px] font-semibold text-orange-300"
+            title="Competitive mode: difficulty only increases"
+            aria-label="Competitive mode active"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-orange-400" aria-hidden="true" />
+            COMP
+          </span>
+        )}
         <span className="ml-auto font-mono text-lg font-bold text-white">{levelPercent}%</span>
       </div>
 

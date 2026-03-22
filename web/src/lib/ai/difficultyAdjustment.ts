@@ -35,7 +35,18 @@ export interface DDAConfig {
   maxDifficulty: number;
   adjustmentSpeed: number;
   cooldownSeconds: number;
-  /** When true, difficulty only increases — never decreases (competitive mode) */
+  /**
+   * Explicit competitive mode flag.
+   * When true, difficulty only ever increases — it never decreases.
+   * This replaces the implicit heuristic behaviour and must be set
+   * deliberately rather than inferred from other fields.
+   */
+  isCompetitive: boolean;
+  /**
+   * @deprecated Use `isCompetitive` instead.
+   * Kept for backwards compatibility — if set and `isCompetitive` is false
+   * it will still enable one-way difficulty increase. Prefer `isCompetitive`.
+   */
   neverDecrease?: boolean;
 }
 
@@ -56,6 +67,7 @@ export const DDA_PRESETS: Record<string, DDAConfig> = {
     maxDifficulty: 0.8,
     adjustmentSpeed: 0.05,
     cooldownSeconds: 30,
+    isCompetitive: false,
   },
   standard: {
     enabled: true,
@@ -64,6 +76,7 @@ export const DDA_PRESETS: Record<string, DDAConfig> = {
     maxDifficulty: 1.0,
     adjustmentSpeed: 0.1,
     cooldownSeconds: 15,
+    isCompetitive: false,
   },
   hardcore: {
     enabled: true,
@@ -72,6 +85,7 @@ export const DDA_PRESETS: Record<string, DDAConfig> = {
     maxDifficulty: 1.0,
     adjustmentSpeed: 0.15,
     cooldownSeconds: 5,
+    isCompetitive: false,
   },
   adaptive_story: {
     enabled: true,
@@ -80,6 +94,7 @@ export const DDA_PRESETS: Record<string, DDAConfig> = {
     maxDifficulty: 0.7,
     adjustmentSpeed: 0.12,
     cooldownSeconds: 20,
+    isCompetitive: false,
   },
   competitive: {
     enabled: true,
@@ -88,6 +103,7 @@ export const DDA_PRESETS: Record<string, DDAConfig> = {
     maxDifficulty: 1.0,
     adjustmentSpeed: 0.08,
     cooldownSeconds: 10,
+    isCompetitive: true,
     neverDecrease: true,
   },
 };
@@ -165,8 +181,11 @@ export function calculateDifficultyAdjustment(
   // Delta between where we want to be and where we are
   const delta = targetDifficulty - currentProfile.level;
 
-  // Competitive mode: difficulty only increases, never decreases
-  const effectiveDelta = config.neverDecrease ? Math.max(0, delta) : delta;
+  // Competitive mode: difficulty only increases, never decreases.
+  // isCompetitive is the canonical flag; neverDecrease is honoured for
+  // backwards compatibility with configs that predate this field.
+  const oneWayOnly = config.isCompetitive || config.neverDecrease === true;
+  const effectiveDelta = oneWayOnly ? Math.max(0, delta) : delta;
 
   // Apply adjustment speed and sensitivity
   const adjustment = effectiveDelta * config.adjustmentSpeed * config.sensitivity;
@@ -254,7 +273,8 @@ function onUpdate(dt) {
   const skill = Math.max(0, Math.min(100, 100 - deathsPerMinute * 40));
   const target = skill / 100;
   const rawDelta = target - currentLevel;
-  const delta = DDA_CONFIG.neverDecrease ? Math.max(0, rawDelta) : rawDelta;
+  const oneWayOnly = DDA_CONFIG.isCompetitive || DDA_CONFIG.neverDecrease === true;
+  const delta = oneWayOnly ? Math.max(0, rawDelta) : rawDelta;
   const adjustment = delta * DDA_CONFIG.adjustmentSpeed * DDA_CONFIG.sensitivity;
 
   currentLevel = Math.max(
