@@ -86,8 +86,10 @@ export function reportWasmLoadMetric(metric: WasmLoadMetric): void {
 /**
  * Wrap a WASM fetch with cache status detection and timing.
  *
- * Returns the original Response so callers can still consume the body, and
- * schedules the metric report as a microtask so it never blocks the load path.
+ * Measures time from `startTimeMs` until HTTP response headers are received
+ * (fetch resolution). This does NOT include body download or WASM compilation
+ * time — those happen asynchronously after the Response is consumed by the
+ * caller. The metric captures network latency + CDN cache behavior.
  *
  * @param url - The WASM binary URL being fetched
  * @param backend - Which engine backend is being loaded
@@ -103,12 +105,12 @@ export async function fetchWasmWithMetrics(
 
   if (response.ok) {
     const cacheStatus = readCfCacheStatus(response);
-    const loadTimeMs = performance.now() - startTimeMs;
+    const fetchTimeMs = performance.now() - startTimeMs;
     const cdnEnabled = !url.startsWith('/') && !url.startsWith(window.location.origin);
 
     // Schedule metric reporting without blocking the load path
     queueMicrotask(() => {
-      reportWasmLoadMetric({ loadTimeMs, backend, cacheStatus, cdnEnabled });
+      reportWasmLoadMetric({ loadTimeMs: fetchTimeMs, backend, cacheStatus, cdnEnabled });
     });
   }
 
