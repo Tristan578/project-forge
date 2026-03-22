@@ -324,7 +324,7 @@ export async function generateReview(context: ReviewContext): Promise<GameReview
       model: 'claude-haiku-4-5-20251001',
       sceneContext: '',
       thinking: false,
-      systemPromptOverride: REVIEWER_SYSTEM_PROMPT,
+      systemOverride: REVIEWER_SYSTEM_PROMPT,
     }),
   });
 

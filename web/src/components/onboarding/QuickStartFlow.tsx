@@ -97,10 +97,10 @@ export function QuickStartFlow({ onComplete, onSkip }: QuickStartFlowProps) {
     setIsGenerating(true);
     try {
       await loadTemplate(card.templateId);
-    } finally {
-      setIsGenerating(false);
       setIsReady(true);
       setStep(3);
+    } finally {
+      setIsGenerating(false);
     }
   }, [selectedType, isGenerating, loadTemplate]);
 

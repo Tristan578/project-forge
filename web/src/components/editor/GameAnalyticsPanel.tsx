@@ -255,7 +255,10 @@ export function GameAnalyticsPanel({
     const link = document.createElement('a');
     link.href = url;
     link.download = 'game-analytics.csv';
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }, [sessions]);
 
