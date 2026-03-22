@@ -4,6 +4,7 @@ import { generationJobs } from '@/lib/db/schema';
 import { eq, and, inArray, desc } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ job: { id: job.id } }, { status: 201 });
   } catch (error) {
+    captureException(error, { route: '/api/jobs', method: 'POST' });
     console.error('Failed to create job:', error);
     return NextResponse.json(
       { error: 'Failed to create job' },
@@ -105,6 +107,7 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (error) {
+    captureException(error, { route: '/api/jobs', method: 'GET' });
     console.error('Failed to fetch jobs:', error);
     return NextResponse.json(
       { error: 'Failed to fetch jobs' },

@@ -6,6 +6,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 interface BatchItem {
   nodeId: string;
@@ -21,6 +22,7 @@ interface VoiceSettings {
 }
 
 export async function POST(request: NextRequest) {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
@@ -118,4 +120,8 @@ export async function POST(request: NextRequest) {
     totalGenerated: results.length,
     totalFailed: errors.length,
   });
+  } catch (err) {
+    captureException(err, { route: '/api/generate/voice/batch' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
