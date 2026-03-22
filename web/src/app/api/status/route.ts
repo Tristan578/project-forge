@@ -8,6 +8,7 @@ import {
   type StatusPagePayload,
 } from '@/lib/status/statusTypes';
 import { MONITORED_SERVICES } from '@/lib/status/statusConfig';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * GET /api/status
@@ -32,6 +33,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const rateLimitResult = await rateLimitPublicRoute(req, 'status');
   if (rateLimitResult) return rateLimitResult;
 
+  try {
   const report = await runAllHealthChecks();
 
   // Build a lookup map from health check name → health result for O(1) access
@@ -69,12 +71,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   };
 
   return NextResponse.json(payload, {
-    status: 200,
-    headers: {
-      // Allow CDN / edge caching for up to 30 seconds
-      'Cache-Control': 'public, max-age=30, stale-while-revalidate=60',
-    },
-  });
+      status: 200,
+      headers: {
+        // Allow CDN / edge caching for up to 30 seconds
+        'Cache-Control': 'public, max-age=30, stale-while-revalidate=60',
+      },
+    });
+  } catch (error) {
+    captureException(error, { route: '/api/status' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
 
 export const dynamic = 'force-dynamic';
