@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 /**
  * Tests for /api/docs route — extractTitle, extractSections, GET handler.
  *
@@ -47,7 +48,7 @@ describe('/api/docs GET', () => {
       .mockResolvedValueOnce('# Getting Started\n## Setup\nInstall deps.')
       .mockRejectedValueOnce(new Error('no _meta.json'));
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -63,7 +64,7 @@ describe('/api/docs GET', () => {
     vi.mocked(readdir).mockResolvedValueOnce([] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
     vi.mocked(readFile).mockRejectedValueOnce(new Error('no _meta.json'));
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -80,7 +81,7 @@ describe('/api/docs GET', () => {
       .mockResolvedValueOnce('# Physics Engine\n## Collisions\nHit detection.')
       .mockRejectedValueOnce(new Error('no _meta.json'));
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     expect(body.docs).toHaveLength(1);
@@ -99,7 +100,7 @@ describe('/api/docs GET', () => {
       .mockResolvedValueOnce('# README\nContent here.')
       .mockRejectedValueOnce(new Error('no _meta.json'));
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     expect(body.docs).toHaveLength(1);
@@ -115,7 +116,7 @@ describe('/api/docs GET', () => {
       .mockResolvedValueOnce('Just some text without a heading.')
       .mockRejectedValueOnce(new Error('no _meta.json'));
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     expect(body.docs[0].title).toBe('Untitled');
@@ -130,7 +131,7 @@ describe('/api/docs GET', () => {
       .mockResolvedValueOnce('# Title\n## Section A\nContent A.\n## Section B\nContent B.\n### Sub C\nContent C.')
       .mockRejectedValueOnce(new Error('no _meta.json'));
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     expect(body.docs[0].sections).toHaveLength(3);
@@ -143,7 +144,7 @@ describe('/api/docs GET', () => {
     vi.mocked(readdir).mockResolvedValueOnce([] as any); // eslint-disable-line @typescript-eslint/no-explicit-any
     vi.mocked(readFile).mockResolvedValueOnce('{"order": ["intro", "guide"]}');
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     expect(body.meta).toEqual({ order: ['intro', 'guide'] });
@@ -153,7 +154,7 @@ describe('/api/docs GET', () => {
     vi.mocked(readdir).mockRejectedValueOnce(new Error('disk failure'));
     vi.mocked(readFile).mockRejectedValueOnce(new Error('no _meta.json'));
 
-    const response = await GET();
+    const response = await GET(new NextRequest('http://localhost/test'));
     const body = await response.json();
 
     // loadDocsRecursive catches readdir errors internally

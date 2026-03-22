@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -20,7 +21,7 @@ describe('GET /api/openapi', () => {
     mockReadFileSync.mockReturnValue(JSON.stringify(mockSpec));
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/test'));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -34,7 +35,7 @@ describe('GET /api/openapi', () => {
     mockReadFileSync.mockImplementation(() => { throw new Error('ENOENT: no such file'); });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/test'));
     const body = await res.json();
 
     expect(res.status).toBe(500);
@@ -45,7 +46,7 @@ describe('GET /api/openapi', () => {
     mockReadFileSync.mockReturnValue('not valid json {{{');
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/test'));
     const body = await res.json();
 
     expect(res.status).toBe(500);
