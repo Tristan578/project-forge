@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db/client';
 import { assetPurchases } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET() {
   try {
@@ -23,6 +24,7 @@ export async function GET() {
 
     return NextResponse.json({ assetIds: purchases.map((p) => p.assetId) });
   } catch (error) {
+    captureException(error, { route: '/api/marketplace/purchases', method: 'GET' });
     console.error('Error fetching purchases:', error);
     return NextResponse.json({ error: 'Failed to fetch purchases' }, { status: 500 });
   }
