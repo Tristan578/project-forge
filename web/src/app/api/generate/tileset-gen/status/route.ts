@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET(request: NextRequest) {
   const authResult = await authenticateRequest();
@@ -62,6 +63,7 @@ export async function GET(request: NextRequest) {
       error: mappedStatus === 'failed' ? 'Tileset generation failed' : undefined,
     });
   } catch (err) {
+    captureException(err, { route: '/api/generate/tileset-gen/status' });
     const message = err instanceof Error ? err.message : 'Status check failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SunoClient } from '@/lib/generate/sunoClient';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET(request: NextRequest) {
   // 1. Authenticate
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest) {
       error: mappedStatus === 'failed' ? 'Generation failed' : undefined,
     });
   } catch (err) {
+    captureException(err, { route: '/api/generate/music/status' });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

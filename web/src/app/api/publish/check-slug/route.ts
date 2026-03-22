@@ -5,6 +5,7 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET(request: NextRequest) {
   const session = await authenticateClerkSession();
@@ -13,18 +14,23 @@ export async function GET(request: NextRequest) {
   const rl = await rateLimit(`user:publish-check-slug:${session.clerkId}`, 30, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  const user = await getUserByClerkId(session.clerkId);
-  if (!user) return NextResponse.json({ available: true });
+  try {
+    const user = await getUserByClerkId(session.clerkId);
+    if (!user) return NextResponse.json({ available: true });
 
-  const slug = request.nextUrl.searchParams.get('slug');
-  if (!slug) return NextResponse.json({ available: false });
+    const slug = request.nextUrl.searchParams.get('slug');
+    if (!slug) return NextResponse.json({ available: false });
 
-  const db = getDb();
+    const db = getDb();
 
-  const existing = await db.select({ id: publishedGames.id })
-    .from(publishedGames)
-    .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
-    .limit(1);
+    const existing = await db.select({ id: publishedGames.id })
+      .from(publishedGames)
+      .where(and(eq(publishedGames.userId, user.id), eq(publishedGames.slug, slug)))
+      .limit(1);
 
-  return NextResponse.json({ available: existing.length === 0 });
+    return NextResponse.json({ available: existing.length === 0 });
+  } catch (err) {
+    captureException(err, { route: '/api/publish/check-slug' });
+    return NextResponse.json({ error: 'Failed to check slug availability' }, { status: 500 });
+  }
 }
