@@ -66,6 +66,9 @@ interface ChatState {
   conversations: Conversation[];
   activeConversationId: string | null;
 
+  showTokenDepletedModal: boolean;
+  setShowTokenDepletedModal: (show: boolean) => void;
+
   sendMessage: (text: string, images?: string[], entityRefs?: Record<string, string>) => Promise<void>;
   /**
    * Send a message and stream the response via the AI SDK UI message stream
@@ -299,10 +302,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
   pendingEntityRefs: {},
   conversations: [],
   activeConversationId: null,
+  showTokenDepletedModal: false,
+
+  setShowTokenDepletedModal: (show) => set({ showTokenDepletedModal: show }),
 
   sendMessage: async (text: string, images?: string[], entityRefs?: Record<string, string>) => {
     const { messages, activeModel, isStreaming, thinkingEnabled, rightPanelTab } = get();
     if (isStreaming) return;
+
+    // Check token balance before sending — show depletion modal if zero
+    try {
+      const { useUserStore } = await import('@/stores/userStore');
+      const balance = useUserStore.getState().tokenBalance;
+      if (balance !== null && balance.total === 0) {
+        set({ showTokenDepletedModal: true });
+        return;
+      }
+    } catch {
+      // Non-critical — proceed if store unavailable
+    }
 
     // Track AI chat usage
     try { const { trackAIChatMessageSent } = await import('@/lib/analytics/events'); trackAIChatMessageSent(activeModel); } catch { /* analytics non-critical */ }

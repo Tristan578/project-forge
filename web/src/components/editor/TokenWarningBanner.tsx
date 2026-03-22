@@ -35,7 +35,7 @@ export function TokenWarningBanner() {
   const isTokenLow = useMemo(() => {
     if (!tokenBalance) return false;
     if (tokenBalance.monthlyTotal <= 0) return false;
-    return tokenBalance.monthlyRemaining / tokenBalance.monthlyTotal < 0.1;
+    return tokenBalance.monthlyRemaining / tokenBalance.monthlyTotal < 0.2;
   }, [tokenBalance]);
 
   const isPastDue = billingStatus?.subscriptionStatus === 'past_due';
@@ -94,7 +94,7 @@ export function TokenWarningBanner() {
         >
           <AlertTriangle size={14} className="shrink-0 text-amber-400" />
           <span className="flex-1">
-            Your AI token balance is below 10%.{' '}
+            Your AI token balance is below 20%.{' '}
             {tokenBalance && (
               <span className="font-medium">
                 {tokenBalance.monthlyRemaining.toLocaleString()} of{' '}

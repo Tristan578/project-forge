@@ -38,6 +38,7 @@ import { GenerationStatus } from './GenerationStatus';
 import { HelpMenu } from './HelpMenu';
 import { AutoSaveRecovery } from './AutoSaveRecovery';
 import { TokenWarningBanner } from './TokenWarningBanner';
+import { TokenDepletedModal } from './TokenDepletedModal';
 import { Celebration } from '@/components/ui/Celebration';
 import { useCelebrations } from '@/hooks/useCelebrations';
 import { useChatStore, type RightPanelTab } from '@/stores/chatStore';
@@ -545,6 +546,7 @@ export function EditorLayout() {
         <DialogueOverlay />
         <TutorialOverlay />
         <OnboardingChecklist />
+        <TokenDepletedModal />
         <Suspense fallback={null}>
           <OnboardingGate />
           <ShaderEditorPanel />
@@ -609,6 +611,7 @@ export function EditorLayout() {
       <DialogueOverlay />
       <TutorialOverlay />
       <OnboardingChecklist />
+      <TokenDepletedModal />
       <Suspense fallback={null}>
         <OnboardingGate />
         <ShaderEditorPanel />
