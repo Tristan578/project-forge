@@ -3,6 +3,7 @@ import { logInitEvent, type InitPhase } from '@/lib/initLog';
 import { emitStatusEvent } from './useEngineStatus';
 import { captureException, setTag } from '@/lib/monitoring/sentry-client';
 import { showError } from '@/lib/toast';
+import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
 
 /** Loading progress state exported for UI components to display progress feedback. */
 export type LoadingPhase = 'idle' | 'detecting' | 'downloading' | 'initializing' | 'ready' | 'error';
@@ -173,9 +174,21 @@ const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/
 async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string, signal?: AbortSignal): Promise<WasmModule> {
   const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
   const wasmUrl = `${basePath}${wasmFile}`;
+
+  // Determine backend from the base path for CDN metrics
+  const backend: 'webgpu' | 'webgl2' = basePath.includes('webgpu') ? 'webgpu' : 'webgl2';
+
   // Pre-fetch the .wasm binary with the abort signal so callers can cancel,
-  // and wrap with a timeout to prevent infinite stalls
-  const wasmInput = signal ? await fetch(wasmUrl, { signal }) : wasmUrl;
+  // and wrap with a timeout to prevent infinite stalls.
+  // Use fetchWasmWithMetrics to track CDN cache status and load timing.
+  const fetchStart = performance.now();
+  let wasmInput: Response | string;
+  if (signal) {
+    wasmInput = await fetchWasmWithMetrics(wasmUrl, backend, fetchStart, signal);
+  } else {
+    wasmInput = await fetchWasmWithMetrics(wasmUrl, backend, fetchStart);
+  }
+
   await withTimeout(
     wasm.default(wasmInput),
     WASM_FETCH_TIMEOUT_MS,
