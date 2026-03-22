@@ -125,6 +125,7 @@ export async function runEvaluation(): Promise<EvalResult[]> {
   await initBrowser();
   const results: EvalResult[] = [];
 
+  try {
   for (const prompt of prompts) {
     console.log(`\n--- Evaluating: ${prompt.id} ---`);
     console.log(`  Prompt: "${prompt.prompt}"`);
@@ -175,7 +176,9 @@ export async function runEvaluation(): Promise<EvalResult[]> {
     results.push(result);
   }
 
-  await closeBrowser();
+  } finally {
+    await closeBrowser();
+  }
 
   // Log results
   if (!existsSync(config.resultsDir)) mkdirSync(config.resultsDir, { recursive: true });
