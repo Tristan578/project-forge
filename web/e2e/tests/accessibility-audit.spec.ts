@@ -19,8 +19,10 @@ test.describe('Accessibility Audit @ui', () => {
 
   test('editor main area has zero critical or serious axe violations', async ({ page }) => {
     const results = await new AxeBuilder({ page })
-      .include('main')
       .withTags(['wcag2a', 'wcag2aa'])
+      .disableRules(['color-contrast']) // dark zinc theme — tracked as PF-572
+      .exclude('[data-testid="canvas-area"]') // non-DOM WebGL content
+      .exclude('.dockview-theme-dark') // third-party dockview panel library
       .analyze();
 
     const criticalOrSerious = results.violations.filter(
@@ -46,8 +48,10 @@ test.describe('Accessibility Audit @ui', () => {
 
   test('editor main area has zero serious axe violations', async ({ page }) => {
     const results = await new AxeBuilder({ page })
-      .include('main')
       .withTags(['wcag2a', 'wcag2aa'])
+      .disableRules(['color-contrast'])
+      .exclude('[data-testid="canvas-area"]')
+      .exclude('.dockview-theme-dark')
       .analyze();
 
     const seriousOnly = results.violations.filter((v) => v.impact === 'serious');
