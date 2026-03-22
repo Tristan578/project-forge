@@ -258,6 +258,15 @@ function buildForgeApi(scriptEntityId: string) {
         }
         return results;
       },
+      findByNameExact: (name: string) => {
+        const results: string[] = [];
+        for (const [id, info] of Object.entries(entityInfos)) {
+          if (info.name === name) {
+            results.push(id);
+          }
+        }
+        return results;
+      },
       getEntityName: (eid: string) => entityInfos[eid]?.name ?? null,
       getEntityType: (eid: string) => entityInfos[eid]?.type ?? null,
       getEntitiesInRadius: (position: [number, number, number], radius: number) => {

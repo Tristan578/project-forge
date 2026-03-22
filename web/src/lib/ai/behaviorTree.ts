@@ -120,6 +120,18 @@ export function validateNode(node: BehaviorNode, depth: number = 0): string[] {
   return errors;
 }
 
+/** Collect all node IDs from a tree recursively */
+function collectNodeIds(node: BehaviorNode): string[] {
+  const ids: string[] = [];
+  if (node.id) ids.push(node.id);
+  if (node.children) {
+    for (const child of node.children) {
+      ids.push(...collectNodeIds(child));
+    }
+  }
+  return ids;
+}
+
 /** Validate an entire behavior tree */
 export function validateTree(tree: BehaviorTree): string[] {
   const errors: string[] = [];
@@ -134,6 +146,17 @@ export function validateTree(tree: BehaviorTree): string[] {
   }
 
   errors.push(...validateNode(tree.root));
+
+  // Validate node ID uniqueness — duplicate IDs cause variable name collisions
+  // in generateNodeCode() and produce a SyntaxError when the script runs.
+  const allIds = collectNodeIds(tree.root);
+  const seen = new Set<string>();
+  for (const id of allIds) {
+    if (seen.has(id)) {
+      errors.push(`Duplicate node ID: "${id}" — all node IDs must be unique`);
+    }
+    seen.add(id);
+  }
 
   // Validate variables
   if (tree.variables) {

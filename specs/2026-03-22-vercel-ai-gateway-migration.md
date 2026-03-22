@@ -419,6 +419,23 @@ If the AI SDK has a critical bug in production:
 2. Deploy — instantly reverts to `@anthropic-ai/sdk` code path
 3. No code changes needed for immediate mitigation
 
+## Performance Targets
+
+These quantified targets apply to this migration and must not regress:
+
+| Metric | Target | Measurement method |
+|--------|--------|--------------------|
+| LCP (Largest Contentful Paint) | < 2.5s | Vercel Speed Insights / Lighthouse |
+| CLS (Cumulative Layout Shift) | < 0.1 | Lighthouse |
+| INP (Interaction to Next Paint) | < 200ms | Lighthouse / field data |
+| WASM engine load time | < 3s on fast 3G | `performance.mark` around WASM init |
+| Initial JS bundle (gzipped) | < 500KB | `next experimental-analyze` |
+| AI SDK addition to bundle | < 50KB gzipped | `next experimental-analyze` diff |
+| Streaming first-byte latency | < 2s | Server timing header |
+| Command dispatch latency | < 1ms | `performance.now()` around `dispatchCommand()` |
+
+Measure baseline before Phase 1 and after Phase 5. Flag any regression as a blocker.
+
 ## Constraints
 
 - **Vercel AI SDK version**: Use `ai@^4.0.0` (latest stable). Do NOT use canary/preview versions.
@@ -427,7 +444,7 @@ If the AI SDK has a critical bug in production:
 - **Sentry SDK version**: `@sentry/nextjs@^10.42.0` — already supports `vercelAIIntegration()` (requires 10.6.0+).
 - **No breaking changes to MCP commands**: The `commands.json` manifest format remains unchanged. Tool adapter converts at runtime.
 - **Agentic loop must remain client-side**: Tool execution happens in the browser (WASM engine commands). Server-side `maxSteps` with `execute` functions cannot reach the browser. Use client-side tool result forwarding.
-- **Performance budget**: Command latency must remain < 1ms. Streaming first-byte must remain < 2s. AI SDK overhead must be negligible.
+- **Performance budget**: See Performance Targets table above.
 
 ## Alternatives Considered
 

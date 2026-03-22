@@ -46,7 +46,7 @@ function buildSceneContextFromStore(): SceneContext {
   // Build scripts map from allScripts
   const scripts: SceneContext['scripts'] = {};
   for (const [id, data] of Object.entries(state.allScripts ?? {})) {
-    scripts[id] = { enabled: data.enabled };
+    scripts[id] = { enabled: data?.enabled ?? false };
   }
 
   // Input bindings — use sources field from InputBinding type

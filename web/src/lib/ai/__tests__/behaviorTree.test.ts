@@ -220,6 +220,67 @@ describe('behaviorTree', () => {
       const errors = validateTree(tree);
       expect(errors.some(e => e.includes('Variable missing required "name"'))).toBe(true);
     });
+
+    it('passes when all node IDs are unique (regression for PF-709)', () => {
+      const tree: BehaviorTree = {
+        name: 'T',
+        description: '',
+        root: {
+          id: 'root',
+          type: 'sequence',
+          name: 'seq',
+          children: [
+            { id: 'c1', type: 'action', name: 'a1' },
+            { id: 'c2', type: 'action', name: 'a2' },
+          ],
+        },
+        variables: [],
+      };
+      expect(validateTree(tree)).toEqual([]);
+    });
+
+    it('errors on duplicate node IDs to prevent SyntaxError in generated scripts (regression for PF-709)', () => {
+      const tree: BehaviorTree = {
+        name: 'T',
+        description: '',
+        root: {
+          id: 'dup',
+          type: 'sequence',
+          name: 'seq',
+          children: [
+            { id: 'dup', type: 'action', name: 'a1' }, // same ID as root
+            { id: 'c2', type: 'action', name: 'a2' },
+          ],
+        },
+        variables: [],
+      };
+      const errors = validateTree(tree);
+      expect(errors.some(e => e.includes('Duplicate node ID') && e.includes('"dup"'))).toBe(true);
+    });
+
+    it('detects duplicate IDs in deeply nested trees', () => {
+      const tree: BehaviorTree = {
+        name: 'T',
+        description: '',
+        root: {
+          id: 'root',
+          type: 'sequence',
+          name: 'seq',
+          children: [
+            {
+              id: 'nested',
+              type: 'inverter',
+              name: 'inv',
+              children: [{ id: 'leaf', type: 'action', name: 'a' }],
+            },
+            { id: 'leaf', type: 'action', name: 'b' }, // duplicate 'leaf'
+          ],
+        },
+        variables: [],
+      };
+      const errors = validateTree(tree);
+      expect(errors.some(e => e.includes('Duplicate node ID') && e.includes('"leaf"'))).toBe(true);
+    });
   });
 
   // ---- Preset Trees ----
