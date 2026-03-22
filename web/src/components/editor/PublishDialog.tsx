@@ -94,7 +94,7 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
             <Globe size={20} />
             Publish Game
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:text-zinc-300">
+          <button onClick={onClose} aria-label="Close publish dialog" className="rounded p-1 text-zinc-400 hover:text-zinc-300">
             <X size={18} />
           </button>
         </div>

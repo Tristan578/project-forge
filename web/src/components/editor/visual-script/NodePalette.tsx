@@ -33,7 +33,7 @@ export function NodePalette({ onClose }: NodePaletteProps) {
       <div className="sticky top-0 z-10 border-b border-zinc-700 bg-zinc-900 p-2">
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-semibold text-zinc-400">Node Palette</span>
-          <button onClick={onClose} className="rounded p-0.5 text-zinc-400 hover:text-zinc-300">
+          <button onClick={onClose} aria-label="Close node palette" className="rounded p-0.5 text-zinc-400 hover:text-zinc-300">
             <X size={14} />
           </button>
         </div>

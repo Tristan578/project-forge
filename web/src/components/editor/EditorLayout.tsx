@@ -501,10 +501,10 @@ export function EditorLayout() {
         </div>
 
         {/* Canvas fills remaining space */}
-        <div className="absolute inset-0 top-8 bottom-12">
+        <main className="absolute inset-0 top-8 bottom-12" aria-label="Game editor workspace">
           <CanvasArea />
           <MobileBanner />
-        </div>
+        </main>
 
         {/* Bottom toolbar */}
         <MobileToolbar
@@ -577,7 +577,7 @@ export function EditorLayout() {
       <TokenWarningBanner />
 
       {/* Main area: Sidebar + Dockview */}
-      <div className="flex flex-1 overflow-hidden">
+      <main className="flex flex-1 overflow-hidden" aria-label="Game editor workspace">
         {/* Tool sidebar */}
         <Sidebar />
 
@@ -585,7 +585,7 @@ export function EditorLayout() {
         <div className="flex-1 overflow-hidden">
           <WorkspaceProvider />
         </div>
-      </div>
+      </main>
 
       <AutoSaveRecovery />
       <ChatOverlay />

@@ -117,7 +117,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="feedback-dialog-title"
+        aria-labelledby={submitted ? 'feedback-dialog-success-title' : 'feedback-dialog-title'}
         className="mx-4 w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -125,7 +125,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
           // Success state
           <div className="flex flex-col items-center gap-3 py-6">
             <CheckCircle size={40} className="text-green-400" />
-            <h2 id="feedback-dialog-title" className="text-lg font-semibold text-zinc-100">Thanks for your feedback!</h2>
+            <h2 id="feedback-dialog-success-title" className="text-lg font-semibold text-zinc-100">Thanks for your feedback!</h2>
             <p className="text-center text-sm text-zinc-400">
               Your {type === 'bug' ? 'bug report' : type === 'feature' ? 'feature request' : 'feedback'} has been submitted.
             </p>

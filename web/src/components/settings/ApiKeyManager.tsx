@@ -210,7 +210,7 @@ export function ApiKeyManager() {
               <code className="flex-1 rounded bg-zinc-950 px-2 py-1 text-xs text-zinc-200">
                 {newMcpKey}
               </code>
-              <button onClick={copyKey} className="text-yellow-400 hover:text-yellow-300">
+              <button onClick={copyKey} aria-label={copied ? 'Copied' : 'Copy API key'} className="text-yellow-400 hover:text-yellow-300">
                 {copied ? <Check size={14} /> : <Copy size={14} />}
               </button>
             </div>
