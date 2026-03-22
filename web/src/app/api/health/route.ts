@@ -87,14 +87,21 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const publicServices = sanitizeForPublic(report.services).map(normalizeStatus);
 
   // Log degraded or down health to aid incident response
+  const allDegradedServices = report.services
+    .filter((s) => s.status !== 'healthy')
+    .map((s) => ({ name: s.name, status: s.status }));
   if (criticalStatus !== 'healthy') {
-    const degradedServices = report.services
-      .filter((s) => s.status !== 'healthy')
-      .map((s) => s.name);
-    logger.warn('Health check degraded', {
+    logger.warn('Health check degraded (critical services affected)', {
       endpoint: 'GET /api/health',
       criticalStatus,
-      degradedServices,
+      degradedServices: allDegradedServices,
+    });
+  } else if (allDegradedServices.length > 0) {
+    // Non-critical services are degraded — log for observability even though HTTP 200 is returned
+    logger.warn('Health check degraded (non-critical services)', {
+      endpoint: 'GET /api/health',
+      criticalStatus,
+      degradedServices: allDegradedServices,
     });
   }
 

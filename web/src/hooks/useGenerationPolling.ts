@@ -73,17 +73,23 @@ export function useGenerationPolling() {
         delete pollCountsRef.current[id];
       }
     }
+    // NOTE: No cleanup return here — clearing all timers on deps change would stop
+    // in-flight polls every time updateJob() causes a re-render (PF-699 desync bug).
+    // Unmount cleanup is handled by the separate effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs]);
 
+  // Separate effect for unmount-only cleanup so that timer teardown does not
+  // run on every jobs state change (which would desync the polling loop).
+  useEffect(() => {
     return () => {
-      // Cleanup all timers on unmount
       for (const timer of Object.values(timersRef.current)) {
         clearInterval(timer);
       }
       timersRef.current = {};
       pollCountsRef.current = {};
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs]);
+  }, []);
 
   function startPolling(id: string, jobId: string, type: string) {
     pollCountsRef.current[id] = 0;
