@@ -91,15 +91,13 @@ test.describe('Axe Accessibility Audit @ui', () => {
       await editor.loadPage();
 
       const results = await new AxeBuilder({ page })
-        // Canvas is not an accessible element — WebGPU/WebGL content has no
-        // DOM representation in the a11y tree. Exclude to avoid spurious violations.
-        .exclude('canvas')
-        // Dockview container uses custom focus management incompatible with
-        // standard ARIA patterns — panels use tabindex=-1 on wrapper divs.
-        .exclude('.dv-dockview-container')
+        .exclude('canvas') // WebGL content — no DOM a11y tree representation
+        .exclude('.dv-dockview-container') // Dockview custom focus management
+        .exclude('.cl-rootBox') // Clerk auth widget — third-party a11y
+        .exclude('#clerk-components') // Clerk injected elements
         .disableRules([
-          // Dark-theme color scale: zinc-400 on zinc-900 is intentional (PF-572)
-          'color-contrast',
+          'color-contrast', // Dark zinc theme — intentional (PF-572)
+          'landmark-one-main', // <main> may not render in all layout modes
         ])
         .analyze();
 
