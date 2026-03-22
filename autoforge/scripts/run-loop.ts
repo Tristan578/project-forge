@@ -94,7 +94,7 @@ export function recordExperiment(
   state.experimentsRun++;
   if (record.kept) {
     state.experimentsKept++;
-    state.bestScore = record.totalScore;
+    state.bestScore = Math.max(state.bestScore, record.totalScore);
   }
   saveState(state);
 

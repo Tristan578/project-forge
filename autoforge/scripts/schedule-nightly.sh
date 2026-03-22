@@ -124,7 +124,7 @@ Your task:
    c. Verify: cd web && npx tsc --noEmit && npx eslint --max-warnings 0
    d. Run evaluation: cd autoforge && npx tsx scripts/run-eval.ts --vision
    e. If score improved: git add -A && git commit with 'autoforge: <hypothesis>'
-   f. If score did not improve: git checkout -- web/src/lib/chat/handlers/
+   f. If score did not improve: git checkout -- web/src/lib/chat/handlers/ web/src/lib/chat/context.ts
    g. Update program.md 'Successful Patterns' or 'Anti-Patterns' sections
 4. After all experiments, generate a summary and push to the branch.
 
