@@ -7,6 +7,7 @@ import {
   resetAllBreakers,
   type ProviderName,
 } from '@/lib/providers/circuitBreaker';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * GET /api/admin/circuit-breaker
@@ -15,6 +16,7 @@ import {
  * Admin-only endpoint.
  */
 export async function GET() {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
   const { clerkId } = authResult.ctx;
@@ -40,6 +42,10 @@ export async function GET() {
     },
     providers: stats,
   });
+  } catch (err) {
+    captureException(err, { route: '/api/admin/circuit-breaker' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
 
 /**
@@ -50,6 +56,7 @@ export async function GET() {
  * Body: { action: 'reset_all' } | { action: 'reset_provider', provider: string }
  */
 export async function POST(request: NextRequest) {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
   const { clerkId } = authResult.ctx;
@@ -112,4 +119,8 @@ export async function POST(request: NextRequest) {
     { error: 'Unknown action. Valid actions: reset_all, reset_provider' },
     { status: 400 }
   );
+  } catch (err) {
+    captureException(err, { route: '/api/admin/circuit-breaker' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

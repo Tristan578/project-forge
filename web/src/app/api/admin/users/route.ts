@@ -4,11 +4,13 @@ import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { ilike, or, desc } from 'drizzle-orm';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 export async function GET(req: NextRequest) {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
   const { clerkId } = authResult.ctx;
@@ -61,4 +63,8 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({ users: rows, limit, offset });
+  } catch (err) {
+    captureException(err, { route: '/api/admin/users' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

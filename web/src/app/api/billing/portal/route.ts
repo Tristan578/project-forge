@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -16,6 +17,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * Create a Stripe billing portal session for managing subscriptions.
  */
 export async function POST() {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
@@ -38,4 +40,8 @@ export async function POST() {
   });
 
   return NextResponse.json({ url: session.url });
+  } catch (err) {
+    captureException(err, { route: '/api/billing/portal' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

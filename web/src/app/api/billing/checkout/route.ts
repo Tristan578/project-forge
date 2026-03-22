@@ -7,6 +7,7 @@ import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logging/logger';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -28,6 +29,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * Body: { tier: 'hobbyist' | 'creator' | 'pro' }
  */
 export async function POST(req: Request) {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
@@ -100,4 +102,8 @@ export async function POST(req: Request) {
   reqLog.info('Checkout session created', { tier, sessionId: session.id });
 
   return NextResponse.json({ url: session.url });
+  } catch (err) {
+    captureException(err, { route: '/api/billing/checkout' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

@@ -19,19 +19,25 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getMetrics } from '@/lib/db/queryMonitor';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { clerkId } = authResult.ctx;
+  try {
+    const authResult = await authenticateRequest();
+    if (!authResult.ok) return authResult.response;
+    const { clerkId } = authResult.ctx;
 
-  const adminError = assertAdmin(clerkId);
-  if (adminError) return adminError;
+    const adminError = assertAdmin(clerkId);
+    if (adminError) return adminError;
 
-  const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-db-metrics');
-  if (rateLimitError) return rateLimitError;
+    const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-db-metrics');
+    if (rateLimitError) return rateLimitError;
 
-  const metrics = getMetrics();
+    const metrics = getMetrics();
 
-  return NextResponse.json(metrics);
+    return NextResponse.json(metrics);
+  } catch (err) {
+    captureException(err, { route: '/api/admin/db-metrics' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

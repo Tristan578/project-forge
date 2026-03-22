@@ -4,6 +4,7 @@ import { moderationAppeals, gameComments } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,6 +88,7 @@ export async function POST(
       status: newStatus,
     });
   } catch (error) {
+    captureException(error, { route: '/api/admin/moderation/appeals/[id]/review' });
     console.error('Failed to review appeal:', error);
     return NextResponse.json(
       { error: 'Failed to review appeal' },

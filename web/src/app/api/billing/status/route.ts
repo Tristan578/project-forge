@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { logger } from '@/lib/logging/logger';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
@@ -12,6 +13,7 @@ const stripeSecret = process.env.STRIPE_SECRET_KEY;
  * Includes subscription status from Stripe when available.
  */
 export async function GET() {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
@@ -52,4 +54,8 @@ export async function GET() {
     nextRefillDate,
     subscriptionStatus,
   });
+  } catch (err) {
+    captureException(err, { route: '/api/billing/status' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

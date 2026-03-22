@@ -7,6 +7,7 @@ import {
   isTransientError,
   processRetryQueue,
 } from '@/lib/auth/webhookRetry';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /** Process a verified webhook event. Extracted so it can be used by the retry queue. */
 async function handleWebhookEvent(
@@ -68,6 +69,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true, queued: true });
     }
     // Permanent error — log and return error status
+    captureException(error, { route: '/api/auth/webhook', eventType: event.type });
     console.error('[Webhook] Permanent error processing event:', event.type, error);
     return NextResponse.json({ error: 'Failed to process event' }, { status: 500 });
   }
