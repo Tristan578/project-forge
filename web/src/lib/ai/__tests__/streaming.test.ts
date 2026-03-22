@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   parseSSELine,
+  parseAiSdkSSELine,
   readSSEStream,
+  readAiSdkStream,
+  isAiSdkStream,
   streamChat,
   type SSEEnvelopeEvent,
   type StreamCallbacks,
@@ -200,12 +203,15 @@ describe('streamChat', () => {
         controller.close();
       },
     });
+    // Include a Headers object so isAiSdkStream() can check response headers.
+    // No x-vercel-ai-ui-message-stream header = legacy format path.
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
         ok: status >= 200 && status < 300,
         status,
         body: stream,
+        headers: new Headers(),
         json: async () => ({ error: 'server error' }),
       }),
     );
@@ -320,5 +326,253 @@ describe('SSEEnvelopeEvent type coverage', () => {
       { type: 'done' },
     ];
     expect(events.map((e) => e.type)).toEqual(['text_delta', 'progress', 'error', 'done']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parseAiSdkSSELine — AI SDK UI message stream format
+// ---------------------------------------------------------------------------
+
+describe('parseAiSdkSSELine', () => {
+  it('returns null for lines without "data: " prefix', () => {
+    expect(parseAiSdkSSELine('')).toBeNull();
+    expect(parseAiSdkSSELine('event: message')).toBeNull();
+    expect(parseAiSdkSSELine(': heartbeat')).toBeNull();
+  });
+
+  it('returns done for [DONE] sentinel', () => {
+    expect(parseAiSdkSSELine('data: [DONE]')).toEqual({ type: 'done' });
+  });
+
+  it('returns null for empty data payload', () => {
+    expect(parseAiSdkSSELine('data: ')).toBeNull();
+  });
+
+  it('parses a text-delta event (AI SDK hyphenated format with delta field)', () => {
+    const result = parseAiSdkSSELine('data: {"type":"text-delta","id":"msg-1","delta":"Hello"}');
+    expect(result).toEqual({ type: 'text_delta', text: 'Hello' });
+  });
+
+  it('returns null for text-delta without a string delta field', () => {
+    expect(parseAiSdkSSELine('data: {"type":"text-delta","id":"x","delta":42}')).toBeNull();
+  });
+
+  it('parses an error event with errorText field', () => {
+    const result = parseAiSdkSSELine('data: {"type":"error","errorText":"upstream failed"}');
+    expect(result).toEqual({ type: 'error', message: 'upstream failed' });
+  });
+
+  it('parses an error event with message field as fallback', () => {
+    const result = parseAiSdkSSELine('data: {"type":"error","message":"rate limit"}');
+    expect(result).toEqual({ type: 'error', message: 'rate limit' });
+  });
+
+  it('returns a generic error message when neither errorText nor message are present', () => {
+    const result = parseAiSdkSSELine('data: {"type":"error"}');
+    expect(result).toEqual({ type: 'error', message: 'AI stream error' });
+  });
+
+  it('returns done for finish event', () => {
+    expect(parseAiSdkSSELine('data: {"type":"finish","finishReason":"stop"}')).toEqual({
+      type: 'done',
+    });
+  });
+
+  it('returns done for finish-step event', () => {
+    expect(parseAiSdkSSELine('data: {"type":"finish-step"}')).toEqual({ type: 'done' });
+  });
+
+  it('returns null for non-text AI SDK event types (silently skipped)', () => {
+    expect(parseAiSdkSSELine('data: {"type":"text-start","id":"x"}')).toBeNull();
+    expect(parseAiSdkSSELine('data: {"type":"text-end","id":"x"}')).toBeNull();
+    expect(parseAiSdkSSELine('data: {"type":"tool-input-start","id":"x"}')).toBeNull();
+    expect(parseAiSdkSSELine('data: {"type":"reasoning-delta","delta":"think"}')).toBeNull();
+    expect(parseAiSdkSSELine('data: {"type":"start","id":"x"}')).toBeNull();
+    expect(parseAiSdkSSELine('data: {"type":"start-step","id":"x"}')).toBeNull();
+    expect(parseAiSdkSSELine('data: {"type":"abort"}')).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readAiSdkStream
+// ---------------------------------------------------------------------------
+
+function makeAiSdkStream(lines: string[]): ReadableStreamDefaultReader<Uint8Array> {
+  const encoder = new TextEncoder();
+  const text = lines.join('\n') + '\n';
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(text));
+      controller.close();
+    },
+  });
+  return stream.getReader();
+}
+
+describe('readAiSdkStream', () => {
+  it('accumulates text-delta chunks into a single string', async () => {
+    const reader = makeAiSdkStream([
+      'data: {"type":"text-delta","id":"m1","delta":"Hello"}',
+      'data: {"type":"text-delta","id":"m1","delta":", world"}',
+      'data: {"type":"finish","finishReason":"stop"}',
+    ]);
+    const result = await readAiSdkStream(reader);
+    expect(result).toBe('Hello, world');
+  });
+
+  it('calls onText callback for each text-delta chunk', async () => {
+    const chunks: string[] = [];
+    const reader = makeAiSdkStream([
+      'data: {"type":"text-delta","id":"m1","delta":"a"}',
+      'data: {"type":"text-delta","id":"m1","delta":"b"}',
+    ]);
+    await readAiSdkStream(reader, { onText: (c) => chunks.push(c) });
+    expect(chunks).toEqual(['a', 'b']);
+  });
+
+  it('silently skips non-text events (tool calls, reasoning, start/finish markers)', async () => {
+    const reader = makeAiSdkStream([
+      'data: {"type":"start","id":"m1"}',
+      'data: {"type":"start-step","id":"m1"}',
+      'data: {"type":"text-start","id":"t1"}',
+      'data: {"type":"text-delta","id":"t1","delta":"ok"}',
+      'data: {"type":"text-end","id":"t1"}',
+      'data: {"type":"tool-input-start","id":"tc1","toolName":"spawn_entity"}',
+      'data: {"type":"finish-step"}',
+      'data: {"type":"finish","finishReason":"stop"}',
+    ]);
+    const result = await readAiSdkStream(reader);
+    expect(result).toBe('ok');
+  });
+
+  it('throws and calls onError when an error event is received', async () => {
+    const errors: string[] = [];
+    const reader = makeAiSdkStream([
+      'data: {"type":"text-delta","id":"m1","delta":"partial"}',
+      'data: {"type":"error","errorText":"upstream failed"}',
+    ]);
+    await expect(readAiSdkStream(reader, { onError: (m) => errors.push(m) })).rejects.toThrow(
+      'upstream failed',
+    );
+    expect(errors).toEqual(['upstream failed']);
+  });
+
+  it('handles an empty stream', async () => {
+    const reader = makeAiSdkStream([]);
+    const result = await readAiSdkStream(reader);
+    expect(result).toBe('');
+  });
+
+  it('handles [DONE] sentinel correctly', async () => {
+    const reader = makeAiSdkStream([
+      'data: {"type":"text-delta","id":"m1","delta":"final"}',
+      'data: [DONE]',
+    ]);
+    const result = await readAiSdkStream(reader);
+    expect(result).toBe('final');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isAiSdkStream
+// ---------------------------------------------------------------------------
+
+describe('isAiSdkStream', () => {
+  function makeResponse(headers: Record<string, string>): Response {
+    return new Response(null, { headers });
+  }
+
+  it('returns true when x-vercel-ai-ui-message-stream header is v1', () => {
+    expect(isAiSdkStream(makeResponse({ 'x-vercel-ai-ui-message-stream': 'v1' }))).toBe(true);
+  });
+
+  it('returns false when the header is absent', () => {
+    expect(isAiSdkStream(makeResponse({}))).toBe(false);
+  });
+
+  it('returns false when the header has a different value', () => {
+    expect(isAiSdkStream(makeResponse({ 'x-vercel-ai-ui-message-stream': 'v2' }))).toBe(false);
+    expect(isAiSdkStream(makeResponse({ 'x-vercel-ai-ui-message-stream': '' }))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// streamChat — format detection routing
+// ---------------------------------------------------------------------------
+
+describe('streamChat format detection', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function mockFetchWithHeader(
+    lines: string[],
+    headers: Record<string, string> = {},
+    status = 200,
+  ) {
+    const encoder = new TextEncoder();
+    const text = lines.join('\n') + '\n';
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(text));
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: status >= 200 && status < 300,
+        status,
+        body: stream,
+        headers: new Headers(headers),
+        json: async () => ({ error: 'server error' }),
+      }),
+    );
+  }
+
+  it('uses legacy reader when x-vercel-ai-ui-message-stream header is absent', async () => {
+    mockFetchWithHeader(['data: {"type":"text_delta","text":"legacy"}']);
+    const result = await streamChat({
+      messages: [{ role: 'user', content: 'hello' }],
+      model: 'test-model',
+    });
+    expect(result).toBe('legacy');
+  });
+
+  it('uses AI SDK reader when x-vercel-ai-ui-message-stream: v1 header is present', async () => {
+    mockFetchWithHeader(
+      ['data: {"type":"text-delta","id":"m1","delta":"sdk-text"}'],
+      { 'x-vercel-ai-ui-message-stream': 'v1' },
+    );
+    const result = await streamChat({
+      messages: [{ role: 'user', content: 'hello' }],
+      model: 'test-model',
+    });
+    expect(result).toBe('sdk-text');
+  });
+
+  it('AI SDK reader handles finish event correctly', async () => {
+    mockFetchWithHeader(
+      [
+        'data: {"type":"text-delta","id":"m1","delta":"done"}',
+        'data: {"type":"finish","finishReason":"stop"}',
+      ],
+      { 'x-vercel-ai-ui-message-stream': 'v1' },
+    );
+    const result = await streamChat({
+      messages: [{ role: 'user', content: 'hello' }],
+      model: 'test-model',
+    });
+    expect(result).toBe('done');
+  });
+
+  it('AI SDK reader propagates error events', async () => {
+    mockFetchWithHeader(
+      ['data: {"type":"error","errorText":"quota exceeded"}'],
+      { 'x-vercel-ai-ui-message-stream': 'v1' },
+    );
+    await expect(
+      streamChat({ messages: [{ role: 'user', content: 'hello' }], model: 'test-model' }),
+    ).rejects.toThrow('quota exceeded');
   });
 });
