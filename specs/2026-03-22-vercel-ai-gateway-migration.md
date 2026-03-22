@@ -4,6 +4,22 @@
 > **Date:** 2026-03-22
 > **Scope:** Replace direct `@anthropic-ai/sdk` usage with Vercel AI SDK (`ai` + `@ai-sdk/react` + `@ai-sdk/gateway`) across all AI-consuming routes and the client chat UI.
 
+## User Workflow
+
+**Persona:** SpawnForge user chatting with the AI assistant to build a game.
+
+1. The user opens the editor and types "create a platformer level with moving platforms and a collectible coin at the end."
+2. The AI chat panel begins streaming a response. Under the hood, the Next.js route calls `streamText()` from the Vercel AI SDK, routing through the gateway with OIDC auth — no API key required for deployed instances.
+3. As the AI responds with tool calls (`spawn_entity`, `set_material`, `apply_physics`), the `useChat` hook accumulates parts natively — no manual SSE parsing. The tool calls dispatch to the WASM engine via the browser-side tool execution loop.
+4. When thinking mode is active, the AI's reasoning appears as a collapsible block. The `@ai-sdk/anthropic` provider passes the thinking budget to Anthropic transparently.
+5. An approval-mode tool call (e.g. `delete_entity`) pauses with a confirmation dialog. The `needsApproval` flag on the tool triggers AI SDK's deferred execution path, preserving the existing UX.
+6. The full conversation is visible in Sentry with per-call AI spans: model name, token count, latency — powered by `vercelAIIntegration()`. The team can triage slow responses without reading logs.
+7. The engineer maintaining the codebase has zero custom SSE parsers to maintain. Provider failover, circuit breaking, and health monitoring continue to work — the AI SDK only replaced the transport layer.
+
+**Expected outcome:** Users experience faster, more reliable AI responses. Engineers maintain less custom streaming code. The team gains AI-specific observability in Sentry without any instrumentation work.
+
+---
+
 ## Problem
 
 SpawnForge currently uses a hand-rolled streaming infrastructure built around the `@anthropic-ai/sdk` package:
