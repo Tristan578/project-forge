@@ -12,7 +12,7 @@ import { useOnboardingStore } from '../onboardingStore';
 
 describe('onboardingStore', () => {
   beforeEach(() => {
-    // Reset store to initial state
+    // Reset store to initial state (including Phase 1 fields)
     useOnboardingStore.setState({
       activeTutorial: null,
       tutorialStep: 0,
@@ -28,6 +28,12 @@ describe('onboardingStore', () => {
       showWhatsNew: false,
       showOnboardingPanel: false,
       showAchievementToast: false,
+      // Phase 1 fields
+      onboardingPath: null,
+      onboardingStartedAt: null,
+      featureVisibilityTier: 'novice',
+      firstInteractions: {},
+      onboardingCompleted: false,
     });
     localStorage.clear();
   });
