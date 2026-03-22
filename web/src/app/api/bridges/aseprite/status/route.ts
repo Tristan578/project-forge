@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -9,6 +10,9 @@ export async function GET() {
   if (!auth.ok) {
     return auth.response;
   }
+
+  const rl = await rateLimit(`user:bridges-aseprite-status:${auth.ctx.user.id}`, 30, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   try {
     const config = await discoverTool('aseprite');

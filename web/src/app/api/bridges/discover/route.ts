@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -9,6 +10,9 @@ export async function POST(req: Request) {
   if (!auth.ok) {
     return auth.response;
   }
+
+  const rl = await rateLimit(`user:bridges-discover:${auth.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   try {
     const body = await req.json();

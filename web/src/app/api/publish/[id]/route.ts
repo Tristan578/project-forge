@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function DELETE(
   _request: NextRequest,
@@ -11,6 +12,9 @@ export async function DELETE(
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
   const { user } = authResult.ctx;
+
+  const rl = await rateLimit(`user:publish-delete:${user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { id } = await params;
   const db = getDb();

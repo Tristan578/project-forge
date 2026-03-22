@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { gameComments } from '@/lib/db/schema';
 import { inArray } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +22,9 @@ export async function POST(req: NextRequest) {
 
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
+
+    const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-moderation-bulk');
+    if (limited) return limited;
 
     const body = await req.json() as unknown;
 
