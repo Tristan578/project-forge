@@ -131,6 +131,7 @@ export async function* streamViaSdk(
   }
 
   try {
+    let toolIndex = 0;
     const result = streamText({
       model: modelInstance,
       system: systemText || undefined,
@@ -181,7 +182,7 @@ export async function* streamViaSdk(
           break;
 
         case 'tool-input-end':
-          yield { type: 'content_block_stop', index: 0 };
+          yield { type: 'content_block_stop', index: toolIndex++ };
           break;
 
         case 'finish-step': {
