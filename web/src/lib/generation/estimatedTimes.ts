@@ -85,6 +85,11 @@ export function formatEstimatedTime(
   if (min < 60 && max < 60) {
     return `~${min}-${max}s`;
   }
+  if (min < 60 && max >= 60) {
+    // Mixed range: e.g. 30s-90s → "~30s-2 min"
+    const maxMins = Math.ceil(max / 60);
+    return `~${min}s-${maxMins} min`;
+  }
   const minMins = Math.floor(min / 60);
   const maxMins = Math.ceil(max / 60);
   if (minMins === maxMins) {

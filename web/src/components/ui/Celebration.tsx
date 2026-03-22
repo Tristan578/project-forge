@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { X } from 'lucide-react';
 
 export interface CelebrationProps {
@@ -22,8 +22,11 @@ const AUTO_DISMISS_MS = 5000;
  */
 export function Celebration({ title, message, onDismiss }: CelebrationProps) {
   const [visible, setVisible] = useState(true);
+  const dismissed = useRef(false);
 
   const dismiss = useCallback(() => {
+    if (dismissed.current) return;
+    dismissed.current = true;
     setVisible(false);
     onDismiss();
   }, [onDismiss]);

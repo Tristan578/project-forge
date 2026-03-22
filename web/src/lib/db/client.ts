@@ -1,9 +1,11 @@
 import 'server-only';
 import { neon } from '@neondatabase/serverless';
 import { drizzle } from 'drizzle-orm/neon-http';
+import { headers } from 'next/headers';
 import * as schema from './schema';
 import { withRetry, RetryOptions } from './withRetry';
 import { dbCircuitBreaker } from './circuitBreaker';
+import { setCurrentRoute } from './queryMonitor';
 
 // PF-525: Transaction support with neon-http driver.
 //
@@ -65,5 +67,18 @@ export async function queryWithResilience<T>(
   operation: () => Promise<T>,
   retryOptions?: RetryOptions
 ): Promise<T> {
+  // Auto-derive route label from the incoming request path so the query
+  // monitor can attribute metrics per-route without requiring each handler
+  // to call setCurrentRoute() manually (PF-704).
+  try {
+    const h = await headers();
+    const url = h.get('x-invoke-path') ?? h.get('x-pathname') ?? h.get('x-url');
+    if (url) {
+      setCurrentRoute(url);
+    }
+  } catch {
+    // headers() throws outside of a request context (e.g. during tests or
+    // background jobs). Swallow silently — route will remain 'unknown'.
+  }
   return dbCircuitBreaker.execute(() => withRetry(operation, retryOptions));
 }

@@ -375,20 +375,24 @@ export async function generateGDD(
       const data = line.slice(6);
       if (data === '[DONE]') continue;
 
+      // Check for SSE error event before attempting JSON parse
+      let event: Record<string, unknown>;
       try {
-        const event = JSON.parse(data) as Record<string, unknown>;
-        if (event.type === 'text_delta' && typeof event.text === 'string') {
-          content += event.text;
+        event = JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        // Malformed SSE data — skip silently unless it looks like a JSON object
+        // (i.e. non-JSON text deltas or partial chunks are expected)
+        if (data.startsWith('{')) {
+          // Looked like JSON but wasn't — skip
         }
-        if (event.type === 'error' && typeof event.message === 'string') {
-          throw new Error(event.message);
-        }
-      } catch (e) {
-        // Re-throw if it's our own error
-        if (e instanceof Error && e.message !== 'Failed to parse GDD response as JSON') {
-          if (e.message.startsWith('GDD') || !data.startsWith('{')) continue;
-          throw e;
-        }
+        continue;
+      }
+
+      if (event.type === 'error' && typeof event.message === 'string') {
+        throw new Error(event.message);
+      }
+      if (event.type === 'text_delta' && typeof event.text === 'string') {
+        content += event.text;
       }
     }
   }

@@ -120,8 +120,10 @@ function useTeacherSceneContext(): TeacherSceneContext {
     const hasDynamic = entities.some((e) =>
       e.components.includes('PhysicsEnabled') && e.hasPhysics,
     );
+    // A "fixed" ground requires PhysicsEnabled with a non-dynamic (static/kinematic) body.
+    // The hasPhysics flag indicates a dynamic rigidbody; absence means fixed/kinematic.
     const hasFixed = entities.some((e) =>
-      e.components.includes('PhysicsEnabled'),
+      e.components.includes('PhysicsEnabled') && !e.hasPhysics,
     );
 
     return {
