@@ -17,6 +17,13 @@
  *   const result = await resolveChat(messages, { model, thinking, systemBlocks });
  *   if (!result.ok) throw new Error(result.error);
  *   for await (const event of result.stream) { ... }
+ *
+ * TODO(PF-828 Phase 2): When Phase 2 of the Vercel AI Gateway migration lands,
+ * remove the @anthropic-ai/sdk import, streamAnthropicDirect(), streamOpenAICompat(),
+ * and the Anthropic type exports. Replace resolveChat() with a thin resolveChatRoute()
+ * wrapper used for provider selection and billing only — the route will call
+ * streamText() directly via the AI SDK. The USE_AI_SDK feature flag from Phase 1
+ * should also be removed at that point, making the AI SDK path the default.
  */
 
 import type { ResolvedRoute } from './types';

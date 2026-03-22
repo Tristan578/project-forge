@@ -19,6 +19,10 @@ if (DSN) {
         recordInputs: !IS_PROD,
         recordOutputs: !IS_PROD,
       }),
+      // Captures AI SDK (Vercel AI) spans: model name, token usage, latency,
+      // and tool call traces for every streamText/generateText call.
+      // Requires experimental_telemetry: { isEnabled: true } on each call.
+      Sentry.vercelAIIntegration(),
     ],
   });
 
