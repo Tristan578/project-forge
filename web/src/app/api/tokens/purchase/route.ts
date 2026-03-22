@@ -5,6 +5,7 @@ import type { TokenPackage } from '@/lib/tokens/pricing';
 import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -53,23 +54,28 @@ export async function POST(req: Request) {
     );
   }
 
-  const user = authResult.ctx.user;
-  const pkgInfo = TOKEN_PACKAGES[pkg as TokenPackage];
+  try {
+    const user = authResult.ctx.user;
+    const pkgInfo = TOKEN_PACKAGES[pkg as TokenPackage];
 
-  // Create Stripe Checkout session for one-time payment
-  const session = await getStripe().checkout.sessions.create({
-    mode: 'payment',
-    customer: user.stripeCustomerId ?? undefined,
-    customer_email: user.stripeCustomerId ? undefined : user.email,
-    line_items: [{ price: priceId, quantity: 1 }],
-    metadata: {
-      userId: user.id,
-      package: pkg,
-      tokens: pkgInfo.tokens.toString(),
-    },
-    success_url: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}?purchase=success`,
-    cancel_url: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}?purchase=cancelled`,
-  });
+    // Create Stripe Checkout session for one-time payment
+    const session = await getStripe().checkout.sessions.create({
+      mode: 'payment',
+      customer: user.stripeCustomerId ?? undefined,
+      customer_email: user.stripeCustomerId ? undefined : user.email,
+      line_items: [{ price: priceId, quantity: 1 }],
+      metadata: {
+        userId: user.id,
+        package: pkg,
+        tokens: pkgInfo.tokens.toString(),
+      },
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}?purchase=success`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'}?purchase=cancelled`,
+    });
 
-  return NextResponse.json({ checkoutUrl: session.url });
+    return NextResponse.json({ checkoutUrl: session.url });
+  } catch (error) {
+    captureException(error, { route: '/api/tokens/purchase' });
+    return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
+  }
 }

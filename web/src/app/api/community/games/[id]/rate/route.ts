@@ -4,6 +4,7 @@ import { gameRatings } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +74,7 @@ export async function POST(
       ratingCount: Number(stats[0].ratingCount),
     });
   } catch (error) {
-    console.error('Failed to rate game:', error);
+    captureException(error, { route: '/api/community/games/[id]/rate' });
     return NextResponse.json({ error: 'Failed to rate game' }, { status: 500 });
   }
 }

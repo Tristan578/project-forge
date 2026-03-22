@@ -4,6 +4,7 @@ import { gameLikes } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,7 +54,7 @@ export async function POST(
 
     return NextResponse.json({ liked: true, likeCount: Number(count[0].count) });
   } catch (error) {
-    console.error('Failed to like game:', error);
+    captureException(error, { route: '/api/community/games/[id]/like', method: 'POST' });
     return NextResponse.json({ error: 'Failed to like game' }, { status: 500 });
   }
 }
@@ -82,7 +83,7 @@ export async function DELETE(
 
     return NextResponse.json({ liked: false, likeCount: Number(count[0].count) });
   } catch (error) {
-    console.error('Failed to unlike game:', error);
+    captureException(error, { route: '/api/community/games/[id]/like', method: 'DELETE' });
     return NextResponse.json({ error: 'Failed to unlike game' }, { status: 500 });
   }
 }
