@@ -4,6 +4,7 @@
  */
 
 import type { EditorState } from '@/stores/editorStore';
+import { AI_MODEL_FAST } from './models';
 
 // ---- Types ----
 
@@ -321,7 +322,7 @@ export async function generateReview(context: ReviewContext): Promise<GameReview
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: [{ role: 'user', content: `Please review this game based on the following data:\n\n${prompt}` }],
-      model: 'claude-haiku-4-5-20251001',
+      model: AI_MODEL_FAST,
       sceneContext: '',
       thinking: false,
       systemOverride: REVIEWER_SYSTEM_PROMPT,

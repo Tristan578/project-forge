@@ -7,6 +7,7 @@
  */
 
 import type { SceneContext, EntitySummary } from './sceneContext';
+import { AI_MODEL_PRIMARY } from './models';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -225,7 +226,7 @@ export async function planModification(
   const {
     fetchFn = fetch,
     apiEndpoint = '/api/chat',
-    model = 'claude-sonnet-4-5-20250929',
+    model = AI_MODEL_PRIMARY,
   } = options;
 
   const userPrompt = buildModificationPrompt(request, sceneContext);

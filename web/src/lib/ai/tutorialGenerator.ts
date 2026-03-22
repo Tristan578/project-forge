@@ -6,6 +6,8 @@
  * the game step-by-step.
  */
 
+import { AI_MODEL_PRIMARY } from './models';
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -442,7 +444,7 @@ export async function generateTutorialPlan(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       messages: [{ role: 'user', content: userMessage }],
-      model: 'claude-sonnet-4-5-20250929',
+      model: AI_MODEL_PRIMARY,
       sceneContext: '',
       thinking: false,
       systemOverride: TUTORIAL_SYSTEM_PROMPT,

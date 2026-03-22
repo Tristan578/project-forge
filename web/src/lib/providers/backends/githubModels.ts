@@ -8,6 +8,7 @@
  */
 
 import type { ProviderBackend, ProviderCapability } from '../types';
+import { AI_MODELS } from '@/lib/ai/models';
 
 const ENDPOINT = 'https://models.inference.ai.azure.com';
 
@@ -43,7 +44,7 @@ const MODEL_MAP: Record<string, string> = {
   'cohere-embed-v3': 'Cohere-embed-v3-multilingual',
 };
 
-const DEFAULT_MODEL = 'gpt-4o-mini';
+const DEFAULT_MODEL = AI_MODELS.githubDefault;
 
 export const githubModelsBackend: ProviderBackend = {
   id: 'github-models',

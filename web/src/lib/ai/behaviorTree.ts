@@ -2,6 +2,8 @@
 // Converts natural language descriptions into executable behavior tree structures
 // that compile to TypeScript scripts for the SpawnForge script worker.
 
+import { AI_MODEL_FAST } from './models';
+
 // ---- Types ----
 
 export type BehaviorNodeType =
@@ -633,7 +635,7 @@ export async function generateBehaviorTree(description: string): Promise<Behavio
       messages: [
         { role: 'user', content: prompt },
       ],
-      model: 'claude-haiku-4-5-20251001',
+      model: AI_MODEL_FAST,
       max_tokens: 2048,
     }),
   });

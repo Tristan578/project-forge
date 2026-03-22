@@ -19,6 +19,7 @@ import type { DocEntry } from '@/lib/docs/docsIndex';
 import { resolveChat, resolveChatRoute } from '@/lib/providers/resolveChat';
 import type { AnthropicContentBlock } from '@/lib/providers/resolveChat';
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_MODEL_PRIMARY } from '@/lib/ai/models';
 
 // ---------------------------------------------------------------------------
 // Docs loading (server-side, filesystem)
@@ -426,7 +427,7 @@ export async function POST(request: NextRequest) {
 
         // Dispatch through provider registry — routes to gateway or direct Anthropic
         const chatResult = await resolveChat(chatMessages, {
-          model: model || 'claude-sonnet-4-5-20250929',
+          model: model || AI_MODEL_PRIMARY,
           systemBlocks,
           tools: cachedTools as Anthropic.Tool[],
           thinking,

@@ -22,6 +22,7 @@
 import type { ResolvedRoute } from './types';
 import { resolveBackend, resolveBackendWithCircuitBreaker } from './registry';
 import Anthropic from '@anthropic-ai/sdk';
+import { AI_MODELS, AI_MODEL_PRIMARY } from '@/lib/ai/models';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -83,7 +84,7 @@ async function* streamOpenAICompat(
   messages: ChatMessage[],
   options: ResolveChatOptions
 ): AsyncGenerator<ResolveChatStreamEvent> {
-  const modelId = route.modelId ?? options.model ?? 'anthropic/claude-sonnet-4-6';
+  const modelId = route.modelId ?? options.model ?? AI_MODELS.gatewayChat;
   const maxTokens = options.maxTokens ?? 4096;
 
   // Build system message from systemBlocks or systemPrompt
@@ -196,7 +197,7 @@ async function* streamAnthropicDirect(
   options: ResolveChatOptions
 ): AsyncGenerator<ResolveChatStreamEvent> {
   const client = new Anthropic({ apiKey });
-  const modelId = options.model ?? 'claude-sonnet-4-5-20250929';
+  const modelId = options.model ?? AI_MODEL_PRIMARY;
   const maxTokens = options.thinking ? 16384 : (options.maxTokens ?? 4096);
 
   // Narrow messages to Anthropic format

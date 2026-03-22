@@ -7,6 +7,7 @@
  */
 
 import type { ProviderBackend, ProviderCapability } from '../types';
+import { AI_MODELS } from '@/lib/ai/models';
 
 const ENDPOINT = 'https://openrouter.ai/api/v1';
 
@@ -31,7 +32,7 @@ const MODEL_MAP: Record<string, string> = {
   'mistral-7b': 'mistralai/mistral-7b-instruct:free',
 };
 
-const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-6';
+const DEFAULT_MODEL = AI_MODELS.openrouterDefault;
 
 export const openrouterBackend: ProviderBackend = {
   id: 'openrouter',
