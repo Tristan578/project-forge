@@ -127,7 +127,13 @@ test.describe('Modals @ui', () => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
 
-    // Wait for dialog to be visible before measuring z-index
+    // Wait for dialog to be fully visible and rendered before measuring z-index.
+    // On CI the modal may still be transitioning into position when the check runs.
+    await page.waitForSelector('[role="dialog"][aria-labelledby="settings-dialog-title"]', {
+      state: 'visible',
+      timeout: 10_000,
+    });
+
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
