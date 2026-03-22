@@ -400,6 +400,11 @@ export async function POST(request: NextRequest) {
             totalChars += b.text.length;
           } else if (b.type === 'tool_result' && typeof b.content === 'string') {
             totalChars += b.content.length;
+          } else if ('source' in b) {
+            const src = b.source;
+            if (typeof src === 'object' && src !== null && 'data' in src && typeof (src as Record<string, unknown>).data === 'string') {
+              totalChars += ((src as Record<string, unknown>).data as string).length;
+            }
           }
         }
       }
