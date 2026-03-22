@@ -25,7 +25,6 @@ const WelcomeModal = lazy(() => import('./WelcomeModal').then(m => ({ default: m
 const KeyboardShortcutsPanel = lazy(() => import('./KeyboardShortcutsPanel').then(m => ({ default: m.KeyboardShortcutsPanel })));
 const ShortcutCheatSheet = lazy(() => import('./ShortcutCheatSheet').then(m => ({ default: m.ShortcutCheatSheet })));
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(m => ({ default: m.FeedbackDialog })));
-const QuickStartFlow = lazy(() => import('../onboarding/QuickStartFlow').then(m => ({ default: m.QuickStartFlow })));
 const BehaviorTreePanel = lazy(() => import('./BehaviorTreePanel').then(m => ({ default: m.BehaviorTreePanel })));
 const OnboardingWizard = lazy(() => import('../onboarding/OnboardingWizard').then(m => ({ default: m.OnboardingWizard })));
 
@@ -600,7 +599,7 @@ export function EditorLayout() {
       <TutorialOverlay />
       <OnboardingChecklist />
       <Suspense fallback={null}>
-        <QuickStartGate />
+        <OnboardingGate />
         <ShaderEditorPanel />
         <KeyboardShortcutsPanel open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
         <ShortcutCheatSheet open={cheatSheetOpen} onClose={() => setCheatSheetOpen(false)} />
