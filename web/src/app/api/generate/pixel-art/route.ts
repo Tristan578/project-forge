@@ -8,6 +8,7 @@ import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const VALID_SIZES = [16, 32, 64, 128];
 const VALID_DITHERING = ['none', 'bayer4x4', 'bayer8x8'];
@@ -122,7 +123,7 @@ export async function POST(request: NextRequest) {
       style: style ?? 'character',
     }, { status: 201 });
   } catch (err) {
-    console.error('Pixel art generation error:', err);
+    captureException(err, { route: '/api/generate/pixel-art' });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
