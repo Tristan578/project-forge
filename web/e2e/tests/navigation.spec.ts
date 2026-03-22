@@ -192,11 +192,17 @@ test.describe('Navigation & Routing @ui', () => {
 
       const privacyLink = page.locator('a[href="/privacy"]').first();
       await privacyLink.click();
+      // Wait for the navigation to fully commit before calling goBack().
+      // Without this, goBack() can race against the in-progress navigation on
+      // slow CI runners and end up on an unexpected URL.
       await page.waitForURL('**/privacy**', { timeout: 10000 });
+      await page.waitForLoadState('domcontentloaded');
       expect(page.url()).toContain('/privacy');
 
       await page.goBack();
+      // Wait for back-navigation to settle before asserting the URL.
       await page.waitForURL('**/terms**', { timeout: 10000 });
+      await page.waitForLoadState('domcontentloaded');
       expect(page.url()).toContain('/terms');
     });
   });
