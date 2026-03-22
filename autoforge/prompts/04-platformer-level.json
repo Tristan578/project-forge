@@ -1,0 +1,15 @@
+{
+  "id": "platformer-level",
+  "prompt": "A 2D platformer level with floating platforms and coins",
+  "expectedElements": {
+    "entities": ["ground", "platforms (5+)", "coins (3+)", "player start", "background"],
+    "materials": ["grass platform", "stone platform", "gold/coin", "sky"],
+    "lighting": ["bright directional"],
+    "audio": [],
+    "physics": ["static platforms", "static ground", "collectible coins"],
+    "mood": "colorful, playful, bright"
+  },
+  "minEntities": 10,
+  "maxEntities": 30,
+  "category": "gameplay-2d"
+}

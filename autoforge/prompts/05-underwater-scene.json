@@ -1,0 +1,15 @@
+{
+  "id": "underwater-scene",
+  "prompt": "An underwater scene with coral and fish",
+  "expectedElements": {
+    "entities": ["ocean floor", "coral (3+)", "fish (2+)", "rocks", "seaweed", "bubbles"],
+    "materials": ["sand", "coral colorful", "water tint", "organic"],
+    "lighting": ["blue-green directional from above", "caustic-style ambient"],
+    "audio": ["underwater ambience"],
+    "physics": [],
+    "mood": "serene, blue-green, ethereal"
+  },
+  "minEntities": 8,
+  "maxEntities": 25,
+  "category": "environment"
+}

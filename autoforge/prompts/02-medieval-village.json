@@ -1,0 +1,15 @@
+{
+  "id": "medieval-village",
+  "prompt": "A small medieval village with a well in the center",
+  "expectedElements": {
+    "entities": ["ground plane", "buildings (3+)", "well", "paths", "fences", "ambient light"],
+    "materials": ["stone", "wood", "thatch/roof", "water", "dirt path"],
+    "lighting": ["directional sunlight", "warm point lights in buildings"],
+    "audio": [],
+    "physics": ["static buildings", "static well", "static fences"],
+    "mood": "bright, rustic, daytime"
+  },
+  "minEntities": 12,
+  "maxEntities": 40,
+  "category": "environment"
+}

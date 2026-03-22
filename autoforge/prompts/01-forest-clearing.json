@@ -1,0 +1,15 @@
+{
+  "id": "forest-clearing",
+  "prompt": "A forest clearing with a campfire at dusk",
+  "expectedElements": {
+    "entities": ["ground plane", "trees (3+)", "campfire", "rocks", "ambient light"],
+    "materials": ["grass/ground", "bark/wood", "stone", "fire emissive"],
+    "lighting": ["warm point light on campfire", "dim directional for dusk sky"],
+    "audio": ["fire crackling"],
+    "physics": ["static ground", "static trees", "static rocks"],
+    "mood": "warm, peaceful, twilight"
+  },
+  "minEntities": 8,
+  "maxEntities": 25,
+  "category": "environment"
+}

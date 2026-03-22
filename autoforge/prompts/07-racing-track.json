@@ -1,0 +1,15 @@
+{
+  "id": "racing-track",
+  "prompt": "A simple racing track with barriers and a start line",
+  "expectedElements": {
+    "entities": ["track surface", "barriers (6+)", "start line", "finish line", "grandstand"],
+    "materials": ["asphalt", "barrier red-white", "grass", "paint markings"],
+    "lighting": ["bright directional sunlight"],
+    "audio": [],
+    "physics": ["static track", "static barriers"],
+    "mood": "sporty, bright, competitive"
+  },
+  "minEntities": 10,
+  "maxEntities": 35,
+  "category": "gameplay-3d"
+}

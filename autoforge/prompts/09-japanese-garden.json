@@ -1,0 +1,15 @@
+{
+  "id": "japanese-garden",
+  "prompt": "A Japanese garden with a bridge over a koi pond",
+  "expectedElements": {
+    "entities": ["ground", "pond", "bridge", "trees (2+)", "lanterns", "stones", "torii gate"],
+    "materials": ["grass", "water", "wood bridge", "stone lantern", "bamboo"],
+    "lighting": ["soft directional golden hour", "lantern point lights"],
+    "audio": ["water flowing", "birds"],
+    "physics": ["static ground", "static bridge"],
+    "mood": "tranquil, golden, zen"
+  },
+  "minEntities": 10,
+  "maxEntities": 30,
+  "category": "environment"
+}

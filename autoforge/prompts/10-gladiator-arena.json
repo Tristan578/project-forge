@@ -1,0 +1,15 @@
+{
+  "id": "gladiator-arena",
+  "prompt": "A circular gladiator arena with spectator stands",
+  "expectedElements": {
+    "entities": ["arena floor", "walls", "spectator stands", "gates (2+)", "pillars", "torches"],
+    "materials": ["sand", "stone weathered", "metal gate", "wood stands", "fire emissive"],
+    "lighting": ["harsh directional overhead", "warm torch point lights"],
+    "audio": ["crowd ambience"],
+    "physics": ["static walls", "static arena floor"],
+    "mood": "epic, ancient, dramatic"
+  },
+  "minEntities": 10,
+  "maxEntities": 30,
+  "category": "environment"
+}
