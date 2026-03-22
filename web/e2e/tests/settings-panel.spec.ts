@@ -21,8 +21,11 @@ test.describe('Settings Panel @ui', () => {
   });
 
   test('settings dialog has correct ARIA attributes', async ({ page }) => {
+    // Wait for dialog to be fully rendered before checking ARIA attributes.
+    // On CI the dialog may not have completed its mount cycle when the check runs.
     const dialog = page.locator(settingsDialog);
-    await expect(dialog).toHaveAttribute('aria-modal', 'true');
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog).toHaveAttribute('aria-modal', 'true', { timeout: 10_000 });
   });
 
   test('tab list has correct ARIA role', async ({ page }) => {
