@@ -57,22 +57,13 @@ cd "$REPO_ROOT"
 echo ""
 echo "--- Vitest (smoke: first 100 tests) ---"
 
-# Run vitest with a test-count limit via reporter output inspection.
-# --reporter=verbose lets us count lines; bail after 100 passes.
+# Run a representative subset of store tests (fast, ~10s, validates vitest works)
 if cd "$REPO_ROOT/web" && \
-   node_modules/.bin/vitest run --reporter=dot 2>&1 | \
-   head -200 | \
-   grep -qE "Tests\s+[0-9]+ passed"; then
-  pass "vitest smoke run"
+   node_modules/.bin/vitest run src/stores/__tests__/ --reporter=dot 2>&1 | tail -5 | \
+   grep -qE "passed"; then
+  pass "vitest smoke run (store tests)"
 else
-  # Fallback: run a single representative test file to confirm the runner works
-  if cd "$REPO_ROOT/web" && \
-     node_modules/.bin/vitest run src/stores/__tests__/ 2>&1 | \
-     grep -qE "passed"; then
-    pass "vitest smoke run (store tests)"
-  else
-    fail "vitest (check test output above for failures)"
-  fi
+  fail "vitest (check test output above for failures)"
 fi
 cd "$REPO_ROOT"
 
