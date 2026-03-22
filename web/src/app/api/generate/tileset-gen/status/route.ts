@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SpriteClient } from '@/lib/generate/spriteClient';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function GET(request: NextRequest) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:generate-tileset-status:${authResult.ctx.user.id}`, 60, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { searchParams } = new URL(request.url);
   const jobId = searchParams.get('jobId');
