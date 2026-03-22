@@ -41,6 +41,9 @@ function clearAllProviderEnv(): void {
   for (const k of keys) {
     delete process.env[k];
   }
+  // Disable AI SDK adapter so legacy-path tests exercise the Anthropic SDK /
+  // fetch-based streams they mock (the SDK path is on by default in production).
+  process.env.USE_AI_SDK = 'false';
 }
 
 // ---------------------------------------------------------------------------
