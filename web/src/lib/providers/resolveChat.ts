@@ -23,6 +23,12 @@ import type { ResolvedRoute } from './types';
 import { resolveBackend, resolveBackendWithCircuitBreaker } from './registry';
 import Anthropic from '@anthropic-ai/sdk';
 import { AI_MODELS, AI_MODEL_PRIMARY } from '@/lib/ai/models';
+import { streamViaSdk } from '@/lib/ai/aiSdkAdapter';
+import type { ManifestTool } from '@/lib/ai/toolAdapter';
+
+// Feature flag: set USE_AI_SDK=true to route through AI SDK v5 adapter.
+// When false (default), the existing Anthropic SDK / fetch-based paths run unchanged.
+const USE_AI_SDK = process.env.USE_AI_SDK === 'true';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -52,6 +58,12 @@ export interface ResolveChatOptions {
   thinking?: boolean;
   /** Max output tokens */
   maxTokens?: number;
+  /**
+   * MCP manifest tools in commands.json format.
+   * When USE_AI_SDK=true, these are converted to AI SDK v5 tool definitions
+   * via toolAdapter.ts. Ignored on the legacy code paths.
+   */
+  manifestTools?: ManifestTool[];
 }
 
 export type ResolveChatStreamEvent =
@@ -311,7 +323,10 @@ export async function resolveChat(
 
   let stream: AsyncGenerator<ResolveChatStreamEvent>;
 
-  if (resolvedRoute.backendId === 'direct') {
+  if (USE_AI_SDK) {
+    // AI SDK v5 adapter path (feature-flagged — off by default)
+    stream = streamViaSdk(resolvedRoute, messages, options, options.manifestTools);
+  } else if (resolvedRoute.backendId === 'direct') {
     // Direct path: use Anthropic SDK (preserves thinking, prompt caching, tool streaming)
     stream = streamAnthropicDirect(resolvedRoute.apiKey, messages, options);
   } else {
