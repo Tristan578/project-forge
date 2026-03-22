@@ -4,6 +4,7 @@ import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users, costLog, creditTransactions, tokenConfig, tierConfig } from '@/lib/db/schema';
 import { sql, count, sum, desc } from 'drizzle-orm';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET() {
   const authResult = await authenticateRequest();
@@ -16,6 +17,7 @@ export async function GET() {
   const rateLimitError = await rateLimitAdminRoute(clerkId, 'admin-economics');
   if (rateLimitError) return rateLimitError;
 
+  try {
   const db = getDb();
 
   // Overview stats
@@ -59,4 +61,8 @@ export async function GET() {
     tokenConfigs,
     tierConfigs,
   });
+  } catch (error) {
+    captureException(error, { route: '/api/admin/economics' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

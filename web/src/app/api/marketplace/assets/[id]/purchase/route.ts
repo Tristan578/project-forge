@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db/client';
 import { users, marketplaceAssets, assetPurchases, creditTransactions } from '@/lib/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function POST(
   _req: NextRequest,
@@ -183,6 +184,7 @@ export async function POST(
       sellerEarnings,
     });
   } catch (error) {
+    captureException(error, { route: '/api/marketplace/assets/[id]/purchase' });
     console.error('Error purchasing asset:', error);
     return NextResponse.json({ error: 'Failed to purchase asset' }, { status: 500 });
   }
