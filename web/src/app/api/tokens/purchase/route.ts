@@ -5,6 +5,7 @@ import type { TokenPackage } from '@/lib/tokens/pricing';
 import { TOKEN_PACKAGES } from '@/lib/tokens/pricing';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -19,6 +20,7 @@ const PACKAGE_PRICE_IDS: Record<string, string | undefined> = {
 };
 
 export async function POST(req: Request) {
+  try {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
@@ -72,4 +74,8 @@ export async function POST(req: Request) {
   });
 
   return NextResponse.json({ checkoutUrl: session.url });
+  } catch (err) {
+    captureException(err, { route: '/api/tokens/purchase', method: 'POST' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
