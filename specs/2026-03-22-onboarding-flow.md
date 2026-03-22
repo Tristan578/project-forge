@@ -1,6 +1,10 @@
 # Spec: Unified Onboarding Flow
 
-> **Status:** DRAFT -- Awaiting Approval
+> **Status:** APPROVED
+> **Design Decisions (2026-03-22):**
+> - Progressive disclosure: **Dimmed tabs** (visible but locked, discoverable surface area)
+> - Template auto-play: **User-initiated button click** (no auto-play countdown)
+> - AI card for starter tier: **Locked with upgrade badge** (drives conversions)
 > **Date:** 2026-03-22
 > **Ticket:** PF-599
 > **Scope:** Redesign the first-time user experience to maximize activation within 5 minutes
