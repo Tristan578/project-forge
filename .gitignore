@@ -24,6 +24,7 @@ secrets.json
 !.claude/tools/
 !.claude/settings.json
 !.claude/TASKBOARD_SETUP.md
+!.claude/docs/
 # Always ignore local settings, DB, and WAL files
 .claude/settings.local.json
 .claude/taskboard.db
