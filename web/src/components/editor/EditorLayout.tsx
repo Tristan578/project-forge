@@ -327,14 +327,20 @@ function OnboardingGate() {
   const isNewUser = useOnboardingStore((s) => s.isNewUser);
   const completeOnboarding = useOnboardingStore((s) => s.completeOnboarding);
 
-  // Check legacy localStorage keys for backward compatibility
+  // Check legacy localStorage keys (old quickstart/welcome flows)
   const legacyDone = useSyncExternalStore(
     noopSubscribe,
     () =>
       !!localStorage.getItem(LEGACY_QUICKSTART_KEY) ||
-      !!localStorage.getItem(LEGACY_WELCOME_KEY) ||
-      !!localStorage.getItem(ONBOARDING_COMPLETED_KEY),
+      !!localStorage.getItem(LEGACY_WELCOME_KEY),
     () => true, // SSR: treat as done to avoid hydration mismatch
+  );
+
+  // Check if new onboarding was completed (separate from legacy)
+  const onboardingDone = useSyncExternalStore(
+    noopSubscribe,
+    () => !!localStorage.getItem(ONBOARDING_COMPLETED_KEY),
+    () => false,
   );
 
   const [wizardDismissed, setWizardDismissed] = useState(false);
@@ -345,18 +351,23 @@ function OnboardingGate() {
     setWizardDismissed(true);
   }, [completeOnboarding]);
 
-  // Legacy users: just show WelcomeModal (existing behavior, gated behind legacy flag)
+  // New onboarding completed — no modals needed
+  if (onboardingDone || onboardingCompleted || wizardDismissed) {
+    return null;
+  }
+
+  // Legacy users: show WelcomeModal (existing behavior)
   if (legacyDone) {
     return <WelcomeModal />;
   }
 
   // New users who haven't completed onboarding yet
-  if (isNewUser && !onboardingCompleted && !wizardDismissed) {
+  if (isNewUser) {
     return <OnboardingWizard onComplete={handleWizardComplete} />;
   }
 
-  // Returning users (onboarding done) — show WelcomeModal for tips
-  return <WelcomeModal />;
+  // Default: no overlay
+  return null;
 }
 
 // ---- Main EditorLayout ----
