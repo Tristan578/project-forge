@@ -276,11 +276,13 @@ export function WorldBuilderPanel() {
     const a = document.createElement('a');
     a.href = url;
     a.download = `${world.name.toLowerCase().replace(/\s+/g, '-')}-lore.md`;
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // Defer revocation so the browser's download manager can read the blob
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    // Defer revocation so the browser's download manager can read the blob.
+    // 60s ensures Firefox's async download initiation completes before the URL is revoked.
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
   }, [world]);
 
   return (

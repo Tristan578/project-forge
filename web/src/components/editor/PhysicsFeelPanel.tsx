@@ -7,7 +7,7 @@
  * blend control between two presets, scene analysis, and custom generation.
  */
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Gauge, Blend, Search, Sparkles, Check } from 'lucide-react';
 import {
   PHYSICS_PRESETS,
@@ -53,6 +53,7 @@ export function PhysicsFeelPanel() {
   const sceneGraph = useEditorStore((s) => s.sceneGraph);
   const primaryPhysics = useEditorStore((s) => s.primaryPhysics);
   const physicsEnabled = useEditorStore((s) => s.physicsEnabled);
+  const physics2dEntityIds = useEditorStore((s) => Object.keys(s.physics2d));
 
   // --- Local state ---
   const [selectedPresetA, setSelectedPresetA] = useState<string>(PRESET_KEYS[0]);
@@ -61,6 +62,16 @@ export function PhysicsFeelPanel() {
   const [analysis, setAnalysis] = useState<PhysicsAnalysis | null>(null);
   const [customDescription, setCustomDescription] = useState('');
   const [applied, setApplied] = useState(false);
+  const appliedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear the applied indicator timer on unmount
+  useEffect(() => {
+    return () => {
+      if (appliedTimerRef.current !== null) {
+        clearTimeout(appliedTimerRef.current);
+      }
+    };
+  }, []);
 
   // --- Derived profile ---
   const currentProfile = useMemo(() => {
@@ -72,17 +83,26 @@ export function PhysicsFeelPanel() {
 
   // --- Entity IDs with physics ---
   const physicsEntityIds = useMemo(() => {
-    if (!sceneGraph) return [];
+    if (!sceneGraph) return physics2dEntityIds;
     const PHYSICS_COMPONENTS = new Set([
       'PhysicsData',
       'PhysicsEnabled',
       'RigidBody',
       'Collider',
     ]);
-    return Object.values(sceneGraph.nodes)
+    // Primary filter: engine-reported components
+    const fromComponents = Object.values(sceneGraph.nodes)
       .filter((node) => node.components.some((c) => PHYSICS_COMPONENTS.has(c)))
       .map((node) => node.entityId);
-  }, [sceneGraph]);
+    // Fallback: store-tracked physics entities (2D physics map + 3D if components are empty)
+    if (fromComponents.length > 0) return fromComponents;
+    // Merge 2D physics entity IDs with any entity IDs in the scene graph that have physicsEnabled
+    const physicsEnabledFromStore = physicsEnabled
+      ? Object.values(sceneGraph.nodes).map((n) => n.entityId)
+      : [];
+    const merged = new Set([...physics2dEntityIds, ...physicsEnabledFromStore]);
+    return Array.from(merged);
+  }, [sceneGraph, physics2dEntityIds, physicsEnabled]);
 
   // --- Handlers ---
   const handleAnalyze = useCallback(() => {
@@ -107,7 +127,13 @@ export function PhysicsFeelPanel() {
     applyPhysicsProfile(currentProfile, dispatch, physicsEntityIds);
     setApplied(true);
     // Reset the "applied" indicator after 2 seconds
-    setTimeout(() => setApplied(false), 2000);
+    if (appliedTimerRef.current !== null) {
+      clearTimeout(appliedTimerRef.current);
+    }
+    appliedTimerRef.current = setTimeout(() => {
+      setApplied(false);
+      appliedTimerRef.current = null;
+    }, 2000);
   }, [currentProfile, physicsEntityIds]);
 
   const handleCustomGenerate = useCallback(() => {

@@ -49,11 +49,12 @@ async function upstashSlidingWindow(
 
   // Pipeline: ZREMRANGEBYSCORE, ZADD, ZCARD, EXPIRE
   // We issue these as a pipeline (array of commands) for a single round-trip.
+  // ZADD score must be a number (not a string) for the Redis sorted set to order correctly.
   const pipeline = [
-    ['ZREMRANGEBYSCORE', key, '-inf', windowStart.toString()],
-    ['ZADD', key, now.toString(), member],
+    ['ZREMRANGEBYSCORE', key, '-inf', windowStart],
+    ['ZADD', key, now, member],
     ['ZCARD', key],
-    ['EXPIRE', key, windowSeconds.toString()],
+    ['EXPIRE', key, windowSeconds],
   ];
 
   const response = await fetch(`${url}/pipeline`, {
@@ -77,14 +78,17 @@ async function upstashSlidingWindow(
   const allowed = countAfterAdd <= limit;
 
   if (!allowed) {
-    // We added to the window but are over the limit — remove the member we just added
-    await fetch(`${url}/pipeline`, {
+    // Atomically remove the member we just added using a Lua script.
+    // A plain ZREM in a separate request is non-atomic — the Lua EVAL guarantees
+    // the remove-if-over-limit check is atomic on the Redis side.
+    const luaScript = "if redis.call('ZSCORE', KEYS[1], ARGV[1]) then return redis.call('ZREM', KEYS[1], ARGV[1]) else return 0 end";
+    await fetch(`${url}/eval`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify([['ZREM', key, member]]),
+      body: JSON.stringify([luaScript, 1, key, member]),
     }).catch(() => {
       // Best-effort cleanup; don't throw on failure
     });

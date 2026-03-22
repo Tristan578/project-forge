@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { moderationAppeals } from '@/lib/db/schema';
 import { authenticateRequest } from '@/lib/auth/api-auth';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,6 +14,10 @@ const VALID_CONTENT_TYPES = ['comment', 'asset', 'game'];
  * Body: { contentId, contentType, reason }
  */
 export async function POST(req: NextRequest) {
+  // Rate limit: 5 appeals per 10 minutes per IP — prevents spam appeal submission
+  const limited = await rateLimitPublicRoute(req, 'moderation-appeal', 5, 600_000);
+  if (limited) return limited;
+
   try {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
