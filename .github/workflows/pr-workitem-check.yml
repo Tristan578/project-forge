@@ -121,7 +121,7 @@ jobs:
           for TICKET in $TICKETS; do
             NUMBER=$(echo "$TICKET" | grep -oE '[0-9]+')
             # Search for issues with PF-XXX in title
-            RESULT=$(gh issue list --search "PF-${NUMBER} in:title" --limit 1 --json number --jq 'length' 2>/dev/null || echo "0")
+            RESULT=$(gh issue list --search "PF-${NUMBER} in:title" --state all --limit 1 --json number --jq 'length' 2>/dev/null || echo "0")
             if [ "$RESULT" -gt 0 ]; then
               echo "Verified: $TICKET exists on GitHub"
               VERIFIED=true
