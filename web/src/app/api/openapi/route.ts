@@ -1,13 +1,16 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync } from 'fs';
 import path from 'path';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 /**
  * GET /api/openapi
  * Serves the OpenAPI 3.0 specification as JSON.
  * Used by the Swagger UI at /api-docs.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const limited = await rateLimitPublicRoute(req, 'openapi', 30, 60_000);
+  if (limited) return limited;
   try {
     // Resolve from web/ working directory up to docs/api/openapi.json
     const specPath = path.join(process.cwd(), '..', 'docs', 'api', 'openapi.json');

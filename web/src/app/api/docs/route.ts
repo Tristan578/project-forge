@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 interface DocEntry {
   path: string;
@@ -71,7 +72,9 @@ async function loadDocsRecursive(dir: string, basePath: string = ''): Promise<Do
   return entries;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const limited = await rateLimitPublicRoute(req, 'docs', 30, 60_000);
+  if (limited) return limited;
   try {
     const docs = await loadDocsRecursive(DOCS_ROOT);
 
