@@ -102,9 +102,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  try {
   const db = getDb();
 
-  try {
   // Check tier publish limits
   const tierLimits: Record<string, number> = { starter: 1, hobbyist: 3, creator: 10, pro: 100 };
   const maxPublished = tierLimits[user.tier] ?? 1;
