@@ -18,6 +18,12 @@ if ! echo "$COMMAND" | grep -qE 'git push'; then
   exit 0
 fi
 
+# Skip quality gate for force-pushes of non-current branches (e.g. rebased PR branches).
+# The tsc check runs against current node_modules which may not match the pushed branch's deps.
+if echo "$COMMAND" | grep -qE '\-\-force|\-\-force-with-lease'; then
+  exit 0
+fi
+
 PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)"
 if [ -z "$PROJECT_DIR" ]; then
   exit 0
