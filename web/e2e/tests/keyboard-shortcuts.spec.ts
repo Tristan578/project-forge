@@ -74,6 +74,7 @@ test.describe('Keyboard Shortcuts @ui', () => {
   });
 
   test('Ctrl+Z triggers undo without crashing', async ({ page }) => {
+    test.slow();
     // Collect errors
     const errors: string[] = [];
     page.on('console', (msg) => {
@@ -84,12 +85,14 @@ test.describe('Keyboard Shortcuts @ui', () => {
 
     await page.keyboard.press('Control+z');
 
-    // Editor should remain functional
-    const storeExists = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return !!(window as any).__EDITOR_STORE;
-    });
-    expect(storeExists).toBe(true);
+    // Wait for the undo operation to propagate through WASM and back to the store.
+    // On CI (3-5x slower than local), the engine event callback may not fire
+    // until the next animation frame, so we poll until the store is confirmed intact.
+    const storeExists = await page.waitForFunction(
+      () => !!(window as any).__EDITOR_STORE, // eslint-disable-line @typescript-eslint/no-explicit-any
+      { timeout: 10_000 },
+    );
+    expect(await storeExists.jsonValue()).toBe(true);
 
     // No unexpected errors — only filter well-known benign noise patterns.
     // Patterns are intentionally specific to avoid masking real failures.
