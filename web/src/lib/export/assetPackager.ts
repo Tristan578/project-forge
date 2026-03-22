@@ -48,7 +48,14 @@ function selectCompressionConfig(
   mimeType: string,
   override?: CompressionConfig,
 ): CompressionConfig {
-  if (override) return override;
+  if (override) {
+    // Prevent silent transparency loss: if the source has alpha (PNG/GIF)
+    // but the override uses a format without alpha support (jpeg), force PNG.
+    if (PNG_PRESERVE_TYPES.has(mimeType) && override.format === 'jpeg') {
+      return { ...override, format: 'png' };
+    }
+    return override;
+  }
   if (PNG_PRESERVE_TYPES.has(mimeType)) {
     return { ...COMPRESSION_PRESETS.balanced, format: 'png' };
   }
