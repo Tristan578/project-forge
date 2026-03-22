@@ -7,6 +7,7 @@ import {
 } from '@/lib/monitoring/healthChecks';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { logger } from '@/lib/logging/logger';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /** Public status vocabulary — 'healthy' is remapped to 'up'. */
 type PublicStatus = 'up' | 'degraded' | 'down';
@@ -57,6 +58,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const limited = await rateLimitPublicRoute(req, 'health', 60, 60_000);
   if (limited) return limited;
 
+  try {
   // Return cached result if still fresh
   const now = Date.now();
   if (cachedReport !== null && now - cachedReport.timestamp < CACHE_TTL_MS) {
@@ -121,12 +123,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   cachedReport = { body, httpStatus, timestamp: now };
 
   return NextResponse.json(body, {
-    status: httpStatus,
-    headers: {
-      'Cache-Control': 'public, max-age=30',
-      'X-Cache': 'MISS',
-    },
-  });
+      status: httpStatus,
+      headers: {
+        'Cache-Control': 'public, max-age=30',
+        'X-Cache': 'MISS',
+      },
+    });
+  } catch (error) {
+    captureException(error, { route: '/api/health' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
 
 export const dynamic = 'force-dynamic';

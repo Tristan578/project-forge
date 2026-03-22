@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { ProviderCapability } from '@/lib/providers/types';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * Maps each provider capability to the environment variable(s) that must be set.
@@ -89,52 +90,58 @@ export interface CapabilitiesResponse {
 export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
   const limited = await rateLimitPublicRoute(req, 'capabilities', 30, 60_000);
   if (limited) return limited as NextResponse<CapabilitiesResponse>;
-  const allCapabilities: ProviderCapability[] = [
-    'chat',
-    'embedding',
-    'image',
-    'model3d',
-    'texture',
-    'sfx',
-    'voice',
-    'music',
-    'sprite',
-    'bg_removal',
-  ];
 
-  const capabilities: CapabilityStatus[] = allCapabilities.map((cap) => {
-    const envVars = CAPABILITY_KEY_MAP[cap];
-    // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
-    const vercelOidc = Boolean(process.env.VERCEL) && envVars.includes('AI_GATEWAY_API_KEY');
-    const isAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
+  try {
+    const allCapabilities: ProviderCapability[] = [
+      'chat',
+      'embedding',
+      'image',
+      'model3d',
+      'texture',
+      'sfx',
+      'voice',
+      'music',
+      'sprite',
+      'bg_removal',
+    ];
 
-    const status: CapabilityStatus = {
-      capability: cap,
-      available: isAvailable,
-      label: FEATURE_LABELS[cap],
-    };
+    const capabilities: CapabilityStatus[] = allCapabilities.map((cap) => {
+      const envVars = CAPABILITY_KEY_MAP[cap];
+      // On Vercel, AI Gateway uses OIDC auto-auth (no explicit key needed for chat/embedding)
+      const vercelOidc = Boolean(process.env.VERCEL) && envVars.includes('AI_GATEWAY_API_KEY');
+      const isAvailable = vercelOidc || envVars.some((envVar) => Boolean(process.env[envVar]));
 
-    if (!isAvailable) {
-      // Tell the user which providers they could configure
-      const providerNames = envVars.map(
-        (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || envVar
-      );
-      const uniqueProviders = [...new Set(providerNames)];
-      status.requiredProviders = uniqueProviders;
-      status.hint = `Configure ${uniqueProviders[0]} API key in Settings to enable ${FEATURE_LABELS[cap]}.`;
-    }
+      const status: CapabilityStatus = {
+        capability: cap,
+        available: isAvailable,
+        label: FEATURE_LABELS[cap],
+      };
 
-    return status;
-  });
+      if (!isAvailable) {
+        // Tell the user which providers they could configure
+        const providerNames = envVars.map(
+          (envVar) => ENV_VAR_PROVIDER_NAMES[envVar] || envVar
+        );
+        const uniqueProviders = [...new Set(providerNames)];
+        status.requiredProviders = uniqueProviders;
+        status.hint = `Configure ${uniqueProviders[0]} API key in Settings to enable ${FEATURE_LABELS[cap]}.`;
+      }
 
-  const available = capabilities
-    .filter((c) => c.available)
-    .map((c) => c.capability);
-  const unavailable = capabilities
-    .filter((c) => !c.available)
-    .map((c) => c.capability);
+      return status;
+    });
 
-  return NextResponse.json({ capabilities, available, unavailable });
+    const available = capabilities
+      .filter((c) => c.available)
+      .map((c) => c.capability);
+    const unavailable = capabilities
+      .filter((c) => !c.available)
+      .map((c) => c.capability);
+
+    return NextResponse.json({ capabilities, available, unavailable });
+  } catch (error) {
+    captureException(error, { route: '/api/capabilities' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 }) as NextResponse<CapabilitiesResponse>;
+  }
 }
 
 export const dynamic = 'force-dynamic';
