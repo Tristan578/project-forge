@@ -40,33 +40,30 @@ fi
 ERRORS=""
 
 # 1. TypeScript check (fast, catches type errors from merge conflicts)
-# WEB_DIR is already the cwd — no need to cd again
 if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
-  if ! npx tsc --noEmit 2>&1 | tail -5; then
+  TSC_OUTPUT=$(npx tsc --noEmit 2>&1) || {
+    echo "$TSC_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}TypeScript errors found. "
-  fi
+  }
 fi
 
 # 2. ESLint on changed files only (fast, ~2-3s per file)
-# Paths are relative to web/ since that is the cwd
 TS_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
 if [ -n "$TS_FILES" ]; then
   # shellcheck disable=SC2086
-  if ! npx eslint --max-warnings 0 $TS_FILES 2>&1 | tail -5; then
+  LINT_OUTPUT=$(npx eslint --max-warnings 0 $TS_FILES 2>&1) || {
+    echo "$LINT_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}ESLint warnings/errors found. "
-  fi
+  }
 fi
 
 # 3. Run panelRegistry structural test (catches #1 agent bug)
 if echo "$CHANGED_FILES" | grep -qE 'panelRegistry|WorkspaceProvider'; then
-  if ! npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts 2>&1 | tail -5; then
+  TEST_OUTPUT=$(npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts 2>&1) || {
+    echo "$TEST_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}panelRegistry structural test failed. "
-  fi
+  }
 fi
-
-# 4. Run targeted tests for changed test files
-# Note: targeted test execution delegated to CI to avoid npx/jsdom resolution issues
-# in the Claude Code hook environment. panelRegistry structural test (step 3) still runs.
 
 if [ -n "$ERRORS" ]; then
   echo "${ERRORS}" >&2
