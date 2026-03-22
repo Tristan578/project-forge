@@ -3,6 +3,7 @@ import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { rateLimitAdminRoute } from '@/lib/rateLimit';
 
 const VALID_TIERS = ['starter', 'hobbyist', 'creator', 'pro'] as const;
 type Tier = (typeof VALID_TIERS)[number];
@@ -17,6 +18,9 @@ export async function GET(
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
+
+  const limited = await rateLimitAdminRoute(clerkId, 'admin-users-get');
+  if (limited) return limited;
 
   const { id } = await params;
   const db = getDb();
@@ -39,6 +43,9 @@ export async function PATCH(
 
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
+
+  const limited = await rateLimitAdminRoute(clerkId, 'admin-users-patch');
+  if (limited) return limited;
 
   const { id } = await params;
 

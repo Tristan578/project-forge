@@ -4,12 +4,16 @@ import { getDb } from '@/lib/db/client';
 import { sellerProfiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function GET() {
   try {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:seller-profile-get:${user.id}`, 30, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 
@@ -44,6 +48,9 @@ export async function POST(req: NextRequest) {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:seller-profile-post:${user.id}`, 10, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 

@@ -56,6 +56,9 @@ vi.mock('@/lib/rateLimit/distributed', () => ({
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
+  rateLimitAdminRoute: vi.fn().mockResolvedValue(null),
+  rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
   rateLimitResponse: (...args: unknown[]) => mockRateLimitResponse(...args),
 }));
 

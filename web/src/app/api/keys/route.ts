@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { listConfiguredProviders } from '@/lib/keys/resolver';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /** GET /api/keys — list which providers have BYOK keys configured */
 export async function GET() {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:keys-list:${authResult.ctx.user.id}`, 30, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;

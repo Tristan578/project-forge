@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { deleteUserAccount } from '@/lib/auth/user-service';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /**
  * POST /api/user/delete
@@ -9,6 +10,9 @@ import { deleteUserAccount } from '@/lib/auth/user-service';
 export async function POST() {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:account-delete:${authResult.ctx.user.id}`, 5, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   try {
     await deleteUserAccount(authResult.ctx.user.id);

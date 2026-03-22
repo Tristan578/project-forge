@@ -5,6 +5,7 @@ import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { uploadToR2, buildAssetKey } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 const ALLOWED_PREVIEW_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 const ALLOWED_ASSET_TYPES = [
@@ -31,6 +32,9 @@ export async function POST(
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:seller-asset-upload:${user.id}`, 10, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 

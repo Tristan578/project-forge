@@ -4,6 +4,7 @@ import { executeOperation } from '@/lib/bridges/asepriteBridge';
 import { discoverTool } from '@/lib/bridges/bridgeManager';
 import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export const runtime = 'nodejs';
 
@@ -26,6 +27,9 @@ export async function POST(req: Request) {
   if (!auth.ok) {
     return auth.response;
   }
+
+  const rl = await rateLimit(`user:bridges-aseprite-execute:${auth.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   try {
     const body = await req.json();

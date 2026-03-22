@@ -5,6 +5,7 @@ import { marketplaceAssets, assetPurchases } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { getSignedDownloadUrl } from '@/lib/storage/r2';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /**
  * Extract the R2 storage key from a CDN URL.
@@ -23,7 +24,7 @@ function extractStorageKey(cdnUrl: string): string | null {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id: assetId } = await context.params;
@@ -32,6 +33,9 @@ export async function GET(
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:marketplace-download:${user.id}`, 10, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 

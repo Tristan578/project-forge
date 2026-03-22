@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SunoClient } from '@/lib/generate/sunoClient';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function GET(request: NextRequest) {
   // 1. Authenticate
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:generate-music-status:${authResult.ctx.user.id}`, 60, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Parse query params
   const { searchParams } = new URL(request.url);

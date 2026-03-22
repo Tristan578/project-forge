@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -32,7 +33,7 @@ describe('GET /api/community/tags', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/test'));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -53,7 +54,7 @@ describe('GET /api/community/tags', () => {
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/test'));
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -64,7 +65,7 @@ describe('GET /api/community/tags', () => {
     vi.mocked(getDb).mockImplementation(() => { throw new Error('DB error'); });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/test'));
     const body = await res.json();
 
     expect(res.status).toBe(500);

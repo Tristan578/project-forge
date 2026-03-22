@@ -3,12 +3,16 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { assetPurchases } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function GET() {
   try {
     const authResult = await authenticateRequest();
     if (!authResult.ok) return authResult.response;
     const { user } = authResult.ctx;
+
+    const rl = await rateLimit(`user:marketplace-purchases:${user.id}`, 30, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
     const db = getDb();
 

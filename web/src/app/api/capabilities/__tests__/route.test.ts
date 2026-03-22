@@ -1,3 +1,4 @@
+import { NextRequest } from 'next/server';
 /**
  * Tests for GET /api/capabilities
  *
@@ -9,7 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { CapabilitiesResponse } from '../route';
 
 describe('GET /api/capabilities', () => {
-  let GET: () => Promise<Response>;
+  let GET: (req: NextRequest) => Promise<Response>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -30,12 +31,12 @@ describe('GET /api/capabilities', () => {
   // ---------------------------------------------------------------------------
   describe('response format', () => {
     it('returns 200 status', async () => {
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       expect(res.status).toBe(200);
     });
 
     it('returns JSON with capabilities array', async () => {
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
       expect(Array.isArray(body.capabilities)).toBe(true);
       expect(Array.isArray(body.available)).toBe(true);
@@ -43,13 +44,13 @@ describe('GET /api/capabilities', () => {
     });
 
     it('returns all 10 capabilities', async () => {
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
       expect(body.capabilities).toHaveLength(10);
     });
 
     it('includes capability, available, and label fields', async () => {
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
       for (const cap of body.capabilities) {
         expect(cap).toHaveProperty('capability');
@@ -64,14 +65,14 @@ describe('GET /api/capabilities', () => {
   // ---------------------------------------------------------------------------
   describe('no keys configured', () => {
     it('marks all capabilities as unavailable', async () => {
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
       expect(body.available).toHaveLength(0);
       expect(body.unavailable).toHaveLength(10);
     });
 
     it('includes hints for unavailable capabilities', async () => {
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
       for (const cap of body.capabilities) {
         expect(cap.hint).toBeDefined();
@@ -90,7 +91,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('PLATFORM_ANTHROPIC_KEY', 'sk-test-key');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const chat = body.capabilities.find((c) => c.capability === 'chat');
@@ -102,7 +103,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('PLATFORM_MESHY_KEY', 'msh-test-key');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const model3d = body.capabilities.find((c) => c.capability === 'model3d');
@@ -115,7 +116,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('PLATFORM_ELEVENLABS_KEY', 'el-test-key');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const sfx = body.capabilities.find((c) => c.capability === 'sfx');
@@ -128,7 +129,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('PLATFORM_SUNO_KEY', 'suno-test');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const music = body.capabilities.find((c) => c.capability === 'music');
@@ -144,7 +145,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('OPENROUTER_API_KEY', 'or-test');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const chat = body.capabilities.find((c) => c.capability === 'chat');
@@ -155,7 +156,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-test');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const chat = body.capabilities.find((c) => c.capability === 'chat');
@@ -166,7 +167,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('GITHUB_MODELS_PAT', 'ghp-test');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const chat = body.capabilities.find((c) => c.capability === 'chat');
@@ -180,7 +181,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('AI_GATEWAY_API_KEY', 'gw-test');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const model3d = body.capabilities.find((c) => c.capability === 'model3d');
@@ -194,7 +195,7 @@ describe('GET /api/capabilities', () => {
   // ---------------------------------------------------------------------------
   describe('hints', () => {
     it('includes provider name in the hint', async () => {
-      const res = await GET();
+      const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const model3d = body.capabilities.find((c) => c.capability === 'model3d');
@@ -211,7 +212,7 @@ describe('GET /api/capabilities', () => {
       vi.stubEnv('PLATFORM_ANTHROPIC_KEY', 'sk-test');
       vi.resetModules();
       const mod = await import('../route');
-      const res = await mod.GET();
+      const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
 
       const chat = body.capabilities.find((c) => c.capability === 'chat');

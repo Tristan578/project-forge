@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /** DELETE /api/keys/api-key/:id — revoke an API key */
 export async function DELETE(
@@ -11,6 +12,9 @@ export async function DELETE(
 ) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:api-key-delete:${authResult.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { id } = await params;
   const db = getDb();

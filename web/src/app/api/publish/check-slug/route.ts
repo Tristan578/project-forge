@@ -4,10 +4,14 @@ import { getUserByClerkId } from '@/lib/auth/user-service';
 import { getDb } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function GET(request: NextRequest) {
   const session = await authenticateClerkSession();
   if (!session.ok) return session.response;
+
+  const rl = await rateLimit(`user:publish-check-slug:${session.clerkId}`, 30, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const user = await getUserByClerkId(session.clerkId);
   if (!user) return NextResponse.json({ available: true });

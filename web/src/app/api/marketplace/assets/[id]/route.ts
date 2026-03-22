@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { marketplaceAssets, sellerProfiles, assetReviews, users } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
+  const limited = await rateLimitPublicRoute(req, 'marketplace-asset', 30, 60_000);
+  if (limited) return limited;
   const { id } = await context.params;
 
   try {

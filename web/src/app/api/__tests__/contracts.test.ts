@@ -229,7 +229,7 @@ describe('GET /api/capabilities — response shape contract', () => {
 
   it('returns an object with capabilities array', async () => {
     const { GET } = await import('@/app/api/capabilities/route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/health'));
     const body = await res.json() as Record<string, unknown>;
 
     expect(Array.isArray(body.capabilities)).toBe(true);
@@ -238,7 +238,7 @@ describe('GET /api/capabilities — response shape contract', () => {
 
   it('returns available and unavailable arrays', async () => {
     const { GET } = await import('@/app/api/capabilities/route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/health'));
     const body = await res.json() as Record<string, unknown>;
 
     expect(Array.isArray(body.available)).toBe(true);
@@ -247,7 +247,7 @@ describe('GET /api/capabilities — response shape contract', () => {
 
   it('each capability entry has capability, available, and label fields', async () => {
     const { GET } = await import('@/app/api/capabilities/route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/health'));
     const body = await res.json() as Record<string, unknown>;
 
     const caps = body.capabilities as Array<Record<string, unknown>>;
@@ -260,7 +260,7 @@ describe('GET /api/capabilities — response shape contract', () => {
 
   it('available + unavailable covers all capability entries', async () => {
     const { GET } = await import('@/app/api/capabilities/route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/health'));
     const body = await res.json() as Record<string, unknown>;
 
     const caps = body.capabilities as Array<{ capability: string }>;
@@ -275,7 +275,7 @@ describe('GET /api/capabilities — response shape contract', () => {
 
   it('responds with 200', async () => {
     const { GET } = await import('@/app/api/capabilities/route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/health'));
 
     expect(res.status).toBe(200);
   });
@@ -283,7 +283,7 @@ describe('GET /api/capabilities — response shape contract', () => {
   it('unavailable capabilities include requiredProviders hint', async () => {
     // With no API keys set, all capabilities should be unavailable and have hints
     const { GET } = await import('@/app/api/capabilities/route');
-    const res = await GET();
+    const res = await GET(new NextRequest('http://localhost/api/health'));
     const body = await res.json() as Record<string, unknown>;
 
     const caps = body.capabilities as Array<Record<string, unknown>>;

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { updateDisplayName } from '@/lib/auth/user-service';
 import { parseJsonBody, requireString } from '@/lib/apiValidation';
+import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 /**
  * GET /api/user/profile
@@ -10,6 +11,9 @@ import { parseJsonBody, requireString } from '@/lib/apiValidation';
 export async function GET() {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:profile-get:${authResult.ctx.user.id}`, 30, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const user = authResult.ctx.user;
 
@@ -28,6 +32,9 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  const rl = await rateLimit(`user:profile-put:${authResult.ctx.user.id}`, 10, 60_000);
+  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const parsed = await parseJsonBody(request);
   if (!parsed.ok) return parsed.response;

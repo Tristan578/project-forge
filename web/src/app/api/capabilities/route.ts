@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import type { ProviderCapability } from '@/lib/providers/types';
+import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 /**
  * Maps each provider capability to the environment variable(s) that must be set.
@@ -85,7 +86,9 @@ export interface CapabilitiesResponse {
  * Returns which AI capabilities are available based on configured API keys.
  * Checks env vars server-side so secrets are never exposed to the client.
  */
-export async function GET(): Promise<NextResponse<CapabilitiesResponse>> {
+export async function GET(req: NextRequest): Promise<NextResponse<CapabilitiesResponse>> {
+  const limited = await rateLimitPublicRoute(req, 'capabilities', 30, 60_000);
+  if (limited) return limited as NextResponse<CapabilitiesResponse>;
   const allCapabilities: ProviderCapability[] = [
     'chat',
     'embedding',
