@@ -18,8 +18,8 @@ import {
   mkdirSync,
   readdirSync,
 } from 'fs';
-import { resolve } from 'path';
-import { execSync } from 'child_process';
+import path, { resolve } from 'path';
+import { execSync, execFileSync } from 'child_process';
 import { config } from '../autoforge.config.js';
 
 // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ export function recordExperiment(
 // ---------------------------------------------------------------------------
 export function getCurrentCommitHash(): string {
   try {
-    return execSync('git rev-parse HEAD', {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
       cwd: config.projectRoot,
       encoding: 'utf-8',
     }).trim();
@@ -122,7 +122,7 @@ export function getCurrentCommitHash(): string {
 
 export function getChangedFiles(): string[] {
   try {
-    const diff = execSync('git diff --name-only', {
+    const diff = execFileSync('git', ['diff', '--name-only'], {
       cwd: config.projectRoot,
       encoding: 'utf-8',
     }).trim();
@@ -134,11 +134,9 @@ export function getChangedFiles(): string[] {
 
 export function commitExperiment(hypothesis: string, delta: number): string {
   try {
-    execSync('git add -A', { cwd: config.projectRoot });
+    execFileSync('git', ['add', '-A'], { cwd: config.projectRoot });
     const msg = `autoforge: ${hypothesis} (+${delta.toFixed(1)} points)`;
-    execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, {
-      cwd: config.projectRoot,
-    });
+    execFileSync('git', ['commit', '-m', msg], { cwd: config.projectRoot });
     return getCurrentCommitHash();
   } catch {
     return 'commit-failed';
@@ -147,10 +145,15 @@ export function commitExperiment(hypothesis: string, delta: number): string {
 
 export function discardChanges(): void {
   try {
-    execSync('git checkout -- .', { cwd: config.projectRoot });
-    execSync('git clean -fd', { cwd: config.projectRoot });
+    // Only discard changes to the editable surface — never clean untracked files repo-wide
+    const relativePaths = config.editableSurface.map((p) =>
+      path.relative(config.projectRoot, p)
+    );
+    execFileSync('git', ['checkout', '--', ...relativePaths], {
+      cwd: config.projectRoot,
+    });
   } catch {
-    // Best effort
+    // Best effort — files may not have changes
   }
 }
 

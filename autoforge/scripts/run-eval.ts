@@ -115,8 +115,7 @@ export interface EvalResult {
 export async function runEvaluation(): Promise<EvalResult[]> {
   const prompts = loadPrompts();
   if (prompts.length === 0) {
-    console.error('No benchmark prompts found.');
-    process.exit(1);
+    throw new Error('No benchmark prompts found in autoforge/prompts/');
   }
 
   console.log(

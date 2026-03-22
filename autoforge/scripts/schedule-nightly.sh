@@ -29,6 +29,9 @@ if [ -f "$ENV_FILE" ]; then
         [[ "$line" =~ ^# ]] && continue
         key="${line%%=*}"
         val="${line#*=}"
+        # Strip surrounding quotes
+        val="${val#\"}" ; val="${val%\"}"
+        val="${val#\'}" ; val="${val%\'}"
         # Only set if not already present (env vars take precedence)
         if [ -z "${!key:-}" ]; then
             export "$key=$val"
@@ -90,13 +93,13 @@ log "Checking dependencies..."
 log "Starting dev server..."
 (cd web && npm run dev &)
 DEV_PID=$!
+trap 'kill "$DEV_PID" 2>/dev/null || true' EXIT
 sleep "${DEV_SERVER_WAIT:-30}"
 
 # Configure AI Gateway routing for Claude Code (if key is set)
 if [ -n "${AI_GATEWAY_API_KEY:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     export ANTHROPIC_BASE_URL="${AI_GATEWAY_URL:-https://ai-gateway.vercel.sh}"
-    export ANTHROPIC_AUTH_TOKEN="$AI_GATEWAY_API_KEY"
-    export ANTHROPIC_API_KEY=""
+    export ANTHROPIC_API_KEY="$AI_GATEWAY_API_KEY"
     log "Routing Claude Code through AI Gateway"
 else
     log "Using Claude Code with default auth (Max subscription or ANTHROPIC_API_KEY)"
