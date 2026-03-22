@@ -1,0 +1,23 @@
+{
+  "name": "@spawnforge/autoforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autoresearch-style nightly optimization loop for SpawnForge compound AI actions",
+  "type": "module",
+  "scripts": {
+    "eval": "tsx scripts/run-eval.ts",
+    "eval:vision": "tsx scripts/run-eval.ts --vision",
+    "loop": "tsx scripts/run-loop.ts",
+    "validate": "tsx scripts/validate-setup.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "playwright": "^1.50.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  }
+}

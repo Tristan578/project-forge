@@ -1,0 +1,15 @@
+{
+  "id": "space-station",
+  "prompt": "An interior space station corridor with flickering lights",
+  "expectedElements": {
+    "entities": ["floor", "walls", "ceiling", "lights (3+)", "doors", "pipes/cables"],
+    "materials": ["metal brushed", "metal dark", "emissive panels", "glass"],
+    "lighting": ["cool point lights", "emissive strips", "low ambient"],
+    "audio": ["ambient hum"],
+    "physics": ["static walls", "static floor"],
+    "mood": "cold, industrial, slightly ominous"
+  },
+  "minEntities": 10,
+  "maxEntities": 30,
+  "category": "interior"
+}

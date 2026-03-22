@@ -1,0 +1,15 @@
+{
+  "id": "puzzle-room",
+  "prompt": "A puzzle room with pressure plates and a locked door",
+  "expectedElements": {
+    "entities": ["floor", "walls", "pressure plates (2+)", "locked door", "decorative elements"],
+    "materials": ["stone clean", "metal plates", "wood door", "emissive indicators"],
+    "lighting": ["neutral ambient", "colored indicators on plates"],
+    "audio": [],
+    "physics": ["static walls", "interactive plates", "interactive door"],
+    "mood": "cerebral, clean, mysterious"
+  },
+  "minEntities": 8,
+  "maxEntities": 20,
+  "category": "gameplay-3d"
+}

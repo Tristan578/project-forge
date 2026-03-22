@@ -104,6 +104,13 @@ do_split.py
 extract_handlers.py
 split_commands*.py
 
+# ----- AutoForge -----
+autoforge/results/*
+!autoforge/results/.gitkeep
+autoforge/asset-cache/*
+!autoforge/asset-cache/.gitkeep
+autoforge/node_modules/
+
 # ----- Misc -----
 *.log
 *.pid

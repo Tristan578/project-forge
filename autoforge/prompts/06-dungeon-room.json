@@ -1,0 +1,15 @@
+{
+  "id": "dungeon-room",
+  "prompt": "A dark dungeon room with torches and a treasure chest",
+  "expectedElements": {
+    "entities": ["floor", "walls (4)", "torches (2+)", "treasure chest", "debris/bones"],
+    "materials": ["stone dark", "metal rusty", "wood aged", "fire emissive", "gold"],
+    "lighting": ["warm point lights on torches", "very low ambient"],
+    "audio": ["torch crackling", "dripping water"],
+    "physics": ["static walls", "static floor", "interactive chest"],
+    "mood": "dark, mysterious, medieval"
+  },
+  "minEntities": 8,
+  "maxEntities": 20,
+  "category": "interior"
+}
