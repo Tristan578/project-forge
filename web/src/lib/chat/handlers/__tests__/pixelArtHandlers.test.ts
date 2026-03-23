@@ -119,20 +119,18 @@ describe('handleQuantizeSpriteColors', () => {
     expect(result.error).toContain('256');
   });
 
-  it('should reject invalid dithering', async () => {
-    const result = await handleQuantizeSpriteColors({ colorCount: 8, dithering: 'floyd' }, mockCtx);
-    expect(result.success).toBe(false);
-  });
-
-  // PF-838 regression: stub must return 501 (not success) so callers never
-  // receive a success response when no real work was done.
-  it('returns not-implemented error for valid params (PF-838)', async () => {
+  it('should return not-implemented for valid params (PF-838)', async () => {
     const result = await handleQuantizeSpriteColors({ colorCount: 16, dithering: 'bayer8x8' }, mockCtx);
     expect(result.success).toBe(false);
     expect(result.error).toContain('not yet implemented');
   });
 
-  it('returns not-implemented error when only colorCount is supplied (PF-838)', async () => {
+  it('should reject invalid dithering before stub check', async () => {
+    const result = await handleQuantizeSpriteColors({ colorCount: 8, dithering: 'floyd' }, mockCtx);
+    expect(result.success).toBe(false);
+  });
+
+  it('should return not-implemented for default dithering (PF-838)', async () => {
     const result = await handleQuantizeSpriteColors({ colorCount: 8 }, mockCtx);
     expect(result.success).toBe(false);
     expect(result.error).toContain('not yet implemented');
