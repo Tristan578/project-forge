@@ -148,7 +148,7 @@ describe('SHADER_NODE_DEFINITIONS: port definitions', () => {
 describe('SHADER_NODE_DEFINITIONS: input category', () => {
   it('contains vertex_position node with vec3 output', () => {
     const node = SHADER_NODE_DEFINITIONS['vertex_position'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('input');
     expect(node.inputs).toHaveLength(0);
     expect(node.outputs.some(p => p.id === 'position' && p.type === 'vec3')).toBe(true);
@@ -156,19 +156,19 @@ describe('SHADER_NODE_DEFINITIONS: input category', () => {
 
   it('contains vertex_normal node with vec3 output', () => {
     const node = SHADER_NODE_DEFINITIONS['vertex_normal'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.outputs.some(p => p.type === 'vec3')).toBe(true);
   });
 
   it('contains vertex_uv node with vec2 output', () => {
     const node = SHADER_NODE_DEFINITIONS['vertex_uv'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.outputs.some(p => p.id === 'uv' && p.type === 'vec2')).toBe(true);
   });
 
   it('contains time node with float output', () => {
     const node = SHADER_NODE_DEFINITIONS['time'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.outputs.some(p => p.id === 'time' && p.type === 'float')).toBe(true);
   });
 
@@ -196,7 +196,7 @@ describe('SHADER_NODE_DEFINITIONS: math category', () => {
 
   it('contains clamp node with value/min/max inputs', () => {
     const node = SHADER_NODE_DEFINITIONS['clamp'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'value')).toBe(true);
     expect(node.inputs.some(p => p.id === 'min')).toBe(true);
     expect(node.inputs.some(p => p.id === 'max')).toBe(true);
@@ -204,7 +204,7 @@ describe('SHADER_NODE_DEFINITIONS: math category', () => {
 
   it('contains lerp node with a/b/t inputs', () => {
     const node = SHADER_NODE_DEFINITIONS['lerp'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'a')).toBe(true);
     expect(node.inputs.some(p => p.id === 'b')).toBe(true);
     expect(node.inputs.some(p => p.id === 't')).toBe(true);
@@ -217,14 +217,14 @@ describe('SHADER_NODE_DEFINITIONS: math category', () => {
 
   it('contains smoothstep node with edge0/edge1/value', () => {
     const node = SHADER_NODE_DEFINITIONS['smoothstep'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'edge0')).toBe(true);
     expect(node.inputs.some(p => p.id === 'edge1')).toBe(true);
   });
 
   it('contains power node with base/exponent inputs', () => {
     const node = SHADER_NODE_DEFINITIONS['power'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'base')).toBe(true);
     expect(node.inputs.some(p => p.id === 'exponent')).toBe(true);
   });
@@ -235,7 +235,7 @@ describe('SHADER_NODE_DEFINITIONS: math category', () => {
 describe('SHADER_NODE_DEFINITIONS: texture category', () => {
   it('contains texture_sample node', () => {
     const node = SHADER_NODE_DEFINITIONS['texture_sample'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('texture');
     expect(node.inputs.some(p => p.type === 'texture2d')).toBe(true);
     expect(node.inputs.some(p => p.type === 'vec2')).toBe(true);
@@ -256,19 +256,19 @@ describe('SHADER_NODE_DEFINITIONS: texture category', () => {
 describe('SHADER_NODE_DEFINITIONS: vector category', () => {
   it('contains normalize node', () => {
     const node = SHADER_NODE_DEFINITIONS['normalize'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('vector');
   });
 
   it('contains dot_product node with float output', () => {
     const node = SHADER_NODE_DEFINITIONS['dot_product'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.outputs.some(p => p.type === 'float')).toBe(true);
   });
 
   it('contains cross_product node with vec3 output', () => {
     const node = SHADER_NODE_DEFINITIONS['cross_product'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.outputs.some(p => p.type === 'vec3')).toBe(true);
   });
 });
@@ -278,7 +278,7 @@ describe('SHADER_NODE_DEFINITIONS: vector category', () => {
 describe('SHADER_NODE_DEFINITIONS: lighting category', () => {
   it('contains fresnel node', () => {
     const node = SHADER_NODE_DEFINITIONS['fresnel'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('lighting');
     expect(node.inputs.some(p => p.id === 'normal')).toBe(true);
     expect(node.inputs.some(p => p.id === 'view')).toBe(true);
@@ -287,7 +287,7 @@ describe('SHADER_NODE_DEFINITIONS: lighting category', () => {
 
   it('contains normal_map node with strength input', () => {
     const node = SHADER_NODE_DEFINITIONS['normal_map'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'strength')).toBe(true);
     expect(node.outputs.some(p => p.id === 'normal')).toBe(true);
   });
@@ -298,7 +298,7 @@ describe('SHADER_NODE_DEFINITIONS: lighting category', () => {
 describe('SHADER_NODE_DEFINITIONS: output node (pbr_output)', () => {
   it('contains pbr_output node', () => {
     const node = SHADER_NODE_DEFINITIONS['pbr_output'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('output');
   });
 

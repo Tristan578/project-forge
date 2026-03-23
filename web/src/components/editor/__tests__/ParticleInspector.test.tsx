@@ -97,7 +97,7 @@ describe('ParticleInspector', () => {
   it('shows Add Particles button when no particle data', () => {
     setupStore({ primaryParticle: null });
     render(<ParticleInspector />);
-    expect(screen.getByText('Add Particles')).toBeDefined();
+    expect(screen.getByText('Add Particles').textContent).toBe('Add Particles');
   });
 
   it('adds particles with fire preset on click', () => {
@@ -112,7 +112,7 @@ describe('ParticleInspector', () => {
   it('renders Particles header', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Particles')).toBeDefined();
+    expect(screen.getByText('Particles').textContent).toBe('Particles');
   });
 
   it('renders preset dropdown with fire selected', () => {
@@ -150,12 +150,12 @@ describe('ParticleInspector', () => {
   it('renders spawner mode dropdown', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Spawner')).toBeDefined();
+    expect(screen.getByText('Spawner').textContent).toBe('Spawner');
     const selects = document.querySelectorAll('select');
     const modeSelect = Array.from(selects).find((s) =>
       Array.from(s.options).some((o) => o.textContent === 'Burst'),
     ) as HTMLSelectElement;
-    expect(modeSelect).toBeDefined();
+    expect(modeSelect).not.toBeNull();
     expect(modeSelect.value).toBe('continuous');
   });
 
@@ -175,7 +175,7 @@ describe('ParticleInspector', () => {
   it('renders rate slider for continuous mode', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Rate')).toBeDefined();
+    expect(screen.getByText('Rate').textContent).toBe('Rate');
   });
 
   it('renders count slider for burst mode', () => {
@@ -183,7 +183,7 @@ describe('ParticleInspector', () => {
       primaryParticle: { ...defaultParticle, spawnerMode: { type: 'burst', count: 100 } as unknown as typeof defaultParticle.spawnerMode },
     });
     render(<ParticleInspector />);
-    expect(screen.getByText('Count')).toBeDefined();
+    expect(screen.getByText('Count').textContent).toBe('Count');
   });
 
   // ── Emission shape ────────────────────────────────────────────────────
@@ -191,7 +191,7 @@ describe('ParticleInspector', () => {
   it('renders emission shape section', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Emission Shape')).toBeDefined();
+    expect(screen.getByText('Emission Shape').textContent).toBe('Emission Shape');
   });
 
   it('changes emission shape to sphere', () => {
@@ -213,7 +213,7 @@ describe('ParticleInspector', () => {
     });
     render(<ParticleInspector />);
     // Should have a Radius slider specific to sphere shape
-    expect(screen.getByText('Radius')).toBeDefined();
+    expect(screen.getByText('Radius').textContent).toBe('Radius');
   });
 
   it('shows half extents for box shape', () => {
@@ -224,7 +224,7 @@ describe('ParticleInspector', () => {
       },
     });
     render(<ParticleInspector />);
-    expect(screen.getByText('Half Extents')).toBeDefined();
+    expect(screen.getByText('Half Extents').textContent).toBe('Half Extents');
   });
 
   // ── Velocity / Forces / Size sections ─────────────────────────────────
@@ -232,19 +232,19 @@ describe('ParticleInspector', () => {
   it('renders velocity section', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Velocity')).toBeDefined();
+    expect(screen.getByText('Velocity').textContent).toBe('Velocity');
   });
 
   it('renders forces section', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Forces')).toBeDefined();
+    expect(screen.getByText('Forces').textContent).toBe('Forces');
   });
 
   it('renders size section', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Size')).toBeDefined();
+    expect(screen.getByText('Size').textContent).toBe('Size');
   });
 
   // ── Color gradient ────────────────────────────────────────────────────
@@ -252,9 +252,9 @@ describe('ParticleInspector', () => {
   it('renders color gradient section with stops', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Color Gradient')).toBeDefined();
-    expect(screen.getByText('Stop 1')).toBeDefined();
-    expect(screen.getByText('Stop 2')).toBeDefined();
+    expect(screen.getByText('Color Gradient').textContent).toBe('Color Gradient');
+    expect(screen.getByText('Stop 1').textContent).toBe('Stop 1');
+    expect(screen.getByText('Stop 2').textContent).toBe('Stop 2');
   });
 
   it('does not show remove button when only 2 stops', () => {
@@ -286,12 +286,12 @@ describe('ParticleInspector', () => {
   it('renders blend mode dropdown', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Rendering')).toBeDefined();
+    expect(screen.getByText('Rendering').textContent).toBe('Rendering');
     const selects = document.querySelectorAll('select');
     const blendSelect = Array.from(selects).find((s) =>
       Array.from(s.options).some((o) => o.textContent === 'Alpha Blend'),
     ) as HTMLSelectElement;
-    expect(blendSelect).toBeDefined();
+    expect(blendSelect).not.toBeNull();
     expect(blendSelect.value).toBe('additive');
   });
 
@@ -346,7 +346,7 @@ describe('ParticleInspector', () => {
   it('renders Remove Particles button', () => {
     setupStore();
     render(<ParticleInspector />);
-    expect(screen.getByText('Remove Particles')).toBeDefined();
+    expect(screen.getByText('Remove Particles').textContent).toBe('Remove Particles');
   });
 
   it('calls removeParticle on Remove click', () => {

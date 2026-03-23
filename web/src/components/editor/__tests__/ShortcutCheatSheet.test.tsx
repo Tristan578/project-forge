@@ -30,31 +30,31 @@ describe('ShortcutCheatSheet', () => {
 
   it('renders heading when open', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Keyboard Shortcuts')).toBeDefined();
+    expect(screen.getByText('Keyboard Shortcuts').textContent).toBe('Keyboard Shortcuts');
   });
 
   it('renders dialog role with aria-modal', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
     const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeDefined();
+    expect(dialog).not.toBeNull();
     expect(dialog.getAttribute('aria-modal')).toBe('true');
   });
 
   it('renders shortcut categories', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('General')).toBeDefined();
-    expect(screen.getByText('Transform')).toBeDefined();
-    expect(screen.getByText('Selection')).toBeDefined();
-    expect(screen.getByText('View')).toBeDefined();
-    expect(screen.getByText('Play Mode')).toBeDefined();
+    expect(screen.getByText('General').textContent).toBe('General');
+    expect(screen.getByText('Transform').textContent).toBe('Transform');
+    expect(screen.getByText('Selection').textContent).toBe('Selection');
+    expect(screen.getByText('View').textContent).toBe('View');
+    expect(screen.getByText('Play Mode').textContent).toBe('Play Mode');
   });
 
   it('renders shortcut action descriptions', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Save scene')).toBeDefined();
-    expect(screen.getByText('Undo')).toBeDefined();
-    expect(screen.getByText('Translate mode')).toBeDefined();
-    expect(screen.getByText('Toggle grid')).toBeDefined();
+    expect(screen.getByText('Save scene').textContent).toBe('Save scene');
+    expect(screen.getByText('Undo').textContent).toBe('Undo');
+    expect(screen.getByText('Translate mode').textContent).toBe('Translate mode');
+    expect(screen.getByText('Toggle grid').textContent).toBe('Toggle grid');
   });
 
   it('renders search input', () => {
@@ -66,7 +66,7 @@ describe('ShortcutCheatSheet', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
     const searchInput = screen.getByLabelText('Search shortcuts');
     fireEvent.change(searchInput, { target: { value: 'undo' } });
-    expect(screen.getByText('Undo')).toBeDefined();
+    expect(screen.getByText('Undo').textContent).toBe('Undo');
     // "Toggle grid" should not be visible
     expect(screen.queryByText('Toggle grid')).toBeNull();
   });
@@ -82,7 +82,7 @@ describe('ShortcutCheatSheet', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
     const searchInput = screen.getByLabelText('Search shortcuts');
     fireEvent.change(searchInput, { target: { value: 'play mode' } });
-    expect(screen.getByText('Play / Stop game')).toBeDefined();
+    expect(screen.getByText('Play / Stop game').textContent).toBe('Play / Stop game');
     // Other categories should not appear
     expect(screen.queryByText('Save scene')).toBeNull();
   });
@@ -92,8 +92,8 @@ describe('ShortcutCheatSheet', () => {
     const searchInput = screen.getByLabelText('Search shortcuts');
     fireEvent.change(searchInput, { target: { value: 'ctrl' } });
     // All ctrl shortcuts should be visible
-    expect(screen.getByText('Save scene')).toBeDefined();
-    expect(screen.getByText('Undo')).toBeDefined();
+    expect(screen.getByText('Save scene').textContent).toBe('Save scene');
+    expect(screen.getByText('Undo').textContent).toBe('Undo');
     // Non-ctrl shortcuts should not be visible
     expect(screen.queryByText('Translate mode')).toBeNull();
   });
@@ -131,7 +131,7 @@ describe('ShortcutCheatSheet', () => {
     fireEvent.change(searchInput, { target: { value: '?' } });
     expect(searchInput).toHaveProperty('value', '?');
     // The overlay is still open (onClose not called from typing)
-    expect(screen.getByRole('dialog')).toBeDefined();
+    expect(screen.getByRole('dialog')).not.toBeNull();
   });
 
   it('resets search when reopened', () => {

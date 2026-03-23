@@ -50,7 +50,7 @@ describe('parseInkJson - text parsing', () => {
     const tree = parseInkJson(input);
 
     const textNode = tree.nodes.find((n) => n.type === 'text') as TextNode | undefined;
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
     expect(textNode!.text).toBe('Hello, world!');
   });
 
@@ -66,7 +66,7 @@ describe('parseInkJson - text parsing', () => {
     const tree = parseInkJson(input);
 
     const startNode = tree.nodes.find((n) => n.id === tree.startNodeId);
-    expect(startNode).toBeDefined();
+    expect(startNode).not.toBeNull();
     expect(startNode!.type).toBe('text');
   });
 
@@ -77,8 +77,8 @@ describe('parseInkJson - text parsing', () => {
     const nodeA = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Line A') as TextNode | undefined;
     const nodeB = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Line B') as TextNode | undefined;
 
-    expect(nodeA).toBeDefined();
-    expect(nodeB).toBeDefined();
+    expect(nodeA).not.toBeNull();
+    expect(nodeB).not.toBeNull();
     expect(nodeA!.next).toBe(nodeB!.id);
   });
 
@@ -94,7 +94,7 @@ describe('parseInkJson - text parsing', () => {
     const input = makeInk(['^Hello', '^, world!', '\n', 'end']);
     const tree = parseInkJson(input);
     const textNode = tree.nodes.find((n) => n.type === 'text') as TextNode | undefined;
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
     expect(textNode!.text).toContain('Hello');
     expect(textNode!.text).toContain('world!');
   });
@@ -103,7 +103,7 @@ describe('parseInkJson - text parsing', () => {
     const input = makeInk([null, '^Text', null, '\n', 'end']);
     const tree = parseInkJson(input);
     const textNode = tree.nodes.find((n) => n.type === 'text') as TextNode | undefined;
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
     expect(textNode!.text).toBe('Text');
   });
 
@@ -111,7 +111,7 @@ describe('parseInkJson - text parsing', () => {
     const input = makeInk([42, '^Text', 7, '\n', 'end']);
     const tree = parseInkJson(input);
     const textNode = tree.nodes.find((n) => n.type === 'text') as TextNode | undefined;
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
   });
 });
 
@@ -130,7 +130,7 @@ describe('parseInkJson - choice parsing', () => {
     const tree = parseInkJson(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     expect(choiceNode!.choices.length).toBe(1);
     expect(choiceNode!.choices[0].text).toBe('Option A');
   });
@@ -168,7 +168,7 @@ describe('parseInkJson - choice parsing', () => {
     const tree = parseInkJson(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     expect(choiceNode!.choices[0].text).toBe('(choice)');
   });
 
@@ -192,8 +192,8 @@ describe('parseInkJson - choice parsing', () => {
 
     const textNode = tree.nodes.find((n) => n.type === 'text') as TextNode | undefined;
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(textNode).toBeDefined();
-    expect(choiceNode).toBeDefined();
+    expect(textNode).not.toBeNull();
+    expect(choiceNode).not.toBeNull();
     expect(textNode!.next).toBe(choiceNode!.id);
   });
 });
@@ -209,7 +209,7 @@ describe('parseInkJson - nested content', () => {
     ]);
     const tree = parseInkJson(input);
     const textNode = tree.nodes.find((n) => n.type === 'text') as TextNode | undefined;
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
     expect(textNode!.text).toBe('Inner text');
   });
 
@@ -219,7 +219,7 @@ describe('parseInkJson - nested content', () => {
     ]);
     const tree = parseInkJson(input);
     const textNode = tree.nodes.find((n) => n.type === 'text') as TextNode | undefined;
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
     expect(textNode!.text).toBe('Deep text');
   });
 
@@ -234,7 +234,7 @@ describe('parseInkJson - nested content', () => {
     ]);
     const tree = parseInkJson(input);
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.onTrue).not.toBeNull();
     expect(condNode!.onFalse).not.toBeNull();
   });
@@ -250,7 +250,7 @@ describe('parseInkJson - nested content', () => {
     ]);
     const tree = parseInkJson(input);
     const startNode = tree.nodes.find((n) => n.id === tree.startNodeId);
-    expect(startNode).toBeDefined();
+    expect(startNode).not.toBeNull();
     expect(startNode!.type).toBe('condition');
   });
 
@@ -260,7 +260,7 @@ describe('parseInkJson - nested content', () => {
     ]);
     const tree = parseInkJson(input);
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.onTrue).not.toBeNull();
     expect(condNode!.onFalse).toBeNull();
   });
@@ -275,21 +275,21 @@ describe('parseInkJson - divert handling', () => {
     const input = makeInk(['^Text', '\n', { '->': 'END' }]);
     const tree = parseInkJson(input);
     const endNode = tree.nodes.find((n) => n.type === 'end');
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 
   it('maps -> DONE divert to EndNode', () => {
     const input = makeInk(['^Text', '\n', { '->': 'DONE' }]);
     const tree = parseInkJson(input);
     const endNode = tree.nodes.find((n) => n.type === 'end');
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 
   it('maps -> knot divert to EndNode stub', () => {
     const input = makeInk(['^Text', '\n', { '->': 'some_knot' }]);
     const tree = parseInkJson(input);
     const endNode = tree.nodes.find((n) => n.type === 'end');
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 });
 
@@ -302,7 +302,7 @@ describe('parseInkJson - variable assignment', () => {
     const input = makeInk([{ 'VAR=': 'gold' }, 'end']);
     const tree = parseInkJson(input);
     const actionNode = tree.nodes.find((n) => n.type === 'action') as ActionNode | undefined;
-    expect(actionNode).toBeDefined();
+    expect(actionNode).not.toBeNull();
     expect(actionNode!.actions[0].type).toBe('set_state');
     expect((actionNode!.actions[0] as { type: 'set_state'; key: string }).key).toBe('gold');
   });
@@ -311,7 +311,7 @@ describe('parseInkJson - variable assignment', () => {
     const input = makeInk([{ temp: 'tempVar' }, 'end']);
     const tree = parseInkJson(input);
     const actionNode = tree.nodes.find((n) => n.type === 'action') as ActionNode | undefined;
-    expect(actionNode).toBeDefined();
+    expect(actionNode).not.toBeNull();
     expect((actionNode!.actions[0] as { type: 'set_state'; key: string }).key).toBe('tempVar');
   });
 });
@@ -409,7 +409,7 @@ describe('parseInkJson - realistic sample', () => {
   it('contains a choice node with the two choices', () => {
     const tree = parseInkJson(realisticInk);
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     expect(choiceNode!.choices.length).toBe(2);
     const choiceTexts = choiceNode!.choices.map((c) => c.text);
     expect(choiceTexts).toContain('I seek wisdom.');

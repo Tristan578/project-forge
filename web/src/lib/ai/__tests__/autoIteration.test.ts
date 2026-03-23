@@ -69,7 +69,7 @@ describe('diagnoseIssues', () => {
     const issues = diagnoseIssues(metrics, makeSceneContext());
     expect(issues.length).toBeGreaterThanOrEqual(1);
     const quitIssue = issues.find((i) => i.affectedArea === 'Level 3');
-    expect(quitIssue).toBeDefined();
+    expect(quitIssue).not.toBeNull();
     expect(quitIssue!.severity).toBe('critical');
     expect(quitIssue!.category).toBe('engagement');
   });
@@ -80,7 +80,7 @@ describe('diagnoseIssues', () => {
     });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     const quitIssue = issues.find((i) => i.affectedArea === 'Level 2');
-    expect(quitIssue).toBeDefined();
+    expect(quitIssue).not.toBeNull();
     expect(quitIssue!.severity).toBe('major');
   });
 
@@ -99,7 +99,7 @@ describe('diagnoseIssues', () => {
     });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     const spike = issues.find((i) => i.affectedArea === 'Boss Room');
-    expect(spike).toBeDefined();
+    expect(spike).not.toBeNull();
     expect(spike!.severity).toBe('critical');
     expect(spike!.category).toBe('difficulty');
   });
@@ -110,7 +110,7 @@ describe('diagnoseIssues', () => {
     });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     const spike = issues.find((i) => i.affectedArea === 'Lava Pit');
-    expect(spike).toBeDefined();
+    expect(spike).not.toBeNull();
     expect(spike!.severity).toBe('major');
   });
 
@@ -127,7 +127,7 @@ describe('diagnoseIssues', () => {
     const metrics = makeMetrics({ engagementScore: 20 });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     const engagement = issues.find((i) => i.category === 'engagement' && i.description.includes('engagement score'));
-    expect(engagement).toBeDefined();
+    expect(engagement).not.toBeNull();
     expect(engagement!.severity).toBe('major');
   });
 
@@ -135,7 +135,7 @@ describe('diagnoseIssues', () => {
     const metrics = makeMetrics({ completionRate: 10 });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     const progression = issues.find((i) => i.category === 'progression');
-    expect(progression).toBeDefined();
+    expect(progression).not.toBeNull();
     expect(progression!.severity).toBe('critical');
   });
 
@@ -143,7 +143,7 @@ describe('diagnoseIssues', () => {
     const metrics = makeMetrics({ completionRate: 35 });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     const progression = issues.find((i) => i.category === 'progression');
-    expect(progression).toBeDefined();
+    expect(progression).not.toBeNull();
     expect(progression!.severity).toBe('major');
   });
 
@@ -151,7 +151,7 @@ describe('diagnoseIssues', () => {
     const metrics = makeMetrics({ avgPlayTime: 30 });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     const ux = issues.find((i) => i.category === 'ux');
-    expect(ux).toBeDefined();
+    expect(ux).not.toBeNull();
     expect(ux!.severity).toBe('major');
   });
 
@@ -242,7 +242,7 @@ describe('generateFixes', () => {
     });
     const fixes = generateFixes([issue], ctx);
     const damageFix = fixes.find((f) => f.description.includes('damage'));
-    expect(damageFix).toBeDefined();
+    expect(damageFix).not.toBeNull();
     expect(damageFix!.issueId).toBe('issue-1');
     expect(damageFix!.confidence).toBeGreaterThan(0);
     expect(damageFix!.changes.length).toBeGreaterThan(0);
@@ -272,7 +272,7 @@ describe('generateFixes', () => {
     });
     const fixes = generateFixes([issue], ctx);
     const healthFix = fixes.find((f) => f.description.includes('health'));
-    expect(healthFix).toBeDefined();
+    expect(healthFix).not.toBeNull();
     expect(healthFix!.changes[0].newValue).toBe(150);
   });
 
@@ -288,7 +288,7 @@ describe('generateFixes', () => {
     const ctx = makeSceneContext({ entities: [] });
     const fixes = generateFixes([issue], ctx);
     const checkpointFix = fixes.find((f) => f.description.includes('checkpoint'));
-    expect(checkpointFix).toBeDefined();
+    expect(checkpointFix).not.toBeNull();
     expect(checkpointFix!.confidence).toBeGreaterThan(0);
   });
 
@@ -326,7 +326,7 @@ describe('generateFixes', () => {
     });
     const fixes = generateFixes([issue], ctx);
     const platformFix = fixes.find((f) => f.description.includes('platform'));
-    expect(platformFix).toBeDefined();
+    expect(platformFix).not.toBeNull();
     expect(platformFix!.changes[0].newValue).toBeLessThan(4);
   });
 
@@ -350,7 +350,7 @@ describe('generateFixes', () => {
     });
     const fixes = generateFixes([issue], ctx);
     const spawnerFix = fixes.find((f) => f.description.includes('spawner'));
-    expect(spawnerFix).toBeDefined();
+    expect(spawnerFix).not.toBeNull();
     expect((spawnerFix!.changes[0].newValue as number)).toBeGreaterThan(2);
   });
 
@@ -634,7 +634,7 @@ describe('edge cases', () => {
     expect(fixes.length).toBeGreaterThan(0);
     // Should use default value
     const damageFix = fixes.find((f) => f.description.includes('damage'));
-    expect(damageFix).toBeDefined();
+    expect(damageFix).not.toBeNull();
     expect(damageFix!.changes[0].oldValue).toBe(25); // default
   });
 
@@ -671,7 +671,7 @@ describe('edge cases', () => {
     });
     const fixes = generateFixes([issue], ctx);
     const damageFix = fixes.find((f) => f.description.includes('damage'));
-    expect(damageFix).toBeDefined();
+    expect(damageFix).not.toBeNull();
     expect((damageFix!.changes[0].newValue as number)).toBeGreaterThanOrEqual(5);
   });
 
@@ -695,7 +695,7 @@ describe('edge cases', () => {
     });
     const fixes = generateFixes([issue], ctx);
     const platFix = fixes.find((f) => f.description.includes('platform'));
-    expect(platFix).toBeDefined();
+    expect(platFix).not.toBeNull();
     expect((platFix!.changes[0].newValue as number)).toBeGreaterThanOrEqual(0.5);
   });
 });

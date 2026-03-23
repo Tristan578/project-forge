@@ -24,12 +24,12 @@ afterEach(() => {
 describe('ErrorDisplay — inline variant', () => {
   it('renders the message text', () => {
     render(<ErrorDisplay variant="inline" message="This field is required." />);
-    expect(screen.getByText('This field is required.')).toBeDefined();
+    expect(screen.getByText('This field is required.').textContent).toBe('This field is required.');
   });
 
   it('has role=alert for screen readers', () => {
     render(<ErrorDisplay variant="inline" message="Invalid email address." />);
-    expect(screen.getByRole('alert')).toBeDefined();
+    expect(screen.getByRole('alert')).not.toBeNull();
   });
 
   it('shows the error icon by default (severity=error)', () => {
@@ -70,12 +70,12 @@ describe('ErrorDisplay — inline variant', () => {
 describe('ErrorDisplay — banner variant', () => {
   it('renders the message text', () => {
     render(<ErrorDisplay variant="banner" message="Connection lost." />);
-    expect(screen.getByText('Connection lost.')).toBeDefined();
+    expect(screen.getByText('Connection lost.').textContent).toBe('Connection lost.');
   });
 
   it('renders the title when provided', () => {
     render(<ErrorDisplay variant="banner" title="Network error" message="Retry." />);
-    expect(screen.getByText('Network error')).toBeDefined();
+    expect(screen.getByText('Network error').textContent).toBe('Network error');
   });
 
   it('does not render a title element when title is omitted', () => {
@@ -94,7 +94,7 @@ describe('ErrorDisplay — banner variant', () => {
       />,
     );
     const button = screen.getByRole('button', { name: 'Try again' });
-    expect(button).toBeDefined();
+    expect(button).not.toBeNull();
   });
 
   it('calls action.onClick when action button is clicked', () => {
@@ -113,7 +113,7 @@ describe('ErrorDisplay — banner variant', () => {
   it('renders the dismiss button when onDismiss is provided', () => {
     const onDismiss = vi.fn();
     render(<ErrorDisplay variant="banner" message="Error." onDismiss={onDismiss} />);
-    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).not.toBeNull();
   });
 
   it('calls onDismiss when dismiss button is clicked', () => {
@@ -130,7 +130,7 @@ describe('ErrorDisplay — banner variant', () => {
 
   it('has role=alert for screen readers', () => {
     render(<ErrorDisplay variant="banner" message="Error." />);
-    expect(screen.getByRole('alert')).toBeDefined();
+    expect(screen.getByRole('alert')).not.toBeNull();
   });
 });
 
@@ -139,12 +139,12 @@ describe('ErrorDisplay — banner variant', () => {
 describe('ErrorDisplay — card variant', () => {
   it('renders the message text', () => {
     render(<ErrorDisplay variant="card" message="Something went wrong." />);
-    expect(screen.getByText('Something went wrong.')).toBeDefined();
+    expect(screen.getByText('Something went wrong.').textContent).toBe('Something went wrong.');
   });
 
   it('renders the title when provided', () => {
     render(<ErrorDisplay variant="card" title="Engine failed" message="Reload to fix." />);
-    expect(screen.getByText('Engine failed')).toBeDefined();
+    expect(screen.getByText('Engine failed').textContent).toBe('Engine failed');
   });
 
   it('renders the action button when action is provided', () => {
@@ -157,7 +157,7 @@ describe('ErrorDisplay — card variant', () => {
         action={{ label: 'Reload page', onClick }}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Reload page' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Reload page' })).not.toBeNull();
   });
 
   it('calls action.onClick when action button is clicked', () => {
@@ -176,7 +176,7 @@ describe('ErrorDisplay — card variant', () => {
   it('renders a Dismiss button when onDismiss is provided', () => {
     const onDismiss = vi.fn();
     render(<ErrorDisplay variant="card" message="Error." onDismiss={onDismiss} />);
-    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeDefined();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).not.toBeNull();
   });
 
   it('calls onDismiss when Dismiss button is clicked', () => {
@@ -203,7 +203,7 @@ describe('ErrorDisplay — card variant', () => {
 
   it('has role=alert for screen readers', () => {
     render(<ErrorDisplay variant="card" message="Error." />);
-    expect(screen.getByRole('alert')).toBeDefined();
+    expect(screen.getByRole('alert')).not.toBeNull();
   });
 });
 

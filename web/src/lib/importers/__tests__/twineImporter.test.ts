@@ -27,7 +27,7 @@ describe('parseTweeFile - single passage text node', () => {
     const textNode = tree.nodes.find(
       (n) => n.type === 'text' && (n as TextNode).text === 'Hello, world!',
     );
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
   });
 
   it('sets tree name to the passage name', () => {
@@ -41,7 +41,7 @@ describe('parseTweeFile - single passage text node', () => {
     const tree = parseTweeFile(input);
 
     const startNode = tree.nodes.find((n) => n.id === tree.startNodeId);
-    expect(startNode).toBeDefined();
+    expect(startNode).not.toBeNull();
   });
 
   it('initialises variables as an empty object', () => {
@@ -80,7 +80,7 @@ describe('parseTweeFile - choice nodes', () => {
     const tree = parseTweeFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     expect(choiceNode!.choices.length).toBe(2);
   });
 
@@ -92,10 +92,10 @@ describe('parseTweeFile - choice nodes', () => {
     const tree = parseTweeFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     const choiceTarget = choiceNode!.choices[0].nextNodeId;
     const resolved = tree.nodes.find((n) => n.id === choiceTarget);
-    expect(resolved).toBeDefined();
+    expect(resolved).not.toBeNull();
     expect(resolved!.type).not.toBe(undefined);
   });
 
@@ -108,12 +108,12 @@ describe('parseTweeFile - choice nodes', () => {
     const tree = parseTweeFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
 
     const left = choiceNode!.choices.find((c) => c.text === 'Go left');
     const right = choiceNode!.choices.find((c) => c.text === 'Go right');
-    expect(left).toBeDefined();
-    expect(right).toBeDefined();
+    expect(left).not.toBeNull();
+    expect(right).not.toBeNull();
     expect(left!.nextNodeId).not.toBe(right!.nextNodeId);
 
     // Both should resolve to actual nodes
@@ -129,7 +129,7 @@ describe('parseTweeFile - choice nodes', () => {
     const tree = parseTweeFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     const choice = choiceNode!.choices[0];
     expect(choice.text).toBe('Pick this');
     expect(tree.nodes.find((n) => n.id === choice.nextNodeId)).toBeDefined();
@@ -145,7 +145,7 @@ describe('parseTweeFile - choice nodes', () => {
     const tree = parseTweeFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     const choiceIds = choiceNode!.choices.map((c) => c.id);
     expect(new Set(choiceIds).size).toBe(choiceIds.length);
   });
@@ -188,7 +188,7 @@ describe('parseTweeFile - multi-passage', () => {
     const tree = parseTweeFile(input);
 
     const startNode = tree.nodes.find((n) => n.id === tree.startNodeId);
-    expect(startNode).toBeDefined();
+    expect(startNode).not.toBeNull();
     // The start node should come from the first passage
     expect(startNode!.type).not.toBe(undefined);
   });
@@ -208,7 +208,7 @@ describe('parseTweeFile - startup tag', () => {
 
     expect(tree.name).toBe('ActualStart');
     const startNode = tree.nodes.find((n) => n.id === tree.startNodeId);
-    expect(startNode).toBeDefined();
+    expect(startNode).not.toBeNull();
   });
 
   it('falls back to first passage when no startup tag', () => {
@@ -231,7 +231,7 @@ describe('parseTweeFile - (set:) macro', () => {
     const tree = parseTweeFile(input);
 
     const actionNode = tree.nodes.find((n) => n.type === 'action') as ActionNode | undefined;
-    expect(actionNode).toBeDefined();
+    expect(actionNode).not.toBeNull();
     expect(actionNode!.actions[0].type).toBe('set_state');
     const action = actionNode!.actions[0] as { type: string; key: string; value: unknown };
     expect(action.key).toBe('score');
@@ -242,7 +242,7 @@ describe('parseTweeFile - (set:) macro', () => {
     const input = passage('S', '', '(set: $flag to true)');
     const tree = parseTweeFile(input);
     const actionNode = tree.nodes.find((n) => n.type === 'action') as ActionNode | undefined;
-    expect(actionNode).toBeDefined();
+    expect(actionNode).not.toBeNull();
     const action = actionNode!.actions[0] as { type: string; key: string; value: unknown };
     expect(action.value).toBe(true);
   });
@@ -254,7 +254,7 @@ describe('parseTweeFile - (if:) macro', () => {
     const tree = parseTweeFile(input);
 
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.condition.type).toBe('equals');
   });
 
@@ -262,7 +262,7 @@ describe('parseTweeFile - (if:) macro', () => {
     const input = passage('Start', '', '(if: $alive is not false)');
     const tree = parseTweeFile(input);
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.condition.type).toBe('not_equals');
   });
 
@@ -270,7 +270,7 @@ describe('parseTweeFile - (if:) macro', () => {
     const input = passage('Start', '', '(if: $score > 5)');
     const tree = parseTweeFile(input);
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.condition.type).toBe('greater');
     if (condNode!.condition.type === 'greater') {
       expect(condNode!.condition.variable).toBe('score');
@@ -282,7 +282,7 @@ describe('parseTweeFile - (if:) macro', () => {
     const input = passage('Start', '', '(if: $hp < 20)');
     const tree = parseTweeFile(input);
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.condition.type).toBe('less');
   });
 });
@@ -311,7 +311,7 @@ describe('parseTweeFile - malformed input', () => {
     const tree = parseTweeFile(input);
     expect(tree.nodes.length).toBeGreaterThan(0);
     const endNode = tree.nodes.find((n) => n.type === 'end');
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 
   it('all nodes in a mixed tree have valid types', () => {

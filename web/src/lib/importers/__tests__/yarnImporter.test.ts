@@ -27,7 +27,7 @@ describe('parseYarnFile - text nodes', () => {
     expect(tree.nodes.length).toBeGreaterThan(0);
 
     const textNode = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Hello, world!');
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
   });
 
   it('creates a tree with correct startNodeId pointing to the first node', () => {
@@ -35,7 +35,7 @@ describe('parseYarnFile - text nodes', () => {
     const tree = parseYarnFile(input);
 
     const startNode = tree.nodes.find((n) => n.id === tree.startNodeId);
-    expect(startNode).toBeDefined();
+    expect(startNode).not.toBeNull();
     expect(startNode!.type).toBe('text');
     expect((startNode as TextNode).text).toBe('First line.');
   });
@@ -47,8 +47,8 @@ describe('parseYarnFile - text nodes', () => {
     const nodeA = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Line A.') as TextNode | undefined;
     const nodeB = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Line B.') as TextNode | undefined;
 
-    expect(nodeA).toBeDefined();
-    expect(nodeB).toBeDefined();
+    expect(nodeA).not.toBeNull();
+    expect(nodeB).not.toBeNull();
     expect(nodeA!.next).toBe(nodeB!.id);
   });
 
@@ -78,7 +78,7 @@ describe('parseYarnFile - choices', () => {
     const tree = parseYarnFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     expect(choiceNode!.choices.length).toBe(2);
     expect(choiceNode!.choices[0].text).toBe('Yes');
     expect(choiceNode!.choices[1].text).toBe('No');
@@ -95,7 +95,7 @@ describe('parseYarnFile - choices', () => {
     const tree = parseYarnFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
 
     const leftChoice = choiceNode!.choices.find((c) => c.text === 'Go left');
     const rightChoice = choiceNode!.choices.find((c) => c.text === 'Go right');
@@ -107,8 +107,8 @@ describe('parseYarnFile - choices', () => {
     // The resolved IDs must exist in the tree
     const leftNode = tree.nodes.find((n) => n.id === leftChoice!.nextNodeId);
     const rightNode = tree.nodes.find((n) => n.id === rightChoice!.nextNodeId);
-    expect(leftNode).toBeDefined();
-    expect(rightNode).toBeDefined();
+    expect(leftNode).not.toBeNull();
+    expect(rightNode).not.toBeNull();
   });
 
   it('handles options without target links (nextNodeId stays null)', () => {
@@ -116,7 +116,7 @@ describe('parseYarnFile - choices', () => {
     const tree = parseYarnFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
     expect(choiceNode!.choices[0].nextNodeId).toBeNull();
   });
 
@@ -126,13 +126,13 @@ describe('parseYarnFile - choices', () => {
     const tree = parseYarnFile(input);
 
     const choiceNode = tree.nodes.find((n) => n.type === 'choice') as ChoiceNode | undefined;
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeNull();
 
     // The choice itself should have the text before [[
     const choice = choiceNode!.choices[0];
     expect(choice.nextNodeId).toBeDefined();
     const resolved = tree.nodes.find((n) => n.id === choice.nextNodeId);
-    expect(resolved).toBeDefined();
+    expect(resolved).not.toBeNull();
   });
 });
 
@@ -147,7 +147,7 @@ describe('parseYarnFile - conditionals', () => {
     const tree = parseYarnFile(input);
 
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.condition.type).toBe('equals');
   });
 
@@ -201,16 +201,16 @@ You do not have the flag.
     const tree = parseYarnFile(input);
 
     const condNode = tree.nodes.find((n) => n.type === 'condition') as ConditionNode | undefined;
-    expect(condNode).toBeDefined();
+    expect(condNode).not.toBeNull();
     expect(condNode!.onTrue).not.toBeNull();
     expect(condNode!.onFalse).not.toBeNull();
 
     const trueNode = tree.nodes.find((n) => n.id === condNode!.onTrue) as TextNode;
-    expect(trueNode).toBeDefined();
+    expect(trueNode).not.toBeNull();
     expect(trueNode.text).toBe('You have the flag.');
 
     const falseNode = tree.nodes.find((n) => n.id === condNode!.onFalse) as TextNode;
-    expect(falseNode).toBeDefined();
+    expect(falseNode).not.toBeNull();
     expect(falseNode.text).toBe('You do not have the flag.');
   });
 
@@ -226,7 +226,7 @@ Try harder.
     const tree = parseYarnFile(input);
 
     const firstCond = tree.nodes.find((n) => n.type === 'condition') as ConditionNode;
-    expect(firstCond).toBeDefined();
+    expect(firstCond).not.toBeNull();
     expect(firstCond.condition.type).toBe('greater');
     expect(firstCond.onTrue).not.toBeNull();
     expect(firstCond.onFalse).not.toBeNull();
@@ -235,7 +235,7 @@ Try harder.
     expect(excellentNode.text).toBe('Excellent!');
 
     const secondCond = tree.nodes.find((n) => n.id === firstCond.onFalse) as ConditionNode;
-    expect(secondCond).toBeDefined();
+    expect(secondCond).not.toBeNull();
     expect(secondCond.type).toBe('condition');
     expect(secondCond.onTrue).not.toBeNull();
     expect(secondCond.onFalse).not.toBeNull();
@@ -308,13 +308,13 @@ describe('parseYarnFile - multi-node files', () => {
 
     // There should be a text/jump-carrier node whose next points to the End node's entry
     const endEntry = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Goodbye.');
-    expect(endEntry).toBeDefined();
+    expect(endEntry).not.toBeNull();
 
     // Find the node that has next pointing to endEntry
     const jumpCarrier = tree.nodes.find(
       (n) => n.type === 'text' && (n as TextNode).next === endEntry!.id,
     );
-    expect(jumpCarrier).toBeDefined();
+    expect(jumpCarrier).not.toBeNull();
   });
 
   it('resolves [[NodeName]] v1 inline jump syntax', () => {
@@ -326,12 +326,12 @@ describe('parseYarnFile - multi-node files', () => {
     const tree = parseYarnFile(input);
 
     const destEntry = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Arrived.');
-    expect(destEntry).toBeDefined();
+    expect(destEntry).not.toBeNull();
 
     const jumpCarrier = tree.nodes.find(
       (n) => n.type === 'text' && (n as TextNode).next === destEntry!.id,
     );
-    expect(jumpCarrier).toBeDefined();
+    expect(jumpCarrier).not.toBeNull();
   });
 
   it('sets startNodeId to the entry node of the first Yarn node', () => {
@@ -342,7 +342,7 @@ describe('parseYarnFile - multi-node files', () => {
 
     const tree = parseYarnFile(input);
     const startNode = tree.nodes.find((n) => n.id === tree.startNodeId) as TextNode | undefined;
-    expect(startNode).toBeDefined();
+    expect(startNode).not.toBeNull();
     expect(startNode!.text).toBe('First text.');
   });
 
@@ -351,7 +351,7 @@ describe('parseYarnFile - multi-node files', () => {
     const tree = parseYarnFile(input);
 
     const endNode = tree.nodes.find((n) => n.type === 'end') as EndNode | undefined;
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 
   it('creates ActionNode for unknown commands', () => {
@@ -359,7 +359,7 @@ describe('parseYarnFile - multi-node files', () => {
     const tree = parseYarnFile(input);
 
     const actionNode = tree.nodes.find((n) => n.type === 'action') as ActionNode | undefined;
-    expect(actionNode).toBeDefined();
+    expect(actionNode).not.toBeNull();
     expect(actionNode!.actions.length).toBeGreaterThan(0);
     expect(actionNode!.actions[0].type).toBe('trigger_event');
     expect((actionNode!.actions[0] as { type: string; eventName: string }).eventName).toContain('playsound');
@@ -376,7 +376,7 @@ describe('parseYarnFile - empty jump nodes', () => {
     const tree = parseYarnFile(input);
 
     const endNode = tree.nodes.find((n) => n.type === 'end') as EndNode | undefined;
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 
   it('treats <<jump>> with empty string target as EndNode', () => {
@@ -384,7 +384,7 @@ describe('parseYarnFile - empty jump nodes', () => {
     const tree = parseYarnFile(input);
 
     const endNode = tree.nodes.find((n) => n.type === 'end') as EndNode | undefined;
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 
   it('does not create empty TextNode carrier for jump with no target', () => {
@@ -424,7 +424,7 @@ describe('parseYarnFile - malformed input', () => {
     // Should produce at least an EndNode
     expect(tree.nodes.length).toBeGreaterThan(0);
     const endNode = tree.nodes.find((n) => n.type === 'end');
-    expect(endNode).toBeDefined();
+    expect(endNode).not.toBeNull();
   });
 
   it('ignores malformed node (missing title) among valid nodes', () => {
@@ -436,7 +436,7 @@ describe('parseYarnFile - malformed input', () => {
     const tree = parseYarnFile(input);
     expect(tree.name).toBe('Good');
     const textNode = tree.nodes.find((n) => n.type === 'text' && (n as TextNode).text === 'Valid node.');
-    expect(textNode).toBeDefined();
+    expect(textNode).not.toBeNull();
   });
 
   it('produces unique node IDs across multiple nodes', () => {

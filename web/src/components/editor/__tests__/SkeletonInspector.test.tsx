@@ -77,13 +77,13 @@ describe('SkeletonInspector', () => {
   it('shows "No skeleton data" when no skeleton', () => {
     setupStore();
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('No skeleton data')).toBeDefined();
+    expect(screen.getByText('No skeleton data').textContent).toBe('No skeleton data');
   });
 
   it('shows Add Skeleton button when no skeleton', () => {
     setupStore();
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Add Skeleton')).toBeDefined();
+    expect(screen.getByText('Add Skeleton').textContent).toBe('Add Skeleton');
   });
 
   it('calls setSkeleton2d when Add Skeleton clicked', () => {
@@ -99,19 +99,19 @@ describe('SkeletonInspector', () => {
   it('renders Bone Hierarchy label when skeleton exists', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Bone Hierarchy')).toBeDefined();
+    expect(screen.getByText('Bone Hierarchy').textContent).toBe('Bone Hierarchy');
   });
 
   it('shows bone name in bone list', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('root')).toBeDefined();
+    expect(screen.getByText('root').textContent).toBe('root');
   });
 
   it('shows "No bones" when bones array is empty', () => {
     setupStore({ skeleton: { ...baseSkeleton, bones: [] } });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('No bones')).toBeDefined();
+    expect(screen.getByText('No bones').textContent).toBe('No bones');
   });
 
   it('calls setSelectedBone when bone button clicked', () => {
@@ -124,13 +124,13 @@ describe('SkeletonInspector', () => {
   it('renders Create Bone label', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Create Bone')).toBeDefined();
+    expect(screen.getByText('Create Bone').textContent).toBe('Create Bone');
   });
 
   it('renders bone name input placeholder', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByPlaceholderText('Bone name')).toBeDefined();
+    expect(screen.getByPlaceholderText('Bone name').tagName.toLowerCase()).toMatch(/input|textarea/);
   });
 
   it('calls setSkeleton2d when a bone name is entered and add button clicked', () => {
@@ -154,25 +154,25 @@ describe('SkeletonInspector', () => {
   it('shows "Root bone" when no bone is selected', () => {
     setupStore({ skeleton: baseSkeleton, selectedBone: null });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Root bone')).toBeDefined();
+    expect(screen.getByText('Root bone').textContent).toBe('Root bone');
   });
 
   it('shows parent bone name when a bone is selected', () => {
     setupStore({ skeleton: baseSkeleton, selectedBone: 'root' });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Parent: root')).toBeDefined();
+    expect(screen.getByText('Parent: root').textContent).toBe('Parent: root');
   });
 
   it('renders Active Skin label', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Active Skin')).toBeDefined();
+    expect(screen.getByText('Active Skin').textContent).toBe('Active Skin');
   });
 
   it('renders skin name as option in skin select', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByRole('option', { name: 'default' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'default' })).not.toBeNull();
   });
 
   it('renders animations section when animations exist', () => {
@@ -181,8 +181,8 @@ describe('SkeletonInspector', () => {
       animations: [{ name: 'walk', duration: 1.2 }],
     });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Animations')).toBeDefined();
-    expect(screen.getByText('walk (1.2s)')).toBeDefined();
+    expect(screen.getByText('Animations').textContent).toBe('Animations');
+    expect(screen.getByText('walk (1.2s)').textContent).toBe('walk (1.2s)');
   });
 
   it('calls playAnimation when animation button clicked', () => {
@@ -198,7 +198,7 @@ describe('SkeletonInspector', () => {
   it('shows Remove Skeleton button', () => {
     setupStore({ skeleton: baseSkeleton });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Remove Skeleton')).toBeDefined();
+    expect(screen.getByText('Remove Skeleton').textContent).toBe('Remove Skeleton');
   });
 
   it('calls removeSkeleton2d when Remove Skeleton confirmed', () => {
@@ -219,15 +219,15 @@ describe('SkeletonInspector', () => {
       },
     });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('IK Constraints')).toBeDefined();
-    expect(screen.getByText('arm_ik')).toBeDefined();
+    expect(screen.getByText('IK Constraints').textContent).toBe('IK Constraints');
+    expect(screen.getByText('arm_ik').textContent).toBe('arm_ik');
   });
 
   it('shows selected bone properties when a bone is selected', () => {
     setupStore({ skeleton: baseSkeleton, selectedBone: 'root' });
     render(<SkeletonInspector entityId="entity-1" />);
-    expect(screen.getByText('Bone: root')).toBeDefined();
-    expect(screen.getByText('Position')).toBeDefined();
-    expect(screen.getByText('Rotation (deg)')).toBeDefined();
+    expect(screen.getByText('Bone: root').textContent).toBe('Bone: root');
+    expect(screen.getByText('Position').textContent).toBe('Position');
+    expect(screen.getByText('Rotation (deg)').textContent).toBe('Rotation (deg)');
   });
 });

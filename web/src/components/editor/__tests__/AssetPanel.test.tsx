@@ -77,8 +77,8 @@ describe('AssetPanel', () => {
   it('renders Assets and Materials tabs', () => {
     setupStore();
     render(<AssetPanel />);
-    expect(screen.getByText('Assets')).toBeDefined();
-    expect(screen.getByText('Materials')).toBeDefined();
+    expect(screen.getByText('Assets').textContent).toBe('Assets');
+    expect(screen.getByText('Materials').textContent).toBe('Materials');
   });
 
   it('shows empty state when no assets', () => {
@@ -135,10 +135,10 @@ describe('AssetPanel', () => {
       },
     });
     render(<AssetPanel />);
-    expect(screen.getByText('hero.glb')).toBeDefined();
-    expect(screen.getByText('floor.png')).toBeDefined();
-    expect(screen.getByText('1.0 KB')).toBeDefined();
-    expect(screen.getByText('2.0 KB')).toBeDefined();
+    expect(screen.getByText('hero.glb').textContent).toBe('hero.glb');
+    expect(screen.getByText('floor.png').textContent).toBe('floor.png');
+    expect(screen.getByText('1.0 KB').textContent).toBe('1.0 KB');
+    expect(screen.getByText('2.0 KB').textContent).toBe('2.0 KB');
   });
 
   it('places gltf asset on click', () => {
@@ -170,11 +170,11 @@ describe('AssetPanel', () => {
     setupStore();
     render(<AssetPanel />);
     fireEvent.click(screen.getByLabelText('AI Generate'));
-    expect(screen.getByText('Generate 3D Model')).toBeDefined();
-    expect(screen.getByText('Generate Texture')).toBeDefined();
-    expect(screen.getByText('Generate Sound')).toBeDefined();
-    expect(screen.getByText('Generate Music')).toBeDefined();
-    expect(screen.getByText('Generate Skybox')).toBeDefined();
+    expect(screen.getByText('Generate 3D Model').textContent).toBe('Generate 3D Model');
+    expect(screen.getByText('Generate Texture').textContent).toBe('Generate Texture');
+    expect(screen.getByText('Generate Sound').textContent).toBe('Generate Sound');
+    expect(screen.getByText('Generate Music').textContent).toBe('Generate Music');
+    expect(screen.getByText('Generate Skybox').textContent).toBe('Generate Skybox');
   });
 
   it('opens Generate 3D Model dialog', () => {
@@ -209,7 +209,7 @@ describe('AssetPanel', () => {
     const { container } = render(<AssetPanel />);
     const panel = container.firstElementChild!;
     fireEvent.dragEnter(panel, { preventDefault: vi.fn(), stopPropagation: vi.fn() });
-    expect(screen.getByText('Drop to import')).toBeDefined();
+    expect(screen.getByText('Drop to import').textContent).toBe('Drop to import');
   });
 
   it('hides drag overlay on dragLeave', () => {
@@ -231,7 +231,7 @@ describe('AssetPanel', () => {
       },
     });
     render(<AssetPanel />);
-    expect(screen.getByText('500 B')).toBeDefined();
-    expect(screen.getByText('1.4 MB')).toBeDefined();
+    expect(screen.getByText('500 B').textContent).toBe('500 B');
+    expect(screen.getByText('1.4 MB').textContent).toBe('1.4 MB');
   });
 });

@@ -81,15 +81,15 @@ describe('ScriptEditorPanel', () => {
   it('shows empty state when no entity selected', () => {
     setupStore({ primaryId: null });
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('Select an entity to edit its script')).toBeDefined();
+    expect(screen.getByText('Select an entity to edit its script').textContent).toBe('Select an entity to edit its script');
   });
 
   it('shows forge API hints in empty state', () => {
     setupStore({ primaryId: null });
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('forge.transform')).toBeDefined();
-    expect(screen.getByText('forge.input')).toBeDefined();
-    expect(screen.getByText('forge.physics')).toBeDefined();
+    expect(screen.getByText('forge.transform').textContent).toBe('forge.transform');
+    expect(screen.getByText('forge.input').textContent).toBe('forge.input');
+    expect(screen.getByText('forge.physics').textContent).toBe('forge.physics');
   });
 
   // ── Entity selected, no script ────────────────────────────────────────
@@ -97,13 +97,13 @@ describe('ScriptEditorPanel', () => {
   it('shows No script attached message', () => {
     setupStore();
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('No scripts')).toBeDefined();
+    expect(screen.getByText('No scripts').textContent).toBe('No scripts');
   });
 
   it('shows Add Script button', () => {
     setupStore();
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('Add Script')).toBeDefined();
+    expect(screen.getByText('Add Script').textContent).toBe('Add Script');
   });
 
   it('adds default script on Add Script click', () => {
@@ -116,8 +116,8 @@ describe('ScriptEditorPanel', () => {
   it('shows script templates in no-script state', () => {
     setupStore();
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('Movement')).toBeDefined();
-    expect(screen.getByText('Shooter')).toBeDefined();
+    expect(screen.getByText('Movement').textContent).toBe('Movement');
+    expect(screen.getByText('Shooter').textContent).toBe('Shooter');
   });
 
   it('applies template on template click', () => {
@@ -138,7 +138,7 @@ describe('ScriptEditorPanel', () => {
       allScripts: { 'ent-1': { source: 'function onStart() {}', enabled: true } },
     });
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('Player')).toBeDefined();
+    expect(screen.getByText('Player').textContent).toBe('Player');
   });
 
   it('renders Code and Graph view mode tabs', () => {
@@ -146,8 +146,8 @@ describe('ScriptEditorPanel', () => {
       allScripts: { 'ent-1': { source: 'function onStart() {}', enabled: true } },
     });
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('Code')).toBeDefined();
-    expect(screen.getByText('Graph')).toBeDefined();
+    expect(screen.getByText('Code').textContent).toBe('Code');
+    expect(screen.getByText('Graph').textContent).toBe('Graph');
   });
 
   it('renders console section', () => {
@@ -155,8 +155,8 @@ describe('ScriptEditorPanel', () => {
       allScripts: { 'ent-1': { source: 'function onStart() {}', enabled: true } },
     });
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('Console')).toBeDefined();
-    expect(screen.getByText('No output yet')).toBeDefined();
+    expect(screen.getByText('Console').textContent).toBe('Console');
+    expect(screen.getByText('No output yet').textContent).toBe('No output yet');
   });
 
   it('shows script logs in console', () => {
@@ -168,8 +168,8 @@ describe('ScriptEditorPanel', () => {
       ],
     });
     render(<ScriptEditorPanel />);
-    expect(screen.getByText('Script started!')).toBeDefined();
-    expect(screen.getByText('Null reference')).toBeDefined();
+    expect(screen.getByText('Script started!').textContent).toBe('Script started!');
+    expect(screen.getByText('Null reference').textContent).toBe('Null reference');
   });
 
   it('clears logs on Clear click', () => {
@@ -199,7 +199,7 @@ describe('ScriptEditorPanel', () => {
     render(<ScriptEditorPanel />);
     fireEvent.click(screen.getByText('Hide'));
     fireEvent.click(screen.getByText(/Show Console/));
-    expect(screen.getByText('Console')).toBeDefined();
+    expect(screen.getByText('Console').textContent).toBe('Console');
   });
 
   it('removes script on Remove button click', () => {
@@ -217,7 +217,7 @@ describe('ScriptEditorPanel', () => {
     });
     render(<ScriptEditorPanel />);
     const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
-    expect(checkbox).toBeDefined();
+    expect(checkbox).not.toBeNull();
     expect(checkbox.checked).toBe(true);
   });
 
@@ -230,6 +230,6 @@ describe('ScriptEditorPanel', () => {
     const templateSelect = Array.from(selects).find((s) =>
       Array.from(s.options).some((o) => o.textContent === 'Movement'),
     );
-    expect(templateSelect).toBeDefined();
+    expect(templateSelect).not.toBeNull();
   });
 });

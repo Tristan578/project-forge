@@ -84,14 +84,14 @@ describe('GameComponentInspector', () => {
   it('renders "No game components" when entity has no components', () => {
     setupStore({ primaryGameComponents: [] });
     render(<GameComponentInspector />);
-    expect(screen.getByText('No game components attached')).toBeDefined();
+    expect(screen.getByText('No game components attached').textContent).toBe('No game components attached');
   });
 
   it('renders heading and add button', () => {
     setupStore();
     render(<GameComponentInspector />);
-    expect(screen.getByText('Game Components')).toBeDefined();
-    expect(screen.getByText('Add')).toBeDefined();
+    expect(screen.getByText('Game Components').textContent).toBe('Game Components');
+    expect(screen.getByText('Add').textContent).toBe('Add');
   });
 
   // ── Add menu ─────────────────────────────────────────────────────────
@@ -102,10 +102,10 @@ describe('GameComponentInspector', () => {
     fireEvent.click(screen.getByText('Add'));
 
     // All 13 types should be available
-    expect(screen.getByText('Character Controller')).toBeDefined();
-    expect(screen.getByText('Health')).toBeDefined();
-    expect(screen.getByText('Collectible')).toBeDefined();
-    expect(screen.getByText('Win Condition')).toBeDefined();
+    expect(screen.getByText('Character Controller').textContent).toBe('Character Controller');
+    expect(screen.getByText('Health').textContent).toBe('Health');
+    expect(screen.getByText('Collectible').textContent).toBe('Collectible');
+    expect(screen.getByText('Win Condition').textContent).toBe('Win Condition');
   });
 
   it('hides already-attached types from add menu', () => {
@@ -289,9 +289,9 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Character Controller')).toBeDefined();
-    expect(screen.getByText('Speed')).toBeDefined();
-    expect(screen.getByText('Jump Height')).toBeDefined();
+    expect(screen.getByText('Character Controller').textContent).toBe('Character Controller');
+    expect(screen.getByText('Speed').textContent).toBe('Speed');
+    expect(screen.getByText('Jump Height').textContent).toBe('Jump Height');
   });
 
   it('renders Health section', () => {
@@ -301,8 +301,8 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Health')).toBeDefined();
-    expect(screen.getByText('Max HP')).toBeDefined();
+    expect(screen.getByText('Health').textContent).toBe('Health');
+    expect(screen.getByText('Max HP').textContent).toBe('Max HP');
   });
 
   it('renders Collectible section', () => {
@@ -312,8 +312,8 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Collectible')).toBeDefined();
-    expect(screen.getByText('Value')).toBeDefined();
+    expect(screen.getByText('Collectible').textContent).toBe('Collectible');
+    expect(screen.getByText('Value').textContent).toBe('Value');
   });
 
   it('renders DamageZone section', () => {
@@ -323,8 +323,8 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Damage Zone')).toBeDefined();
-    expect(screen.getByText('Damage/Sec')).toBeDefined();
+    expect(screen.getByText('Damage Zone').textContent).toBe('Damage Zone');
+    expect(screen.getByText('Damage/Sec').textContent).toBe('Damage/Sec');
   });
 
   it('renders MovingPlatform section with waypoints', () => {
@@ -334,8 +334,8 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Moving Platform')).toBeDefined();
-    expect(screen.getByText('Waypoints')).toBeDefined();
+    expect(screen.getByText('Moving Platform').textContent).toBe('Moving Platform');
+    expect(screen.getByText('Waypoints').textContent).toBe('Waypoints');
   });
 
   it('renders WinCondition section with conditional target score', () => {
@@ -345,8 +345,8 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Win Condition')).toBeDefined();
-    expect(screen.getByText('Target Score')).toBeDefined();
+    expect(screen.getByText('Win Condition').textContent).toBe('Win Condition');
+    expect(screen.getByText('Target Score').textContent).toBe('Target Score');
   });
 
   it('renders WinCondition reachGoal variant with Goal ID field', () => {
@@ -356,7 +356,7 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Goal ID')).toBeDefined();
+    expect(screen.getByText('Goal ID').textContent).toBe('Goal ID');
   });
 
   it('renders DialogueTrigger section with interact key when requireInteract is true', () => {
@@ -366,8 +366,8 @@ describe('GameComponentInspector', () => {
       ],
     });
     render(<GameComponentInspector />);
-    expect(screen.getByText('Dialogue Trigger')).toBeDefined();
-    expect(screen.getByText('Key')).toBeDefined();
+    expect(screen.getByText('Dialogue Trigger').textContent).toBe('Dialogue Trigger');
+    expect(screen.getByText('Key').textContent).toBe('Key');
   });
 
   // ── Update component ──────────────────────────────────────────────────
@@ -431,7 +431,7 @@ describe('GameComponentInspector', () => {
     const trashBtn = Array.from(removeButtons).find((b) =>
       b.className.includes('hover:text-red-400') && b.closest('.rounded.border')
     );
-    expect(trashBtn).toBeDefined();
+    expect(trashBtn).not.toBeNull();
     fireEvent.click(trashBtn!);
     expect(mockRemoveGameComponent).toHaveBeenCalledWith('ent-1', 'health');
   });
@@ -447,7 +447,7 @@ describe('GameComponentInspector', () => {
     render(<GameComponentInspector />);
 
     // Auto-Save checkbox should be visible
-    expect(screen.getByText('Auto-Save')).toBeDefined();
+    expect(screen.getByText('Auto-Save').textContent).toBe('Auto-Save');
 
     // Click the section toggle button
     const toggleBtn = screen.getByText('Checkpoint');
@@ -458,7 +458,7 @@ describe('GameComponentInspector', () => {
 
     // Click again to expand
     fireEvent.click(toggleBtn);
-    expect(screen.getByText('Auto-Save')).toBeDefined();
+    expect(screen.getByText('Auto-Save').textContent).toBe('Auto-Save');
   });
 
   // ── Multiple components ───────────────────────────────────────────────
@@ -473,8 +473,8 @@ describe('GameComponentInspector', () => {
     });
     render(<GameComponentInspector />);
 
-    expect(screen.getByText('Character Controller')).toBeDefined();
-    expect(screen.getByText('Health')).toBeDefined();
-    expect(screen.getByText('Collectible')).toBeDefined();
+    expect(screen.getByText('Character Controller').textContent).toBe('Character Controller');
+    expect(screen.getByText('Health').textContent).toBe('Health');
+    expect(screen.getByText('Collectible').textContent).toBe('Collectible');
   });
 });
