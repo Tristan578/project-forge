@@ -118,7 +118,6 @@ export const COMPLEXITY_FEATURES: Record<ComplexityLevel, ComplexityFeatureSet> 
       'asset-panel',
       'script-editor',
       'shader-editor',
-      'performance-profiler',
     ],
   },
 };
