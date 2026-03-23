@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { generateManifest, generateServiceWorker, generateInstallPrompt, generatePlaceholderIcons } from './pwaGenerator';
 
 describe('pwaGenerator', () => {
