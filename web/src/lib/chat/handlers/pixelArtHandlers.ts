@@ -117,11 +117,11 @@ export const handleQuantizeSpriteColors: ToolHandler = async (args): Promise<Exe
   const p = parseArgs(quantizeSchema, args);
   if (p.error) return p.error;
 
-  const { colorCount, dithering, ditheringIntensity } = p.data;
-
+  // Color quantization pipeline is not yet implemented (PF-838).
+  // Return 501 so callers know no work was done and no tokens should be charged.
   return {
-    success: true,
-    message: `Colors quantized to ${colorCount} with ${dithering} dithering (intensity: ${ditheringIntensity})`,
+    success: false,
+    error: 'quantize_sprite_colors is not yet implemented',
   };
 };
 
