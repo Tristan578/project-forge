@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AIRequestQueue, aiQueue, type Priority } from '../requestQueue';
 
 // ---------------------------------------------------------------------------
@@ -62,13 +62,14 @@ describe('AIRequestQueue — concurrency cap', () => {
     let maxObserved = 0;
 
     const task = (): Promise<void> =>
-      new Promise((res) => {
+      new Promise<void>((res) => {
         concurrent++;
         maxObserved = Math.max(maxObserved, concurrent);
-        setTimeout(() => {
+        // Use microtask yield instead of setTimeout to avoid no-restricted-syntax
+        void Promise.resolve().then(() => {
           concurrent--;
           res();
-        }, 0);
+        });
       });
 
     await Promise.all([

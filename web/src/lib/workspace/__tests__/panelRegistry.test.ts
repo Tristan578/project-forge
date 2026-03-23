@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { PANEL_DEFINITIONS, UNCLOSABLE_PANELS } from '../panelRegistry';
+import {
+  PANEL_DEFINITIONS,
+  UNCLOSABLE_PANELS,
+  AI_PANELS_BY_CATEGORY,
+  type AIPanelCategory,
+} from '../panelRegistry';
 
 describe('PANEL_DEFINITIONS', () => {
   it('should have consistent id and key', () => {
@@ -68,10 +73,19 @@ describe('PANEL_DEFINITIONS', () => {
   });
 
   it('every entry has only valid PanelDefinition fields (no unexpected keys)', () => {
-    const validKeys = new Set(['id', 'title', 'component', 'minWidth', 'minHeight', 'unclosable', 'renderer']);
+    const validKeys = new Set(['id', 'title', 'component', 'minWidth', 'minHeight', 'unclosable', 'renderer', 'category']);
     for (const [key, def] of Object.entries(PANEL_DEFINITIONS)) {
       for (const field of Object.keys(def)) {
         expect(validKeys.has(field), `Panel "${key}" has unexpected field "${field}" — possible nesting bug`).toBe(true);
+      }
+    }
+  });
+
+  it('category field, when present, uses a valid AIPanelCategory value', () => {
+    const validCategories = new Set<AIPanelCategory>(['creation', 'polish', 'intelligence', 'tools']);
+    for (const [key, def] of Object.entries(PANEL_DEFINITIONS)) {
+      if (def.category !== undefined) {
+        expect(validCategories.has(def.category), `Panel "${key}" has invalid category "${def.category}"`).toBe(true);
       }
     }
   });
@@ -84,6 +98,75 @@ describe('PANEL_DEFINITIONS', () => {
 
   it('has at least 10 panels (sanity — detect accidental deletion)', () => {
     expect(Object.keys(PANEL_DEFINITIONS).length).toBeGreaterThanOrEqual(10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AI_PANELS_BY_CATEGORY
+// ---------------------------------------------------------------------------
+
+describe('AI_PANELS_BY_CATEGORY', () => {
+  it('contains all four categories', () => {
+    expect(Object.keys(AI_PANELS_BY_CATEGORY).sort()).toEqual(
+      ['creation', 'intelligence', 'polish', 'tools'],
+    );
+  });
+
+  it('every panel in the category lists has the matching category field', () => {
+    for (const [cat, panels] of Object.entries(AI_PANELS_BY_CATEGORY) as [AIPanelCategory, typeof AI_PANELS_BY_CATEGORY[AIPanelCategory]][]) {
+      for (const panel of panels) {
+        expect(panel.category, `${panel.id} should have category ${cat}`).toBe(cat);
+      }
+    }
+  });
+
+  it('contains known AI panel IDs in correct categories', () => {
+    const creationIds = AI_PANELS_BY_CATEGORY.creation.map((p) => p.id);
+    expect(creationIds).toContain('behavior-tree');
+    expect(creationIds).toContain('level-generator');
+    expect(creationIds).toContain('narrative');
+    expect(creationIds).toContain('auto-rigging');
+    expect(creationIds).toContain('procedural-anim');
+
+    const polishIds = AI_PANELS_BY_CATEGORY.polish.map((p) => p.id);
+    expect(polishIds).toContain('art-style');
+    expect(polishIds).toContain('tutorial');
+    expect(polishIds).toContain('accessibility');
+    expect(polishIds).toContain('save-system');
+    expect(polishIds).toContain('texture-painter');
+
+    const intelligenceIds = AI_PANELS_BY_CATEGORY.intelligence.map((p) => p.id);
+    expect(intelligenceIds).toContain('review');
+    expect(intelligenceIds).toContain('auto-iteration');
+    expect(intelligenceIds).toContain('game-analytics');
+    expect(intelligenceIds).toContain('playtest');
+    expect(intelligenceIds).toContain('difficulty');
+    expect(intelligenceIds).toContain('pacing-analyzer');
+    expect(intelligenceIds).toContain('physics-feel');
+
+    const toolsIds = AI_PANELS_BY_CATEGORY.tools.map((p) => p.id);
+    expect(toolsIds).toContain('idea-generator');
+    expect(toolsIds).toContain('design-teacher');
+    expect(toolsIds).toContain('world-builder');
+    expect(toolsIds).toContain('economy');
+    expect(toolsIds).toContain('quest-generator');
+  });
+
+  it('non-AI panels are not included in any category list', () => {
+    const nonAIPanelIds = ['scene-viewport', 'inspector', 'scene-hierarchy', 'script-editor', 'asset-browser'];
+    for (const panels of Object.values(AI_PANELS_BY_CATEGORY)) {
+      for (const panelId of nonAIPanelIds) {
+        expect(panels.map((p) => p.id)).not.toContain(panelId);
+      }
+    }
+  });
+
+  it('each panel appears in exactly one category', () => {
+    const allCategoryPanelIds = Object.values(AI_PANELS_BY_CATEGORY).flatMap((panels) =>
+      panels.map((p) => p.id),
+    );
+    const duplicates = allCategoryPanelIds.filter((id, i) => allCategoryPanelIds.indexOf(id) !== i);
+    expect(duplicates).toEqual([]);
   });
 });
 

@@ -138,7 +138,7 @@ export async function streamAI(
   options?: AIClientOptions,
   callbacks?: StreamCallbacks,
 ): Promise<string> {
-  const { model = 'claude-sonnet-4-5', systemOverride, sceneContext = '', thinking = false, signal } = options ?? {};
+  const { model = 'claude-sonnet-4-5', systemOverride, sceneContext = '', thinking = false, signal: _signal } = options ?? {};
 
   try {
     return await streamChat({
