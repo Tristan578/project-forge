@@ -450,10 +450,18 @@ export function EditorLayout() {
         return;
       }
 
-      // ? key opens cheat sheet overlay
+      // ? key opens cheat sheet overlay — but not when another dialog is already open
       if (e.key === '?') {
         e.preventDefault();
-        setCheatSheetOpen((prev) => !prev);
+        setCheatSheetOpen((prev) => {
+          // If already open, always allow closing
+          if (prev) return false;
+          // If a modal dialog is open, don't stack the cheat sheet on top.
+          // Uses aria-modal to distinguish true modals from drawers/sheets.
+          const hasOpenModal = document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+          if (hasOpenModal) return false;
+          return true;
+        });
       }
     },
     [toggleChatOverlay]

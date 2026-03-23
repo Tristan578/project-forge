@@ -285,6 +285,9 @@ describe('EditorLayout', () => {
   it('? key toggles cheat sheet', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
+    // Ensure no modal dialogs are open (handler checks [role="dialog"][aria-modal="true"])
+    const existingModals = document.querySelectorAll('[role="dialog"][aria-modal="true"]');
+    existingModals.forEach((d) => d.remove());
     act(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
     });
