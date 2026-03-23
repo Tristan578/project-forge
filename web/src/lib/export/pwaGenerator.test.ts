@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { generateManifest, generateServiceWorker, generateInstallPrompt, generatePlaceholderIcons } from './pwaGenerator';
 
 describe('pwaGenerator', () => {
@@ -329,6 +329,331 @@ describe('pwaGenerator', () => {
 
       await generatePlaceholderIcons('Go');
       expect(mockCtx.fillText).toHaveBeenCalledWith('GO', 96, 96);
+    });
+
+    it('uses full uppercase title for 3-character titles (boundary: length <= 3)', async () => {
+      const mockCtx = {
+        fillRect: vi.fn(),
+        fillText: vi.fn(),
+        createLinearGradient: vi.fn(() => ({
+          addColorStop: vi.fn(),
+        })),
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+      };
+
+      global.document = {
+        createElement: vi.fn(() => ({
+          width: 192,
+          height: 192,
+          getContext: vi.fn(() => mockCtx),
+          toDataURL: vi.fn(() => 'data:image/png;base64,test'),
+        })),
+      } as unknown as Document;
+
+      await generatePlaceholderIcons('Ace');
+      expect(mockCtx.fillText).toHaveBeenCalledWith('ACE', 96, 96);
+    });
+
+    it('uses 2-char initials for 4-character titles (boundary: length > 3)', async () => {
+      const mockCtx = {
+        fillRect: vi.fn(),
+        fillText: vi.fn(),
+        createLinearGradient: vi.fn(() => ({
+          addColorStop: vi.fn(),
+        })),
+        fillStyle: '',
+        font: '',
+        textAlign: '',
+        textBaseline: '',
+      };
+
+      global.document = {
+        createElement: vi.fn(() => ({
+          width: 192,
+          height: 192,
+          getContext: vi.fn(() => mockCtx),
+          toDataURL: vi.fn(() => 'data:image/png;base64,test'),
+        })),
+      } as unknown as Document;
+
+      await generatePlaceholderIcons('Edge');
+      expect(mockCtx.fillText).toHaveBeenCalledWith('ED', 96, 96);
+    });
+
+    it('still returns icon data URLs when ctx192 is null (getContext returns null)', async () => {
+      let callCount = 0;
+      global.document = {
+        createElement: vi.fn(() => {
+          callCount++;
+          return {
+            width: 0,
+            height: 0,
+            // First canvas returns null context, second returns a valid one
+            getContext: vi.fn(() => (callCount === 1 ? null : {
+              fillRect: vi.fn(),
+              fillText: vi.fn(),
+              createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+              fillStyle: '',
+              font: '',
+              textAlign: '',
+              textBaseline: '',
+            })),
+            toDataURL: vi.fn(() => 'data:image/png;base64,test'),
+          };
+        }),
+      } as unknown as Document;
+
+      const icons = await generatePlaceholderIcons('My Game');
+      expect(icons.icon192).toContain('data:image/png;base64');
+      expect(icons.icon512).toContain('data:image/png;base64');
+    });
+
+    it('still returns icon data URLs when ctx512 is null (getContext returns null)', async () => {
+      let callCount = 0;
+      global.document = {
+        createElement: vi.fn(() => {
+          callCount++;
+          return {
+            width: 0,
+            height: 0,
+            // First canvas (192) returns a valid context, second (512) returns null
+            getContext: vi.fn(() => (callCount === 2 ? null : {
+              fillRect: vi.fn(),
+              fillText: vi.fn(),
+              createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+              fillStyle: '',
+              font: '',
+              textAlign: '',
+              textBaseline: '',
+            })),
+            toDataURL: vi.fn(() => 'data:image/png;base64,test'),
+          };
+        }),
+      } as unknown as Document;
+
+      const icons = await generatePlaceholderIcons('My Game');
+      expect(icons.icon192).toContain('data:image/png;base64');
+      expect(icons.icon512).toContain('data:image/png;base64');
+    });
+
+    it('still returns icon data URLs when both contexts are null', async () => {
+      global.document = {
+        createElement: vi.fn(() => ({
+          width: 0,
+          height: 0,
+          getContext: vi.fn(() => null),
+          toDataURL: vi.fn(() => 'data:image/png;base64,empty'),
+        })),
+      } as unknown as Document;
+
+      const icons = await generatePlaceholderIcons('My Game');
+      expect(icons.icon192).toContain('data:image/png;base64');
+      expect(icons.icon512).toContain('data:image/png;base64');
+    });
+
+    it('draws icons at the correct sizes (192 and 512)', async () => {
+      const canvasSizes: number[] = [];
+      global.document = {
+        createElement: vi.fn(() => {
+          const canvas = {
+            width: 0 as number,
+            height: 0 as number,
+            getContext: vi.fn(() => ({
+              fillRect: vi.fn(),
+              fillText: vi.fn(),
+              createLinearGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+              fillStyle: '',
+              font: '',
+              textAlign: '',
+              textBaseline: '',
+            })),
+            toDataURL: vi.fn(() => 'data:image/png;base64,test'),
+          };
+          // Track the size assignment via a setter
+          Object.defineProperty(canvas, 'width', {
+            get() { return this._width ?? 0; },
+            set(v: number) {
+              this._width = v;
+              canvasSizes.push(v);
+            },
+          });
+          return canvas;
+        }),
+      } as unknown as Document;
+
+      await generatePlaceholderIcons('Game');
+      expect(canvasSizes).toContain(192);
+      expect(canvasSizes).toContain(512);
+    });
+  });
+
+  describe('generateManifest edge cases', () => {
+    it('includes scope field set to "."', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: 'My Game',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.scope).toBe('.');
+    });
+
+    it('sets start_url to "."', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: 'My Game',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.start_url).toBe('.');
+    });
+
+    it('sets icon purpose to "any maskable" for both icons', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: 'My Game',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.icons[0].purpose).toBe('any maskable');
+      expect(parsed.icons[1].purpose).toBe('any maskable');
+    });
+
+    it('sets icon MIME types to image/png', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: 'My Game',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.icons[0].type).toBe('image/png');
+      expect(parsed.icons[1].type).toBe('image/png');
+    });
+
+    it('produces valid JSON output', () => {
+      const manifest = generateManifest({
+        title: 'My Game',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      });
+      expect(() => JSON.parse(manifest)).not.toThrow();
+    });
+
+    it('truncates short_name at exactly 12 characters when title is exactly 12 characters', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: '123456789012', // exactly 12 chars
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.short_name).toBe('123456789012');
+      expect(parsed.short_name.length).toBe(12);
+    });
+
+    it('truncates short_name when title is longer than 12 characters', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: '1234567890123', // 13 chars
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.short_name).toBe('123456789012');
+      expect(parsed.short_name.length).toBe(12);
+    });
+
+    it('preserves explicit shortName even if longer than 12 characters', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: 'My Game',
+        shortName: 'This Is A Long Short Name',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.short_name).toBe('This Is A Long Short Name');
+    });
+
+    it('handles title with special characters in description default', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: 'Foo & Bar <Game>',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.description).toBe('Foo & Bar <Game> - Created with SpawnForge');
+    });
+
+    it('sets display to fullscreen', () => {
+      const parsed = JSON.parse(generateManifest({
+        title: 'My Game',
+        backgroundColor: '#000000',
+        themeColor: '#ffffff',
+      }));
+      expect(parsed.display).toBe('fullscreen');
+    });
+  });
+
+  describe('generateServiceWorker structural integrity', () => {
+    it('returns a non-empty string', () => {
+      const sw = generateServiceWorker();
+      expect(typeof sw).toBe('string');
+      expect(sw.length).toBeGreaterThan(0);
+    });
+
+    it('includes icon files in the cache list', () => {
+      const sw = generateServiceWorker();
+      expect(sw).toContain('icon-192.png');
+      expect(sw).toContain('icon-512.png');
+    });
+
+    it('cache name is forge-game-v1', () => {
+      const sw = generateServiceWorker();
+      expect(sw).toContain("'forge-game-v1'");
+    });
+
+    it('includes offline fallback response with 503 status', () => {
+      const sw = generateServiceWorker();
+      expect(sw).toContain('503');
+      expect(sw).toContain('Service Unavailable');
+    });
+
+    it('includes fetch request clone step', () => {
+      const sw = generateServiceWorker();
+      expect(sw).toContain('event.request.clone()');
+    });
+
+    it('includes cache-first strategy comment', () => {
+      const sw = generateServiceWorker();
+      expect(sw).toContain('Cache-first');
+    });
+  });
+
+  describe('generateInstallPrompt structural integrity', () => {
+    it('returns a non-empty string', () => {
+      const html = generateInstallPrompt();
+      expect(typeof html).toBe('string');
+      expect(html.length).toBeGreaterThan(0);
+    });
+
+    it('includes hover style for install button', () => {
+      const html = generateInstallPrompt();
+      expect(html).toContain('#pwa-install-button:hover');
+    });
+
+    it('includes indigo brand color for install button', () => {
+      const html = generateInstallPrompt();
+      expect(html).toContain('#6366f1');
+    });
+
+    it('includes script tag for install logic', () => {
+      const html = generateInstallPrompt();
+      expect(html).toContain('<script>');
+      expect(html).toContain('</script>');
+    });
+
+    it('includes userChoice outcome check', () => {
+      const html = generateInstallPrompt();
+      expect(html).toContain('userChoice');
+      expect(html).toContain('outcome');
+    });
+
+    it('clears deferred prompt after use', () => {
+      const html = generateInstallPrompt();
+      expect(html).toContain('deferredPrompt = null');
     });
   });
 });
