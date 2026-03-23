@@ -117,6 +117,9 @@ const VoiceProfilePanel = lazy(() =>
 const ShaderEditorPanel = lazy(() =>
   import('./ShaderEditorPanel').then((m) => ({ default: m.ShaderEditorPanel }))
 );
+const VoiceProfilePanel = lazy(() =>
+  import('./VoiceProfilePanel').then((m) => ({ default: m.VoiceProfilePanel }))
+);
 
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useUserStore } from '@/stores/userStore';
@@ -295,10 +298,8 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'quest-generator': withTierGate('quest-generator', QuestGeneratorPanel),
   'pacing-analyzer': withTierGate('pacing-analyzer', PacingAnalyzerPanel),
   'procedural-anim': withTierGate('procedural-anim', ProceduralAnimPanel),
-  // Dialogue/voice tools — no tier restriction
-  'voice-profile': withSuspense(VoiceProfilePanel),
-  // Shader graph editor — no tier restriction, always-rendered for canvas continuity
-  'shader-editor': withSuspense(ShaderEditorPanel),
+  'gdd-generator': withTierGate('gdd-generator', GDDPanelComponent),
+  'voice-profile': withTierGate('voice-profile', VoiceProfilePanel),
   // AI panels — tier-gated (pro only)
   'auto-iteration': withTierGate('auto-iteration', AutoIterationPanel),
   playtest: withTierGate('playtest', PlaytestPanel),

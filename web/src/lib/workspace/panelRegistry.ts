@@ -341,7 +341,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     id: 'voice-profile',
     title: 'Voice Profiles',
     component: 'voice-profile',
-    minWidth: 260,
+    minWidth: 240,
     minHeight: 200,
   },
   'shader-editor': {
