@@ -11,27 +11,21 @@ vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
   rateLimitResponse: vi.fn(),
 }));
-vi.mock('@/lib/keys/resolver', () => ({
-  resolveApiKey: vi.fn(),
-  ApiKeyError: class ApiKeyError extends Error {
-    code: string;
-    constructor(code: string, message: string) {
-      super(message);
-      this.code = code;
-      this.name = 'ApiKeyError';
-    }
-  },
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn(),
+}));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
 }));
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { resolveApiKey } from '@/lib/keys/resolver';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { NextResponse } from 'next/server';
 
 const mockAuth = authenticateRequest as ReturnType<typeof vi.fn>;
-const mockRateLimit = rateLimit as ReturnType<typeof vi.fn>;
 const mockRateLimitResponse = rateLimitResponse as ReturnType<typeof vi.fn>;
-const mockResolveKey = resolveApiKey as ReturnType<typeof vi.fn>;
+const mockDistributedRateLimit = distributedRateLimit as ReturnType<typeof vi.fn>;
 
 function makeRequest(body: Record<string, unknown>): NextRequest {
   return new NextRequest('http://localhost:3000/api/generate/pixel-art', {
@@ -58,11 +52,10 @@ describe('POST /api/generate/pixel-art', () => {
       ok: true,
       ctx: { user: { id: 'user-123', tier: 'pro' }, clerkId: 'clerk-123' },
     });
-    mockRateLimit.mockReturnValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
+    mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
     mockRateLimitResponse.mockReturnValue(
       NextResponse.json({ error: 'Too many requests' }, { status: 429 })
     );
-    mockResolveKey.mockResolvedValue({ type: 'byok', key: 'sk-test-key', metered: false });
   });
 
   it('should return 401 when unauthenticated', async () => {
@@ -75,63 +68,27 @@ describe('POST /api/generate/pixel-art', () => {
   });
 
   it('should return 429 when rate limited', async () => {
-    mockRateLimit.mockReturnValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
+    mockDistributedRateLimit.mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 300000 });
     const res = await POST(makeRequest(validBody));
     expect(res.status).toBe(429);
   });
 
-  it('should return 400 for short prompt', async () => {
-    const res = await POST(makeRequest({ ...validBody, prompt: 'ab' }));
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toContain('3 characters');
-  });
-
-  it('should return 400 for invalid size', async () => {
-    const res = await POST(makeRequest({ ...validBody, targetSize: 50 }));
-    expect(res.status).toBe(400);
-  });
-
-  it('should return 400 for invalid palette', async () => {
-    const res = await POST(makeRequest({ ...validBody, palette: 'invalid' }));
-    expect(res.status).toBe(400);
-  });
-
-  it('should return 400 for custom palette without colors', async () => {
-    const res = await POST(makeRequest({ ...validBody, palette: 'custom' }));
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toContain('Custom palette');
-  });
-
-  it('should return 400 for invalid dithering intensity', async () => {
-    const res = await POST(makeRequest({ ...validBody, ditheringIntensity: 2 }));
-    expect(res.status).toBe(400);
-  });
-
-  it('should return 402 when no API key', async () => {
-    const { ApiKeyError: MockApiKeyError } = await import('@/lib/keys/resolver');
-    mockResolveKey.mockRejectedValue(new MockApiKeyError('NO_KEY_CONFIGURED', 'No API key configured for replicate'));
+  it('should return 501 — pixel art generation is not yet available', async () => {
     const res = await POST(makeRequest(validBody));
-    expect(res.status).toBe(402);
+    expect(res.status).toBe(501);
     const data = await res.json();
-    expect(data.error).toContain('API key');
+    expect(data.error).toBeTruthy();
   });
 
-  it('should return 201 with valid request', async () => {
+  it('should return 501 regardless of request body contents', async () => {
+    const res = await POST(makeRequest({ prompt: 'ab', targetSize: 50 }));
+    expect(res.status).toBe(501);
+  });
+
+  it('should not charge tokens before returning 501', async () => {
+    // The route returns 501 immediately after auth/rate-limit — resolveApiKey
+    // is no longer called, so users are never charged for a stub endpoint.
     const res = await POST(makeRequest(validBody));
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.status).toBe('pending');
-    expect(data.provider).toBe('replicate');
-    expect(data.tokenCost).toBe(10);
-  });
-
-  it('should use openai provider when specified', async () => {
-    const res = await POST(makeRequest({ ...validBody, provider: 'openai' }));
-    expect(res.status).toBe(201);
-    const data = await res.json();
-    expect(data.provider).toBe('openai');
-    expect(data.tokenCost).toBe(20);
+    expect(res.status).toBe(501);
   });
 });

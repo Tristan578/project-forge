@@ -2,13 +2,17 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 
 vi.mock('@/lib/auth/api-auth');
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 59, resetAt: Date.now() + 60000 }),
+  rateLimitResponse: vi.fn().mockReturnValue(new NextResponse('Too many requests', { status: 429 })),
+}));
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
   const mod = await importOriginal<typeof import('@/lib/keys/resolver')>();
   return { ...mod, resolveApiKey: vi.fn() };
@@ -18,12 +22,15 @@ vi.mock('@/lib/generate/meshyClient', () => ({
     getTaskStatus: vi.fn(),
   })),
 }));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
 
-function makeRequest(jobId?: string) {
+function makeRequest(jobId?: string): NextRequest {
   const url = jobId
     ? `http://test/api/generate/model/status?jobId=${jobId}`
     : 'http://test/api/generate/model/status';
-  return new Request(url) as any;
+  return new NextRequest(url);
 }
 
 describe('GET /api/generate/model/status', () => {
