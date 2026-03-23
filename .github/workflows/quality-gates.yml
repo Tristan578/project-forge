@@ -24,9 +24,9 @@ on:
         type: boolean
         default: true
       can-commit-ratchet:
-        description: 'Whether the ratchet job can commit+push (only true from CD with write perms)'
+        description: 'Whether the ratchet job can commit+push (only fires on main branch, requires write perms)'
         type: boolean
-        default: false
+        default: true
     outputs:
       lint-result:
         description: 'Outcome of the lint job'

@@ -77,6 +77,10 @@ jobs:
       engine-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-engine) }}
       mcp-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-mcp) }}
       ci-changed: ${{ fromJSON(needs.ci-gate.outputs.needs-ci) }}
+      # PRs never run on main — the ratchet commit step is guarded by
+      # github.ref == refs/heads/main so it is a no-op here, but false
+      # makes the intent explicit.
+      can-commit-ratchet: false
 
   # ---- CI-only checks ----
 
