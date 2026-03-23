@@ -823,29 +823,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (previewTools.length === 0) return;
 
     const { executeToolCall } = await import('../lib/chat/executor');
+    const { useEditorStore } = await import('./editorStore');
 
+    type ExecutionResult = Awaited<ReturnType<typeof executeToolCall>>;
+    const results = new Map<string, ExecutionResult>();
     for (const tc of previewTools) {
-      const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
-      const result = await executeToolCall(tc.name, tc.input, currentEditorState);
-
-      const msgs = get().messages.map((msg) => {
-        if (msg.id !== messageId) return msg;
-        return {
-          ...msg,
-          toolCalls: (msg.toolCalls || []).map((t) =>
-            t.id === tc.id
-              ? {
-                  ...t,
-                  status: result.success ? 'success' as const : 'error' as const,
-                  result: result.result,
-                  error: result.error,
-                }
-              : t
-          ),
-        };
-      });
-      set({ messages: msgs });
+      const editorState = useEditorStore.getState();
+      results.set(tc.id, await executeToolCall(tc.name, tc.input, editorState));
     }
+
+    // Single set() with all results applied at once
+    const msgs = get().messages.map((msg) => {
+      if (msg.id !== messageId) return msg;
+      return {
+        ...msg,
+        toolCalls: (msg.toolCalls || []).map((t) => {
+          const r = results.get(t.id);
+          return r
+            ? {
+                ...t,
+                status: r.success ? 'success' as const : 'error' as const,
+                result: r.result,
+                error: r.error,
+              }
+            : t;
+        }),
+      };
+    });
+    set({ messages: msgs });
   },
 
   rejectToolCalls: (messageId: string) => {
