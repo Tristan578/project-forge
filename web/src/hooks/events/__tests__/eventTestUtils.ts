@@ -88,6 +88,15 @@ export function createMockActions() {
     setCamera2dData: vi.fn(),
     removeTilemapData: vi.fn(),
     setTileset: vi.fn(),
+    // SceneLight events
+    recomputeLightState: vi.fn(),
+    onLightNodeAdded: vi.fn(),
+    onLightNodeRemoved: vi.fn(),
+    setSceneLightAmbient: vi.fn(),
+    // SceneGraph mutations
+    addNode: vi.fn(),
+    removeNode: vi.fn(),
+    updateNode: vi.fn(),
     // State properties used by animation tests
     primaryId: null as string | null,
     skeletons2d: {} as Record<string, unknown>,
