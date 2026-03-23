@@ -120,6 +120,9 @@ const ShaderEditorPanel = lazy(() =>
 const VoiceProfilePanel = lazy(() =>
   import('./VoiceProfilePanel').then((m) => ({ default: m.VoiceProfilePanel }))
 );
+const ShaderEditorPanel = lazy(() =>
+  import('./ShaderEditorPanel').then((m) => ({ default: m.ShaderEditorPanel }))
+);
 
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useUserStore } from '@/stores/userStore';
@@ -300,6 +303,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'procedural-anim': withTierGate('procedural-anim', ProceduralAnimPanel),
   'gdd-generator': withTierGate('gdd-generator', GDDPanelComponent),
   'voice-profile': withTierGate('voice-profile', VoiceProfilePanel),
+  'shader-editor': withSuspense(ShaderEditorPanel),
   // AI panels — tier-gated (pro only)
   'auto-iteration': withTierGate('auto-iteration', AutoIterationPanel),
   playtest: withTierGate('playtest', PlaytestPanel),
