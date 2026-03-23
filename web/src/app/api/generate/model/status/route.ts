@@ -10,8 +10,7 @@ export async function GET(request: NextRequest) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  // Rate limit: 60 status polls per minute per user (distributed, Upstash-backed)
-  const rl = await distributedRateLimit(`gen-model-status:${authResult.ctx.user.id}`, 60, 60);
+  const rl = await distributedRateLimit(`user:generate-model-status:${authResult.ctx.user.id}`, 60, 60);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Parse query params

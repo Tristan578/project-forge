@@ -4,16 +4,24 @@ vi.mock('server-only', () => ({}));
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockReadFileSync = vi.fn();
+const mockExistsSync = vi.fn();
 
 vi.mock('fs', () => ({
   readFileSync: mockReadFileSync,
-  default: { readFileSync: mockReadFileSync },
+  existsSync: mockExistsSync,
+  default: { readFileSync: mockReadFileSync, existsSync: mockExistsSync },
+}));
+
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
 }));
 
 describe('GET /api/openapi', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    // Default: file exists and returns valid content
+    mockExistsSync.mockReturnValue(true);
   });
 
   it('should return OpenAPI spec as JSON', async () => {
@@ -31,15 +39,15 @@ describe('GET /api/openapi', () => {
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
   });
 
-  it('should return 500 when spec file not found', async () => {
-    mockReadFileSync.mockImplementation(() => { throw new Error('ENOENT: no such file'); });
+  it('should return 404 when spec file does not exist', async () => {
+    mockExistsSync.mockReturnValue(false);
 
     const { GET } = await import('./route');
     const res = await GET(new NextRequest('http://localhost/test'));
     const body = await res.json();
 
-    expect(res.status).toBe(500);
-    expect(body.error).toContain('ENOENT');
+    expect(res.status).toBe(404);
+    expect(body.error).toBeTruthy();
   });
 
   it('should return 500 when spec file has invalid JSON', async () => {

@@ -1,3 +1,5 @@
+// Bridge state is JS-only (Aseprite, external tools). No engine event handler needed — updates come from UI components directly.
+
 /**
  * Bridge slice — tracks external tool connections and running operations.
  *
