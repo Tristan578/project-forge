@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { deleteUserAccount } from '@/lib/auth/user-service';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * POST /api/user/delete
@@ -19,7 +18,6 @@ export async function POST() {
     await deleteUserAccount(authResult.ctx.user.id);
     return NextResponse.json({ deleted: true });
   } catch (err) {
-    captureException(err, { route: '/api/user/delete' });
     console.error('Account deletion failed:', err);
     return NextResponse.json(
       { error: 'Failed to delete account' },

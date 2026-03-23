@@ -4,7 +4,6 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 /** DELETE /api/keys/api-key/:id — revoke an API key */
 export async function DELETE(
@@ -17,22 +16,17 @@ export async function DELETE(
   const rl = await rateLimit(`user:api-key-delete:${authResult.ctx.user.id}`, 10, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  try {
-    const { id } = await params;
-    const db = getDb();
+  const { id } = await params;
+  const db = getDb();
 
-    const deleted = await db
-      .delete(apiKeys)
-      .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, authResult.ctx.user.id)))
-      .returning({ id: apiKeys.id });
+  const deleted = await db
+    .delete(apiKeys)
+    .where(and(eq(apiKeys.id, id), eq(apiKeys.userId, authResult.ctx.user.id)))
+    .returning({ id: apiKeys.id });
 
-    if (deleted.length === 0) {
-      return NextResponse.json({ error: 'API key not found' }, { status: 404 });
-    }
-
-    return NextResponse.json({ success: true, revoked: id });
-  } catch (err) {
-    captureException(err, { route: '/api/keys/api-key/[id]', method: 'DELETE' });
-    return NextResponse.json({ error: 'Failed to revoke API key' }, { status: 500 });
+  if (deleted.length === 0) {
+    return NextResponse.json({ error: 'API key not found' }, { status: 404 });
   }
+
+  return NextResponse.json({ success: true, revoked: id });
 }

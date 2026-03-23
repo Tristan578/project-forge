@@ -4,7 +4,6 @@ import { getDb } from '@/lib/db/client';
 import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function PUT(request: NextRequest) {
   const authResult = await authenticateRequest();
@@ -14,37 +13,32 @@ export async function PUT(request: NextRequest) {
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(clerkId, 'admin-economics-config');
+  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-economics-config');
   if (limited) return limited;
 
-  try {
-    const body = await request.json();
-    const db = getDb();
+  const body = await request.json();
+  const db = getDb();
 
-    if (body.type === 'token_config') {
-      await db.update(tokenConfig)
-        .set({
-          tokenCost: body.tokenCost,
-          estimatedCostCents: body.estimatedCostCents,
-          active: body.active ? 1 : 0,
-          updatedAt: new Date(),
-        })
-        .where(eq(tokenConfig.id, body.id));
-    } else if (body.type === 'tier_config') {
-      await db.update(tierConfig)
-        .set({
-          monthlyTokens: body.monthlyTokens,
-          maxProjects: body.maxProjects,
-          maxPublished: body.maxPublished,
-          priceCentsMonthly: body.priceCentsMonthly,
-          updatedAt: new Date(),
-        })
-        .where(eq(tierConfig.id, body.id));
-    }
-
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    captureException(error, { route: '/api/admin/economics/config' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  if (body.type === 'token_config') {
+    await db.update(tokenConfig)
+      .set({
+        tokenCost: body.tokenCost,
+        estimatedCostCents: body.estimatedCostCents,
+        active: body.active ? 1 : 0,
+        updatedAt: new Date(),
+      })
+      .where(eq(tokenConfig.id, body.id));
+  } else if (body.type === 'tier_config') {
+    await db.update(tierConfig)
+      .set({
+        monthlyTokens: body.monthlyTokens,
+        maxProjects: body.maxProjects,
+        maxPublished: body.maxPublished,
+        priceCentsMonthly: body.priceCentsMonthly,
+        updatedAt: new Date(),
+      })
+      .where(eq(tierConfig.id, body.id));
   }
+
+  return NextResponse.json({ success: true });
 }

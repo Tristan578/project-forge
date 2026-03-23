@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getTokenBalance } from '@/lib/tokens/service';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET() {
   const authResult = await authenticateRequest();
@@ -12,11 +11,6 @@ export async function GET() {
   const rl = await rateLimit(`user:tokens-balance:${userId}`, 30, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  try {
-    const balance = await getTokenBalance(userId);
-    return NextResponse.json(balance);
-  } catch (error) {
-    captureException(error, { route: '/api/tokens/balance' });
-    return NextResponse.json({ error: 'Failed to fetch token balance' }, { status: 500 });
-  }
+  const balance = await getTokenBalance(userId);
+  return NextResponse.json(balance);
 }
