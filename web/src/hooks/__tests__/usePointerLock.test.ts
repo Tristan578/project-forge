@@ -114,7 +114,8 @@ describe('usePointerLock', () => {
   });
 
   describe('mouse movement handling', () => {
-    it('sends mouse_delta command when pointer is locked and mouse moves', () => {
+    it('sends mouse_delta command when pointer is locked and mouse moves', async () => {
+      vi.useFakeTimers();
       useEditorStore.setState({
         engineMode: 'play',
         activeGameCameraId: 'cam1',
@@ -138,10 +139,15 @@ describe('usePointerLock', () => {
       Object.defineProperty(moveEvent, 'movementY', { value: -5 });
       document.dispatchEvent(moveEvent);
 
+      // Dispatch is deferred via requestAnimationFrame — flush it
+      await vi.advanceTimersByTimeAsync(16);
+
       expect(mockHandleCommand).toHaveBeenCalledWith('mouse_delta', {
         dx: 10,
         dy: -5,
       });
+
+      vi.useRealTimers();
     });
 
     it('does not send command when pointer is not locked', () => {

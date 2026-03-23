@@ -219,7 +219,7 @@ describe('visualViewport listener', () => {
 
     const { result } = renderHook(() => useResponsiveLayout());
 
-    expect(mockVV.addEventListener).toHaveBeenCalledWith('resize', expect.any(Function));
+    expect(mockVV.addEventListener).toHaveBeenCalledWith('resize', expect.any(Function), { passive: true });
 
     mockVV.height = 300;
     act(() => { listeners['resize']?.forEach(h => h()); });
