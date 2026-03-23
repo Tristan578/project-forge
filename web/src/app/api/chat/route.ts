@@ -412,10 +412,12 @@ export async function POST(request: NextRequest) {
   }
   if (totalChars > MAX_INPUT_CHARS) {
     if (usageId) {
-      await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
+      await refundTokens(auth.ctx.user.id, usageId).catch((err: unknown) => {
+        captureException(err, { route: '/api/chat', phase: 'refund_413', usageId });
+      });
     }
     return Response.json(
-      { error: 'Conversation too long. Please start a new conversation or clear chat.' },
+      { error: 'Conversation too long. Please start a new conversation or clear older messages.' },
       { status: 413 }
     );
   }
@@ -486,7 +488,9 @@ export async function POST(request: NextRequest) {
       onError: async ({ error }) => {
         captureException(error, { route: '/api/chat', model, phase: 'mid-stream' });
         if (usageId) {
-          await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
+          await refundTokens(auth.ctx.user.id, usageId).catch((refundErr: unknown) => {
+            captureException(refundErr, { route: '/api/chat', phase: 'refund_mid_stream', usageId });
+          });
         }
       },
     });
@@ -497,7 +501,9 @@ export async function POST(request: NextRequest) {
     captureException(err, { route: '/api/chat', model });
 
     if (usageId) {
-      await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
+      await refundTokens(auth.ctx.user.id, usageId).catch((refundErr: unknown) => {
+        captureException(refundErr, { route: '/api/chat', phase: 'refund_sync_error', usageId });
+      });
     }
 
     const message = err instanceof Error ? err.message : 'AI API error';

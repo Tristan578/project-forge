@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { contentId, contentType, reason } = body;
 
-    if (!contentId || typeof contentId !== 'string') {
+    if (!contentId || typeof contentId !== 'string' || contentId.length > 100) {
       return NextResponse.json({ error: 'Missing or invalid contentId' }, { status: 400 });
     }
 
