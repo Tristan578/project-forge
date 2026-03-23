@@ -463,6 +463,19 @@ Measure baseline before Phase 1 and after Phase 5. Flag any regression as a bloc
 ### 5. Build a custom streaming adapter without AI SDK
 **Rejected**: Reinventing what the AI SDK already provides. The ecosystem benefits (telemetry, multi-provider, structured output) justify the dependency.
 
+## Error Handling
+
+| Error Condition | User Experience | Recovery Path |
+|-----------------|-----------------|---------------|
+| AI provider rate limit (HTTP 429) from gateway or direct Anthropic | Chat shows inline error message: "Rate limit reached. Please wait a moment." Streaming stops cleanly. | Existing circuit breaker in `registry.ts` trips after threshold; failover routes to next available backend. `USE_AI_SDK` feature flag allows instant rollback if AI SDK rate limit handling differs from current behavior. |
+| AI provider auth error (HTTP 401) — gateway OIDC token expired or API key invalid | Chat shows: "AI authentication failed. The team has been notified." Request does not retry automatically. | Sentry captures the auth error via `vercelAIIntegration()` span. Ops rotates the key or refreshes OIDC token. Existing `resolveBackend()` can fall back to a backup key if configured. |
+| Network disconnection mid-stream during `streamText` | AI SDK's `ReadableStream` reader receives `AbortError`. Chat shows: "Connection interrupted. Your message was not completed." Partial text is preserved in the message. | User can resend the message. `useChat().stop()` is called on unmount to clean up dangling stream. No orphaned server processes — `streamText` aborts on the server when the client disconnects. |
+| Token depletion detected before streaming completes | Route handler calls `resolveChatRoute()` which checks token balance before dispatching. Returns HTTP 402 with `{ error: 'insufficient_tokens' }`. Chat shows upgrade prompt. | `useChat` receives a non-2xx response and surfaces the error. `chatStore` handles `402` as a special case showing the token purchase dialog. No partial message is saved. |
+| Database connection failure in `resolveChatRoute()` (Neon timeout) | Route returns HTTP 503. Chat shows: "Couldn't reach the server. Please try again." | Neon connection pool is retried once (existing behavior in `db/index.ts`). If still failing, the 503 surfaces. Circuit breaker prevents cascading failures. Sentry alert fires on elevated 503 rate. |
+| WASM engine panic during tool execution (command dispatch fails) | Tool call result returned to AI SDK as `{ error: 'Engine command failed: <message>' }`. The model receives the error as a tool result and can attempt recovery or inform the user. | AI SDK's `addToolResult` path sends the error back to the model. The model typically responds with a diagnostic message or suggests an alternative command. No client crash — error is caught in the tool execution wrapper. |
+| `streamText` timeout (Vercel function maxDuration exceeded) | Vercel terminates the response with a 504. AI SDK surfaces this as a stream error. Chat shows: "Response timed out. Try a shorter request." | Set `maxDuration: 60` in the route config. Long-running agentic loops should use `maxSteps` to avoid single-request timeouts. Rollback option: revert to `@anthropic-ai/sdk` path via `USE_AI_SDK=false`. |
+| Tool schema validation failure (`inputSchema` Zod parse error) | AI SDK rejects the tool call before `execute` runs. The model receives a validation error as the tool result. | Model typically self-corrects by reformulating the tool call with valid parameters. Zod error message is forwarded as the tool result so the model can understand what went wrong. |
+
 ## Estimated Effort
 
 | Phase | Effort | Risk | Can Ship Independently |
