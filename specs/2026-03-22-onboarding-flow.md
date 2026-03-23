@@ -420,6 +420,19 @@ Rejected. Video tutorials have < 30% completion rates. Interactive onboarding (t
 
 Rejected for now. The onboardingStore already uses Zustand persist (localStorage), which survives across sessions on the same device. Server-side state adds complexity (API route, DB migration, auth dependency) for marginal benefit. Can be added later when cross-device sync is prioritized.
 
+## Error Handling
+
+| Error Condition | User Experience | Recovery Path |
+|-----------------|-----------------|---------------|
+| AI provider rate limit hit during onboarding AI path (HTTP 429) | Toast message: "AI is a bit busy right now — try again in a moment." Chat input remains enabled. | Retry button in toast; user can type manually while waiting. |
+| AI provider auth error (HTTP 401/403) during first AI generation | Toast: "AI isn't available for your account. Contact support." "Build with AI" card grays out. | Redirect to upgrade page if on starter tier; show support link otherwise. |
+| WASM engine fails to load (fetch error or WASM compile error) | Skeleton loading UI stays visible; after 10s timeout shows error banner: "Engine failed to load. Try refreshing the page." | Reload button in error banner; link to browser compatibility page. |
+| Network disconnection during template load in onboarding | Template gallery shows spinner until timeout (8s), then inline error: "Couldn't load templates. Check your connection." | Retry button reloads the template list; "Start Blank" option always available as fallback. |
+| Token depletion detected before first AI generation | OnboardingWizard shows "Build with AI" card with token-depleted badge instead of hiding it. | Clicking the card shows the token purchase/upgrade dialog instead of opening chat. |
+| Database connection failure when loading recent projects | Recent projects section in OnboardingWizard renders as empty with a subtle "Couldn't load recent projects" note. | No blocking — user can still proceed with any of the 4 onboarding paths. Recent projects are non-critical. |
+| `onboardingStore` persist hydration failure (corrupted localStorage) | `onboardingStore` falls back to initial state (fresh user). Wizard appears even for returning users. | User dismisses wizard; `onboardingCompleted: true` is re-written to localStorage on completion. Subsequent loads are correct. |
+| Analytics event dispatch failure (PostHog unavailable) | Silently swallowed — analytics is non-blocking. User experience is unaffected. | No recovery needed; funnel metrics will have a gap. Alert via PostHog health dashboard if persistent. |
+
 ## Implementation Order
 
 1. **Phase 1: OnboardingWizard** -- Create the unified wizard, wire up in EditorLayout, backward compatibility. Delete old components.
