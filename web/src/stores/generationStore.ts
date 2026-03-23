@@ -67,13 +67,12 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
     trackEvent(AnalyticsEvent.AI_GENERATION_STARTED, { type: job.type, provider: job.provider });
     trackAIAssetGenerated(job.type, job.provider);
 
-    // Persist to database (fire-and-forget).
-    // autoPlace/targetEntityId/materialSlot are stored in the parameters JSONB
-    // column so they survive page refresh and are restored in hydrateFromServer.
-    const parameters: Record<string, unknown> = {};
-    if (job.autoPlace !== undefined) parameters['autoPlace'] = job.autoPlace;
-    if (job.targetEntityId !== undefined) parameters['targetEntityId'] = job.targetEntityId;
-    if (job.materialSlot !== undefined) parameters['materialSlot'] = job.materialSlot;
+    // Persist to database (fire-and-forget)
+    // Include placement metadata in `parameters` so hydrateFromServer can restore them.
+    const jobParameters: Record<string, unknown> = {};
+    if (job.autoPlace !== undefined) jobParameters.autoPlace = job.autoPlace;
+    if (job.targetEntityId !== undefined) jobParameters.targetEntityId = job.targetEntityId;
+    if (job.materialSlot !== undefined) jobParameters.materialSlot = job.materialSlot;
 
     fetch('/api/jobs', {
       method: 'POST',
@@ -83,6 +82,7 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         provider: job.provider,
         type: job.type,
         prompt: job.prompt,
+        parameters: jobParameters,
         tokenCost: 0,
         tokenUsageId: job.usageId,
         entityId: job.entityId,
@@ -187,11 +187,12 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
       const hydratedJobs: Record<string, GenerationJob> = {};
       for (const sj of serverJobs) {
         const localId = `hydrated_${sj.id}`;
-        // Restore persisted placement fields from the parameters JSONB column
-        const params =
-          sj.parameters && typeof sj.parameters === 'object'
-            ? (sj.parameters as Record<string, unknown>)
-            : {};
+        // Restore placement metadata from the persisted parameters JSON
+        const params = (sj.parameters ?? {}) as Record<string, unknown>;
+        const autoPlace = typeof params.autoPlace === 'boolean' ? params.autoPlace : undefined;
+        const targetEntityId = typeof params.targetEntityId === 'string' ? params.targetEntityId : undefined;
+        const materialSlot = typeof params.materialSlot === 'string' ? params.materialSlot : undefined;
+
         hydratedJobs[localId] = {
           id: localId,
           jobId: sj.providerJobId,
@@ -204,11 +205,9 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           entityId: sj.entityId ?? undefined,
           usageId: sj.tokenUsageId ?? undefined,
           dbId: sj.id,
-          autoPlace: typeof params['autoPlace'] === 'boolean' ? params['autoPlace'] : undefined,
-          targetEntityId:
-            typeof params['targetEntityId'] === 'string' ? params['targetEntityId'] : undefined,
-          materialSlot:
-            typeof params['materialSlot'] === 'string' ? params['materialSlot'] : undefined,
+          autoPlace,
+          targetEntityId,
+          materialSlot,
         };
       }
 
