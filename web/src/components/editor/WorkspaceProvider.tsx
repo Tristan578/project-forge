@@ -108,6 +108,9 @@ const IdeaGeneratorPanel = lazy(() =>
 const QuestGeneratorPanel = lazy(() =>
   import('./QuestGeneratorPanel').then((m) => ({ default: m.QuestGeneratorPanel }))
 );
+const GDDPanel = lazy(() =>
+  import('./GDDPanel').then((m) => ({ default: m.GDDPanel }))
+);
 const PacingAnalyzerPanel = lazy(() =>
   import('./PacingAnalyzerPanel').then((m) => ({ default: m.PacingAnalyzerPanel }))
 );
@@ -293,6 +296,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'world-builder': withTierGate('world-builder', WorldBuilderPanel),
   'texture-painter': withTierGate('texture-painter', TexturePainterPanel),
   'quest-generator': withTierGate('quest-generator', QuestGeneratorPanel),
+  'gdd-generator': withTierGate('gdd-generator', GDDPanel),
   'pacing-analyzer': withTierGate('pacing-analyzer', PacingAnalyzerPanel),
   'procedural-anim': withTierGate('procedural-anim', ProceduralAnimPanel),
   // Dialogue/voice tools — no tier restriction
