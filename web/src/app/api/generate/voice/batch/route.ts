@@ -7,6 +7,7 @@ import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { refundTokens } from '@/lib/tokens/service';
 
 interface BatchItem {
   nodeId: string;
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = items.length * 5;
 
   let apiKey: string;
+  let usageId: string | undefined;
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
@@ -77,6 +79,7 @@ export async function POST(request: NextRequest) {
       { itemCount: items.length, speaker: items[0]?.speaker }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -111,6 +114,15 @@ export async function POST(request: NextRequest) {
         nodeId: item.nodeId,
         error: err instanceof Error ? err.message : 'Generation failed',
       });
+    }
+  }
+
+  // If every item failed, refund the tokens — the user got nothing for their spend.
+  if (results.length === 0 && usageId) {
+    try {
+      await refundTokens(authResult.ctx.user.id, usageId);
+    } catch (refundErr) {
+      captureException(refundErr, { route: '/api/generate/voice/batch', context: 'refund' });
     }
   }
 
