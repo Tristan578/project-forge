@@ -93,7 +93,7 @@ export function createMockActions() {
     onLightNodeAdded: vi.fn(),
     onLightNodeRemoved: vi.fn(),
     setSceneLightAmbient: vi.fn(),
-    // SceneGraph mutations
+    // SceneGraph mutations used by event handlers
     addNode: vi.fn(),
     removeNode: vi.fn(),
     updateNode: vi.fn(),
