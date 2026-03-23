@@ -58,51 +58,51 @@ describe('AnalyticsProvider', () => {
 
 describe('analyticsBeforeSend', () => {
   it('passes through a normal page event', () => {
-    const event = { url: '/editor' };
-    expect(analyticsBeforeSend(event)).toEqual({ url: '/editor' });
+    const event = { type: 'pageview' as const, url: '/editor' };
+    expect(analyticsBeforeSend(event)).toEqual({ type: 'pageview' as const, url: '/editor' });
   });
 
   it('filters out /dev exact path', () => {
-    expect(analyticsBeforeSend({ url: '/dev' })).toBeNull();
+    expect(analyticsBeforeSend({ type: 'pageview' as const, url: '/dev' })).toBeNull();
   });
 
   it('filters out /dev/ subpaths', () => {
-    expect(analyticsBeforeSend({ url: '/dev/sandbox' })).toBeNull();
-    expect(analyticsBeforeSend({ url: '/dev/another-path' })).toBeNull();
+    expect(analyticsBeforeSend({ type: 'pageview' as const, url: '/dev/sandbox' })).toBeNull();
+    expect(analyticsBeforeSend({ type: 'pageview' as const, url: '/dev/another-path' })).toBeNull();
   });
 
   it('filters out /admin routes', () => {
-    expect(analyticsBeforeSend({ url: '/admin/economics' })).toBeNull();
-    expect(analyticsBeforeSend({ url: '/admin' })).toBeNull();
+    expect(analyticsBeforeSend({ type: 'pageview' as const, url: '/admin/economics' })).toBeNull();
+    expect(analyticsBeforeSend({ type: 'pageview' as const, url: '/admin' })).toBeNull();
   });
 
   it('filters out /api/ routes', () => {
-    expect(analyticsBeforeSend({ url: '/api/chat' })).toBeNull();
-    expect(analyticsBeforeSend({ url: '/api/jobs' })).toBeNull();
+    expect(analyticsBeforeSend({ type: 'pageview' as const, url: '/api/chat' })).toBeNull();
+    expect(analyticsBeforeSend({ type: 'pageview' as const, url: '/api/jobs' })).toBeNull();
   });
 
   it('passes through /pricing page', () => {
-    const event = { url: '/pricing' };
+    const event = { type: 'pageview' as const, url: '/pricing' };
     expect(analyticsBeforeSend(event)).toEqual(event);
   });
 
   it('passes through /sign-up page', () => {
-    const event = { url: '/sign-up' };
+    const event = { type: 'pageview' as const, url: '/sign-up' };
     expect(analyticsBeforeSend(event)).toEqual(event);
   });
 
   it('passes through the marketing landing page root', () => {
-    const event = { url: '/' };
+    const event = { type: 'pageview' as const, url: '/' };
     expect(analyticsBeforeSend(event)).toEqual(event);
   });
 
   it('passes through /play/ routes (published games)', () => {
-    const event = { url: '/play/my-game-slug' };
+    const event = { type: 'pageview' as const, url: '/play/my-game-slug' };
     expect(analyticsBeforeSend(event)).toEqual(event);
   });
 
   it('returns the original event object reference (not a copy)', () => {
-    const event = { url: '/editor' };
+    const event = { type: 'pageview' as const, url: '/editor' };
     expect(analyticsBeforeSend(event)).toBe(event);
   });
 });
