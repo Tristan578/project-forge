@@ -2,9 +2,12 @@ vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { POST } from './route';
-import { syncUserFromClerk } from '@/lib/auth/user-service';
+import { syncUserFromClerk, getUserByClerkId, deleteUserAccount } from '@/lib/auth/user-service';
 
 vi.mock('@/lib/auth/user-service');
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
 
 const mockVerify = vi.fn();
 vi.mock('svix', () => ({
@@ -89,19 +92,77 @@ describe('POST /api/auth/webhook', () => {
     expect(syncUserFromClerk).toHaveBeenCalledWith({ id: 'clerk_123', email_addresses: [] });
   });
 
-  it('ignores other event types but returns 200', async () => {
+  // PF-840 regression: user.deleted must cascade-delete user data, not be ignored.
+  it('deletes user data on user.deleted event when user exists (PF-840)', async () => {
     mockVerify.mockReturnValue({
       type: 'user.deleted',
       data: { id: 'clerk_123' },
     });
+    vi.mocked(getUserByClerkId).mockResolvedValue({ id: 'internal-uuid', clerkId: 'clerk_123' } as never);
+    vi.mocked(deleteUserAccount).mockResolvedValue(undefined);
 
-    const req = new Request('http://localhost/api/auth/webhook', { 
-      method: 'POST', 
-      body: JSON.stringify({}) 
+    const req = new Request('http://localhost/api/auth/webhook', {
+      method: 'POST',
+      body: JSON.stringify({}),
     });
     const res = await POST(req);
 
     expect(res.status).toBe(200);
+    expect(getUserByClerkId).toHaveBeenCalledWith('clerk_123');
+    expect(deleteUserAccount).toHaveBeenCalledWith('internal-uuid');
     expect(syncUserFromClerk).not.toHaveBeenCalled();
+  });
+
+  it('returns 200 on user.deleted when user not found in DB (PF-840)', async () => {
+    mockVerify.mockReturnValue({
+      type: 'user.deleted',
+      data: { id: 'clerk_never_synced' },
+    });
+    vi.mocked(getUserByClerkId).mockResolvedValue(null);
+
+    const req = new Request('http://localhost/api/auth/webhook', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(200);
+    expect(getUserByClerkId).toHaveBeenCalledWith('clerk_never_synced');
+    expect(deleteUserAccount).not.toHaveBeenCalled();
+  });
+
+  it('captures exception in Sentry when deleteUserAccount throws (PF-840)', async () => {
+    const { captureException } = await import('@/lib/monitoring/sentry-server');
+    mockVerify.mockReturnValue({
+      type: 'user.deleted',
+      data: { id: 'clerk_123' },
+    });
+    vi.mocked(getUserByClerkId).mockResolvedValue({ id: 'internal-uuid', clerkId: 'clerk_123' } as never);
+    vi.mocked(deleteUserAccount).mockRejectedValue(new Error('DB failure'));
+
+    const req = new Request('http://localhost/api/auth/webhook', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(500);
+    expect(captureException).toHaveBeenCalled();
+  });
+
+  it('rejects user.deleted event with missing id field (PF-840)', async () => {
+    mockVerify.mockReturnValue({
+      type: 'user.deleted',
+      data: {},
+    });
+
+    const req = new Request('http://localhost/api/auth/webhook', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(500);
+    expect(deleteUserAccount).not.toHaveBeenCalled();
   });
 });

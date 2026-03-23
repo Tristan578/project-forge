@@ -1,12 +1,13 @@
 import { Webhook } from 'svix';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { syncUserFromClerk } from '@/lib/auth/user-service';
+import { syncUserFromClerk, getUserByClerkId, deleteUserAccount } from '@/lib/auth/user-service';
 import {
   enqueueRetry,
   isTransientError,
   processRetryQueue,
 } from '@/lib/auth/webhookRetry';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /** Process a verified webhook event. Extracted so it can be used by the retry queue. */
 async function handleWebhookEvent(
@@ -19,7 +20,24 @@ async function handleWebhookEvent(
       await syncUserFromClerk(data as Parameters<typeof syncUserFromClerk>[0]);
       break;
     }
-    // user.deleted could be handled to soft-delete
+    case 'user.deleted': {
+      const clerkId = data.id;
+      if (typeof clerkId !== 'string' || !clerkId) {
+        throw new Error('user.deleted event missing id field');
+      }
+      const user = await getUserByClerkId(clerkId);
+      if (!user) {
+        // User never synced to our DB — nothing to delete
+        break;
+      }
+      try {
+        await deleteUserAccount(user.id);
+      } catch (err) {
+        captureException(err, { context: 'user.deleted webhook', clerkId });
+        throw err;
+      }
+      break;
+    }
   }
 }
 
@@ -67,8 +85,9 @@ export async function POST(req: Request) {
       // Return 200 so Clerk doesn't retry its own delivery (we handle retries internally)
       return NextResponse.json({ received: true, queued: true });
     }
-    // Permanent error — log and return error status
+    // Permanent error — log, capture in Sentry, and return error status
     console.error('[Webhook] Permanent error processing event:', event.type, error);
+    captureException(error, { context: 'clerk webhook permanent error', eventType: event.type });
     return NextResponse.json({ error: 'Failed to process event' }, { status: 500 });
   }
 
