@@ -2106,7 +2106,7 @@
     },
     {
       "name": "create_script",
-      "description": "Create and attach a new TypeScript script to an entity. Accepts entityId (defaults to primary selection), source code (required), optional name label, enabled flag, and template hint. Use this when you want to add new scripted behaviour to an entity from scratch.",
+      "description": "Create and attach a new TypeScript script to an entity. Accepts entityId (defaults to primary selection), source code (required), optional enabled flag, and template hint.",
       "category": "scripting",
       "parameters": {
         "type": "object",
@@ -2118,10 +2118,6 @@
           "source": {
             "type": "string",
             "description": "TypeScript source code with optional onStart/onUpdate/onDestroy lifecycle functions"
-          },
-          "name": {
-            "type": "string",
-            "description": "Human-readable label for this script (for display purposes only)"
           },
           "enabled": {
             "type": "boolean",

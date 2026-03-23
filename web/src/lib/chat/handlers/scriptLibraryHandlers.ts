@@ -11,7 +11,6 @@ export const scriptLibraryHandlers: Record<string, ToolHandler> = {
     const p = parseArgs(z.object({
       entityId: zEntityId.optional(),
       source: z.string().min(1),
-      name: z.string().optional(),
       enabled: z.boolean().optional(),
       template: z.string().optional(),
     }), args);
@@ -19,7 +18,7 @@ export const scriptLibraryHandlers: Record<string, ToolHandler> = {
     const targetId = p.data.entityId ?? ctx.store.primaryId;
     if (!targetId) return { success: false, error: 'No entity selected and no entityId provided' };
     ctx.store.setScript(targetId, p.data.source, p.data.enabled ?? true, p.data.template);
-    return { success: true, result: { message: `Script created on ${targetId}${p.data.name ? ` ("${p.data.name}")` : ''}` } };
+    return { success: true, result: { message: `Script created on ${targetId}` } };
   },
 
   set_script: async (args, ctx) => {
