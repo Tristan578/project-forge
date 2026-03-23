@@ -177,7 +177,7 @@ describe('chatStore deep tests', () => {
   });
 
   describe('updateToolCall', () => {
-    it('updates a specific tool call in a message', () => {
+    it('updates a specific tool call in a message', async () => {
       const msg = makeAssistantMessage({ id: 'msg1' }, [
         { id: 'tc1', name: 'add_entity', status: 'pending' },
         { id: 'tc2', name: 'set_material', status: 'pending' },
@@ -189,6 +189,8 @@ describe('chatStore deep tests', () => {
         result: { entityId: '123' },
       });
 
+      await new Promise((r) => queueMicrotask(r));
+
       const updated = useChatStore.getState().messages[0];
       expect(updated.toolCalls![0].status).toBe('success');
       expect(updated.toolCalls![0].result).toEqual({ entityId: '123' });
@@ -196,26 +198,30 @@ describe('chatStore deep tests', () => {
       expect(updated.toolCalls![1].status).toBe('pending');
     });
 
-    it('does nothing for non-existent message ID', () => {
+    it('does nothing for non-existent message ID', async () => {
       const msg = makeAssistantMessage({ id: 'msg1' }, [{ id: 'tc1', status: 'pending' }]);
       useChatStore.setState({ messages: [msg] });
 
       useChatStore.getState().updateToolCall('nonexistent', 'tc1', { status: 'success' });
 
+      await new Promise((r) => queueMicrotask(r));
+
       // Original message unchanged
       expect(useChatStore.getState().messages[0].toolCalls![0].status).toBe('pending');
     });
 
-    it('does nothing for non-existent tool call ID', () => {
+    it('does nothing for non-existent tool call ID', async () => {
       const msg = makeAssistantMessage({ id: 'msg1' }, [{ id: 'tc1', status: 'pending' }]);
       useChatStore.setState({ messages: [msg] });
 
       useChatStore.getState().updateToolCall('msg1', 'nonexistent', { status: 'success' });
 
+      await new Promise((r) => queueMicrotask(r));
+
       expect(useChatStore.getState().messages[0].toolCalls![0].status).toBe('pending');
     });
 
-    it('can update error status with error message', () => {
+    it('can update error status with error message', async () => {
       const msg = makeAssistantMessage({ id: 'msg1' }, [{ id: 'tc1', status: 'pending' }]);
       useChatStore.setState({ messages: [msg] });
 
@@ -223,6 +229,8 @@ describe('chatStore deep tests', () => {
         status: 'error',
         error: 'Entity limit reached',
       });
+
+      await new Promise((r) => queueMicrotask(r));
 
       const tc = useChatStore.getState().messages[0].toolCalls![0];
       expect(tc.status).toBe('error');
@@ -303,7 +311,10 @@ describe('chatStore deep tests', () => {
   });
 
   describe('saveConversation / loadConversation', () => {
-    it('saves and loads conversation by project ID', () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('saves and loads conversation by project ID', async () => {
       const messages = [
         makeUserMessage('hello', { id: 'u1' }),
         makeAssistantMessage({ id: 'a1', content: 'Hi there!' }),
@@ -311,6 +322,7 @@ describe('chatStore deep tests', () => {
       useChatStore.setState({ messages });
 
       useChatStore.getState().saveConversation('proj-123');
+      await vi.runAllTimersAsync();
 
       // Clear state
       useChatStore.setState({ messages: [], error: 'old error' });
@@ -324,7 +336,7 @@ describe('chatStore deep tests', () => {
       expect(loaded.error).toBeNull(); // Error cleared on load
     });
 
-    it('truncates to MAX_STORED_MESSAGES on save', () => {
+    it('truncates to MAX_STORED_MESSAGES on save', async () => {
       const messages: ChatMessage[] = [];
       for (let i = 0; i < 60; i++) {
         messages.push(makeUserMessage(`msg ${i}`, { id: `msg_${i}`, timestamp: i }));
@@ -332,6 +344,7 @@ describe('chatStore deep tests', () => {
       useChatStore.setState({ messages });
 
       useChatStore.getState().saveConversation('proj-big');
+      await vi.runAllTimersAsync();
 
       useChatStore.setState({ messages: [] });
       useChatStore.getState().loadConversation('proj-big');
@@ -357,7 +370,7 @@ describe('chatStore deep tests', () => {
       expect(() => useChatStore.getState().loadConversation('corrupt')).not.toThrow();
     });
 
-    it('handles localStorage quota exceeded on save', () => {
+    it('handles localStorage quota exceeded on save', async () => {
       // Fill localStorage near quota
       const mockSetItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
         throw new DOMException('QuotaExceededError');
@@ -367,16 +380,19 @@ describe('chatStore deep tests', () => {
 
       // Should not throw
       expect(() => useChatStore.getState().saveConversation('proj')).not.toThrow();
+      await vi.runAllTimersAsync();
 
       mockSetItem.mockRestore();
     });
 
-    it('saves to project-specific key', () => {
+    it('saves to project-specific key', async () => {
       useChatStore.setState({ messages: [makeUserMessage('for A', { id: 'a' })] });
       useChatStore.getState().saveConversation('projA');
+      await vi.runAllTimersAsync();
 
       useChatStore.setState({ messages: [makeUserMessage('for B', { id: 'b' })] });
       useChatStore.getState().saveConversation('projB');
+      await vi.runAllTimersAsync();
 
       useChatStore.setState({ messages: [] });
 
@@ -512,7 +528,7 @@ describe('chatStore deep tests', () => {
   });
 
   describe('complex multi-message scenarios', () => {
-    it('handles interleaved user and assistant messages correctly', () => {
+    it('handles interleaved user and assistant messages correctly', async () => {
       const messages: ChatMessage[] = [
         makeUserMessage('create a cube', { id: 'u1' }),
         makeAssistantMessage({ id: 'a1', content: 'Creating cube...' }, [
@@ -529,6 +545,8 @@ describe('chatStore deep tests', () => {
       useChatStore.getState().updateToolCall('a2', 'tc2', {
         result: { color: '#ff0000' },
       });
+
+      await new Promise((r) => queueMicrotask(r));
 
       const updated = useChatStore.getState().messages;
       expect(updated[3].toolCalls![0].result).toEqual({ color: '#ff0000' });

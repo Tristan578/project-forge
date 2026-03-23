@@ -198,7 +198,7 @@ describe('chatStore', () => {
       undoable: true,
     };
 
-    it('should update tool call status', () => {
+    it('should update tool call status', async () => {
       const message: ChatMessage = {
         id: 'msg1',
         role: 'assistant',
@@ -211,12 +211,15 @@ describe('chatStore', () => {
       const { updateToolCall } = useChatStore.getState();
       updateToolCall('msg1', 'tool1', { status: 'success', result: 'Done' });
 
+      // updateToolCall batches via queueMicrotask — flush it
+      await new Promise((r) => queueMicrotask(r));
+
       const updated = useChatStore.getState().messages[0].toolCalls?.[0];
       expect(updated?.status).toBe('success');
       expect(updated?.result).toBe('Done');
     });
 
-    it('should update correct tool call in message with multiple tools', () => {
+    it('should update correct tool call in message with multiple tools', async () => {
       const message: ChatMessage = {
         id: 'msg1',
         role: 'assistant',
@@ -232,12 +235,14 @@ describe('chatStore', () => {
       const { updateToolCall } = useChatStore.getState();
       updateToolCall('msg1', 'tool2', { status: 'success' });
 
+      await new Promise((r) => queueMicrotask(r));
+
       const toolCalls = useChatStore.getState().messages[0].toolCalls;
       expect(toolCalls?.[0].status).toBe('pending');
       expect(toolCalls?.[1].status).toBe('success');
     });
 
-    it('should not affect other messages when updating tool call', () => {
+    it('should not affect other messages when updating tool call', async () => {
       const messages: ChatMessage[] = [
         {
           id: 'msg1',
@@ -258,6 +263,8 @@ describe('chatStore', () => {
 
       const { updateToolCall } = useChatStore.getState();
       updateToolCall('msg1', 'tool1', { status: 'success' });
+
+      await new Promise((r) => queueMicrotask(r));
 
       const state = useChatStore.getState();
       expect(state.messages[0].toolCalls?.[0].status).toBe('success');
@@ -403,7 +410,14 @@ describe('chatStore', () => {
   });
 
   describe('Persistence', () => {
-    it('should save conversation to localStorage', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should save conversation to localStorage', async () => {
       const messages: ChatMessage[] = [
         { id: 'msg1', role: 'user', content: 'Hello', timestamp: Date.now() },
         { id: 'msg2', role: 'assistant', content: 'Hi', timestamp: Date.now() + 1 },
@@ -412,6 +426,9 @@ describe('chatStore', () => {
 
       const { saveConversation } = useChatStore.getState();
       saveConversation('project-123');
+
+      // saveConversation defers via requestIdleCallback/setTimeout — flush
+      await vi.runAllTimersAsync();
 
       const stored = localStorage.getItem('forge-chat-project-123');
       expect(stored).toBeTruthy();
@@ -454,7 +471,7 @@ describe('chatStore', () => {
       expect(useChatStore.getState().messages).toEqual([]);
     });
 
-    it('should save only last 50 messages', () => {
+    it('should save only last 50 messages', async () => {
       const messages: ChatMessage[] = Array.from({ length: 60 }, (_, i) => ({
         id: `msg${i}`,
         role: 'user' as const,
@@ -466,13 +483,15 @@ describe('chatStore', () => {
       const { saveConversation } = useChatStore.getState();
       saveConversation('project-789');
 
+      await vi.runAllTimersAsync();
+
       const stored = localStorage.getItem('forge-chat-project-789');
       const parsed = JSON.parse(stored!);
       expect(parsed).toHaveLength(50);
       expect(parsed[0].content).toBe('Message 10'); // First 10 trimmed
     });
 
-    it('should round-trip save and load', () => {
+    it('should round-trip save and load', async () => {
       const messages: ChatMessage[] = [
         {
           id: 'msg1',
@@ -500,6 +519,7 @@ describe('chatStore', () => {
 
       const { saveConversation, loadConversation } = useChatStore.getState();
       saveConversation('roundtrip');
+      await vi.runAllTimersAsync();
       useChatStore.setState({ messages: [] }); // Clear
       loadConversation('roundtrip');
 
