@@ -5,7 +5,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { X, ChevronRight, Trophy } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { useEditorStore } from '@/stores/editorStore';
@@ -66,25 +66,49 @@ export function TutorialOverlay() {
     skipTutorial();
   }, [skipTutorial]);
 
-  // Keyboard navigation: Escape closes, ArrowRight/ArrowLeft navigates steps
+  // Keyboard navigation: Escape closes, ArrowRight/ArrowLeft navigates steps.
+  // Use a ref to hold the latest handler state so the listener itself only
+  // re-registers when activeTutorialId changes (not on every step transition).
+  const keyHandlerState = useRef({
+    isLastStep,
+    currentStep,
+    tutorialStep,
+    skipTutorial,
+    completeTutorial,
+    advanceTutorial,
+    retreatTutorial,
+  });
+  useEffect(() => {
+    keyHandlerState.current = {
+      isLastStep,
+      currentStep,
+      tutorialStep,
+      skipTutorial,
+      completeTutorial,
+      advanceTutorial,
+      retreatTutorial,
+    };
+  });
+
   useEffect(() => {
     if (!activeTutorialId) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      const s = keyHandlerState.current;
       switch (e.key) {
         case 'Escape':
-          skipTutorial();
+          s.skipTutorial();
           break;
         case 'ArrowRight':
-          if (isLastStep) {
-            completeTutorial();
-          } else if (!currentStep?.actionRequired) {
-            advanceTutorial();
+          if (s.isLastStep) {
+            s.completeTutorial();
+          } else if (!s.currentStep?.actionRequired) {
+            s.advanceTutorial();
           }
           break;
         case 'ArrowLeft':
-          if (tutorialStep > 0) {
-            retreatTutorial();
+          if (s.tutorialStep > 0) {
+            s.retreatTutorial();
           }
           break;
       }
@@ -92,7 +116,7 @@ export function TutorialOverlay() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeTutorialId, isLastStep, currentStep, tutorialStep, skipTutorial, completeTutorial, advanceTutorial, retreatTutorial]);
+  }, [activeTutorialId]);
 
   // Update highlight position via DOM query
   useEffect(() => {
@@ -109,7 +133,7 @@ export function TutorialOverlay() {
     };
 
     updateHighlight();
-    window.addEventListener('resize', updateHighlight);
+    window.addEventListener('resize', updateHighlight, { passive: true });
     return () => window.removeEventListener('resize', updateHighlight);
   }, [currentStep?.target]);
 

@@ -5,7 +5,6 @@ import { discoverTool } from '@/lib/bridges/bridgeManager';
 import type { BridgeToolConfig } from '@/lib/bridges/types';
 import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const runtime = 'nodejs';
 
@@ -76,7 +75,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result);
   } catch (err) {
-    captureException(err, { route: '/api/bridges/aseprite/execute' });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Execution failed' },
       { status: 500 }

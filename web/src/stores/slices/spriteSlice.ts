@@ -93,7 +93,7 @@ export const createSpriteSlice: StateCreator<SpriteSlice, [], [], SpriteSlice> =
   setSortingLayers: (layers) => set({ sortingLayers: layers }),
   addSortingLayer: (name) => {
     const state = get();
-    const maxOrder = Math.max(...state.sortingLayers.map(l => l.order), -1);
+    const maxOrder = state.sortingLayers.reduce((m, l) => l.order > m ? l.order : m, -1);
     set({ sortingLayers: [...state.sortingLayers, { name, order: maxOrder + 1, visible: true }] });
   },
   removeSortingLayer: (name) => {

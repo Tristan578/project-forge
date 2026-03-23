@@ -5,7 +5,6 @@ import { getDb } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET() {
   const session = await authenticateClerkSession();
@@ -15,25 +14,20 @@ export async function GET() {
   const rl = await rateLimit(`user:publish-list:${clerkId}`, 30, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  try {
-    const user = await getUserByClerkId(clerkId);
-    if (!user) return NextResponse.json({ publications: [] });
+  const user = await getUserByClerkId(clerkId);
+  if (!user) return NextResponse.json({ publications: [] });
 
-    const db = getDb();
+  const db = getDb();
 
-    const publications = await db.select()
-      .from(publishedGames)
-      .where(eq(publishedGames.userId, user.id))
-      .orderBy(desc(publishedGames.updatedAt));
+  const publications = await db.select()
+    .from(publishedGames)
+    .where(eq(publishedGames.userId, user.id))
+    .orderBy(desc(publishedGames.updatedAt));
 
-    return NextResponse.json({
-      publications: publications.map(p => ({
-        ...p,
-        url: p.cdnUrl || `/play/${clerkId}/${p.slug}`,
-      })),
-    });
-  } catch (err) {
-    captureException(err, { route: '/api/publish/list' });
-    return NextResponse.json({ error: 'Failed to list publications' }, { status: 500 });
-  }
+  return NextResponse.json({
+    publications: publications.map(p => ({
+      ...p,
+      url: p.cdnUrl || `/play/${clerkId}/${p.slug}`,
+    })),
+  });
 }

@@ -238,24 +238,39 @@ function ScoreBadge({ score }: { score: number }) {
 // ---------------------------------------------------------------------------
 
 export function PacingAnalyzerPanel() {
-  const sceneGraph = useEditorStore((s) => s.sceneGraph);
+  const nodes = useEditorStore((s) => s.sceneGraph.nodes);
+  const rootIds = useEditorStore((s) => s.sceneGraph.rootIds);
   const [selectedTemplate, setSelectedTemplate] = useState<PacingTemplateId | ''>('');
 
-  // Convert scene graph entities to descriptors
+  // Convert scene graph entities to descriptors.
+  // Iterate over rootIds (plus all nodes) so that transform-only updates
+  // (which mutate node data but don't change rootIds) do NOT trigger a
+  // recompute of the entity list.
   const entities: SceneEntityDescriptor[] = useMemo(() => {
-    const nodes = sceneGraph.nodes ?? sceneGraph;
-    const entries = Object.entries(nodes);
-    if (entries.length === 0) return [];
+    const allIds = Object.keys(nodes);
+    if (allIds.length === 0) return [];
 
-    // Distribute entities evenly across 0–1 based on their order
-    return entries.map(([id, node], idx) => ({
-      id,
-      name: node.name,
-      type: node.components[0] ?? 'generic',
-      position: entries.length > 1 ? idx / (entries.length - 1) : 0.5,
-      tags: extractTags(node.name, node.components[0]),
-    }));
-  }, [sceneGraph]);
+    // Distribute entities evenly across 0–1 based on their order.
+    // Use rootIds to define ordering for root-level entities; remaining
+    // children follow in insertion order.
+    const ordered = [
+      ...rootIds,
+      ...allIds.filter((id) => !rootIds.includes(id)),
+    ];
+    return ordered
+      .map((id, idx) => {
+        const node = nodes[id];
+        if (!node) return null;
+        return {
+          id,
+          name: node.name,
+          type: node.components[0] ?? 'generic',
+          position: ordered.length > 1 ? idx / (ordered.length - 1) : 0.5,
+          tags: extractTags(node.name, node.components[0]),
+        };
+      })
+      .filter((e): e is SceneEntityDescriptor => e !== null);
+  }, [rootIds, nodes]);
 
   const analysis: PacingAnalysis | null = useMemo(() => {
     if (entities.length === 0) return null;

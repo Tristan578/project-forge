@@ -776,9 +776,16 @@ export function generateDesignCritique(
 
   // 5. Level Design
   if (ctx.entityCount >= 5) {
-    const positions = ctx.entities.map((e) => e.position);
-    const xRange = Math.max(...positions.map((p) => p[0])) - Math.min(...positions.map((p) => p[0]));
-    const zRange = Math.max(...positions.map((p) => p[2])) - Math.min(...positions.map((p) => p[2]));
+    let xMin = Infinity, xMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+    for (const e of ctx.entities) {
+      const [x, , z] = e.position;
+      if (x < xMin) xMin = x;
+      if (x > xMax) xMax = x;
+      if (z < zMin) zMin = z;
+      if (z > zMax) zMax = z;
+    }
+    const xRange = xMax - xMin;
+    const zRange = zMax - zMin;
     const spread = Math.max(xRange, zRange);
     const levelScore = spread > 20 ? 7 : spread > 10 ? 6 : spread > 5 ? 5 : 4;
     scores.push({

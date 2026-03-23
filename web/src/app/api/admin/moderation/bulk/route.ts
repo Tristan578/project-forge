@@ -4,7 +4,6 @@ import { gameComments } from '@/lib/db/schema';
 import { inArray } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +23,7 @@ export async function POST(req: NextRequest) {
     const adminError = assertAdmin(authResult.ctx.clerkId);
     if (adminError) return adminError;
 
-    const limited = await rateLimitAdminRoute(authResult.ctx.clerkId, 'admin-moderation-bulk');
+    const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-moderation-bulk');
     if (limited) return limited;
 
     const body = await req.json() as unknown;
@@ -84,7 +83,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ processed, errors });
   } catch (error) {
-    captureException(error, { route: '/api/admin/moderation/bulk' });
     console.error('Failed to perform bulk moderation:', error);
     return NextResponse.json(
       { error: 'Failed to perform bulk moderation' },

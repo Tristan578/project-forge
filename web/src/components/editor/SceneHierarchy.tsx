@@ -75,27 +75,24 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   // We build from rootIds and assume all are expanded initially
   const allNodeIds = useMemo(() => new Set(Object.keys(sceneGraph.nodes)), [sceneGraph]);
   const effectiveExpandedIds = useMemo(() => {
-    // Start with all nodes expanded, then remove any explicitly collapsed
+    // Start with all nodes expanded, then remove any explicitly collapsed.
+    // expandedIds stores IDs that are COLLAPSED (toggled from default expanded).
     const expanded = new Set(allNodeIds);
-    for (const id of allNodeIds) {
-      if (expandedIds.has(id)) {
-        // Explicitly tracked — could be collapsed (we track collapse, not expand)
-      }
-    }
-    // expandedIds stores IDs that are COLLAPSED (toggled from default expanded)
     for (const id of expandedIds) {
       expanded.delete(id);
     }
     return expanded;
   }, [allNodeIds, expandedIds]);
 
-  const flatNodeIds = useMemo(() => {
-    return flattenVisibleNodes(
+  const { ids: flatNodeIds, indexMap } = useMemo(() => {
+    const ids = flattenVisibleNodes(
       isFiltering ? filterResult.filteredRootIds : sceneGraph.rootIds,
       sceneGraph,
       effectiveExpandedIds,
       isFiltering ? filterResult.visibleIds : undefined,
     );
+    const map = new Map(ids.map((id, i) => [id, i]));
+    return { ids, indexMap: map };
   }, [sceneGraph, effectiveExpandedIds, isFiltering, filterResult]);
 
   // Rename editing state (declared before handleKeyDown so F2 can reference it)
@@ -129,7 +126,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (flatNodeIds.length === 0) return;
 
-    const currentIndex = focusedEntityId ? flatNodeIds.indexOf(focusedEntityId) : -1;
+    const currentIndex = focusedEntityId ? (indexMap.get(focusedEntityId) ?? -1) : -1;
 
     switch (e.key) {
       case 'ArrowDown': {
@@ -219,7 +216,7 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       default:
         return; // Don't prevent default for unhandled keys
     }
-  }, [flatNodeIds, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId]);
+  }, [flatNodeIds, indexMap, focusedEntityId, sceneGraph, effectiveExpandedIds, toggleExpanded, selectEntity, selectedIds, deleteSelectedEntities, setEditingEntityId]);
 
   // Drag state
   const [dragState, setDragState] = useState<{

@@ -3,6 +3,9 @@
  * Maps panel IDs to metadata used by WorkspaceProvider and preset layouts.
  */
 
+/** AI panel categories used to group panels in the AI Studio sidebar. */
+export type AIPanelCategory = 'creation' | 'polish' | 'intelligence' | 'tools';
+
 export interface PanelDefinition {
   id: string;
   title: string;
@@ -16,6 +19,17 @@ export interface PanelDefinition {
   unclosable?: boolean;
   /** Renderer strategy: 'always' keeps DOM alive when hidden (for canvas/editors) */
   renderer?: 'onlyWhenVisible' | 'always';
+  /**
+   * AI Studio category.
+   *
+   * - `creation`     — generative tools that produce new content (GDD, levels, narrative, rigs)
+   * - `polish`       — tools that improve existing content (art style, effects, accessibility)
+   * - `intelligence` — analytical tools that evaluate or adapt gameplay (review, analytics, DDA)
+   * - `tools`        — utility/design tools (idea generation, economy, world building)
+   *
+   * Omitted for non-AI panels (viewport, hierarchy, inspector, etc.).
+   */
+  category?: AIPanelCategory;
 }
 
 export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
@@ -120,47 +134,14 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 200,
     minHeight: 150,
   },
+  // ---- AI: creation --------------------------------------------------------
   'procedural-anim': {
     id: 'procedural-anim',
     title: 'Procedural Animation',
     component: 'procedural-anim',
     minWidth: 220,
     minHeight: 200,
-  },
-  'pacing-analyzer': {
-    id: 'pacing-analyzer',
-    title: 'Pacing Analyzer',
-    component: 'pacing-analyzer',
-    minWidth: 280,
-    minHeight: 200,
-  },
-  review: {
-    id: 'review',
-    title: 'AI Review',
-    component: 'review',
-    minWidth: 220,
-    minHeight: 200,
-  },
-  accessibility: {
-    id: 'accessibility',
-    title: 'Accessibility',
-    component: 'accessibility',
-    minWidth: 260,
-    minHeight: 200,
-  },
-  tutorial: {
-    id: 'tutorial',
-    title: 'Tutorial Generator',
-    component: 'tutorial',
-    minWidth: 240,
-    minHeight: 200,
-  },
-  'effect-bindings': {
-    id: 'effect-bindings',
-    title: 'Effects',
-    component: 'effect-bindings',
-    minWidth: 220,
-    minHeight: 150,
+    category: 'creation',
   },
   'behavior-tree': {
     id: 'behavior-tree',
@@ -168,6 +149,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'behavior-tree',
     minWidth: 260,
     minHeight: 200,
+    category: 'creation',
   },
   'level-generator': {
     id: 'level-generator',
@@ -175,13 +157,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'level-generator',
     minWidth: 260,
     minHeight: 200,
-  },
-  'save-system': {
-    id: 'save-system',
-    title: 'Save System',
-    component: 'save-system',
-    minWidth: 260,
-    minHeight: 200,
+    category: 'creation',
   },
   narrative: {
     id: 'narrative',
@@ -189,48 +165,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'narrative',
     minWidth: 260,
     minHeight: 200,
-  },
-  'auto-iteration': {
-    id: 'auto-iteration',
-    title: 'Auto-Iteration',
-    component: 'auto-iteration',
-    minWidth: 260,
-    minHeight: 200,
-  },
-  'game-analytics': {
-    id: 'game-analytics',
-    title: 'Game Analytics',
-    component: 'game-analytics',
-    minWidth: 280,
-    minHeight: 200,
-  },
-  'art-style': {
-    id: 'art-style',
-    title: 'Art Style',
-    component: 'art-style',
-    minWidth: 260,
-    minHeight: 200,
-  },
-  playtest: {
-    id: 'playtest',
-    title: 'Playtest Bot',
-    component: 'playtest',
-    minWidth: 260,
-    minHeight: 200,
-  },
-  'physics-feel': {
-    id: 'physics-feel',
-    title: 'Physics Feel',
-    component: 'physics-feel',
-    minWidth: 260,
-    minHeight: 200,
-  },
-  difficulty: {
-    id: 'difficulty',
-    title: 'Dynamic Difficulty',
-    component: 'difficulty',
-    minWidth: 260,
-    minHeight: 200,
+    category: 'creation',
   },
   'auto-rigging': {
     id: 'auto-rigging',
@@ -238,34 +173,48 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'auto-rigging',
     minWidth: 260,
     minHeight: 200,
+    category: 'creation',
   },
-  'design-teacher': {
-    id: 'design-teacher',
-    title: 'Design Teacher',
-    component: 'design-teacher',
-    minWidth: 280,
-    minHeight: 200,
-  },
-  economy: {
-    id: 'economy',
-    title: 'Economy Designer',
-    component: 'economy',
+  // ---- AI: polish ----------------------------------------------------------
+  'art-style': {
+    id: 'art-style',
+    title: 'Art Style',
+    component: 'art-style',
     minWidth: 260,
     minHeight: 200,
+    category: 'polish',
   },
-  'smart-camera': {
-    id: 'smart-camera',
-    title: 'Smart Camera',
-    component: 'smart-camera',
+  'effect-bindings': {
+    id: 'effect-bindings',
+    title: 'Effects',
+    component: 'effect-bindings',
+    minWidth: 220,
+    minHeight: 150,
+    category: 'polish',
+  },
+  tutorial: {
+    id: 'tutorial',
+    title: 'Tutorial Generator',
+    component: 'tutorial',
+    minWidth: 240,
+    minHeight: 200,
+    category: 'polish',
+  },
+  accessibility: {
+    id: 'accessibility',
+    title: 'Accessibility',
+    component: 'accessibility',
     minWidth: 260,
     minHeight: 200,
+    category: 'polish',
   },
-  'world-builder': {
-    id: 'world-builder',
-    title: 'World Builder',
-    component: 'world-builder',
-    minWidth: 280,
+  'save-system': {
+    id: 'save-system',
+    title: 'Save System',
+    component: 'save-system',
+    minWidth: 260,
     minHeight: 200,
+    category: 'polish',
   },
   'texture-painter': {
     id: 'texture-painter',
@@ -273,13 +222,105 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'texture-painter',
     minWidth: 260,
     minHeight: 200,
+    category: 'polish',
   },
+  // ---- AI: intelligence ----------------------------------------------------
+  review: {
+    id: 'review',
+    title: 'AI Review',
+    component: 'review',
+    minWidth: 220,
+    minHeight: 200,
+    category: 'intelligence',
+  },
+  'auto-iteration': {
+    id: 'auto-iteration',
+    title: 'Auto-Iteration',
+    component: 'auto-iteration',
+    minWidth: 260,
+    minHeight: 200,
+    category: 'intelligence',
+  },
+  'game-analytics': {
+    id: 'game-analytics',
+    title: 'Game Analytics',
+    component: 'game-analytics',
+    minWidth: 280,
+    minHeight: 200,
+    category: 'intelligence',
+  },
+  playtest: {
+    id: 'playtest',
+    title: 'Playtest Bot',
+    component: 'playtest',
+    minWidth: 260,
+    minHeight: 200,
+    category: 'intelligence',
+  },
+  difficulty: {
+    id: 'difficulty',
+    title: 'Dynamic Difficulty',
+    component: 'difficulty',
+    minWidth: 260,
+    minHeight: 200,
+    category: 'intelligence',
+  },
+  'pacing-analyzer': {
+    id: 'pacing-analyzer',
+    title: 'Pacing Analyzer',
+    component: 'pacing-analyzer',
+    minWidth: 280,
+    minHeight: 200,
+    category: 'intelligence',
+  },
+  'physics-feel': {
+    id: 'physics-feel',
+    title: 'Physics Feel',
+    component: 'physics-feel',
+    minWidth: 260,
+    minHeight: 200,
+    category: 'intelligence',
+  },
+  // ---- AI: tools -----------------------------------------------------------
   'idea-generator': {
     id: 'idea-generator',
     title: 'Idea Generator',
     component: 'idea-generator',
     minWidth: 260,
     minHeight: 200,
+    category: 'tools',
+  },
+  'smart-camera': {
+    id: 'smart-camera',
+    title: 'Smart Camera',
+    component: 'smart-camera',
+    minWidth: 260,
+    minHeight: 200,
+    category: 'tools',
+  },
+  'design-teacher': {
+    id: 'design-teacher',
+    title: 'Design Teacher',
+    component: 'design-teacher',
+    minWidth: 280,
+    minHeight: 200,
+    category: 'tools',
+  },
+  'world-builder': {
+    id: 'world-builder',
+    title: 'World Builder',
+    component: 'world-builder',
+    minWidth: 280,
+    minHeight: 200,
+    category: 'tools',
+  },
+  economy: {
+    id: 'economy',
+    title: 'Economy Designer',
+    component: 'economy',
+    minWidth: 260,
+    minHeight: 200,
+    category: 'tools',
   },
   'quest-generator': {
     id: 'quest-generator',
@@ -287,6 +328,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'quest-generator',
     minWidth: 260,
     minHeight: 200,
+    category: 'tools',
   },
 };
 
@@ -296,3 +338,11 @@ export const UNCLOSABLE_PANELS = new Set(
     .filter((d) => d.unclosable)
     .map((d) => d.id)
 );
+
+/** All AI panel definitions, grouped by category. */
+export const AI_PANELS_BY_CATEGORY: Record<AIPanelCategory, PanelDefinition[]> = {
+  creation: Object.values(PANEL_DEFINITIONS).filter((d) => d.category === 'creation'),
+  polish: Object.values(PANEL_DEFINITIONS).filter((d) => d.category === 'polish'),
+  intelligence: Object.values(PANEL_DEFINITIONS).filter((d) => d.category === 'intelligence'),
+  tools: Object.values(PANEL_DEFINITIONS).filter((d) => d.category === 'tools'),
+};

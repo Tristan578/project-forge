@@ -109,6 +109,17 @@ function nextId(): string {
   return `msg_${Date.now()}_${++messageCounter}`;
 }
 
+// ---------------------------------------------------------------------------
+// updateToolCall microtask batching — prevents a re-render per streaming delta
+// ---------------------------------------------------------------------------
+interface PendingToolUpdate {
+  messageId: string;
+  toolCallId: string;
+  update: Partial<ToolCallStatus>;
+}
+let pendingToolUpdates: PendingToolUpdate[] = [];
+let toolUpdateBatchScheduled = false;
+
 interface DeferredTool {
   id: string;
   name: string;
@@ -778,25 +789,44 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearUnread: () => set({ hasUnreadMessages: false }),
 
   updateToolCall: (messageId, toolCallId, update) => {
-    const msgs = get().messages.map((msg) => {
-      if (msg.id !== messageId) return msg;
-      return {
-        ...msg,
-        toolCalls: (msg.toolCalls || []).map((tc) =>
-          tc.id === toolCallId ? { ...tc, ...update } : tc
-        ),
-      };
-    });
-    set({ messages: msgs });
+    pendingToolUpdates.push({ messageId, toolCallId, update });
+    if (!toolUpdateBatchScheduled) {
+      toolUpdateBatchScheduled = true;
+      queueMicrotask(() => {
+        toolUpdateBatchScheduled = false;
+        const updates = pendingToolUpdates;
+        pendingToolUpdates = [];
+        const msgs = get().messages.map((msg) => {
+          const relevant = updates.filter((u) => u.messageId === msg.id);
+          if (relevant.length === 0) return msg;
+          return {
+            ...msg,
+            toolCalls: (msg.toolCalls || []).map((tc) => {
+              const u = relevant.find((r) => r.toolCallId === tc.id);
+              return u ? { ...tc, ...u.update } : tc;
+            }),
+          };
+        });
+        set({ messages: msgs });
+      });
+    }
   },
 
   saveConversation: (projectId: string) => {
-    try {
-      const { messages } = get();
-      const toStore = messages.slice(-MAX_STORED_MESSAGES);
-      localStorage.setItem(PERSISTENCE_KEY + projectId, JSON.stringify(toStore));
-    } catch {
-      // localStorage full or unavailable
+    const { messages } = get();
+    const toStore = messages.slice(-MAX_STORED_MESSAGES);
+    const key = PERSISTENCE_KEY + projectId;
+    const doSave = () => {
+      try {
+        localStorage.setItem(key, JSON.stringify(toStore));
+      } catch {
+        // localStorage full or unavailable
+      }
+    };
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(doSave, { timeout: 2000 });
+    } else {
+      setTimeout(doSave, 0);
     }
   },
 
@@ -823,29 +853,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (previewTools.length === 0) return;
 
     const { executeToolCall } = await import('../lib/chat/executor');
+    const { useEditorStore } = await import('./editorStore');
 
+    type ExecutionResult = Awaited<ReturnType<typeof executeToolCall>>;
+    const results = new Map<string, ExecutionResult>();
     for (const tc of previewTools) {
-      const currentEditorState = (await import('./editorStore')).useEditorStore.getState();
-      const result = await executeToolCall(tc.name, tc.input, currentEditorState);
-
-      const msgs = get().messages.map((msg) => {
-        if (msg.id !== messageId) return msg;
-        return {
-          ...msg,
-          toolCalls: (msg.toolCalls || []).map((t) =>
-            t.id === tc.id
-              ? {
-                  ...t,
-                  status: result.success ? 'success' as const : 'error' as const,
-                  result: result.result,
-                  error: result.error,
-                }
-              : t
-          ),
-        };
-      });
-      set({ messages: msgs });
+      const editorState = useEditorStore.getState();
+      results.set(tc.id, await executeToolCall(tc.name, tc.input, editorState));
     }
+
+    // Single set() with all results applied at once
+    const msgs = get().messages.map((msg) => {
+      if (msg.id !== messageId) return msg;
+      return {
+        ...msg,
+        toolCalls: (msg.toolCalls || []).map((t) => {
+          const r = results.get(t.id);
+          return r
+            ? {
+                ...t,
+                status: r.success ? 'success' as const : 'error' as const,
+                result: r.result,
+                error: r.error,
+              }
+            : t;
+        }),
+      };
+    });
+    set({ messages: msgs });
   },
 
   rejectToolCalls: (messageId: string) => {

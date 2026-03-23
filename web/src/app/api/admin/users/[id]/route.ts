@@ -4,7 +4,6 @@ import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 const VALID_TIERS = ['starter', 'hobbyist', 'creator', 'pro'] as const;
 type Tier = (typeof VALID_TIERS)[number];
@@ -20,23 +19,18 @@ export async function GET(
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(clerkId, 'admin-users-get');
+  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-users-get');
   if (limited) return limited;
 
-  try {
-    const { id } = await params;
-    const db = getDb();
-    const [user] = await db.select().from(users).where(eq(users.id, id));
+  const { id } = await params;
+  const db = getDb();
+  const [user] = await db.select().from(users).where(eq(users.id, id));
 
-    if (!user) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    return NextResponse.json({ user });
-  } catch (error) {
-    captureException(error, { route: '/api/admin/users/[id]', method: 'GET' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
+
+  return NextResponse.json({ user });
 }
 
 export async function PATCH(
@@ -50,7 +44,7 @@ export async function PATCH(
   const adminError = assertAdmin(clerkId);
   if (adminError) return adminError;
 
-  const limited = await rateLimitAdminRoute(clerkId, 'admin-users-patch');
+  const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-users-patch');
   if (limited) return limited;
 
   const { id } = await params;
@@ -93,21 +87,16 @@ export async function PATCH(
     return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
   }
 
-  try {
-    const db = getDb();
-    const [updated] = await db
-      .update(users)
-      .set({ ...updates, updatedAt: new Date() })
-      .where(eq(users.id, id))
-      .returning();
+  const db = getDb();
+  const [updated] = await db
+    .update(users)
+    .set({ ...updates, updatedAt: new Date() })
+    .where(eq(users.id, id))
+    .returning();
 
-    if (!updated) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    }
-
-    return NextResponse.json({ user: updated });
-  } catch (error) {
-    captureException(error, { route: '/api/admin/users/[id]', method: 'PATCH' });
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  if (!updated) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
+
+  return NextResponse.json({ user: updated });
 }
