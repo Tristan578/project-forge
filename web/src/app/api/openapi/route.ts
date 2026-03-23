@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync } from 'fs';
 import path from 'path';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * GET /api/openapi
@@ -25,7 +24,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
-    captureException(err, { route: '/api/openapi' });
     const message = err instanceof Error ? err.message : 'Failed to load spec';
     return NextResponse.json({ error: message }, { status: 500 });
   }

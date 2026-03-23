@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { listConfiguredProviders } from '@/lib/keys/resolver';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 /** GET /api/keys — list which providers have BYOK keys configured */
 export async function GET() {
@@ -15,17 +14,12 @@ export async function GET() {
   const tierCheck = assertTier(authResult.ctx.user, ['hobbyist', 'creator', 'pro']);
   if (tierCheck) return tierCheck;
 
-  try {
-    const providers = await listConfiguredProviders(authResult.ctx.user.id);
-    return NextResponse.json({
-      providers: providers.map((p) => ({
-        provider: p.provider,
-        configured: true,
-        createdAt: p.createdAt.toISOString(),
-      })),
-    });
-  } catch (err) {
-    captureException(err, { route: '/api/keys' });
-    return NextResponse.json({ error: 'Failed to list provider keys' }, { status: 500 });
-  }
+  const providers = await listConfiguredProviders(authResult.ctx.user.id);
+  return NextResponse.json({
+    providers: providers.map((p) => ({
+      provider: p.provider,
+      configured: true,
+      createdAt: p.createdAt.toISOString(),
+    })),
+  });
 }

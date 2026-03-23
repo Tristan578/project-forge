@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
-import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const runtime = 'nodejs';
 
@@ -39,7 +38,6 @@ export async function POST(req: Request) {
       activeVersion: config.activeVersion,
     });
   } catch (err) {
-    captureException(err, { route: '/api/bridges/discover' });
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Discovery failed' },
       { status: 500 }
