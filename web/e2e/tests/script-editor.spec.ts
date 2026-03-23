@@ -84,27 +84,24 @@ test.describe('Script Editor @engine', () => {
 
     // Find and click code tab
     const codeTab = page.getByRole('button', { name: /^code$/i });
-    if (await codeTab.isVisible()) {
-      await codeTab.click();
+    const codeTabVisible = await codeTab.isVisible().catch(() => false);
+    test.skip(!codeTabVisible, 'Code/Graph tab toggle not present in current layout');
 
+    await codeTab.click();
 
-      // Monaco should be visible
-      const monacoVisible = await page.locator('.monaco-editor').isVisible().catch(() => false);
-      expect(monacoVisible).toBe(true);
+    // Monaco should be visible
+    const monacoVisible = await page.locator('.monaco-editor').isVisible().catch(() => false);
+    expect(monacoVisible).toBe(true);
 
-      // Switch to graph tab
-      const graphTab = page.getByRole('button', { name: /graph|visual/i });
-      if (await graphTab.isVisible()) {
-        await graphTab.click();
+    // Switch to graph tab
+    const graphTab = page.getByRole('button', { name: /graph|visual/i });
+    if (await graphTab.isVisible()) {
+      await graphTab.click();
 
-
-        // Graph editor should load
-        const graphEditor = page.locator('[class*="react-flow"], [class*="graph"]').first();
-        const graphCount = await graphEditor.count();
-        expect(graphCount).toBeGreaterThan(0);
-      }
-    } else {
-      test.skip();
+      // Graph editor should load
+      const graphEditor = page.locator('[class*="react-flow"], [class*="graph"]').first();
+      const graphCount = await graphEditor.count();
+      expect(graphCount).toBeGreaterThan(0);
     }
   });
 
