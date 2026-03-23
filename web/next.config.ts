@@ -41,6 +41,11 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   compress: true,
+  // Enable the 'use cache' directive for Server Components (Next.js 16.2+).
+  // This is a top-level config option that gates the experimental caching
+  // feature. Without it, 'use cache' directives in Server Components cause
+  // a build error: "Error: Caching is not enabled in the current environment."
+  cacheComponents: true,
   // Forward browser console logs to the terminal during `next dev` (16.2+).
   // Enables real-time visibility into client-side errors without opening DevTools.
   logging: {
@@ -56,6 +61,10 @@ const nextConfig: NextConfig = {
     // Use the new scroll restoration handler that correctly restores scroll
     // position across App Router navigations (16.2+).
     appNewScrollHandler: true,
+    // Cache route navigations at the edge (requires cacheComponents: true).
+    // Stores rendered RSC payloads so subsequent navigations to the same
+    // route are served from the cache, reducing server round-trips.
+    cachedNavigations: true,
   },
   images: {
     remotePatterns: [

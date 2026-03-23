@@ -1,3 +1,5 @@
+'use cache';
+
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { LegalLayout } from '@/components/legal/LegalLayout';
