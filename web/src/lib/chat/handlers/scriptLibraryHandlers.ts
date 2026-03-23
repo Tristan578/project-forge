@@ -7,6 +7,31 @@ import type { ToolHandler } from './types';
 import { zEntityId, parseArgs } from './types';
 
 export const scriptLibraryHandlers: Record<string, ToolHandler> = {
+  create_script: async (args, ctx) => {
+    // Spawn a new entity with a script already attached, or attach a script
+    // to an existing entity. A convenience wrapper that combines entity
+    // creation and set_script into a single AI-friendly action.
+    const p = parseArgs(z.object({
+      entityId: zEntityId.optional(),
+      name: z.string().optional(),
+      source: z.string().min(1),
+      enabled: z.boolean().optional(),
+      template: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+
+    const targetId = p.data.entityId ?? 'selected';
+    ctx.store.setScript(targetId, p.data.source, p.data.enabled ?? true, p.data.template);
+    return {
+      success: true,
+      result: {
+        message: `Script created on ${targetId}`,
+        entityId: targetId,
+        name: p.data.name ?? 'Unnamed Script',
+      },
+    };
+  },
+
   set_script: async (args, ctx) => {
     const p = parseArgs(z.object({
       entityId: zEntityId,

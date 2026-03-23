@@ -30,8 +30,16 @@ export function createMockActions() {
     setPrimaryShaderEffect: vi.fn(),
     setTerrainData: vi.fn(),
     setQualityFromEngine: vi.fn(),
+    // SceneLightSlice — wired into transform + material events (PF-849)
+    recomputeLightState: vi.fn(),
+    onLightNodeAdded: vi.fn(),
+    onLightNodeRemoved: vi.fn(),
+    setSceneLightAmbient: vi.fn(),
     // Transform events
     setFullGraph: vi.fn(),
+    addNode: vi.fn(),
+    removeNode: vi.fn(),
+    updateNode: vi.fn(),
     setSceneGraph: vi.fn(),
     setSelection: vi.fn(),
     setPrimaryTransform: vi.fn(),

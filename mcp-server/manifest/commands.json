@@ -2105,6 +2105,41 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "create_script",
+      "description": "Create and attach a TypeScript script to an entity in one step. Convenience command combining entity targeting and script attachment. Use this when you want to add behaviour to an entity — pass the entityId to target an existing entity, or omit it to target the currently selected entity. The source must export onStart, onUpdate, or onDestroy functions.",
+      "category": "scripting",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity to attach the script to. Omit to use the currently selected entity."
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable label for the script (stored in the library, optional)"
+          },
+          "source": {
+            "type": "string",
+            "description": "TypeScript source code. Should export one or more of: onStart(ctx), onUpdate(ctx, dt), onDestroy(ctx)"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the script is active on attach (default: true)"
+          },
+          "template": {
+            "type": "string",
+            "description": "Optional template identifier used to categorise the script in the library"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_script",
       "description": "Set or update TypeScript script source on an entity (lifecycle: onStart, onUpdate, onDestroy)",
       "category": "scripting",

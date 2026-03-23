@@ -226,7 +226,16 @@ async function loadWasm(): Promise<WasmModule> {
     // Phase 1: Detect GPU capability
     setLoadingState({ phase: 'detecting', progress: 0 });
 
-    const useWebGPU = await probeWebGPU();
+    // Allow the user to force WebGL2 via InitOverlay fallback button (PF-845).
+    // The flag is written to localStorage before a reload so the next load
+    // bypasses the WebGPU probe and uses the WebGL2 binary directly.
+    const forcedBackend =
+      typeof window !== 'undefined'
+        ? localStorage.getItem('forge:preferred-backend')
+        : null;
+
+    const useWebGPU =
+      forcedBackend === 'webgl2' ? false : await probeWebGPU();
     const backend = useWebGPU ? 'webgpu' : 'webgl2';
 
     setLoadingState({ phase: 'detecting', progress: 100 });
@@ -280,6 +289,15 @@ async function loadWasm(): Promise<WasmModule> {
 
   initPromise = attempt;
   return initPromise;
+}
+
+/**
+ * Persist a backend preference that survives a page reload (PF-845).
+ * Call this before reloading to force the next load to use a specific backend.
+ */
+export function setPreferredBackend(backend: 'webgpu' | 'webgl2'): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('forge:preferred-backend', backend);
 }
 
 // Reset for retry

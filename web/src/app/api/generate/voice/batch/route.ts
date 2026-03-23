@@ -7,6 +7,7 @@ import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { refundTokens } from '@/lib/tokens/service';
 
 interface BatchItem {
   nodeId: string;
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
   const tokenCost = items.length * 5;
 
   let apiKey: string;
+  let usageId: string | undefined;
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
@@ -77,6 +79,7 @@ export async function POST(request: NextRequest) {
       { itemCount: items.length, speaker: items[0]?.speaker }
     );
     apiKey = resolved.key;
+    usageId = resolved.usageId;
   } catch (err) {
     if (err instanceof ApiKeyError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 402 });
@@ -110,6 +113,22 @@ export async function POST(request: NextRequest) {
       errors.push({
         nodeId: item.nodeId,
         error: err instanceof Error ? err.message : 'Generation failed',
+      });
+    }
+  }
+
+  // Refund the full batch charge if every item failed (complete batch failure).
+  // Partial failures are not refundable via the current usageId model — each
+  // usageId maps to a single usage record for the whole batch. BYOK users have
+  // usageId === undefined and are never charged.
+  if (errors.length === items.length && usageId) {
+    try {
+      await refundTokens(authResult.ctx.user.id, usageId);
+    } catch (refundErr) {
+      captureException(refundErr, {
+        route: '/api/generate/voice/batch',
+        action: 'refund',
+        usageId,
       });
     }
   }

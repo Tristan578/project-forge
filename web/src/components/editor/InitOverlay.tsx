@@ -1,6 +1,7 @@
 'use client';
 
 import { useEngineStatus, PHASE_LABELS, type PhaseStatus } from '@/hooks/useEngineStatus';
+import { setPreferredBackend } from '@/hooks/useEngine';
 import { copyInitLogToClipboard } from '@/lib/initLog';
 import { useState } from 'react';
 
@@ -184,7 +185,7 @@ export function InitOverlay() {
                   {retryCount >= 1 && (
                     <button
                       onClick={() => {
-                        // TODO: Implement WebGL2 fallback mode
+                        setPreferredBackend('webgl2');
                         retry();
                       }}
                       className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500"

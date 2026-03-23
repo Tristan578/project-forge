@@ -110,10 +110,10 @@ export function useCelebrations(): UseCelebrationsReturn {
     return unsub;
   }, [enqueueData]);
 
-  // Expose the current engine mode and entity count for consumers (unused in this
-  // component but keeps the hook reactive so callers re-render with activeCelebration)
-  useEditorStore((s) => s.nodeCount);
-  useEditorStore((s) => s.engineMode);
+  // The queue and engineMode subscriptions above (via useEditorStore.subscribe)
+  // run outside of React render and call setQueue / state updaters directly,
+  // which triggers re-renders through local useState. No additional reactive
+  // store selectors are needed here (PF-872).
 
   return { activeCelebration, dismissCelebration, triggerMilestone };
 }
