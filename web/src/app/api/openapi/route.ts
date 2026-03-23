@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import path from 'path';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -15,6 +15,9 @@ export async function GET(req: NextRequest) {
   try {
     // Resolve from web/ working directory up to docs/api/openapi.json
     const specPath = path.join(process.cwd(), '..', 'docs', 'api', 'openapi.json');
+    if (!existsSync(specPath)) {
+      return NextResponse.json({ error: 'OpenAPI spec not yet generated' }, { status: 404 });
+    }
     const raw = readFileSync(specPath, 'utf-8');
     const spec = JSON.parse(raw) as Record<string, unknown>;
 
