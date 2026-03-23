@@ -1,5 +1,16 @@
 /**
  * Bridge slice — tracks external tool connections and running operations.
+ *
+ * JS-only slice: state is populated entirely from the JS layer (external IDE
+ * bridge integrations, tool discovery, operation lifecycle). There are no
+ * Bevy engine events that feed into this slice — it does NOT have a
+ * corresponding `bridgeEvents.ts` hook in `hooks/events/`.
+ *
+ * State transitions:
+ *   - setBridgeTool / removeBridgeTool: called by bridge adapter code when
+ *     a tool connects or disconnects.
+ *   - addBridgeOperation / updateBridgeOperation / removeBridgeOperation:
+ *     called by bridge adapters to track in-flight async operations.
  */
 
 import type { StateCreator } from 'zustand';
