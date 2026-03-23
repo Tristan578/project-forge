@@ -27,7 +27,6 @@ const tableOfContents = [
 ];
 
 export default function TermsOfServicePage() {
-  'use cache';
   return (
     <LegalLayout
       title="Terms of Service"
