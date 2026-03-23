@@ -415,7 +415,7 @@ export async function POST(request: NextRequest) {
       await refundTokens(auth.ctx.user.id, usageId).catch(() => {});
     }
     return Response.json(
-      { error: 'Conversation too long. Please start a new conversation or clear chat.' },
+      { error: 'Conversation too long — some context was trimmed. Please start a new conversation or clear chat history.' },
       { status: 413 }
     );
   }
