@@ -20,4 +20,3 @@ export * from './sceneSlice';
 export * from './assetSlice';
 export * from './editModeSlice';
 export * from './bridgeSlice';
-export * from './sceneLightSlice';
