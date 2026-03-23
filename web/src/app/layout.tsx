@@ -78,41 +78,44 @@ export default async function RootLayout({
   setRequestLocale(defaultLocale);
   const messages = await getMessages();
 
-  const body = (
+  // Clerk v7 requires ClerkProvider to be inside <body>, not wrapping <html>.
+  const bodyContent = (
+    <>
+      {/* JSON-LD structured data injected here; search engines read it from
+          body per Schema.org and Google guidelines. Manual <head> tags are
+          not permitted in Next.js App Router layouts (metadata export manages
+          all head injection). jsonLdString is JSON.stringify of a static
+          constant — no user input, no XSS risk. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: jsonLdString }}
+      />
+      <NextIntlClientProvider locale={defaultLocale} messages={messages}>
+        {children}
+      </NextIntlClientProvider>
+      <AnalyticsProvider />
+      <SpeedInsights />
+      <Toaster theme="dark" position="bottom-right" richColors />
+      <ServiceWorkerRegistration />
+      <PostHogProvider />
+      <CookieConsent />
+    </>
+  );
+
+  return (
     <html lang="en" className="dark">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning
       >
-        {/* JSON-LD structured data injected here; search engines read it from
-            body per Schema.org and Google guidelines. Manual <head> tags are
-            not permitted in Next.js App Router layouts (metadata export manages
-            all head injection). jsonLdString is JSON.stringify of a static
-            constant — no user input, no XSS risk. */}
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: jsonLdString }}
-        />
-        <NextIntlClientProvider locale={defaultLocale} messages={messages}>
-          {children}
-        </NextIntlClientProvider>
-        <AnalyticsProvider />
-        <SpeedInsights />
-        <Toaster theme="dark" position="bottom-right" richColors />
-        <ServiceWorkerRegistration />
-        <PostHogProvider />
-        <CookieConsent />
+        {hasValidClerkKey ? (
+          <ClerkProvider appearance={{ baseTheme: dark }} afterSignOutUrl="/sign-in">
+            {bodyContent}
+          </ClerkProvider>
+        ) : (
+          bodyContent
+        )}
       </body>
     </html>
-  );
-
-  if (!hasValidClerkKey) {
-    return body;
-  }
-
-  return (
-    <ClerkProvider appearance={{ baseTheme: dark }}>
-      {body}
-    </ClerkProvider>
   );
 }
