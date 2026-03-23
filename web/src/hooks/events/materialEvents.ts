@@ -28,8 +28,9 @@ export function handleMaterialEvent(
 
     case 'AMBIENT_LIGHT_CHANGED': {
       const payload = data as unknown as import('@/stores/editorStore').AmbientLightData;
-      useEditorStore.getState().setAmbientLight(payload);
-      useEditorStore.getState().setSceneLightAmbient(payload.color, payload.brightness);
+      const state = useEditorStore.getState();
+      state.setAmbientLight(payload);
+      state.setSceneLightAmbient(payload.color, payload.brightness);
       return true;
     }
 

@@ -42,8 +42,9 @@ export function handleTransformEvent(
 
     case 'SCENE_GRAPH_UPDATE': {
       const payload = data as unknown as SceneGraph;
-      useEditorStore.getState().setFullGraph(payload);
-      useEditorStore.getState().recomputeLightState(payload);
+      const state = useEditorStore.getState();
+      state.setFullGraph(payload);
+      state.recomputeLightState(payload);
       // Mark scene as modified and trigger debounced auto-save
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
@@ -54,20 +55,19 @@ export function handleTransformEvent(
 
     case 'SCENE_NODE_ADDED': {
       const node = data as unknown as SceneNode;
-      useEditorStore.getState().addNode(node);
-      useEditorStore.getState().onLightNodeAdded(node);
+      const state = useEditorStore.getState();
+      state.addNode(node);
+      state.onLightNodeAdded(node);
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
       return true;
     }
 
     case 'SCENE_NODE_REMOVED': {
-      const payload = data as unknown as { entityId: string };
-      const removedNode = useEditorStore.getState().sceneGraph.nodes[payload.entityId];
-      useEditorStore.getState().removeNode(payload.entityId);
-      if (removedNode) {
-        useEditorStore.getState().onLightNodeRemoved(removedNode.components);
-      }
+      const payload = data as unknown as { entityId: string; components?: string[] };
+      const state = useEditorStore.getState();
+      state.removeNode(payload.entityId);
+      state.onLightNodeRemoved(payload.components ?? []);
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
       return true;
