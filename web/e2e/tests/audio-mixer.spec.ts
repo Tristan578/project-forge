@@ -67,23 +67,20 @@ test.describe('Audio Mixer @engine', () => {
 
     // Try to open audio mixer
     const mixerBtn = page.getByRole('button', { name: /audio.*mixer|mixer/i });
-    if (await mixerBtn.isVisible()) {
-      await mixerBtn.click();
+    const mixerVisible = await mixerBtn.isVisible().catch(() => false);
+    test.skip(!mixerVisible, 'Audio mixer button not present in current layout');
 
+    await mixerBtn.click();
 
-      // Look for close button on the panel tab
-      const closeBtn = page.locator('.dv-tab [class*="close"], .dv-tab button').filter({ hasText: /×|close/i }).first();
-      if (await closeBtn.isVisible()) {
-        await closeBtn.click();
+    // Look for close button on the panel tab
+    const closeBtn = page.locator('.dv-tab [class*="close"], .dv-tab button').filter({ hasText: /×|close/i }).first();
+    if (await closeBtn.isVisible()) {
+      await closeBtn.click();
 
-
-        // Panel should no longer be visible
-        const panelTab = page.locator('.dv-tab').filter({ hasText: /audio.*mixer/i });
-        const visible = await panelTab.isVisible().catch(() => false);
-        expect(visible).toBe(false);
-      }
-    } else {
-      test.skip();
+      // Panel should no longer be visible
+      const panelTab = page.locator('.dv-tab').filter({ hasText: /audio.*mixer/i });
+      const visible = await panelTab.isVisible().catch(() => false);
+      expect(visible).toBe(false);
     }
   });
 
@@ -92,19 +89,17 @@ test.describe('Audio Mixer @engine', () => {
 
     // Try to open audio mixer
     const mixerBtn = page.getByRole('button', { name: /audio.*mixer|mixer/i });
-    if (await mixerBtn.isVisible()) {
-      await mixerBtn.click();
+    const mixerVisible = await mixerBtn.isVisible().catch(() => false);
+    test.skip(!mixerVisible, 'Audio mixer button not present in current layout');
 
+    await mixerBtn.click();
 
-      // Look for multiple bus channels (Master, Music, SFX, Voice)
-      const masterBus = page.locator('text=/master/i').first();
-      const musicBus = page.locator('text=/music/i').first();
+    // Look for multiple bus channels (Master, Music, SFX, Voice)
+    const masterBus = page.locator('text=/master/i').first();
+    const musicBus = page.locator('text=/music/i').first();
 
-      const masterCount = await masterBus.count();
-      const musicCount = await musicBus.count();
-      expect(masterCount + musicCount).toBeGreaterThan(0);
-    } else {
-      test.skip();
-    }
+    const masterCount = await masterBus.count();
+    const musicCount = await musicBus.count();
+    expect(masterCount + musicCount).toBeGreaterThan(0);
   });
 });
