@@ -109,6 +109,17 @@ function nextId(): string {
   return `msg_${Date.now()}_${++messageCounter}`;
 }
 
+// ---------------------------------------------------------------------------
+// updateToolCall microtask batching — prevents a re-render per streaming delta
+// ---------------------------------------------------------------------------
+interface PendingToolUpdate {
+  messageId: string;
+  toolCallId: string;
+  update: Partial<ToolCallStatus>;
+}
+let pendingToolUpdates: PendingToolUpdate[] = [];
+let toolUpdateBatchScheduled = false;
+
 interface DeferredTool {
   id: string;
   name: string;
@@ -778,16 +789,27 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearUnread: () => set({ hasUnreadMessages: false }),
 
   updateToolCall: (messageId, toolCallId, update) => {
-    const msgs = get().messages.map((msg) => {
-      if (msg.id !== messageId) return msg;
-      return {
-        ...msg,
-        toolCalls: (msg.toolCalls || []).map((tc) =>
-          tc.id === toolCallId ? { ...tc, ...update } : tc
-        ),
-      };
-    });
-    set({ messages: msgs });
+    pendingToolUpdates.push({ messageId, toolCallId, update });
+    if (!toolUpdateBatchScheduled) {
+      toolUpdateBatchScheduled = true;
+      queueMicrotask(() => {
+        toolUpdateBatchScheduled = false;
+        const updates = pendingToolUpdates;
+        pendingToolUpdates = [];
+        const msgs = get().messages.map((msg) => {
+          const relevant = updates.filter((u) => u.messageId === msg.id);
+          if (relevant.length === 0) return msg;
+          return {
+            ...msg,
+            toolCalls: (msg.toolCalls || []).map((tc) => {
+              const u = relevant.find((r) => r.toolCallId === tc.id);
+              return u ? { ...tc, ...u.update } : tc;
+            }),
+          };
+        });
+        set({ messages: msgs });
+      });
+    }
   },
 
   saveConversation: (projectId: string) => {
