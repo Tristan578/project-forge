@@ -46,6 +46,7 @@ export const PANEL_TIER_REQUIREMENTS: Partial<Record<string, Tier>> = {
   'design-teacher': 'hobbyist',
   'idea-generator': 'hobbyist',
   accessibility: 'hobbyist',
+  'gdd-generator': 'hobbyist',
 
   // ---------- Creator+ ----------
   'world-builder': 'creator',

@@ -330,6 +330,13 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minHeight: 200,
     category: 'tools',
   },
+  'gdd-generator': {
+    id: 'gdd-generator',
+    title: 'GDD Generator',
+    component: 'gdd-generator',
+    minWidth: 280,
+    minHeight: 200,
+  },
 };
 
 /** Panel IDs that should never be closed by the user. */
