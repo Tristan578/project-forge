@@ -417,7 +417,7 @@ export async function POST(request: NextRequest) {
       });
     }
     return Response.json(
-      { error: 'Conversation too long — some context was trimmed. Please start a new conversation or clear chat history.' },
+      { error: 'Conversation too long. Please start a new conversation or clear older messages.' },
       { status: 413 }
     );
   }
