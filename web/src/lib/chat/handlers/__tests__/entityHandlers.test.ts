@@ -376,7 +376,7 @@ describe('set_coordinate_mode', () => {
 
   it('calls toggleCoordinateMode when mode differs from current', async () => {
     const { result, store } = await invokeHandler(
-      entityHandlers,
+      transformHandlers,
       'set_coordinate_mode',
       { mode: 'local' },
       { coordinateMode: 'world' },
@@ -387,7 +387,7 @@ describe('set_coordinate_mode', () => {
 
   it('does not toggle when mode already matches', async () => {
     const { result, store } = await invokeHandler(
-      entityHandlers,
+      transformHandlers,
       'set_coordinate_mode',
       { mode: 'world' },
       { coordinateMode: 'world' },
