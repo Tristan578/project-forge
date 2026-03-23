@@ -226,7 +226,12 @@ async function loadWasm(): Promise<WasmModule> {
     // Phase 1: Detect GPU capability
     setLoadingState({ phase: 'detecting', progress: 0 });
 
-    const useWebGPU = await probeWebGPU();
+    // Allow the user to force WebGL2 via localStorage (set by InitOverlay fallback button)
+    const forceWebGL2 =
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem('forge-force-webgl2') === '1';
+
+    const useWebGPU = forceWebGL2 ? false : await probeWebGPU();
     const backend = useWebGPU ? 'webgpu' : 'webgl2';
 
     setLoadingState({ phase: 'detecting', progress: 100 });
