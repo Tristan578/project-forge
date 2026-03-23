@@ -149,10 +149,10 @@ export function useViewport(canvasId: string) {
       }, DEBOUNCE_MS);
     };
 
-    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', handleResize, { passive: true });
 
     // Also handle orientation change on mobile
-    window.addEventListener('orientationchange', handleResize);
+    window.addEventListener('orientationchange', handleResize, { passive: true });
 
     return () => {
       window.removeEventListener('resize', handleResize);

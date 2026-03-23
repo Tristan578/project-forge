@@ -98,13 +98,13 @@ export function useResponsiveLayout(): LayoutConfig {
       setConfig(getLayoutConfig(window.innerWidth, detectKeyboard()));
     };
 
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('orientationchange', handleResize);
+    window.addEventListener('resize', handleResize, { passive: true });
+    window.addEventListener('orientationchange', handleResize, { passive: true });
 
     // Listen to visualViewport resize for virtual keyboard changes
     const vv = window.visualViewport;
     if (vv) {
-      vv.addEventListener('resize', handleResize);
+      vv.addEventListener('resize', handleResize, { passive: true });
     }
 
     return () => {
