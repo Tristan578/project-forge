@@ -189,7 +189,7 @@ describe('chatStore deep tests', () => {
         result: { entityId: '123' },
       });
 
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       const updated = useChatStore.getState().messages[0];
       expect(updated.toolCalls![0].status).toBe('success');
@@ -204,7 +204,7 @@ describe('chatStore deep tests', () => {
 
       useChatStore.getState().updateToolCall('nonexistent', 'tc1', { status: 'success' });
 
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       // Original message unchanged
       expect(useChatStore.getState().messages[0].toolCalls![0].status).toBe('pending');
@@ -216,7 +216,7 @@ describe('chatStore deep tests', () => {
 
       useChatStore.getState().updateToolCall('msg1', 'nonexistent', { status: 'success' });
 
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       expect(useChatStore.getState().messages[0].toolCalls![0].status).toBe('pending');
     });
@@ -230,7 +230,7 @@ describe('chatStore deep tests', () => {
         error: 'Entity limit reached',
       });
 
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       const tc = useChatStore.getState().messages[0].toolCalls![0];
       expect(tc.status).toBe('error');
@@ -546,7 +546,7 @@ describe('chatStore deep tests', () => {
         result: { color: '#ff0000' },
       });
 
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       const updated = useChatStore.getState().messages;
       expect(updated[3].toolCalls![0].result).toEqual({ color: '#ff0000' });

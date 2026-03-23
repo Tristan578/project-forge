@@ -212,7 +212,7 @@ describe('chatStore', () => {
       updateToolCall('msg1', 'tool1', { status: 'success', result: 'Done' });
 
       // updateToolCall batches via queueMicrotask — flush it
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       const updated = useChatStore.getState().messages[0].toolCalls?.[0];
       expect(updated?.status).toBe('success');
@@ -235,7 +235,7 @@ describe('chatStore', () => {
       const { updateToolCall } = useChatStore.getState();
       updateToolCall('msg1', 'tool2', { status: 'success' });
 
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       const toolCalls = useChatStore.getState().messages[0].toolCalls;
       expect(toolCalls?.[0].status).toBe('pending');
@@ -264,7 +264,7 @@ describe('chatStore', () => {
       const { updateToolCall } = useChatStore.getState();
       updateToolCall('msg1', 'tool1', { status: 'success' });
 
-      await new Promise((r) => queueMicrotask(r));
+      await new Promise<void>((r) => queueMicrotask(r));
 
       const state = useChatStore.getState();
       expect(state.messages[0].toolCalls?.[0].status).toBe('success');
