@@ -5,6 +5,7 @@ import { assetPurchases, assetReviews, marketplaceAssets } from '@/lib/db/schema
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { parseJsonBody, requireInteger, optionalString } from '@/lib/apiValidation';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function POST(
   req: NextRequest,
@@ -84,6 +85,7 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    captureException(error, { route: '/api/marketplace/assets/[id]/review' });
     console.error('Error submitting review:', error);
     return NextResponse.json({ error: 'Failed to submit review' }, { status: 500 });
   }

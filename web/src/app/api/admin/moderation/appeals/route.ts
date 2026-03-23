@@ -4,6 +4,7 @@ import { moderationAppeals, users } from '@/lib/db/schema';
 import { eq, desc, count } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -83,6 +84,7 @@ export async function GET(req: NextRequest) {
       total,
     });
   } catch (error) {
+    captureException(error, { route: '/api/admin/moderation/appeals' });
     console.error('Failed to fetch appeals:', error);
     return NextResponse.json(
       { error: 'Failed to fetch appeals' },

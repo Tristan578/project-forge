@@ -4,6 +4,7 @@ import { publishedGames, projects, gameForks, users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -95,7 +96,7 @@ export async function POST(
 
     return NextResponse.json({ projectId: newProject.id }, { status: 201 });
   } catch (error) {
-    console.error('Failed to fork game:', error);
+    captureException(error, { route: '/api/community/games/[id]/fork' });
     return NextResponse.json({ error: 'Failed to fork game' }, { status: 500 });
   }
 }

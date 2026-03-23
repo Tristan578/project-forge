@@ -5,6 +5,7 @@ import { eq, desc } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { parsePaginationParams } from '@/lib/apiValidation';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +64,7 @@ export async function GET(req: NextRequest) {
       total: flaggedComments.length,
     });
   } catch (error) {
+    captureException(error, { route: '/api/admin/moderation', method: 'GET' });
     console.error('Failed to fetch moderation queue:', error);
     return NextResponse.json(
       { error: 'Failed to fetch moderation queue' },
@@ -117,6 +119,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, action: 'deleted' });
   } catch (error) {
+    captureException(error, { route: '/api/admin/moderation', method: 'POST' });
     console.error('Failed to perform moderation action:', error);
     return NextResponse.json(
       { error: 'Failed to perform moderation action' },

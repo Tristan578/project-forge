@@ -5,6 +5,7 @@ import { sellerProfiles } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET() {
   try {
@@ -38,6 +39,7 @@ export async function GET() {
       },
     });
   } catch (error) {
+    captureException(error, { route: '/api/marketplace/seller', method: 'GET' });
     console.error('Error fetching seller profile:', error);
     return NextResponse.json({ error: 'Failed to fetch profile' }, { status: 500 });
   }
@@ -95,6 +97,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    captureException(error, { route: '/api/marketplace/seller', method: 'POST' });
     console.error('Error saving seller profile:', error);
     return NextResponse.json({ error: 'Failed to save profile' }, { status: 500 });
   }

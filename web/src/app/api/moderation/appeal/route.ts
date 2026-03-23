@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { moderationAppeals } from '@/lib/db/schema';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ id: appeal.id, status: appeal.status }, { status: 201 });
   } catch (error) {
-    console.error('Failed to submit appeal:', error);
+    captureException(error, { route: '/api/moderation/appeal' });
     return NextResponse.json(
       { error: 'Failed to submit appeal' },
       { status: 500 }

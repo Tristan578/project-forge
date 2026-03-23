@@ -6,6 +6,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 interface BatchItem {
   nodeId: string;
@@ -105,6 +106,7 @@ export async function POST(request: NextRequest) {
         durationSeconds: result.durationSeconds,
       });
     } catch (err) {
+      captureException(err, { route: '/api/generate/voice/batch', nodeId: item.nodeId });
       errors.push({
         nodeId: item.nodeId,
         error: err instanceof Error ? err.message : 'Generation failed',

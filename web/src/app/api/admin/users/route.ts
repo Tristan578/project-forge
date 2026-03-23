@@ -4,6 +4,7 @@ import { rateLimitAdminRoute } from '@/lib/rateLimit';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { ilike, or, desc } from 'drizzle-orm';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -26,39 +27,44 @@ export async function GET(req: NextRequest) {
   const offset = isNaN(rawOffset) || rawOffset < 0 ? 0 : rawOffset;
   const search = (searchParams.get('search') ?? '').trim();
 
-  const db = getDb();
+  try {
+    const db = getDb();
 
-  const selectedFields = {
-    id: users.id,
-    email: users.email,
-    clerkId: users.clerkId,
-    displayName: users.displayName,
-    tier: users.tier,
-    monthlyTokens: users.monthlyTokens,
-    monthlyTokensUsed: users.monthlyTokensUsed,
-    addonTokens: users.addonTokens,
-    banned: users.banned,
-    createdAt: users.createdAt,
-  };
+    const selectedFields = {
+      id: users.id,
+      email: users.email,
+      clerkId: users.clerkId,
+      displayName: users.displayName,
+      tier: users.tier,
+      monthlyTokens: users.monthlyTokens,
+      monthlyTokensUsed: users.monthlyTokensUsed,
+      addonTokens: users.addonTokens,
+      banned: users.banned,
+      createdAt: users.createdAt,
+    };
 
-  let rows;
-  if (search) {
-    const pattern = `%${search}%`;
-    rows = await db
-      .select(selectedFields)
-      .from(users)
-      .where(or(ilike(users.email, pattern), ilike(users.displayName, pattern)))
-      .orderBy(desc(users.createdAt))
-      .limit(limit)
-      .offset(offset);
-  } else {
-    rows = await db
-      .select(selectedFields)
-      .from(users)
-      .orderBy(desc(users.createdAt))
-      .limit(limit)
-      .offset(offset);
+    let rows;
+    if (search) {
+      const pattern = `%${search}%`;
+      rows = await db
+        .select(selectedFields)
+        .from(users)
+        .where(or(ilike(users.email, pattern), ilike(users.displayName, pattern)))
+        .orderBy(desc(users.createdAt))
+        .limit(limit)
+        .offset(offset);
+    } else {
+      rows = await db
+        .select(selectedFields)
+        .from(users)
+        .orderBy(desc(users.createdAt))
+        .limit(limit)
+        .offset(offset);
+    }
+
+    return NextResponse.json({ users: rows, limit, offset });
+  } catch (error) {
+    captureException(error, { route: '/api/admin/users' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  return NextResponse.json({ users: rows, limit, offset });
 }

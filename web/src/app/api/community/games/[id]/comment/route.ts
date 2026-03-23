@@ -7,6 +7,7 @@ import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 import { containsBlockedKeyword } from '@/lib/moderation/keywords';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,7 +51,7 @@ export async function GET(
 
     return NextResponse.json({ comments: formattedComments });
   } catch (error) {
-    console.error('Failed to fetch comments:', error);
+    captureException(error, { route: '/api/community/games/[id]/comment', method: 'GET' });
     return NextResponse.json(
       { error: 'Failed to fetch comments' },
       { status: 500 }
@@ -141,7 +142,7 @@ export async function POST(
       { status: 201 }
     );
   } catch (error) {
-    console.error('Failed to post comment:', error);
+    captureException(error, { route: '/api/community/games/[id]/comment', method: 'POST' });
     return NextResponse.json(
       { error: 'Failed to post comment' },
       { status: 500 }

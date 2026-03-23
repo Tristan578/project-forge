@@ -7,6 +7,7 @@ import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logger } from '@/lib/logging/logger';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -65,39 +66,44 @@ export async function POST(req: Request) {
     );
   }
 
-  const db = getDb();
+  try {
+    const db = getDb();
 
-  // Create or retrieve Stripe customer
-  let customerId = user.stripeCustomerId;
-  if (!customerId) {
-    const customer = await getStripe().customers.create({
-      email: user.email,
+    // Create or retrieve Stripe customer
+    let customerId = user.stripeCustomerId;
+    if (!customerId) {
+      const customer = await getStripe().customers.create({
+        email: user.email,
+        metadata: {
+          userId: user.id,
+          clerkId: authResult.ctx.clerkId,
+        },
+      });
+      customerId = customer.id;
+
+      // Save customer ID to database
+      await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, user.id));
+      reqLog.info('Stripe customer created', { customerId });
+    }
+
+    // Create Stripe Checkout session
+    const session = await getStripe().checkout.sessions.create({
+      mode: 'subscription',
+      customer: customerId,
+      line_items: [{ price: priceId, quantity: 1 }],
       metadata: {
         userId: user.id,
-        clerkId: authResult.ctx.clerkId,
+        tier,
       },
+      success_url: `${APP_URL}/dashboard?upgraded=true`,
+      cancel_url: `${APP_URL}/pricing`,
     });
-    customerId = customer.id;
 
-    // Save customer ID to database
-    await db.update(users).set({ stripeCustomerId: customerId }).where(eq(users.id, user.id));
-    reqLog.info('Stripe customer created', { customerId });
+    reqLog.info('Checkout session created', { tier, sessionId: session.id });
+
+    return NextResponse.json({ url: session.url });
+  } catch (error) {
+    captureException(error, { route: '/api/billing/checkout' });
+    return NextResponse.json({ error: 'Failed to create checkout session' }, { status: 500 });
   }
-
-  // Create Stripe Checkout session
-  const session = await getStripe().checkout.sessions.create({
-    mode: 'subscription',
-    customer: customerId,
-    line_items: [{ price: priceId, quantity: 1 }],
-    metadata: {
-      userId: user.id,
-      tier,
-    },
-    success_url: `${APP_URL}/dashboard?upgraded=true`,
-    cancel_url: `${APP_URL}/pricing`,
-  });
-
-  reqLog.info('Checkout session created', { tier, sessionId: session.id });
-
-  return NextResponse.json({ url: session.url });
 }

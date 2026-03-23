@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -32,10 +33,15 @@ export async function POST() {
     );
   }
 
-  const session = await getStripe().billingPortal.sessions.create({
-    customer: user.stripeCustomerId,
-    return_url: `${APP_URL}/dashboard`,
-  });
+  try {
+    const session = await getStripe().billingPortal.sessions.create({
+      customer: user.stripeCustomerId,
+      return_url: `${APP_URL}/dashboard`,
+    });
 
-  return NextResponse.json({ url: session.url });
+    return NextResponse.json({ url: session.url });
+  } catch (error) {
+    captureException(error, { route: '/api/billing/portal' });
+    return NextResponse.json({ error: 'Failed to create billing portal session' }, { status: 500 });
+  }
 }

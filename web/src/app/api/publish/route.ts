@@ -9,6 +9,7 @@ import { moderateContent } from '@/lib/moderation/contentFilter';
 import { parseJsonBody, requireString, optionalString } from '@/lib/apiValidation';
 import { logger } from '@/lib/logging/logger';
 import { extractRequestId } from '@/lib/logging/requestContext';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function POST(request: NextRequest) {
   const requestId = extractRequestId(request.headers);
@@ -101,6 +102,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  try {
   const db = getDb();
 
   // Check tier publish limits
@@ -198,4 +200,8 @@ export async function POST(request: NextRequest) {
   });
 
   return NextResponse.json({ publication: { ...publication, url: gameUrl } });
+  } catch (err) {
+    captureException(err, { route: '/api/publish', method: 'POST' });
+    return NextResponse.json({ error: 'Failed to publish game' }, { status: 500 });
+  }
 }

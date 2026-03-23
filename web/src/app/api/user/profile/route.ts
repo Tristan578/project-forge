@@ -3,26 +3,32 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { updateDisplayName } from '@/lib/auth/user-service';
 import { parseJsonBody, requireString } from '@/lib/apiValidation';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * GET /api/user/profile
  * Get the authenticated user's profile data.
  */
 export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+  try {
+    const authResult = await authenticateRequest();
+    if (!authResult.ok) return authResult.response;
 
-  const rl = await rateLimit(`user:profile-get:${authResult.ctx.user.id}`, 30, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+    const rl = await rateLimit(`user:profile-get:${authResult.ctx.user.id}`, 30, 60_000);
+    if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
-  const user = authResult.ctx.user;
+    const user = authResult.ctx.user;
 
-  return NextResponse.json({
-    displayName: user.displayName,
-    email: user.email,
-    tier: user.tier,
-    createdAt: user.createdAt.toISOString(),
-  });
+    return NextResponse.json({
+      displayName: user.displayName,
+      email: user.email,
+      tier: user.tier,
+      createdAt: user.createdAt.toISOString(),
+    });
+  } catch (err) {
+    captureException(err, { route: '/api/user/profile', method: 'GET' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
 
 /**
@@ -51,6 +57,7 @@ export async function PUT(request: NextRequest) {
       createdAt: user.createdAt.toISOString(),
     });
   } catch (err) {
+    captureException(err, { route: '/api/user/profile', method: 'PUT' });
     return NextResponse.json(
       { error: (err as Error).message },
       { status: 400 }

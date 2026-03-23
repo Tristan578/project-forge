@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 interface DocEntry {
   path: string;
@@ -89,6 +90,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ docs, meta });
   } catch (err) {
+    captureException(err, { route: '/api/docs' });
     return NextResponse.json(
       { error: 'Failed to load documentation', details: err instanceof Error ? err.message : 'Unknown error' },
       { status: 500 }
