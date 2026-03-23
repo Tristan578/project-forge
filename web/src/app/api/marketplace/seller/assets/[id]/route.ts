@@ -5,6 +5,7 @@ import { marketplaceAssets } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { parseJsonBody, optionalString } from '@/lib/apiValidation';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function PATCH(
   req: NextRequest,
@@ -111,6 +112,7 @@ export async function PATCH(
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error updating asset:', error);
+    captureException(error, { route: '/api/marketplace/seller/assets/[id]', method: 'PATCH' });
     return NextResponse.json({ error: 'Failed to update asset' }, { status: 500 });
   }
 }
