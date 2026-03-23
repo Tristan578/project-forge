@@ -248,6 +248,7 @@ const navLinks = [
 /* ------------------------------------------------------------------ */
 
 export default function LandingPage() {
+  'use cache';
   return (
     <>
       {/* ---- Navigation ---- */}

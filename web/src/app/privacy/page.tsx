@@ -23,6 +23,7 @@ const tableOfContents = [
 ];
 
 export default function PrivacyPolicyPage() {
+  'use cache';
   return (
     <LegalLayout
       title="Privacy Policy"

@@ -56,6 +56,10 @@ const nextConfig: NextConfig = {
     // Use the new scroll restoration handler that correctly restores scroll
     // position across App Router navigations (16.2+).
     appNewScrollHandler: true,
+    // Enable cached navigations for 'use cache' Server Components.
+    // Static marketing, legal, and pricing pages are cached at the edge to
+    // reduce origin load and improve TTFB.
+    cachedNavigations: true,
   },
   images: {
     remotePatterns: [
