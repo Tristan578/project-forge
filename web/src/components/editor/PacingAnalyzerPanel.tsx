@@ -239,12 +239,11 @@ function ScoreBadge({ score }: { score: number }) {
 
 export function PacingAnalyzerPanel() {
   const nodes = useEditorStore((s) => s.sceneGraph.nodes);
-  const rootIds = useEditorStore((s) => s.sceneGraph.rootIds);
   const [selectedTemplate, setSelectedTemplate] = useState<PacingTemplateId | ''>('');
 
   // Convert scene graph entities to descriptors.
-  // Keyed on rootIds so that transform-only updates (which don't change
-  // the entity list) do NOT trigger a recompute.
+  // SceneNode does not carry transform data, so this only recomputes when
+  // entities are added, removed, renamed, or reparented — not on drag.
   const entities: SceneEntityDescriptor[] = useMemo(() => {
     const entries = Object.entries(nodes);
     if (entries.length === 0) return [];
@@ -257,7 +256,7 @@ export function PacingAnalyzerPanel() {
       position: entries.length > 1 ? idx / (entries.length - 1) : 0.5,
       tags: extractTags(node.name, node.components[0]),
     }));
-  }, [rootIds, nodes]);
+  }, [nodes]);
 
   const analysis: PacingAnalysis | null = useMemo(() => {
     if (entities.length === 0) return null;
