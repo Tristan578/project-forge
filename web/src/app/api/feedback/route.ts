@@ -6,6 +6,7 @@ import { feedback } from '@/lib/db/schema';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const VALID_TYPES = ['bug', 'feature', 'general'] as const;
 
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, id: record.id });
   } catch (err) {
     console.error('Feedback submission error:', err);
+    captureException(err, { route: '/api/feedback' });
     return NextResponse.json(
       { error: 'Failed to submit feedback' },
       { status: 500 }

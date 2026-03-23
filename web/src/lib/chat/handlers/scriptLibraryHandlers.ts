@@ -7,6 +7,21 @@ import type { ToolHandler } from './types';
 import { zEntityId, parseArgs } from './types';
 
 export const scriptLibraryHandlers: Record<string, ToolHandler> = {
+  create_script: async (args, ctx) => {
+    const p = parseArgs(z.object({
+      entityId: zEntityId.optional(),
+      source: z.string().min(1),
+      name: z.string().optional(),
+      enabled: z.boolean().optional(),
+      template: z.string().optional(),
+    }), args);
+    if (p.error) return p.error;
+    const targetId = p.data.entityId ?? ctx.store.primaryId;
+    if (!targetId) return { success: false, error: 'No entity selected and no entityId provided' };
+    ctx.store.setScript(targetId, p.data.source, p.data.enabled ?? true, p.data.template);
+    return { success: true, result: { message: `Script created on ${targetId}${p.data.name ? ` ("${p.data.name}")` : ''}` } };
+  },
+
   set_script: async (args, ctx) => {
     const p = parseArgs(z.object({
       entityId: zEntityId,

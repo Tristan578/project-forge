@@ -2,6 +2,7 @@
 
 import { useEngineStatus, PHASE_LABELS, type PhaseStatus } from '@/hooks/useEngineStatus';
 import { copyInitLogToClipboard } from '@/lib/initLog';
+import { setPreferredBackend } from '@/hooks/useEngine';
 import { useState } from 'react';
 
 const GITHUB_ISSUES_URL = 'https://github.com/Tristan578/project-forge/issues/new';
@@ -184,8 +185,8 @@ export function InitOverlay() {
                   {retryCount >= 1 && (
                     <button
                       onClick={() => {
-                        // TODO: Implement WebGL2 fallback mode
-                        retry();
+                        setPreferredBackend('webgl2');
+                        window.location.reload();
                       }}
                       className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500"
                     >

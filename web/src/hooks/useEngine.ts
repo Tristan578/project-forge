@@ -204,6 +204,18 @@ async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: stri
   return mod;
 }
 
+const PREFERRED_BACKEND_KEY = 'forge:preferred-backend';
+
+/**
+ * Persist a backend preference that survives page reload.
+ * Pass 'webgpu' or 'webgl2'. Clear by passing null/undefined.
+ */
+export function setPreferredBackend(backend: string): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(PREFERRED_BACKEND_KEY, backend);
+  }
+}
+
 let loadAbortController: AbortController | null = null;
 
 async function loadWasm(): Promise<WasmModule> {
@@ -226,7 +238,14 @@ async function loadWasm(): Promise<WasmModule> {
     // Phase 1: Detect GPU capability
     setLoadingState({ phase: 'detecting', progress: 0 });
 
-    const useWebGPU = await probeWebGPU();
+    // Check for a user-set backend preference (e.g. from the WebGL2 fallback button)
+    const preferredBackend =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem(PREFERRED_BACKEND_KEY)
+        : null;
+
+    const useWebGPU =
+      preferredBackend === 'webgl2' ? false : await probeWebGPU();
     const backend = useWebGPU ? 'webgpu' : 'webgl2';
 
     setLoadingState({ phase: 'detecting', progress: 100 });
