@@ -21,6 +21,8 @@ export interface SceneNodeChanges {
 export interface SceneGraphSlice {
   // State
   sceneGraph: SceneGraph;
+  /** Total number of nodes in the scene graph. Kept in sync for O(1) selector access. */
+  nodeCount: number;
 
   // Actions
   /** Replace the entire graph (used on scene load / new scene). O(N). */
@@ -69,17 +71,18 @@ export const createSceneGraphSlice: StateCreator<
 > = (set, get) => ({
   // Initial state
   sceneGraph: { nodes: {}, rootIds: [] },
+  nodeCount: 0,
 
   // ---------------------------------------------------------------------------
   // Full graph operations
   // ---------------------------------------------------------------------------
 
   setFullGraph: (graph) => {
-    set({ sceneGraph: graph });
+    set({ sceneGraph: graph, nodeCount: Object.keys(graph.nodes).length });
   },
 
   updateSceneGraph: (graph) => {
-    set({ sceneGraph: graph });
+    set({ sceneGraph: graph, nodeCount: Object.keys(graph.nodes).length });
   },
 
   // ---------------------------------------------------------------------------
@@ -107,7 +110,7 @@ export const createSceneGraphSlice: StateCreator<
         ? [...sceneGraph.rootIds, node.entityId]
         : sceneGraph.rootIds;
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds } });
+    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds }, nodeCount: Object.keys(newNodes).length });
   },
 
   removeNode: (entityId) => {
@@ -130,7 +133,7 @@ export const createSceneGraphSlice: StateCreator<
     // Remove from rootIds if present
     const newRootIds = sceneGraph.rootIds.filter((id) => id !== entityId);
 
-    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds } });
+    set({ sceneGraph: { nodes: newNodes, rootIds: newRootIds }, nodeCount: Object.keys(newNodes).length });
   },
 
   updateNode: (entityId, changes) => {

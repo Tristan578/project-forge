@@ -25,7 +25,7 @@ const CHECKLIST_TASKS: ChecklistTask[] = [
     title: 'Create Your First Entity',
     description: 'Add any entity to your scene',
     category: 'basics',
-    checkCompletion: (state) => Object.keys(state.sceneGraph.nodes).length > 1, // Excluding camera
+    checkCompletion: (state) => state.nodeCount > 1, // Excluding camera
   },
   {
     id: 'customize-material',

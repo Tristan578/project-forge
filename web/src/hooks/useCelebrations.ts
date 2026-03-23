@@ -65,10 +65,10 @@ export function useCelebrations(): UseCelebrationsReturn {
   // This runs in a useEffect so the subscription is set up after mount and
   // cleaned up on unmount. The callback does NOT run during render.
   useEffect(() => {
-    let prevCount = Object.keys(useEditorStore.getState().sceneGraph.nodes).length;
+    let prevCount = useEditorStore.getState().nodeCount;
 
     const unsub = useEditorStore.subscribe((state) => {
-      const count = Object.keys(state.sceneGraph.nodes).length;
+      const count = state.nodeCount;
       if (count === prevCount) return;
 
       if (prevCount === 0 && count > 0) {
@@ -112,7 +112,7 @@ export function useCelebrations(): UseCelebrationsReturn {
 
   // Expose the current engine mode and entity count for consumers (unused in this
   // component but keeps the hook reactive so callers re-render with activeCelebration)
-  useEditorStore((s) => Object.keys(s.sceneGraph.nodes).length);
+  useEditorStore((s) => s.nodeCount);
   useEditorStore((s) => s.engineMode);
 
   return { activeCelebration, dismissCelebration, triggerMilestone };
