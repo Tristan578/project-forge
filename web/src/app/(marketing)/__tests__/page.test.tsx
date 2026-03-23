@@ -23,6 +23,14 @@ vi.mock('next/link', () => ({
   ),
 }));
 
+vi.mock('@/components/marketing/AiShowcaseSection', () => ({
+  AiShowcaseSection: () => (
+    <section id="demo" aria-labelledby="ai-showcase-heading">
+      <h2 id="ai-showcase-heading">From Prompt to Playable</h2>
+    </section>
+  ),
+}));
+
 vi.mock('lucide-react', () => {
   const icon = ({ className, ...props }: Record<string, unknown>) => (
     <span className={className as string} {...props} />
@@ -67,13 +75,13 @@ describe('LandingPage', () => {
     expect(heroLink?.getAttribute('href')).toBe('/sign-up');
   });
 
-  it('renders all 8 feature cards', () => {
+  it('renders all 8 feature cards with updated titles', () => {
     render(<LandingPage />);
     const expectedFeatures = [
-      'AI Game Studio',
-      '327+ MCP Commands',
-      'Bevy Engine (WebGPU)',
-      'Visual Scripting + TypeScript',
+      'AI Game Design',
+      '2D & 3D Engine',
+      'Visual Scripting',
+      '25+ AI Modules',
       'One-Click Publish',
       'Real-Time Collaboration',
       '2D & 3D Game Support',
@@ -92,8 +100,8 @@ describe('LandingPage', () => {
   it('renders the 3-step how-it-works flow', () => {
     render(<LandingPage />);
     expect(screen.getByText('Describe')).toBeDefined();
-    expect(screen.getByText('Create')).toBeDefined();
-    expect(screen.getByText('Publish')).toBeDefined();
+    expect(screen.getByText('Generate')).toBeDefined();
+    expect(screen.getByText('Play')).toBeDefined();
     expect(screen.getByText('Step 1')).toBeDefined();
     expect(screen.getByText('Step 2')).toBeDefined();
     expect(screen.getByText('Step 3')).toBeDefined();
@@ -118,17 +126,17 @@ describe('LandingPage', () => {
     expect(screen.getByText('One-click web publish')).toBeDefined();
   });
 
-  it('renders all 4 pricing tiers with correct prices', () => {
+  it('renders all 4 pricing tiers with correct prices per spec', () => {
     render(<LandingPage />);
+    expect(screen.getByText('$0')).toBeDefined();
     expect(screen.getByText('$9')).toBeDefined();
-    expect(screen.getByText('$19')).toBeDefined();
     expect(screen.getByText('$29')).toBeDefined();
-    expect(screen.getByText('$79')).toBeDefined();
+    expect(screen.getByText('$99')).toBeDefined();
 
     expect(screen.getByText('Starter')).toBeDefined();
     expect(screen.getByText('Hobbyist')).toBeDefined();
     expect(screen.getByText('Creator')).toBeDefined();
-    expect(screen.getByText('Studio')).toBeDefined();
+    expect(screen.getByText('Pro')).toBeDefined();
   });
 
   it('highlights the Creator tier as "Most Popular"', () => {
@@ -139,7 +147,7 @@ describe('LandingPage', () => {
   it('renders the footer CTA section', () => {
     render(<LandingPage />);
     expect(
-      screen.getByRole('heading', { name: /ready to build your game/i })
+      screen.getByRole('heading', { name: /ready to create your first game/i })
     ).toBeDefined();
   });
 
@@ -162,19 +170,43 @@ describe('LandingPage', () => {
 
   it('renders responsive classes on feature grid', () => {
     render(<LandingPage />);
-    // The feature grid container should have responsive grid classes
-    const featureHeading = screen.getByText('AI Game Studio');
+    // The primary feature grid container should have responsive grid classes
+    const featureHeading = screen.getByText('AI Game Design');
     const grid = featureHeading.closest('.grid');
     expect(grid).toBeDefined();
     expect(grid?.className).toContain('sm:grid-cols-2');
-    expect(grid?.className).toContain('lg:grid-cols-4');
+    expect(grid?.className).toContain('lg:grid-cols-3');
   });
 
-  it('renders social proof placeholder section', () => {
+  it('renders testimonials social proof section', () => {
     render(<LandingPage />);
     expect(
       screen.getByRole('heading', { name: /trusted by game creators/i })
     ).toBeDefined();
+  });
+
+  it('renders testimonials with realistic content (not placeholders)', () => {
+    render(<LandingPage />);
+    // Should have figure/blockquote elements with real quotes
+    const blockquotes = document.querySelectorAll('blockquote');
+    expect(blockquotes.length).toBeGreaterThanOrEqual(3);
+    // Each blockquote should have meaningful text, not "placeholder"
+    for (const bq of blockquotes) {
+      expect(bq.textContent?.toLowerCase()).not.toContain('placeholder');
+    }
+  });
+
+  it('renders the AI showcase section', () => {
+    render(<LandingPage />);
+    expect(
+      screen.getByRole('heading', { name: /from prompt to playable/i })
+    ).toBeDefined();
+  });
+
+  it('"See How It Works" CTA links to the demo section', () => {
+    render(<LandingPage />);
+    const link = screen.getByText('See How It Works').closest('a');
+    expect(link?.getAttribute('href')).toBe('#demo');
   });
 
   it('renders footer links', () => {

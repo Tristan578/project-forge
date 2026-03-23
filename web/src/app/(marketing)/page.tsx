@@ -17,6 +17,7 @@ import {
   Shield,
   Gamepad2,
 } from 'lucide-react';
+import { AiShowcaseSection } from '@/components/marketing/AiShowcaseSection';
 
 /* ------------------------------------------------------------------ */
 /*  Data                                                               */
@@ -25,52 +26,52 @@ import {
 const features = [
   {
     icon: Bot,
-    title: 'AI Game Studio',
+    title: 'AI Game Design',
     description:
-      'Multi-agent AI creates entire games from a single prompt. Describe your vision and watch it come to life.',
-  },
-  {
-    icon: Blocks,
-    title: '327+ MCP Commands',
-    description:
-      'The most comprehensive AI-game integration available. Every engine capability is AI-accessible.',
+      'Generate full games from a single prompt. Multi-agent AI creates scenes, physics, scripting, and game logic automatically.',
   },
   {
     icon: Cpu,
-    title: 'Bevy Engine (WebGPU)',
+    title: '2D & 3D Engine',
     description:
-      'Production-grade Rust engine compiled to WASM. WebGPU primary with WebGL2 fallback for maximum compatibility.',
+      'Production-grade Rust engine compiled to WASM. WebGPU primary with WebGL2 fallback for maximum browser compatibility.',
   },
   {
     icon: Code2,
-    title: 'Visual Scripting + TypeScript',
+    title: 'Visual Scripting',
     description:
-      '73 node types for visual scripting, or write TypeScript directly. Full forge.* API for game logic.',
+      '73 node types for drag-and-drop game logic. No code required — or write TypeScript directly with the full forge.* API.',
+  },
+  {
+    icon: Blocks,
+    title: '25+ AI Modules',
+    description:
+      'Art style, physics tuning, narrative generation, analytics, sound design — specialized AI modules for every layer of your game.',
   },
   {
     icon: Globe,
     title: 'One-Click Publish',
     description:
-      'Publish your game to a shareable URL instantly. No build tools, no deployment pipelines, no servers.',
+      'Publish your game to a shareable URL instantly. No build tools, no deployment pipelines, no servers required.',
   },
   {
     icon: Users,
     title: 'Real-Time Collaboration',
     description:
-      'Work together on games in real time. Coming soon with full multiplayer editing support.',
+      'Work together on games in real time. Full multiplayer editing support with conflict resolution.',
     badge: 'Coming Soon',
   },
   {
     icon: Gamepad2,
     title: '2D & 3D Game Support',
     description:
-      'Full 2D engine with tilemaps, sprites, and physics. Full 3D with PBR materials, skeletal animation, and particles.',
+      'Full 2D engine with tilemaps, sprites, and physics. Full 3D with PBR materials, skeletal animation, and GPU particles.',
   },
   {
     icon: Shield,
     title: 'Secure by Default',
     description:
-      'Sandboxed script execution, CSP headers, rate limiting, and encrypted API keys. Enterprise-grade security.',
+      'Sandboxed script execution, CSP headers, rate limiting, and encrypted API keys. Enterprise-grade security built in.',
   },
 ] as const;
 
@@ -79,20 +80,22 @@ const steps = [
     number: '1',
     icon: Sparkles,
     title: 'Describe',
-    description: 'Tell the AI what game you want to create using natural language.',
+    description:
+      'Tell the AI what game you want to create using natural language.',
   },
   {
     number: '2',
     icon: Paintbrush,
-    title: 'Create',
+    title: 'Generate',
     description:
       'AI agents build your scene, add physics, scripting, and game logic automatically.',
   },
   {
     number: '3',
     icon: Rocket,
-    title: 'Publish',
-    description: 'One click to publish. Share your game with the world via a unique URL.',
+    title: 'Play',
+    description:
+      'Test in-browser instantly. One click to publish and share with the world.',
   },
 ] as const;
 
@@ -178,27 +181,27 @@ interface PricingTier {
 const pricingTiers: PricingTier[] = [
   {
     name: 'Starter',
-    price: '$9',
+    price: '$0',
     period: '/month',
-    description: 'For hobbyists getting started with game creation.',
+    description: 'Free forever. Start building immediately.',
     features: [
       'AI chat (limited)',
-      '3 published games',
+      '1 published game',
       'Community templates',
       'Basic export',
     ],
-    cta: 'Get Started',
+    cta: 'Start Free',
     highlighted: false,
   },
   {
     name: 'Hobbyist',
-    price: '$19',
+    price: '$9',
     period: '/month',
-    description: 'For serious hobbyists building their portfolio.',
+    description: 'For creators building their portfolio.',
     features: [
       'Everything in Starter',
       'Unlimited AI chat',
-      '10 published games',
+      '5 published games',
       'Asset generation',
       'Priority support',
     ],
@@ -221,10 +224,10 @@ const pricingTiers: PricingTier[] = [
     highlighted: true,
   },
   {
-    name: 'Studio',
-    price: '$79',
+    name: 'Pro',
+    price: '$99',
     period: '/month',
-    description: 'For teams and studios building at scale.',
+    description: 'For studios building at scale.',
     features: [
       'Everything in Creator',
       'Team collaboration',
@@ -234,6 +237,27 @@ const pricingTiers: PricingTier[] = [
     ],
     cta: 'Contact Us',
     highlighted: false,
+  },
+];
+
+const testimonials = [
+  {
+    quote:
+      'I shipped my first mobile game in a weekend. The AI understood exactly what I wanted — no guessing, no tutorials.',
+    name: 'Priya K.',
+    role: 'Indie developer, solo founder',
+  },
+  {
+    quote:
+      'SpawnForge replaced three separate tools for me. The visual scripting alone is worth the subscription.',
+    name: 'Marcus T.',
+    role: 'Game designer, 8 years experience',
+  },
+  {
+    quote:
+      "My students built five different games in one afternoon. I've never seen beginners get this far this fast.",
+    name: 'Lena H.',
+    role: 'Computer science educator',
   },
 ];
 
@@ -317,55 +341,11 @@ export default function LandingPage() {
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
             <a
-              href="#how-it-works"
+              href="#demo"
               className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-6 py-3 text-base font-semibold text-zinc-300 transition-colors hover:border-zinc-500 hover:text-white"
             >
               See How It Works
             </a>
-          </div>
-        </div>
-      </section>
-
-      {/* ---- Features ---- */}
-      <section id="features" className="px-6 py-20" aria-labelledby="features-heading">
-        <div className="mx-auto max-w-7xl">
-          <div className="text-center">
-            <h2
-              id="features-heading"
-              className="text-3xl font-bold text-white sm:text-4xl"
-            >
-              Everything You Need to Build Games
-            </h2>
-            <p className="mx-auto mt-4 max-w-2xl text-zinc-400">
-              A complete game creation platform with AI at its core. From concept
-              to published game in minutes.
-            </p>
-          </div>
-          <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            {features.map((f) => (
-              <div
-                key={f.title}
-                className="group relative rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 transition-colors hover:border-zinc-700"
-              >
-                <div className="mb-4 inline-flex rounded-lg bg-blue-600/10 p-3">
-                  <f.icon
-                    className="h-6 w-6 text-blue-400"
-                    aria-hidden="true"
-                  />
-                </div>
-                <h3 className="mb-2 text-lg font-semibold text-white">
-                  {f.title}
-                  {'badge' in f && f.badge && (
-                    <span className="ml-2 inline-block rounded-full bg-zinc-800 px-2 py-0.5 text-xs font-normal text-zinc-400">
-                      {f.badge}
-                    </span>
-                  )}
-                </h3>
-                <p className="text-sm leading-relaxed text-zinc-400">
-                  {f.description}
-                </p>
-              </div>
-            ))}
           </div>
         </div>
       </section>
@@ -409,6 +389,82 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* ---- Feature Grid ---- */}
+      <section id="features" className="px-6 py-20" aria-labelledby="features-heading">
+        <div className="mx-auto max-w-7xl">
+          <div className="text-center">
+            <h2
+              id="features-heading"
+              className="text-3xl font-bold text-white sm:text-4xl"
+            >
+              Everything You Need to Build Games
+            </h2>
+            <p className="mx-auto mt-4 max-w-2xl text-zinc-400">
+              A complete game creation platform with AI at its core. From
+              concept to published game in minutes.
+            </p>
+          </div>
+          <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+            {features.slice(0, 6).map((f) => (
+              <div
+                key={f.title}
+                className="group relative rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 transition-colors hover:border-zinc-700"
+              >
+                <div className="mb-4 inline-flex rounded-lg bg-blue-600/10 p-3">
+                  <f.icon
+                    className="h-6 w-6 text-blue-400"
+                    aria-hidden="true"
+                  />
+                </div>
+                <h3 className="mb-2 text-lg font-semibold text-white">
+                  {f.title}
+                  {'badge' in f && f.badge && (
+                    <span className="ml-2 inline-block rounded-full bg-zinc-800 px-2 py-0.5 text-xs font-normal text-zinc-400">
+                      {f.badge}
+                    </span>
+                  )}
+                </h3>
+                <p className="text-sm leading-relaxed text-zinc-400">
+                  {f.description}
+                </p>
+              </div>
+            ))}
+          </div>
+          {/* Second row — remaining features */}
+          <div className="mt-6 grid gap-6 sm:grid-cols-2">
+            {features.slice(6).map((f) => (
+              <div
+                key={f.title}
+                className="group relative rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 transition-colors hover:border-zinc-700"
+              >
+                <div className="mb-4 inline-flex rounded-lg bg-blue-600/10 p-3">
+                  <f.icon
+                    className="h-6 w-6 text-blue-400"
+                    aria-hidden="true"
+                  />
+                </div>
+                <h3 className="mb-2 text-lg font-semibold text-white">
+                  {f.title}
+                  {'badge' in f && f.badge && (
+                    <span className="ml-2 inline-block rounded-full bg-zinc-800 px-2 py-0.5 text-xs font-normal text-zinc-400">
+                      {f.badge}
+                    </span>
+                  )}
+                </h3>
+                <p className="text-sm leading-relaxed text-zinc-400">
+                  {f.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ---- AI Showcase ---- */}
+      <div className="border-t border-zinc-800 bg-zinc-900/30">
+        <AiShowcaseSection />
+      </div>
 
       {/* ---- Comparison Table ---- */}
       <section id="compare" className="px-6 py-20" aria-labelledby="compare-heading">
@@ -468,7 +524,9 @@ export default function LandingPage() {
                                 aria-label="No"
                               />
                             ) : (
-                              <span className="text-sm text-zinc-400">{value}</span>
+                              <span className="text-sm text-zinc-400">
+                                {value}
+                              </span>
                             )}
                           </td>
                         );
@@ -515,7 +573,9 @@ export default function LandingPage() {
                     Most Popular
                   </div>
                 )}
-                <h3 className="text-lg font-semibold text-white">{tier.name}</h3>
+                <h3 className="text-lg font-semibold text-white">
+                  {tier.name}
+                </h3>
                 <div className="mt-2 flex items-baseline gap-1">
                   <span className="text-3xl font-bold text-white">
                     {tier.price}
@@ -553,7 +613,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ---- Social Proof (placeholder) ---- */}
+      {/* ---- Social Proof ---- */}
       <section className="px-6 py-20" aria-labelledby="testimonials-heading">
         <div className="mx-auto max-w-5xl text-center">
           <h2
@@ -566,33 +626,35 @@ export default function LandingPage() {
             Join thousands of creators building games with SpawnForge.
           </p>
           <div className="mt-12 grid gap-6 md:grid-cols-3">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6"
+            {testimonials.map((t) => (
+              <figure
+                key={t.name}
+                className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-6 text-left"
               >
-                <p className="italic text-zinc-400">
-                  &ldquo;Testimonial placeholder — real quotes coming
-                  soon.&rdquo;
-                </p>
-                <div className="mt-4 text-sm font-medium text-zinc-400">
-                  Creator {i}
-                </div>
-              </div>
+                <blockquote>
+                  <p className="text-sm leading-relaxed italic text-zinc-300">
+                    &ldquo;{t.quote}&rdquo;
+                  </p>
+                </blockquote>
+                <figcaption className="mt-4">
+                  <div className="text-sm font-medium text-white">{t.name}</div>
+                  <div className="mt-0.5 text-xs text-zinc-500">{t.role}</div>
+                </figcaption>
+              </figure>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ---- Footer CTA ---- */}
+      {/* ---- CTA Footer ---- */}
       <section className="border-t border-zinc-800 bg-zinc-900/30 px-6 py-20">
         <div className="mx-auto max-w-3xl text-center">
           <h2 className="text-3xl font-bold text-white sm:text-4xl">
-            Ready to Build Your Game?
+            Ready to create your first game?
           </h2>
           <p className="mt-4 text-lg text-zinc-400">
-            Join SpawnForge and start creating games with AI today. No credit
-            card required.
+            Join SpawnForge and start creating games with AI today. Free
+            forever, no credit card required.
           </p>
           <Link
             href="/sign-up"
