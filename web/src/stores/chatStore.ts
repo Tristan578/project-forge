@@ -791,12 +791,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   saveConversation: (projectId: string) => {
-    try {
-      const { messages } = get();
-      const toStore = messages.slice(-MAX_STORED_MESSAGES);
-      localStorage.setItem(PERSISTENCE_KEY + projectId, JSON.stringify(toStore));
-    } catch {
-      // localStorage full or unavailable
+    const { messages } = get();
+    const toStore = messages.slice(-MAX_STORED_MESSAGES);
+    const key = PERSISTENCE_KEY + projectId;
+    const doSave = () => {
+      try {
+        localStorage.setItem(key, JSON.stringify(toStore));
+      } catch {
+        // localStorage full or unavailable
+      }
+    };
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(doSave, { timeout: 2000 });
+    } else {
+      setTimeout(doSave, 0);
     }
   },
 
