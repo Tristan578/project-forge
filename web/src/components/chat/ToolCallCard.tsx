@@ -63,6 +63,7 @@ const TOOL_LABELS: Record<string, string> = {
   place_asset: 'Place Asset',
   delete_asset: 'Delete Asset',
   list_assets: 'List Assets',
+  create_script: 'Create Script',
   set_script: 'Set Script',
   remove_script: 'Remove Script',
   get_script: 'Get Script',

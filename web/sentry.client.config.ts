@@ -17,13 +17,6 @@ if (DSN) {
     integrations: [
       Sentry.browserTracingIntegration(),
       Sentry.replayIntegration({ maskAllText: false, blockAllMedia: false }),
-      // Captures AI token usage, model IDs, latency, and errors for every
-      // Anthropic SDK call. Input/output recording is disabled in production
-      // to avoid capturing PII from user prompts and model responses.
-      Sentry.anthropicAIIntegration({
-        recordInputs: !IS_PROD,
-        recordOutputs: !IS_PROD,
-      }),
     ],
 
     // Replay sampling

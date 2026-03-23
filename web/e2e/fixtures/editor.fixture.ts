@@ -85,11 +85,24 @@ export class EditorPage {
     await this.page.waitForLoadState('domcontentloaded');
     // Wait for React hydration — ensures all event handlers (keyboard shortcuts,
     // button clicks) are attached. This fires after EditorLayout mounts.
-    await this.page.waitForFunction(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      () => (window as any).__REACT_HYDRATED === true,
-      { timeout: 45_000 }
-    );
+    // On cold dev-server starts (CI), the first page load may trigger webpack
+    // chunk compilation. If the dynamic import of EditorLayout hasn't resolved
+    // within 15s, reload to pick up the now-compiled chunks.
+    try {
+      await this.page.waitForFunction(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        () => (window as any).__REACT_HYDRATED === true,
+        { timeout: 15_000 }
+      );
+    } catch {
+      // Reload — chunks should be compiled by now
+      await this.page.reload({ waitUntil: 'domcontentloaded' });
+      await this.page.waitForFunction(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        () => (window as any).__REACT_HYDRATED === true,
+        { timeout: 30_000 }
+      );
+    }
   }
 
   /** Wait for a minimum entity count in the scene graph */

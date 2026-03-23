@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 import {
   users,
   projects,
@@ -176,6 +177,7 @@ export async function GET() {
     });
   } catch (err) {
     console.error('GDPR data export failed:', err);
+    captureException(err, { route: '/api/user/export-data' });
     return NextResponse.json(
       { error: 'Failed to export user data' },
       { status: 500 }

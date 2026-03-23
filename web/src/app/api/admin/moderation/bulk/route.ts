@@ -4,6 +4,7 @@ import { gameComments } from '@/lib/db/schema';
 import { inArray } from 'drizzle-orm';
 import { authenticateRequest, assertAdmin } from '@/lib/auth/api-auth';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -84,6 +85,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ processed, errors });
   } catch (error) {
     console.error('Failed to perform bulk moderation:', error);
+    captureException(error, { route: '/api/admin/moderation/bulk' });
     return NextResponse.json(
       { error: 'Failed to perform bulk moderation' },
       { status: 500 }

@@ -5,6 +5,7 @@ import { marketplaceAssets } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { parseJsonBody, requireString, requireOneOf } from '@/lib/apiValidation';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 const VALID_CATEGORIES = ['model_3d', 'sprite', 'texture', 'audio', 'script', 'prefab', 'template', 'shader', 'animation'] as const;
 const VALID_LICENSES = ['standard', 'extended'] as const;
@@ -42,6 +43,7 @@ export async function GET() {
     return NextResponse.json({ assets: formatted });
   } catch (error) {
     console.error('Error fetching seller assets:', error);
+    captureException(error, { route: '/api/marketplace/seller/assets', method: 'GET' });
     return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 }
@@ -103,6 +105,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ asset });
   } catch (error) {
     console.error('Error creating asset:', error);
+    captureException(error, { route: '/api/marketplace/seller/assets', method: 'POST' });
     return NextResponse.json({ error: 'Failed to create asset' }, { status: 500 });
   }
 }

@@ -2105,6 +2105,37 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "create_script",
+      "description": "Create and attach a new TypeScript script to an entity. Accepts entityId (defaults to primary selection), source code (required), optional enabled flag, and template hint.",
+      "category": "scripting",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity to attach the script to. Defaults to the currently selected entity if omitted."
+          },
+          "source": {
+            "type": "string",
+            "description": "TypeScript source code with optional onStart/onUpdate/onDestroy lifecycle functions"
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether the script should run immediately (default: true)"
+          },
+          "template": {
+            "type": "string",
+            "description": "Optional template hint (e.g. 'character_controller') for UI display"
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
       "name": "set_script",
       "description": "Set or update TypeScript script source on an entity (lifecycle: onStart, onUpdate, onDestroy)",
       "category": "scripting",

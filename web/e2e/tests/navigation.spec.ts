@@ -96,15 +96,14 @@ test.describe('Navigation & Routing @ui', () => {
       await expect(privacyLink).toBeVisible();
       await privacyLink.click();
 
-      await page.waitForURL('**/privacy**', { timeout: 10000 });
-      expect(page.url()).toContain('/privacy');
+      // Next.js Link does client-side navigation — use toHaveURL with auto-retry
+      await expect(page).toHaveURL(/\/privacy/, { timeout: 15000 });
 
       const termsLink = page.locator('a[href="/terms"]').first();
       await expect(termsLink).toBeVisible();
       await termsLink.click();
 
-      await page.waitForURL('**/terms**', { timeout: 10000 });
-      expect(page.url()).toContain('/terms');
+      await expect(page).toHaveURL(/\/terms/, { timeout: 15000 });
     });
 
     test('pricing page Sign In button navigates to sign-in', async ({ page }) => {
@@ -195,15 +194,12 @@ test.describe('Navigation & Routing @ui', () => {
       // Wait for the navigation to fully commit before calling goBack().
       // Without this, goBack() can race against the in-progress navigation on
       // slow CI runners and end up on an unexpected URL.
-      await page.waitForURL('**/privacy**', { timeout: 10000 });
+      await expect(page).toHaveURL(/\/privacy/, { timeout: 15000 });
       await page.waitForLoadState('domcontentloaded');
-      expect(page.url()).toContain('/privacy');
 
       await page.goBack();
-      // Wait for back-navigation to settle before asserting the URL.
-      await page.waitForURL('**/terms**', { timeout: 10000 });
+      await expect(page).toHaveURL(/\/terms/, { timeout: 15000 });
       await page.waitForLoadState('domcontentloaded');
-      expect(page.url()).toContain('/terms');
     });
   });
 });
