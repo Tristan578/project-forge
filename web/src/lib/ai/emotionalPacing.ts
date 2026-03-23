@@ -432,7 +432,10 @@ function detectIssues(curve: PacingCurve): PacingIssue[] {
   }
 
   // 2. No climax — intensity never exceeds 0.7
-  const maxIntensity = Math.max(...pts.map((p) => p.intensity));
+  let maxIntensity = -Infinity;
+  for (const p of pts) {
+    if (p.intensity > maxIntensity) maxIntensity = p.intensity;
+  }
   if (maxIntensity < 0.7) {
     issues.push({
       severity: 'error',
