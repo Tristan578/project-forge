@@ -67,7 +67,7 @@ const NarrativePanel = lazy(() =>
   import('./NarrativePanel').then((m) => ({ default: m.NarrativePanel }))
 );
 const AutoIterationPanel = lazy(() =>
-  import('./AutoIterationPanel').then((m) => ({ default: m.default }))
+  import('./AutoIterationPanel').then((m) => ({ default: m.AutoIterationPanel }))
 );
 const GameAnalyticsPanel = lazy(() =>
   import('./GameAnalyticsPanel').then((m) => ({ default: m.GameAnalyticsPanel }))

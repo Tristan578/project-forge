@@ -463,4 +463,6 @@ const MetricInput = memo(function MetricInput({ label, value, onChange, min, max
   );
 });
 
-export default memo(AutoIterationPanel);
+export const AutoIterationPanelMemo = memo(AutoIterationPanel);
+export { AutoIterationPanelMemo as AutoIterationPanel };
+export default AutoIterationPanelMemo;
