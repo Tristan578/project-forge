@@ -70,7 +70,7 @@ describe('spawn_entity', () => {
 
 describe('despawn_entity', () => {
   it('deletes single entity via entityId', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'despawn_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'despawn_entity', {
       entityId: 'ent-1',
     });
     expect(result.success).toBe(true);
@@ -81,7 +81,7 @@ describe('despawn_entity', () => {
   });
 
   it('deletes multiple entities via entityIds', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'despawn_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'despawn_entity', {
       entityIds: ['ent-1', 'ent-2', 'ent-3'],
     });
     expect(result.success).toBe(true);
@@ -91,7 +91,7 @@ describe('despawn_entity', () => {
   });
 
   it('does not call setSelection or delete when no ids given', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'despawn_entity', {});
+    const { result, store } = await invokeHandler(transformHandlers, 'despawn_entity', {});
     expect(result.success).toBe(true);
     expect(store.setSelection).not.toHaveBeenCalled();
     expect(store.deleteSelectedEntities).not.toHaveBeenCalled();
@@ -106,7 +106,7 @@ describe('despawn_entity', () => {
 
 describe('delete_entities', () => {
   it('deletes entity via entityId', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'delete_entities', {
+    const { result, store } = await invokeHandler(transformHandlers, 'delete_entities', {
       entityId: 'ent-5',
     });
     expect(result.success).toBe(true);
@@ -115,7 +115,7 @@ describe('delete_entities', () => {
   });
 
   it('deletes multiple entities via entityIds', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'delete_entities', {
+    const { result, store } = await invokeHandler(transformHandlers, 'delete_entities', {
       entityIds: ['ent-1', 'ent-2'],
     });
     expect(result.success).toBe(true);
@@ -131,12 +131,12 @@ describe('delete_entities', () => {
 
 describe('duplicate_entity', () => {
   it('returns error when entityId is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'duplicate_entity', {});
+    const { result } = await invokeHandler(transformHandlers, 'duplicate_entity', {});
     expect(result.success).toBe(false);
   });
 
   it('selects entity and calls duplicateSelectedEntity', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'duplicate_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'duplicate_entity', {
       entityId: 'ent-1',
     });
     expect(result.success).toBe(true);
@@ -151,7 +151,7 @@ describe('duplicate_entity', () => {
 
 describe('update_transform', () => {
   it('returns error when entityId is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'update_transform', {
+    const { result } = await invokeHandler(transformHandlers, 'update_transform', {
       position: [0, 0, 0],
     });
     expect(result.success).toBe(false);
@@ -159,7 +159,7 @@ describe('update_transform', () => {
 
   it('updates position when provided', async () => {
     const pos = { x: 1, y: 2, z: 3 };
-    const { result, store } = await invokeHandler(entityHandlers, 'update_transform', {
+    const { result, store } = await invokeHandler(transformHandlers, 'update_transform', {
       entityId: 'ent-1',
       position: pos,
     });
@@ -169,7 +169,7 @@ describe('update_transform', () => {
 
   it('updates rotation when provided', async () => {
     const rot = { x: 0, y: 90, z: 0 };
-    const { store } = await invokeHandler(entityHandlers, 'update_transform', {
+    const { store } = await invokeHandler(transformHandlers, 'update_transform', {
       entityId: 'ent-1',
       rotation: rot,
     });
@@ -178,7 +178,7 @@ describe('update_transform', () => {
 
   it('updates scale when provided', async () => {
     const scale = { x: 2, y: 2, z: 2 };
-    const { store } = await invokeHandler(entityHandlers, 'update_transform', {
+    const { store } = await invokeHandler(transformHandlers, 'update_transform', {
       entityId: 'ent-1',
       scale,
     });
@@ -186,7 +186,7 @@ describe('update_transform', () => {
   });
 
   it('updates all three properties when all provided', async () => {
-    const { store } = await invokeHandler(entityHandlers, 'update_transform', {
+    const { store } = await invokeHandler(transformHandlers, 'update_transform', {
       entityId: 'ent-1',
       position: { x: 1, y: 0, z: 0 },
       rotation: { x: 0, y: 45, z: 0 },
@@ -196,7 +196,7 @@ describe('update_transform', () => {
   });
 
   it('does not call updateTransform when no position/rotation/scale given', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'update_transform', {
+    const { result, store } = await invokeHandler(transformHandlers, 'update_transform', {
       entityId: 'ent-1',
     });
     expect(result.success).toBe(true);
@@ -233,14 +233,14 @@ describe('rename_entity', () => {
 
 describe('reparent_entity', () => {
   it('returns error when entityId is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'reparent_entity', {
+    const { result } = await invokeHandler(transformHandlers, 'reparent_entity', {
       newParentId: 'parent-1',
     });
     expect(result.success).toBe(false);
   });
 
   it('calls store.reparentEntity with newParentId and insertIndex', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'reparent_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'reparent_entity', {
       entityId: 'ent-1',
       newParentId: 'parent-1',
       insertIndex: 2,
@@ -250,7 +250,7 @@ describe('reparent_entity', () => {
   });
 
   it('accepts null newParentId to detach entity', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'reparent_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'reparent_entity', {
       entityId: 'ent-1',
       newParentId: null,
     });
@@ -265,12 +265,12 @@ describe('reparent_entity', () => {
 
 describe('set_visibility', () => {
   it('returns error when entityId is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'set_visibility', {});
+    const { result } = await invokeHandler(transformHandlers, 'set_visibility', {});
     expect(result.success).toBe(false);
   });
 
   it('calls store.toggleVisibility', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'set_visibility', {
+    const { result, store } = await invokeHandler(transformHandlers, 'set_visibility', {
       entityId: 'ent-1',
     });
     expect(result.success).toBe(true);
@@ -284,12 +284,12 @@ describe('set_visibility', () => {
 
 describe('select_entity', () => {
   it('returns error when entityId is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'select_entity', {});
+    const { result } = await invokeHandler(transformHandlers, 'select_entity', {});
     expect(result.success).toBe(false);
   });
 
   it('selects with replace mode by default', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'select_entity', {
+    const { result, store } = await invokeHandler(transformHandlers, 'select_entity', {
       entityId: 'ent-1',
     });
     expect(result.success).toBe(true);
@@ -297,7 +297,7 @@ describe('select_entity', () => {
   });
 
   it('passes mode when provided', async () => {
-    const { store } = await invokeHandler(entityHandlers, 'select_entity', {
+    const { store } = await invokeHandler(transformHandlers, 'select_entity', {
       entityId: 'ent-1',
       mode: 'add',
     });
@@ -311,12 +311,12 @@ describe('select_entity', () => {
 
 describe('select_entities', () => {
   it('returns error when entityIds is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'select_entities', {});
+    const { result } = await invokeHandler(transformHandlers, 'select_entities', {});
     expect(result.success).toBe(false);
   });
 
   it('calls setSelection with all provided ids', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'select_entities', {
+    const { result, store } = await invokeHandler(transformHandlers, 'select_entities', {
       entityIds: ['ent-1', 'ent-2'],
     });
     expect(result.success).toBe(true);
@@ -324,7 +324,7 @@ describe('select_entities', () => {
   });
 
   it('does not call setSelection when entityIds is empty', async () => {
-    const { store } = await invokeHandler(entityHandlers, 'select_entities', {
+    const { store } = await invokeHandler(transformHandlers, 'select_entities', {
       entityIds: [],
     });
     expect(store.setSelection).not.toHaveBeenCalled();
@@ -337,7 +337,7 @@ describe('select_entities', () => {
 
 describe('clear_selection', () => {
   it('calls store.clearSelection', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'clear_selection', {});
+    const { result, store } = await invokeHandler(transformHandlers, 'clear_selection', {});
     expect(result.success).toBe(true);
     expect(store.clearSelection).toHaveBeenCalledTimes(1);
   });
@@ -349,12 +349,12 @@ describe('clear_selection', () => {
 
 describe('set_gizmo_mode', () => {
   it('returns error when mode is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'set_gizmo_mode', {});
+    const { result } = await invokeHandler(transformHandlers, 'set_gizmo_mode', {});
     expect(result.success).toBe(false);
   });
 
   it('calls store.setGizmoMode', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'set_gizmo_mode', {
+    const { result, store } = await invokeHandler(transformHandlers, 'set_gizmo_mode', {
       mode: 'translate',
     });
     expect(result.success).toBe(true);
@@ -368,7 +368,7 @@ describe('set_gizmo_mode', () => {
 
 describe('set_coordinate_mode', () => {
   it('returns error for invalid mode', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'set_coordinate_mode', {
+    const { result } = await invokeHandler(transformHandlers, 'set_coordinate_mode', {
       mode: 'universal',
     });
     expect(result.success).toBe(false);
@@ -403,7 +403,7 @@ describe('set_coordinate_mode', () => {
 
 describe('toggle_grid', () => {
   it('calls store.toggleGrid', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'toggle_grid', {});
+    const { result, store } = await invokeHandler(transformHandlers, 'toggle_grid', {});
     expect(result.success).toBe(true);
     expect(store.toggleGrid).toHaveBeenCalledTimes(1);
   });
@@ -415,7 +415,7 @@ describe('toggle_grid', () => {
 
 describe('set_snap_settings', () => {
   it('calls store.setSnapSettings with args', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'set_snap_settings', {
+    const { result, store } = await invokeHandler(transformHandlers, 'set_snap_settings', {
       translateSnap: 0.5,
       rotateSnap: 15,
     });
@@ -430,14 +430,14 @@ describe('set_snap_settings', () => {
 
 describe('set_camera_preset', () => {
   it('returns error for invalid preset', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'set_camera_preset', {
+    const { result } = await invokeHandler(transformHandlers, 'set_camera_preset', {
       preset: 'sideways',
     });
     expect(result.success).toBe(false);
   });
 
   it('calls store.setCameraPreset', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'set_camera_preset', {
+    const { result, store } = await invokeHandler(transformHandlers, 'set_camera_preset', {
       preset: 'top',
     });
     expect(result.success).toBe(true);
@@ -451,12 +451,12 @@ describe('set_camera_preset', () => {
 
 describe('focus_camera', () => {
   it('returns error when entityId is missing', async () => {
-    const { result } = await invokeHandler(entityHandlers, 'focus_camera', {});
+    const { result } = await invokeHandler(transformHandlers, 'focus_camera', {});
     expect(result.success).toBe(false);
   });
 
   it('selects entity and returns instruction message', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'focus_camera', {
+    const { result, store } = await invokeHandler(transformHandlers, 'focus_camera', {
       entityId: 'ent-1',
     });
     expect(result.success).toBe(true);
@@ -472,7 +472,7 @@ describe('focus_camera', () => {
 
 describe('undo', () => {
   it('calls store.undo and returns success', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'undo', {});
+    const { result, store } = await invokeHandler(transformHandlers, 'undo', {});
     expect(result.success).toBe(true);
     expect(store.undo).toHaveBeenCalledTimes(1);
   });
@@ -480,7 +480,7 @@ describe('undo', () => {
 
 describe('redo', () => {
   it('calls store.redo and returns success', async () => {
-    const { result, store } = await invokeHandler(entityHandlers, 'redo', {});
+    const { result, store } = await invokeHandler(transformHandlers, 'redo', {});
     expect(result.success).toBe(true);
     expect(store.redo).toHaveBeenCalledTimes(1);
   });
