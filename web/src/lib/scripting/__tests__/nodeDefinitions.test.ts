@@ -209,7 +209,7 @@ describe('NODE_CATEGORIES: category completeness', () => {
 describe('NODE_DEFINITIONS: events category', () => {
   it('contains OnStart node with exec output', () => {
     const node = NODE_DEFINITION_MAP['OnStart'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('events');
     expect(node.inputs).toHaveLength(0);
     expect(node.outputs.some(p => p.type === 'exec')).toBe(true);
@@ -217,19 +217,19 @@ describe('NODE_DEFINITIONS: events category', () => {
 
   it('contains OnUpdate node with delta time output', () => {
     const node = NODE_DEFINITION_MAP['OnUpdate'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.outputs.some(p => p.id === 'dt' && p.type === 'float')).toBe(true);
   });
 
   it('contains OnKeyPress node with key input', () => {
     const node = NODE_DEFINITION_MAP['OnKeyPress'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'key' && p.type === 'string')).toBe(true);
   });
 
   it('contains OnTimer node with delay and repeat inputs', () => {
     const node = NODE_DEFINITION_MAP['OnTimer'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'delay')).toBe(true);
     expect(node.inputs.some(p => p.id === 'repeat' && p.type === 'bool')).toBe(true);
   });
@@ -248,7 +248,7 @@ describe('NODE_DEFINITIONS: events category', () => {
 describe('NODE_DEFINITIONS: flow category', () => {
   it('contains Branch node with true/false outputs', () => {
     const node = NODE_DEFINITION_MAP['Branch'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('flow');
     expect(node.outputs.some(p => p.id === 'exec_true')).toBe(true);
     expect(node.outputs.some(p => p.id === 'exec_false')).toBe(true);
@@ -256,7 +256,7 @@ describe('NODE_DEFINITIONS: flow category', () => {
 
   it('contains ForLoop node with start/end inputs and index output', () => {
     const node = NODE_DEFINITION_MAP['ForLoop'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.inputs.some(p => p.id === 'start' && p.type === 'int')).toBe(true);
     expect(node.inputs.some(p => p.id === 'end' && p.type === 'int')).toBe(true);
     expect(node.outputs.some(p => p.id === 'index' && p.type === 'int')).toBe(true);
@@ -276,7 +276,7 @@ describe('NODE_DEFINITIONS: math category', () => {
 
   it('math nodes have a/b inputs and result output', () => {
     const node = NODE_DEFINITION_MAP['Add'];
-    expect(node).toBeDefined();
+    expect(node).not.toBeNull();
     expect(node.category).toBe('math');
     expect(node.inputs.some(p => p.id === 'a')).toBe(true);
     expect(node.inputs.some(p => p.id === 'b')).toBe(true);

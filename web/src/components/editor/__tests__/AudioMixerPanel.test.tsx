@@ -52,21 +52,21 @@ describe('AudioMixerPanel', () => {
 
   it('renders the Audio Mixer header', () => {
     render(<AudioMixerPanel />);
-    expect(screen.getByText('Audio Mixer')).toBeDefined();
+    expect(screen.getByText('Audio Mixer').textContent).toBe('Audio Mixer');
   });
 
   it('renders mixer strips for each bus', () => {
     render(<AudioMixerPanel />);
-    expect(screen.getByText('master')).toBeDefined();
-    expect(screen.getByText('sfx')).toBeDefined();
-    expect(screen.getByText('music')).toBeDefined();
+    expect(screen.getByText('master').textContent).toBe('master');
+    expect(screen.getByText('sfx').textContent).toBe('sfx');
+    expect(screen.getByText('music').textContent).toBe('music');
   });
 
   it('renders volume sliders with aria-labels', () => {
     render(<AudioMixerPanel />);
-    expect(screen.getByRole('slider', { name: /master volume/i })).toBeDefined();
-    expect(screen.getByRole('slider', { name: /sfx volume/i })).toBeDefined();
-    expect(screen.getByRole('slider', { name: /music volume/i })).toBeDefined();
+    expect(screen.getByRole('slider', { name: /master volume/i })).not.toBeNull();
+    expect(screen.getByRole('slider', { name: /sfx volume/i })).not.toBeNull();
+    expect(screen.getByRole('slider', { name: /music volume/i })).not.toBeNull();
   });
 
   it('renders mute buttons with aria-label and aria-pressed', () => {
@@ -88,28 +88,28 @@ describe('AudioMixerPanel', () => {
     const soloButtons = screen.getAllByRole('button', { name: /^Solo /i });
     // Solo should appear for sfx and music, not master
     expect(soloButtons.length).toBe(2);
-    expect(screen.getByRole('button', { name: /Solo sfx/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /Solo music/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /Solo sfx/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /Solo music/i })).not.toBeNull();
   });
 
   it('displays volume percentage', () => {
     render(<AudioMixerPanel />);
-    expect(screen.getByText('80%')).toBeDefined(); // master 0.8
-    expect(screen.getByText('100%')).toBeDefined(); // sfx 1.0
-    expect(screen.getByText('60%')).toBeDefined(); // music 0.6
+    expect(screen.getByText('80%').textContent).toBe('80%'); // master 0.8
+    expect(screen.getByText('100%').textContent).toBe('100%'); // sfx 1.0
+    expect(screen.getByText('60%').textContent).toBe('60%'); // music 0.6
   });
 
   it('renders Add Bus button', () => {
     render(<AudioMixerPanel />);
-    expect(screen.getByText('Add Bus')).toBeDefined();
+    expect(screen.getByText('Add Bus').textContent).toBe('Add Bus');
   });
 
   it('shows add bus dialog when Add Bus is clicked', () => {
     render(<AudioMixerPanel />);
     fireEvent.click(screen.getByText('Add Bus'));
-    expect(screen.getByRole('textbox', { name: /new bus name/i })).toBeDefined();
-    expect(screen.getByText('Create')).toBeDefined();
-    expect(screen.getByText('Cancel')).toBeDefined();
+    expect(screen.getByRole('textbox', { name: /new bus name/i })).not.toBeNull();
+    expect(screen.getByText('Create').textContent).toBe('Create');
+    expect(screen.getByText('Cancel').textContent).toBe('Cancel');
   });
 
   it('creates a new bus when form is submitted', () => {
@@ -134,7 +134,7 @@ describe('AudioMixerPanel', () => {
   it('hides add bus dialog when Cancel is clicked', () => {
     render(<AudioMixerPanel />);
     fireEvent.click(screen.getByText('Add Bus'));
-    expect(screen.getByRole('textbox', { name: /new bus name/i })).toBeDefined();
+    expect(screen.getByRole('textbox', { name: /new bus name/i })).not.toBeNull();
 
     fireEvent.click(screen.getByText('Cancel'));
     expect(screen.queryByRole('textbox', { name: /new bus name/i })).toBeNull();
@@ -153,7 +153,7 @@ describe('AudioMixerPanel', () => {
     });
 
     render(<AudioMixerPanel />);
-    expect(screen.getByText('Audio Mixer')).toBeDefined();
+    expect(screen.getByText('Audio Mixer').textContent).toBe('Audio Mixer');
     expect(screen.queryAllByRole('slider')).toHaveLength(0);
   });
 });

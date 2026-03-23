@@ -166,8 +166,8 @@ describe('MaterialInspector', () => {
   it('renders Material heading and Shader Editor button', () => {
     setupStore();
     render(<MaterialInspector />);
-    expect(screen.getByText('Material')).toBeDefined();
-    expect(screen.getByText('Shader Editor')).toBeDefined();
+    expect(screen.getByText('Material').textContent).toBe('Material');
+    expect(screen.getByText('Shader Editor').textContent).toBe('Shader Editor');
   });
 
   it('opens shader editor on button click', () => {
@@ -302,7 +302,7 @@ describe('MaterialInspector', () => {
   it('renders preset selector with categories', () => {
     setupStore();
     render(<MaterialInspector />);
-    expect(screen.getByText('Apply Preset')).toBeDefined();
+    expect(screen.getByText('Apply Preset').textContent).toBe('Apply Preset');
   });
 
   it('apply preset button is disabled when no preset selected', () => {
@@ -330,13 +330,13 @@ describe('MaterialInspector', () => {
   it('renders texture slot labels', () => {
     setupStore();
     render(<MaterialInspector />);
-    expect(screen.getByText('Textures')).toBeDefined();
+    expect(screen.getByText('Textures').textContent).toBe('Textures');
   });
 
   it('shows Generate button for AI texture', () => {
     setupStore();
     render(<MaterialInspector />);
-    expect(screen.getByText('Generate')).toBeDefined();
+    expect(screen.getByText('Generate').textContent).toBe('Generate');
   });
 
   // ── Collapsible sections ──────────────────────────────────────────────
@@ -346,9 +346,9 @@ describe('MaterialInspector', () => {
     render(<MaterialInspector />);
     const btn = screen.getByText('UV Transform');
     fireEvent.click(btn);
-    expect(screen.getByText('Offset X')).toBeDefined();
-    expect(screen.getByText('Scale X')).toBeDefined();
-    expect(screen.getByText('Rotation')).toBeDefined();
+    expect(screen.getByText('Offset X').textContent).toBe('Offset X');
+    expect(screen.getByText('Scale X').textContent).toBe('Scale X');
+    expect(screen.getByText('Rotation').textContent).toBe('Rotation');
   });
 
   it('Clearcoat section expands on click', () => {
@@ -356,7 +356,7 @@ describe('MaterialInspector', () => {
     render(<MaterialInspector />);
     const btn = screen.getByText('Clearcoat');
     fireEvent.click(btn);
-    expect(screen.getByText('Intensity')).toBeDefined();
+    expect(screen.getByText('Intensity').textContent).toBe('Intensity');
   });
 
   it('Transmission section expands on click and shows IOR hints', () => {
@@ -364,7 +364,7 @@ describe('MaterialInspector', () => {
     render(<MaterialInspector />);
     const btn = screen.getByText('Transmission');
     fireEvent.click(btn);
-    expect(screen.getByText('IOR')).toBeDefined();
+    expect(screen.getByText('IOR').textContent).toBe('IOR');
   });
 
   it('Parallax Mapping section expands on click', () => {
@@ -372,8 +372,8 @@ describe('MaterialInspector', () => {
     render(<MaterialInspector />);
     const btn = screen.getByText('Parallax Mapping');
     fireEvent.click(btn);
-    expect(screen.getByText('Depth Scale')).toBeDefined();
-    expect(screen.getByText('Method')).toBeDefined();
+    expect(screen.getByText('Depth Scale').textContent).toBe('Depth Scale');
+    expect(screen.getByText('Method').textContent).toBe('Method');
   });
 
   // ── Shader effect ─────────────────────────────────────────────────────
@@ -383,7 +383,7 @@ describe('MaterialInspector', () => {
     render(<MaterialInspector />);
     const btn = screen.getByText('Shader Effect');
     fireEvent.click(btn);
-    expect(screen.getByText('Standard PBR')).toBeDefined();
+    expect(screen.getByText('Standard PBR').textContent).toBe('Standard PBR');
   });
 
   it('calls updateShaderEffect when shader type changes from none', () => {
@@ -396,7 +396,7 @@ describe('MaterialInspector', () => {
     const shaderSelect = Array.from(selects).find((s) =>
       Array.from(s.options).some((o) => o.textContent === 'Standard PBR')
     );
-    expect(shaderSelect).toBeDefined();
+    expect(shaderSelect).not.toBeNull();
     fireEvent.change(shaderSelect!, { target: { value: 'dissolve' } });
     expect(mockUpdateShaderEffect).toHaveBeenCalledWith(
       'ent-1',
@@ -427,7 +427,7 @@ describe('MaterialInspector', () => {
     const shaderSelect = Array.from(selects).find((s) =>
       Array.from(s.options).some((o) => o.textContent === 'Dissolve')
     );
-    expect(shaderSelect).toBeDefined();
+    expect(shaderSelect).not.toBeNull();
     fireEvent.change(shaderSelect!, { target: { value: 'none' } });
     expect(mockRemoveShaderEffect).toHaveBeenCalledWith('ent-1');
   });
@@ -450,8 +450,8 @@ describe('MaterialInspector', () => {
       },
     });
     render(<MaterialInspector />);
-    expect(screen.getByText('Threshold')).toBeDefined();
-    expect(screen.getByText('Edge Width')).toBeDefined();
+    expect(screen.getByText('Threshold').textContent).toBe('Threshold');
+    expect(screen.getByText('Edge Width').textContent).toBe('Edge Width');
   });
 
   // ── Transmission alpha mode tip ───────────────────────────────────────

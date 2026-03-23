@@ -145,7 +145,7 @@ describe('WidgetPropertyPanel', () => {
       setupStore(makeWidget('text'));
       render(<WidgetPropertyPanel />);
       const input = screen.getByDisplayValue('text_widget');
-      expect(input).toBeDefined();
+      expect(input).not.toBeNull();
     });
 
     it('calls updateWidget when name is changed', () => {
@@ -159,8 +159,8 @@ describe('WidgetPropertyPanel', () => {
     it('renders x and y position inputs', () => {
       setupStore(makeWidget('text'));
       render(<WidgetPropertyPanel />);
-      expect(screen.getByDisplayValue('10')).toBeDefined();
-      expect(screen.getByDisplayValue('20')).toBeDefined();
+      expect(screen.getByDisplayValue('10').tagName.toLowerCase()).toMatch(/input|select|textarea/);
+      expect(screen.getByDisplayValue('20').tagName.toLowerCase()).toMatch(/input|select|textarea/);
     });
 
     it('calls moveWidget with new x value when x input changes', () => {
@@ -228,7 +228,7 @@ describe('WidgetPropertyPanel', () => {
         'Bottom Left', 'Bottom Center', 'Bottom Right',
       ];
       for (const label of options) {
-        expect(screen.getByRole('option', { name: label })).toBeDefined();
+        expect(screen.getByRole('option', { name: label })).not.toBeNull();
       }
     });
 
@@ -255,7 +255,7 @@ describe('WidgetPropertyPanel', () => {
     it('renders Type-Specific Settings section heading', () => {
       setupStore(makeWidget('text'));
       render(<WidgetPropertyPanel />);
-      expect(screen.getByText('Type-Specific Settings')).toBeDefined();
+      expect(screen.getByText('Type-Specific Settings').textContent).toBe('Type-Specific Settings');
     });
 
     describe('text widget', () => {
@@ -263,7 +263,7 @@ describe('WidgetPropertyPanel', () => {
         setupStore(makeWidget('text'));
         render(<WidgetPropertyPanel />);
         const textarea = screen.getByDisplayValue('Hello');
-        expect(textarea).toBeDefined();
+        expect(textarea).not.toBeNull();
       });
 
       it('calls updateWidget with updated config when content changes', () => {
@@ -281,7 +281,7 @@ describe('WidgetPropertyPanel', () => {
       it('renders DataBindingEditor with Data Binding label', () => {
         setupStore(makeWidget('text'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByText('Data Binding')).toBeDefined();
+        expect(screen.getByText('Data Binding').textContent).toBe('Data Binding');
       });
 
       it('does not render image or button fields', () => {
@@ -314,10 +314,10 @@ describe('WidgetPropertyPanel', () => {
       it('renders fit select with all options', () => {
         setupStore(makeWidget('image'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByRole('option', { name: 'Contain' })).toBeDefined();
-        expect(screen.getByRole('option', { name: 'Cover' })).toBeDefined();
-        expect(screen.getByRole('option', { name: 'Fill' })).toBeDefined();
-        expect(screen.getByRole('option', { name: 'None' })).toBeDefined();
+        expect(screen.getByRole('option', { name: 'Contain' })).not.toBeNull();
+        expect(screen.getByRole('option', { name: 'Cover' })).not.toBeNull();
+        expect(screen.getByRole('option', { name: 'Fill' })).not.toBeNull();
+        expect(screen.getByRole('option', { name: 'None' })).not.toBeNull();
       });
 
       it('calls updateWidget with fit when fit select changes', () => {
@@ -337,7 +337,7 @@ describe('WidgetPropertyPanel', () => {
       it('renders label input with current label', () => {
         setupStore(makeWidget('button'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByDisplayValue('Click Me')).toBeDefined();
+        expect(screen.getByDisplayValue('Click Me').tagName.toLowerCase()).toMatch(/input|select|textarea/);
       });
 
       it('calls updateWidget when button label changes', () => {
@@ -357,7 +357,7 @@ describe('WidgetPropertyPanel', () => {
         render(<WidgetPropertyPanel />);
         const options = ['None', 'Show Screen', 'Hide Screen', 'Toggle Screen', 'Set State', 'Call Function', 'Reset Scene'];
         for (const label of options) {
-          expect(screen.getByRole('option', { name: label })).toBeDefined();
+          expect(screen.getByRole('option', { name: label })).not.toBeNull();
         }
       });
 
@@ -386,9 +386,9 @@ describe('WidgetPropertyPanel', () => {
       it('renders Direction select with all options', () => {
         setupStore(makeWidget('progress_bar'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByRole('option', { name: 'Horizontal' })).toBeDefined();
-        expect(screen.getByRole('option', { name: 'Vertical' })).toBeDefined();
-        expect(screen.getByRole('option', { name: 'Radial' })).toBeDefined();
+        expect(screen.getByRole('option', { name: 'Horizontal' })).not.toBeNull();
+        expect(screen.getByRole('option', { name: 'Vertical' })).not.toBeNull();
+        expect(screen.getByRole('option', { name: 'Radial' })).not.toBeNull();
       });
 
       it('calls updateWidget when direction changes', () => {
@@ -406,7 +406,7 @@ describe('WidgetPropertyPanel', () => {
       it('renders DataBindingEditor for valueBinding', () => {
         setupStore(makeWidget('progress_bar'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByText('Data Binding')).toBeDefined();
+        expect(screen.getByText('Data Binding').textContent).toBe('Data Binding');
       });
     });
 
@@ -414,15 +414,15 @@ describe('WidgetPropertyPanel', () => {
       it('renders Min, Max, and Step inputs', () => {
         setupStore(makeWidget('slider'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByText('Min')).toBeDefined();
-        expect(screen.getByText('Max')).toBeDefined();
-        expect(screen.getByText('Step')).toBeDefined();
+        expect(screen.getByText('Min').textContent).toBe('Min');
+        expect(screen.getByText('Max').textContent).toBe('Max');
+        expect(screen.getByText('Step').textContent).toBe('Step');
       });
 
       it('renders DataBindingEditor for valueBinding', () => {
         setupStore(makeWidget('slider'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByText('Data Binding')).toBeDefined();
+        expect(screen.getByText('Data Binding').textContent).toBe('Data Binding');
       });
     });
 
@@ -430,8 +430,8 @@ describe('WidgetPropertyPanel', () => {
       it('renders On Label and Off Label inputs', () => {
         setupStore(makeWidget('toggle'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByDisplayValue('ON')).toBeDefined();
-        expect(screen.getByDisplayValue('OFF')).toBeDefined();
+        expect(screen.getByDisplayValue('ON').tagName.toLowerCase()).toMatch(/input|select|textarea/);
+        expect(screen.getByDisplayValue('OFF').tagName.toLowerCase()).toMatch(/input|select|textarea/);
       });
 
       it('calls updateWidget when On Label changes', () => {
@@ -461,7 +461,7 @@ describe('WidgetPropertyPanel', () => {
       it('renders DataBindingEditor for valueBinding', () => {
         setupStore(makeWidget('toggle'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByText('Data Binding')).toBeDefined();
+        expect(screen.getByText('Data Binding').textContent).toBe('Data Binding');
       });
     });
 
@@ -471,7 +471,7 @@ describe('WidgetPropertyPanel', () => {
         setupStore(makeWidget('panel'));
         render(<WidgetPropertyPanel />);
         // Should still render the common properties section
-        expect(screen.getByText('Type-Specific Settings')).toBeDefined();
+        expect(screen.getByText('Type-Specific Settings').textContent).toBe('Type-Specific Settings');
       });
     });
   });

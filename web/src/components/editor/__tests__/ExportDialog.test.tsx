@@ -79,7 +79,7 @@ describe('ExportDialog', () => {
   it('renders dialog with title when open', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Export Game')).toBeDefined();
+    expect(screen.getByText('Export Game').textContent).toBe('Export Game');
   });
 
   it('renders game title input pre-filled with scene name', () => {
@@ -92,35 +92,35 @@ describe('ExportDialog', () => {
   it('renders export mode radio buttons', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Single HTML File')).toBeDefined();
-    expect(screen.getByText('ZIP Bundle')).toBeDefined();
-    expect(screen.getByText('PWA (Progressive Web App)')).toBeDefined();
-    expect(screen.getByText('Embed (iframe)')).toBeDefined();
+    expect(screen.getByText('Single HTML File').textContent).toBe('Single HTML File');
+    expect(screen.getByText('ZIP Bundle').textContent).toBe('ZIP Bundle');
+    expect(screen.getByText('PWA (Progressive Web App)').textContent).toBe('PWA (Progressive Web App)');
+    expect(screen.getByText('Embed (iframe)').textContent).toBe('Embed (iframe)');
   });
 
   it('renders resolution selector', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Responsive (Fill Window)')).toBeDefined();
+    expect(screen.getByText('Responsive (Fill Window)').textContent).toBe('Responsive (Fill Window)');
   });
 
   it('renders background color inputs', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Background Color')).toBeDefined();
+    expect(screen.getByText('Background Color').textContent).toBe('Background Color');
   });
 
   it('renders include debug checkbox', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Include Debug Info')).toBeDefined();
+    expect(screen.getByText('Include Debug Info').textContent).toBe('Include Debug Info');
   });
 
   it('renders Export and Cancel buttons', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Export')).toBeDefined();
-    expect(screen.getByText('Cancel')).toBeDefined();
+    expect(screen.getByText('Export').textContent).toBe('Export');
+    expect(screen.getByText('Cancel').textContent).toBe('Cancel');
   });
 
   // ── Quick presets ─────────────────────────────────────────────────────
@@ -128,8 +128,8 @@ describe('ExportDialog', () => {
   it('renders quick preset buttons', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Web')).toBeDefined();
-    expect(screen.getByText('Mobile')).toBeDefined();
+    expect(screen.getByText('Web').textContent).toBe('Web');
+    expect(screen.getByText('Mobile').textContent).toBe('Mobile');
   });
 
   it('applies preset when clicked', () => {
@@ -192,7 +192,7 @@ describe('ExportDialog', () => {
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
     const titleInput = screen.getByPlaceholderText('Enter game title');
     fireEvent.change(titleInput, { target: { value: '' } });
-    expect(screen.getByText('A game title is required to export')).toBeDefined();
+    expect(screen.getByText('A game title is required to export').textContent).toBe('A game title is required to export');
   });
 
   // ── Close behavior ────────────────────────────────────────────────────
@@ -248,9 +248,9 @@ describe('ExportDialog', () => {
     setupStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
     fireEvent.click(screen.getByText('Customize Loading Screen'));
-    expect(screen.getByText('Progress Style')).toBeDefined();
-    expect(screen.getByText('Loading Title')).toBeDefined();
-    expect(screen.getByText('Loading Subtitle')).toBeDefined();
+    expect(screen.getByText('Progress Style').textContent).toBe('Progress Style');
+    expect(screen.getByText('Loading Title').textContent).toBe('Loading Title');
+    expect(screen.getByText('Loading Subtitle').textContent).toBe('Loading Subtitle');
   });
 
   it('changes progress style', () => {
@@ -262,7 +262,7 @@ describe('ExportDialog', () => {
     const progressSelect = Array.from(selects).find((s) =>
       Array.from(s.options).some((o) => o.textContent === 'Spinner')
     ) as HTMLSelectElement;
-    expect(progressSelect).toBeDefined();
+    expect(progressSelect).not.toBeNull();
     fireEvent.change(progressSelect, { target: { value: 'spinner' } });
     expect(progressSelect.value).toBe('spinner');
   });
@@ -282,7 +282,7 @@ describe('ExportDialog', () => {
   it('shows Exporting... button text when isExporting', () => {
     setupStore({ isExporting: true });
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Exporting...')).toBeDefined();
+    expect(screen.getByText('Exporting...').textContent).toBe('Exporting...');
   });
 
   it('disables Cancel button when exporting', () => {

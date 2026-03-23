@@ -337,12 +337,20 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 280,
     minHeight: 200,
   },
-  'performance-profiler': {
-    id: 'performance-profiler',
-    title: 'Performance Profiler',
-    component: 'performance-profiler',
-    minWidth: 280,
+  'voice-profile': {
+    id: 'voice-profile',
+    title: 'Voice Profiles',
+    component: 'voice-profile',
+    minWidth: 260,
     minHeight: 200,
+  },
+  'shader-editor': {
+    id: 'shader-editor',
+    title: 'Shader Editor',
+    component: 'shader-editor',
+    minWidth: 400,
+    minHeight: 300,
+    renderer: 'always',
   },
 };
 

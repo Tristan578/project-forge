@@ -140,14 +140,14 @@ describe('InspectorPanel', () => {
   it('shows Scene Settings when no entity selected', () => {
     setupStore({ primaryId: null });
     render(<InspectorPanel />);
-    expect(screen.getByText('Scene Settings')).toBeDefined();
-    expect(screen.getByText('SceneSettings')).toBeDefined();
+    expect(screen.getByText('Scene Settings').textContent).toBe('Scene Settings');
+    expect(screen.getByText('SceneSettings').textContent).toBe('SceneSettings');
   });
 
   it('shows InputBindingsPanel when no entity selected', () => {
     setupStore({ primaryId: null });
     render(<InspectorPanel />);
-    expect(screen.getByText('InputBindingsPanel')).toBeDefined();
+    expect(screen.getByText('InputBindingsPanel').textContent).toBe('InputBindingsPanel');
   });
 
   // ── Entity selected ───────────────────────────────────────────────────
@@ -155,14 +155,14 @@ describe('InspectorPanel', () => {
   it('renders Inspector heading', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('Inspector')).toBeDefined();
+    expect(screen.getByText('Inspector').textContent).toBe('Inspector');
   });
 
   it('renders entity name input', () => {
     setupStore();
     render(<InspectorPanel />);
     const nameInput = screen.getByDisplayValue('MyCube');
-    expect(nameInput).toBeDefined();
+    expect(nameInput).not.toBeNull();
   });
 
   it('renames entity on blur', () => {
@@ -199,7 +199,7 @@ describe('InspectorPanel', () => {
   it('renders Transform collapsible section with Vec3 inputs', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('Transform')).toBeDefined();
+    expect(screen.getByText('Transform').textContent).toBe('Transform');
     expect(screen.getByTestId('vec3-Position')).toBeDefined();
     expect(screen.getByTestId('vec3-Rotation')).toBeDefined();
     expect(screen.getByTestId('vec3-Scale')).toBeDefined();
@@ -219,46 +219,46 @@ describe('InspectorPanel', () => {
   it('renders Material section for non-light 3D entity', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('MaterialInspector')).toBeDefined();
+    expect(screen.getByText('MaterialInspector').textContent).toBe('MaterialInspector');
   });
 
   it('renders Light section instead of Material for light entity', () => {
     setupStore({ primaryLight: { type: 'point', color: '#fff', intensity: 1 } });
     render(<InspectorPanel />);
-    expect(screen.getByText('LightInspector')).toBeDefined();
+    expect(screen.getByText('LightInspector').textContent).toBe('LightInspector');
     expect(screen.queryByText('MaterialInspector')).toBeNull();
   });
 
   it('renders Physics section in 3D', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('PhysicsInspector')).toBeDefined();
+    expect(screen.getByText('PhysicsInspector').textContent).toBe('PhysicsInspector');
   });
 
   it('renders Audio section', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('AudioInspector')).toBeDefined();
+    expect(screen.getByText('AudioInspector').textContent).toBe('AudioInspector');
   });
 
   it('renders Particle section', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('ParticleInspector')).toBeDefined();
+    expect(screen.getByText('ParticleInspector').textContent).toBe('ParticleInspector');
   });
 
   it('renders Animation sections', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('AnimationInspector')).toBeDefined();
-    expect(screen.getByText('AnimationClipInspector')).toBeDefined();
+    expect(screen.getByText('AnimationInspector').textContent).toBe('AnimationInspector');
+    expect(screen.getByText('AnimationClipInspector').textContent).toBe('AnimationClipInspector');
   });
 
   it('renders Game Components and Camera sections', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('GameComponentInspector')).toBeDefined();
-    expect(screen.getByText('GameCameraInspector')).toBeDefined();
+    expect(screen.getByText('GameComponentInspector').textContent).toBe('GameComponentInspector');
+    expect(screen.getByText('GameCameraInspector').textContent).toBe('GameCameraInspector');
   });
 
   // ── 2D project sections ───────────────────────────────────────────────
@@ -269,20 +269,20 @@ describe('InspectorPanel', () => {
       sceneGraph: { nodes: { 'ent-1': { components: ['Sprite'] } } },
     });
     render(<InspectorPanel />);
-    expect(screen.getByText('SpriteInspector')).toBeDefined();
-    expect(screen.getByText('SpriteAnimationInspector')).toBeDefined();
+    expect(screen.getByText('SpriteInspector').textContent).toBe('SpriteInspector');
+    expect(screen.getByText('SpriteAnimationInspector').textContent).toBe('SpriteAnimationInspector');
   });
 
   it('renders Physics2d in 2D project', () => {
     setupStore({ projectType: '2d' });
     render(<InspectorPanel />);
-    expect(screen.getByText('Physics2dInspector')).toBeDefined();
+    expect(screen.getByText('Physics2dInspector').textContent).toBe('Physics2dInspector');
   });
 
   it('renders Tilemap section in 2D', () => {
     setupStore({ projectType: '2d' });
     render(<InspectorPanel />);
-    expect(screen.getByText('TilemapInspector')).toBeDefined();
+    expect(screen.getByText('TilemapInspector').textContent).toBe('TilemapInspector');
   });
 
   it('does not render Light/Material in 2D', () => {
@@ -297,19 +297,19 @@ describe('InspectorPanel', () => {
   it('renders Script section with Add Script button', () => {
     setupStore();
     render(<InspectorPanel />);
-    expect(screen.getByText('Add Script')).toBeDefined();
+    expect(screen.getByText('Add Script').textContent).toBe('Add Script');
   });
 
   it('renders Edit Script when entity has script', () => {
     setupStore({ allScripts: { 'ent-1': { source: 'code', enabled: true } } });
     render(<InspectorPanel />);
-    expect(screen.getByText('Edit Script')).toBeDefined();
+    expect(screen.getByText('Edit Script').textContent).toBe('Edit Script');
   });
 
   it('shows Active badge when entity has script', () => {
     setupStore({ allScripts: { 'ent-1': { source: 'code', enabled: true } } });
     render(<InspectorPanel />);
-    expect(screen.getByText('Active')).toBeDefined();
+    expect(screen.getByText('Active').textContent).toBe('Active');
   });
 
   it('switches to script tab on Edit Script click', () => {

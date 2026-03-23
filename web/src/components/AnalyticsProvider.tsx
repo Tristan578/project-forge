@@ -8,7 +8,8 @@ const analyticsMode =
   process.env.NODE_ENV === "development" ? "development" : "production";
 
 // Filter out internal routes from analytics
-function analyticsBeforeSend(event: BeforeSendEvent): BeforeSendEvent | null {
+// Exported for testing — not part of the public API surface.
+export function analyticsBeforeSend(event: BeforeSendEvent): BeforeSendEvent | null {
   const url = event.url;
   // Exclude dev bypass (exact /dev path or /dev/* subpaths), admin, and API routes
   if (url === "/dev" || url.startsWith("/dev/") || url.includes("/admin") || url.includes("/api/")) {

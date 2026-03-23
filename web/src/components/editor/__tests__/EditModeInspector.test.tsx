@@ -81,7 +81,7 @@ describe('EditModeInspector', () => {
   it('renders Edit Mode heading when active', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Edit Mode')).toBeDefined();
+    expect(screen.getByText('Edit Mode').textContent).toBe('Edit Mode');
   });
 
   it('calls exitEditMode when Exit button clicked', () => {
@@ -94,9 +94,9 @@ describe('EditModeInspector', () => {
   it('renders selection mode buttons', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Vertex')).toBeDefined();
-    expect(screen.getByText('Edge')).toBeDefined();
-    expect(screen.getByText('Face')).toBeDefined();
+    expect(screen.getByText('Vertex').textContent).toBe('Vertex');
+    expect(screen.getByText('Edge').textContent).toBe('Edge');
+    expect(screen.getByText('Face').textContent).toBe('Face');
   });
 
   it('calls setSelectionMode when Edge clicked', () => {
@@ -109,27 +109,27 @@ describe('EditModeInspector', () => {
   it('shows mesh stats', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1', vertexCount: 8, edgeCount: 12, faceCount: 6 });
     render(<EditModeInspector />);
-    expect(screen.getByText('8')).toBeDefined();
-    expect(screen.getByText('12')).toBeDefined();
-    expect(screen.getByText('6')).toBeDefined();
-    expect(screen.getByText('Vertices')).toBeDefined();
-    expect(screen.getByText('Edges')).toBeDefined();
-    expect(screen.getByText('Faces')).toBeDefined();
+    expect(screen.getByText('8').textContent).toBe('8');
+    expect(screen.getByText('12').textContent).toBe('12');
+    expect(screen.getByText('6').textContent).toBe('6');
+    expect(screen.getByText('Vertices').textContent).toBe('Vertices');
+    expect(screen.getByText('Edges').textContent).toBe('Edges');
+    expect(screen.getByText('Faces').textContent).toBe('Faces');
   });
 
   it('shows selected count', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1', selectedIndices: [0, 1, 2], selectionMode: 'vertex' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Selected: 3 vertexs')).toBeDefined();
+    expect(screen.getByText('Selected: 3 vertexs').textContent).toBe('Selected: 3 vertexs');
   });
 
   it('renders operation buttons', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Extrude')).toBeDefined();
-    expect(screen.getByText('Inset')).toBeDefined();
-    expect(screen.getByText('Subdivide')).toBeDefined();
-    expect(screen.getByText('Delete Selected')).toBeDefined();
+    expect(screen.getByText('Extrude').textContent).toBe('Extrude');
+    expect(screen.getByText('Inset').textContent).toBe('Inset');
+    expect(screen.getByText('Subdivide').textContent).toBe('Subdivide');
+    expect(screen.getByText('Delete Selected').textContent).toBe('Delete Selected');
   });
 
   it('Extrude button is disabled when no indices selected', () => {
@@ -156,8 +156,8 @@ describe('EditModeInspector', () => {
   it('renders Wireframe and X-Ray display buttons', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Wireframe')).toBeDefined();
-    expect(screen.getByText('X-Ray')).toBeDefined();
+    expect(screen.getByText('Wireframe').textContent).toBe('Wireframe');
+    expect(screen.getByText('X-Ray').textContent).toBe('X-Ray');
   });
 
   it('calls toggleWireframe when Wireframe clicked', () => {
@@ -170,8 +170,8 @@ describe('EditModeInspector', () => {
   it('renders Smooth and Flat normals buttons', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Smooth')).toBeDefined();
-    expect(screen.getByText('Flat')).toBeDefined();
+    expect(screen.getByText('Smooth').textContent).toBe('Smooth');
+    expect(screen.getByText('Flat').textContent).toBe('Flat');
   });
 
   it('calls recalcNormals(true) when Smooth clicked', () => {

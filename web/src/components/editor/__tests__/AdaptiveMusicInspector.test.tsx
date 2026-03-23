@@ -56,7 +56,7 @@ describe('AdaptiveMusicInspector', () => {
 
   it('renders Adaptive Music heading', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('Adaptive Music')).toBeDefined();
+    expect(screen.getByText('Adaptive Music').textContent).toBe('Adaptive Music');
   });
 
   it('renders Play button initially', () => {
@@ -72,7 +72,7 @@ describe('AdaptiveMusicInspector', () => {
 
   it('renders Intensity label', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('Intensity')).toBeDefined();
+    expect(screen.getByText('Intensity').textContent).toBe('Intensity');
   });
 
   it('renders intensity slider with current value', () => {
@@ -85,7 +85,7 @@ describe('AdaptiveMusicInspector', () => {
   it('shows intensity percentage', () => {
     setupStore({ intensity: 0.5 });
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('50%')).toBeDefined();
+    expect(screen.getByText('50%').textContent).toBe('50%');
   });
 
   it('calls setAdaptiveMusicIntensity when slider changed', () => {
@@ -97,39 +97,39 @@ describe('AdaptiveMusicInspector', () => {
 
   it('renders Stems section', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('Stems')).toBeDefined();
+    expect(screen.getByText('Stems').textContent).toBe('Stems');
   });
 
   it('renders pad/bass/melody/drums inputs', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('pad')).toBeDefined();
-    expect(screen.getByText('bass')).toBeDefined();
-    expect(screen.getByText('melody')).toBeDefined();
-    expect(screen.getByText('drums')).toBeDefined();
+    expect(screen.getByText('pad').textContent).toBe('pad');
+    expect(screen.getByText('bass').textContent).toBe('bass');
+    expect(screen.getByText('melody').textContent).toBe('melody');
+    expect(screen.getByText('drums').textContent).toBe('drums');
   });
 
   it('renders BPM input', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('BPM')).toBeDefined();
+    expect(screen.getByText('BPM').textContent).toBe('BPM');
   });
 
   it('renders Configure Stems button', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('Configure Stems')).toBeDefined();
+    expect(screen.getByText('Configure Stems').textContent).toBe('Configure Stems');
   });
 
   it('renders Segments section', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('Segments')).toBeDefined();
+    expect(screen.getByText('Segments').textContent).toBe('Segments');
   });
 
   it('renders segment buttons', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('intro')).toBeDefined();
-    expect(screen.getByText('main')).toBeDefined();
-    expect(screen.getByText('combat')).toBeDefined();
-    expect(screen.getByText('calm')).toBeDefined();
-    expect(screen.getByText('outro')).toBeDefined();
+    expect(screen.getByText('intro').textContent).toBe('intro');
+    expect(screen.getByText('main').textContent).toBe('main');
+    expect(screen.getByText('combat').textContent).toBe('combat');
+    expect(screen.getByText('calm').textContent).toBe('calm');
+    expect(screen.getByText('outro').textContent).toBe('outro');
   });
 
   it('calls setCurrentMusicSegment when segment button clicked', () => {
@@ -140,12 +140,12 @@ describe('AdaptiveMusicInspector', () => {
 
   it('renders Audio Snapshots section', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByText('Audio Snapshots')).toBeDefined();
+    expect(screen.getByText('Audio Snapshots').textContent).toBe('Audio Snapshots');
   });
 
   it('renders snapshot name input', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByPlaceholderText('Snapshot name')).toBeDefined();
+    expect(screen.getByPlaceholderText('Snapshot name').tagName.toLowerCase()).toMatch(/input|textarea/);
   });
 
   it('renders Create snapshot button', () => {

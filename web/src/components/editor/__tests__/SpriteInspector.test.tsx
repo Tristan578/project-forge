@@ -91,19 +91,19 @@ describe('SpriteInspector', () => {
   it('renders Sprite heading', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Sprite')).toBeDefined();
+    expect(screen.getByText('Sprite').textContent).toBe('Sprite');
   });
 
   it('renders Texture label', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Texture')).toBeDefined();
+    expect(screen.getByText('Texture').textContent).toBe('Texture');
   });
 
   it('shows Upload Texture button when no assets available', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Upload Texture')).toBeDefined();
+    expect(screen.getByText('Upload Texture').textContent).toBe('Upload Texture');
   });
 
   it('shows texture select dropdown when assets available', () => {
@@ -115,32 +115,32 @@ describe('SpriteInspector', () => {
     render(<SpriteInspector />);
     const selects = screen.getAllByRole('combobox');
     expect(selects.length).toBeGreaterThan(0);
-    expect(screen.getByText('player.png')).toBeDefined();
+    expect(screen.getByText('player.png').textContent).toBe('player.png');
   });
 
   it('renders Draw Pixel Art button', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Draw Pixel Art')).toBeDefined();
+    expect(screen.getByText('Draw Pixel Art').textContent).toBe('Draw Pixel Art');
   });
 
   it('renders Appearance section', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Appearance')).toBeDefined();
+    expect(screen.getByText('Appearance').textContent).toBe('Appearance');
   });
 
   it('renders Color Tint label', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Color Tint')).toBeDefined();
+    expect(screen.getByText('Color Tint').textContent).toBe('Color Tint');
   });
 
   it('renders Flip X and Flip Y checkboxes', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Flip X')).toBeDefined();
-    expect(screen.getByText('Flip Y')).toBeDefined();
+    expect(screen.getByText('Flip X').textContent).toBe('Flip X');
+    expect(screen.getByText('Flip Y').textContent).toBe('Flip Y');
   });
 
   it('flip X checkbox reflects state', () => {
@@ -170,7 +170,7 @@ describe('SpriteInspector', () => {
   it('renders Custom Size checkbox', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Custom Size')).toBeDefined();
+    expect(screen.getByText('Custom Size').textContent).toBe('Custom Size');
   });
 
   it('does not show Width/Height inputs when customSize is null', () => {
@@ -185,22 +185,22 @@ describe('SpriteInspector', () => {
       spriteData: { ...baseSpriteData, customSize: [2, 3] as [number, number] },
     });
     render(<SpriteInspector />);
-    expect(screen.getByText('Width')).toBeDefined();
-    expect(screen.getByText('Height')).toBeDefined();
+    expect(screen.getByText('Width').textContent).toBe('Width');
+    expect(screen.getByText('Height').textContent).toBe('Height');
   });
 
   it('renders Sorting section', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Sorting')).toBeDefined();
+    expect(screen.getByText('Sorting').textContent).toBe('Sorting');
   });
 
   it('renders Layer select with sorting layers', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Background')).toBeDefined();
-    expect(screen.getByText('Default')).toBeDefined();
-    expect(screen.getByText('Foreground')).toBeDefined();
+    expect(screen.getByText('Background').textContent).toBe('Background');
+    expect(screen.getByText('Default').textContent).toBe('Default');
+    expect(screen.getByText('Foreground').textContent).toBe('Foreground');
   });
 
   it('calls setSpriteData when layer changed', () => {
@@ -217,7 +217,7 @@ describe('SpriteInspector', () => {
   it('renders Anchor section', () => {
     setupStore();
     render(<SpriteInspector />);
-    expect(screen.getByText('Anchor')).toBeDefined();
+    expect(screen.getByText('Anchor').textContent).toBe('Anchor');
   });
 
   it('renders 9 anchor buttons', () => {

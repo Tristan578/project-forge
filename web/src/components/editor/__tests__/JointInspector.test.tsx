@@ -84,7 +84,7 @@ describe('JointInspector', () => {
   it('shows Add Joint button when no joint configured', () => {
     setupStore();
     render(<JointInspector />);
-    expect(screen.getByText('Add Joint')).toBeDefined();
+    expect(screen.getByText('Add Joint').textContent).toBe('Add Joint');
   });
 
   it('shows need another entity message when only one entity', () => {
@@ -95,7 +95,7 @@ describe('JointInspector', () => {
       },
     });
     render(<JointInspector />);
-    expect(screen.getByText('Need another entity')).toBeDefined();
+    expect(screen.getByText('Need another entity').textContent).toBe('Need another entity');
   });
 
   it('calls createJoint when Add Joint clicked', () => {
@@ -108,13 +108,13 @@ describe('JointInspector', () => {
   it('renders Joint heading when joint configured', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByText('Joint')).toBeDefined();
+    expect(screen.getByText('Joint').textContent).toBe('Joint');
   });
 
   it('renders Remove button when joint configured', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByText('Remove')).toBeDefined();
+    expect(screen.getByText('Remove').textContent).toBe('Remove');
   });
 
   it('calls removeJoint when Remove clicked', () => {
@@ -127,7 +127,7 @@ describe('JointInspector', () => {
   it('renders Type select with current joint type', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByText('Type')).toBeDefined();
+    expect(screen.getByText('Type').textContent).toBe('Type');
     const selects = screen.getAllByRole('combobox');
     const typeSelect = selects.find(
       (s) => (s as HTMLSelectElement).value === 'revolute'
@@ -138,10 +138,10 @@ describe('JointInspector', () => {
   it('renders all joint type options', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByRole('option', { name: 'Revolute' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Fixed' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Spherical' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Prismatic' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'Revolute' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Fixed' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Spherical' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Prismatic' })).not.toBeNull();
   });
 
   it('calls updateJoint when type changed', () => {
@@ -158,7 +158,7 @@ describe('JointInspector', () => {
   it('renders Axis inputs for revolute joint', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByText('Axis')).toBeDefined();
+    expect(screen.getByText('Axis').textContent).toBe('Axis');
   });
 
   it('does not render Axis for fixed joint type', () => {
@@ -170,7 +170,7 @@ describe('JointInspector', () => {
   it('renders Limits checkbox for revolute joint', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByText('Limits')).toBeDefined();
+    expect(screen.getByText('Limits').textContent).toBe('Limits');
   });
 
   it('shows Min/Max inputs when limits enabled', () => {
@@ -178,14 +178,14 @@ describe('JointInspector', () => {
       primaryJoint: { ...baseJoint, limits: { min: -1, max: 1 } },
     });
     render(<JointInspector />);
-    expect(screen.getByText('Min')).toBeDefined();
-    expect(screen.getByText('Max')).toBeDefined();
+    expect(screen.getByText('Min').textContent).toBe('Min');
+    expect(screen.getByText('Max').textContent).toBe('Max');
   });
 
   it('renders Motor checkbox for revolute joint', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByText('Motor')).toBeDefined();
+    expect(screen.getByText('Motor').textContent).toBe('Motor');
   });
 
   it('shows Velocity/Max Force when motor enabled', () => {
@@ -193,14 +193,14 @@ describe('JointInspector', () => {
       primaryJoint: { ...baseJoint, motor: { targetVelocity: 1, maxForce: 100 } },
     });
     render(<JointInspector />);
-    expect(screen.getByText('Velocity')).toBeDefined();
-    expect(screen.getByText('Max Force')).toBeDefined();
+    expect(screen.getByText('Velocity').textContent).toBe('Velocity');
+    expect(screen.getByText('Max Force').textContent).toBe('Max Force');
   });
 
   it('renders Connected To select with other entities', () => {
     setupStore({ primaryJoint: baseJoint });
     render(<JointInspector />);
-    expect(screen.getByText('Connected To')).toBeDefined();
-    expect(screen.getByText('Entity 2')).toBeDefined();
+    expect(screen.getByText('Connected To').textContent).toBe('Connected To');
+    expect(screen.getByText('Entity 2').textContent).toBe('Entity 2');
   });
 });

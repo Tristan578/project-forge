@@ -68,7 +68,7 @@ describe('DocsPanel', () => {
     setupStore();
     vi.mocked(loadDocsIndex).mockReturnValue(new Promise(() => {})); // never resolves
     render(<DocsPanel />);
-    expect(screen.getByText('Loading documentation...')).toBeDefined();
+    expect(screen.getByText('Loading documentation...').textContent).toBe('Loading documentation...');
   });
 
   // ── Error state ───────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ describe('DocsPanel', () => {
     vi.mocked(loadDocsIndex).mockRejectedValue(new Error('Network failure'));
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Network failure')).toBeDefined();
+      expect(screen.getByText('Network failure').textContent).toBe('Network failure');
     });
   });
 
@@ -89,7 +89,7 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Documentation')).toBeDefined();
+      expect(screen.getByText('Documentation').textContent).toBe('Documentation');
     });
   });
 
@@ -98,8 +98,9 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Getting Started')).toBeDefined();
-      expect(screen.getByText('Features')).toBeDefined();
+      // textContent includes the count badge child, so use toContain
+      expect(screen.getByText('Getting Started').textContent).toContain('Getting Started');
+      expect(screen.getByText('Features').textContent).toContain('Features');
     });
   });
 
@@ -108,8 +109,8 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('(1)')).toBeDefined(); // getting-started has 1
-      expect(screen.getByText('(2)')).toBeDefined(); // features has 2
+      expect(screen.getByText('(1)').textContent).toBe('(1)'); // getting-started has 1
+      expect(screen.getByText('(2)').textContent).toBe('(2)'); // features has 2
     });
   });
 
@@ -118,9 +119,9 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Introduction')).toBeDefined();
-      expect(screen.getByText('Physics')).toBeDefined();
-      expect(screen.getByText('Materials')).toBeDefined();
+      expect(screen.getByText('Introduction').textContent).toBe('Introduction');
+      expect(screen.getByText('Physics').textContent).toBe('Physics');
+      expect(screen.getByText('Materials').textContent).toBe('Materials');
     });
   });
 
@@ -131,7 +132,7 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Introduction')).toBeDefined();
+      expect(screen.getByText('Introduction').textContent).toBe('Introduction');
     });
     fireEvent.click(screen.getByText('Getting Started'));
     expect(screen.queryByText('Introduction')).toBeNull();
@@ -142,11 +143,11 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Introduction')).toBeDefined();
+      expect(screen.getByText('Introduction').textContent).toBe('Introduction');
     });
     fireEvent.click(screen.getByText('Getting Started'));
     fireEvent.click(screen.getByText('Getting Started'));
-    expect(screen.getByText('Introduction')).toBeDefined();
+    expect(screen.getByText('Introduction').textContent).toBe('Introduction');
   });
 
   // ── Navigation ────────────────────────────────────────────────────────
@@ -156,7 +157,7 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Materials')).toBeDefined();
+      expect(screen.getByText('Materials').textContent).toBe('Materials');
     });
     fireEvent.click(screen.getByText('Materials'));
     // Should show document view with back button
@@ -170,7 +171,7 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByText('Materials')).toBeDefined();
+      expect(screen.getByText('Materials').textContent).toBe('Materials');
     });
     fireEvent.click(screen.getByText('Materials'));
     await waitFor(() => {
@@ -178,7 +179,7 @@ describe('DocsPanel', () => {
     });
     fireEvent.click(screen.getByTitle('Back'));
     await waitFor(() => {
-      expect(screen.getByText('Documentation')).toBeDefined();
+      expect(screen.getByText('Documentation').textContent).toBe('Documentation');
     });
   });
 
@@ -189,7 +190,7 @@ describe('DocsPanel', () => {
     setupDocsLoaded();
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Search docs...')).toBeDefined();
+      expect(screen.getByPlaceholderText('Search docs...').tagName.toLowerCase()).toMatch(/input|textarea/);
     });
   });
 
@@ -199,7 +200,7 @@ describe('DocsPanel', () => {
     vi.mocked(searchDocs).mockReturnValue([]);
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Search docs...')).toBeDefined();
+      expect(screen.getByPlaceholderText('Search docs...').tagName.toLowerCase()).toMatch(/input|textarea/);
     });
     fireEvent.change(screen.getByPlaceholderText('Search docs...'), {
       target: { value: 'xyznonexistent' },
@@ -217,13 +218,13 @@ describe('DocsPanel', () => {
     ]);
     render(<DocsPanel />);
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('Search docs...')).toBeDefined();
+      expect(screen.getByPlaceholderText('Search docs...').tagName.toLowerCase()).toMatch(/input|textarea/);
     });
     fireEvent.change(screen.getByPlaceholderText('Search docs...'), {
       target: { value: 'physics' },
     });
     await waitFor(() => {
-      expect(screen.getByText('Physics engine docs.')).toBeDefined();
+      expect(screen.getByText('Physics engine docs.').textContent).toBe('Physics engine docs.');
     });
   });
 

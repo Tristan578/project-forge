@@ -71,7 +71,7 @@ describe('LandingPage', () => {
     const ctas = screen.getAllByText('Start Creating Free');
     // At least the hero CTA should link to /sign-up
     const heroLink = ctas[0].closest('a');
-    expect(heroLink).toBeDefined();
+    expect(heroLink).not.toBeNull();
     expect(heroLink?.getAttribute('href')).toBe('/sign-up');
   });
 
@@ -94,17 +94,17 @@ describe('LandingPage', () => {
 
   it('shows "Coming Soon" badge on collaboration feature', () => {
     render(<LandingPage />);
-    expect(screen.getByText('Coming Soon')).toBeDefined();
+    expect(screen.getByText('Coming Soon').textContent).toBe('Coming Soon');
   });
 
   it('renders the 3-step how-it-works flow', () => {
     render(<LandingPage />);
-    expect(screen.getByText('Describe')).toBeDefined();
-    expect(screen.getByText('Generate')).toBeDefined();
-    expect(screen.getByText('Play')).toBeDefined();
-    expect(screen.getByText('Step 1')).toBeDefined();
-    expect(screen.getByText('Step 2')).toBeDefined();
-    expect(screen.getByText('Step 3')).toBeDefined();
+    expect(screen.getByText('Describe').textContent).toBe('Describe');
+    expect(screen.getByText('Generate').textContent).toBe('Generate');
+    expect(screen.getByText('Play').textContent).toBe('Play');
+    expect(screen.getByText('Step 1').textContent).toBe('Step 1');
+    expect(screen.getByText('Step 2').textContent).toBe('Step 2');
+    expect(screen.getByText('Step 3').textContent).toBe('Step 3');
   });
 
   it('renders comparison table with all 4 competitors', () => {
@@ -120,28 +120,28 @@ describe('LandingPage', () => {
 
   it('renders all comparison rows', () => {
     render(<LandingPage />);
-    expect(screen.getByText('Browser-native (no install)')).toBeDefined();
-    expect(screen.getByText('AI-first game creation')).toBeDefined();
-    expect(screen.getByText('WebGPU rendering')).toBeDefined();
-    expect(screen.getByText('One-click web publish')).toBeDefined();
+    expect(screen.getByText('Browser-native (no install)').textContent).toBe('Browser-native (no install)');
+    expect(screen.getByText('AI-first game creation').textContent).toBe('AI-first game creation');
+    expect(screen.getByText('WebGPU rendering').textContent).toBe('WebGPU rendering');
+    expect(screen.getByText('One-click web publish').textContent).toBe('One-click web publish');
   });
 
   it('renders all 4 pricing tiers with correct prices per spec', () => {
     render(<LandingPage />);
-    expect(screen.getByText('$0')).toBeDefined();
-    expect(screen.getByText('$9')).toBeDefined();
-    expect(screen.getByText('$29')).toBeDefined();
-    expect(screen.getByText('$99')).toBeDefined();
+    expect(screen.getByText('$0').textContent).toBe('$0');
+    expect(screen.getByText('$9').textContent).toBe('$9');
+    expect(screen.getByText('$29').textContent).toBe('$29');
+    expect(screen.getByText('$99').textContent).toBe('$99');
 
-    expect(screen.getByText('Starter')).toBeDefined();
-    expect(screen.getByText('Hobbyist')).toBeDefined();
-    expect(screen.getByText('Creator')).toBeDefined();
-    expect(screen.getByText('Pro')).toBeDefined();
+    expect(screen.getByText('Starter').textContent).toBe('Starter');
+    expect(screen.getByText('Hobbyist').textContent).toBe('Hobbyist');
+    expect(screen.getByText('Creator').textContent).toBe('Creator');
+    expect(screen.getByText('Pro').textContent).toBe('Pro');
   });
 
   it('highlights the Creator tier as "Most Popular"', () => {
     render(<LandingPage />);
-    expect(screen.getByText('Most Popular')).toBeDefined();
+    expect(screen.getByText('Most Popular').textContent).toBe('Most Popular');
   });
 
   it('renders the footer CTA section', () => {
@@ -173,7 +173,7 @@ describe('LandingPage', () => {
     // The primary feature grid container should have responsive grid classes
     const featureHeading = screen.getByText('AI Game Design');
     const grid = featureHeading.closest('.grid');
-    expect(grid).toBeDefined();
+    expect(grid).not.toBeNull();
     expect(grid?.className).toContain('sm:grid-cols-2');
     expect(grid?.className).toContain('lg:grid-cols-3');
   });
