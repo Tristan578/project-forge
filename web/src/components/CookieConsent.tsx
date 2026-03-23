@@ -1,51 +1,49 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { initPostHog } from '@/lib/analytics/posthog';
 
 const STORAGE_KEY = 'forge-cookie-consent';
 
-/**
- * Returns the initial consent state by reading localStorage during the first
- * client-side render. Returns null during SSR (window is undefined) so the
- * banner is suppressed server-side — this avoids hydration mismatches because
- * localStorage is unavailable in the Node.js SSR environment.
- *
- * On the client:
- *  - null in localStorage  → returns false (banner visible, user hasn't responded)
- *  - 'true' in localStorage → returns true  (banner hidden, user accepted)
- *  - 'false' in localStorage → returns false (banner visible on next load if they declined)
- */
-function readConsentFromStorage(): boolean | null {
-  if (typeof window === 'undefined') return null;
-  const stored = localStorage.getItem(STORAGE_KEY);
-  // Any stored value ('true' or 'false') means the user has already interacted
-  return stored !== null;
+function subscribeToStorage(callback: () => void) {
+  window.addEventListener('storage', callback);
+  return () => window.removeEventListener('storage', callback);
+}
+
+function getConsentSnapshot(): boolean {
+  return localStorage.getItem(STORAGE_KEY) !== null;
+}
+
+function getServerSnapshot(): boolean {
+  // Return true (hide banner) during SSR to match the initial client render
+  // after useSyncExternalStore resolves. This prevents hydration mismatch.
+  return true;
 }
 
 /**
- * Cookie consent banner. Uses a lazy useState initializer instead of useEffect
- * to read localStorage, so consent state is available synchronously on the
- * first client-side render without causing cascading re-renders.
+ * Cookie consent banner. Uses useSyncExternalStore so localStorage is read
+ * hydration-safe: getServerSnapshot returns true (banner hidden), matching
+ * the SSR output. After hydration the client snapshot takes over — if the
+ * user hasn't interacted yet (no key in localStorage), the banner appears.
  */
 export function CookieConsent() {
-  const [consented, setConsented] = useState<boolean | null>(readConsentFromStorage);
+  const hasInteracted = useSyncExternalStore(subscribeToStorage, getConsentSnapshot, getServerSnapshot);
 
   const handleAccept = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, 'true');
-    setConsented(true);
-    // Initialize PostHog immediately — the storage event only fires in other
-    // tabs, so we must call initPostHog directly in the originating tab.
     initPostHog();
+    // Force re-render via storage event won't fire in same tab — trigger
+    // by dispatching a synthetic event so useSyncExternalStore picks it up.
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 
   const handleDecline = useCallback(() => {
     localStorage.setItem(STORAGE_KEY, 'false');
-    setConsented(true);
+    window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
   }, []);
 
-  // Don't render during SSR (null) or if already consented/interacted
-  if (consented !== false) return null;
+  // Already interacted → hide banner
+  if (hasInteracted) return null;
 
   return (
     <div

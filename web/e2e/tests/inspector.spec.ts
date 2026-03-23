@@ -5,7 +5,7 @@ test.describe('Inspector Panel @engine', () => {
     await editor.load();
   });
 
-  test('update_material: changing color reflects in the store @ui', async ({ page, editor }) => {
+  test('update_material: changing color reflects in the store @engine', async ({ page, editor }) => {
     // Spawn a cube and select it
     await page.getByRole('button', { name: 'Add Entity' }).click();
     await page.getByText('Cube', { exact: true }).click();
