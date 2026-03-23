@@ -4,6 +4,7 @@ import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET(request: NextRequest) {
   // 1. Authenticate
@@ -66,6 +67,7 @@ export async function GET(request: NextRequest) {
       error: mappedStatus === 'failed' ? 'Generation failed' : undefined,
     });
   } catch (err) {
+    captureException(err, { route: '/api/generate/model/status', jobId });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });
   }

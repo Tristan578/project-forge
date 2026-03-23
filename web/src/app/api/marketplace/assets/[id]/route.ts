@@ -3,6 +3,7 @@ import { getDb } from '@/lib/db/client';
 import { marketplaceAssets, sellerProfiles, assetReviews, users } from '@/lib/db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function GET(
   req: NextRequest,
@@ -106,6 +107,7 @@ export async function GET(
     });
   } catch (error) {
     console.error('Error fetching asset details:', error);
+    captureException(error, { route: '/api/marketplace/assets/[id]' });
     return NextResponse.json({ error: 'Failed to fetch asset' }, { status: 500 });
   }
 }
