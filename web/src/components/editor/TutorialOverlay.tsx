@@ -133,7 +133,7 @@ export function TutorialOverlay() {
     };
 
     updateHighlight();
-    window.addEventListener('resize', updateHighlight);
+    window.addEventListener('resize', updateHighlight, { passive: true });
     return () => window.removeEventListener('resize', updateHighlight);
   }, [currentStep?.target]);
 
