@@ -24,6 +24,20 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (err) {
+    // Distinguish missing spec file (404) from unexpected server errors (500)
+    const isNotFound =
+      err instanceof Error &&
+      'code' in err &&
+      (err as NodeJS.ErrnoException).code === 'ENOENT';
+
+    if (isNotFound) {
+      return NextResponse.json(
+        { error: 'OpenAPI spec not found. Run the spec generation script to create docs/api/openapi.json.' },
+        { status: 404 }
+      );
+    }
+
+    captureException(err, { route: '/api/openapi' });
     const message = err instanceof Error ? err.message : 'Failed to load spec';
     return NextResponse.json({ error: message }, { status: 500 });
   }

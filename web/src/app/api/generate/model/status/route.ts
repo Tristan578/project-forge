@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { MeshyClient } from '@/lib/generate/meshyClient';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 
 export async function GET(request: NextRequest) {
   // 1. Authenticate
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  const rl = await rateLimit(`user:generate-model-status:${authResult.ctx.user.id}`, 60, 60_000);
+  // Rate limit: 60 status polls per minute per user (distributed, Upstash-backed)
+  const rl = await distributedRateLimit(`gen-model-status:${authResult.ctx.user.id}`, 60, 60);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // 2. Parse query params
