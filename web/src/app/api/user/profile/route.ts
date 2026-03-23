@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { updateDisplayName } from '@/lib/auth/user-service';
 import { parseJsonBody, requireString } from '@/lib/apiValidation';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * GET /api/user/profile
@@ -51,6 +52,7 @@ export async function PUT(request: NextRequest) {
       createdAt: user.createdAt.toISOString(),
     });
   } catch (err) {
+    captureException(err, { route: '/api/user/profile', method: 'PUT' });
     return NextResponse.json(
       { error: (err as Error).message },
       { status: 400 }
