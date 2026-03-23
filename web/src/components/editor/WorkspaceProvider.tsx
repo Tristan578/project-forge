@@ -111,8 +111,11 @@ const QuestGeneratorPanel = lazy(() =>
 const PacingAnalyzerPanel = lazy(() =>
   import('./PacingAnalyzerPanel').then((m) => ({ default: m.PacingAnalyzerPanel }))
 );
-const GDDPanelComponent = lazy(() =>
-  import('./GDDPanel').then((m) => ({ default: m.GDDPanel }))
+const VoiceProfilePanel = lazy(() =>
+  import('./VoiceProfilePanel').then((m) => ({ default: m.VoiceProfilePanel }))
+);
+const ShaderEditorPanel = lazy(() =>
+  import('./ShaderEditorPanel').then((m) => ({ default: m.ShaderEditorPanel }))
 );
 
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -292,7 +295,10 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'quest-generator': withTierGate('quest-generator', QuestGeneratorPanel),
   'pacing-analyzer': withTierGate('pacing-analyzer', PacingAnalyzerPanel),
   'procedural-anim': withTierGate('procedural-anim', ProceduralAnimPanel),
-  'gdd-generator': withTierGate('gdd-generator', GDDPanelComponent),
+  // Dialogue/voice tools — no tier restriction
+  'voice-profile': withSuspense(VoiceProfilePanel),
+  // Shader graph editor — no tier restriction, always-rendered for canvas continuity
+  'shader-editor': withSuspense(ShaderEditorPanel),
   // AI panels — tier-gated (pro only)
   'auto-iteration': withTierGate('auto-iteration', AutoIterationPanel),
   playtest: withTierGate('playtest', PlaytestPanel),
