@@ -456,9 +456,10 @@ export function EditorLayout() {
         setCheatSheetOpen((prev) => {
           // If already open, always allow closing
           if (prev) return false;
-          // If another dialog is open, don't stack the cheat sheet on top
-          const hasOpenDialog = document.querySelector('[role="dialog"]') !== null;
-          if (hasOpenDialog) return false;
+          // If a modal dialog is open, don't stack the cheat sheet on top.
+          // Uses aria-modal to distinguish true modals from drawers/sheets.
+          const hasOpenModal = document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+          if (hasOpenModal) return false;
           return true;
         });
       }
