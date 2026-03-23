@@ -111,6 +111,9 @@ const QuestGeneratorPanel = lazy(() =>
 const PacingAnalyzerPanel = lazy(() =>
   import('./PacingAnalyzerPanel').then((m) => ({ default: m.PacingAnalyzerPanel }))
 );
+const GDDPanelComponent = lazy(() =>
+  import('./GDDPanel').then((m) => ({ default: m.GDDPanel }))
+);
 
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useUserStore } from '@/stores/userStore';
@@ -289,6 +292,7 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'quest-generator': withTierGate('quest-generator', QuestGeneratorPanel),
   'pacing-analyzer': withTierGate('pacing-analyzer', PacingAnalyzerPanel),
   'procedural-anim': withTierGate('procedural-anim', ProceduralAnimPanel),
+  'gdd-generator': withTierGate('gdd-generator', GDDPanelComponent),
   // AI panels — tier-gated (pro only)
   'auto-iteration': withTierGate('auto-iteration', AutoIterationPanel),
   playtest: withTierGate('playtest', PlaytestPanel),

@@ -83,6 +83,7 @@ vi.mock('../TexturePainterPanel', () => ({ TexturePainterPanel: () => null }));
 vi.mock('../IdeaGeneratorPanel', () => ({ IdeaGeneratorPanel: () => null }));
 vi.mock('../QuestGeneratorPanel', () => ({ QuestGeneratorPanel: () => null }));
 vi.mock('../PacingAnalyzerPanel', () => ({ PacingAnalyzerPanel: () => null }));
+vi.mock('../GDDPanel', () => ({ GDDPanel: () => null }));
 
 // ── Workspace lib mocks ────────────────────────────────────────────────────
 
