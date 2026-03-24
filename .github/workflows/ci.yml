@@ -37,10 +37,11 @@ jobs:
 
       - name: Detect changed paths
         id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          BASE="${{ github.event.pull_request.base.sha }}"
-          HEAD="${{ github.event.pull_request.head.sha }}"
-          CHANGED=$(git diff --name-only "$BASE" "$HEAD")
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
 
           web=false; engine=false; mcp=false; ci=false
 
@@ -125,6 +126,77 @@ jobs:
       - name: Check JS bundle size
         working-directory: web
         run: node scripts/check-bundle-size.js
+
+  # ---- Preview Deployment (PR only) ----
+  # Deploys a Vercel preview for every PR so reviewers can test changes without
+  # a local build. Only runs when VERCEL_DEPLOY_ENABLED is set and web/mcp files changed.
+  preview-deploy:
+    name: Preview Deployment
+    needs: [ci-gate]
+    if: |
+      vars.VERCEL_DEPLOY_ENABLED == 'true' &&
+      (needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-mcp == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      deployments: write
+      pull-requests: write
+    environment:
+      name: preview
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel@50.34.3
+
+      - name: Pull Vercel environment (preview)
+        working-directory: web
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+
+      - name: Build with Vercel
+        working-directory: web
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel build --token="$VERCEL_TOKEN"
+
+      - name: Deploy preview
+        id: deploy
+        working-directory: web
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Preview deployment: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment preview URL on PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          DEPLOY_URL: ${{ steps.deploy.outputs.url }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          short_sha="${COMMIT_SHA:0:8}"
+          gh pr comment "$PR_NUMBER" \
+            --body "**Preview deployment ready** — [\`${short_sha}\`](${DEPLOY_URL}): ${DEPLOY_URL}" \
+            --repo "$REPO"
 
   # Engine-dependent E2E tests (@engine) require WASM + GPU which CI runners lack.
   # Only UI-only E2E tests (@ui) run in CI — they test React shell without WASM.
