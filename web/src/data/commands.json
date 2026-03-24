@@ -715,11 +715,17 @@
           },
           "paramNames": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Optional parameter name hints (up to 16 values)"
           }
         },
-        "required": ["slot", "name", "wgslCode"]
+        "required": [
+          "slot",
+          "name",
+          "wgslCode"
+        ]
       },
       "tokenCost": 1,
       "requiredScope": "shaders:write"
@@ -741,11 +747,16 @@
           },
           "params": {
             "type": "object",
-            "additionalProperties": { "type": "number" },
+            "additionalProperties": {
+              "type": "number"
+            },
             "description": "Optional named float parameters (up to 16 values)"
           }
         },
-        "required": ["entityId", "slot"]
+        "required": [
+          "entityId",
+          "slot"
+        ]
       },
       "tokenCost": 1,
       "requiredScope": "shaders:write"
@@ -762,7 +773,9 @@
             "description": "Slot index 0-7 to clear"
           }
         },
-        "required": ["slot"]
+        "required": [
+          "slot"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write"
@@ -10118,7 +10131,9 @@
             "type": "array",
             "items": {
               "type": "array",
-              "items": { "type": "number" },
+              "items": {
+                "type": "number"
+              },
               "minItems": 2,
               "maxItems": 2
             },
@@ -10128,7 +10143,9 @@
             "type": "array",
             "items": {
               "type": "array",
-              "items": { "type": "number" },
+              "items": {
+                "type": "number"
+              },
               "minItems": 2,
               "maxItems": 2
             },
@@ -10136,7 +10153,9 @@
           },
           "triangles": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Triangle index array"
           },
           "weights": {
@@ -10146,16 +10165,23 @@
               "properties": {
                 "bones": {
                   "type": "array",
-                  "items": { "type": "string" },
+                  "items": {
+                    "type": "string"
+                  },
                   "description": "Bone names influencing this vertex"
                 },
                 "weights": {
                   "type": "array",
-                  "items": { "type": "number" },
+                  "items": {
+                    "type": "number"
+                  },
                   "description": "Normalized weight per bone (sum = 1.0)"
                 }
               },
-              "required": ["bones", "weights"]
+              "required": [
+                "bones",
+                "weights"
+              ]
             },
             "description": "Array of { bones: string[], weights: number[] } per vertex"
           }
@@ -10799,7 +10825,7 @@
     },
     {
       "name": "build_world",
-      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size — use sparingly.",
+      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size \u2014 use sparingly.",
       "category": "world_building",
       "parameters": {
         "type": "object",
@@ -10825,7 +10851,9 @@
             "description": "Desired number of regions (1-20). Default is 5. Graph visualization breaks above 20."
           }
         },
-        "required": ["premise"]
+        "required": [
+          "premise"
+        ]
       },
       "tokenCost": 3,
       "requiredScope": "ai:generate"
@@ -10873,7 +10901,9 @@
         "properties": {
           "targetLocales": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "BCP-47 locale codes to translate to (e.g. [\"ja\", \"fr\", \"de\", \"zh-CN\"]). Maximum 10 per call."
           },
           "sourceLocale": {
@@ -10882,7 +10912,9 @@
             "default": "en"
           }
         },
-        "required": ["targetLocales"]
+        "required": [
+          "targetLocales"
+        ]
       },
       "tokenCost": 5,
       "requiredScope": "ai:generate"
@@ -10895,11 +10927,16 @@
         "type": "object",
         "properties": {
           "locale": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "BCP-47 locale code to preview (e.g. \"ja\"), or null to return to source text."
           }
         },
-        "required": ["locale"]
+        "required": [
+          "locale"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -10915,6 +10952,40 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "design_economy",
+      "description": "Generate a complete, balanced in-game economy from a game description. Returns currencies (with earn rates and sinks), a shop with priced items, loot tables with weighted drops, a progression curve (XP per level and rewards), and a balance validation report. Use the 'preset' parameter to start from a known-good template: 'casual_mobile', 'rpg_classic', 'roguelike', 'idle_incremental', or 'competitive_pvp'. The response includes a balanceScore (0-100), a list of issues (inflation_risk, dead_end_item, unreachable_content, etc.), and ready-to-use JavaScript source code for the economy runtime. Validation errors must be fixed before the economy is suitable for production use.",
+      "category": "economy",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameDescription": {
+            "type": "string",
+            "description": "Natural language description of the game \u2014 genre, progression feel, player goals. Used to select and tune the economy. Example: 'A fast-paced roguelike where players collect souls and unlock meta-upgrades between runs.'"
+          },
+          "preset": {
+            "type": "string",
+            "enum": [
+              "casual_mobile",
+              "rpg_classic",
+              "roguelike",
+              "idle_incremental",
+              "competitive_pvp"
+            ],
+            "description": "Optional starting template. Overrides keyword matching from gameDescription. casual_mobile: single currency, short session. rpg_classic: gold + premium gem dual currency. roguelike: souls meta-progression. idle_incremental: prestige loop with 3 currencies. competitive_pvp: cosmetic-only token shop."
+          },
+          "autoInjectScript": {
+            "type": "boolean",
+            "description": "If true, the generated economy JavaScript is automatically added to the project script library as 'economy.js'. Default: false."
+          }
+        },
+        "required": [
+          "gameDescription"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
     }
   ],
   "resources": [
