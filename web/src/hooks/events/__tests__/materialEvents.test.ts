@@ -96,6 +96,20 @@ describe('handleMaterialEvent', () => {
     expect(actions.setAmbientLight).toHaveBeenCalledWith(payload);
   });
 
+  it('AMBIENT_LIGHT_CHANGED: also updates SceneLightSlice via setSceneLightAmbient', () => {
+    const payload = {
+      color: { r: 0.2, g: 0.4, b: 0.6 },
+      brightness: 800,
+    };
+
+    handleMaterialEvent('AMBIENT_LIGHT_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+    expect(actions.setSceneLightAmbient).toHaveBeenCalledWith(
+      { r: 0.2, g: 0.4, b: 0.6 },
+      800,
+    );
+  });
+
   it('ENVIRONMENT_CHANGED: passes full payload to setEnvironment', () => {
     const payload = {
       clearColor: { r: 0.2, g: 0.3, b: 0.4 },
