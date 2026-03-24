@@ -34,6 +34,7 @@ import { compoundHandlers } from './handlers/compoundHandlers';
 import { leaderboardHandlers } from './handlers/leaderboardHandlers';
 import { worldHandlers } from './handlers/worldHandlers';
 import { localizationHandlers } from './handlers/localizationHandlers';
+import { economyHandlers } from './handlers/economyHandlers';
 
 /**
  * Merged handler registry.
@@ -65,6 +66,7 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...leaderboardHandlers,
   ...worldHandlers,
   ...localizationHandlers,
+  ...economyHandlers,
 };
 
 /**
