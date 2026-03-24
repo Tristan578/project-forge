@@ -6,6 +6,7 @@ import { TemplateGallery } from './TemplateGallery';
 import { IdeaGeneratorModal } from './IdeaGeneratorModal';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
+import { useChatStore } from '@/stores/chatStore';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
 import type { GameIdea } from '@/lib/ai/ideaGenerator';
 
@@ -29,6 +30,7 @@ export function WelcomeModal() {
   const [showIdeaGenerator, setShowIdeaGenerator] = useState(false);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
+  const sendMessage = useChatStore((s) => s.sendMessage);
 
   // Load recent projects once on mount (useState lazy init avoids referential instability
   // that useSyncExternalStore would cause with array snapshots — Object.is([], []) is false).
@@ -60,11 +62,16 @@ export function WelcomeModal() {
   }, []);
 
   const handleIdeaStart = useCallback(
-    (_idea: GameIdea) => {
+    (idea: GameIdea) => {
       setShowIdeaGenerator(false);
       handleDismiss();
+      // Send the idea to the AI chat so it scaffolds the project via start_from_idea
+      const genres = `${idea.genreMix.primary}/${idea.genreMix.secondary}`;
+      const mechanics = idea.mechanicCombo.mechanics.join(', ');
+      const prompt = `Create a game from this idea: "${idea.title}" — ${idea.description}. Genre: ${genres}. Mechanics: ${mechanics}.`;
+      void sendMessage(prompt);
     },
-    [handleDismiss]
+    [handleDismiss, sendMessage]
   );
 
   const handleOpenDocs = useCallback(() => {
