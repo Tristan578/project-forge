@@ -9,12 +9,18 @@ describe('game templates', () => {
 
   it('all registry entries have required fields', () => {
     for (const entry of TEMPLATE_REGISTRY) {
-      expect(entry.id).toBeTruthy();
-      expect(entry.name).toBeTruthy();
-      expect(entry.description).toBeTruthy();
-      expect(entry.category).toBeTruthy();
-      expect(entry.difficulty).toBeTruthy();
-      expect(entry.thumbnail).toBeDefined();
+      expect(typeof entry.id).toBe('string');
+      expect(entry.id.length).toBeGreaterThan(0);
+      expect(typeof entry.name).toBe('string');
+      expect(entry.name.length).toBeGreaterThan(0);
+      expect(typeof entry.description).toBe('string');
+      expect(entry.description.length).toBeGreaterThan(0);
+      expect(typeof entry.category).toBe('string');
+      expect(entry.category.length).toBeGreaterThan(0);
+      expect(typeof entry.difficulty).toBe('string');
+      expect(entry.difficulty.length).toBeGreaterThan(0);
+      expect(typeof entry.thumbnail).toBe('object');
+      expect(entry.thumbnail).toMatchObject({ gradient: expect.any(String), icon: expect.any(String) });
       expect(entry.entityCount).toBeGreaterThan(0);
       expect(typeof entry.load).toBe('function');
     }
@@ -27,7 +33,7 @@ describe('game templates', () => {
 
   it('getTemplateInfo works', () => {
     const info = getTemplateInfo('platformer');
-    expect(info).toBeDefined();
+    expect(info).not.toBeNull();
     expect(info?.id).toBe('platformer');
 
     const missing = getTemplateInfo('nonexistent');
@@ -44,7 +50,7 @@ describe('game templates', () => {
       });
 
       it('loads successfully', () => {
-        expect(template).toBeDefined();
+        expect(template).not.toBeNull();
         expect(template.id).toBe(entry.id);
       });
 
@@ -63,10 +69,13 @@ describe('game templates', () => {
 
       it('all entities have required fields', () => {
         for (const entity of template.sceneData.entities) {
-          expect(entity.entityId).toBeTruthy();
-          expect(entity.entityName).toBeTruthy();
-          expect(entity.entityType).toBeTruthy();
-          expect(entity.transform).toBeDefined();
+          expect(typeof entity.entityId).toBe('string');
+          expect(entity.entityId.length).toBeGreaterThan(0);
+          expect(typeof entity.entityName).toBe('string');
+          expect(entity.entityName.length).toBeGreaterThan(0);
+          expect(typeof entity.entityType).toBe('string');
+          expect(entity.entityType.length).toBeGreaterThan(0);
+          expect(entity.transform).toMatchObject({ translation: expect.any(Array), rotation: expect.any(Array), scale: expect.any(Array) });
           expect(entity.transform.translation).toHaveLength(3);
           expect(entity.transform.rotation).toHaveLength(4);
           expect(entity.transform.scale).toHaveLength(3);
@@ -96,13 +105,13 @@ describe('game templates', () => {
       });
 
       it('has valid environment settings', () => {
-        expect(template.sceneData.environment).toBeDefined();
-        expect(template.sceneData.ambientLight).toBeDefined();
+        expect(template.sceneData.environment).not.toBeNull();
+        expect(typeof template.sceneData.environment).toBe('object');
+        expect(template.sceneData.ambientLight).not.toBeNull();
         expect(template.sceneData.ambientLight.brightness).toBeGreaterThan(0);
       });
 
       it('has an input preset', () => {
-        expect(template.inputPreset).toBeTruthy();
         expect(['fps', 'platformer', 'topdown', 'racing']).toContain(template.inputPreset);
       });
     });
@@ -110,7 +119,7 @@ describe('game templates', () => {
 
   it('loadTemplate works for valid ID', async () => {
     const template = await loadTemplate('platformer');
-    expect(template).toBeDefined();
+    expect(template).not.toBeNull();
     expect(template?.id).toBe('platformer');
   });
 

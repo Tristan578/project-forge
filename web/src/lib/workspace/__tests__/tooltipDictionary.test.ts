@@ -15,38 +15,38 @@ describe('TOOLTIP_DICTIONARY', () => {
   });
 
   it('should include transform tooltips', () => {
-    expect(TOOLTIP_DICTIONARY['position']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['rotation']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['scale']).toBeDefined();
+    expect(typeof TOOLTIP_DICTIONARY['position']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['rotation']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['scale']).toBe('string');
   });
 
   it('should include material tooltips', () => {
-    expect(TOOLTIP_DICTIONARY['metallic']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['roughness']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['baseColor']).toBeDefined();
+    expect(typeof TOOLTIP_DICTIONARY['metallic']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['roughness']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['baseColor']).toBe('string');
   });
 
   it('should include physics tooltips', () => {
-    expect(TOOLTIP_DICTIONARY['restitution']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['friction']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['bodyType']).toBeDefined();
+    expect(typeof TOOLTIP_DICTIONARY['restitution']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['friction']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['bodyType']).toBe('string');
   });
 
   it('should include audio tooltips', () => {
-    expect(TOOLTIP_DICTIONARY['audioVolume']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['audioSpatial']).toBeDefined();
+    expect(typeof TOOLTIP_DICTIONARY['audioVolume']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['audioSpatial']).toBe('string');
   });
 
   it('should include game component tooltips', () => {
-    expect(TOOLTIP_DICTIONARY['characterController']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['health']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['collectible']).toBeDefined();
+    expect(typeof TOOLTIP_DICTIONARY['characterController']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['health']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['collectible']).toBe('string');
   });
 
   it('should include lighting tooltips', () => {
-    expect(TOOLTIP_DICTIONARY['intensity']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['range']).toBeDefined();
-    expect(TOOLTIP_DICTIONARY['lightShadows']).toBeDefined();
+    expect(typeof TOOLTIP_DICTIONARY['intensity']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['range']).toBe('string');
+    expect(typeof TOOLTIP_DICTIONARY['lightShadows']).toBe('string');
   });
 
   it('tooltip values should be user-friendly (no raw code)', () => {

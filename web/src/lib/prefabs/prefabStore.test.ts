@@ -44,8 +44,8 @@ describe('CRUD Operations', () => {
     expect(prefab.category).toBe('TestCategory');
     expect(prefab.description).toBe('Test description');
     expect(prefab.snapshot).toEqual(mockSnapshot);
-    expect(prefab.createdAt).toBeTruthy();
-    expect(prefab.updatedAt).toBeTruthy();
+    expect(typeof prefab.createdAt).toBe('string');
+    expect(typeof prefab.updatedAt).toBe('string');
   });
 
   it('savePrefab generates unique IDs', () => {
@@ -84,14 +84,14 @@ describe('CRUD Operations', () => {
   it('getPrefab finds by ID', () => {
     const prefab = savePrefab('FindMe', 'cat', '', mockSnapshot);
     const found = getPrefab(prefab.id);
-    expect(found).toBeTruthy();
+    expect(found).not.toBeNull();
     expect(found?.name).toBe('FindMe');
   });
 
   it('getPrefab finds by name', () => {
     savePrefab('UniqueName', 'cat', '', mockSnapshot);
     const found = getPrefab('UniqueName');
-    expect(found).toBeTruthy();
+    expect(found).not.toBeNull();
     expect(found?.name).toBe('UniqueName');
   });
 
@@ -125,16 +125,22 @@ describe('Built-in Prefabs', () => {
   it('All built-ins have required fields', () => {
     const builtIns = getBuiltInPrefabs();
     builtIns.forEach(prefab => {
-      expect(prefab.id).toBeTruthy();
-      expect(prefab.name).toBeTruthy();
-      expect(prefab.category).toBeTruthy();
-      expect(prefab.description).toBeTruthy();
-      expect(prefab.snapshot).toBeTruthy();
-      expect(prefab.snapshot.entityType).toBeTruthy();
-      expect(prefab.snapshot.name).toBeTruthy();
-      expect(prefab.snapshot.transform).toBeTruthy();
-      expect(prefab.createdAt).toBeTruthy();
-      expect(prefab.updatedAt).toBeTruthy();
+      expect(typeof prefab.id).toBe('string');
+      expect(prefab.id.length).toBeGreaterThan(0);
+      expect(typeof prefab.name).toBe('string');
+      expect(prefab.name.length).toBeGreaterThan(0);
+      expect(typeof prefab.category).toBe('string');
+      expect(prefab.category.length).toBeGreaterThan(0);
+      expect(typeof prefab.description).toBe('string');
+      expect(typeof prefab.snapshot).toBe('object');
+      expect(prefab.snapshot).not.toBeNull();
+      expect(typeof prefab.snapshot.entityType).toBe('string');
+      expect(prefab.snapshot.entityType.length).toBeGreaterThan(0);
+      expect(typeof prefab.snapshot.name).toBe('string');
+      expect(prefab.snapshot.name.length).toBeGreaterThan(0);
+      expect(typeof prefab.snapshot.transform).toBe('object');
+      expect(typeof prefab.createdAt).toBe('string');
+      expect(typeof prefab.updatedAt).toBe('string');
     });
   });
 
@@ -153,7 +159,7 @@ describe('Built-in Prefabs', () => {
 
   it('getPrefab finds built-in by name', () => {
     const found = getPrefab('Basic Player');
-    expect(found).toBeTruthy();
+    expect(found).not.toBeNull();
     expect(found?.id).toBe('builtin_player');
   });
 
@@ -228,7 +234,7 @@ describe('Import/Export', () => {
   it('exportPrefab returns JSON string', () => {
     const prefab = savePrefab('ExportTest', 'cat', 'desc', mockSnapshot);
     const json = exportPrefab(prefab.id);
-    expect(json).toBeTruthy();
+    expect(typeof json).toBe('string');
     expect(() => JSON.parse(json!)).not.toThrow();
     const parsed = JSON.parse(json!);
     expect(parsed.name).toBe('ExportTest');
@@ -247,7 +253,7 @@ describe('Import/Export', () => {
     // Clear storage and re-import
     storage = {};
     const imported = importPrefab(json!);
-    expect(imported).toBeTruthy();
+    expect(imported).not.toBeNull();
     expect(imported?.name).toBe('Original');
     // Should preserve the original category from the JSON
     expect(imported?.category).toBe('TestCat');

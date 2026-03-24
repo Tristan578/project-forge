@@ -28,8 +28,7 @@ describe('analyzeScene', () => {
   describe('empty scene', () => {
     it('warns about empty scene', () => {
       const advice = analyzeScene(makeInput());
-      expect(findAdvice(advice, 'empty-scene')).toBeDefined();
-      expect(findAdvice(advice, 'empty-scene')!.severity).toBe('info');
+      expect(findAdvice(advice, 'empty-scene')).toMatchObject({ id: 'empty-scene', severity: 'info' });
     });
   });
 
@@ -39,8 +38,7 @@ describe('analyzeScene', () => {
         entityCount: 5,
         ambientLight: { color: [1, 1, 1], brightness: 0.01 },
       }));
-      expect(findAdvice(advice, 'no-lighting')).toBeDefined();
-      expect(findAdvice(advice, 'no-lighting')!.severity).toBe('warning');
+      expect(findAdvice(advice, 'no-lighting')).toMatchObject({ id: 'no-lighting', severity: 'warning' });
     });
 
     it('does not warn when ambient is sufficient', () => {
@@ -74,7 +72,7 @@ describe('analyzeScene', () => {
           e2: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
         },
       }));
-      expect(findAdvice(advice, 'overlapping-entities')).toBeDefined();
+      expect(findAdvice(advice, 'overlapping-entities')).toMatchObject({ id: 'overlapping-entities' });
     });
 
     it('does not flag non-overlapping entities', () => {
@@ -96,7 +94,7 @@ describe('analyzeScene', () => {
         physics: { e1: { bodyType: 'dynamic', colliderShape: 'cuboid' } },
         physicsEnabled: { e1: true },
       }));
-      expect(findAdvice(advice, 'no-physics-ground')).toBeDefined();
+      expect(findAdvice(advice, 'no-physics-ground')).toMatchObject({ id: 'no-physics-ground' });
     });
 
     it('does not warn when fixed body exists', () => {
@@ -124,14 +122,12 @@ describe('analyzeScene', () => {
   describe('entity count', () => {
     it('warns at >200 entities', () => {
       const advice = analyzeScene(makeInput({ entityCount: 250 }));
-      expect(findAdvice(advice, 'high-entity-count')).toBeDefined();
-      expect(findAdvice(advice, 'high-entity-count')!.severity).toBe('warning');
+      expect(findAdvice(advice, 'high-entity-count')).toMatchObject({ id: 'high-entity-count', severity: 'warning' });
     });
 
     it('info at >100 entities', () => {
       const advice = analyzeScene(makeInput({ entityCount: 150 }));
-      expect(findAdvice(advice, 'moderate-entity-count')).toBeDefined();
-      expect(findAdvice(advice, 'moderate-entity-count')!.severity).toBe('info');
+      expect(findAdvice(advice, 'moderate-entity-count')).toMatchObject({ id: 'moderate-entity-count', severity: 'info' });
     });
 
     it('no warning at <=100 entities', () => {
