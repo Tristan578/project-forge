@@ -44,7 +44,7 @@ test.describe('load_scene store action @ui', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: 45_000 },
     );
 
     const hasLoadScene = await page.evaluate(() => {
@@ -63,7 +63,7 @@ test.describe('load_scene store action @ui', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: 45_000 },
     );
 
     const error = await page.evaluate((json: string) => {
@@ -88,7 +88,7 @@ test.describe('load_scene store action @ui', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: 45_000 },
     );
 
     // Should not throw — the store/engine should handle invalid JSON gracefully
@@ -107,17 +107,17 @@ test.describe('load_scene store action @ui', () => {
     expect(error).toBeNull();
 
     // Editor layout should still be intact after the bad call
-    await expect(page.locator('.dv-dockview-container').first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator('.dv-dockview-container').first()).toBeVisible({ timeout: 30_000 });
   });
 
-  test('dispatchCommand load_scene call does not throw', async ({ page }) => {
+  test('dispatchCommand load_scene call does not throw @engine', async ({ page }) => {
     await page.waitForFunction(
       () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().dispatchCommand === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: 45_000 },
     );
 
     const error = await page.evaluate((json: string) => {

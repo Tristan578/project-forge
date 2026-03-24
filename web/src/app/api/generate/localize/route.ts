@@ -130,8 +130,11 @@ export async function POST(request: NextRequest) {
     validatedTargets.push(locale);
   }
 
-  // 5. Resolve API key once (before loop) — token cost is 5 per locale
-  const tokenCost = validatedTargets.length * 5;
+  // 5. Resolve API key — cost scales by work units (chunks * locales * 5 tokens)
+  const CHUNK_SIZE = 200;
+  const chunkCount = Math.ceil(validatedStrings.length / CHUNK_SIZE);
+  const TOKEN_COST_PER_CHUNK = 5;
+  const tokenCost = chunkCount * validatedTargets.length * TOKEN_COST_PER_CHUNK;
   let resolved;
   try {
     resolved = await resolveApiKey(
@@ -151,7 +154,6 @@ export async function POST(request: NextRequest) {
 
   // 6. Translate each locale
   const result: Record<string, LocaleBundle> = {};
-  const CHUNK_SIZE = 200;
   const anthropicProvider = createAnthropic({ apiKey: resolved.key });
 
   try {
