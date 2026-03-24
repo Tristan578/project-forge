@@ -84,6 +84,8 @@ vi.mock('../IdeaGeneratorPanel', () => ({ IdeaGeneratorPanel: () => null }));
 vi.mock('../QuestGeneratorPanel', () => ({ QuestGeneratorPanel: () => null }));
 vi.mock('../PacingAnalyzerPanel', () => ({ PacingAnalyzerPanel: () => null }));
 vi.mock('../GDDPanel', () => ({ GDDPanel: () => null }));
+vi.mock('../VoiceProfilePanel', () => ({ VoiceProfilePanel: () => null }));
+vi.mock('../ShaderEditorPanel', () => ({ ShaderEditorPanel: () => null }));
 
 // ── Workspace lib mocks ────────────────────────────────────────────────────
 
