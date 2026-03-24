@@ -1,26 +1,31 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { ArrowRight, X } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { TUTORIALS, TutorialStep } from '@/data/tutorials';
 
 export function TutorialOverlay() {
-  const {
-    activeTutorial,
-    tutorialStep,
-    advanceTutorial,
-    completeTutorial,
-    skipTutorial,
-  } = useOnboardingStore();
+  const activeTutorial = useOnboardingStore((s) => s.activeTutorial);
+  const tutorialStep = useOnboardingStore((s) => s.tutorialStep);
+  const advanceTutorial = useOnboardingStore((s) => s.advanceTutorial);
+  const completeTutorial = useOnboardingStore((s) => s.completeTutorial);
+  const skipTutorial = useOnboardingStore((s) => s.skipTutorial);
 
   const [highlightRect, setHighlightRect] = useState<DOMRect | null>(null);
   const [stepCardPos, setStepCardPos] = useState<{ top: number; left: number } | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
 
-  const tutorial = TUTORIALS.find(t => t.id === activeTutorial);
-  const currentStep: TutorialStep | undefined = tutorial?.steps[tutorialStep];
+  // Memoize so stable identity prevents spurious effect re-runs
+  const tutorial = useMemo(
+    () => TUTORIALS.find((t) => t.id === activeTutorial) ?? null,
+    [activeTutorial]
+  );
+  const currentStep: TutorialStep | undefined = useMemo(
+    () => (tutorial ? tutorial.steps[tutorialStep] : undefined),
+    [tutorial, tutorialStep]
+  );
 
   const updatePosition = useCallback(() => {
     if (!currentStep?.target) return;
@@ -64,8 +69,12 @@ export function TutorialOverlay() {
     }
   }, [currentStep]);
 
+  // Use currentStep?.target as the dep so that the effect only re-registers
+  // listeners when the highlighted element changes, not on every render.
+  const currentStepTarget = currentStep?.target ?? null;
+
   useEffect(() => {
-    if (!currentStep?.target) return;
+    if (!currentStepTarget) return;
 
     const scheduleUpdate = () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -81,7 +90,7 @@ export function TutorialOverlay() {
       window.removeEventListener('resize', scheduleUpdate);
       window.removeEventListener('scroll', scheduleUpdate);
     };
-  }, [currentStep, updatePosition]);
+  }, [currentStepTarget, updatePosition]);
 
   if (!tutorial || !currentStep) return null;
 

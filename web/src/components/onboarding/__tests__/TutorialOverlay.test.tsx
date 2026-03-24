@@ -47,12 +47,17 @@ function setupStore(activeTutorial: string | null, tutorialStep = 0) {
   const mockCompleteTutorial = vi.fn();
   const mockSkipTutorial = vi.fn();
 
-  vi.mocked(useOnboardingStore).mockReturnValue({
-    activeTutorial,
-    tutorialStep,
-    advanceTutorial: mockAdvanceTutorial,
-    completeTutorial: mockCompleteTutorial,
-    skipTutorial: mockSkipTutorial,
+  // The component uses selector functions: useOnboardingStore((s) => s.field)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  vi.mocked(useOnboardingStore).mockImplementation((selector: any) => {
+    const state = {
+      activeTutorial,
+      tutorialStep,
+      advanceTutorial: mockAdvanceTutorial,
+      completeTutorial: mockCompleteTutorial,
+      skipTutorial: mockSkipTutorial,
+    };
+    return selector(state);
   });
 
   return { mockAdvanceTutorial, mockCompleteTutorial, mockSkipTutorial };
