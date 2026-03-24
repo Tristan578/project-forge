@@ -715,11 +715,17 @@
           },
           "paramNames": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "Optional parameter name hints (up to 16 values)"
           }
         },
-        "required": ["slot", "name", "wgslCode"]
+        "required": [
+          "slot",
+          "name",
+          "wgslCode"
+        ]
       },
       "tokenCost": 1,
       "requiredScope": "shaders:write"
@@ -741,11 +747,16 @@
           },
           "params": {
             "type": "object",
-            "additionalProperties": { "type": "number" },
+            "additionalProperties": {
+              "type": "number"
+            },
             "description": "Optional named float parameters (up to 16 values)"
           }
         },
-        "required": ["entityId", "slot"]
+        "required": [
+          "entityId",
+          "slot"
+        ]
       },
       "tokenCost": 1,
       "requiredScope": "shaders:write"
@@ -762,7 +773,9 @@
             "description": "Slot index 0-7 to clear"
           }
         },
-        "required": ["slot"]
+        "required": [
+          "slot"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "shaders:write"
@@ -10250,7 +10263,9 @@
             "type": "array",
             "items": {
               "type": "array",
-              "items": { "type": "number" },
+              "items": {
+                "type": "number"
+              },
               "minItems": 2,
               "maxItems": 2
             },
@@ -10260,7 +10275,9 @@
             "type": "array",
             "items": {
               "type": "array",
-              "items": { "type": "number" },
+              "items": {
+                "type": "number"
+              },
               "minItems": 2,
               "maxItems": 2
             },
@@ -10268,7 +10285,9 @@
           },
           "triangles": {
             "type": "array",
-            "items": { "type": "number" },
+            "items": {
+              "type": "number"
+            },
             "description": "Triangle index array"
           },
           "weights": {
@@ -10278,16 +10297,23 @@
               "properties": {
                 "bones": {
                   "type": "array",
-                  "items": { "type": "string" },
+                  "items": {
+                    "type": "string"
+                  },
                   "description": "Bone names influencing this vertex"
                 },
                 "weights": {
                   "type": "array",
-                  "items": { "type": "number" },
+                  "items": {
+                    "type": "number"
+                  },
                   "description": "Normalized weight per bone (sum = 1.0)"
                 }
               },
-              "required": ["bones", "weights"]
+              "required": [
+                "bones",
+                "weights"
+              ]
             },
             "description": "Array of { bones: string[], weights: number[] } per vertex"
           }
@@ -10931,7 +10957,7 @@
     },
     {
       "name": "build_world",
-      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size — use sparingly.",
+      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size \u2014 use sparingly.",
       "category": "world_building",
       "parameters": {
         "type": "object",
@@ -10957,7 +10983,9 @@
             "description": "Desired number of regions (1-20). Default is 5. Graph visualization breaks above 20."
           }
         },
-        "required": ["premise"]
+        "required": [
+          "premise"
+        ]
       },
       "tokenCost": 3,
       "requiredScope": "ai:generate"
@@ -11005,7 +11033,9 @@
         "properties": {
           "targetLocales": {
             "type": "array",
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "description": "BCP-47 locale codes to translate to (e.g. [\"ja\", \"fr\", \"de\", \"zh-CN\"]). Maximum 10 per call."
           },
           "sourceLocale": {
@@ -11014,7 +11044,9 @@
             "default": "en"
           }
         },
-        "required": ["targetLocales"]
+        "required": [
+          "targetLocales"
+        ]
       },
       "tokenCost": 5,
       "requiredScope": "ai:generate"
@@ -11027,11 +11059,16 @@
         "type": "object",
         "properties": {
           "locale": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "BCP-47 locale code to preview (e.g. \"ja\"), or null to return to source text."
           }
         },
-        "required": ["locale"]
+        "required": [
+          "locale"
+        ]
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
@@ -11047,6 +11084,89 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:read"
+    },
+    {
+      "name": "generate_cutscene",
+      "description": "AI-generate a cinematic cutscene timeline from a natural-language description. Produces camera movements, entity animations, dialogue cues, and audio tracks. Returns a cutsceneId to use with play_cutscene. Maximum 60 seconds.",
+      "category": "cutscene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Natural-language description of the cutscene, e.g. 'Dramatic pan from sky down to the player, then dialogue between player and the wizard'"
+          },
+          "duration": {
+            "type": "number",
+            "description": "Desired total duration in seconds (1\u201360, default 10)"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      },
+      "tokenCost": 20,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "play_cutscene",
+      "description": "Enter play mode and execute a cutscene timeline. Commands fire at their scheduled timestamps (+/- 16ms). Automatically returns to edit mode when the cutscene ends.",
+      "category": "cutscene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cutsceneId": {
+            "type": "string",
+            "description": "ID of the cutscene to play (returned by generate_cutscene or list_cutscenes)"
+          }
+        },
+        "required": [
+          "cutsceneId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "stop_cutscene",
+      "description": "Stop the currently playing cutscene and return the editor to edit mode. Has no effect if no cutscene is playing.",
+      "category": "cutscene",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_cutscenes",
+      "description": "Return all cutscenes saved in the current project, including their IDs, names, durations, and track counts.",
+      "category": "cutscene",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "delete_cutscene",
+      "description": "Permanently delete a cutscene from the project. If the deleted cutscene is currently active, playback is stopped first.",
+      "category": "cutscene",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "cutsceneId": {
+            "type": "string",
+            "description": "ID of the cutscene to delete"
+          }
+        },
+        "required": [
+          "cutsceneId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
     }
   ],
   "resources": [
