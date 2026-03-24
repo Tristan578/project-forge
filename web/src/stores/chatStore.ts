@@ -110,6 +110,20 @@ function nextId(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Message index — O(1) lookup of a message's position in the messages array.
+// Maintained by useChatStore.subscribe() after store creation.
+// ---------------------------------------------------------------------------
+/** messageId → index in useChatStore.getState().messages */
+let msgIndexMap = new Map<string, number>();
+
+function rebuildMsgIndex(msgs: ChatMessage[]): void {
+  msgIndexMap = new Map<string, number>();
+  for (let i = 0; i < msgs.length; i++) {
+    msgIndexMap.set(msgs[i].id, i);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // updateToolCall microtask batching — prevents a re-render per streaming delta
 // ---------------------------------------------------------------------------
 interface PendingToolUpdate {
@@ -796,18 +810,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
         toolUpdateBatchScheduled = false;
         const updates = pendingToolUpdates;
         pendingToolUpdates = [];
-        const msgs = get().messages.map((msg) => {
-          const relevant = updates.filter((u) => u.messageId === msg.id);
-          if (relevant.length === 0) return msg;
-          return {
-            ...msg,
-            toolCalls: (msg.toolCalls || []).map((tc) => {
-              const u = relevant.find((r) => r.toolCallId === tc.id);
-              return u ? { ...tc, ...u.update } : tc;
-            }),
-          };
-        });
-        set({ messages: msgs });
+
+        // Group pending updates by messageId to avoid rescanning the full array
+        // for each update. Each messageId gets at most one O(1) index lookup
+        // and one targeted array splice — O(messages_touched) not O(N*updates).
+        const updatesByMsg = new Map<string, PendingToolUpdate[]>();
+        for (const u of updates) {
+          const bucket = updatesByMsg.get(u.messageId);
+          if (bucket) {
+            bucket.push(u);
+          } else {
+            updatesByMsg.set(u.messageId, [u]);
+          }
+        }
+
+        const msgs = get().messages.slice(); // shallow copy of the array
+        let changed = false;
+        for (const [msgId, msgUpdates] of updatesByMsg) {
+          const idx = msgIndexMap.get(msgId);
+          if (idx === undefined) continue; // message not found — skip
+          const msg = msgs[idx];
+          // Build a Map of toolCallId → merged update for this message
+          const tcUpdates = new Map<string, Partial<ToolCallStatus>>();
+          for (const u of msgUpdates) {
+            const existing = tcUpdates.get(u.toolCallId);
+            tcUpdates.set(u.toolCallId, existing ? { ...existing, ...u.update } : u.update);
+          }
+          const newToolCalls = (msg.toolCalls || []).map((tc) => {
+            const u = tcUpdates.get(tc.id);
+            return u ? { ...tc, ...u } : tc;
+          });
+          msgs[idx] = { ...msg, toolCalls: newToolCalls };
+          changed = true;
+        }
+        if (changed) set({ messages: msgs });
       });
     }
   },
@@ -845,8 +881,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setApprovalMode: (enabled) => set({ approvalMode: enabled }),
 
   approveToolCalls: async (messageId: string) => {
-    const { messages } = get();
-    const message = messages.find((m) => m.id === messageId);
+    // O(1) message lookup via index map (PF-870)
+    const idx = msgIndexMap.get(messageId);
+    if (idx === undefined) return;
+    const messages = get().messages;
+    const message = messages[idx];
     if (!message?.toolCalls) return;
 
     const previewTools = message.toolCalls.filter((tc) => tc.status === 'preview');
@@ -862,50 +901,57 @@ export const useChatStore = create<ChatState>((set, get) => ({
       results.set(tc.id, await executeToolCall(tc.name, tc.input, editorState));
     }
 
-    // Single set() with all results applied at once
-    const msgs = get().messages.map((msg) => {
-      if (msg.id !== messageId) return msg;
-      return {
-        ...msg,
-        toolCalls: (msg.toolCalls || []).map((t) => {
-          const r = results.get(t.id);
-          return r
-            ? {
-                ...t,
-                status: r.success ? 'success' as const : 'error' as const,
-                result: r.result,
-                error: r.error,
-              }
-            : t;
-        }),
-      };
-    });
+    // Single set() with results applied to the targeted message only (PF-870)
+    const msgs = get().messages.slice();
+    const currentIdx = msgIndexMap.get(messageId);
+    if (currentIdx === undefined) return; // message removed while awaiting
+    const current = msgs[currentIdx];
+    msgs[currentIdx] = {
+      ...current,
+      toolCalls: (current.toolCalls || []).map((t) => {
+        const r = results.get(t.id);
+        return r
+          ? {
+              ...t,
+              status: r.success ? 'success' as const : 'error' as const,
+              result: r.result,
+              error: r.error,
+            }
+          : t;
+      }),
+    };
     set({ messages: msgs });
   },
 
   rejectToolCalls: (messageId: string) => {
-    const msgs = get().messages.map((msg) => {
-      if (msg.id !== messageId) return msg;
-      return {
-        ...msg,
-        toolCalls: (msg.toolCalls || []).map((tc) =>
-          tc.status === 'preview' ? { ...tc, status: 'rejected' as const } : tc
-        ),
-      };
-    });
+    // O(1) message lookup via index map (PF-870)
+    const idx = msgIndexMap.get(messageId);
+    if (idx === undefined) return;
+    const msgs = get().messages.slice();
+    const msg = msgs[idx];
+    msgs[idx] = {
+      ...msg,
+      toolCalls: (msg.toolCalls || []).map((tc) =>
+        tc.status === 'preview' ? { ...tc, status: 'rejected' as const } : tc
+      ),
+    };
     set({ messages: msgs });
   },
 
   setMessageFeedback: (messageId: string, feedback: 'positive' | 'negative' | null) => {
-    const msgs = get().messages.map((msg) =>
-      msg.id === messageId ? { ...msg, feedback } : msg
-    );
+    // O(1) message lookup via index map
+    const idx = msgIndexMap.get(messageId);
+    if (idx === undefined) return;
+    const msgs = get().messages.slice();
+    msgs[idx] = { ...msgs[idx], feedback };
     set({ messages: msgs });
   },
 
   batchUndoMessage: (messageId: string) => {
-    const { messages } = get();
-    const message = messages.find((m) => m.id === messageId);
+    // O(1) message lookup via index map
+    const idx = msgIndexMap.get(messageId);
+    if (idx === undefined) return;
+    const message = get().messages[idx];
     if (!message?.toolCalls) return;
 
     const undoableCompleted = message.toolCalls.filter(
@@ -924,21 +970,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
 
       if (undoneCount > 0) {
-        // Mark all successful+undoable tool calls as undone
+        // Mark all successful+undoable tool calls as undone (O(1) lookup)
         const toolIdsToUndo = new Set(
           undoableCompleted.slice(0, undoneCount).map((tc) => tc.id)
         );
-        const msgs = get().messages.map((msg) => {
-          if (msg.id !== messageId) return msg;
-          return {
-            ...msg,
-            toolCalls: (msg.toolCalls || []).map((tc) =>
-              toolIdsToUndo.has(tc.id)
-                ? { ...tc, status: 'undone' as const }
-                : tc
-            ),
-          };
-        });
+        const currentIdx = msgIndexMap.get(messageId);
+        if (currentIdx === undefined) return; // message removed while awaiting
+        const msgs = get().messages.slice();
+        const msg = msgs[currentIdx];
+        msgs[currentIdx] = {
+          ...msg,
+          toolCalls: (msg.toolCalls || []).map((tc) =>
+            toolIdsToUndo.has(tc.id)
+              ? { ...tc, status: 'undone' as const }
+              : tc
+          ),
+        };
         set({ messages: msgs });
       }
     });
@@ -1096,6 +1143,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 }));
+
+// ---------------------------------------------------------------------------
+// Keep msgIndexMap in sync with every messages array change.
+// Zustand 5.x base subscribe receives (state, prevState). We compare array
+// references so the rebuild only runs when messages actually changed.
+// This is O(N) — no worse than the full messages.map() scans it replaces,
+// but eliminates repeated O(N) scans inside each per-message operation.
+// ---------------------------------------------------------------------------
+useChatStore.subscribe((state, prevState) => {
+  if (state.messages !== prevState.messages) {
+    rebuildMsgIndex(state.messages);
+  }
+});
 
 function saveConversationsToStorage(conversations: Conversation[], activeId?: string | null) {
   try {
