@@ -163,6 +163,8 @@ const TOOL_LABELS: Record<string, string> = {
   set_active_game_camera: 'Set Active Camera',
   camera_shake: 'Camera Shake',
   get_game_camera: 'Get Game Camera',
+  configure_smart_camera: 'Configure Smart Camera',
+  list_camera_presets: 'List Camera Presets',
   load_scene_with_transition: 'Load Scene',
   set_default_transition: 'Set Default Transition',
   design_economy: 'Design Economy',
