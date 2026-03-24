@@ -120,17 +120,17 @@ export async function POST(request: NextRequest) {
   }
 
   // Refund tokens for failed items.
-  // We charged items.length * 5 upfront; give back 5 tokens per item that failed.
+  // We charged items.length * voice_batch_cost_per_item upfront; refund per failed item.
   if (errors.length > 0 && usageId) {
     try {
       if (results.length === 0) {
         // All items failed — full refund via the original usage record
         await refundTokens(authResult.ctx.user.id, usageId);
       } else {
-        // Partial failure — refund 5 tokens per failed item.
+        // Partial failure — refund per-item cost for each failed item.
         // Pass usageId so refundTokenAmount restores to the correct pool
         // (monthly vs addon) instead of always crediting addon tokens.
-        const refundAmount = errors.length * 5;
+        const refundAmount = errors.length * TOKEN_COSTS.voice_batch_cost_per_item;
         await refundTokenAmount(
           authResult.ctx.user.id,
           refundAmount,
