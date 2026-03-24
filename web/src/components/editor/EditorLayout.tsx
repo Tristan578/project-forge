@@ -399,6 +399,14 @@ export function EditorLayout() {
   const [cheatSheetOpen, setCheatSheetOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
+  // Guard against opening the shortcuts panel when another modal is already
+  // visible (e.g. WelcomeModal, TutorialOverlay). Uses aria-modal to detect
+  // true modals (as opposed to drawers or menus).
+  const openShortcutsPanel = useCallback(() => {
+    const hasOpenModal = document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
+    if (!hasOpenModal) setShortcutsOpen(true);
+  }, []);
+
   // Close drawers when switching away from compact mode (prev-value pattern)
   const [prevMode, setPrevMode] = useState(layout.mode);
   if (prevMode !== layout.mode) {
@@ -522,7 +530,7 @@ export function EditorLayout() {
             )}
           </div>
           <PlayControls />
-          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} onOpenFeedback={() => setFeedbackOpen(true)} />
+          <HelpMenu onOpenShortcuts={openShortcutsPanel} onOpenFeedback={() => setFeedbackOpen(true)} />
         </div>
 
         {/* Canvas fills remaining space */}
@@ -594,7 +602,7 @@ export function EditorLayout() {
         <div className="flex items-center gap-3">
           <PanelsMenu />
           <LayoutMenu />
-          <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} onOpenFeedback={() => setFeedbackOpen(true)} />
+          <HelpMenu onOpenShortcuts={openShortcutsPanel} onOpenFeedback={() => setFeedbackOpen(true)} />
           <TokenBalance />
           {hasClerk && <UserButton />}
         </div>

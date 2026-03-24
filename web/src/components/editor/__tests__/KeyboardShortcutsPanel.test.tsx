@@ -120,4 +120,28 @@ describe('KeyboardShortcutsPanel', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
     expect(screen.getByText(/Click any shortcut to rebind it/)).not.toBeNull();
   });
+
+  // PF-692: Escape should not fire onClose when another modal is stacked on top
+  it('does not call onClose on Escape when another modal is already open', () => {
+    render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
+
+    // Simulate a higher-z modal being present in the DOM (e.g. WelcomeModal)
+    const modal = document.createElement('div');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    modal.setAttribute('aria-labelledby', 'other-dialog-title');
+    document.body.appendChild(modal);
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(mockOnClose).not.toHaveBeenCalled();
+
+    document.body.removeChild(modal);
+  });
+
+  // PF-692: Escape should still fire onClose when no other modal is open
+  it('calls onClose on Escape when no other modal is stacked', () => {
+    render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(mockOnClose).toHaveBeenCalled();
+  });
 });
