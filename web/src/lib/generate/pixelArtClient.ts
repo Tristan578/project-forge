@@ -52,7 +52,9 @@ export class PixelArtClient {
     return this.generateReplicate(enhancedPrompt, params.size);
   }
 
-  private async generateDalle(prompt: string, size: 512 | 1024): Promise<OpenAIResult> {
+  private async generateDalle(prompt: string, _size: 512 | 1024): Promise<OpenAIResult> {
+    // DALL-E 3 only supports 1024x1024, 1024x1792, and 1792x1024.
+    // Always request 1024x1024 and let the caller downscale if needed.
     const response = await fetch('https://api.openai.com/v1/images/generations', {
       method: 'POST',
       headers: {
@@ -63,7 +65,7 @@ export class PixelArtClient {
         model: 'dall-e-3',
         prompt,
         n: 1,
-        size: `${size}x${size}`,
+        size: '1024x1024',
         response_format: 'b64_json',
       }),
       signal: AbortSignal.timeout(60_000),

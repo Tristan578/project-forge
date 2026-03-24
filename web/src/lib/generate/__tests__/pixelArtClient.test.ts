@@ -120,6 +120,19 @@ describe('pixelArtClient', () => {
       expect(body.prompt).toContain('pixel art');
     });
 
+    it('should always request 1024x1024 from DALL-E 3 regardless of targetSize', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ data: [{ b64_json: 'x' }] }),
+      } as Response);
+
+      const client = new PixelArtClient('test-key', 'openai');
+      await client.generate({ prompt: 'a cat', style: 'character', size: 512 });
+
+      const body = JSON.parse(vi.mocked(fetch).mock.calls[0][1]?.body as string);
+      expect(body.size).toBe('1024x1024');
+    });
+
     it('should throw on Replicate API error', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: false,

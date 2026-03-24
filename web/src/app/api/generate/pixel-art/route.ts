@@ -8,6 +8,9 @@ import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
+import { PixelArtClient } from '@/lib/generate/pixelArtClient';
+import type { PixelArtStyle, PixelArtProvider } from '@/lib/generate/pixelArtClient';
+import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 const VALID_SIZES = [16, 32, 64, 128];
@@ -16,6 +19,12 @@ const VALID_STYLES = ['character', 'prop', 'tile', 'icon', 'environment'];
 const VALID_PROVIDERS = ['auto', 'openai', 'replicate'];
 const PALETTE_IDS = Object.keys(PALETTES) as PaletteId[];
 const TOKEN_COSTS: Record<string, number> = { replicate: 10, openai: 20 };
+
+// Map target pixel-art size to the nearest supported provider canvas size.
+// Providers generate at high resolution; the post-processor downsamples to targetSize.
+function resolveProviderSize(targetSize: number): 512 | 1024 {
+  return targetSize <= 64 ? 512 : 1024;
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -80,10 +89,12 @@ export async function POST(request: NextRequest) {
     const safePrompt = safety.filtered ?? (prompt as string);
 
     // 3. Resolve provider
-    const resolvedProvider = (!provider || provider === 'auto' || provider === 'replicate') ? 'replicate' : 'openai';
+    const resolvedProvider: PixelArtProvider =
+      (!provider || provider === 'auto' || provider === 'replicate') ? 'replicate' : 'openai';
     const tokenCost = TOKEN_COSTS[resolvedProvider] ?? 10;
 
     // 4. Resolve API key and charge tokens
+    let apiKey: string;
     let usageId: string | undefined;
     try {
       const resolved = await resolveApiKey(
@@ -93,6 +104,7 @@ export async function POST(request: NextRequest) {
         'pixel_art_generation',
         { prompt: safePrompt, targetSize, palette, style }
       );
+      apiKey = resolved.key;
       usageId = resolved.usageId;
     } catch (err) {
       if (err instanceof ApiKeyError) {
@@ -106,22 +118,48 @@ export async function POST(request: NextRequest) {
       ? { name: 'Custom', colors: customPalette as string[] }
       : getPalette(palette as PaletteId);
 
-    // Phase 1: Returns a pending job stub. Phase 2 will integrate PixelArtClient
-    // to start the actual provider generation and add a /pixel-art/status endpoint.
-    const jobId = `pxart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // 6. Call the provider
+    const providerSize = resolveProviderSize(targetSize as number);
+    const client = new PixelArtClient(apiKey, resolvedProvider);
 
-    return NextResponse.json({
-      status: 'pending',
-      jobId,
-      usageId,
-      provider: resolvedProvider,
-      tokenCost,
-      palette: paletteData?.name ?? palette,
-      targetSize,
-      dithering: dithering ?? 'none',
-      ditheringIntensity: ditheringIntensity ?? 0,
-      style: style ?? 'character',
-    }, { status: 201 });
+    try {
+      const result = await client.generate({
+        prompt: safePrompt,
+        style: (style as PixelArtStyle) ?? 'character',
+        size: providerSize,
+      });
+
+      // Replicate returns a predictionId for async polling.
+      // OpenAI returns base64 directly (synchronous).
+      const jobId = result.predictionId ?? `pxart-openai-${Date.now()}`;
+      const status = result.predictionId ? 'pending' : 'completed';
+
+      return NextResponse.json({
+        status,
+        jobId,
+        usageId,
+        provider: resolvedProvider,
+        tokenCost,
+        palette: paletteData?.name ?? palette,
+        targetSize,
+        dithering: dithering ?? 'none',
+        ditheringIntensity: ditheringIntensity ?? 0,
+        style: style ?? 'character',
+        ...(result.base64 ? { base64: result.base64 } : {}),
+      }, { status: 201 });
+    } catch (err) {
+      // Provider call failed — refund tokens so user is not billed for nothing
+      if (usageId) {
+        try {
+          await refundTokens(authResult.ctx.user.id, usageId);
+        } catch (refundErr) {
+          captureException(refundErr, { route: '/api/generate/pixel-art', action: 'refund', usageId });
+        }
+      }
+      captureException(err, { route: '/api/generate/pixel-art', prompt: safePrompt });
+      const message = err instanceof Error ? err.message : 'Provider error';
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
   } catch (err) {
     captureException(err, { route: '/api/generate/pixel-art' });
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
