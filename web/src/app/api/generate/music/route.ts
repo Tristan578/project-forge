@@ -1,4 +1,5 @@
-export const maxDuration = 180; // seconds — Suno music generation is very slow
+import { API_MAX_DURATION_HEAVY_GEN_S } from '@/lib/config/timeouts';
+export const maxDuration = API_MAX_DURATION_HEAVY_GEN_S;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';

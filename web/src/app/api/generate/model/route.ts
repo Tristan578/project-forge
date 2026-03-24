@@ -1,4 +1,5 @@
-export const maxDuration = 180; // seconds — 3D model generation (Meshy) is very slow
+import { API_MAX_DURATION_HEAVY_GEN_S } from '@/lib/config/timeouts';
+export const maxDuration = API_MAX_DURATION_HEAVY_GEN_S;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';

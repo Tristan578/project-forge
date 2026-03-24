@@ -1,4 +1,5 @@
-export const maxDuration = 120; // seconds — batch translation can be slow for large string sets
+import { API_MAX_DURATION_BATCH_S } from '@/lib/config/timeouts';
+export const maxDuration = API_MAX_DURATION_BATCH_S;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
@@ -17,6 +18,7 @@ import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { refundTokens } from '@/lib/tokens/service';
 
 // ---------------------------------------------------------------------------
 // POST /api/generate/localize
@@ -181,7 +183,12 @@ export async function POST(request: NextRequest) {
       };
     }
   } catch (err) {
-    captureException(err);
+    captureException(err, { route: '/api/generate/localize' });
+    if (resolved?.usageId) {
+      await refundTokens(authResult.ctx.user.id, resolved.usageId).catch((refundErr: unknown) => {
+        captureException(refundErr, { route: '/api/generate/localize', action: 'refund' });
+      });
+    }
     const message = err instanceof Error ? err.message : 'Translation failed';
     return NextResponse.json({ error: message }, { status: 500 });
   }

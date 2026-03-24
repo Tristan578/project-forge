@@ -145,7 +145,11 @@ export async function deductTokens(
     return deductTokens(userId, operation, tokenCost, provider, metadata, _retryCount + 1);
   }
 
-  // Log usage
+  // Log usage — for mixed-source charges, store the split so refunds can reverse proportionally
+  const usageMetadata = source === 'mixed'
+    ? { ...(metadata ?? {}), monthlyDeduct, addonDeduct }
+    : (metadata ?? null);
+
   const [usageRecord] = await db
     .insert(tokenUsage)
     .values({
@@ -154,7 +158,7 @@ export async function deductTokens(
       tokens: tokenCost,
       source,
       provider: provider ?? null,
-      metadata: metadata ?? null,
+      metadata: usageMetadata,
     })
     .returning({ id: tokenUsage.id });
 
@@ -199,12 +203,17 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
       })
       .where(eq(users.id, userId));
   } else if (record.source === 'mixed') {
-    // For mixed, we refund everything to addon for simplicity
-    // (monthly may have reset since the charge)
+    // For mixed, reverse the original split stored in metadata.
+    // If metadata is missing (legacy records), fall back to addon-only refund.
+    const meta = record.metadata as Record<string, unknown> | null;
+    const savedMonthly = typeof meta?.monthlyDeduct === 'number' ? meta.monthlyDeduct : 0;
+    const savedAddon = typeof meta?.addonDeduct === 'number' ? meta.addonDeduct : record.tokens;
+
     await db
       .update(users)
       .set({
-        addonTokens: sql`${users.addonTokens} + ${record.tokens}`,
+        monthlyTokensUsed: sql`GREATEST(0, ${users.monthlyTokensUsed} - ${savedMonthly})`,
+        addonTokens: sql`${users.addonTokens} + ${savedAddon}`,
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));

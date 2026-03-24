@@ -1,4 +1,5 @@
-export const maxDuration = 120; // seconds — AI streaming + tool calls need more than the 10s default
+import { API_MAX_DURATION_CHAT_S } from '@/lib/config/timeouts';
+export const maxDuration = API_MAX_DURATION_CHAT_S;
 
 import { NextRequest } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
@@ -375,8 +376,8 @@ export async function POST(request: NextRequest) {
         auth.ctx.user.id,
         'anthropic',
         estimatedCost,
-        messages.length > 3 ? 'chat_long' : 'chat_short',
-        { model }
+        'chat_message',
+        { model, length: messages.length > 3 ? 'long' : 'short' }
       );
       usageId = resolved.usageId;
     } catch (err) {
