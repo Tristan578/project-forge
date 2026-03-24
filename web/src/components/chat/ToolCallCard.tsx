@@ -165,6 +165,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_game_camera: 'Get Game Camera',
   load_scene_with_transition: 'Load Scene',
   set_default_transition: 'Set Default Transition',
+  design_economy: 'Design Economy',
   generate_3d_model: 'Generate 3D Model',
   generate_3d_from_image: 'Generate 3D from Image',
   generate_texture: 'Generate Texture',
