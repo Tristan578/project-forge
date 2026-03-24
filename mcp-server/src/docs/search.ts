@@ -83,8 +83,15 @@ function tokenizeRaw(text: string): string[] {
     .replace(/[#*_|>\-=~]/g, ' ')
     .replace(/[^\w\s]/g, ' ')
     .split(/\s+/)
-    .filter(t => t.length > 1)
-    .map(stem);
+    .filter(t => t.length > 1);
+}
+
+/**
+ * Tokenize text into lowercase terms, removing markdown syntax and punctuation,
+ * then apply suffix stemming so inflected forms match their root.
+ */
+function tokenize(text: string): string[] {
+  return tokenizeRaw(text).map(stem);
 }
 
 /**
