@@ -178,6 +178,12 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
       return { success: false, error: `Cutscene "${p.data.cutsceneId}" not found` };
     }
 
+    // Stop the active player if the deleted cutscene is currently playing
+    if (activePlayer && state.activeCutsceneId === p.data.cutsceneId) {
+      activePlayer.stop();
+      activePlayer = null;
+    }
+
     state.deleteCutscene(p.data.cutsceneId);
 
     return {
