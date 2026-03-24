@@ -125,12 +125,15 @@ export async function POST(request: NextRequest) {
         // All items failed — full refund via the original usage record
         await refundTokens(authResult.ctx.user.id, usageId);
       } else {
-        // Partial failure — refund 5 tokens per failed item
+        // Partial failure — refund 5 tokens per failed item.
+        // Pass usageId so refundTokenAmount restores to the correct pool
+        // (monthly vs addon) instead of always crediting addon tokens.
         const refundAmount = errors.length * 5;
         await refundTokenAmount(
           authResult.ctx.user.id,
           refundAmount,
           `voice_batch_partial_failure:${errors.length}_of_${items.length}_failed`,
+          usageId,
         );
       }
     } catch (refundErr) {
