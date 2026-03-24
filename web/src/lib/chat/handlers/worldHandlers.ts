@@ -93,14 +93,24 @@ async function generateWithHealing(
         return { world: healed, report, fallback: false };
       }
     } catch (err) {
-      // Network or auth errors propagate immediately — don't retry
+      // Fail-fast on errors that retrying would amplify or that indicate
+      // permanent failure. Only retry on parse/validation errors.
       const message = err instanceof Error ? err.message : String(err);
-      const isRetryable = !message.toLowerCase().includes('credit') &&
-        !message.toLowerCase().includes('auth') &&
-        !message.toLowerCase().includes('401') &&
-        !message.toLowerCase().includes('403') &&
-        !message.toLowerCase().includes('402');
-      if (!isRetryable) throw err;
+      const lower = message.toLowerCase();
+      const isNonRetryable =
+        lower.includes('credit') ||
+        lower.includes('auth') ||
+        lower.includes('401') ||
+        lower.includes('403') ||
+        lower.includes('402') ||
+        lower.includes('429') ||
+        lower.includes('rate limit') ||
+        lower.includes('too many') ||
+        lower.includes('backpressure') ||
+        lower.includes('queue') ||
+        lower.includes('abort') ||
+        lower.includes('timeout');
+      if (isNonRetryable) throw err;
     }
   }
 
