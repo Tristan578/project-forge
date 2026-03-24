@@ -96,6 +96,126 @@ describe('handleTransformEvent', () => {
       expect(actions.setFullGraph).toHaveBeenCalledWith(sceneGraph);
       expect(useEditorStore.setState).toHaveBeenCalledWith({ sceneModified: true });
     });
+
+    it('calls recomputeLightState with the full graph payload', () => {
+      const sceneGraph = {
+        nodes: {
+          'd1': { entityId: 'd1', name: 'Sun', parentId: null, children: [], components: ['DirectionalLight'], visible: true },
+          'cube': { entityId: 'cube', name: 'Cube', parentId: null, children: [], components: ['Mesh'], visible: true },
+        },
+        rootIds: ['d1', 'cube'],
+      };
+
+      handleTransformEvent('SCENE_GRAPH_UPDATE', sceneGraph, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.recomputeLightState).toHaveBeenCalledWith(sceneGraph);
+    });
+  });
+
+  describe('SCENE_NODE_ADDED', () => {
+    it('calls addNode with the node payload', () => {
+      const node = {
+        entityId: 'p1',
+        name: 'PointLight',
+        parentId: null,
+        children: [],
+        components: ['PointLight'],
+        visible: true,
+      };
+
+      const result = handleTransformEvent('SCENE_NODE_ADDED', node, mockSetGet.set, mockSetGet.get);
+
+      expect(result).toBe(true);
+      expect(actions.addNode).toHaveBeenCalledWith(node);
+    });
+
+    it('calls onLightNodeAdded with the node when adding a light entity', () => {
+      const node = {
+        entityId: 'p1',
+        name: 'PointLight',
+        parentId: null,
+        children: [],
+        components: ['PointLight'],
+        visible: true,
+      };
+
+      handleTransformEvent('SCENE_NODE_ADDED', node, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.onLightNodeAdded).toHaveBeenCalledWith(node);
+    });
+
+    it('calls onLightNodeAdded even for non-light nodes (slice decides whether to update)', () => {
+      const node = {
+        entityId: 'cube1',
+        name: 'Cube',
+        parentId: null,
+        children: [],
+        components: ['Mesh'],
+        visible: true,
+      };
+
+      handleTransformEvent('SCENE_NODE_ADDED', node, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.onLightNodeAdded).toHaveBeenCalledWith(node);
+    });
+  });
+
+  describe('SCENE_NODE_REMOVED', () => {
+    it('calls removeNode with entityId', () => {
+      // Prime the graph so removedNode lookup succeeds
+      const existingNode = {
+        entityId: 'p1',
+        name: 'PointLight',
+        parentId: null,
+        children: [],
+        components: ['PointLight'],
+        visible: true,
+      };
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: { p1: existingNode }, rootIds: ['p1'] },
+      } as unknown as StoreState);
+
+      const result = handleTransformEvent(
+        'SCENE_NODE_REMOVED',
+        { entityId: 'p1' },
+        mockSetGet.set,
+        mockSetGet.get,
+      );
+
+      expect(result).toBe(true);
+      expect(actions.removeNode).toHaveBeenCalledWith('p1');
+    });
+
+    it('calls onLightNodeRemoved with the removed node components', () => {
+      const existingNode = {
+        entityId: 's1',
+        name: 'SpotLight',
+        parentId: null,
+        children: [],
+        components: ['SpotLight'],
+        visible: true,
+      };
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: { s1: existingNode }, rootIds: ['s1'] },
+      } as unknown as StoreState);
+
+      handleTransformEvent('SCENE_NODE_REMOVED', { entityId: 's1' }, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.onLightNodeRemoved).toHaveBeenCalledWith(['SpotLight']);
+    });
+
+    it('does not call onLightNodeRemoved when the entity is not in the scene graph', () => {
+      vi.mocked(useEditorStore.getState).mockReturnValue({
+        ...actions,
+        sceneGraph: { nodes: {}, rootIds: [] },
+      } as unknown as StoreState);
+
+      handleTransformEvent('SCENE_NODE_REMOVED', { entityId: 'ghost' }, mockSetGet.set, mockSetGet.get);
+
+      expect(actions.onLightNodeRemoved).not.toHaveBeenCalled();
+    });
   });
 
   describe('TRANSFORM_CHANGED', () => {
