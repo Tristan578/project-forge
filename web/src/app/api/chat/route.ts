@@ -494,7 +494,7 @@ export async function POST(request: NextRequest) {
           logCost(
             auth.ctx.user.id,
             'chat_message',
-            'anthropic',
+            isDirectBackend ? 'anthropic' : 'gateway',
             null,
             totalTokens,
             {
