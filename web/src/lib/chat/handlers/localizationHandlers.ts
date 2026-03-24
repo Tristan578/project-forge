@@ -103,6 +103,18 @@ export const localizationHandlers: Record<string, ToolHandler> = {
 
     const { targetLocales, sourceLocale } = parsed.data;
 
+    // Validate sourceLocale against the same LOCALE_MAP used for targetLocales.
+    // This prevents mismatched source labels being stored in translation bundles.
+    if (!LOCALE_MAP.has(sourceLocale)) {
+      const supportedList = SUPPORTED_LOCALES.slice(0, 20)
+        .map((l) => l.code)
+        .join(', ');
+      return {
+        success: false,
+        error: `Unsupported source locale: "${sourceLocale}". Supported codes include: ${supportedList}, ...`,
+      };
+    }
+
     // Validate locale codes
     const invalidLocales = targetLocales.filter((l) => !LOCALE_MAP.has(l));
     if (invalidLocales.length > 0) {
