@@ -80,8 +80,10 @@ export class AIRequestQueue {
       return Promise.reject(new Error('Request aborted'));
     }
 
-    // Backpressure: reject if the pending queue is full
-    if (this.queue.length >= this.maxQueueDepth) {
+    // Backpressure: reject if the pending queue is full.
+    // Only applies when the request would need to wait in the queue
+    // (i.e. all concurrency slots are occupied).
+    if (this.running >= this.maxConcurrent && this.queue.length >= this.maxQueueDepth) {
       return Promise.reject(
         new Error('Too many AI requests in progress — please wait a moment and try again.'),
       );

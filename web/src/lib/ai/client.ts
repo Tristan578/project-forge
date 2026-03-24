@@ -47,7 +47,11 @@ function mapError(err: unknown): Error {
     const msg = err.message;
 
     // Re-map known server-side error strings
-    if (msg.includes('429') || msg.toLowerCase().includes('rate limit')) {
+    if (
+      msg.includes('429') ||
+      msg.toLowerCase().includes('rate limit') ||
+      msg.toLowerCase().includes('too many requests')
+    ) {
       return new Error('Rate limit reached — please wait a moment and try again.');
     }
     if (msg.includes('401') || msg.toLowerCase().includes('unauthorized')) {
