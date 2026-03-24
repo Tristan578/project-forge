@@ -91,7 +91,10 @@
   },
   "overrides": {
     "esbuild": ">=0.25.0",
-    "dompurify": ">=3.3.2"
+    "dompurify": ">=3.3.2",
+    "next-intl": {
+      "typescript": "$typescript"
+    }
   },
   "portless": {
     "name": "spawnforge",
