@@ -7,6 +7,22 @@ description: "Taskboard management skill. Use this to view, create, update, and 
 
 You manage project work via the **taskboard MCP server** (22 tools). The taskboard is the single source of truth for all project work.
 
+## Taskboard Ownership Model
+
+**Only the orchestrator (main Claude session) manages ticket lifecycle.**
+
+| Actor | Can Create | Can Add Subtasks | Can Update Description | Can Move Status | Can Edit Metadata |
+|-------|:---:|:---:|:---:|:---:|:---:|
+| Orchestrator | yes | yes | yes | yes | yes |
+| Builder agents | yes (new bugs) | yes (own ticket) | no | **NO** | **NO** |
+| Review agents | yes (findings) | yes | yes (add findings) | **NO** | **NO** |
+
+If the taskboard is not running when needed:
+```bash
+taskboard start --port 3010 &
+sleep 2  # Wait for startup
+```
+
 **Web UI:** http://localhost:3010
 **Project:** Project Forge (prefix: PF, ID: `01KK974VMNC16ZAW7MW1NH3T3M`)
 
@@ -152,6 +168,57 @@ Use MCP tool: batch_create_subtasks
   ticket_id: "<ticket_id>"
   subtasks: ["Step 1: ...", "Step 2: ...", "Step 3: ..."]
 ```
+
+## REST API Fallback (for subagents without MCP access)
+
+When MCP tools are unavailable (e.g., in worktree subagents), use the REST API directly.
+**Base URL:** `http://localhost:3010/api`
+
+### CRITICAL: Field name is `status`, NOT `column`
+
+```bash
+# Move ticket — field is "status", NOT "column"
+curl -s -X POST "http://localhost:3010/api/tickets/<TICKET_ID>/move" \
+  -H 'Content-Type: application/json' \
+  -d '{"status":"in_progress"}'   # ✅ CORRECT
+  # -d '{"column":"in_progress"}' # ❌ WRONG — silently fails
+
+# Create ticket
+curl -s -X POST "http://localhost:3010/api/tickets" \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "title": "...",
+    "description": "...",
+    "priority": "high",
+    "projectId": "01KK974VMNC16ZAW7MW1NH3T3M",
+    "teamId": "01KK9751NZ4HM7VQM0AQ5WGME3"
+  }'
+
+# Get ticket
+curl -s "http://localhost:3010/api/tickets/<TICKET_ID>"
+
+# Get board
+curl -s "http://localhost:3010/api/board"
+
+# Create subtask
+curl -s -X POST "http://localhost:3010/api/tickets/<TICKET_ID>/subtasks" \
+  -H 'Content-Type: application/json' \
+  -d '{"title": "Step 1: ..."}'
+
+# Toggle subtask
+curl -s -X POST "http://localhost:3010/api/subtasks/<SUBTASK_ID>/toggle"
+```
+
+### API Field Reference
+
+| Endpoint | Method | Body Fields | Notes |
+|----------|--------|-------------|-------|
+| `/api/tickets` | POST | `title`, `description`, `priority`, `projectId`, `teamId`, `labels` | `projectId` not `project` |
+| `/api/tickets/:id/move` | POST | `status` ("todo", "in_progress", "done") | **NOT `column`** |
+| `/api/tickets/:id` | PUT | `title`, `description`, `priority`, `labels`, `dueDate` | Partial update |
+| `/api/tickets/:id/subtasks` | POST | `title` | Single subtask |
+| `/api/subtasks/:id/toggle` | POST | (none) | Toggles complete/incomplete |
+| `/api/board` | GET | (none) | Returns `{ columns: [{ name, tickets }] }` |
 
 ## Priority Definitions
 
