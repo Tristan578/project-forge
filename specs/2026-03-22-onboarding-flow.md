@@ -433,6 +433,21 @@ Rejected for now. The onboardingStore already uses Zustand persist (localStorage
 | `onboardingStore` persist hydration failure (corrupted localStorage) | `onboardingStore` falls back to initial state (fresh user). Wizard appears even for returning users. | User dismisses wizard; `onboardingCompleted: true` is re-written to localStorage on completion. Subsequent loads are correct. |
 | Analytics event dispatch failure (PostHog unavailable) | Silently swallowed — analytics is non-blocking. User experience is unaffected. | No recovery needed; funnel metrics will have a gap. Alert via PostHog health dashboard if persistent. |
 
+## Edge Cases
+
+| Scenario | Expected Behavior |
+|----------|------------------|
+| User opens editor on a device where localStorage is disabled (private browsing, Safari ITP) | `useSyncExternalStore` snapshot returns `false` (server-safe default). `onboardingStore` persist skips write silently. OnboardingWizard shows on every load. User sees wizard each session — acceptable trade-off for private mode. |
+| User selects "Build with AI" but has no remaining tokens at the moment the wizard resolves (race between wizard mount and balance fetch) | `OnboardingTipManager` defers the "try describing your game" tip until `userStore.tokenBalance` is confirmed to be non-zero. If zero, tips switch to the Blank path flow instead. |
+| User rapidly clicks between intent cards before the wizard animation completes | Step state machine guards against double-selection via a `transitioning` flag. Additional clicks during transition are no-ops. |
+| User opens the editor in two browser tabs simultaneously | Both tabs independently show the OnboardingWizard. Completing onboarding in one tab writes localStorage. The other tab detects the key on next render via `useSyncExternalStore` and hides the wizard. State drift is tolerated — no cross-tab sync needed. |
+| `featureVisibilityTier` is `expert` from a previous `zustand-persist` migration but the user has zero tasks completed | The tier is trusted as stored. No downgrade logic. Users who somehow arrive at `expert` tier with no tasks keep full panel access — this can only happen through direct localStorage manipulation or a data migration bug. |
+| User completes 3 basic tasks faster than `autoPromoteVisibilityTier` can fire (e.g. AI fills in all tasks at once) | `completeTask` calls `autoPromoteVisibilityTier` synchronously after every task. The tier promotes immediately. No debounce needed — task completion is rare and already debounced by user interaction. |
+| User dismisses OnboardingWizard via Escape key before selecting a path | `onboardingPath` remains `null`. `completeOnboarding()` is called with path `null`. The `featureVisibilityTier` stays at `novice`. `OnboardingTipManager` does not emit path-specific tips (path is null). The checklist still shows. |
+| User with legacy `forge-quickstart-completed` key upgrades to a tier that previously didn't see the wizard | Legacy key is checked first; wizard is suppressed. User keeps the legacy experience. If they clear localStorage, they see the new wizard as a brand-new user. |
+| Template load partially succeeds (some assets 404 but scene JSON loads) | Template scene loads with missing asset warnings in the console. `OnboardingTipManager` proceeds normally — template path is considered "loaded" when the scene graph has any entities, regardless of missing assets. |
+| Onboarding analytics event fires but PostHog batching delays the send by several minutes | Analytics events are buffered by the PostHog SDK. User experience is unaffected. Funnel metrics may have timestamp skew of up to 30 seconds. This is within acceptable measurement precision for onboarding metrics. |
+
 ## Implementation Order
 
 1. **Phase 1: OnboardingWizard** -- Create the unified wizard, wire up in EditorLayout, backward compatibility. Delete old components.
