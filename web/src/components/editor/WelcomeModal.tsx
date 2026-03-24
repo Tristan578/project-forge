@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
-import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen, GraduationCap, Clock } from 'lucide-react';
+import { MousePointerClick, RotateCw, Keyboard, Sparkles, BookOpen, GraduationCap, Clock, Lightbulb } from 'lucide-react';
 import { TemplateGallery } from './TemplateGallery';
+import { IdeaGeneratorModal } from './IdeaGeneratorModal';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { getRecentProjects } from '@/lib/workspace/recentProjects';
+import type { GameIdea } from '@/lib/ai/ideaGenerator';
 
 const STORAGE_KEY = 'forge-welcomed';
 
@@ -24,6 +26,7 @@ export function WelcomeModal() {
   const visible = shouldShow && !dismissed;
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showIdeaGenerator, setShowIdeaGenerator] = useState(false);
   const navigateDocs = useWorkspaceStore((s) => s.navigateDocs);
   const startTutorial = useOnboardingStore((s) => s.startTutorial);
 
@@ -51,6 +54,18 @@ export function WelcomeModal() {
     setShowTemplates(false);
     handleDismiss();
   }, [handleDismiss]);
+
+  const handleIdeaClose = useCallback(() => {
+    setShowIdeaGenerator(false);
+  }, []);
+
+  const handleIdeaStart = useCallback(
+    (_idea: GameIdea) => {
+      setShowIdeaGenerator(false);
+      handleDismiss();
+    },
+    [handleDismiss]
+  );
 
   const handleOpenDocs = useCallback(() => {
     navigateDocs('getting-started/editor-overview');
@@ -188,7 +203,7 @@ export function WelcomeModal() {
           </div>
 
           {/* Template selection section */}
-          <div className="mb-5 rounded border border-zinc-700 bg-zinc-800/50 p-4">
+          <div className="mb-3 rounded border border-zinc-700 bg-zinc-800/50 p-4">
             <div className="mb-2 flex items-center gap-2">
               <Sparkles size={16} className="text-purple-400" />
               <h3 className="text-sm font-semibold text-zinc-200">Start from a Template</h3>
@@ -201,6 +216,23 @@ export function WelcomeModal() {
               className="w-full rounded bg-zinc-700 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-600 transition-colors"
             >
               Browse Templates
+            </button>
+          </div>
+
+          {/* Idea generator section */}
+          <div className="mb-5 rounded border border-yellow-700/40 bg-yellow-900/10 p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <Lightbulb size={16} className="text-yellow-400" />
+              <h3 className="text-sm font-semibold text-zinc-200">Need Inspiration?</h3>
+            </div>
+            <p className="mb-3 text-xs text-zinc-400">
+              Generate unique game ideas by remixing genres and mechanics. One click to scaffold your project.
+            </p>
+            <button
+              onClick={() => setShowIdeaGenerator(true)}
+              className="w-full rounded bg-yellow-700/40 px-4 py-2 text-sm font-medium text-yellow-200 hover:bg-yellow-700/60 transition-colors"
+            >
+              Generate Ideas
             </button>
           </div>
 
@@ -235,6 +267,13 @@ export function WelcomeModal() {
 
       {/* Template Gallery Modal */}
       <TemplateGallery isOpen={showTemplates} onClose={handleTemplateClose} />
+
+      {/* Idea Generator Modal */}
+      <IdeaGeneratorModal
+        isOpen={showIdeaGenerator}
+        onClose={handleIdeaClose}
+        onStart={handleIdeaStart}
+      />
     </>
   );
 }

@@ -6092,6 +6092,138 @@
       "requiredScope": "generation:write"
     },
     {
+      "name": "generate_game_ideas",
+      "description": "Generate 1-5 structured game concepts by remixing genres and mechanics. Returns each idea with title, description, primary/secondary genre, mechanics list, a novelty score (0-100), audience hooks, and a recommended starter template. Use this when the user wants inspiration or is starting a new project.",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "number",
+            "description": "Number of ideas to generate (1-5, default 3)"
+          },
+          "genreIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Restrict generation to specific genre IDs (e.g. platformer, roguelike, puzzle, survival, rpg, racing, rhythm, sandbox, horror, shooter, simulation, idle, metroidvania, card-game)"
+          },
+          "mechanicIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Require specific mechanic IDs in the output (e.g. time-rewind, crafting, deck-building, stealth, physics-sim)"
+          },
+          "maxComplexity": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "Maximum mechanic complexity to include (default: high — includes all)"
+          },
+          "trendingOnly": {
+            "type": "boolean",
+            "description": "Only use trending genres (default false)"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "get_idea_details",
+      "description": "Expand a brief game idea into a full Game Design Document (GDD) outline. Returns a structured GDD prompt covering gameplay loop, mechanics, art direction, sound, progression, and monetization. Call after generate_game_ideas when the user wants to explore a specific idea further.",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "primaryGenre": {
+            "type": "string",
+            "description": "Primary genre ID or name (e.g. platformer, roguelike)"
+          },
+          "secondaryGenre": {
+            "type": "string",
+            "description": "Secondary genre ID or name to blend with"
+          },
+          "mechanics": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Mechanic IDs or names to include in the design"
+          },
+          "title": {
+            "type": "string",
+            "description": "Optional title override for the game concept"
+          }
+        },
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "start_from_idea",
+      "description": "Scaffold a new game project from a structured idea. Selects the matching starter template, determines 2D/3D project type from genre tags, creates the initial scene using create_scene, and returns the project configuration. Use this when the user clicks 'Start' on a generated idea.",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "description": "Game title (used as project and scene name)"
+          },
+          "primaryGenre": {
+            "type": "string",
+            "description": "Primary genre ID or name"
+          },
+          "secondaryGenre": {
+            "type": "string",
+            "description": "Secondary genre ID or name"
+          },
+          "mechanics": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "List of mechanic names to include in the project"
+          },
+          "templateMatch": {
+            "type": "string",
+            "enum": ["platformer", "runner", "shooter", "puzzle", "explorer"],
+            "description": "Override starter template (auto-selected from genre if omitted)"
+          }
+        },
+        "required": ["title", "primaryGenre", "secondaryGenre"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "remix_idea",
+      "description": "Mutate one dimension of an existing game idea to produce a fresh variation. 'genre' swaps the secondary genre, 'mechanic' replaces one mechanic with a random alternative, 'both' changes both. Returns a new GameIdea with score and hooks.",
+      "category": "generation",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "primaryGenre": {
+            "type": "string",
+            "description": "Primary genre ID of the idea to remix"
+          },
+          "secondaryGenre": {
+            "type": "string",
+            "description": "Secondary genre ID of the idea to remix"
+          },
+          "mechanics": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Mechanic IDs of the idea to remix"
+          },
+          "dimension": {
+            "type": "string",
+            "enum": ["genre", "mechanic", "both"],
+            "description": "Which dimension to change (default: mechanic)"
+          }
+        },
+        "required": ["primaryGenre", "secondaryGenre"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "create_ui_screen",
       "description": "Create a new UI screen for in-game interfaces",
       "category": "ui",
