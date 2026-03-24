@@ -53,6 +53,10 @@ describe('environment module', () => {
       process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
       process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
       process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
+      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
+      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
 
       const { validateEnvironment } = await import('../environment');
       const result = validateEnvironment();

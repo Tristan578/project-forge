@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { useEngine, resetEngine } from '../useEngine';
+import { useEngine, resetEngine, fetchWasmHash } from '../useEngine';
 import * as initLog from '@/lib/initLog';
 
 vi.mock('@/lib/initLog', () => ({
@@ -121,5 +121,81 @@ describe('useEngine', () => {
     });
 
     delete (window as Window & { __SKIP_ENGINE?: boolean }).__SKIP_ENGINE;
+  });
+});
+
+describe('fetchWasmHash', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns the hash from a valid manifest', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ wasmFile: 'forge_engine_bg.wasm', jsFile: 'forge_engine.js', hash: 'abc123def456' }),
+    }));
+
+    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
+    expect(hash).toBe('abc123def456');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns null when the manifest fetch returns a non-ok status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 404 }));
+
+    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
+    expect(hash).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns null when the manifest has no hash field', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ wasmFile: 'forge_engine_bg.wasm' }),
+    }));
+
+    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
+    expect(hash).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns null when the manifest hash is an empty string', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ hash: '' }),
+    }));
+
+    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
+    expect(hash).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('returns null when fetch throws (network error)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
+
+    const hash = await fetchWasmHash('/engine-pkg-webgl2/');
+    expect(hash).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches the manifest from the correct URL', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ hash: 'deadbeef12345678' }),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    await fetchWasmHash('https://engine.spawnforge.ai/engine-pkg-webgpu/');
+    expect(mockFetch).toHaveBeenCalledWith(
+      'https://engine.spawnforge.ai/engine-pkg-webgpu/wasm-manifest.json',
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+
+    vi.unstubAllGlobals();
   });
 });
