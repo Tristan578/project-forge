@@ -81,6 +81,21 @@ If none exists, require the author to add a regression test before merging.
 | Missing MCP command for UI action | WARN |
 | O(n^2) algorithm | WARN |
 
+## Taskboard Permissions
+
+You MUST NOT move tickets between columns. The orchestrator handles all ticket lifecycle transitions.
+
+You MAY:
+- Update ticket descriptions with your findings and verdict
+- Add subtasks to document specific issues found
+- Create new tickets for bugs you discover during review
+
+You MUST NOT:
+- Call `move_ticket` (MCP) or POST to `/api/tickets/:id/move` (REST)
+- Edit ticket priority, labels, or team assignment
+
+Report your pass/fail verdict to the orchestrator. The orchestrator decides whether to move the ticket.
+
 ## Verdict Format
 
 ```

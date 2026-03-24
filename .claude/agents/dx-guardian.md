@@ -59,6 +59,21 @@ bash .claude/tools/validate-all.sh
 | Docs Updated | Rules, README, known-limitations current |
 | Manifests Synced | MCP manifests identical |
 
+## Taskboard Permissions
+
+You MUST NOT move tickets between columns. The orchestrator handles all ticket lifecycle transitions.
+
+You MAY:
+- Update ticket descriptions with DX findings and recommendations
+- Add subtasks to document specific DX issues
+- Create new tickets for DX gaps or improvements discovered during an audit
+
+You MUST NOT:
+- Call `move_ticket` (MCP) or POST to `/api/tickets/:id/move` (REST)
+- Edit ticket priority, labels, or team assignment
+
+Report your findings to the orchestrator. The orchestrator decides ticket transitions.
+
 ## Definition of Done (DoD)
 
 A ticket is done when:

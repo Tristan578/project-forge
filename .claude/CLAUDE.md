@@ -150,6 +150,26 @@ Taskboard web UI: `http://localhost:3010` (start with: `taskboard start --port 3
 **Do NOT pass `--db .claude/taskboard.db`** — let the taskboard use its default OS path.
 
 ### Rules for Claude
+
+#### Orchestrator vs. Subagent Permissions
+
+**The orchestrator (main Claude session) owns ALL ticket lifecycle transitions.** Subagents MUST NOT call `move_ticket` or the REST `/move` endpoint.
+
+| Actor | create_ticket | add subtasks | update description | move_ticket | edit metadata |
+|-------|:---:|:---:|:---:|:---:|:---:|
+| Orchestrator | yes | yes | yes | yes | yes |
+| Builder agents | yes (bugs found) | yes (own ticket) | no | **NO** | **NO** |
+| Review agents | yes (findings) | yes | yes (add findings) | **NO** | **NO** |
+
+#### Before Dispatching Any Agent (Orchestrator Checklist)
+
+1. Ensure taskboard is running: `curl -s http://localhost:3010/api/board > /dev/null || taskboard start --port 3010 &`
+2. Move the ticket to `in_progress` (orchestrator does this, not the agent)
+3. Run sync-push: `python3 .claude/hooks/github_project_sync.py push`
+4. Find the GitHub issue number: `gh issue list --search "PF-XXX in:title" --limit 1`
+5. Include the ticket ID, GH issue number, and a `Closes #NNNN` template in the dispatch prompt
+
+#### General Rules
 - **Before starting work:** Check the board (`get_board`), pick a ticket, move to `in_progress`
 - **Before creating ANY PR:** Run `python3 .claude/hooks/github_project_sync.py push` to sync tickets to GitHub. Find the GitHub issue number with `gh issue list --search "PF-XXX in:title" --limit 1`. Include `Closes #NNNN` (GitHub issue number) in the PR body. **CI will fail without this.**
 - **After completing work:** Move ticket to `done`, verify acceptance criteria met
