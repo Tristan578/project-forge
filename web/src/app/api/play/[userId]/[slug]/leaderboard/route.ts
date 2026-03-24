@@ -43,7 +43,10 @@ async function resolvePublishedGame(clerkId: string, slug: string) {
  */
 function hashIp(ip: string): string {
   const daySalt = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  return createHash('sha256').update(`${ip}:${daySalt}`).digest('hex').slice(0, 32);
+  // When IP is unknown (proxy/VPN), use a random nonce so different users
+  // behind the same proxy don't collide on the dedup check.
+  const key = ip === 'unknown' ? `nonce:${Math.random().toString(36).slice(2)}` : ip;
+  return createHash('sha256').update(`${key}:${daySalt}`).digest('hex').slice(0, 32);
 }
 
 // ---------------------------------------------------------------------------
