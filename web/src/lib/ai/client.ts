@@ -8,6 +8,7 @@
 
 import { streamChat, type StreamCallbacks } from './streaming';
 import { aiQueue, type Priority } from './requestQueue';
+import { aiResponseCache } from './promptCache';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -82,8 +83,10 @@ function mapError(err: unknown): Error {
 /**
  * Send a prompt to /api/chat and return the full response text.
  *
- * Requests are routed through the shared `aiQueue` so concurrent AI module
- * calls are capped and dispatched in priority order.
+ * Non-signal requests are eligible for response caching and in-flight
+ * deduplication via AIResponseCache. All requests are routed through the
+ * shared `aiQueue` so concurrent AI module calls are capped and dispatched
+ * in priority order.
  *
  * Use this for short one-shot requests where streaming is not needed
  * (e.g. generating a JSON blob, validating a design, classifying content).
@@ -91,6 +94,33 @@ function mapError(err: unknown): Error {
  * @throws {Error} On HTTP error, stream error, abort, or queue backpressure.
  */
 export async function fetchAI(prompt: string, options?: AIClientOptions): Promise<string> {
+  const {
+    model = 'claude-sonnet-4-5',
+    systemOverride,
+    sceneContext = '',
+    signal,
+  } = options ?? {};
+
+  // Non-streaming requests are eligible for caching.
+  // Streaming requests (streamAI) are intentionally excluded because callers
+  // expect incremental callbacks, not a single cached string.
+  //
+  // AbortSignal-controlled requests skip the cache so that a cancelled
+  // request cannot poison the cache with a partial result.
+  if (!signal) {
+    const thinking = options?.thinking ?? false;
+    const cacheKey = await aiResponseCache.computeKey(
+      `${model}:${thinking ? 'thinking' : 'standard'}`,
+      systemOverride ?? '',
+      `${sceneContext}\x00${prompt}`,
+    );
+    return aiResponseCache.dedup(cacheKey, () => fetchAIUncached(prompt, options));
+  }
+
+  return fetchAIUncached(prompt, options);
+}
+
+async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promise<string> {
   const {
     model = 'claude-sonnet-4-5',
     systemOverride,

@@ -11,6 +11,11 @@ import {
   type TutorialPlan,
 } from '../tutorialGenerator';
 
+vi.mock('@/lib/ai/client', () => ({
+  fetchAI: vi.fn(),
+  streamAI: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // detectMechanics
 // ---------------------------------------------------------------------------
@@ -411,12 +416,16 @@ describe('TUTORIAL_SYSTEM_PROMPT', () => {
 });
 
 // ---------------------------------------------------------------------------
-// generateTutorialPlan (API integration)
+// generateTutorialPlan (API integration — mocked fetchAI)
 // ---------------------------------------------------------------------------
 
 describe('generateTutorialPlan', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
+  let fetchAIMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    const client = await import('@/lib/ai/client');
+    fetchAIMock = vi.mocked(client.fetchAI);
   });
 
   it('throws when no mechanics provided', async () => {
@@ -425,67 +434,24 @@ describe('generateTutorialPlan', () => {
     );
   });
 
-  /** Create an SSE response body compatible with fetchAI */
-  function makeSseResponse(text: string): Response {
-    const sseData = `data: ${JSON.stringify({ type: 'text_delta', text })}\n\ndata: {"type":"done"}\n\n`;
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(sseData));
-        controller.close();
-      },
-    });
-    return new Response(stream, {
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-    });
-  }
-
   it('throws on non-ok response', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: 'Internal server error' }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      ),
-    );
+    fetchAIMock.mockRejectedValue(new Error('AI service error — the request failed on the server. Please try again.'));
 
     const mechanics: GameMechanic[] = [
       { name: 'Movement', description: 'Move', inputRequired: 'WASD', complexity: 1 },
     ];
 
-    // fetchAI mapError transforms "Internal server" messages to a friendly string
     await expect(generateTutorialPlan(mechanics)).rejects.toThrow(/service error/i);
-    vi.unstubAllGlobals();
   });
 
   it('throws on AI returned empty response', async () => {
-    // Return a stream with no text content — fetchAI resolves to '' which triggers
-    // the empty check in generateTutorialPlan
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          new ReadableStream({
-            start(controller) {
-              const encoder = new TextEncoder();
-              controller.enqueue(encoder.encode('data: {"type":"done"}\n\n'));
-              controller.close();
-            },
-          }),
-          { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
-        ),
-      ),
-    );
+    fetchAIMock.mockResolvedValue('');
 
     const mechanics: GameMechanic[] = [
       { name: 'Movement', description: 'Move', inputRequired: 'WASD', complexity: 1 },
     ];
 
     await expect(generateTutorialPlan(mechanics)).rejects.toThrow('AI returned an empty response');
-    vi.unstubAllGlobals();
   });
 
   it('parses SSE stream and returns tutorial plan', async () => {
@@ -505,7 +471,7 @@ describe('generateTutorialPlan', () => {
       completionText: 'Done!',
     };
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSseResponse(JSON.stringify(plan))));
+    fetchAIMock.mockResolvedValue(JSON.stringify(plan));
 
     const mechanics: GameMechanic[] = [
       { name: 'Movement', description: 'Move', inputRequired: 'WASD', complexity: 1 },
@@ -515,19 +481,17 @@ describe('generateTutorialPlan', () => {
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0].mechanic).toBe('Movement');
     expect(result.introText).toBe('Welcome!');
-    vi.unstubAllGlobals();
   });
 
   it('sends correct request payload', async () => {
-    const plan = {
+    const plan: TutorialPlan = {
       steps: [{ mechanic: 'X', instruction: 'Y', order: 1, triggerCondition: 'start', completionCondition: 'end' }],
       introText: 'A',
       completionText: 'B',
       estimatedDuration: '1m',
       difficulty: 'beginner',
     };
-    const fetchMock = vi.fn().mockResolvedValue(makeSseResponse(JSON.stringify(plan)));
-    vi.stubGlobal('fetch', fetchMock);
+    fetchAIMock.mockResolvedValue(JSON.stringify(plan));
 
     const mechanics: GameMechanic[] = [
       { name: 'Movement', description: 'Move', inputRequired: 'WASD', complexity: 1 },
@@ -535,15 +499,10 @@ describe('generateTutorialPlan', () => {
 
     await generateTutorialPlan(mechanics, { maxSteps: 3 });
 
-    expect(fetchMock).toHaveBeenCalledWith('/api/chat', expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    }));
-
-    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string) as Record<string, unknown>;
-    expect(body.systemOverride).toBe(TUTORIAL_SYSTEM_PROMPT);
-    expect((body.messages as Array<{ content: string }>)[0].content).toContain('Movement');
-    expect((body.messages as Array<{ content: string }>)[0].content).toContain('Maximum tutorial steps: 3');
-    vi.unstubAllGlobals();
+    expect(fetchAIMock).toHaveBeenCalledOnce();
+    const [prompt, options] = fetchAIMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(options.systemOverride).toBe(TUTORIAL_SYSTEM_PROMPT);
+    expect(prompt).toContain('Movement');
+    expect(prompt).toContain('Maximum tutorial steps: 3');
   });
 });

@@ -1,6 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ---------------------------------------------------------------------------
+// Mock aiResponseCache as a transparent pass-through so tests are not
+// affected by the module-level singleton caching responses across tests.
+// ---------------------------------------------------------------------------
+
+vi.mock('@/lib/ai/promptCache', () => {
+  const passthrough = {
+    computeKey: (_model: string, _sys: string, msg: string) => Promise.resolve(msg),
+    get: () => undefined,
+    dedup: (_key: string, fn: () => Promise<string>) => fn(),
+    set: () => undefined,
+    clear: () => undefined,
+    invalidate: () => undefined,
+    isInflight: () => false,
+    size: 0,
+    inflightCount: 0,
+  };
+  return {
+    PromptCache: vi.fn(),
+    AIResponseCache: vi.fn(),
+    promptCache: {},
+    aiResponseCache: passthrough,
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Mock fetch globally before importing the module under test
 // ---------------------------------------------------------------------------
 

@@ -11,6 +11,11 @@ import {
   type GameDesignDocument,
 } from '../gddGenerator';
 
+vi.mock('@/lib/ai/client', () => ({
+  fetchAI: vi.fn(),
+  streamAI: vi.fn(),
+}));
+
 // ---------------------------------------------------------------------------
 // detectGenre
 // ---------------------------------------------------------------------------
@@ -392,7 +397,7 @@ describe('GDD_STANDARD_SECTIONS', () => {
 });
 
 // ---------------------------------------------------------------------------
-// generateGDD (integration — mocked fetch)
+// generateGDD (integration — mocked fetchAI)
 // ---------------------------------------------------------------------------
 
 describe('generateGDD', () => {
@@ -407,25 +412,12 @@ describe('generateGDD', () => {
     estimatedScope: 'small',
   };
 
-  function createMockSSEResponse(content: string): Response {
-    const encoder = new TextEncoder();
-    const events = [
-      `data: ${JSON.stringify({ type: 'text_delta', text: content })}\n`,
-      'data: [DONE]\n',
-    ].join('\n');
+  let fetchAIMock: ReturnType<typeof vi.fn>;
 
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(events));
-        controller.close();
-      },
-    });
-
-    return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
-  }
-
-  beforeEach(() => {
-    vi.restoreAllMocks();
+  beforeEach(async () => {
+    vi.resetAllMocks();
+    const client = await import('@/lib/ai/client');
+    fetchAIMock = vi.mocked(client.fetchAI);
   });
 
   it('throws on empty prompt', async () => {
@@ -437,22 +429,17 @@ describe('generateGDD', () => {
   });
 
   it('throws on non-ok response', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 }),
-    );
-    // fetchAI's mapError transforms 429 into a user-friendly rate limit message
+    fetchAIMock.mockRejectedValue(new Error('Rate limit reached — please wait a moment and try again.'));
     await expect(generateGDD('a game')).rejects.toThrow(/rate limit/i);
   });
 
   it('throws on empty AI response', async () => {
-    const emptyResponse = createMockSSEResponse('');
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(emptyResponse);
+    fetchAIMock.mockResolvedValue('');
     await expect(generateGDD('a game')).rejects.toThrow('AI returned an empty response');
   });
 
   it('parses a valid streamed GDD response', async () => {
-    const response = createMockSSEResponse(JSON.stringify(mockGDD));
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+    fetchAIMock.mockResolvedValue(JSON.stringify(mockGDD));
 
     const result = await generateGDD('a platformer in a haunted castle');
     expect(result.title).toBe('Star Castle');
@@ -461,31 +448,20 @@ describe('generateGDD', () => {
   });
 
   it('sends correct request body', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      createMockSSEResponse(JSON.stringify(mockGDD)),
-    );
+    fetchAIMock.mockResolvedValue(JSON.stringify(mockGDD));
 
     await generateGDD('a puzzle game', { genre: 'Puzzle', scope: 'small' });
 
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
-    expect(body.messages[0].content).toContain('Game idea: a puzzle game');
-    expect(body.messages[0].content).toContain('Genre preference: Puzzle');
-    expect(body.messages[0].content).toContain('Target scope: small');
-    expect(body.systemOverride).toBeDefined();
+    expect(fetchAIMock).toHaveBeenCalledOnce();
+    const [prompt, options] = fetchAIMock.mock.calls[0] as [string, Record<string, unknown>];
+    expect(prompt).toContain('Game idea: a puzzle game');
+    expect(prompt).toContain('Genre preference: Puzzle');
+    expect(prompt).toContain('Target scope: small');
+    expect(options.systemOverride).toBeDefined();
   });
 
   it('handles error event in SSE stream', async () => {
-    const encoder = new TextEncoder();
-    const events = `data: ${JSON.stringify({ type: 'error', message: 'Token limit exceeded' })}\n\ndata: [DONE]\n`;
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(events));
-        controller.close();
-      },
-    });
-    const response = new Response(stream, { status: 200 });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response);
+    fetchAIMock.mockRejectedValue(new Error('Token limit exceeded'));
 
     await expect(generateGDD('a game')).rejects.toThrow('Token limit exceeded');
   });
