@@ -244,6 +244,11 @@ const TOOL_LABELS: Record<string, string> = {
   set_dialogue_node_voice: 'Set Voice Asset',
   export_dialogue_tree: 'Export Dialogue Tree',
   import_dialogue_tree: 'Import Dialogue Tree',
+  generate_quest: 'Generate Quest',
+  list_quests: 'List Quests',
+  get_quest: 'Get Quest',
+  update_quest_objective: 'Update Quest Objective',
+  delete_quest: 'Delete Quest',
   publish_game: 'Publish Game',
   unpublish_game: 'Unpublish Game',
   list_publications: 'List Publications',
@@ -313,6 +318,11 @@ const TOOL_LABELS: Record<string, string> = {
   stop_cutscene: 'Stop Cutscene',
   list_cutscenes: 'List Cutscenes',
   delete_cutscene: 'Delete Cutscene',
+  // Leaderboards
+  create_leaderboard: 'Create Leaderboard',
+  list_leaderboards: 'List Leaderboards',
+  configure_leaderboard: 'Configure Leaderboard',
+  delete_leaderboard: 'Delete Leaderboard',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {
