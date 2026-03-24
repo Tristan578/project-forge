@@ -34,9 +34,10 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
   }
 
   const rawStyle = args['style'] ?? 'character';
-  const style: PixelArtStyle = (VALID_STYLES as readonly string[]).includes(rawStyle as string)
-    ? (rawStyle as PixelArtStyle)
-    : 'character';
+  if (typeof rawStyle !== 'string' || !(VALID_STYLES as readonly string[]).includes(rawStyle)) {
+    return { success: false, error: `Invalid arguments: style: Must be one of: ${VALID_STYLES.join(', ')}` };
+  }
+  const style = rawStyle as PixelArtStyle;
 
   const rawDithering = args['dithering'] ?? 'none';
   if (typeof rawDithering !== 'string' || !(VALID_DITHERING as readonly string[]).includes(rawDithering)) {

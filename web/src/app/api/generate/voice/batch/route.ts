@@ -131,6 +131,7 @@ export async function POST(request: NextRequest) {
           authResult.ctx.user.id,
           refundAmount,
           `voice_batch_partial_failure:${errors.length}_of_${items.length}_failed`,
+          usageId,
         );
       }
     } catch (refundErr) {

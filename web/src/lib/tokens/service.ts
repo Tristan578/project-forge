@@ -226,34 +226,61 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
  * Use this when only a subset of items in a batch operation failed — the caller
  * is responsible for calculating how many tokens to return.
  *
+ * Pass `usageId` (from the original `deductTokens` call) so the refund is
+ * credited to the correct pool (monthly vs addon).  When the original source
+ * was `monthly`, the refund reduces `monthlyTokensUsed`; for `addon` or
+ * `mixed` it increases `addonTokens` (matching the `refundTokens` behaviour
+ * for the mixed case).
+ *
  * For a complete operation failure (all items failed), prefer `refundTokens`
- * which looks up the original usage record and reverses the exact deduction.
+ * which reverses the exact deduction amount from the usage record.
  */
 export async function refundTokenAmount(
   userId: string,
   tokens: number,
   reason: string,
+  usageId?: string,
 ): Promise<void> {
   if (tokens <= 0) return;
 
   const db = getDb();
 
-  // Credit back to addon tokens (simplest path — avoids needing to know the
-  // original monthly/addon split for a partial refund)
-  await db
-    .update(users)
-    .set({
-      addonTokens: sql`${users.addonTokens} + ${tokens}`,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  // Determine the original source so we credit the right pool.
+  let source: 'monthly' | 'addon' | 'mixed' = 'addon';
+  if (usageId) {
+    const [record] = await db
+      .select({ source: tokenUsage.source })
+      .from(tokenUsage)
+      .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
+      .limit(1);
+    if (record) source = record.source as 'monthly' | 'addon' | 'mixed';
+  }
+
+  if (source === 'monthly') {
+    await db
+      .update(users)
+      .set({
+        monthlyTokensUsed: sql`GREATEST(0, ${users.monthlyTokensUsed} - ${tokens})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  } else {
+    // addon or mixed — refund to addonTokens (consistent with full refundTokens for mixed)
+    await db
+      .update(users)
+      .set({
+        addonTokens: sql`${users.addonTokens} + ${tokens}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  }
 
   await db.insert(tokenUsage).values({
     userId,
     operation: 'partial_refund',
     tokens: -tokens,
-    source: 'addon',
-    metadata: { reason },
+    source,
+    metadata: { reason, ...(usageId ? { refundedUsageId: usageId } : {}) },
   });
 }
 
