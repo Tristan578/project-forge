@@ -5,6 +5,7 @@ import {
   AI_PANELS_BY_CATEGORY,
   type AIPanelCategory,
 } from '../panelRegistry';
+import { AI_PANEL_CATEGORY_SET } from '@/lib/config/enums';
 
 describe('PANEL_DEFINITIONS', () => {
   it('should have consistent id and key', () => {
@@ -82,10 +83,9 @@ describe('PANEL_DEFINITIONS', () => {
   });
 
   it('category field, when present, uses a valid AIPanelCategory value', () => {
-    const validCategories = new Set<AIPanelCategory>(['creation', 'polish', 'intelligence', 'tools']);
     for (const [key, def] of Object.entries(PANEL_DEFINITIONS)) {
       if (def.category !== undefined) {
-        expect(validCategories.has(def.category), `Panel "${key}" has invalid category "${def.category}"`).toBe(true);
+        expect(AI_PANEL_CATEGORY_SET.has(def.category), `Panel "${key}" has invalid category "${def.category}"`).toBe(true);
       }
     }
   });
