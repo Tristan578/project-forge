@@ -286,7 +286,7 @@ A Vercel Cron Job runs weekly (Monday 06:00 UTC) to:
    c. Sum `creator_share_cents` from the now-claimed events
    d. Skip if below `min_payout_cents` threshold ($10 default) — reset `payoutId` on claimed events
    e. Create a Stripe Transfer with `idempotency_key` matching the payout record
-   f. Update `payout_history` status to `'completed'` with the Stripe transfer ID
+   f. Update `payout_history` status to `'paid'` with the Stripe transfer ID
 3. On retry: events already claimed by a `payoutId` are excluded from re-summation. The Stripe `idempotency_key` prevents duplicate transfers even if the cron fires twice.
 4. Send notification to creators with successful payouts (future: email via Clerk)
 
