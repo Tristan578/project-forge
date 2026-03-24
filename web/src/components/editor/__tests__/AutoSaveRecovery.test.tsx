@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
+import { render, screen, cleanup, act } from '@/test/utils/componentTestUtils';
 import { AutoSaveRecovery } from '../AutoSaveRecovery';
 
 // ---------------------------------------------------------------------------
@@ -57,10 +57,13 @@ function mockStore(overrides: Record<string, unknown> = {}) {
   vi.mocked(useEditorStore).mockImplementation((selector: any) => selector(state));
 }
 
-// Advance time enough for the async loadAutoSaveEntry promise to resolve and
-// React effects to flush. Does NOT run any setInterval timers.
+// Wrap timer advancement in act() so React processes state updates synchronously.
+// vi.advanceTimersByTimeAsync(0) drains microtasks queued by resolved promises,
+// and act() ensures React flushes the resulting state updates before we assert.
 async function flushPromises() {
-  await vi.advanceTimersByTimeAsync(0);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +102,8 @@ describe('AutoSaveRecovery', () => {
       mockStore({ lastCloudSave: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() });
       render(<AutoSaveRecovery />);
       await flushPromises();
+      // After flushPromises (act + advanceTimersByTimeAsync), the loadAutoSaveEntry
+      // promise has resolved and React has flushed the setEntry state update.
       expect(screen.queryByText('Unsaved work recovered')).not.toBeNull();
     });
   });
@@ -155,7 +160,7 @@ describe('AutoSaveRecovery', () => {
       // Flush the loadAutoSaveEntry promise so entry is set and poll starts
       await flushPromises();
       // Advance past one poll interval — getWasmModule should have been called
-      await vi.advanceTimersByTimeAsync(210);
+      await act(async () => { await vi.advanceTimersByTimeAsync(210); });
       // Poll should have checked for engine readiness
       expect(vi.mocked(getWasmModule)).toHaveBeenCalled();
     });
@@ -169,7 +174,7 @@ describe('AutoSaveRecovery', () => {
 
       // Simulate engine becoming ready
       vi.mocked(getWasmModule).mockReturnValue({} as never);
-      await vi.advanceTimersByTimeAsync(210);
+      await act(async () => { await vi.advanceTimersByTimeAsync(210); });
       // After poll, getWasmModule returned non-null, so poll should have stopped
       expect(vi.mocked(getWasmModule)).toHaveBeenCalled();
     });
@@ -186,7 +191,8 @@ describe('AutoSaveRecovery', () => {
       mockStore({ lastCloudSave: null });
       render(<AutoSaveRecovery />);
       await flushPromises();
-      // With no cloud save to compare against, the dialog should show
+      // With no cloud save to compare against, the dialog should show.
+      // flushPromises() uses act() so React has already processed setEntry.
       expect(screen.queryByText('Unsaved work recovered')).not.toBeNull();
     });
 
