@@ -1,6 +1,6 @@
 /**
  * Tool call executor — maps Claude tool calls to editorStore commands.
- * Refactored to use handler registry pattern for maintainability.
+ * Uses a handler registry pattern; unknown tool names return an error directly.
  */
 
 import type { EditorState } from '@/stores/editorStore';
@@ -31,9 +31,6 @@ import { assetHandlers } from './handlers/assetHandlers';
 import { audioLegacyHandlers } from './handlers/audioLegacyHandlers';
 import { pixelArtHandlers } from './handlers/pixelArtHandlers';
 import { compoundHandlers } from './handlers/compoundHandlers';
-
-// Legacy fallback for handlers not yet migrated to the registry pattern
-import { executeToolCall as legacyExecuteToolCall } from './executor.legacy';
 
 /**
  * Merged handler registry.
@@ -87,8 +84,7 @@ export async function executeToolCall(
       return await handler(input, ctx);
     }
 
-    // Fallback to legacy executor for handlers not yet migrated
-    return await legacyExecuteToolCall(toolName, input, store);
+    return { success: false, error: `Unknown tool: ${toolName}` };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Execution failed' };
   }
