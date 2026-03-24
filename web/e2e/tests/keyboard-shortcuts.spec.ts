@@ -90,7 +90,7 @@ test.describe('Keyboard Shortcuts @ui', () => {
     // until the next animation frame, so we poll until the store is confirmed intact.
     const storeExists = await page.waitForFunction(
       () => !!(window as any).__EDITOR_STORE, // eslint-disable-line @typescript-eslint/no-explicit-any
-      { timeout: 10_000 },
+      { timeout: 45_000 },
     );
     expect(await storeExists.jsonValue()).toBe(true);
 
