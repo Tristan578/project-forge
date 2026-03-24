@@ -328,7 +328,7 @@ export function applyConstraints(
   layout: LevelLayout,
   constraints: LevelConstraint[],
 ): LevelLayout {
-  let result = { ...layout, rooms: layout.rooms.map((r) => ({ ...r, entities: [...r.entities] })) };
+  let result = { ...layout, rooms: layout.rooms.map((r) => ({ ...r, entities: [...r.entities], connections: [...r.connections] })) };
 
   for (const constraint of constraints) {
     switch (constraint.type) {
