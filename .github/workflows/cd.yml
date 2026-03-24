@@ -76,7 +76,7 @@ jobs:
   # ---- Quality Gates (must all pass before any deployment) ----
 
   # Quality gate jobs only run on workflow_dispatch (manual triggers).
-  # On push to main, CI already validated the same SHA before the merge —
+  # On push to main, CI already validated the same SHA before the merge --
   # re-running them wastes ~15 runner-minutes per push with zero benefit.
   lint:
     name: Lint
@@ -145,14 +145,14 @@ jobs:
         working-directory: web
         # Timeout safety net: vitest hangs after test completion due to jsdom open
         # handles (known issue vitest#3077). Exit 124 = timeout killed a hung process
-        # after tests already completed successfully — treat as warning, not failure.
+        # after tests already completed successfully -- treat as warning, not failure.
         run: |
           set +e
           timeout 600 npx vitest run 2>&1 | tee /tmp/vitest-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
           if [ $EXIT_CODE -eq 124 ]; then
-            echo "::warning::vitest process was killed after 600s — likely hung during cleanup (vitest#3077)"
+            echo "::warning::vitest process was killed after 600s -- likely hung during cleanup (vitest#3077)"
             exit 0
           fi
           # vitest 4.x may exit non-zero due to open handles even when all tests pass.
@@ -161,7 +161,7 @@ jobs:
             if sed 's/\x1b\[[0-9;]*m//g' /tmp/vitest-output.txt | grep -q "Test Files.*failed"; then
               exit $EXIT_CODE
             else
-              echo "::warning::vitest exited with code $EXIT_CODE but no test failures detected — likely open handle issue (vitest#3077)"
+              echo "::warning::vitest exited with code $EXIT_CODE but no test failures detected -- likely open handle issue (vitest#3077)"
               exit 0
             fi
           fi
@@ -204,9 +204,11 @@ jobs:
 
       - name: Detect changed paths
         id: filter
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           # Use push event's before SHA for accurate diff (handles squash merges)
-          BEFORE="${{ github.event.before }}"
+          BEFORE="$BEFORE_SHA"
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             BEFORE="HEAD~1"
           fi
@@ -214,18 +216,18 @@ jobs:
 
           if echo "$CHANGED" | grep -q '^engine/'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
-            echo "Engine files changed — WASM build required"
+            echo "Engine files changed -- WASM build required"
           else
             echo "engine=false" >> "$GITHUB_OUTPUT"
-            echo "No engine changes — skipping WASM build"
+            echo "No engine changes -- skipping WASM build"
           fi
 
           if echo "$CHANGED" | grep -qE '^web/|^package\.json|^\.github/'; then
             echo "web=true" >> "$GITHUB_OUTPUT"
-            echo "Web files changed — deploy required"
+            echo "Web files changed -- deploy required"
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
-            echo "No web changes — skipping deploy"
+            echo "No web changes -- skipping deploy"
           fi
 
   build-wasm:
@@ -572,7 +574,7 @@ jobs:
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     needs: [check-changes, lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
     if: |
       always() &&
@@ -633,12 +635,17 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          # Retrieve the URL of the deployment currently aliased to production.
-          # This becomes the rollback target if the new deployment fails health checks.
-          prev_url=$(vercel inspect --scope "$VERCEL_ORG_ID" --prod \
-            --token="$VERCEL_TOKEN" 2>/dev/null \
-            | grep -oP 'https://[^ ]+\.vercel\.app' | head -1 || echo "")
-          if [[ -n "$prev_url" && "$prev_url" != "http"* ]]; then
+          # Retrieve the URL currently aliased to production for rollback purposes.
+          # `vercel ls` lists deployments with a stable tabular format; the first
+          # READY row is the currently live deployment. We take field 2 (the URL).
+          prev_url=$(vercel ls --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN" \
+            2>/dev/null \
+            | grep -E 'READY' \
+            | head -1 \
+            | awk '{print $2}' \
+            | sed 's|/*$||' || echo "")
+          # Ensure the URL has an https:// prefix.
+          if [ -n "$prev_url" ] && [ "${prev_url#https://}" = "$prev_url" ]; then
             prev_url="https://${prev_url}"
           fi
           echo "prev_url=${prev_url}" >> "$GITHUB_OUTPUT"
@@ -651,6 +658,15 @@ jobs:
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Run database migrations
+        # Migrations must run before the new code is deployed so any schema
+        # changes are in place when the first request hits the new runtime.
+        # DATABASE_URL is supplied as a repository secret (matches the production DB).
+        working-directory: web
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npm run db:migrate
 
       - name: Build with Vercel
         working-directory: web
@@ -689,7 +705,7 @@ jobs:
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
           NEW_URL: ${{ steps.deploy.outputs.url }}
         run: |
-          echo "::error::Health check failed — rolling back production to $PREV_URL"
+          echo "::error::Health check failed -- rolling back production to $PREV_URL"
           vercel promote "$PREV_URL" --scope "$VERCEL_ORG_ID" --token="$VERCEL_TOKEN"
           echo "Rollback complete. Production restored to: $PREV_URL"
 
