@@ -317,7 +317,7 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
     const path = await import('path');
     const clientConfigPath = path.resolve(
       process.cwd(),
-      '../sentry.client.config.ts',
+      'sentry.client.config.ts',
     );
     const content = fs.readFileSync(clientConfigPath, 'utf-8');
     expect(content).not.toContain('anthropicAIIntegration');
@@ -328,7 +328,7 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
     const path = await import('path');
     const clientConfigPath = path.resolve(
       process.cwd(),
-      '../sentry.client.config.ts',
+      'sentry.client.config.ts',
     );
     const content = fs.readFileSync(clientConfigPath, 'utf-8');
     expect(content).not.toContain('vercelAIIntegration');
@@ -339,7 +339,7 @@ describe('PF-892: Sentry client config must not include server-only AI integrati
     const path = await import('path');
     const serverConfigPath = path.resolve(
       process.cwd(),
-      '../sentry.server.config.ts',
+      'sentry.server.config.ts',
     );
     const content = fs.readFileSync(serverConfigPath, 'utf-8');
     expect(content).toContain('anthropicAIIntegration');
