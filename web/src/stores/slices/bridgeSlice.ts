@@ -1,18 +1,58 @@
-// Bridge state is JS-only (Aseprite, external tools). No engine event handler needed — updates come from UI components directly.
-
 /**
  * Bridge slice — tracks external tool connections and running operations.
  *
- * JS-only slice: state is populated entirely from the JS layer (external IDE
- * bridge integrations, tool discovery, operation lifecycle). There are no
- * Bevy engine events that feed into this slice — it does NOT have a
- * corresponding `bridgeEvents.ts` hook in `hooks/events/`.
+ * ## Architecture: JS-Only Slice
  *
- * State transitions:
- *   - setBridgeTool / removeBridgeTool: called by bridge adapter code when
- *     a tool connects or disconnects.
- *   - addBridgeOperation / updateBridgeOperation / removeBridgeOperation:
- *     called by bridge adapters to track in-flight async operations.
+ * This slice is populated entirely from the JS layer. It does NOT receive data
+ * from the Bevy WASM engine and has no corresponding `bridgeEvents.ts` hook in
+ * `hooks/events/`. There are no Bevy ECS components or engine events that feed
+ * into it.
+ *
+ * ## Communication Pattern
+ *
+ * External tool bridges (e.g. Aseprite integration) discover tools at startup
+ * and call the slice actions directly:
+ *
+ * ```
+ * Bridge Adapter (lib/bridges/*.ts)
+ *   → setBridgeTool({ id, name, status: 'connected', ... })
+ *   → addBridgeOperation({ id, toolId, operationName, status: 'running', ... })
+ *   → updateBridgeOperation(opId, { status: 'completed' })
+ *   → removeBridgeOperation(opId)
+ * ```
+ *
+ * ## Types
+ *
+ * `BridgeToolInfo` (this file) is the Zustand-store-level shape — a superset
+ * of `BridgeToolConfig` from `@/lib/bridges/types`. Use `BridgeToolInfo` when
+ * reading or writing store state. Use `BridgeToolConfig` when interacting with
+ * the bridge adapter library (discovery, launch, IPC).
+ *
+ * `BridgeOperationInfo` (this file) tracks in-flight async operations from the
+ * perspective of the editor UI (status, elapsed time, error). It is not the
+ * same as `BridgeOperation` from `@/lib/bridges/types` (which is a request
+ * descriptor sent to the tool subprocess).
+ *
+ * ## State Transitions
+ *
+ * ```
+ * Tool connection lifecycle:
+ *   not in store → setBridgeTool({ status: 'not_found' | 'disconnected' })
+ *   → setBridgeTool({ status: 'connected', activeVersion: '...' })
+ *   → removeBridgeTool(toolId)   // on adapter shutdown
+ *
+ * Operation lifecycle:
+ *   addBridgeOperation({ status: 'running' })
+ *   → updateBridgeOperation(opId, { status: 'completed' | 'failed', error? })
+ *   → removeBridgeOperation(opId)  // after UI has consumed the result
+ * ```
+ *
+ * ## Error States
+ *
+ * A tool can be in `status: 'error'` when the subprocess exits unexpectedly or
+ * the IPC channel drops. Bridge adapters call `setBridgeTool({ status: 'error' })`
+ * to surface this in the UI. The editor shows a warning badge but does not
+ * block the user — all bridge functionality degrades gracefully.
  */
 
 import type { StateCreator } from 'zustand';
