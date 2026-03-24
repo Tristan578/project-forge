@@ -108,8 +108,9 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
   // AbortSignal-controlled requests skip the cache so that a cancelled
   // request cannot poison the cache with a partial result.
   if (!signal) {
+    const thinking = options?.thinking ?? false;
     const cacheKey = await aiResponseCache.computeKey(
-      model,
+      `${model}:${thinking ? 'thinking' : 'standard'}`,
       systemOverride ?? '',
       `${sceneContext}\x00${prompt}`,
     );

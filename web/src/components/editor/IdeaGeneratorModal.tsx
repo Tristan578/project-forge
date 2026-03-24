@@ -27,7 +27,6 @@ interface IdeaGeneratorModalProps {
 
 export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorModalProps) {
   const [ideas, setIdeas] = useState<GameIdea[]>([]);
-  const [filters, setFilters] = useState<IdeaFilters>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const [selectedGenre, setSelectedGenre] = useState('');
@@ -36,12 +35,20 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
 
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Generate on open — use prev-value pattern to avoid setState in an effect body
+  // Generate on open — use prev-value pattern to avoid setState in an effect body.
+  // Build filters from the current UI control state rather than the `filters`
+  // snapshot, which may be stale if the user changed controls without clicking
+  // Generate before closing the modal.
   const [prevIsOpen, setPrevIsOpen] = useState(false);
   if (prevIsOpen !== isOpen) {
     setPrevIsOpen(isOpen);
     if (isOpen) {
-      setIdeas(generateIdeas(3, filters));
+      const currentFilters: IdeaFilters = {
+        genreIds: selectedGenre ? [selectedGenre] : undefined,
+        maxComplexity: selectedComplexity || undefined,
+        trendingOnly: trendingOnly || undefined,
+      };
+      setIdeas(generateIdeas(3, currentFilters));
     }
   }
 
@@ -92,7 +99,6 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
       maxComplexity: selectedComplexity || undefined,
       trendingOnly: trendingOnly || undefined,
     };
-    setFilters(activeFilters);
     setIdeas(generateIdeas(3, activeFilters));
     setExpandedId(null);
   }, [selectedGenre, selectedComplexity, trendingOnly]);
