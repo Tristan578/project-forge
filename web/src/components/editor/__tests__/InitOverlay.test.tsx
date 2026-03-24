@@ -20,8 +20,13 @@ vi.mock('@/lib/initLog', () => ({
   copyInitLogToClipboard: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock('@/hooks/useEngine', () => ({
+  setPreferredBackend: vi.fn(),
+}));
+
 import { useEngineStatus, type EngineStatus, type PhaseStatus } from '@/hooks/useEngineStatus';
 import type { InitPhase } from '@/lib/initLog';
+import { setPreferredBackend } from '@/hooks/useEngine';
 
 const basePhases: PhaseStatus[] = [
   { phase: 'wasm_loading', status: 'done', duration: 1500 },
@@ -173,5 +178,46 @@ describe('InitOverlay', () => {
     });
     render(<InitOverlay />);
     expect(screen.getByText(/Attempt 2\/3/)).toBeDefined();
+  });
+
+  // PF-845 regression: WebGL2 fallback button must be present in failed state
+  it('shows Switch to WebGL2 Mode button in failed state (PF-845)', () => {
+    vi.mocked(useEngineStatus).mockReturnValue({
+      ...baseStatus,
+      retryCount: 3,
+    });
+    render(<InitOverlay />);
+    expect(screen.getByText('Switch to WebGL2 Mode')).toBeDefined();
+  });
+
+  it('clicking Switch to WebGL2 calls setPreferredBackend with webgl2 (PF-845)', () => {
+    // Mock window.location.reload so it does not throw in jsdom
+    const reloadMock = vi.fn();
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...window.location, reload: reloadMock },
+    });
+
+    vi.mocked(useEngineStatus).mockReturnValue({
+      ...baseStatus,
+      retryCount: 3,
+    });
+    render(<InitOverlay />);
+    fireEvent.click(screen.getByText('Switch to WebGL2 Mode'));
+    expect(vi.mocked(setPreferredBackend)).toHaveBeenCalledWith('webgl2');
+    expect(reloadMock).toHaveBeenCalled();
+  });
+
+  it('shows WebGL2 fallback button when error causes immediate failed state (PF-845)', () => {
+    vi.mocked(useEngineStatus).mockReturnValue({
+      ...baseStatus,
+      error: 'WebGPU adapter not available',
+      canRetry: false,
+      isTimedOut: false,
+    });
+    render(<InitOverlay />);
+    // showFailedState = retryCount>=3 || (!canRetry && (isTimedOut || error))
+    // here: !canRetry=true, error is truthy → showFailedState=true
+    expect(screen.getByText('Switch to WebGL2 Mode')).toBeDefined();
   });
 });
