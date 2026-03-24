@@ -85,7 +85,7 @@ function ScoreBadge({ report }: { report: BalanceReport }) {
 // ---------------------------------------------------------------------------
 
 function XpCurveChart({ xpPerLevel }: { xpPerLevel: number[] }) {
-  const maxXp = Math.max(...xpPerLevel, 1);
+  const maxXp = xpPerLevel.reduce((a, b) => (b > a ? b : a), 1);
   // Show at most 20 bars
   const step = Math.max(1, Math.floor(xpPerLevel.length / 20));
   const sampled = xpPerLevel.filter((_, i) => i % step === 0);
