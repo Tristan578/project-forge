@@ -96,6 +96,78 @@ beforeEach(() => {
 });
 
 // ===========================================================================
+// create_script (PF-855)
+// ===========================================================================
+
+describe('create_script', () => {
+  it('returns error when source is missing', async () => {
+    const { result } = await invokeHandler(scriptLibraryHandlers, 'create_script', {
+      entityId: 'ent-1',
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it('returns error when no entityId and no primaryId in store', async () => {
+    const store = createMockStore({ setScript: vi.fn(), primaryId: null });
+    const result = await scriptLibraryHandlers.create_script(
+      { source: 'function onStart() {}' },
+      { store, dispatchCommand: vi.fn() },
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('No entity selected');
+  });
+
+  it('calls store.setScript with explicit entityId', async () => {
+    const store = createMockStore({ setScript: vi.fn() });
+    const result = await scriptLibraryHandlers.create_script(
+      { entityId: 'ent-1', source: 'function onStart() {}' },
+      { store, dispatchCommand: vi.fn() },
+    );
+    expect(result.success).toBe(true);
+    expect(store.setScript).toHaveBeenCalledWith('ent-1', 'function onStart() {}', true, undefined);
+  });
+
+  it('falls back to primaryId when no entityId provided', async () => {
+    const store = createMockStore({ setScript: vi.fn(), primaryId: 'ent-42' });
+    const result = await scriptLibraryHandlers.create_script(
+      { source: 'const x = 1;' },
+      { store, dispatchCommand: vi.fn() },
+    );
+    expect(result.success).toBe(true);
+    expect(store.setScript).toHaveBeenCalledWith('ent-42', 'const x = 1;', true, undefined);
+  });
+
+  it('passes enabled=false when provided', async () => {
+    const store = createMockStore({ setScript: vi.fn() });
+    await scriptLibraryHandlers.create_script(
+      { entityId: 'ent-1', source: 'code', enabled: false },
+      { store, dispatchCommand: vi.fn() },
+    );
+    expect(store.setScript).toHaveBeenCalledWith('ent-1', 'code', false, undefined);
+  });
+
+  it('passes template hint when provided', async () => {
+    const store = createMockStore({ setScript: vi.fn() });
+    await scriptLibraryHandlers.create_script(
+      { entityId: 'ent-1', source: 'code', template: 'character_controller' },
+      { store, dispatchCommand: vi.fn() },
+    );
+    expect(store.setScript).toHaveBeenCalledWith('ent-1', 'code', true, 'character_controller');
+  });
+
+  it('result message includes entityId', async () => {
+    const store = createMockStore({ setScript: vi.fn() });
+    const result = await scriptLibraryHandlers.create_script(
+      { entityId: 'ent-99', source: 'code' },
+      { store, dispatchCommand: vi.fn() },
+    );
+    expect(result.success).toBe(true);
+    const data = result.result as { message: string };
+    expect(data.message).toContain('ent-99');
+  });
+});
+
+// ===========================================================================
 // set_script
 // ===========================================================================
 
