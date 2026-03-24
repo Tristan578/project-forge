@@ -489,7 +489,9 @@ export async function POST(request: NextRequest) {
       // usage.inputTokens and usage.outputTokens are the actual values from
       // the model (not the estimated cost charged upfront via resolveApiKey).
       onFinish: async ({ usage }) => {
-        if (auth.ctx.user.id && usage) {
+        // Only log cost when tokens were actually metered (direct backend with usageId).
+        // Gateway/BYOK requests don't have a usageId and should not be logged here.
+        if (auth.ctx.user.id && usageId && usage) {
           const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
           logCost(
             auth.ctx.user.id,
