@@ -9,6 +9,7 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { refundTokens } from '@/lib/tokens/service';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -65,7 +66,9 @@ export async function POST(request: NextRequest) {
     ? (style === 'pixel-art' ? 'sdxl' : 'dalle3')
     : provider;
 
-  const tokenCost = actualProvider === 'dalle3' ? 20 : 10;
+  const tokenCost = actualProvider === 'dalle3'
+    ? TOKEN_COSTS.sprite_generation_dalle3
+    : TOKEN_COSTS.sprite_generation_replicate;
   const serviceName = actualProvider === 'dalle3' ? 'openai' : 'replicate';
 
   let apiKey: string;
