@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Lightbulb, RefreshCw, Play, ChevronDown, ChevronUp, X } from 'lucide-react';
 import {
   generateIdeas,
