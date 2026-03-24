@@ -5,12 +5,15 @@ import {
   parseWorldResponse,
   generateWorld,
   worldToMarkdown,
+  validateWorldConsistency,
+  healWorldConsistency,
   type GameWorld,
   type Faction,
   type Region,
   type TimelineEvent,
   type LoreEntry,
   type WorldRule,
+  type ConsistencyReport,
 } from '../worldBuilder';
 
 // ---- Type structure tests ----
@@ -510,5 +513,330 @@ describe('worldToMarkdown', () => {
     expect(md).toContain('**Relationships:**');
     expect(md).toContain('(ally)');
     expect(md).toContain('(enemy)');
+  });
+});
+
+// ---- validateWorldConsistency tests ----
+
+describe('validateWorldConsistency', () => {
+  const makeWorld = (overrides: Partial<GameWorld> = {}): GameWorld => ({
+    name: 'Test World',
+    description: 'Test',
+    genre: 'fantasy',
+    era: 'Age 1',
+    factions: [
+      { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T1', leader: 'L1', traits: [], relationships: { Beta: 'ally' } },
+      { name: 'Beta', description: 'B', alignment: 'hostile', territory: 'T2', leader: 'L2', traits: [], relationships: { Alpha: 'ally' } },
+    ],
+    regions: [
+      { name: 'North', description: 'N', biome: 'tundra', dangerLevel: 3, resources: [], landmarks: [], connectedTo: ['South'] },
+      { name: 'South', description: 'S', biome: 'desert', dangerLevel: 5, resources: [], landmarks: [], connectedTo: ['North'] },
+    ],
+    timeline: [
+      { year: 0, name: 'Founding', description: 'Founded', impact: 'Started', factionsInvolved: ['Alpha'] },
+      { year: 100, name: 'War', description: 'War', impact: 'Changed things', factionsInvolved: ['Alpha', 'Beta'] },
+    ],
+    lore: [{ title: 'The Legend', category: 'mythology', content: 'Old story' }],
+    rules: [{ name: 'Magic', description: 'Works here', gameplayEffect: 'Spell bonus' }],
+    ...overrides,
+  });
+
+  it('returns valid=true for internally consistent world', () => {
+    const report = validateWorldConsistency(makeWorld());
+    expect(report.valid).toBe(true);
+    const errors = report.issues.filter((i) => i.severity === 'error');
+    expect(errors).toHaveLength(0);
+  });
+
+  it('detects asymmetric faction relationships (error)', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: { Beta: 'enemy' } },
+        { name: 'Beta', description: 'B', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: { Alpha: 'ally' } },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    expect(report.valid).toBe(false);
+    const asym = report.issues.find((i) => i.category === 'faction_symmetry' && i.severity === 'error');
+    expect(asym).toBeDefined();
+    expect(asym?.message).toContain('Asymmetric relationship');
+  });
+
+  it('detects unknown faction name in relationships (error)', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: { Gamma: 'ally' } },
+        { name: 'Beta', description: 'B', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    expect(report.valid).toBe(false);
+    const err = report.issues.find((i) => i.category === 'faction_symmetry' && i.message.includes('unknown faction "Gamma"'));
+    expect(err).toBeDefined();
+  });
+
+  it('detects missing reverse relationship (warning, not error)', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: { Beta: 'ally' } },
+        { name: 'Beta', description: 'B', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    const warn = report.issues.find((i) => i.category === 'faction_symmetry' && i.severity === 'warning');
+    expect(warn).toBeDefined();
+  });
+
+  it('detects missing relationship completeness (warning)', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: {} },
+        { name: 'Beta', description: 'B', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    const warn = report.issues.find((i) => i.category === 'relationship_completeness' && i.severity === 'warning');
+    expect(warn).toBeDefined();
+  });
+
+  it('detects isolated region (warning)', () => {
+    const world = makeWorld({
+      regions: [
+        { name: 'North', description: 'N', biome: 'tundra', dangerLevel: 3, resources: [], landmarks: [], connectedTo: [] },
+        { name: 'South', description: 'S', biome: 'desert', dangerLevel: 5, resources: [], landmarks: [], connectedTo: [] },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    const warn = report.issues.find((i) => i.category === 'region_connectivity' && i.severity === 'warning');
+    expect(warn).toBeDefined();
+    expect(warn?.message).toContain('isolated');
+  });
+
+  it('detects unknown region in connectedTo (error)', () => {
+    const world = makeWorld({
+      regions: [
+        { name: 'North', description: 'N', biome: 'tundra', dangerLevel: 3, resources: [], landmarks: [], connectedTo: ['Atlantis'] },
+        { name: 'South', description: 'S', biome: 'desert', dangerLevel: 5, resources: [], landmarks: [], connectedTo: ['North'] },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    expect(report.valid).toBe(false);
+    const err = report.issues.find((i) => i.category === 'region_connectivity' && i.message.includes('Atlantis'));
+    expect(err).toBeDefined();
+  });
+
+  it('detects timeline out of order (error)', () => {
+    const world = makeWorld({
+      timeline: [
+        { year: 100, name: 'A', description: 'A', impact: 'A', factionsInvolved: [] },
+        { year: 50, name: 'B', description: 'B', impact: 'B', factionsInvolved: [] },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    expect(report.valid).toBe(false);
+    const err = report.issues.find((i) => i.category === 'timeline_ordering' && i.severity === 'error');
+    expect(err).toBeDefined();
+  });
+
+  it('detects duplicate timeline year (warning)', () => {
+    const world = makeWorld({
+      timeline: [
+        { year: 0, name: 'A', description: 'A', impact: 'A', factionsInvolved: [] },
+        { year: 0, name: 'B', description: 'B', impact: 'B', factionsInvolved: [] },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    const warn = report.issues.find((i) => i.category === 'timeline_ordering' && i.severity === 'warning');
+    expect(warn).toBeDefined();
+  });
+
+  it('detects duplicate faction names (error)', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: {} },
+        { name: 'Alpha', description: 'B', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    expect(report.valid).toBe(false);
+    const err = report.issues.find((i) => i.category === 'name_uniqueness' && i.message.includes('"Alpha"'));
+    expect(err).toBeDefined();
+  });
+
+  it('detects duplicate region names (error)', () => {
+    const world = makeWorld({
+      regions: [
+        { name: 'North', description: 'N', biome: 'tundra', dangerLevel: 3, resources: [], landmarks: [], connectedTo: [] },
+        { name: 'North', description: 'N2', biome: 'desert', dangerLevel: 5, resources: [], landmarks: [], connectedTo: [] },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    expect(report.valid).toBe(false);
+    const err = report.issues.find((i) => i.category === 'name_uniqueness' && i.message.includes('"North"'));
+    expect(err).toBeDefined();
+  });
+
+  it('detects unknown faction in timeline factionsInvolved (warning)', () => {
+    const world = makeWorld({
+      timeline: [
+        { year: 0, name: 'Event', description: 'E', impact: 'I', factionsInvolved: ['Gamma'] },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    const warn = report.issues.find((i) => i.category === 'lore_references' && i.severity === 'warning');
+    expect(warn).toBeDefined();
+    expect(warn?.message).toContain('Gamma');
+  });
+
+  it('handles single-faction world: no relationship errors', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Solo', description: 'A', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    // Single faction: no relationship completeness issues
+    const relErrors = report.issues.filter((i) => i.category === 'relationship_completeness');
+    expect(relErrors).toHaveLength(0);
+  });
+
+  it('handles single-region world: no connectivity issues', () => {
+    const world = makeWorld({
+      regions: [
+        { name: 'Lone Isle', description: 'N', biome: 'island', dangerLevel: 3, resources: [], landmarks: [], connectedTo: [] },
+      ],
+    });
+    const report = validateWorldConsistency(world);
+    const connIssues = report.issues.filter((i) => i.category === 'region_connectivity');
+    expect(connIssues).toHaveLength(0);
+  });
+
+  it('all presets pass consistency validation', () => {
+    for (const [key, preset] of Object.entries(WORLD_PRESETS)) {
+      const report = validateWorldConsistency(preset);
+      const errors = report.issues.filter((i) => i.severity === 'error');
+      expect(errors, `Preset "${key}" has consistency errors`).toHaveLength(0);
+    }
+  });
+
+  it('10-faction world with full relationships passes validation', () => {
+    const factionNames = Array.from({ length: 10 }, (_, i) => `F${i}`);
+    // Use 'neutral' for ALL pairs to guarantee full symmetry
+    const factions = factionNames.map((name) => ({
+      name,
+      description: name,
+      alignment: 'neutral' as const,
+      territory: name,
+      leader: name,
+      traits: [],
+      relationships: Object.fromEntries(
+        factionNames.filter((n) => n !== name).map((n) => [n, 'neutral'] as [string, 'neutral'])
+      ),
+    }));
+    const world = makeWorld({ factions });
+    const report = validateWorldConsistency(world);
+    // All relationships are symmetric (all neutral)
+    const symErrors = report.issues.filter((i) => i.category === 'faction_symmetry' && i.severity === 'error');
+    expect(symErrors).toHaveLength(0);
+    // 10 factions * 9 others = 90 relationship entries
+    const totalRels = factions.reduce((sum, f) => sum + Object.keys(f.relationships).length, 0);
+    expect(totalRels).toBe(90);
+  });
+});
+
+// ---- healWorldConsistency tests ----
+
+describe('healWorldConsistency', () => {
+  const makeWorld = (overrides: Partial<GameWorld> = {}): GameWorld => ({
+    name: 'Test',
+    description: 'Test',
+    genre: 'fantasy',
+    era: 'Age 1',
+    factions: [
+      { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: { Beta: 'enemy' } },
+      { name: 'Beta', description: 'B', alignment: 'hostile', territory: 'T', leader: 'L', traits: [], relationships: { Alpha: 'ally' } },
+    ],
+    regions: [
+      { name: 'North', description: 'N', biome: 'tundra', dangerLevel: 3, resources: [], landmarks: [], connectedTo: ['South'] },
+      { name: 'South', description: 'S', biome: 'desert', dangerLevel: 5, resources: [], landmarks: [], connectedTo: [] },
+    ],
+    timeline: [
+      { year: 100, name: 'Later', description: 'L', impact: 'I', factionsInvolved: [] },
+      { year: 0, name: 'Earlier', description: 'E', impact: 'I', factionsInvolved: [] },
+    ],
+    lore: [{ title: 'L', category: 'history', content: 'C' }],
+    rules: [{ name: 'R', description: 'D', gameplayEffect: 'G' }],
+    ...overrides,
+  });
+
+  it('heals asymmetric relationships', () => {
+    const healed = healWorldConsistency(makeWorld());
+    const alpha = healed.factions.find((f) => f.name === 'Alpha')!;
+    const beta = healed.factions.find((f) => f.name === 'Beta')!;
+    // Should be symmetric after healing
+    expect(alpha.relationships.Beta).toBe(beta.relationships.Alpha);
+  });
+
+  it('sorts timeline chronologically', () => {
+    const healed = healWorldConsistency(makeWorld());
+    expect(healed.timeline[0].year).toBe(0);
+    expect(healed.timeline[1].year).toBe(100);
+  });
+
+  it('fills missing relationships with neutral', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L', traits: [], relationships: {} },
+        { name: 'Beta', description: 'B', alignment: 'neutral', territory: 'T', leader: 'L', traits: [], relationships: {} },
+        { name: 'Gamma', description: 'C', alignment: 'hostile', territory: 'T', leader: 'L', traits: [], relationships: {} },
+      ],
+    });
+    const healed = healWorldConsistency(world);
+    const alpha = healed.factions.find((f) => f.name === 'Alpha')!;
+    expect(alpha.relationships.Beta).toBe('neutral');
+    expect(alpha.relationships.Gamma).toBe('neutral');
+  });
+
+  it('removes duplicate faction names, keeping first', () => {
+    const world = makeWorld({
+      factions: [
+        { name: 'Alpha', description: 'A', alignment: 'friendly', territory: 'T', leader: 'L1', traits: [], relationships: {} },
+        { name: 'Alpha', description: 'A2', alignment: 'neutral', territory: 'T', leader: 'L2', traits: [], relationships: {} },
+        { name: 'Beta', description: 'B', alignment: 'hostile', territory: 'T', leader: 'L3', traits: [], relationships: {} },
+      ],
+    });
+    const healed = healWorldConsistency(world);
+    const alphas = healed.factions.filter((f) => f.name === 'Alpha');
+    expect(alphas).toHaveLength(1);
+    expect(alphas[0].leader).toBe('L1');
+  });
+
+  it('removes duplicate region names, keeping first', () => {
+    const world = makeWorld({
+      regions: [
+        { name: 'North', description: 'N1', biome: 'tundra', dangerLevel: 3, resources: [], landmarks: [], connectedTo: [] },
+        { name: 'North', description: 'N2', biome: 'desert', dangerLevel: 5, resources: [], landmarks: [], connectedTo: [] },
+        { name: 'South', description: 'S', biome: 'plains', dangerLevel: 1, resources: [], landmarks: [], connectedTo: [] },
+      ],
+    });
+    const healed = healWorldConsistency(world);
+    const norths = healed.regions.filter((r) => r.name === 'North');
+    expect(norths).toHaveLength(1);
+    expect(norths[0].description).toBe('N1');
+  });
+
+  it('does not mutate the original world', () => {
+    const original = makeWorld();
+    const _healed = healWorldConsistency(original);
+    // Original timeline should still be disordered
+    expect(original.timeline[0].year).toBe(100);
+  });
+
+  it('healed world passes consistency validation', () => {
+    const world = makeWorld();
+    const healed = healWorldConsistency(world);
+    const report = validateWorldConsistency(healed);
+    const errors = report.issues.filter((i) => i.severity === 'error');
+    expect(errors).toHaveLength(0);
   });
 });
