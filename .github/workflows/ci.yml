@@ -157,6 +157,10 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
       - name: Pull Vercel environment (preview)
         working-directory: web
         env:
