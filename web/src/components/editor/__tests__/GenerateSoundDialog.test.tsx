@@ -56,22 +56,22 @@ describe('GenerateSoundDialog', () => {
 
   it('renders Generate Sound heading', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Generate Sound')).toBeDefined();
+    expect(screen.getByText('Generate Sound')).not.toBeNull();
   });
 
   it('renders Sound Effect radio button', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Sound Effect')).toBeDefined();
+    expect(screen.getByText('Sound Effect')).not.toBeNull();
   });
 
   it('renders Voice radio button', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Voice')).toBeDefined();
+    expect(screen.getByText('Voice')).not.toBeNull();
   });
 
   it('shows SFX prompt textarea by default', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText('Sword clashing against metal shield')).toBeDefined();
+    expect(screen.getByPlaceholderText('Sword clashing against metal shield')).not.toBeNull();
   });
 
   it('shows voice text textarea when Voice radio selected', () => {
@@ -79,28 +79,28 @@ describe('GenerateSoundDialog', () => {
     const voiceRadios = screen.getAllByRole('radio');
     // Second radio is Voice
     fireEvent.click(voiceRadios[1]);
-    expect(screen.getByPlaceholderText('Welcome, brave adventurer!')).toBeDefined();
+    expect(screen.getByPlaceholderText('Welcome, brave adventurer!')).not.toBeNull();
   });
 
   it('shows Voice Style select in voice mode', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
     const voiceRadios = screen.getAllByRole('radio');
     fireEvent.click(voiceRadios[1]);
-    expect(screen.getByText('Neutral')).toBeDefined();
-    expect(screen.getByText('Friendly')).toBeDefined();
-    expect(screen.getByText('Sinister')).toBeDefined();
+    expect(screen.getByText('Neutral')).not.toBeNull();
+    expect(screen.getByText('Friendly')).not.toBeNull();
+    expect(screen.getByText('Sinister')).not.toBeNull();
   });
 
   it('renders token cost of 20 for sfx', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('20')).toBeDefined();
+    expect(screen.getByText('20')).not.toBeNull();
   });
 
   it('renders token cost of 40 for voice', () => {
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} />);
     const voiceRadios = screen.getAllByRole('radio');
     fireEvent.click(voiceRadios[1]);
-    expect(screen.getByText('40')).toBeDefined();
+    expect(screen.getByText('40')).not.toBeNull();
   });
 
   it('disables Generate when prompt is empty', () => {
@@ -132,8 +132,8 @@ describe('GenerateSoundDialog', () => {
   it('shows auto-attach checkbox when entityId provided', () => {
     setupStore(1000, 'Player');
     render(<GenerateSoundDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByText(/Auto-attach to/)).toBeDefined();
-    expect(screen.getByText('Player')).toBeDefined();
+    expect(screen.getByText(/Auto-attach to/)).not.toBeNull();
+    expect(screen.getByText('Player')).not.toBeNull();
   });
 
   it('hides auto-attach checkbox when no entityId', () => {

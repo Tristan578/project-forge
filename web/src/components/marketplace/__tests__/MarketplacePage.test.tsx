@@ -96,10 +96,10 @@ describe('MarketplacePage', () => {
   it('renders All Assets and category buttons', () => {
     setupStore();
     render(<MarketplacePage />);
-    expect(screen.getByText('All Assets')).toBeDefined();
-    expect(screen.getByText('3D Models')).toBeDefined();
-    expect(screen.getByText('Sprites')).toBeDefined();
-    expect(screen.getByText('Audio')).toBeDefined();
+    expect(screen.getByText('All Assets')).not.toBeNull();
+    expect(screen.getByText('3D Models')).not.toBeNull();
+    expect(screen.getByText('Sprites')).not.toBeNull();
+    expect(screen.getByText('Audio')).not.toBeNull();
   });
 
   it('calls setCategory(null) when "All Assets" is clicked', () => {
@@ -121,7 +121,7 @@ describe('MarketplacePage', () => {
   it('renders search input', () => {
     setupStore();
     render(<MarketplacePage />);
-    expect(screen.getByPlaceholderText('Search assets...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Search assets...')).not.toBeNull();
   });
 
   it('calls setSearchQuery on input change', () => {
@@ -161,7 +161,7 @@ describe('MarketplacePage', () => {
   it('renders price filter selector', () => {
     setupStore();
     render(<MarketplacePage />);
-    expect(screen.getByDisplayValue('All Prices')).toBeDefined();
+    expect(screen.getByDisplayValue('All Prices')).not.toBeNull();
   });
 
   it('calls setPriceFilter when price option is changed', () => {
@@ -177,10 +177,10 @@ describe('MarketplacePage', () => {
   it('renders asset cards for each asset', () => {
     setupStore({ assets: [makeAsset('a1', 'Sword'), makeAsset('a2', 'Shield')] });
     render(<MarketplacePage />);
-    expect(screen.getByTestId('asset-card-a1')).toBeDefined();
-    expect(screen.getByTestId('asset-card-a2')).toBeDefined();
-    expect(screen.getByText('Sword')).toBeDefined();
-    expect(screen.getByText('Shield')).toBeDefined();
+    expect(screen.getByTestId('asset-card-a1')).not.toBeNull();
+    expect(screen.getByTestId('asset-card-a2')).not.toBeNull();
+    expect(screen.getByText('Sword')).not.toBeNull();
+    expect(screen.getByText('Shield')).not.toBeNull();
   });
 
   // ── Empty state ────────────────────────────────────────────────────────
@@ -188,7 +188,7 @@ describe('MarketplacePage', () => {
   it('shows empty state message when no assets and not loading', () => {
     setupStore({ assets: [], loading: false });
     render(<MarketplacePage />);
-    expect(screen.getByText(/no assets found/i)).toBeDefined();
+    expect(screen.getByText(/no assets found/i)).not.toBeNull();
   });
 
   // ── Loading state ──────────────────────────────────────────────────────
@@ -196,7 +196,7 @@ describe('MarketplacePage', () => {
   it('shows loading message when loading with no assets', () => {
     setupStore({ assets: [], loading: true });
     render(<MarketplacePage />);
-    expect(screen.getByText('Loading...')).toBeDefined();
+    expect(screen.getByText('Loading...')).not.toBeNull();
   });
 
   // ── Error state ────────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ describe('MarketplacePage', () => {
   it('shows error message when error is set', () => {
     setupStore({ error: 'Failed to fetch assets', assets: [] });
     render(<MarketplacePage />);
-    expect(screen.getByText('Failed to fetch assets')).toBeDefined();
+    expect(screen.getByText('Failed to fetch assets')).not.toBeNull();
   });
 
   // ── Load more ──────────────────────────────────────────────────────────
@@ -212,7 +212,7 @@ describe('MarketplacePage', () => {
   it('shows Load More button when hasMore is true and assets exist', () => {
     setupStore({ assets: [makeAsset('a1')], hasMore: true });
     render(<MarketplacePage />);
-    expect(screen.getByText('Load More')).toBeDefined();
+    expect(screen.getByText('Load More')).not.toBeNull();
   });
 
   it('calls fetchAssets(false) when Load More is clicked', () => {
@@ -231,6 +231,6 @@ describe('MarketplacePage', () => {
   it('Load More button shows loading text when loading', () => {
     setupStore({ assets: [makeAsset('a1')], hasMore: true, loading: true });
     render(<MarketplacePage />);
-    expect(screen.getByText('Loading...')).toBeDefined();
+    expect(screen.getByText('Loading...')).not.toBeNull();
   });
 });

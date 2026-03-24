@@ -51,14 +51,14 @@ describe('TokenWarningBanner', () => {
     const banner = screen.getByTestId('token-warning-banner');
     expect(banner).toBeDefined();
     expect(banner.getAttribute('role')).toBe('alert');
-    expect(screen.getByText(/below 20%/)).toBeDefined();
+    expect(screen.getByText(/below 20%/)).not.toBeNull();
   });
 
   it('shows remaining token count in the banner', () => {
     mockState.tokenBalance = { monthlyRemaining: 500, monthlyTotal: 10000, addon: 0, total: 500, nextRefillDate: null };
     render(<TokenWarningBanner />);
-    expect(screen.getByText(/500/)).toBeDefined();
-    expect(screen.getByText(/10,000/)).toBeDefined();
+    expect(screen.getByText(/500/)).not.toBeNull();
+    expect(screen.getByText(/10,000/)).not.toBeNull();
   });
 
   it('shows Buy Tokens link pointing to billing', () => {
@@ -90,7 +90,7 @@ describe('TokenWarningBanner', () => {
     const banner = screen.getByTestId('payment-warning-banner');
     expect(banner).toBeDefined();
     expect(banner.getAttribute('role')).toBe('alert');
-    expect(screen.getByText(/payment method has failed/)).toBeDefined();
+    expect(screen.getByText(/payment method has failed/)).not.toBeNull();
   });
 
   it('shows Update Payment link in payment recovery banner', () => {
@@ -119,8 +119,8 @@ describe('TokenWarningBanner', () => {
     mockState.tokenBalance = { monthlyRemaining: 100, monthlyTotal: 10000, addon: 0, total: 100, nextRefillDate: null };
     mockState.billingStatus = { tier: 'creator', stripeCustomerId: 'cus_123', billingCycleStart: null, subscriptionStatus: 'past_due' };
     render(<TokenWarningBanner />);
-    expect(screen.getByTestId('token-warning-banner')).toBeDefined();
-    expect(screen.getByTestId('payment-warning-banner')).toBeDefined();
+    expect(screen.getByTestId('token-warning-banner')).not.toBeNull();
+    expect(screen.getByTestId('payment-warning-banner')).not.toBeNull();
   });
 
   it('handles zero monthlyTotal without crashing', () => {
@@ -132,7 +132,7 @@ describe('TokenWarningBanner', () => {
   it('shows warning below 20% boundary', () => {
     mockState.tokenBalance = { monthlyRemaining: 1999, monthlyTotal: 10000, addon: 0, total: 1999, nextRefillDate: null };
     render(<TokenWarningBanner />);
-    expect(screen.getByTestId('token-warning-banner')).toBeDefined();
+    expect(screen.getByTestId('token-warning-banner')).not.toBeNull();
   });
 
   it('does not show warning at exactly 20%', () => {
@@ -148,7 +148,7 @@ describe('TokenWarningBanner', () => {
       mockState.tokenBalance = { monthlyRemaining: 100, monthlyTotal: 10000, addon: 0, total: 100, nextRefillDate: null };
       // Should not throw; defaults to false (not dismissed), so banner should appear
       render(<TokenWarningBanner />);
-      expect(screen.getByTestId('token-warning-banner')).toBeDefined();
+      expect(screen.getByTestId('token-warning-banner')).not.toBeNull();
     } finally {
       Storage.prototype.getItem = originalGetItem;
     }
@@ -160,7 +160,7 @@ describe('TokenWarningBanner', () => {
     try {
       mockState.billingStatus = { tier: 'creator', stripeCustomerId: 'cus_123', billingCycleStart: null, subscriptionStatus: 'past_due' };
       render(<TokenWarningBanner />);
-      expect(screen.getByTestId('payment-warning-banner')).toBeDefined();
+      expect(screen.getByTestId('payment-warning-banner')).not.toBeNull();
     } finally {
       Storage.prototype.getItem = originalGetItem;
     }

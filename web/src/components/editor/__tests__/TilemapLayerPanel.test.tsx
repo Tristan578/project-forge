@@ -79,13 +79,13 @@ describe('TilemapLayerPanel', () => {
   it('renders Layers heading', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
-    expect(screen.getByText('Layers')).toBeDefined();
+    expect(screen.getByText('Layers')).not.toBeNull();
   });
 
   it('renders Add Layer button with title', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
-    expect(screen.getByTitle('Add Layer')).toBeDefined();
+    expect(screen.getByTitle('Add Layer')).not.toBeNull();
   });
 
   it('calls setTilemapData with new layer when Add Layer clicked', () => {
@@ -136,13 +136,13 @@ describe('TilemapLayerPanel', () => {
   it('shows visibility toggle button for visible layer', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
-    expect(screen.getByTitle('Hide layer')).toBeDefined();
+    expect(screen.getByTitle('Hide layer')).not.toBeNull();
   });
 
   it('shows visibility toggle button for hidden layer', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
-    expect(screen.getByTitle('Show layer')).toBeDefined();
+    expect(screen.getByTitle('Show layer')).not.toBeNull();
   });
 
   it('calls setTilemapData when visibility toggle clicked', () => {
@@ -162,13 +162,13 @@ describe('TilemapLayerPanel', () => {
   it('shows collision toggle with "Collision enabled" title for collision layer', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
-    expect(screen.getByTitle('Collision enabled')).toBeDefined();
+    expect(screen.getByTitle('Collision enabled')).not.toBeNull();
   });
 
   it('shows collision toggle with "Collision disabled" title for non-collision layer', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapLayerPanel />);
-    expect(screen.getByTitle('Collision disabled')).toBeDefined();
+    expect(screen.getByTitle('Collision disabled')).not.toBeNull();
   });
 
   it('shows opacity percentage text for each layer', () => {
@@ -176,7 +176,7 @@ describe('TilemapLayerPanel', () => {
     render(<TilemapLayerPanel />);
     // Layer 1 has opacity 1 = 100%, Layer 2 has opacity 0.5 = 50%
     expect(screen.getAllByText('100%').length).toBeGreaterThan(0);
-    expect(screen.getByText('50%')).toBeDefined();
+    expect(screen.getByText('50%')).not.toBeNull();
   });
 
   it('shows Delete layer button when more than one layer exists', () => {
@@ -199,8 +199,8 @@ describe('TilemapLayerPanel', () => {
   it('renders Layer Opacity slider for active layer', () => {
     setupStore({ tilemapData: baseTilemapData, activeLayerIndex: 0 });
     render(<TilemapLayerPanel />);
-    expect(screen.getByText('Layer Opacity')).toBeDefined();
-    expect(screen.getByRole('slider')).toBeDefined();
+    expect(screen.getByText('Layer Opacity')).not.toBeNull();
+    expect(screen.getByRole('slider')).not.toBeNull();
   });
 
   it('calls setTilemapData when delete layer confirmed', () => {

@@ -63,7 +63,7 @@ describe('TokenDashboard', () => {
   it('renders Token Balance heading', () => {
     setupStore();
     render(<TokenDashboard />);
-    expect(screen.getByText('Token Balance')).toBeDefined();
+    expect(screen.getByText('Token Balance')).not.toBeNull();
   });
 
   it('calls fetchBalance on mount', () => {
@@ -75,7 +75,7 @@ describe('TokenDashboard', () => {
   it('shows Loading when tokenBalance is null', () => {
     setupStore({ tokenBalance: null });
     render(<TokenDashboard />);
-    expect(screen.getByText('Loading...')).toBeDefined();
+    expect(screen.getByText('Loading...')).not.toBeNull();
   });
 
   it('renders total available tokens when balance loaded', () => {
@@ -83,8 +83,8 @@ describe('TokenDashboard', () => {
       tokenBalance: { total: 12345, monthlyRemaining: 8000, addon: 4345 },
     });
     render(<TokenDashboard />);
-    expect(screen.getByText('12,345')).toBeDefined();
-    expect(screen.getByText('Total Available')).toBeDefined();
+    expect(screen.getByText('12,345')).not.toBeNull();
+    expect(screen.getByText('Total Available')).not.toBeNull();
   });
 
   it('renders monthly remaining tokens', () => {
@@ -92,8 +92,8 @@ describe('TokenDashboard', () => {
       tokenBalance: { total: 12345, monthlyRemaining: 8000, addon: 4345 },
     });
     render(<TokenDashboard />);
-    expect(screen.getByText('8,000')).toBeDefined();
-    expect(screen.getByText('Monthly Remaining')).toBeDefined();
+    expect(screen.getByText('8,000')).not.toBeNull();
+    expect(screen.getByText('Monthly Remaining')).not.toBeNull();
   });
 
   it('renders addon tokens', () => {
@@ -101,8 +101,8 @@ describe('TokenDashboard', () => {
       tokenBalance: { total: 12345, monthlyRemaining: 8000, addon: 4345 },
     });
     render(<TokenDashboard />);
-    expect(screen.getByText('4,345')).toBeDefined();
-    expect(screen.getByText('Add-On')).toBeDefined();
+    expect(screen.getByText('4,345')).not.toBeNull();
+    expect(screen.getByText('Add-On')).not.toBeNull();
   });
 
   it('shows Buy More Tokens for non-starter tier', () => {
@@ -111,7 +111,7 @@ describe('TokenDashboard', () => {
       tier: 'hobbyist',
     });
     render(<TokenDashboard />);
-    expect(screen.getByText('Buy More Tokens')).toBeDefined();
+    expect(screen.getByText('Buy More Tokens')).not.toBeNull();
   });
 
   it('hides Buy More Tokens for starter tier', () => {
@@ -129,7 +129,7 @@ describe('TokenDashboard', () => {
       tier: 'hobbyist',
     });
     render(<TokenDashboard />);
-    expect(screen.getByText('Spark')).toBeDefined();
-    expect(screen.getByText('Blaze')).toBeDefined();
+    expect(screen.getByText('Spark')).not.toBeNull();
+    expect(screen.getByText('Blaze')).not.toBeNull();
   });
 });

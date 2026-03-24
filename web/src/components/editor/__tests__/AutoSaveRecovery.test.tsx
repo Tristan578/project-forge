@@ -99,7 +99,7 @@ describe('AutoSaveRecovery', () => {
       mockStore({ lastCloudSave: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() });
       render(<AutoSaveRecovery />);
       await flushPromises();
-      expect(screen.queryByText('Unsaved work recovered')).toBeDefined();
+      expect(screen.queryByText('Unsaved work recovered')).not.toBeNull();
     });
   });
 
@@ -187,7 +187,7 @@ describe('AutoSaveRecovery', () => {
       render(<AutoSaveRecovery />);
       await flushPromises();
       // With no cloud save to compare against, the dialog should show
-      expect(screen.queryByText('Unsaved work recovered')).toBeDefined();
+      expect(screen.queryByText('Unsaved work recovered')).not.toBeNull();
     });
 
     it('does not show dialog when lastCloudSave is set and is newer', async () => {

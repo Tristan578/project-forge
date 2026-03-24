@@ -104,12 +104,12 @@ describe('ChatPanel', () => {
 
   it('renders without crashing', () => {
     render(<ChatPanel />);
-    expect(screen.getByText('AI Assistant')).toBeDefined();
+    expect(screen.getByText('AI Assistant')).not.toBeNull();
   });
 
   it('shows description text and suggestion chips when no messages', () => {
     render(<ChatPanel />);
-    expect(screen.getByText('Describe what you want to build.')).toBeDefined();
+    expect(screen.getByText('Describe what you want to build.')).not.toBeNull();
     // Dynamic suggestions should be rendered (empty scene suggestions)
     const buttons = screen.getAllByRole('button');
     // Should have suggestion chip buttons
@@ -120,12 +120,12 @@ describe('ChatPanel', () => {
   it('renders the ChatInput component', () => {
     render(<ChatPanel />);
     // ChatInput renders a textarea with aria-label "Chat message"
-    expect(screen.getByLabelText('Chat message')).toBeDefined();
+    expect(screen.getByLabelText('Chat message')).not.toBeNull();
   });
 
   it('renders conversation switcher', () => {
     render(<ChatPanel />);
     // ConversationList renders a button with "New Chat" or similar
-    expect(screen.getByLabelText('Switch conversation')).toBeDefined();
+    expect(screen.getByLabelText('Switch conversation')).not.toBeNull();
   });
 });

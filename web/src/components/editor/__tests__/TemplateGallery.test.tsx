@@ -67,22 +67,22 @@ describe('TemplateGallery', () => {
 
   it('renders Choose a Template heading when open', () => {
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Choose a Template')).toBeDefined();
+    expect(screen.getByText('Choose a Template')).not.toBeNull();
   });
 
   it('renders subtitle text', () => {
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Start with a pre-built game or a blank project')).toBeDefined();
+    expect(screen.getByText('Start with a pre-built game or a blank project')).not.toBeNull();
   });
 
   it('renders Blank Project card', () => {
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Blank Project')).toBeDefined();
+    expect(screen.getByText('Blank Project')).not.toBeNull();
   });
 
   it('renders close button with aria-label', () => {
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByLabelText('Close template gallery')).toBeDefined();
+    expect(screen.getByLabelText('Close template gallery')).not.toBeNull();
   });
 
   it('calls onClose when close button clicked', () => {
@@ -100,7 +100,7 @@ describe('TemplateGallery', () => {
 
   it('has role="dialog" on the modal', () => {
     render(<TemplateGallery isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByRole('dialog')).toBeDefined();
+    expect(screen.getByRole('dialog')).not.toBeNull();
   });
 
   it('calls onClose when Escape key pressed', () => {

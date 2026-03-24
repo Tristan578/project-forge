@@ -59,7 +59,7 @@ describe('ShortcutCheatSheet', () => {
 
   it('renders search input', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
-    expect(screen.getByLabelText('Search shortcuts')).toBeDefined();
+    expect(screen.getByLabelText('Search shortcuts')).not.toBeNull();
   });
 
   it('filters shortcuts by search query', () => {
@@ -75,7 +75,7 @@ describe('ShortcutCheatSheet', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
     const searchInput = screen.getByLabelText('Search shortcuts');
     fireEvent.change(searchInput, { target: { value: 'xyznonexistent' } });
-    expect(screen.getByText(/No shortcuts match/)).toBeDefined();
+    expect(screen.getByText(/No shortcuts match/)).not.toBeNull();
   });
 
   it('filters by category name', () => {
@@ -151,7 +151,7 @@ describe('ShortcutCheatSheet', () => {
 
   it('renders footer hint text', () => {
     render(<ShortcutCheatSheet open={true} onClose={mockOnClose} />);
-    expect(screen.getByText(/to toggle this overlay/)).toBeDefined();
+    expect(screen.getByText(/to toggle this overlay/)).not.toBeNull();
   });
 
   it('renders key badges with kbd elements', () => {

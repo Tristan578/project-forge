@@ -60,7 +60,7 @@ describe('WelcomeWizard', () => {
         onSkip={mockOnSkip}
       />
     );
-    expect(screen.getByText('Welcome to SpawnForge!')).toBeDefined();
+    expect(screen.getByText('Welcome to SpawnForge!')).not.toBeNull();
   });
 
   it('renders Start a Tutorial option', () => {
@@ -72,7 +72,7 @@ describe('WelcomeWizard', () => {
         onSkip={mockOnSkip}
       />
     );
-    expect(screen.getByText('Start a Tutorial')).toBeDefined();
+    expect(screen.getByText('Start a Tutorial')).not.toBeNull();
   });
 
   it('renders Choose a Template option', () => {
@@ -84,7 +84,7 @@ describe('WelcomeWizard', () => {
         onSkip={mockOnSkip}
       />
     );
-    expect(screen.getByText('Choose a Template')).toBeDefined();
+    expect(screen.getByText('Choose a Template')).not.toBeNull();
   });
 
   it('renders Jump Right In option', () => {
@@ -96,7 +96,7 @@ describe('WelcomeWizard', () => {
         onSkip={mockOnSkip}
       />
     );
-    expect(screen.getByText('Jump Right In')).toBeDefined();
+    expect(screen.getByText('Jump Right In')).not.toBeNull();
   });
 
   it('calls onStartTutorial when Start a Tutorial clicked', () => {
@@ -147,7 +147,7 @@ describe('WelcomeWizard', () => {
         onSkip={mockOnSkip}
       />
     );
-    expect(screen.getByText("Don't show this again")).toBeDefined();
+    expect(screen.getByText("Don't show this again")).not.toBeNull();
   });
 
   it('calls recordVisit when checkbox is checked and action taken', () => {

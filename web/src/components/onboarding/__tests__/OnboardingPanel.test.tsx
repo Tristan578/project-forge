@@ -110,27 +110,27 @@ describe('OnboardingPanel', () => {
   it('renders Getting Started heading', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('Getting Started')).toBeDefined();
+    expect(screen.getByText('Getting Started')).not.toBeNull();
   });
 
   it('renders Tutorials section heading', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('Tutorials')).toBeDefined();
+    expect(screen.getByText('Tutorials')).not.toBeNull();
   });
 
   it('renders tutorial names', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('The Basics')).toBeDefined();
-    expect(screen.getByText('Physics 101')).toBeDefined();
+    expect(screen.getByText('The Basics')).not.toBeNull();
+    expect(screen.getByText('Physics 101')).not.toBeNull();
   });
 
   it('renders tutorial difficulty and time', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('beginner')).toBeDefined();
-    expect(screen.getByText('5 min')).toBeDefined();
+    expect(screen.getByText('beginner')).not.toBeNull();
+    expect(screen.getByText('5 min')).not.toBeNull();
   });
 
   it('calls startTutorial when tutorial button clicked', () => {
@@ -143,47 +143,47 @@ describe('OnboardingPanel', () => {
   it('renders Feature Checklist section', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('Feature Checklist')).toBeDefined();
+    expect(screen.getByText('Feature Checklist')).not.toBeNull();
   });
 
   it('renders Basic Skills section with task labels', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('Basic Skills')).toBeDefined();
-    expect(screen.getByText('Create an Entity')).toBeDefined();
-    expect(screen.getByText('Add a Material')).toBeDefined();
+    expect(screen.getByText('Basic Skills')).not.toBeNull();
+    expect(screen.getByText('Create an Entity')).not.toBeNull();
+    expect(screen.getByText('Add a Material')).not.toBeNull();
   });
 
   it('renders Advanced Skills section', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('Advanced Skills')).toBeDefined();
-    expect(screen.getByText('Write a Script')).toBeDefined();
+    expect(screen.getByText('Advanced Skills')).not.toBeNull();
+    expect(screen.getByText('Write a Script')).not.toBeNull();
   });
 
   it('renders basic task progress count', () => {
     setupStore({ basicTasks: { 'create-entity': true } });
     render(<OnboardingPanel />);
     // "1 / 2" for basic tasks
-    expect(screen.getByText('1 / 2')).toBeDefined();
+    expect(screen.getByText('1 / 2')).not.toBeNull();
   });
 
   it('renders Achievements section heading', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('Achievements')).toBeDefined();
+    expect(screen.getByText('Achievements')).not.toBeNull();
   });
 
   it('renders achievement name', () => {
     setupStore();
     render(<OnboardingPanel />);
-    expect(screen.getByText('First Steps')).toBeDefined();
+    expect(screen.getByText('First Steps')).not.toBeNull();
   });
 
   it('renders lock icon for locked achievements', () => {
     setupStore({ unlockedAchievements: [] });
     render(<OnboardingPanel />);
-    expect(screen.getByTestId('lock-icon')).toBeDefined();
+    expect(screen.getByTestId('lock-icon')).not.toBeNull();
   });
 
   it('calls setShowOnboardingPanel(false) when X clicked', () => {

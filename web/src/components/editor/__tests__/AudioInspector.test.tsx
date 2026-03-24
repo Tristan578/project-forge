@@ -48,8 +48,8 @@ describe('AudioInspector', () => {
   it('shows Add Audio button when no audio is attached', () => {
     mockEditorStore();
     render(<AudioInspector />);
-    expect(screen.getByText('Audio')).toBeDefined();
-    expect(screen.getByText('Add Audio')).toBeDefined();
+    expect(screen.getByText('Audio')).not.toBeNull();
+    expect(screen.getByText('Add Audio')).not.toBeNull();
   });
 
   it('shows audio controls when audio data exists', () => {
@@ -67,11 +67,11 @@ describe('AudioInspector', () => {
       },
     });
     render(<AudioInspector />);
-    expect(screen.getByText('Volume')).toBeDefined();
-    expect(screen.getByText('Pitch')).toBeDefined();
-    expect(screen.getByText('Loop')).toBeDefined();
-    expect(screen.getByText('Preview')).toBeDefined();
-    expect(screen.getByText('Remove Audio')).toBeDefined();
+    expect(screen.getByText('Volume')).not.toBeNull();
+    expect(screen.getByText('Pitch')).not.toBeNull();
+    expect(screen.getByText('Loop')).not.toBeNull();
+    expect(screen.getByText('Preview')).not.toBeNull();
+    expect(screen.getByText('Remove Audio')).not.toBeNull();
   });
 
   it('shows spatial audio settings when spatial is enabled', () => {
@@ -89,8 +89,8 @@ describe('AudioInspector', () => {
       },
     });
     render(<AudioInspector />);
-    expect(screen.getByText('Max Distance')).toBeDefined();
-    expect(screen.getByText('Ref Distance')).toBeDefined();
-    expect(screen.getByText('Rolloff')).toBeDefined();
+    expect(screen.getByText('Max Distance')).not.toBeNull();
+    expect(screen.getByText('Ref Distance')).not.toBeNull();
+    expect(screen.getByText('Rolloff')).not.toBeNull();
   });
 });

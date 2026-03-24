@@ -36,24 +36,24 @@ describe('ServiceStatusCard', () => {
 
   it('renders the service name', () => {
     render(<ServiceStatusCard service={makeService({ name: 'Database' })} />);
-    expect(screen.getByText('Database')).toBeDefined();
+    expect(screen.getByText('Database')).not.toBeNull();
   });
 
   // ── Status variants ────────────────────────────────────────────────────
 
   it('shows "Healthy" label for healthy status', () => {
     render(<ServiceStatusCard service={makeService({ status: 'healthy' })} />);
-    expect(screen.getByText('Healthy')).toBeDefined();
+    expect(screen.getByText('Healthy')).not.toBeNull();
   });
 
   it('shows "Degraded" label for degraded status', () => {
     render(<ServiceStatusCard service={makeService({ status: 'degraded' })} />);
-    expect(screen.getByText('Degraded')).toBeDefined();
+    expect(screen.getByText('Degraded')).not.toBeNull();
   });
 
   it('shows "Down" label for down status', () => {
     render(<ServiceStatusCard service={makeService({ status: 'down' })} />);
-    expect(screen.getByText('Down')).toBeDefined();
+    expect(screen.getByText('Down')).not.toBeNull();
   });
 
   // ── Latency ────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ describe('ServiceStatusCard', () => {
     render(
       <ServiceStatusCard service={makeService({ status: 'down', error: 'Connection refused' })} />
     );
-    expect(screen.getByText('Connection refused')).toBeDefined();
+    expect(screen.getByText('Connection refused')).not.toBeNull();
   });
 
   it('does not show error block when no error', () => {

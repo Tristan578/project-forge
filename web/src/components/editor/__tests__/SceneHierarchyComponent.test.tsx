@@ -199,27 +199,27 @@ describe('SceneHierarchy', () => {
   it('renders header with title', () => {
     setupStore();
     render(<SceneHierarchy />);
-    expect(screen.getByText('Scene Hierarchy')).toBeDefined();
+    expect(screen.getByText('Scene Hierarchy')).not.toBeNull();
   });
 
   it('renders scene nodes from graph', () => {
     setupStore();
     render(<SceneHierarchy />);
-    expect(screen.getByTestId('scene-node-a')).toBeDefined();
-    expect(screen.getByTestId('scene-node-c')).toBeDefined();
-    expect(screen.getByTestId('scene-node-d')).toBeDefined();
+    expect(screen.getByTestId('scene-node-a')).not.toBeNull();
+    expect(screen.getByTestId('scene-node-c')).not.toBeNull();
+    expect(screen.getByTestId('scene-node-d')).not.toBeNull();
   });
 
   it('renders search component', () => {
     setupStore();
     render(<SceneHierarchy />);
-    expect(screen.getByTestId('hierarchy-search')).toBeDefined();
+    expect(screen.getByTestId('hierarchy-search')).not.toBeNull();
   });
 
   it('shows selection count when entities are selected', () => {
     setupStore({ selectedIds: new Set(['a', 'c']) });
     render(<SceneHierarchy />);
-    expect(screen.getByText('2 selected')).toBeDefined();
+    expect(screen.getByText('2 selected')).not.toBeNull();
   });
 
   it('does not show selection count when nothing selected', () => {
@@ -256,11 +256,11 @@ describe('SceneHierarchy', () => {
     const nodeEl = screen.getByTestId('scene-node-c');
     fireEvent.contextMenu(nodeEl, { clientX: 100, clientY: 200 });
 
-    expect(screen.getByTestId('context-menu')).toBeDefined();
-    expect(screen.getByTestId('ctx-rename')).toBeDefined();
-    expect(screen.getByTestId('ctx-focus')).toBeDefined();
-    expect(screen.getByTestId('ctx-duplicate')).toBeDefined();
-    expect(screen.getByTestId('ctx-delete')).toBeDefined();
+    expect(screen.getByTestId('context-menu')).not.toBeNull();
+    expect(screen.getByTestId('ctx-rename')).not.toBeNull();
+    expect(screen.getByTestId('ctx-focus')).not.toBeNull();
+    expect(screen.getByTestId('ctx-duplicate')).not.toBeNull();
+    expect(screen.getByTestId('ctx-delete')).not.toBeNull();
   });
 
   it('rename action from context menu enables editing', () => {
@@ -272,7 +272,7 @@ describe('SceneHierarchy', () => {
     fireEvent.click(screen.getByTestId('ctx-rename'));
 
     // Editing input should appear for entity 'c'
-    expect(screen.getByTestId('rename-input-c')).toBeDefined();
+    expect(screen.getByTestId('rename-input-c')).not.toBeNull();
   });
 
   it('duplicate action from context menu calls duplicateSelectedEntity', () => {
@@ -400,7 +400,7 @@ describe('SceneHierarchy', () => {
     fireEvent.keyDown(tree, { key: 'ArrowDown' }); // Focus Camera (a)
     fireEvent.keyDown(tree, { key: 'F2' });
 
-    expect(screen.getByTestId('rename-input-a')).toBeDefined();
+    expect(screen.getByTestId('rename-input-a')).not.toBeNull();
   });
 
   it('Shift+F10 opens context menu for focused entity', () => {
@@ -411,7 +411,7 @@ describe('SceneHierarchy', () => {
     fireEvent.keyDown(tree, { key: 'ArrowDown' }); // Focus Camera (a)
     fireEvent.keyDown(tree, { key: 'F10', shiftKey: true });
 
-    expect(screen.getByTestId('context-menu')).toBeDefined();
+    expect(screen.getByTestId('context-menu')).not.toBeNull();
   });
 
   // ── Rename flow ───────────────────────────────────────────────────────

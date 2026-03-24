@@ -34,7 +34,7 @@ describe('AddEntityMenu', () => {
 
   it('renders correctly', () => {
     render(<AddEntityMenu onSpawn={mockSpawnEntity} />);
-    expect(screen.getByRole('button', { name: /Add Entity/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /Add Entity/i })).not.toBeNull();
   });
 
   it('opens menu when clicked', async () => {
@@ -43,7 +43,7 @@ describe('AddEntityMenu', () => {
     fireEvent.click(buttons[0]);
 
     // Should show Meshes and other groups (using findBy to wait for render)
-    expect(await screen.findByText('Meshes')).toBeDefined();
+    expect(await screen.findByText('Meshes')).not.toBeNull();
     expect(screen.getAllByText('Cube').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Sphere').length).toBeGreaterThan(0);
   });

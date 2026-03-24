@@ -19,7 +19,7 @@ describe('StarRating', () => {
 
   it('displays count when provided', () => {
     render(<StarRating value={4.5} count={12} />);
-    expect(screen.getByText('(12)')).toBeDefined();
+    expect(screen.getByText('(12)')).not.toBeNull();
   });
 
   it('does not display count when not provided', () => {

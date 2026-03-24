@@ -26,17 +26,17 @@ describe('AssetUploadDialog', () => {
 
   it('renders Create Asset Listing heading', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByText('Create Asset Listing')).toBeDefined();
+    expect(screen.getByText('Create Asset Listing')).not.toBeNull();
   });
 
   it('renders Name input field', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByPlaceholderText('My Awesome Asset')).toBeDefined();
+    expect(screen.getByPlaceholderText('My Awesome Asset')).not.toBeNull();
   });
 
   it('renders Description textarea', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByPlaceholderText('Describe your asset, its features, and usage...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Describe your asset, its features, and usage...')).not.toBeNull();
   });
 
   it('renders Category select with 3D Model as default', () => {
@@ -49,23 +49,23 @@ describe('AssetUploadDialog', () => {
 
   it('renders all category options', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByText('3D Model')).toBeDefined();
-    expect(screen.getByText('Sprite')).toBeDefined();
-    expect(screen.getByText('Texture')).toBeDefined();
-    expect(screen.getByText('Audio')).toBeDefined();
-    expect(screen.getByText('Script')).toBeDefined();
+    expect(screen.getByText('3D Model')).not.toBeNull();
+    expect(screen.getByText('Sprite')).not.toBeNull();
+    expect(screen.getByText('Texture')).not.toBeNull();
+    expect(screen.getByText('Audio')).not.toBeNull();
+    expect(screen.getByText('Script')).not.toBeNull();
   });
 
   it('renders License options', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByText(/Standard/)).toBeDefined();
-    expect(screen.getByText(/Extended/)).toBeDefined();
+    expect(screen.getByText(/Standard/)).not.toBeNull();
+    expect(screen.getByText(/Extended/)).not.toBeNull();
   });
 
   it('renders Create Listing and Cancel buttons', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByText('Create Listing')).toBeDefined();
-    expect(screen.getByText('Cancel')).toBeDefined();
+    expect(screen.getByText('Create Listing')).not.toBeNull();
+    expect(screen.getByText('Cancel')).not.toBeNull();
   });
 
   it('calls onClose when Cancel clicked', () => {
@@ -89,12 +89,12 @@ describe('AssetUploadDialog', () => {
 
   it('renders AI-generated checkbox', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByText(/AI-generated/)).toBeDefined();
+    expect(screen.getByText(/AI-generated/)).not.toBeNull();
   });
 
   it('renders Tags input field', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
-    expect(screen.getByPlaceholderText('fantasy, low-poly, environment')).toBeDefined();
+    expect(screen.getByPlaceholderText('fantasy, low-poly, environment')).not.toBeNull();
   });
 
   it('renders Price input with default 0', () => {

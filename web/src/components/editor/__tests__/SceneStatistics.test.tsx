@@ -53,7 +53,7 @@ describe('SceneStatistics', () => {
   it('renders Scene Statistics button', () => {
     setupStore();
     render(<SceneStatistics />);
-    expect(screen.getByText('Scene Statistics')).toBeDefined();
+    expect(screen.getByText('Scene Statistics')).not.toBeNull();
   });
 
   it('shows entity count in summary', () => {
@@ -65,7 +65,7 @@ describe('SceneStatistics', () => {
       },
     });
     render(<SceneStatistics />);
-    expect(screen.getByText('3')).toBeDefined();
+    expect(screen.getByText('3')).not.toBeNull();
   });
 
   it('shows script count in summary', () => {
@@ -73,7 +73,7 @@ describe('SceneStatistics', () => {
       allScripts: { s1: { source: 'a' }, s2: { source: 'b' } },
     });
     render(<SceneStatistics />);
-    expect(screen.getByText('2')).toBeDefined();
+    expect(screen.getByText('2')).not.toBeNull();
   });
 
   it('shows asset count in summary', () => {
@@ -84,7 +84,7 @@ describe('SceneStatistics', () => {
       },
     });
     render(<SceneStatistics />);
-    expect(screen.getByText('2')).toBeDefined();
+    expect(screen.getByText('2')).not.toBeNull();
   });
 
   it('is collapsed by default (no breakdown visible)', () => {
@@ -97,9 +97,9 @@ describe('SceneStatistics', () => {
   it('shows summary labels always visible', () => {
     setupStore();
     render(<SceneStatistics />);
-    expect(screen.getByText('Entities')).toBeDefined();
-    expect(screen.getByText('Scripts')).toBeDefined();
-    expect(screen.getByText('Assets')).toBeDefined();
+    expect(screen.getByText('Entities')).not.toBeNull();
+    expect(screen.getByText('Scripts')).not.toBeNull();
+    expect(screen.getByText('Assets')).not.toBeNull();
   });
 
   it('expands breakdown when Scene Statistics is clicked', () => {
@@ -108,7 +108,7 @@ describe('SceneStatistics', () => {
     });
     render(<SceneStatistics />);
     fireEvent.click(screen.getByText('Scene Statistics'));
-    expect(screen.getByText('Components')).toBeDefined();
+    expect(screen.getByText('Components')).not.toBeNull();
   });
 
   it('shows light count in component breakdown when expanded', () => {
@@ -120,7 +120,7 @@ describe('SceneStatistics', () => {
     });
     render(<SceneStatistics />);
     fireEvent.click(screen.getByText('Scene Statistics'));
-    expect(screen.getByText('Lights')).toBeDefined();
+    expect(screen.getByText('Lights')).not.toBeNull();
   });
 
   it('shows texture count in asset breakdown when expanded', () => {
@@ -129,7 +129,7 @@ describe('SceneStatistics', () => {
     });
     render(<SceneStatistics />);
     fireEvent.click(screen.getByText('Scene Statistics'));
-    expect(screen.getByText('Textures')).toBeDefined();
+    expect(screen.getByText('Textures')).not.toBeNull();
   });
 
   it('collapses again after second click', () => {

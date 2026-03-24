@@ -62,7 +62,7 @@ describe('InputBindingsPanel', () => {
 
   it('renders "Input Bindings" label', () => {
     render(<InputBindingsPanel />);
-    expect(screen.getByText('Input Bindings')).toBeDefined();
+    expect(screen.getByText('Input Bindings')).not.toBeNull();
   });
 
   it('expands when toggle is clicked', () => {
@@ -77,18 +77,18 @@ describe('InputBindingsPanel', () => {
     render(<InputBindingsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
 
-    expect(screen.getByRole('combobox', { name: /input preset/i })).toBeDefined();
-    expect(screen.getByText('FPS')).toBeDefined();
-    expect(screen.getByText('Platformer')).toBeDefined();
-    expect(screen.getByText('Top-Down')).toBeDefined();
+    expect(screen.getByRole('combobox', { name: /input preset/i })).not.toBeNull();
+    expect(screen.getByText('FPS')).not.toBeNull();
+    expect(screen.getByText('Platformer')).not.toBeNull();
+    expect(screen.getByText('Top-Down')).not.toBeNull();
   });
 
   it('shows binding action names when expanded', () => {
     render(<InputBindingsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
 
-    expect(screen.getByText('Jump')).toBeDefined();
-    expect(screen.getByText('MoveX')).toBeDefined();
+    expect(screen.getByText('Jump')).not.toBeNull();
+    expect(screen.getByText('MoveX')).not.toBeNull();
   });
 
   it('shows key codes for digital bindings', () => {
@@ -96,23 +96,23 @@ describe('InputBindingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
 
     // formatKeyCode strips "Space" prefix — it stays as "Space" since it doesn't start with Key/Digit/Arrow
-    expect(screen.getByText('Space')).toBeDefined();
+    expect(screen.getByText('Space')).not.toBeNull();
   });
 
   it('shows action type labels', () => {
     render(<InputBindingsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
 
-    expect(screen.getByText('digital')).toBeDefined();
-    expect(screen.getByText('axis')).toBeDefined();
+    expect(screen.getByText('digital')).not.toBeNull();
+    expect(screen.getByText('axis')).not.toBeNull();
   });
 
   it('shows remove button with aria-label in edit mode', () => {
     render(<InputBindingsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
 
-    expect(screen.getByRole('button', { name: /remove jump binding/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /remove movex binding/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /remove jump binding/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /remove movex binding/i })).not.toBeNull();
   });
 
   it('calls removeInputBinding when remove button is clicked', () => {
@@ -145,7 +145,7 @@ describe('InputBindingsPanel', () => {
     render(<InputBindingsPanel />);
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
 
-    expect(screen.getByText('No bindings configured')).toBeDefined();
+    expect(screen.getByText('No bindings configured')).not.toBeNull();
   });
 
   it('shows formatted key codes (strips Key prefix)', () => {
@@ -158,6 +158,6 @@ describe('InputBindingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /expand input bindings/i }));
 
     // formatKeyCode('KeyW') -> 'W'
-    expect(screen.getByText('W')).toBeDefined();
+    expect(screen.getByText('W')).not.toBeNull();
   });
 });

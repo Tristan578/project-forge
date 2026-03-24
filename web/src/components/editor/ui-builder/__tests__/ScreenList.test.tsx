@@ -53,13 +53,13 @@ describe('ScreenList', () => {
   it('shows the active screen name', () => {
     setupStore();
     render(<ScreenList />);
-    expect(screen.getByText('HUD')).toBeDefined();
+    expect(screen.getByText('HUD')).not.toBeNull();
   });
 
   it('shows "No screen selected" when no active screen matches', () => {
     setupStore({ activeScreenId: 'nonexistent' });
     render(<ScreenList />);
-    expect(screen.getByText('No screen selected')).toBeDefined();
+    expect(screen.getByText('No screen selected')).not.toBeNull();
   });
 
   it('shows screen dropdown when selector button is clicked', () => {
@@ -67,7 +67,7 @@ describe('ScreenList', () => {
     render(<ScreenList />);
     // Click the screen selector button (contains 'HUD')
     fireEvent.click(screen.getByText('HUD'));
-    expect(screen.getByText('Main Menu')).toBeDefined();
+    expect(screen.getByText('Main Menu')).not.toBeNull();
   });
 
   it('shows widget count in dropdown', () => {
@@ -75,7 +75,7 @@ describe('ScreenList', () => {
     render(<ScreenList />);
     fireEvent.click(screen.getByText('HUD'));
     // Main Menu has 2 widgets
-    expect(screen.getByText('2 widgets')).toBeDefined();
+    expect(screen.getByText('2 widgets')).not.toBeNull();
   });
 
   it('shows "No screens" when screen list is empty', () => {
@@ -83,7 +83,7 @@ describe('ScreenList', () => {
     render(<ScreenList />);
     // Click the button showing "No screen selected"
     fireEvent.click(screen.getByText('No screen selected'));
-    expect(screen.getByText('No screens')).toBeDefined();
+    expect(screen.getByText('No screens')).not.toBeNull();
   });
 
   it('calls setActiveScreen when a screen is selected from dropdown', () => {
@@ -99,11 +99,11 @@ describe('ScreenList', () => {
     render(<ScreenList />);
     fireEvent.click(screen.getByTestId('plus-icon').closest('button')!);
     // Preset picker should show all preset options
-    expect(screen.getByText('Blank')).toBeDefined();
-    expect(screen.getByText('Pause Menu')).toBeDefined();
-    expect(screen.getByText('Game Over')).toBeDefined();
-    expect(screen.getByText('Inventory')).toBeDefined();
-    expect(screen.getByText('Dialog')).toBeDefined();
+    expect(screen.getByText('Blank')).not.toBeNull();
+    expect(screen.getByText('Pause Menu')).not.toBeNull();
+    expect(screen.getByText('Game Over')).not.toBeNull();
+    expect(screen.getByText('Inventory')).not.toBeNull();
+    expect(screen.getByText('Dialog')).not.toBeNull();
   });
 
   it('calls createScreen with selected preset when preset is clicked', () => {

@@ -88,21 +88,21 @@ describe('WidgetTree', () => {
   it('shows empty state message when no widgets', () => {
     setupStore({ widgets: [] });
     render(<WidgetTree />);
-    expect(screen.getByText('No widgets. Add one from the palette above.')).toBeDefined();
+    expect(screen.getByText('No widgets. Add one from the palette above.')).not.toBeNull();
   });
 
   it('renders widget names', () => {
     setupStore();
     render(<WidgetTree />);
-    expect(screen.getByText('TextWidget')).toBeDefined();
-    expect(screen.getByText('ButtonWidget')).toBeDefined();
+    expect(screen.getByText('TextWidget')).not.toBeNull();
+    expect(screen.getByText('ButtonWidget')).not.toBeNull();
   });
 
   it('renders widget type labels', () => {
     setupStore();
     render(<WidgetTree />);
-    expect(screen.getByText('text')).toBeDefined();
-    expect(screen.getByText('button')).toBeDefined();
+    expect(screen.getByText('text')).not.toBeNull();
+    expect(screen.getByText('button')).not.toBeNull();
   });
 
   it('calls selectWidget when widget name is clicked', () => {

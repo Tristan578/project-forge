@@ -63,7 +63,7 @@ describe('GeneratePixelArtDialog', () => {
 
   it('should render when open', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Generate Pixel Art')).toBeDefined();
+    expect(screen.getByText('Generate Pixel Art')).not.toBeNull();
   });
 
   // ── Form controls ─────────────────────────────────────────────────────
@@ -77,32 +77,32 @@ describe('GeneratePixelArtDialog', () => {
 
   it('should show style selector', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Style')).toBeDefined();
-    expect(screen.getByText('Character')).toBeDefined();
+    expect(screen.getByText('Style')).not.toBeNull();
+    expect(screen.getByText('Character')).not.toBeNull();
   });
 
   it('should show size options', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('16px')).toBeDefined();
-    expect(screen.getByText('32px')).toBeDefined();
-    expect(screen.getByText('64px')).toBeDefined();
-    expect(screen.getByText('128px')).toBeDefined();
+    expect(screen.getByText('16px')).not.toBeNull();
+    expect(screen.getByText('32px')).not.toBeNull();
+    expect(screen.getByText('64px')).not.toBeNull();
+    expect(screen.getByText('128px')).not.toBeNull();
   });
 
   it('should show palette selector with preview swatches', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Palette')).toBeDefined();
+    expect(screen.getByText('Palette')).not.toBeNull();
   });
 
   it('should show dithering selector', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText('Dithering')).toBeDefined();
+    expect(screen.getByText('Dithering')).not.toBeNull();
   });
 
   it('should show token cost and balance', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
-    expect(screen.getByText(/Cost: 10 tokens/)).toBeDefined();
-    expect(screen.getByText(/Balance: 100/)).toBeDefined();
+    expect(screen.getByText(/Cost: 10 tokens/)).not.toBeNull();
+    expect(screen.getByText(/Balance: 100/)).not.toBeNull();
   });
 
   // ── Submit button state ───────────────────────────────────────────────

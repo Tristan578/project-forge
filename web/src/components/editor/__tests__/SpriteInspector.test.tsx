@@ -228,7 +228,7 @@ describe('SpriteInspector', () => {
       'middle_left', 'center', 'middle_right',
       'bottom_left', 'bottom_center', 'bottom_right'];
     for (const anchor of anchorButtons) {
-      expect(screen.getByTitle(anchor)).toBeDefined();
+      expect(screen.getByTitle(anchor)).not.toBeNull();
     }
   });
 

@@ -79,68 +79,68 @@ describe('SellerDashboard', () => {
   it('renders Seller Dashboard heading', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Seller Dashboard')).toBeDefined();
+      expect(screen.getByText('Seller Dashboard')).not.toBeNull();
     });
   });
 
   it('renders Create Listing button', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Create Listing')).toBeDefined();
+      expect(screen.getByText('Create Listing')).not.toBeNull();
     });
   });
 
   it('renders Total Earnings stats', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Total Earnings')).toBeDefined();
-      expect(screen.getByText('250 tokens')).toBeDefined();
+      expect(screen.getByText('Total Earnings')).not.toBeNull();
+      expect(screen.getByText('250 tokens')).not.toBeNull();
     });
   });
 
   it('renders Total Sales stats', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Total Sales')).toBeDefined();
-      expect(screen.getByText('10')).toBeDefined();
+      expect(screen.getByText('Total Sales')).not.toBeNull();
+      expect(screen.getByText('10')).not.toBeNull();
     });
   });
 
   it('renders Seller Profile section', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Seller Profile')).toBeDefined();
+      expect(screen.getByText('Seller Profile')).not.toBeNull();
     });
   });
 
   it('renders asset names', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Pixel Knight')).toBeDefined();
-      expect(screen.getByText('Forest Tileset')).toBeDefined();
+      expect(screen.getByText('Pixel Knight')).not.toBeNull();
+      expect(screen.getByText('Forest Tileset')).not.toBeNull();
     });
   });
 
   it('renders Your Listings section heading', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Your Listings')).toBeDefined();
+      expect(screen.getByText('Your Listings')).not.toBeNull();
     });
   });
 
   it('shows AssetUploadDialog when Create Listing clicked', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Create Listing')).toBeDefined();
+      expect(screen.getByText('Create Listing')).not.toBeNull();
     });
     fireEvent.click(screen.getByText('Create Listing'));
-    expect(screen.getByTestId('asset-upload-dialog')).toBeDefined();
+    expect(screen.getByTestId('asset-upload-dialog')).not.toBeNull();
   });
 
   it('hides AssetUploadDialog when closed', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Create Listing')).toBeDefined();
+      expect(screen.getByText('Create Listing')).not.toBeNull();
     });
     fireEvent.click(screen.getByText('Create Listing'));
     fireEvent.click(screen.getByText('Close Upload'));
@@ -150,9 +150,9 @@ describe('SellerDashboard', () => {
   it('shows edit form when Edit button clicked', async () => {
     render(<SellerDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Seller Profile')).toBeDefined();
+      expect(screen.getByText('Seller Profile')).not.toBeNull();
     });
     fireEvent.click(screen.getByText('Edit'));
-    expect(screen.getByText('Save Profile')).toBeDefined();
+    expect(screen.getByText('Save Profile')).not.toBeNull();
   });
 });

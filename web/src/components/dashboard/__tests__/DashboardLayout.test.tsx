@@ -51,14 +51,14 @@ describe('DashboardLayout', () => {
 
   it('renders without crashing', () => {
     render(<DashboardLayout />);
-    expect(screen.getByText('SpawnForge')).toBeDefined();
-    expect(screen.getByText('My Projects')).toBeDefined();
+    expect(screen.getByText('SpawnForge')).not.toBeNull();
+    expect(screen.getByText('My Projects')).not.toBeNull();
   });
 
   it('shows loading state initially', () => {
     mockFetch.mockReturnValue(new Promise(() => {})); // Never resolves
     render(<DashboardLayout />);
-    expect(screen.getByText('Loading projects...')).toBeDefined();
+    expect(screen.getByText('Loading projects...')).not.toBeNull();
   });
 
   it('shows empty state when no projects loaded', async () => {
@@ -76,6 +76,6 @@ describe('DashboardLayout', () => {
     // Click the one in the header area
     const newProjectBtn = screen.getByRole('button', { name: /New Project/i });
     fireEvent.click(newProjectBtn);
-    expect(screen.getByTestId('new-project-dialog')).toBeDefined();
+    expect(screen.getByTestId('new-project-dialog')).not.toBeNull();
   });
 });

@@ -61,13 +61,13 @@ describe('AdaptiveMusicInspector', () => {
 
   it('renders Play button initially', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByLabelText('Play')).toBeDefined();
+    expect(screen.getByLabelText('Play')).not.toBeNull();
   });
 
   it('toggles to Pause when Play clicked', () => {
     render(<AdaptiveMusicInspector />);
     fireEvent.click(screen.getByLabelText('Play'));
-    expect(screen.getByLabelText('Pause')).toBeDefined();
+    expect(screen.getByLabelText('Pause')).not.toBeNull();
   });
 
   it('renders Intensity label', () => {
@@ -150,6 +150,6 @@ describe('AdaptiveMusicInspector', () => {
 
   it('renders Create snapshot button', () => {
     render(<AdaptiveMusicInspector />);
-    expect(screen.getByLabelText('Create snapshot')).toBeDefined();
+    expect(screen.getByLabelText('Create snapshot')).not.toBeNull();
   });
 });

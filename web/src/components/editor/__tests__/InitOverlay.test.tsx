@@ -66,21 +66,21 @@ describe('InitOverlay', () => {
   it('renders Initializing Engine heading when not ready', () => {
     vi.mocked(useEngineStatus).mockReturnValue(baseStatus);
     render(<InitOverlay />);
-    expect(screen.getByText('Initializing Engine...')).toBeDefined();
+    expect(screen.getByText('Initializing Engine...')).not.toBeNull();
   });
 
   it('shows phase labels', () => {
     vi.mocked(useEngineStatus).mockReturnValue(baseStatus);
     render(<InitOverlay />);
-    expect(screen.getByText('Loading WASM (1.5s)')).toBeDefined();
-    expect(screen.getByText('Initializing Renderer')).toBeDefined();
-    expect(screen.getByText('Setting Up Scene')).toBeDefined();
+    expect(screen.getByText('Loading WASM (1.5s)')).not.toBeNull();
+    expect(screen.getByText('Initializing Renderer')).not.toBeNull();
+    expect(screen.getByText('Setting Up Scene')).not.toBeNull();
   });
 
   it('shows elapsed time', () => {
     vi.mocked(useEngineStatus).mockReturnValue(baseStatus);
     render(<InitOverlay />);
-    expect(screen.getByText(/Elapsed: 2\.0s/)).toBeDefined();
+    expect(screen.getByText(/Elapsed: 2\.0s/)).not.toBeNull();
   });
 
   it('shows timeout warning for wasm_loading phase', () => {
@@ -116,7 +116,7 @@ describe('InitOverlay', () => {
       timeoutPhase: 'wasm_loading',
     });
     render(<InitOverlay />);
-    expect(screen.getByText('Retry')).toBeDefined();
+    expect(screen.getByText('Retry')).not.toBeNull();
   });
 
   it('calls retry when Retry button clicked', () => {
@@ -139,7 +139,7 @@ describe('InitOverlay', () => {
       retryCount: 3,
     });
     render(<InitOverlay />);
-    expect(screen.getByText('Unable to Initialize Engine')).toBeDefined();
+    expect(screen.getByText('Unable to Initialize Engine')).not.toBeNull();
   });
 
   it('shows Copy Debug Log button in failed state', () => {
@@ -148,7 +148,7 @@ describe('InitOverlay', () => {
       retryCount: 3,
     });
     render(<InitOverlay />);
-    expect(screen.getByText('Copy Debug Log')).toBeDefined();
+    expect(screen.getByText('Copy Debug Log')).not.toBeNull();
   });
 
   it('shows Report Issue link in failed state', () => {
@@ -157,7 +157,7 @@ describe('InitOverlay', () => {
       retryCount: 3,
     });
     render(<InitOverlay />);
-    expect(screen.getByText('Report Issue')).toBeDefined();
+    expect(screen.getByText('Report Issue')).not.toBeNull();
   });
 
   it('shows error message when error is present and canRetry', () => {
@@ -177,7 +177,7 @@ describe('InitOverlay', () => {
       retryCount: 1,
     });
     render(<InitOverlay />);
-    expect(screen.getByText(/Attempt 2\/3/)).toBeDefined();
+    expect(screen.getByText(/Attempt 2\/3/)).not.toBeNull();
   });
 
   // PF-845 regression: WebGL2 fallback button must be present in failed state
@@ -187,7 +187,7 @@ describe('InitOverlay', () => {
       retryCount: 3,
     });
     render(<InitOverlay />);
-    expect(screen.getByText('Switch to WebGL2 Mode')).toBeDefined();
+    expect(screen.getByText('Switch to WebGL2 Mode')).not.toBeNull();
   });
 
   it('clicking Switch to WebGL2 calls setPreferredBackend with webgl2 (PF-845)', () => {
@@ -218,6 +218,6 @@ describe('InitOverlay', () => {
     render(<InitOverlay />);
     // showFailedState = retryCount>=3 || (!canRetry && (isTimedOut || error))
     // here: !canRetry=true, error is truthy → showFailedState=true
-    expect(screen.getByText('Switch to WebGL2 Mode')).toBeDefined();
+    expect(screen.getByText('Switch to WebGL2 Mode')).not.toBeNull();
   });
 });

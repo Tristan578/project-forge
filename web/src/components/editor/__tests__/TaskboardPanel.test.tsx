@@ -115,31 +115,31 @@ describe('TaskboardPanel', () => {
   describe('Rendering', () => {
     it('renders the Tasks panel header', () => {
       render(<TaskboardPanel />);
-      expect(screen.getByText('Tasks')).toBeDefined();
+      expect(screen.getByText('Tasks')).not.toBeNull();
     });
 
     it('renders all three column labels', () => {
       render(<TaskboardPanel />);
-      expect(screen.getByText('To Do')).toBeDefined();
-      expect(screen.getByText('In Progress')).toBeDefined();
-      expect(screen.getByText('Done')).toBeDefined();
+      expect(screen.getByText('To Do')).not.toBeNull();
+      expect(screen.getByText('In Progress')).not.toBeNull();
+      expect(screen.getByText('Done')).not.toBeNull();
     });
 
     it('shows correct total task count in header', () => {
       resetStore(makeTasks());
       render(<TaskboardPanel />);
       // Header shows "N total"
-      expect(screen.getByText('4 total')).toBeDefined();
+      expect(screen.getByText('4 total')).not.toBeNull();
     });
 
     it('renders tasks in correct columns', () => {
       resetStore(makeTasks());
       render(<TaskboardPanel />);
 
-      expect(screen.getByText('Todo Task One')).toBeDefined();
-      expect(screen.getByText('Todo Task Two')).toBeDefined();
-      expect(screen.getByText('In Progress Task')).toBeDefined();
-      expect(screen.getByText('Done Task')).toBeDefined();
+      expect(screen.getByText('Todo Task One')).not.toBeNull();
+      expect(screen.getByText('Todo Task Two')).not.toBeNull();
+      expect(screen.getByText('In Progress Task')).not.toBeNull();
+      expect(screen.getByText('Done Task')).not.toBeNull();
     });
 
     it('displays column task counts', () => {
@@ -152,7 +152,7 @@ describe('TaskboardPanel', () => {
 
     it('renders with zero tasks', () => {
       render(<TaskboardPanel />);
-      expect(screen.getByText('0 total')).toBeDefined();
+      expect(screen.getByText('0 total')).not.toBeNull();
     });
   });
 
@@ -202,7 +202,7 @@ describe('TaskboardPanel', () => {
       // Plus button is the add-task trigger in the To Do column
       const addButton = screen.getByLabelText('Add task');
       fireEvent.click(addButton);
-      expect(screen.getByPlaceholderText('Task title…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Task title…')).not.toBeNull();
     });
 
     it('adds a new task on form submit', () => {
@@ -217,7 +217,7 @@ describe('TaskboardPanel', () => {
       // Submit via form submit event (Enter key)
       fireEvent.submit(input.closest('form')!);
 
-      expect(screen.getByText('New shiny task')).toBeDefined();
+      expect(screen.getByText('New shiny task')).not.toBeNull();
       expect(useTaskStore.getState().tasks).toHaveLength(1);
     });
 
@@ -296,7 +296,7 @@ describe('TaskboardPanel', () => {
       const taskCard = screen.getByRole('button', { name: /Todo Task One/i });
       fireEvent.click(taskCard);
 
-      expect(screen.getByPlaceholderText('Add description…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Add description…')).not.toBeNull();
     });
 
     it('collapses task card on second click', () => {
@@ -430,7 +430,7 @@ describe('TaskboardPanel', () => {
       const taskCard = screen.getByRole('button', { name: /Todo Task One/i });
       fireEvent.keyDown(taskCard, { key: 'Enter' });
 
-      expect(screen.getByPlaceholderText('Add description…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Add description…')).not.toBeNull();
     });
 
     it('task cards respond to Space key for expand', () => {
@@ -440,7 +440,7 @@ describe('TaskboardPanel', () => {
       const taskCard = screen.getByRole('button', { name: /Todo Task One/i });
       fireEvent.keyDown(taskCard, { key: ' ' });
 
-      expect(screen.getByPlaceholderText('Add description…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Add description…')).not.toBeNull();
     });
   });
 });

@@ -52,13 +52,13 @@ describe('BillingTab', () => {
   it('shows loading state initially', () => {
     global.fetch = vi.fn().mockReturnValue(new Promise(() => {}));
     render(<BillingTab />);
-    expect(screen.getByText('Loading billing information...')).toBeDefined();
+    expect(screen.getByText('Loading billing information...')).not.toBeNull();
   });
 
   it('renders Current Plan heading after loading', async () => {
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText('Current Plan')).toBeDefined();
+      expect(screen.getByText('Current Plan')).not.toBeNull();
     });
   });
 
@@ -72,7 +72,7 @@ describe('BillingTab', () => {
   it('renders Upgrade Plan button for starter tier', async () => {
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText('Upgrade Plan')).toBeDefined();
+      expect(screen.getByText('Upgrade Plan')).not.toBeNull();
     });
   });
 
@@ -89,14 +89,14 @@ describe('BillingTab', () => {
     });
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText('Manage Subscription')).toBeDefined();
+      expect(screen.getByText('Manage Subscription')).not.toBeNull();
     });
   });
 
   it('shows upgrade message for starter tier', async () => {
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText('Upgrade to unlock more features')).toBeDefined();
+      expect(screen.getByText('Upgrade to unlock more features')).not.toBeNull();
     });
   });
 
@@ -113,7 +113,7 @@ describe('BillingTab', () => {
     });
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText('Token Usage')).toBeDefined();
+      expect(screen.getByText('Token Usage')).not.toBeNull();
     });
   });
 
@@ -125,7 +125,7 @@ describe('BillingTab', () => {
     });
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText(/Monthly tokens/)).toBeDefined();
+      expect(screen.getByText(/Monthly tokens/)).not.toBeNull();
     });
   });
 
@@ -137,7 +137,7 @@ describe('BillingTab', () => {
     });
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText(/Add-on tokens/)).toBeDefined();
+      expect(screen.getByText(/Add-on tokens/)).not.toBeNull();
     });
   });
 
@@ -154,8 +154,8 @@ describe('BillingTab', () => {
     });
     render(<BillingTab />);
     await waitFor(() => {
-      expect(screen.getByText('Started:')).toBeDefined();
-      expect(screen.getByText('Next renewal:')).toBeDefined();
+      expect(screen.getByText('Started:')).not.toBeNull();
+      expect(screen.getByText('Next renewal:')).not.toBeNull();
     });
   });
 });

@@ -41,17 +41,17 @@ describe('GameCard', () => {
     render(
       <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />
     );
-    expect(screen.getByText('Test Game')).toBeDefined();
-    expect(screen.getByText('by TestAuthor')).toBeDefined();
+    expect(screen.getByText('Test Game')).not.toBeNull();
+    expect(screen.getByText('by TestAuthor')).not.toBeNull();
   });
 
   it('renders tags (up to 3)', () => {
     render(
       <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />
     );
-    expect(screen.getByText('action')).toBeDefined();
-    expect(screen.getByText('puzzle')).toBeDefined();
-    expect(screen.getByText('platformer')).toBeDefined();
+    expect(screen.getByText('action')).not.toBeNull();
+    expect(screen.getByText('puzzle')).not.toBeNull();
+    expect(screen.getByText('platformer')).not.toBeNull();
   });
 
   it('calls onClick when card is clicked', () => {
@@ -67,7 +67,7 @@ describe('GameCard', () => {
     render(
       <GameCard game={mockGame} isLiked={false} onLike={vi.fn()} onClick={vi.fn()} />
     );
-    expect(screen.getByText('42')).toBeDefined();
-    expect(screen.getByText('10')).toBeDefined();
+    expect(screen.getByText('42')).not.toBeNull();
+    expect(screen.getByText('10')).not.toBeNull();
   });
 });

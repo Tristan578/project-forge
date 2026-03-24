@@ -44,7 +44,7 @@ describe('ShaderNodeBase', () => {
   it('renders the label for a known node type (multiply)', () => {
     render(<ShaderNodeBase {...makeNodeProps('multiply')} />);
     // 'Multiply' is the label defined in SHADER_NODE_DEFINITIONS
-    expect(screen.getByText('Multiply')).toBeDefined();
+    expect(screen.getByText('Multiply')).not.toBeNull();
   });
 
   it('renders input and output handle placeholders', () => {
@@ -89,7 +89,7 @@ describe('ShaderNodeBase', () => {
 
   it('renders pbr_output node with its label', () => {
     render(<ShaderNodeBase {...makeNodeProps('pbr_output')} />);
-    expect(screen.getByText('PBR Output')).toBeDefined();
+    expect(screen.getByText('PBR Output')).not.toBeNull();
   });
 
   // ── Time node (no inputs) ─────────────────────────────────────────────

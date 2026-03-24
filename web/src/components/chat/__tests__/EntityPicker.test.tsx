@@ -47,9 +47,9 @@ describe('EntityPicker', () => {
 
   it('renders without crashing and shows entities', () => {
     render(<EntityPicker onSelect={mockOnSelect} onClose={mockOnClose} />);
-    expect(screen.getByText('Player')).toBeDefined();
-    expect(screen.getByText('Ground')).toBeDefined();
-    expect(screen.getByText('PointLight1')).toBeDefined();
+    expect(screen.getByText('Player')).not.toBeNull();
+    expect(screen.getByText('Ground')).not.toBeNull();
+    expect(screen.getByText('PointLight1')).not.toBeNull();
   });
 
   it('calls onSelect when an entity is clicked', () => {
@@ -60,7 +60,7 @@ describe('EntityPicker', () => {
 
   it('shows entity IDs next to names', () => {
     render(<EntityPicker onSelect={mockOnSelect} onClose={mockOnClose} />);
-    expect(screen.getByText('entity-1')).toBeDefined();
-    expect(screen.getByText('entity-2')).toBeDefined();
+    expect(screen.getByText('entity-1')).not.toBeNull();
+    expect(screen.getByText('entity-2')).not.toBeNull();
   });
 });

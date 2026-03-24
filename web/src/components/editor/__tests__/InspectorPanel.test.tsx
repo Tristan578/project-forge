@@ -134,7 +134,7 @@ describe('InspectorPanel', () => {
   it('shows empty state hint when no entity selected', () => {
     setupStore({ primaryId: null });
     render(<InspectorPanel />);
-    expect(screen.getByText(/Select an entity/)).toBeDefined();
+    expect(screen.getByText(/Select an entity/)).not.toBeNull();
   });
 
   it('shows Scene Settings when no entity selected', () => {
@@ -200,9 +200,9 @@ describe('InspectorPanel', () => {
     setupStore();
     render(<InspectorPanel />);
     expect(screen.getByText('Transform').textContent).toBe('Transform');
-    expect(screen.getByTestId('vec3-Position')).toBeDefined();
-    expect(screen.getByTestId('vec3-Rotation')).toBeDefined();
-    expect(screen.getByTestId('vec3-Scale')).toBeDefined();
+    expect(screen.getByTestId('vec3-Position')).not.toBeNull();
+    expect(screen.getByTestId('vec3-Rotation')).not.toBeNull();
+    expect(screen.getByTestId('vec3-Scale')).not.toBeNull();
   });
 
   // ── Loading skeleton ──────────────────────────────────────────────────

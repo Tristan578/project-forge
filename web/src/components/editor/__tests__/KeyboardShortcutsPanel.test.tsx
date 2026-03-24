@@ -51,48 +51,48 @@ describe('KeyboardShortcutsPanel', () => {
 
   it('renders Keyboard Shortcuts heading when open', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Keyboard Shortcuts')).toBeDefined();
+    expect(screen.getByText('Keyboard Shortcuts')).not.toBeNull();
   });
 
   it('renders dialog role', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByRole('dialog')).toBeDefined();
+    expect(screen.getByRole('dialog')).not.toBeNull();
   });
 
   it('renders mouse shortcut categories section', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Mouse')).toBeDefined();
-    expect(screen.getByText('Select entity')).toBeDefined();
+    expect(screen.getByText('Mouse')).not.toBeNull();
+    expect(screen.getByText('Select entity')).not.toBeNull();
   });
 
   it('renders binding labels from grouped categories', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Undo')).toBeDefined();
-    expect(screen.getByText('Redo')).toBeDefined();
+    expect(screen.getByText('Undo')).not.toBeNull();
+    expect(screen.getByText('Redo')).not.toBeNull();
     // "Delete" appears as both label and key badge — check label exists via aria
-    expect(screen.getByLabelText(/Rebind Delete/)).toBeDefined();
+    expect(screen.getByLabelText(/Rebind Delete/)).not.toBeNull();
   });
 
   it('renders keyboard shortcut key badges', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Ctrl+Z')).toBeDefined();
-    expect(screen.getByText('Ctrl+Y')).toBeDefined();
+    expect(screen.getByText('Ctrl+Z')).not.toBeNull();
+    expect(screen.getByText('Ctrl+Y')).not.toBeNull();
   });
 
   it('renders category headings', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Edit')).toBeDefined();
-    expect(screen.getByText('Selection')).toBeDefined();
+    expect(screen.getByText('Edit')).not.toBeNull();
+    expect(screen.getByText('Selection')).not.toBeNull();
   });
 
   it('renders Reset All button', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Reset All')).toBeDefined();
+    expect(screen.getByText('Reset All')).not.toBeNull();
   });
 
   it('renders Close button with aria-label', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByLabelText('Close keyboard shortcuts')).toBeDefined();
+    expect(screen.getByLabelText('Close keyboard shortcuts')).not.toBeNull();
   });
 
   it('calls onClose when close button clicked', () => {
@@ -113,11 +113,11 @@ describe('KeyboardShortcutsPanel', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
     const rebindButton = screen.getByLabelText(/Rebind Undo/);
     fireEvent.click(rebindButton);
-    expect(screen.getByText('Press key...')).toBeDefined();
+    expect(screen.getByText('Press key...')).not.toBeNull();
   });
 
   it('shows footer hint text', () => {
     render(<KeyboardShortcutsPanel open={true} onClose={mockOnClose} />);
-    expect(screen.getByText(/Click any shortcut to rebind it/)).toBeDefined();
+    expect(screen.getByText(/Click any shortcut to rebind it/)).not.toBeNull();
   });
 });

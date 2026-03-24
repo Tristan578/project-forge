@@ -90,13 +90,13 @@ describe('Physics2dInspector', () => {
   it('renders 2D Physics heading', () => {
     setupStore();
     render(<Physics2dInspector />);
-    expect(screen.getByText('2D Physics')).toBeDefined();
+    expect(screen.getByText('2D Physics')).not.toBeNull();
   });
 
   it('renders Enabled checkbox', () => {
     setupStore();
     render(<Physics2dInspector />);
-    expect(screen.getByText('Enabled')).toBeDefined();
+    expect(screen.getByText('Enabled')).not.toBeNull();
   });
 
   it('Enabled checkbox is unchecked when physics2dEnabled is false', () => {
@@ -134,23 +134,23 @@ describe('Physics2dInspector', () => {
   it('shows Body Type select when enabled with data', () => {
     setupStore({ physics2d: basePhysics2d, physics2dEnabled: true });
     render(<Physics2dInspector />);
-    expect(screen.getByText('Body Type')).toBeDefined();
+    expect(screen.getByText('Body Type')).not.toBeNull();
   });
 
   it('renders Dynamic/Static/Kinematic options', () => {
     setupStore({ physics2d: basePhysics2d, physics2dEnabled: true });
     render(<Physics2dInspector />);
-    expect(screen.getByRole('option', { name: 'Dynamic' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Static' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Kinematic' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'Dynamic' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Static' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Kinematic' })).not.toBeNull();
   });
 
   it('renders collider shape select', () => {
     setupStore({ physics2d: basePhysics2d, physics2dEnabled: true });
     render(<Physics2dInspector />);
-    expect(screen.getByRole('option', { name: 'Auto' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Box' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Circle' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'Auto' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Box' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Circle' })).not.toBeNull();
   });
 
   it('shows Size inputs for box collider', () => {
@@ -159,7 +159,7 @@ describe('Physics2dInspector', () => {
       physics2dEnabled: true,
     });
     render(<Physics2dInspector />);
-    expect(screen.getByText('Size')).toBeDefined();
+    expect(screen.getByText('Size')).not.toBeNull();
   });
 
   it('shows Radius input for circle collider', () => {
@@ -168,13 +168,13 @@ describe('Physics2dInspector', () => {
       physics2dEnabled: true,
     });
     render(<Physics2dInspector />);
-    expect(screen.getByText('Radius')).toBeDefined();
+    expect(screen.getByText('Radius')).not.toBeNull();
   });
 
   it('shows Mass slider for dynamic body', () => {
     setupStore({ physics2d: basePhysics2d, physics2dEnabled: true });
     render(<Physics2dInspector />);
-    expect(screen.getByText('Mass')).toBeDefined();
+    expect(screen.getByText('Mass')).not.toBeNull();
   });
 
   it('does not show Mass slider for static body', () => {
@@ -189,7 +189,7 @@ describe('Physics2dInspector', () => {
   it('shows Friction label', () => {
     setupStore({ physics2d: basePhysics2d, physics2dEnabled: true });
     render(<Physics2dInspector />);
-    expect(screen.getByText('Friction')).toBeDefined();
+    expect(screen.getByText('Friction')).not.toBeNull();
   });
 
   it('calls updatePhysics2d when body type changed', () => {
@@ -209,7 +209,7 @@ describe('Physics2dInspector', () => {
   it('shows Remove button when physics2d enabled', () => {
     setupStore({ physics2d: basePhysics2d, physics2dEnabled: true });
     render(<Physics2dInspector />);
-    expect(screen.getByText('Remove Physics')).toBeDefined();
+    expect(screen.getByText('Remove Physics')).not.toBeNull();
   });
 
   it('calls removePhysics2d when Remove clicked and confirmed', () => {

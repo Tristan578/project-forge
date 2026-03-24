@@ -33,22 +33,22 @@ describe('PlayControls', () => {
   it('renders play, pause, and stop buttons in edit mode', () => {
     mockEditorStore();
     render(<PlayControls />);
-    expect(screen.getByRole('button', { name: /play/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /pause/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /stop/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /play/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /pause/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /stop/i })).not.toBeNull();
   });
 
   it('shows Playing status indicator when in play mode', () => {
     mockEditorStore({ engineMode: 'play' });
     render(<PlayControls />);
-    expect(screen.getByText('Playing')).toBeDefined();
+    expect(screen.getByText('Playing')).not.toBeNull();
   });
 
   it('shows Paused status and resume button when paused', () => {
     mockEditorStore({ engineMode: 'paused' });
     render(<PlayControls />);
-    expect(screen.getByText('Paused')).toBeDefined();
-    expect(screen.getByRole('button', { name: /resume/i })).toBeDefined();
+    expect(screen.getByText('Paused')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /resume/i })).not.toBeNull();
   });
 
   it('calls play when play button is clicked in edit mode', () => {

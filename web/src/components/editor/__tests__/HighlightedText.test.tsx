@@ -18,17 +18,17 @@ describe('HighlightedText', () => {
 
   it('renders plain text when no highlight', () => {
     render(<HighlightedText text="Player Entity" />);
-    expect(screen.getByText('Player Entity')).toBeDefined();
+    expect(screen.getByText('Player Entity')).not.toBeNull();
   });
 
   it('renders plain text when highlight is empty string', () => {
     render(<HighlightedText text="Player Entity" highlight="" />);
-    expect(screen.getByText('Player Entity')).toBeDefined();
+    expect(screen.getByText('Player Entity')).not.toBeNull();
   });
 
   it('renders plain text when highlight is whitespace', () => {
     render(<HighlightedText text="Player Entity" highlight="   " />);
-    expect(screen.getByText('Player Entity')).toBeDefined();
+    expect(screen.getByText('Player Entity')).not.toBeNull();
   });
 
   it('highlights the matching substring', () => {

@@ -32,17 +32,17 @@ describe('ContextualTipToast', () => {
 
   it('renders tip title', () => {
     render(<ContextualTipToast tip={baseTip} onDismiss={mockOnDismiss} />);
-    expect(screen.getByText('Pro Tip')).toBeDefined();
+    expect(screen.getByText('Pro Tip')).not.toBeNull();
   });
 
   it('renders tip message', () => {
     render(<ContextualTipToast tip={baseTip} onDismiss={mockOnDismiss} />);
-    expect(screen.getByText('You can undo actions with Ctrl+Z.')).toBeDefined();
+    expect(screen.getByText('You can undo actions with Ctrl+Z.')).not.toBeNull();
   });
 
   it('renders lightbulb icon', () => {
     render(<ContextualTipToast tip={baseTip} onDismiss={mockOnDismiss} />);
-    expect(screen.getByTestId('lightbulb-icon')).toBeDefined();
+    expect(screen.getByTestId('lightbulb-icon')).not.toBeNull();
   });
 
   it('calls onDismiss when X button clicked', () => {
@@ -68,7 +68,7 @@ describe('ContextualTipToast', () => {
         onAction={mockOnAction}
       />
     );
-    expect(screen.getByText('Try it')).toBeDefined();
+    expect(screen.getByText('Try it')).not.toBeNull();
   });
 
   it('calls onAction when action button clicked', () => {

@@ -98,7 +98,7 @@ describe('LandingPage', () => {
       'Secure by Default',
     ];
     for (const title of expectedFeatures) {
-      expect(screen.getByText(title)).toBeDefined();
+      expect(screen.getByText(title)).not.toBeNull();
     }
   });
 
@@ -163,10 +163,10 @@ describe('LandingPage', () => {
 
   it('renders navigation with section links', () => {
     const nav = screen.getByRole('navigation', { name: /main navigation/i });
-    expect(within(nav).getByText('Features')).toBeDefined();
-    expect(within(nav).getByText('How It Works')).toBeDefined();
-    expect(within(nav).getByText('Compare')).toBeDefined();
-    expect(within(nav).getByText('Pricing')).toBeDefined();
+    expect(within(nav).getByText('Features')).not.toBeNull();
+    expect(within(nav).getByText('How It Works')).not.toBeNull();
+    expect(within(nav).getByText('Compare')).not.toBeNull();
+    expect(within(nav).getByText('Pricing')).not.toBeNull();
   });
 
   it('renders responsive classes on feature grid', () => {
@@ -207,8 +207,8 @@ describe('LandingPage', () => {
 
   it('renders footer links', () => {
     const footer = screen.getByRole('contentinfo');
-    expect(within(footer).getByText('Pricing')).toBeDefined();
-    expect(within(footer).getByText('Terms')).toBeDefined();
-    expect(within(footer).getByText('Privacy')).toBeDefined();
+    expect(within(footer).getByText('Pricing')).not.toBeNull();
+    expect(within(footer).getByText('Terms')).not.toBeNull();
+    expect(within(footer).getByText('Privacy')).not.toBeNull();
   });
 });

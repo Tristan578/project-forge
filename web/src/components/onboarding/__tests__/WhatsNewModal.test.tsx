@@ -43,33 +43,33 @@ describe('WhatsNewModal', () => {
   it('renders What\'s New heading', () => {
     setupStore({ showWhatsNew: true });
     render(<WhatsNewModal />);
-    expect(screen.getByText("What's New")).toBeDefined();
+    expect(screen.getByText("What's New")).not.toBeNull();
   });
 
   it('renders welcome back message', () => {
     setupStore({ showWhatsNew: true });
     render(<WhatsNewModal />);
-    expect(screen.getByText(/Welcome back/)).toBeDefined();
+    expect(screen.getByText(/Welcome back/)).not.toBeNull();
   });
 
   it('renders feature titles', () => {
     setupStore({ showWhatsNew: true });
     render(<WhatsNewModal />);
-    expect(screen.getByText('Visual Scripting')).toBeDefined();
-    expect(screen.getByText('Cloud Publishing')).toBeDefined();
-    expect(screen.getByText('Dialogue System')).toBeDefined();
+    expect(screen.getByText('Visual Scripting')).not.toBeNull();
+    expect(screen.getByText('Cloud Publishing')).not.toBeNull();
+    expect(screen.getByText('Dialogue System')).not.toBeNull();
   });
 
   it('renders feature descriptions', () => {
     setupStore({ showWhatsNew: true });
     render(<WhatsNewModal />);
-    expect(screen.getByText(/node-based visual editor/)).toBeDefined();
+    expect(screen.getByText(/node-based visual editor/)).not.toBeNull();
   });
 
   it('renders Got it button', () => {
     setupStore({ showWhatsNew: true });
     render(<WhatsNewModal />);
-    expect(screen.getByText('Got it')).toBeDefined();
+    expect(screen.getByText('Got it')).not.toBeNull();
   });
 
   it('calls dismissWhatsNew when Got it clicked', () => {

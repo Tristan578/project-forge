@@ -57,14 +57,14 @@ describe('EngineCrashOverlay', () => {
     render(<EngineCrashOverlay />);
     expect(screen.queryByText('Engine Crashed')).toBeNull();
     if (capturedListener) capturedListener('panicked at core::slice');
-    expect(await screen.findByText('Engine Crashed')).toBeDefined();
+    expect(await screen.findByText('Engine Crashed')).not.toBeNull();
   });
 
   it('shows Save and Reload buttons', async () => {
     render(<EngineCrashOverlay />);
     if (capturedListener) capturedListener('test panic');
-    expect(await screen.findByText('Reload Engine')).toBeDefined();
-    expect(screen.getByText(/Save/)).toBeDefined();
+    expect(await screen.findByText('Reload Engine')).not.toBeNull();
+    expect(screen.getByText(/Save/)).not.toBeNull();
   });
 
   it('has correct ARIA attributes', async () => {
@@ -86,7 +86,7 @@ describe('EngineCrashOverlay', () => {
     mockIsEngineCrashed.mockReturnValue(true);
     mockGetEngineCrashMessage.mockReturnValue('pre-existing panic');
     render(<EngineCrashOverlay />);
-    expect(screen.getByText('Engine Crashed')).toBeDefined();
+    expect(screen.getByText('Engine Crashed')).not.toBeNull();
     mockIsEngineCrashed.mockReturnValue(false);
     mockGetEngineCrashMessage.mockReturnValue(null);
   });

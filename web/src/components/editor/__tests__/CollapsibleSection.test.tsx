@@ -24,7 +24,7 @@ describe('CollapsibleSection', () => {
         <div>Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByText('Transform')).toBeDefined();
+    expect(screen.getByText('Transform')).not.toBeNull();
   });
 
   it('renders children when expanded (default)', () => {
@@ -33,7 +33,7 @@ describe('CollapsibleSection', () => {
         <div>My Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByText('My Content')).toBeDefined();
+    expect(screen.getByText('My Content')).not.toBeNull();
   });
 
   it('shows ChevronDown when expanded', () => {
@@ -42,7 +42,7 @@ describe('CollapsibleSection', () => {
         <div>Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByTestId('chevron-down')).toBeDefined();
+    expect(screen.getByTestId('chevron-down')).not.toBeNull();
   });
 
   it('collapses content when header is clicked', () => {
@@ -62,7 +62,7 @@ describe('CollapsibleSection', () => {
       </CollapsibleSection>
     );
     fireEvent.click(screen.getByText('Transform'));
-    expect(screen.getByTestId('chevron-right')).toBeDefined();
+    expect(screen.getByTestId('chevron-right')).not.toBeNull();
   });
 
   it('expands again after second click', () => {
@@ -73,7 +73,7 @@ describe('CollapsibleSection', () => {
     );
     fireEvent.click(screen.getByText('Transform'));
     fireEvent.click(screen.getByText('Transform'));
-    expect(screen.getByText('My Content')).toBeDefined();
+    expect(screen.getByText('My Content')).not.toBeNull();
   });
 
   it('renders headerRight when provided', () => {
@@ -82,7 +82,7 @@ describe('CollapsibleSection', () => {
         <div>Content</div>
       </CollapsibleSection>
     );
-    expect(screen.getByText('Badge')).toBeDefined();
+    expect(screen.getByText('Badge')).not.toBeNull();
   });
 
   it('starts collapsed when localStorage has the id', () => {

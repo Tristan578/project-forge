@@ -77,26 +77,26 @@ describe('SpriteSheetImportDialog', () => {
   it('renders dialog title when open', () => {
     setupStore();
     render(<SpriteSheetImportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Import Sprite Sheet')).toBeDefined();
+    expect(screen.getByText('Import Sprite Sheet')).not.toBeNull();
   });
 
   it('renders drop zone before file is loaded', () => {
     setupStore();
     render(<SpriteSheetImportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Drop a sprite sheet image here')).toBeDefined();
+    expect(screen.getByText('Drop a sprite sheet image here')).not.toBeNull();
   });
 
   it('renders Browse Files button', () => {
     setupStore();
     render(<SpriteSheetImportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Browse Files')).toBeDefined();
+    expect(screen.getByText('Browse Files')).not.toBeNull();
   });
 
   it('renders Cancel and Import buttons', () => {
     setupStore();
     render(<SpriteSheetImportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Cancel')).toBeDefined();
-    expect(screen.getByText('Import (1 frames)')).toBeDefined();
+    expect(screen.getByText('Cancel')).not.toBeNull();
+    expect(screen.getByText('Import (1 frames)')).not.toBeNull();
   });
 
   it('import button is disabled before image is loaded', () => {
@@ -173,7 +173,7 @@ describe('SpriteSheetImportDialog', () => {
   it('accepts PNG, JPEG, and WebP files', () => {
     setupStore();
     render(<SpriteSheetImportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('PNG, JPG, or WebP')).toBeDefined();
+    expect(screen.getByText('PNG, JPG, or WebP')).not.toBeNull();
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     expect(fileInput.accept).toContain('image/png');
     expect(fileInput.accept).toContain('image/jpeg');

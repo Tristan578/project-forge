@@ -31,24 +31,24 @@ describe('AccountTab', () => {
 
   it('renders Danger Zone heading', () => {
     render(<AccountTab />);
-    expect(screen.getByText('Danger Zone')).toBeDefined();
+    expect(screen.getByText('Danger Zone')).not.toBeNull();
   });
 
   it('renders warning message about deletion', () => {
     render(<AccountTab />);
-    expect(screen.getByText(/Permanently delete your account/)).toBeDefined();
+    expect(screen.getByText(/Permanently delete your account/)).not.toBeNull();
   });
 
   it('renders Delete Account button initially', () => {
     render(<AccountTab />);
-    expect(screen.getByText('Delete Account')).toBeDefined();
+    expect(screen.getByText('Delete Account')).not.toBeNull();
   });
 
   it('shows confirmation form when Delete Account clicked', () => {
     render(<AccountTab />);
     fireEvent.click(screen.getByText('Delete Account'));
-    expect(screen.getByText(/Type/)).toBeDefined();
-    expect(screen.getByPlaceholderText('Type DELETE')).toBeDefined();
+    expect(screen.getByText(/Type/)).not.toBeNull();
+    expect(screen.getByPlaceholderText('Type DELETE')).not.toBeNull();
   });
 
   it('shows Permanently Delete button (disabled) in confirmation state', () => {
@@ -70,7 +70,7 @@ describe('AccountTab', () => {
   it('shows Cancel button in confirmation state', () => {
     render(<AccountTab />);
     fireEvent.click(screen.getByText('Delete Account'));
-    expect(screen.getByText('Cancel')).toBeDefined();
+    expect(screen.getByText('Cancel')).not.toBeNull();
   });
 
   it('hides confirmation form when Cancel clicked', () => {
@@ -78,11 +78,11 @@ describe('AccountTab', () => {
     fireEvent.click(screen.getByText('Delete Account'));
     fireEvent.click(screen.getByText('Cancel'));
     expect(screen.queryByPlaceholderText('Type DELETE')).toBeNull();
-    expect(screen.getByText('Delete Account')).toBeDefined();
+    expect(screen.getByText('Delete Account')).not.toBeNull();
   });
 
   it('renders This action cannot be undone warning', () => {
     render(<AccountTab />);
-    expect(screen.getByText('This action cannot be undone.')).toBeDefined();
+    expect(screen.getByText('This action cannot be undone.')).not.toBeNull();
   });
 });

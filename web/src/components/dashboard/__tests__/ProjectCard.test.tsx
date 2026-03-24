@@ -36,8 +36,8 @@ describe('ProjectCard', () => {
         onRename={mockOnRename}
       />
     );
-    expect(screen.getByText('My Game')).toBeDefined();
-    expect(screen.getByText('12 entities')).toBeDefined();
+    expect(screen.getByText('My Game')).not.toBeNull();
+    expect(screen.getByText('12 entities')).not.toBeNull();
   });
 
   it('shows relative time', () => {
@@ -50,7 +50,7 @@ describe('ProjectCard', () => {
       />
     );
     // Just updated, so should show "just now"
-    expect(screen.getByText('just now')).toBeDefined();
+    expect(screen.getByText('just now')).not.toBeNull();
   });
 
   it('calls onOpen when thumbnail area is clicked', () => {

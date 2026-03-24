@@ -82,17 +82,17 @@ describe('TilemapToolbar', () => {
   it('renders paint tool button', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByTitle('Paint (B)')).toBeDefined();
+    expect(screen.getByTitle('Paint (B)')).not.toBeNull();
   });
 
   it('renders all tool buttons', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByTitle('Paint (B)')).toBeDefined();
-    expect(screen.getByTitle('Erase (E)')).toBeDefined();
-    expect(screen.getByTitle('Fill (G)')).toBeDefined();
-    expect(screen.getByTitle('Rectangle (R)')).toBeDefined();
-    expect(screen.getByTitle('Tile Picker (Alt+Click)')).toBeDefined();
+    expect(screen.getByTitle('Paint (B)')).not.toBeNull();
+    expect(screen.getByTitle('Erase (E)')).not.toBeNull();
+    expect(screen.getByTitle('Fill (G)')).not.toBeNull();
+    expect(screen.getByTitle('Rectangle (R)')).not.toBeNull();
+    expect(screen.getByTitle('Tile Picker (Alt+Click)')).not.toBeNull();
   });
 
   it('calls setActiveTool when a tool button is clicked', () => {
@@ -105,14 +105,14 @@ describe('TilemapToolbar', () => {
   it('renders Layer selector label', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByText('Layer:')).toBeDefined();
+    expect(screen.getByText('Layer:')).not.toBeNull();
   });
 
   it('renders layer options in selector', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapToolbar />);
-    expect(screen.getByRole('option', { name: 'Layer 1' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Layer 2' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'Layer 1' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Layer 2' })).not.toBeNull();
   });
 
   it('calls setActiveLayerIndex when layer select changes', () => {

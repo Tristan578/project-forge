@@ -47,7 +47,7 @@ describe('WasmErrorBoundary', () => {
         <ThrowingChild shouldThrow={false} />
       </WasmErrorBoundary>
     );
-    expect(screen.getByTestId('child-content')).toBeDefined();
+    expect(screen.getByTestId('child-content')).not.toBeNull();
   });
 
   it('renders Engine Error fallback UI when child throws', () => {
@@ -56,7 +56,7 @@ describe('WasmErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </WasmErrorBoundary>
     );
-    expect(screen.getByText('Engine Error')).toBeDefined();
+    expect(screen.getByText('Engine Error')).not.toBeNull();
   });
 
   it('shows error description in fallback UI', () => {
@@ -65,7 +65,7 @@ describe('WasmErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </WasmErrorBoundary>
     );
-    expect(screen.getByText(/unexpected error/)).toBeDefined();
+    expect(screen.getByText(/unexpected error/)).not.toBeNull();
   });
 
   it('shows Reload Engine button in fallback UI', () => {
@@ -74,7 +74,7 @@ describe('WasmErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </WasmErrorBoundary>
     );
-    expect(screen.getByText('Reload Engine')).toBeDefined();
+    expect(screen.getByText('Reload Engine')).not.toBeNull();
   });
 
   it('shows Restore & Reload Engine button when backup exists', () => {
@@ -87,7 +87,7 @@ describe('WasmErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </WasmErrorBoundary>
     );
-    expect(screen.getByText('Restore & Reload Engine')).toBeDefined();
+    expect(screen.getByText('Restore & Reload Engine')).not.toBeNull();
   });
 
   it('does not show Restore button when no backup', () => {
@@ -109,7 +109,7 @@ describe('WasmErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </WasmErrorBoundary>
     );
-    expect(screen.getByText('Auto-save detected')).toBeDefined();
+    expect(screen.getByText('Auto-save detected')).not.toBeNull();
   });
 
   it('hides child content when error occurs', () => {

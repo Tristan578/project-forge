@@ -79,13 +79,13 @@ describe('ChatInput', () => {
   it('renders textarea with placeholder', () => {
     setupStore();
     render(<ChatInput />);
-    expect(screen.getByPlaceholderText(/Describe what you want/)).toBeDefined();
+    expect(screen.getByPlaceholderText(/Describe what you want/)).not.toBeNull();
   });
 
   it('renders send button', () => {
     setupStore();
     render(<ChatInput />);
-    expect(screen.getByLabelText('Send message')).toBeDefined();
+    expect(screen.getByLabelText('Send message')).not.toBeNull();
   });
 
   it('send button is disabled when textarea is empty', () => {
@@ -98,26 +98,26 @@ describe('ChatInput', () => {
   it('renders model selector', () => {
     setupStore();
     render(<ChatInput />);
-    expect(screen.getByLabelText('AI model')).toBeDefined();
+    expect(screen.getByLabelText('AI model')).not.toBeNull();
   });
 
   it('renders Think button', () => {
     setupStore();
     render(<ChatInput />);
-    expect(screen.getByText('Think')).toBeDefined();
+    expect(screen.getByText('Think')).not.toBeNull();
   });
 
   it('renders Review button', () => {
     setupStore();
     render(<ChatInput />);
-    expect(screen.getByText('Review')).toBeDefined();
+    expect(screen.getByText('Review')).not.toBeNull();
   });
 
   it('renders attach and voice buttons', () => {
     setupStore();
     render(<ChatInput />);
-    expect(screen.getByLabelText('Attach image')).toBeDefined();
-    expect(screen.getByLabelText('Voice input')).toBeDefined();
+    expect(screen.getByLabelText('Attach image')).not.toBeNull();
+    expect(screen.getByLabelText('Voice input')).not.toBeNull();
   });
 
   // ── Sending messages ──────────────────────────────────────────────────
@@ -182,7 +182,7 @@ describe('ChatInput', () => {
   it('shows stop button when streaming', () => {
     setupStore({ isStreaming: true });
     render(<ChatInput />);
-    expect(screen.getByLabelText('Stop streaming')).toBeDefined();
+    expect(screen.getByLabelText('Stop streaming')).not.toBeNull();
   });
 
   it('calls stopStreaming when stop button clicked', () => {
@@ -247,7 +247,7 @@ describe('ChatInput', () => {
   it('renders entity picker when showEntityPicker is true', () => {
     setupStore({ showEntityPicker: true });
     render(<ChatInput />);
-    expect(screen.getByTestId('entity-picker')).toBeDefined();
+    expect(screen.getByTestId('entity-picker')).not.toBeNull();
   });
 
   it('does not render entity picker when showEntityPicker is false', () => {
@@ -261,8 +261,8 @@ describe('ChatInput', () => {
   it('renders entity reference chips when present', () => {
     setupStore({ pendingEntityRefs: { '@Player': 'ent-1', '@Enemy': 'ent-2' } });
     render(<ChatInput />);
-    expect(screen.getByText('@Player')).toBeDefined();
-    expect(screen.getByText('@Enemy')).toBeDefined();
+    expect(screen.getByText('@Player')).not.toBeNull();
+    expect(screen.getByText('@Enemy')).not.toBeNull();
   });
 
   it('does not render entity chips when empty', () => {

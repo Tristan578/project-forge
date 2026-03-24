@@ -70,22 +70,22 @@ describe('TokenDepletedModal', () => {
   it('displays the "You\'re out of tokens" heading', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
-    expect(screen.getByText(/out of tokens/i)).toBeDefined();
+    expect(screen.getByText(/out of tokens/i)).not.toBeNull();
   });
 
   it('shows the current tier name in the modal', () => {
     mockChatState.showTokenDepletedModal = true;
     mockUserState.tier = 'creator';
     render(<TokenDepletedModal />);
-    expect(screen.getByText('Creator')).toBeDefined();
+    expect(screen.getByText('Creator')).not.toBeNull();
   });
 
   it('shows all three action buttons', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
-    expect(screen.getByTestId('upgrade-plan-button')).toBeDefined();
-    expect(screen.getByTestId('buy-token-pack-button')).toBeDefined();
-    expect(screen.getByTestId('byok-link')).toBeDefined();
+    expect(screen.getByTestId('upgrade-plan-button')).not.toBeNull();
+    expect(screen.getByTestId('buy-token-pack-button')).not.toBeNull();
+    expect(screen.getByTestId('byok-link')).not.toBeNull();
   });
 
   it('navigates to /pricing when Upgrade Plan is clicked', () => {
@@ -141,7 +141,7 @@ describe('TokenDepletedModal', () => {
       mockChatState.showTokenDepletedModal = true;
       mockUserState.tier = tier;
       const { unmount } = render(<TokenDepletedModal />);
-      expect(screen.getByText(label)).toBeDefined();
+      expect(screen.getByText(label)).not.toBeNull();
       unmount();
     }
   });

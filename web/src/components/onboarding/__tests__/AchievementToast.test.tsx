@@ -80,25 +80,25 @@ describe('AchievementToast', () => {
   it('renders Achievement Unlocked heading', () => {
     setupStore({ showAchievementToast: true, lastAchievementShown: 'first-entity' });
     render(<AchievementToast />);
-    expect(screen.getByText('Achievement Unlocked!')).toBeDefined();
+    expect(screen.getByText('Achievement Unlocked!')).not.toBeNull();
   });
 
   it('renders achievement name', () => {
     setupStore({ showAchievementToast: true, lastAchievementShown: 'first-entity' });
     render(<AchievementToast />);
-    expect(screen.getByText('First Steps')).toBeDefined();
+    expect(screen.getByText('First Steps')).not.toBeNull();
   });
 
   it('renders achievement description', () => {
     setupStore({ showAchievementToast: true, lastAchievementShown: 'first-entity' });
     render(<AchievementToast />);
-    expect(screen.getByText('Spawned your first entity')).toBeDefined();
+    expect(screen.getByText('Spawned your first entity')).not.toBeNull();
   });
 
   it('renders tier badge', () => {
     setupStore({ showAchievementToast: true, lastAchievementShown: 'first-entity' });
     render(<AchievementToast />);
-    expect(screen.getByText('bronze')).toBeDefined();
+    expect(screen.getByText('bronze')).not.toBeNull();
   });
 
   it('calls dismissAchievementToast when X clicked', () => {
@@ -118,6 +118,6 @@ describe('AchievementToast', () => {
   it('renders gold tier badge for gold achievement', () => {
     setupStore({ showAchievementToast: true, lastAchievementShown: 'gold-achievement' });
     render(<AchievementToast />);
-    expect(screen.getByText('gold')).toBeDefined();
+    expect(screen.getByText('gold')).not.toBeNull();
   });
 });

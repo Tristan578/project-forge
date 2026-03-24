@@ -76,37 +76,37 @@ describe('TutorialOverlay', () => {
   it('renders current step title', () => {
     setupStore('basic-editor', 0);
     render(<TutorialOverlay />);
-    expect(screen.getByText('Welcome to SpawnForge')).toBeDefined();
+    expect(screen.getByText('Welcome to SpawnForge')).not.toBeNull();
   });
 
   it('renders current step description', () => {
     setupStore('basic-editor', 0);
     render(<TutorialOverlay />);
-    expect(screen.getByText('This is your scene editor where you create games.')).toBeDefined();
+    expect(screen.getByText('This is your scene editor where you create games.')).not.toBeNull();
   });
 
   it('renders step counter', () => {
     setupStore('basic-editor', 0);
     render(<TutorialOverlay />);
-    expect(screen.getByText('Step 1 of 2')).toBeDefined();
+    expect(screen.getByText('Step 1 of 2')).not.toBeNull();
   });
 
   it('renders Next button on non-last step', () => {
     setupStore('basic-editor', 0);
     render(<TutorialOverlay />);
-    expect(screen.getByText('Next')).toBeDefined();
+    expect(screen.getByText('Next')).not.toBeNull();
   });
 
   it('renders Complete button on last step', () => {
     setupStore('basic-editor', 1);
     render(<TutorialOverlay />);
-    expect(screen.getByText('Complete')).toBeDefined();
+    expect(screen.getByText('Complete')).not.toBeNull();
   });
 
   it('renders Skip Tutorial button', () => {
     setupStore('basic-editor', 0);
     render(<TutorialOverlay />);
-    expect(screen.getByText('Skip Tutorial')).toBeDefined();
+    expect(screen.getByText('Skip Tutorial')).not.toBeNull();
   });
 
   it('calls advanceTutorial when Next clicked on non-last step', () => {
@@ -140,6 +140,6 @@ describe('TutorialOverlay', () => {
   it('shows step 2 of 2 when on last step', () => {
     setupStore('basic-editor', 1);
     render(<TutorialOverlay />);
-    expect(screen.getByText('Step 2 of 2')).toBeDefined();
+    expect(screen.getByText('Step 2 of 2')).not.toBeNull();
   });
 });

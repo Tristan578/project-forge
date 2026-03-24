@@ -63,13 +63,13 @@ describe('ConversationList', () => {
 
   it('renders the active conversation name as button text', () => {
     render(<ConversationList />);
-    expect(screen.getByText('My Chat')).toBeDefined();
+    expect(screen.getByText('My Chat')).not.toBeNull();
   });
 
   it('shows "New Chat" when no active conversation', () => {
     setupStore({ conversations: [], activeConversationId: null });
     render(<ConversationList />);
-    expect(screen.getByText('New Chat')).toBeDefined();
+    expect(screen.getByText('New Chat')).not.toBeNull();
   });
 
   it('calls loadConversations on mount', () => {
@@ -79,21 +79,21 @@ describe('ConversationList', () => {
 
   it('shows Switch conversation aria-label', () => {
     render(<ConversationList />);
-    expect(screen.getByLabelText('Switch conversation')).toBeDefined();
+    expect(screen.getByLabelText('Switch conversation')).not.toBeNull();
   });
 
   it('opens dropdown when button clicked', () => {
     render(<ConversationList />);
     fireEvent.click(screen.getByLabelText('Switch conversation'));
-    expect(screen.getByText('New Chat')).toBeDefined(); // New Chat button in dropdown
-    expect(screen.getByText('Another Chat')).toBeDefined();
+    expect(screen.getByText('New Chat')).not.toBeNull(); // New Chat button in dropdown
+    expect(screen.getByText('Another Chat')).not.toBeNull();
   });
 
   it('shows "No saved conversations" when conversations empty', () => {
     setupStore({ conversations: [] });
     render(<ConversationList />);
     fireEvent.click(screen.getByLabelText('Switch conversation'));
-    expect(screen.getByText('No saved conversations')).toBeDefined();
+    expect(screen.getByText('No saved conversations')).not.toBeNull();
   });
 
   it('calls createConversation when New Chat clicked', () => {
@@ -113,7 +113,7 @@ describe('ConversationList', () => {
   it('shows message count for each conversation', () => {
     render(<ConversationList />);
     fireEvent.click(screen.getByLabelText('Switch conversation'));
-    expect(screen.getByText('1 msg')).toBeDefined();
-    expect(screen.getByText('0 msgs')).toBeDefined();
+    expect(screen.getByText('1 msg')).not.toBeNull();
+    expect(screen.getByText('0 msgs')).not.toBeNull();
   });
 });

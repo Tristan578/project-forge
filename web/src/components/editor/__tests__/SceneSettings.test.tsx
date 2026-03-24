@@ -154,73 +154,73 @@ describe('SceneSettings', () => {
   it('renders SceneStatistics', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByTestId('scene-statistics')).toBeDefined();
+    expect(screen.getByTestId('scene-statistics')).not.toBeNull();
   });
 
   it('renders Quality Preset section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Quality Preset')).toBeDefined();
+    expect(screen.getByText('Quality Preset')).not.toBeNull();
   });
 
   it('renders Ambient Light section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Ambient Light')).toBeDefined();
+    expect(screen.getByText('Ambient Light')).not.toBeNull();
   });
 
   it('renders Environment section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Environment')).toBeDefined();
+    expect(screen.getByText('Environment')).not.toBeNull();
   });
 
   it('renders Fog section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Fog')).toBeDefined();
+    expect(screen.getByText('Fog')).not.toBeNull();
   });
 
   it('renders Bloom section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Bloom')).toBeDefined();
+    expect(screen.getByText('Bloom')).not.toBeNull();
   });
 
   it('renders Chromatic Aberration section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Chromatic Aberration')).toBeDefined();
+    expect(screen.getByText('Chromatic Aberration')).not.toBeNull();
   });
 
   it('renders Color Grading section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Color Grading')).toBeDefined();
+    expect(screen.getByText('Color Grading')).not.toBeNull();
   });
 
   it('renders Sharpening section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Sharpening')).toBeDefined();
+    expect(screen.getByText('Sharpening')).not.toBeNull();
   });
 
   it('renders Depth of Field section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Depth of Field')).toBeDefined();
+    expect(screen.getByText('Depth of Field')).not.toBeNull();
   });
 
   it('renders Motion Blur section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Motion Blur')).toBeDefined();
+    expect(screen.getByText('Motion Blur')).not.toBeNull();
   });
 
   it('renders Mobile Controls section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Mobile Controls')).toBeDefined();
+    expect(screen.getByText('Mobile Controls')).not.toBeNull();
   });
 
   // ── Quality Preset ────────────────────────────────────────────────────
@@ -394,8 +394,8 @@ describe('SceneSettings', () => {
   it('renders Upload and Generate buttons in Environment', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Upload')).toBeDefined();
-    expect(screen.getByText('Generate')).toBeDefined();
+    expect(screen.getByText('Upload')).not.toBeNull();
+    expect(screen.getByText('Generate')).not.toBeNull();
   });
 
   it('opens docs on help button', () => {

@@ -52,13 +52,13 @@ describe('ThemeEditor', () => {
   it('renders the Theme Presets button', () => {
     setupStore();
     render(<ThemeEditor />);
-    expect(screen.getByText('Theme Presets')).toBeDefined();
+    expect(screen.getByText('Theme Presets')).not.toBeNull();
   });
 
   it('renders the Apply to All Widgets button', () => {
     setupStore();
     render(<ThemeEditor />);
-    expect(screen.getByText('Apply to All Widgets')).toBeDefined();
+    expect(screen.getByText('Apply to All Widgets')).not.toBeNull();
   });
 
   it('preset list is hidden initially', () => {
@@ -71,11 +71,11 @@ describe('ThemeEditor', () => {
     setupStore();
     render(<ThemeEditor />);
     fireEvent.click(screen.getByText('Theme Presets'));
-    expect(screen.getByText('Dark')).toBeDefined();
-    expect(screen.getByText('Light')).toBeDefined();
-    expect(screen.getByText('Sci-Fi')).toBeDefined();
-    expect(screen.getByText('Fantasy')).toBeDefined();
-    expect(screen.getByText('Retro')).toBeDefined();
+    expect(screen.getByText('Dark')).not.toBeNull();
+    expect(screen.getByText('Light')).not.toBeNull();
+    expect(screen.getByText('Sci-Fi')).not.toBeNull();
+    expect(screen.getByText('Fantasy')).not.toBeNull();
+    expect(screen.getByText('Retro')).not.toBeNull();
   });
 
   it('hides preset list when Theme Presets is clicked again', () => {
@@ -130,10 +130,10 @@ describe('ThemeEditor', () => {
   it('renders font family select with all options', () => {
     setupStore();
     render(<ThemeEditor />);
-    expect(screen.getByRole('option', { name: 'System UI' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Monospace' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Serif' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Sans-serif' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'System UI' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Monospace' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Serif' })).not.toBeNull();
+    expect(screen.getByRole('option', { name: 'Sans-serif' })).not.toBeNull();
   });
 
   it('calls applyTheme when font family is changed', () => {
@@ -181,6 +181,6 @@ describe('ThemeEditor', () => {
     setupStore(null);
     render(<ThemeEditor />);
     // The font select should show the Dark preset default (system-ui -> "System UI")
-    expect(screen.getByDisplayValue('System UI')).toBeDefined();
+    expect(screen.getByDisplayValue('System UI')).not.toBeNull();
   });
 });

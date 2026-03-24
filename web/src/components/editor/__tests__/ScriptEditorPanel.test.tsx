@@ -189,7 +189,7 @@ describe('ScriptEditorPanel', () => {
     render(<ScriptEditorPanel />);
     fireEvent.click(screen.getByText('Hide'));
     expect(screen.queryByText('Console')).toBeNull();
-    expect(screen.getByText(/Show Console/)).toBeDefined();
+    expect(screen.getByText(/Show Console/)).not.toBeNull();
   });
 
   it('shows console again on Show Console click', () => {

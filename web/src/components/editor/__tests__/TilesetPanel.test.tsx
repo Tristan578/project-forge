@@ -57,31 +57,31 @@ describe('TilesetPanel', () => {
   it('shows "No tilesets imported yet" when empty', () => {
     setupStore();
     render(<TilesetPanel />);
-    expect(screen.getByText('No tilesets imported yet')).toBeDefined();
+    expect(screen.getByText('No tilesets imported yet')).not.toBeNull();
   });
 
   it('shows Import Tileset button when empty', () => {
     setupStore();
     render(<TilesetPanel />);
-    expect(screen.getByText('Import Tileset')).toBeDefined();
+    expect(screen.getByText('Import Tileset')).not.toBeNull();
   });
 
   it('renders Tileset heading when tilesets exist', () => {
     setupStore({ tilesets: { 'ts-1': fakeTileset }, activeTilesetId: 'ts-1' });
     render(<TilesetPanel />);
-    expect(screen.getByText('Tileset')).toBeDefined();
+    expect(screen.getByText('Tileset')).not.toBeNull();
   });
 
   it('shows tileset name in select option', () => {
     setupStore({ tilesets: { 'ts-1': fakeTileset }, activeTilesetId: 'ts-1' });
     render(<TilesetPanel />);
-    expect(screen.getByRole('option', { name: 'dungeon' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'dungeon' })).not.toBeNull();
   });
 
   it('shows "Select tileset..." placeholder option', () => {
     setupStore({ tilesets: { 'ts-1': fakeTileset }, activeTilesetId: null });
     render(<TilesetPanel />);
-    expect(screen.getByRole('option', { name: 'Select tileset...' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'Select tileset...' })).not.toBeNull();
   });
 
   it('calls setActiveTileset when select changes', () => {
@@ -95,15 +95,15 @@ describe('TilesetPanel', () => {
   it('renders Import Tileset title button when tilesets exist', () => {
     setupStore({ tilesets: { 'ts-1': fakeTileset }, activeTilesetId: 'ts-1' });
     render(<TilesetPanel />);
-    expect(screen.getByTitle('Import Tileset')).toBeDefined();
+    expect(screen.getByTitle('Import Tileset')).not.toBeNull();
   });
 
   it('renders tile grid cells when active tileset is selected', () => {
     setupStore({ tilesets: { 'ts-1': fakeTileset }, activeTilesetId: 'ts-1' });
     render(<TilesetPanel />);
     // 4x4 grid = 16 tiles, each with title "Tile N"
-    expect(screen.getByTitle('Tile 0')).toBeDefined();
-    expect(screen.getByTitle('Tile 15')).toBeDefined();
+    expect(screen.getByTitle('Tile 0')).not.toBeNull();
+    expect(screen.getByTitle('Tile 15')).not.toBeNull();
   });
 
   it('does not render tile grid when no active tileset', () => {

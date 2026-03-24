@@ -68,17 +68,17 @@ describe('GenerationProgress', () => {
 
   it('renders the sparkles icon', () => {
     render(<GenerationProgress operation="texture" />);
-    expect(screen.getByTestId('sparkles-icon')).toBeDefined();
+    expect(screen.getByTestId('sparkles-icon')).not.toBeNull();
   });
 
   it('renders the operation label in the header', () => {
     render(<GenerationProgress operation="texture" />);
-    expect(screen.getByText(/texture/i)).toBeDefined();
+    expect(screen.getByText(/texture/i)).not.toBeNull();
   });
 
   it('renders "3D model" label for model operation', () => {
     render(<GenerationProgress operation="model" />);
-    expect(screen.getByText(/3D model/)).toBeDefined();
+    expect(screen.getByText(/3D model/)).not.toBeNull();
   });
 
   // ── cancel button ───────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ describe('GenerationProgress', () => {
   it('renders cancel button when onCancel is provided', () => {
     const handleCancel = vi.fn();
     render(<GenerationProgress operation="model" onCancel={handleCancel} />);
-    expect(screen.getByTestId('x-icon')).toBeDefined();
+    expect(screen.getByTestId('x-icon')).not.toBeNull();
   });
 
   it('calls onCancel when cancel button is clicked', () => {
@@ -122,7 +122,7 @@ describe('GenerationProgress', () => {
     render(<GenerationProgress operation="model" />);
     // The mocked getCurrentStage returns 'Test stage...' for any inputs
     // But since progress is undefined, derivedStage = 'Starting...'
-    expect(screen.getByText('Starting...')).toBeDefined();
+    expect(screen.getByText('Starting...')).not.toBeNull();
   });
 
   // ── streaming mode (progress = 0) ──────────────────────────────────────────
@@ -135,7 +135,7 @@ describe('GenerationProgress', () => {
   it('renders stage from getCurrentStage in streaming mode', () => {
     render(<GenerationProgress operation="model" progress={0} />);
     // getCurrentStage mock returns 'Test stage...'
-    expect(screen.getByText(/Test stage/i)).toBeDefined();
+    expect(screen.getByText(/Test stage/i)).not.toBeNull();
   });
 
   // ── determinate mode (progress > 0) ─────────────────────────────────────────
@@ -154,7 +154,7 @@ describe('GenerationProgress', () => {
 
   it('renders percentage text in determinate mode', () => {
     render(<GenerationProgress operation="model" progress={64} />);
-    expect(screen.getByText('64%')).toBeDefined();
+    expect(screen.getByText('64%')).not.toBeNull();
   });
 
   it('clamps progress to 0 at minimum', () => {
@@ -173,7 +173,7 @@ describe('GenerationProgress', () => {
 
   it('uses custom stage prop when provided', () => {
     render(<GenerationProgress operation="model" progress={50} stage="Custom stage label..." />);
-    expect(screen.getByText('Custom stage label...')).toBeDefined();
+    expect(screen.getByText('Custom stage label...')).not.toBeNull();
   });
 
   it('uses custom stage in downloading state', () => {
@@ -183,7 +183,7 @@ describe('GenerationProgress', () => {
         stage="Downloading result..."
       />,
     );
-    expect(screen.getByText('Downloading result...')).toBeDefined();
+    expect(screen.getByText('Downloading result...')).not.toBeNull();
   });
 });
 
@@ -216,7 +216,7 @@ describe('GenerationProgressOverlay', () => {
         operation="model"
       />,
     );
-    expect(screen.getByRole('status')).toBeDefined();
+    expect(screen.getByRole('status')).not.toBeNull();
   });
 
   it('forwards operation label into the inner component', () => {
@@ -226,7 +226,7 @@ describe('GenerationProgressOverlay', () => {
         operation="texture"
       />,
     );
-    expect(screen.getByText(/texture/i)).toBeDefined();
+    expect(screen.getByText(/texture/i)).not.toBeNull();
   });
 
   it('passes cancel handler through to the inner component', () => {

@@ -72,13 +72,13 @@ describe('SceneBrowser', () => {
 
   it('renders the dialog when isOpen is true', () => {
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
-    expect(screen.getByRole('dialog')).toBeDefined();
+    expect(screen.getByRole('dialog')).not.toBeNull();
   });
 
   it('renders empty state message when there are no scenes', () => {
     setupStore({ scenes: [] });
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
-    expect(screen.getByText(/No scenes yet/i)).toBeDefined();
+    expect(screen.getByText(/No scenes yet/i)).not.toBeNull();
   });
 
   it('renders the scene list with all scene names', () => {
@@ -90,8 +90,8 @@ describe('SceneBrowser', () => {
       activeSceneId: 'scene-1',
     });
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
-    expect(screen.getByText('Main Level')).toBeDefined();
-    expect(screen.getByText('Boss Level')).toBeDefined();
+    expect(screen.getByText('Main Level')).not.toBeNull();
+    expect(screen.getByText('Boss Level')).not.toBeNull();
   });
 
   it('marks the active scene as aria-selected', () => {
@@ -115,7 +115,7 @@ describe('SceneBrowser', () => {
       nodeCount: 3,
     });
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
-    expect(screen.getByText('3 entities')).toBeDefined();
+    expect(screen.getByText('3 entities')).not.toBeNull();
   });
 
   it('shows start badge on the start scene', () => {
@@ -124,7 +124,7 @@ describe('SceneBrowser', () => {
       activeSceneId: 's1',
     });
     render(<SceneBrowser isOpen onClose={mockOnClose} />);
-    expect(screen.getByText('start')).toBeDefined();
+    expect(screen.getByText('start')).not.toBeNull();
   });
 
   it('calls switchScene when a non-active scene is clicked', () => {

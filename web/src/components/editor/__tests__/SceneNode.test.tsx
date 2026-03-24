@@ -52,7 +52,7 @@ describe('SceneNode', () => {
       />
     );
     
-    expect(screen.getByText('Test Cube')).toBeDefined();
+    expect(screen.getByText('Test Cube')).not.toBeNull();
   });
 
   it('calls selectEntity when clicked', () => {
