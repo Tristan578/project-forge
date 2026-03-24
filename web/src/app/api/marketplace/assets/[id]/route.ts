@@ -78,7 +78,7 @@ export async function GET(
       userName: r.userName || 'Anonymous',
     }));
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       asset: {
         id: asset.id,
         name: asset.name,
@@ -105,6 +105,8 @@ export async function GET(
       },
       reviews: formattedReviews,
     });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    return response;
   } catch (error) {
     console.error('Error fetching asset details:', error);
     captureException(error, { route: '/api/marketplace/assets/[id]' });

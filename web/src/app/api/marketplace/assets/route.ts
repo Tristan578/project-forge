@@ -117,7 +117,9 @@ export async function GET(req: NextRequest) {
       createdAt: r.createdAt.toISOString(),
     }));
 
-    return NextResponse.json({ assets, hasMore });
+    const response = NextResponse.json({ assets, hasMore });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    return response;
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets' });
     console.error('Error fetching marketplace assets:', error);
