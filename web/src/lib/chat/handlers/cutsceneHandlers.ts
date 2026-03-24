@@ -83,9 +83,9 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
     // Enter play mode before starting the cutscene
     ctx.dispatchCommand('play', {});
 
-    useCutsceneStore.getState().setActiveCutscene(p.data.cutsceneId);
-
-    // Stop any existing player before starting a new one
+    // Stop any existing player before starting a new one.
+    // Do NOT set activeCutscene yet — load() triggers stop() which calls onStop,
+    // and onStop nullifies activeCutsceneId. Set it AFTER load completes.
     if (activePlayer) {
       activePlayer.stop();
       activePlayer = null;
@@ -104,10 +104,11 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
       },
     });
 
-    // Assign activePlayer AFTER load() because load() calls stop() internally,
-    // which triggers the onStop callback and would nullify activePlayer prematurely.
+    // load() calls this.stop() internally (resets state), which fires onStop.
+    // Both activePlayer and activeCutsceneId MUST be set AFTER load finishes.
     player.load(cutscene);
     activePlayer = player;
+    useCutsceneStore.getState().setActiveCutscene(p.data.cutsceneId);
     player.play();
 
     return {
