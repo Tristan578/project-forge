@@ -4,7 +4,42 @@ import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
 import { ACHIEVEMENTS } from '@/data/achievements';
-import * as Icons from 'lucide-react';
+import {
+  Sparkles,
+  Palette,
+  Atom,
+  Code,
+  Bot,
+  Layout,
+  Gamepad2,
+  Film,
+  Music,
+  Globe,
+  Award,
+  Trophy,
+  Layers,
+  Compass,
+  Crown,
+} from 'lucide-react';
+import type { LucideProps } from 'lucide-react';
+
+const ACHIEVEMENT_ICONS: Record<string, React.ComponentType<LucideProps>> = {
+  Sparkles,
+  Palette,
+  Atom,
+  Code,
+  Bot,
+  Layout,
+  Gamepad2,
+  Film,
+  Music,
+  Globe,
+  Award,
+  Trophy,
+  Layers,
+  Compass,
+  Crown,
+};
 
 export function AchievementToast() {
   const {
@@ -26,7 +61,7 @@ export function AchievementToast() {
 
   if (!showAchievementToast || !achievement) return null;
 
-  const IconComponent = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[achievement.icon];
+  const IconComponent = ACHIEVEMENT_ICONS[achievement.icon];
 
   const tierColors = {
     bronze: 'from-amber-700 to-amber-900',
