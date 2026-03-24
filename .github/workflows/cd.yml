@@ -302,7 +302,7 @@ jobs:
         run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Upload WASM artifacts
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v4
         with:
           name: wasm-binaries
           path: |
@@ -371,7 +371,7 @@ jobs:
 
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-report
           path: web/playwright-report/
@@ -379,7 +379,7 @@ jobs:
 
       - name: Upload test results
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v8
+        uses: actions/upload-artifact@v4
         with:
           name: playwright-results
           path: web/test-results/
