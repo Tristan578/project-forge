@@ -7,8 +7,6 @@ import { ALLOWED_TEMPLATES } from '@/lib/bridges/luaTemplates';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export const runtime = 'nodejs';
-
 // Cache discovered tool config to avoid spawning a child process on every request
 let cachedTool: { config: BridgeToolConfig; expiresAt: number } | null = null;
 const CACHE_TTL_MS = 60_000; // 60 seconds
