@@ -49,6 +49,7 @@ import {
   setEditModeDispatcher,
   createBridgeSlice,
   createSceneLightSlice,
+  createLocalizationSlice,
 } from '@/stores/slices';
 import type { EditorState } from '@/stores/editorStore';
 import type { SceneNode } from '@/stores/slices/types';
@@ -77,6 +78,7 @@ function createIntegrationStore(): import('zustand').StoreApi<EditorState> {
     ...createEditModeSlice(...args),
     ...createBridgeSlice(...args),
     ...createSceneLightSlice(...args),
+    ...createLocalizationSlice(...args),
   }));
 }
 
