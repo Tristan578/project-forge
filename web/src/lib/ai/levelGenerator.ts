@@ -376,12 +376,13 @@ export function applyConstraints(
 
 function adjustRoomCount(layout: LevelLayout, targetCount: number): LevelLayout {
   const rooms = [...layout.rooms];
-  // If we need more rooms, duplicate combat/corridor rooms
+  // If we need more rooms, insert combat rooms on the main path before the exit
   while (rooms.length < targetCount) {
-    const lastNonExit = rooms.findIndex((r) => r.id === layout.exitRoom);
-    const insertIdx = lastNonExit > 0 ? lastNonExit : rooms.length;
+    const exitIdx = rooms.findIndex((r) => r.id === layout.exitRoom);
+    const insertIdx = exitIdx > 0 ? exitIdx : rooms.length;
     const newId = `gen_room_${rooms.length}`;
     const prevRoom = rooms[insertIdx - 1] ?? rooms[0];
+    const nextRoom = rooms[insertIdx] ?? null;
     const newRoom = makeRoom(
       newId,
       `Room ${rooms.length + 1}`,
@@ -392,8 +393,22 @@ function adjustRoomCount(layout: LevelLayout, targetCount: number): LevelLayout 
       prevRoom.position.y,
       [],
     );
-    // Wire connections
+    // Wire new room into the linear chain: prevRoom <-> newRoom <-> nextRoom
     newRoom.connections.push(prevRoom.id);
+    // Remove the forward link from prevRoom to nextRoom (if any) and replace with newRoom
+    if (nextRoom) {
+      const fwdIdx = prevRoom.connections.indexOf(nextRoom.id);
+      if (fwdIdx !== -1) {
+        prevRoom.connections.splice(fwdIdx, 1);
+      }
+      // Remove the back link from nextRoom to prevRoom and replace with newRoom
+      const backIdx = nextRoom.connections.indexOf(prevRoom.id);
+      if (backIdx !== -1) {
+        nextRoom.connections.splice(backIdx, 1);
+      }
+      nextRoom.connections.push(newId);
+      newRoom.connections.push(nextRoom.id);
+    }
     prevRoom.connections.push(newId);
     rooms.splice(insertIdx, 0, newRoom);
   }
