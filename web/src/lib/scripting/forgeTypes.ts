@@ -391,6 +391,13 @@ declare namespace forge {
     /** Load a 3D model from a URL and register it as an asset (async) */
     function loadModel(url: string): Promise<{ assetId: string } | null>;
   }
+
+  namespace leaderboard {
+    /** Submit a score to a named leaderboard. Returns rank (1-based) or null on failure. */
+    function submit(name: string, playerName: string, score: number, metadata?: Record<string, unknown>): Promise<{ rank: number } | null>;
+    /** Get the top N entries for a named leaderboard (default: top 10). */
+    function getTop(name: string, limit?: number): Promise<Array<{ rank: number; playerName: string; score: number; metadata: Record<string, unknown> | null; createdAt: string }> | null>;
+  }
 }
 
 /** Entity ID of the entity this script is attached to */

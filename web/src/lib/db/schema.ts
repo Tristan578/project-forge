@@ -517,6 +517,46 @@ export const webhookEvents = pgTable('webhook_events', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+// --- Leaderboard Tables ---
+
+export const leaderboardSortOrderEnum = pgEnum('leaderboard_sort_order', ['desc', 'asc']);
+
+export const leaderboards = pgTable(
+  'leaderboards',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    gameId: uuid('game_id').notNull().references(() => publishedGames.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    sortOrder: leaderboardSortOrderEnum('sort_order').notNull().default('desc'),
+    maxEntries: integer('max_entries').notNull().default(100),
+    minScore: integer('min_score'),
+    maxScore: integer('max_score'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('uq_leaderboards_game_name').on(table.gameId, table.name),
+    index('idx_leaderboards_game').on(table.gameId),
+  ]
+);
+
+export const leaderboardEntries = pgTable(
+  'leaderboard_entries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    leaderboardId: uuid('leaderboard_id').notNull().references(() => leaderboards.id, { onDelete: 'cascade' }),
+    playerName: text('player_name').notNull(),
+    score: integer('score').notNull(),
+    metadata: jsonb('metadata'),
+    // Hashed IP for deduplication window checks — never stored in plain text
+    ipHash: text('ip_hash').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index('idx_leaderboard_entries_leaderboard_score').on(table.leaderboardId, table.score),
+    index('idx_leaderboard_entries_leaderboard_created').on(table.leaderboardId, table.createdAt),
+  ]
+);
+
 // --- Content Moderation Appeals ---
 
 export const appealStatusEnum = pgEnum('appeal_status', ['pending', 'approved', 'rejected']);
@@ -590,3 +630,9 @@ export type FeedbackType = 'bug' | 'feature' | 'general';
 export type ModerationAppeal = typeof moderationAppeals.$inferSelect;
 export type NewModerationAppeal = typeof moderationAppeals.$inferInsert;
 export type AppealStatus = 'pending' | 'approved' | 'rejected';
+
+export type Leaderboard = typeof leaderboards.$inferSelect;
+export type NewLeaderboard = typeof leaderboards.$inferInsert;
+export type LeaderboardEntry = typeof leaderboardEntries.$inferSelect;
+export type NewLeaderboardEntry = typeof leaderboardEntries.$inferInsert;
+export type LeaderboardSortOrder = 'desc' | 'asc';

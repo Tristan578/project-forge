@@ -289,6 +289,11 @@ const TOOL_LABELS: Record<string, string> = {
   // Security
   get_security_status: 'Get Security Status',
   validate_project_security: 'Validate Project Security',
+  // Leaderboards
+  create_leaderboard: 'Create Leaderboard',
+  list_leaderboards: 'List Leaderboards',
+  configure_leaderboard: 'Configure Leaderboard',
+  delete_leaderboard: 'Delete Leaderboard',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {

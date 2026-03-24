@@ -10663,6 +10663,120 @@
       },
       "tokenCost": 0,
       "requiredScope": "performance:write"
+    },
+    {
+      "name": "create_leaderboard",
+      "description": "Define a leaderboard for the current published game. Leaderboards are identified by name and can be sorted highest-first (desc) or lowest-first (asc). Call this once per leaderboard during game setup.",
+      "category": "publishing",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "description": "Published game ID to attach the leaderboard to"
+          },
+          "name": {
+            "type": "string",
+            "description": "Unique leaderboard name within this game (e.g. 'highscore', 'speedrun')"
+          },
+          "sortOrder": {
+            "type": "string",
+            "enum": ["desc", "asc"],
+            "description": "Sort order: 'desc' = highest score wins (default), 'asc' = lowest score wins (e.g. speedrun times)"
+          },
+          "maxEntries": {
+            "type": "number",
+            "description": "Maximum number of entries to retain (default: 100, max: 1000)"
+          },
+          "minScore": {
+            "type": "number",
+            "description": "Optional minimum score bound — submissions below this are rejected with 400"
+          },
+          "maxScore": {
+            "type": "number",
+            "description": "Optional maximum score bound — submissions above this are rejected with 400 (useful for anti-cheat)"
+          }
+        },
+        "required": ["gameId", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "list_leaderboards",
+      "description": "List all leaderboards configured for a published game, including their sort order and entry counts.",
+      "category": "publishing",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "description": "Published game ID"
+          }
+        },
+        "required": ["gameId"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "configure_leaderboard",
+      "description": "Update an existing leaderboard's configuration: sort order, max entries, or score bounds. Does not affect existing entries.",
+      "category": "publishing",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "description": "Published game ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the leaderboard to update"
+          },
+          "sortOrder": {
+            "type": "string",
+            "enum": ["desc", "asc"],
+            "description": "New sort order"
+          },
+          "maxEntries": {
+            "type": "number",
+            "description": "New maximum number of retained entries"
+          },
+          "minScore": {
+            "type": "number",
+            "description": "New minimum score bound (null to remove)"
+          },
+          "maxScore": {
+            "type": "number",
+            "description": "New maximum score bound (null to remove)"
+          }
+        },
+        "required": ["gameId", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "project:manage"
+    },
+    {
+      "name": "delete_leaderboard",
+      "description": "Delete a leaderboard and all its entries permanently. This cannot be undone.",
+      "category": "publishing",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "gameId": {
+            "type": "string",
+            "description": "Published game ID"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the leaderboard to delete"
+          }
+        },
+        "required": ["gameId", "name"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "project:manage"
     }
   ],
   "resources": [
