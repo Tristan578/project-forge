@@ -28,7 +28,51 @@ export interface TermIndex {
 }
 
 /**
- * Tokenize text into lowercase terms, removing markdown syntax and punctuation.
+ * Apply simple suffix stemming to reduce inflected forms to a common root.
+ * Exported for testing.
+ * Handles the most common English suffixes without a full stemmer dependency.
+ * Examples: "running" → "run", "animations" → "anim", "physics" → "physic"
+ */
+export function stem(term: string): string {
+  if (term.length < 4) return term;
+
+  // -tion / -sion → remove (e.g. "animation" → "animat")
+  if (term.endsWith('tion') && term.length > 6) return term.slice(0, -4);
+  if (term.endsWith('sion') && term.length > 6) return term.slice(0, -4);
+
+  // -ing → remove, handle doubling (e.g. "running" → "run", "moving" → "mov")
+  if (term.endsWith('ing') && term.length > 5) {
+    const root = term.slice(0, -3);
+    // Undo consonant doubling: "running" → "runn" → "run"
+    if (root.length > 2 && root[root.length - 1] === root[root.length - 2]) {
+      return root.slice(0, -1);
+    }
+    return root;
+  }
+
+  // -ed → remove, handle doubling (e.g. "added" → "add")
+  if (term.endsWith('ed') && term.length > 4) {
+    const root = term.slice(0, -2);
+    if (root.length > 2 && root[root.length - 1] === root[root.length - 2]) {
+      return root.slice(0, -1);
+    }
+    return root;
+  }
+
+  // -es / -s → remove (e.g. "animations" → "animation", "scripts" → "script")
+  if (term.endsWith('ies') && term.length > 5) return term.slice(0, -3) + 'y';
+  if (term.endsWith('es') && term.length > 4) return term.slice(0, -2);
+  if (term.endsWith('s') && term.length > 4 && !term.endsWith('ss')) return term.slice(0, -1);
+
+  // -ly → remove (e.g. "smoothly" → "smooth")
+  if (term.endsWith('ly') && term.length > 5) return term.slice(0, -2);
+
+  return term;
+}
+
+/**
+ * Tokenize text into lowercase terms, removing markdown syntax and punctuation,
+ * then apply suffix stemming so inflected forms match their root.
  */
 function tokenize(text: string): string[] {
   return text
@@ -42,7 +86,8 @@ function tokenize(text: string): string[] {
     .replace(/[^\w\s]/g, ' ')
     // Split on whitespace
     .split(/\s+/)
-    .filter(t => t.length > 1);
+    .filter(t => t.length > 1)
+    .map(stem);
 }
 
 /**
@@ -145,7 +190,35 @@ function findMatchSection(doc: DocEntry, queryTerms: string[]): string | undefin
 }
 
 /**
- * Search documents using TF-IDF scoring.
+ * Return a phrase-match bonus for a document.
+ * If the stemmed query terms appear as a consecutive sequence anywhere in the
+ * document content (after the same tokenize pass), return a multiplier > 1.
+ * Multi-term queries with a phrase hit score 2× higher than term-only matches.
+ */
+function phraseBonus(doc: DocEntry, queryTerms: string[]): number {
+  if (queryTerms.length < 2) return 1;
+
+  const contentTokens = tokenize(doc.content);
+  const firstTerm = queryTerms[0];
+
+  for (let i = 0; i < contentTokens.length - queryTerms.length + 1; i++) {
+    if (contentTokens[i] === firstTerm) {
+      let matched = true;
+      for (let j = 1; j < queryTerms.length; j++) {
+        if (contentTokens[i + j] !== queryTerms[j]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) return 2.0;
+    }
+  }
+
+  return 1;
+}
+
+/**
+ * Search documents using TF-IDF scoring with phrase-match bonus.
  */
 export function search(
   query: string,
@@ -182,6 +255,16 @@ export function search(
 
       const termScore = normalizedTf * idf;
       scores.set(docPath, (scores.get(docPath) ?? 0) + termScore);
+    }
+  }
+
+  // Apply phrase-match bonus before sorting
+  for (const [docPath, baseScore] of scores) {
+    const doc = docIndex.docs.get(docPath);
+    if (!doc) continue;
+    const bonus = phraseBonus(doc, queryTerms);
+    if (bonus > 1) {
+      scores.set(docPath, baseScore * bonus);
     }
   }
 
