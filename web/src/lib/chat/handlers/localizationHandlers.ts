@@ -31,13 +31,14 @@ function buildSceneForExtraction(store: Parameters<ToolHandler>[1]['store']): Sc
   }
 
   // Dialogue trees (present when dialogue system is active)
-  if ((store as Record<string, unknown>).dialogueTrees) {
-    scene.dialogueTrees = (store as Record<string, unknown>).dialogueTrees as SceneForExtraction['dialogueTrees'];
+  const storeAsUnknown = store as unknown as Record<string, unknown>;
+  if (storeAsUnknown.dialogueTrees) {
+    scene.dialogueTrees = storeAsUnknown.dialogueTrees as SceneForExtraction['dialogueTrees'];
   }
 
   // UI widgets (present when UI builder is active)
-  if ((store as Record<string, unknown>).uiWidgets) {
-    scene.uiWidgets = (store as Record<string, unknown>).uiWidgets as SceneForExtraction['uiWidgets'];
+  if (storeAsUnknown.uiWidgets) {
+    scene.uiWidgets = storeAsUnknown.uiWidgets as SceneForExtraction['uiWidgets'];
   }
 
   return scene;
