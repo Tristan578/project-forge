@@ -133,7 +133,8 @@ async function generateWithHealing(
 function worldSummary(world: GameWorld, report: ConsistencyReport, fallback: boolean): string {
   const factionList = world.factions.map((f) => `${f.name} (${f.alignment})`).join(', ');
   const regionList = world.regions.map((r) => r.name).join(', ');
-  const issueCount = report.issues.filter((i) => i.severity === 'warning').length;
+  const warningCount = report.issues.filter((i) => i.severity === 'warning').length;
+  const errorCount = report.issues.filter((i) => i.severity === 'error').length;
 
   const lines: string[] = [
     fallback
@@ -148,8 +149,10 @@ function worldSummary(world: GameWorld, report: ConsistencyReport, fallback: boo
     `**Lore entries:** ${world.lore.length}`,
   ];
 
-  if (issueCount > 0) {
-    lines.push(``, `*${issueCount} minor consistency warning(s) — world is still valid and playable.*`);
+  if (errorCount > 0) {
+    lines.push(``, `*${errorCount} consistency error(s) found — review the consistency report for details.*`);
+  } else if (warningCount > 0) {
+    lines.push(``, `*${warningCount} minor consistency warning(s) — world is still valid and playable.*`);
   }
 
   return lines.join('\n');
