@@ -36,7 +36,7 @@ describe('GET /api/health', () => {
     expect(body.environment).toBe('test');
     expect(body.commit).toBe('abc12345');
     expect(body.branch).toBe('main');
-    expect(body.timestamp).toBeDefined();
+    expect(typeof body.timestamp).toBe('string');
   });
 
   it('should use defaults when env vars not set', async () => {
@@ -164,7 +164,7 @@ describe('GET /api/health', () => {
       }
 
       const res = await GET(req);
-      expect(res.headers.get('Retry-After')).toBeTruthy();
+      expect(Number(res.headers.get('Retry-After'))).toBeGreaterThan(0);
       expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
     });
 

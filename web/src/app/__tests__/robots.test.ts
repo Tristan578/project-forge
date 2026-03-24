@@ -11,7 +11,6 @@ describe('robots', () => {
   it('returns valid robots configuration', () => {
     const result = robots();
 
-    expect(result.rules).toBeDefined();
     expect(Array.isArray(result.rules)).toBe(true);
   });
 

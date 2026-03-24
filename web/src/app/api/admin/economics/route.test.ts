@@ -65,7 +65,7 @@ describe('GET /api/admin/economics', () => {
     
     expect(res.status).toBe(200);
     expect(data.userStats.totalUsers).toBe(10);
-    expect(data.costSummary).toBeDefined();
-    expect(data.recentTransactions).toBeDefined();
+    expect(Array.isArray(data.costSummary)).toBe(true);
+    expect(Array.isArray(data.recentTransactions)).toBe(true);
   });
 });
