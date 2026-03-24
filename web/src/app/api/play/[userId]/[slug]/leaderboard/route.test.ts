@@ -12,16 +12,12 @@ vi.mock('@/lib/rateLimit', () => ({
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
-vi.mock('crypto', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('crypto')>();
-  return {
-    ...actual,
-    createHash: vi.fn().mockReturnValue({
-      update: vi.fn().mockReturnThis(),
-      digest: vi.fn().mockReturnValue('a'.repeat(64)),
-    }),
-  };
-});
+vi.mock('crypto', () => ({
+  createHash: vi.fn().mockReturnValue({
+    update: vi.fn().mockReturnThis(),
+    digest: vi.fn().mockReturnValue('a'.repeat(64)),
+  }),
+}));
 vi.mock('@/lib/db/schema', () => ({
   publishedGames: { id: 'id', userId: 'userId', slug: 'slug', status: 'status' },
   users: { id: 'id', clerkId: 'clerkId' },
@@ -82,10 +78,7 @@ function makeDeleteChain(): Record<string, any> {
 }
 
 const PUBLISHED_GAME = { id: 'game-1', status: 'published' };
-const BOARD_DESC: {
-  id: string; gameId: string; name: string; sortOrder: string;
-  maxEntries: number; minScore: number | null; maxScore: number | null;
-} = {
+const BOARD_DESC = {
   id: 'board-1', gameId: 'game-1', name: 'highscore',
   sortOrder: 'desc', maxEntries: 100, minScore: null, maxScore: null,
 };
@@ -219,7 +212,7 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
     vi.clearAllMocks();
   });
 
-  function makePostDb(board = BOARD_DESC, recentSubmission: unknown = undefined) {
+  function makePostDb(board: { id: string; gameId: string; name: string; sortOrder: string; maxEntries: number; minScore: number | null; maxScore: number | null } = BOARD_DESC, recentSubmission: unknown = undefined) {
     const userChain = makeSelectChain([{ id: 'u1' }]);
     const gameChain = makeSelectChain([PUBLISHED_GAME]);
     const boardChain = makeSelectChain([board]);
