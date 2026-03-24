@@ -733,7 +733,56 @@ tracesSampleRate: 0.1         // 10% of server transactions
 
 ---
 
-## 13. Known Technical Debt
+## 13. Vercel Skew Protection
+
+Skew Protection prevents version mismatch between the JS client and server during rolling deployments. This is critical for SpawnForge: if the JS loader and WASM binary come from different deployments, the engine fails to initialise.
+
+Next.js 14.1.4+ implements Skew Protection automatically — no code changes required. The project uses Next.js 16, so it is fully supported.
+
+### Enable in the Vercel Dashboard
+
+1. Go to **Vercel Dashboard** > **spawnforge** project > **Settings** > **Advanced**
+2. Under **System Environment Variables**, enable **Automatically expose system environment variables**
+3. Scroll to **Skew Protection** and enable the toggle
+4. Set the maximum age (default: 24 hours — suitable for most sessions; increase to 7 days for safety)
+5. **Redeploy** the latest production deployment for the change to take effect
+
+Vercel then auto-injects two env vars on every build:
+- `VERCEL_SKEW_PROTECTION_ENABLED=1`
+- `VERCEL_DEPLOYMENT_ID=dpl_xxx`
+
+Next.js uses these to attach `?dpl=<id>` to framework-managed requests (static assets, RSC fetches, prefetches), routing them to the same deployment that served the initial HTML.
+
+### What it protects
+
+| Request type | Protected automatically |
+|---|---|
+| JS/CSS bundles, framework chunks | Yes |
+| RSC (React Server Component) fetches | Yes |
+| Client-side route transitions | Yes |
+| Prefetch requests | Yes |
+| Custom `fetch()` from client components | No — must add `x-deployment-id` header manually |
+| Full-page navigations (hard refresh) | No — Vercel serves latest deployment, client detects mismatch and reloads |
+| WASM binary loads from `/engine-pkg-*` | No — these are static assets loaded imperatively by `useEngine.ts` |
+
+### WASM binary version safety
+
+The WASM binaries in `/public/engine-pkg-*/` are immutably cached (`Cache-Control: public, max-age=31536000, immutable`). Each deployment produces unique binary filenames (via wasm-bindgen content hashing). The JS loader (`useEngine.ts`) always fetches from the same deployment's public directory — so WASM and JS are always from the same build as long as the page was served by the same deployment. Skew Protection handles this correctly via the framework's asset pinning.
+
+### Verify Skew Protection is active
+
+After enabling and redeploying:
+```bash
+# Confirm Vercel has set the env var on the deployment
+vercel env ls --scope=<team> | grep VERCEL_SKEW
+
+# Check Vercel Monitoring dashboard for skew_protection = 'active' requests
+# Dashboard > spawnforge > Monitoring > filter: skew_protection = 'active'
+```
+
+---
+
+## 14. Known Technical Debt
 
 | Item | Ticket | Risk | Impact |
 |------|--------|------|--------|
@@ -746,7 +795,7 @@ tracesSampleRate: 0.1         // 10% of server transactions
 
 ---
 
-## 14. On-Call Checklist
+## 15. On-Call Checklist
 
 When paged, follow this sequence:
 
