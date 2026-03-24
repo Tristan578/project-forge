@@ -239,6 +239,9 @@ jobs:
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.108
 
+      - name: Install wasm-opt (binaryen)
+        run: sudo apt-get install -y binaryen
+
       - name: Build WebGL2
         working-directory: engine
         run: cargo build --target wasm32-unknown-unknown --release --features webgl2
@@ -255,22 +258,55 @@ jobs:
         working-directory: engine
         run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
+      - name: Build WebGL2 Runtime (stripped editor)
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
+
+      - name: Run wasm-bindgen (WebGL2 Runtime)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Build WebGPU Runtime (stripped editor)
+        working-directory: engine
+        run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
+
+      - name: Run wasm-bindgen (WebGPU Runtime)
+        working-directory: engine
+        run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
+
+      - name: Run wasm-opt (Oz) on all variants
+        working-directory: engine
+        run: |
+          # -Oz: optimize for size (most aggressive). --enable-bulk-memory: required for
+          # wasm-bindgen output which uses bulk memory ops for memory.copy/fill.
+          # Runs in-place. Typically reduces binary size by 20-30%.
+          for PKG in pkg-webgl2 pkg-webgpu pkg-webgl2-runtime pkg-webgpu-runtime; do
+            WASM="$PKG/forge_engine_bg.wasm"
+            BEFORE=$(stat -c%s "$WASM")
+            wasm-opt -Oz --enable-bulk-memory -o "$WASM" "$WASM"
+            AFTER=$(stat -c%s "$WASM")
+            BEFORE_MB=$(echo "scale=1; $BEFORE / 1048576" | bc)
+            AFTER_MB=$(echo "scale=1; $AFTER / 1048576" | bc)
+            echo "$PKG: ${BEFORE_MB} MB -> ${AFTER_MB} MB"
+          done
+
       - name: Check WASM binary sizes
         working-directory: engine
         run: |
-          # Size thresholds in bytes (uncompressed .wasm after wasm-bindgen)
-          # Current sizes: ~47 MB each. Increase when intentionally adding features.
+          # Size thresholds in bytes (uncompressed .wasm after wasm-opt -Oz).
+          # wasm-opt typically reduces ~47 MB editor binaries to ~33-38 MB.
+          # Threshold set to 45 MB (post-opt) — increase only when intentionally adding features.
           # CI fails if size exceeds threshold by more than 10%.
-          WEBGL2_THRESHOLD=52428800   # 50 MB
-          WEBGPU_THRESHOLD=52428800   # 50 MB
+          WEBGL2_THRESHOLD=47185920   # 45 MB
+          WEBGPU_THRESHOLD=47185920   # 45 MB
 
           WEBGL2_SIZE=$(stat -c%s pkg-webgl2/forge_engine_bg.wasm)
           WEBGPU_SIZE=$(stat -c%s pkg-webgpu/forge_engine_bg.wasm)
 
-          echo "=== WASM Binary Sizes ==="
+          echo "=== WASM Binary Sizes (post wasm-opt) ==="
           echo "WebGL2: $(numfmt --to=iec-i --suffix=B $WEBGL2_SIZE) ($WEBGL2_SIZE bytes)"
           echo "WebGPU: $(numfmt --to=iec-i --suffix=B $WEBGPU_SIZE) ($WEBGPU_SIZE bytes)"
-          echo "========================="
+          echo "=========================================="
 
           FAILED=0
 
@@ -287,22 +323,6 @@ jobs:
           fi
 
           exit $FAILED
-
-      - name: Build WebGL2 Runtime (stripped editor)
-        working-directory: engine
-        run: cargo build --target wasm32-unknown-unknown --release --features webgl2,runtime
-
-      - name: Run wasm-bindgen (WebGL2 Runtime)
-        working-directory: engine
-        run: wasm-bindgen --target web --out-dir pkg-webgl2-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
-
-      - name: Build WebGPU Runtime (stripped editor)
-        working-directory: engine
-        run: cargo build --target wasm32-unknown-unknown --release --features webgpu,runtime
-
-      - name: Run wasm-bindgen (WebGPU Runtime)
-        working-directory: engine
-        run: wasm-bindgen --target web --out-dir pkg-webgpu-runtime target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4
