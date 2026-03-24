@@ -10,6 +10,7 @@ import { streamChat, type StreamCallbacks } from './streaming';
 import { aiQueue, type Priority } from './requestQueue';
 import { aiResponseCache } from './promptCache';
 import { AI_MODEL_PRIMARY } from './models';
+import { aiResponseCache } from './promptCache';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -124,6 +125,33 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
 async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promise<string> {
   const {
     model = 'claude-sonnet-4-5',
+    systemOverride,
+    sceneContext = '',
+    thinking = false,
+    signal,
+  } = options ?? {};
+
+  // Non-streaming requests are eligible for caching.
+  // Streaming requests (streamAI) are intentionally excluded because callers
+  // expect incremental callbacks, not a single cached string.
+  //
+  // AbortSignal-controlled requests skip the cache so that a cancelled
+  // request cannot poison the cache with a partial result.
+  if (!signal) {
+    const cacheKey = await aiResponseCache.computeKey(
+      model,
+      systemOverride ?? '',
+      `${sceneContext}\x00${prompt}\x00${thinking}`,
+    );
+    return aiResponseCache.dedup(cacheKey, () => fetchAIUncached(prompt, options));
+  }
+
+  return fetchAIUncached(prompt, options);
+}
+
+async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promise<string> {
+  const {
+    model = AI_MODEL_PRIMARY,
     systemOverride,
     sceneContext = '',
     thinking = false,
