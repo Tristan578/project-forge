@@ -275,7 +275,7 @@ const navLinks = [
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
-export default function LandingPage() {
+export default async function LandingPage() {
   cacheLife('days');
   cacheTag('landing');
   return (
