@@ -22,3 +22,4 @@ export * from './editModeSlice';
 export * from './bridgeSlice';
 
 export * from './sceneLightSlice';
+export * from './localizationSlice';

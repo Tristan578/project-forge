@@ -297,6 +297,11 @@ const TOOL_LABELS: Record<string, string> = {
   list_leaderboards: 'List Leaderboards',
   configure_leaderboard: 'Configure Leaderboard',
   delete_leaderboard: 'Delete Leaderboard',
+  // Localization
+  extract_translatable_strings: 'Extract Strings',
+  translate_scene: 'Translate Scene',
+  set_preview_locale: 'Preview Locale',
+  list_locales: 'List Locales',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {
