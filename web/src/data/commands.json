@@ -11017,7 +11017,7 @@
         "required": ["targetLocales"]
       },
       "tokenCost": 5,
-      "requiredScope": "generate:use"
+      "requiredScope": "ai:generate"
     },
     {
       "name": "set_preview_locale",
