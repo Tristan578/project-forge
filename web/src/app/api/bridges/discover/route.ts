@@ -4,8 +4,6 @@ import { discoverTool, isAllowedToolId } from '@/lib/bridges/bridgeManager';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export const runtime = 'nodejs';
-
 export async function POST(req: Request) {
   const auth = await authenticateRequest();
   if (!auth.ok) {
