@@ -129,8 +129,8 @@ describe('executor: error containment', () => {
 
   it('returns generic error message when a non-Error is thrown', async () => {
     mocks.getCommandDispatcher.mockImplementation(() => {
-      // eslint-disable-next-line @typescript-eslint/no-throw-literal
-      throw 'string rejection';
+      const rejection: unknown = 'string rejection';
+      throw rejection;
     });
 
     const store = makeStore();
