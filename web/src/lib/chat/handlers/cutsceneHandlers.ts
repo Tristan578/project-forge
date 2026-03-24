@@ -101,6 +101,8 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
       onStop: () => {
         activePlayer = null;
         useCutsceneStore.getState().setActiveCutscene(null);
+        // Clean up engine effects (camera, animations, audio) from the interrupted cutscene
+        ctx.dispatchCommand('stop', {});
       },
     });
 
