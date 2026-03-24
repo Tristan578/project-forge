@@ -221,6 +221,42 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
   });
 }
 
+/**
+ * Refund a specific number of tokens for a partial operation failure.
+ * Use this when only a subset of items in a batch operation failed — the caller
+ * is responsible for calculating how many tokens to return.
+ *
+ * For a complete operation failure (all items failed), prefer `refundTokens`
+ * which looks up the original usage record and reverses the exact deduction.
+ */
+export async function refundTokenAmount(
+  userId: string,
+  tokens: number,
+  reason: string,
+): Promise<void> {
+  if (tokens <= 0) return;
+
+  const db = getDb();
+
+  // Credit back to addon tokens (simplest path — avoids needing to know the
+  // original monthly/addon split for a partial refund)
+  await db
+    .update(users)
+    .set({
+      addonTokens: sql`${users.addonTokens} + ${tokens}`,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+
+  await db.insert(tokenUsage).values({
+    userId,
+    operation: 'partial_refund',
+    tokens: -tokens,
+    source: 'addon',
+    metadata: { reason },
+  });
+}
+
 /** Credit tokens from an add-on purchase */
 export async function creditAddonTokens(
   userId: string,
