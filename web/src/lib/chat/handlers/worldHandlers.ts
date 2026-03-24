@@ -114,9 +114,10 @@ async function generateWithHealing(
     }
   }
 
-  // All retries exhausted — fall back to the closest genre preset (self-heal it too)
+  // All retries exhausted — if the last world exists but failed validation,
+  // return it with fallback: true so callers know it may be inconsistent.
   if (lastWorld) {
-    return { world: lastWorld, report: lastReport!, fallback: false };
+    return { world: lastWorld, report: lastReport!, fallback: true };
   }
 
   const presetKey = genre && WORLD_PRESETS[genre] ? genre : 'medieval_fantasy';
