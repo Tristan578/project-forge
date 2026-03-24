@@ -99,6 +99,7 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
     model = AI_MODEL_PRIMARY,
     systemOverride,
     sceneContext = '',
+    thinking = false,
     signal,
   } = options ?? {};
 
@@ -112,7 +113,7 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
     const cacheKey = await aiResponseCache.computeKey(
       model,
       systemOverride ?? '',
-      `${sceneContext}\x00${prompt}`,
+      `${sceneContext}\x00${prompt}\x00${thinking}`,
     );
     return aiResponseCache.dedup(cacheKey, () => fetchAIUncached(prompt, options));
   }

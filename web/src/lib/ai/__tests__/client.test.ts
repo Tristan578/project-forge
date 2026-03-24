@@ -367,6 +367,33 @@ describe('fetchAI response caching', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
+  it('does not serve cached response when thinking flag differs', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"non-thinking answer"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"thinking answer"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      );
+
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+
+    const nonThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-5', thinking: false });
+    const withThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-5', thinking: true });
+
+    expect(nonThinking).toBe('non-thinking answer');
+    expect(withThinking).toBe('thinking answer');
+    // Both must hit the network — thinking=true must not reuse the thinking=false cache entry
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
   it('deduplicates concurrent in-flight requests for the same prompt', async () => {
     let resolveResponse!: () => void;
     const streamBody = new ReadableStream<Uint8Array>({
