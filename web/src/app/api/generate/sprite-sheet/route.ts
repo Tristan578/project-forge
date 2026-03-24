@@ -9,6 +9,7 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -72,7 +73,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 3. Resolve API key (Replicate for ControlNet)
-  const tokenCost = frameCount * 15;
+  const tokenCost = frameCount * TOKEN_COSTS.sprite_sheet_cost_per_frame;
 
   let apiKey: string;
   let usageId: string | undefined;

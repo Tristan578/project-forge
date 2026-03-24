@@ -31,6 +31,23 @@ export const TOKEN_COSTS = {
   // Skybox
   skybox_generation: 50,
 
+  // Sprite generation (provider-specific)
+  sprite_generation_dalle3: 20,
+  sprite_generation_replicate: 10,
+
+  // Tileset generation
+  tileset_generation: 50,
+
+  // Pixel art generation (provider-specific)
+  pixel_art_replicate: 10,
+  pixel_art_openai: 20,
+
+  // Sprite sheet generation (cost per frame — multiply by frameCount at call site)
+  sprite_sheet_cost_per_frame: 15,
+
+  // Voice batch generation (cost per item — multiply by items.length at call site)
+  voice_batch_cost_per_item: 5,
+
   // Compound (estimated averages — actual cost may vary)
   compound_scene_simple: 50,
   compound_scene_complex: 300,

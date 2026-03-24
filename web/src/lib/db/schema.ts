@@ -9,6 +9,7 @@ import {
   index,
   pgEnum,
 } from 'drizzle-orm/pg-core';
+import { DEFAULT_API_KEY_SCOPES } from '@/lib/config/scopes';
 
 // --- Enums ---
 
@@ -74,7 +75,7 @@ export const apiKeys = pgTable(
     scopes: text('scopes')
       .array()
       .notNull()
-      .default(['scene:read', 'scene:write', 'ai:generate', 'project:manage']),
+      .default([...DEFAULT_API_KEY_SCOPES]),
     lastUsed: timestamp('last_used', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -619,7 +620,7 @@ export type NewGenerationJob = typeof generationJobs.$inferInsert;
 
 export type Tier = 'starter' | 'hobbyist' | 'creator' | 'pro';
 export type Provider = 'anthropic' | 'meshy' | 'hyper3d' | 'elevenlabs' | 'suno' | 'openai' | 'replicate' | 'removebg';
-export type ApiKeyScope = 'scene:read' | 'scene:write' | 'ai:generate' | 'project:manage';
+export type { ApiKeyScope } from '@/lib/config/scopes';
 export type AssetCategory = 'model_3d' | 'sprite' | 'texture' | 'audio' | 'script' | 'prefab' | 'template' | 'shader' | 'animation';
 export type AssetStatus = 'draft' | 'pending_review' | 'published' | 'rejected' | 'removed';
 export type AssetLicense = 'standard' | 'extended';
