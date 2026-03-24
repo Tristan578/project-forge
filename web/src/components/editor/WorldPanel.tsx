@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Globe, Users, Map, Clock, BookOpen, Shield, RefreshCw, Download, AlertTriangle, CheckCircle } from 'lucide-react';
 import type { GameWorld, ConsistencyReport } from '@/lib/ai/worldBuilder';
-import { validateWorldConsistency, worldToMarkdown, loadPersistedWorld } from '@/lib/ai/worldBuilder';
+import { validateWorldConsistency, worldToMarkdown } from '@/lib/ai/worldBuilder';
+import { loadPersistedWorld } from '@/lib/chat/handlers/worldHandlers';
 
 const RELATIONSHIP_COLORS: Record<string, string> = {
   ally: 'text-green-400',
@@ -149,22 +150,26 @@ interface WorldPanelProps {
 
 export function WorldPanel({ world: propWorld, onRegenerate }: WorldPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('factions');
-  const [world, setWorld] = useState<GameWorld | null>(propWorld ?? null);
-  const [report, setReport] = useState<ConsistencyReport | null>(null);
 
-  // Load from localStorage if no prop world
-  useEffect(() => {
-    if (!propWorld) {
-      const stored = loadPersistedWorld();
-      if (stored) {
-        setWorld(stored);
-        setReport(validateWorldConsistency(stored));
-      }
-    } else {
+  // Derive initial world: prop takes precedence, then localStorage
+  const [prevPropWorld, setPrevPropWorld] = useState(propWorld);
+  const [world, setWorld] = useState<GameWorld | null>(() => {
+    if (propWorld) return propWorld;
+    return loadPersistedWorld();
+  });
+  const [report, setReport] = useState<ConsistencyReport | null>(() => {
+    const initial = propWorld ?? loadPersistedWorld();
+    return initial ? validateWorldConsistency(initial) : null;
+  });
+
+  // Update when prop world changes (useState prev-value pattern)
+  if (prevPropWorld !== propWorld) {
+    setPrevPropWorld(propWorld);
+    if (propWorld) {
       setWorld(propWorld);
       setReport(validateWorldConsistency(propWorld));
     }
-  }, [propWorld]);
+  }
 
   const handleExportLore = useCallback(() => {
     if (!world) return;
