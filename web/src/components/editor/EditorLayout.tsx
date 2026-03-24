@@ -596,7 +596,7 @@ export function EditorLayout() {
           <LayoutMenu />
           <HelpMenu onOpenShortcuts={() => setShortcutsOpen(true)} onOpenFeedback={() => setFeedbackOpen(true)} />
           <TokenBalance />
-          {hasClerk && <UserButton afterSignOutUrl="/sign-in" />}
+          {hasClerk && <UserButton />}
         </div>
       </div>
 

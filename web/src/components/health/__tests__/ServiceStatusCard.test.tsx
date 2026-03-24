@@ -81,7 +81,7 @@ describe('ServiceStatusCard', () => {
   it('does not show error block when no error', () => {
     const { container } = render(<ServiceStatusCard service={makeService({ error: undefined })} />);
     // The only possible error message would be some kind of error-styled block
-    expect(container.querySelector('.bg-gray-700')).toBeNull();
+    expect(container.querySelector('.bg-zinc-700')).toBeNull();
   });
 
   // ── Timestamp ──────────────────────────────────────────────────────────

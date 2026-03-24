@@ -77,12 +77,23 @@ describe('PricingPage', () => {
   });
 
   it('renders Dashboard button when signed in', async () => {
-    const { useAuth } = await import('@clerk/nextjs');
-    vi.mocked(useAuth).mockReturnValue({ isSignedIn: true } as ReturnType<typeof useAuth>);
-    render(<PricingPage />);
+    // hasClerk is a module-level constant in PricingPage — must stub the env
+    // and reset modules so the constant re-evaluates to true before rendering.
+    vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_stub');
+    vi.resetModules();
+
+    // Re-mock @clerk/nextjs after resetModules so the fresh module picks it up.
+    vi.doMock('@clerk/nextjs', () => ({
+      useAuth: vi.fn(() => ({ isSignedIn: true })),
+    }));
+
+    const { render: localRender } = await import('@/test/utils/componentTestUtils');
+    const { PricingPage: FreshPricingPage } = await import('../PricingPage');
+
+    localRender(<FreshPricingPage />);
     expect(screen.getByText('Dashboard')).toBeDefined();
-    // Reset
-    vi.mocked(useAuth).mockReturnValue({ isSignedIn: false } as ReturnType<typeof useAuth>);
+
+    vi.unstubAllEnvs();
   });
 
   it('renders multiple per-month price labels', () => {

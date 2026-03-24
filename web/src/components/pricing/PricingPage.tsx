@@ -4,8 +4,17 @@ import { useAuth } from '@clerk/nextjs';
 import { useRouter } from 'next/navigation';
 import { Check, X } from 'lucide-react';
 
+const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? '';
+const hasClerk = clerkKey.startsWith('pk_test_') || clerkKey.startsWith('pk_live_');
+
+function useAuthSafe() {
+  if (!hasClerk) return { isSignedIn: false };
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return useAuth();
+}
+
 export function PricingPage() {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useAuthSafe();
   const router = useRouter();
 
   const handleSubscribe = async (tier: string) => {
