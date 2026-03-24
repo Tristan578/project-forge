@@ -185,6 +185,25 @@ describe('search', () => {
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].snippet.toLowerCase()).toContain('boolean');
     });
+
+    it('should extract snippet containing the original -ies word, not the stemmed form', () => {
+      // "entities" stems to "entity". The snippet must find "entities" in the
+      // original content — not search for the stem "entity" which is not a
+      // substring of "entities".
+      const docIndex = makeDocIndex([
+        {
+          path: 'ecs-guide',
+          title: 'ECS Guide',
+          content: 'Game entities are managed by the ECS. Each entity has components.',
+        },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('entities', docIndex, termIndex);
+
+      expect(results.length).toBeGreaterThan(0);
+      // Snippet must contain the actual word from the document, not default to start
+      expect(results[0].snippet.toLowerCase()).toContain('entities');
+    });
   });
 
   describe('Index Building', () => {
