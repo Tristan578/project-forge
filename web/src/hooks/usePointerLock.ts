@@ -54,15 +54,20 @@ export function usePointerLock(canvasId: string): void {
       }
       lastDispatchTime = now;
       const wasm = getWasmModule();
-      if (wasm && (pendingDx !== 0 || pendingDy !== 0)) {
-        try {
-          wasm.handle_command('mouse_delta', { dx: pendingDx, dy: pendingDy });
-        } catch {
-          // Silently ignore command errors during mouse movement
-        }
+      if (pendingDx === 0 && pendingDy === 0) return;
+      if (!wasm) {
+        // Clear accumulated deltas to prevent a camera jump when WASM loads
         pendingDx = 0;
         pendingDy = 0;
+        return;
       }
+      try {
+        wasm.handle_command('mouse_delta', { dx: pendingDx, dy: pendingDy });
+      } catch {
+        // Silently ignore command errors during mouse movement
+      }
+      pendingDx = 0;
+      pendingDy = 0;
     };
 
     const handleMouseMove = (e: MouseEvent) => {

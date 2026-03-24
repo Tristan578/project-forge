@@ -113,7 +113,9 @@ function resolveGenre(raw: string): string | null {
     survival: 'horror',
   };
 
-  for (const [alias, key] of Object.entries(aliases)) {
+  // Sort by alias length descending so specific matches ("2d platformer") beat generic ("platformer")
+  const sorted = Object.entries(aliases).sort((a, b) => b[0].length - a[0].length);
+  for (const [alias, key] of sorted) {
     if (lower.includes(alias)) return key;
   }
 

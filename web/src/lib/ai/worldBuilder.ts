@@ -721,6 +721,9 @@ export function validateWorldConsistency(world: GameWorld): ConsistencyReport {
     for (const r of world.regions) {
       if (!adjacency.has(r.name)) adjacency.set(r.name, new Set());
       for (const conn of r.connectedTo) {
+        // Skip phantom references — already flagged above. Including them
+        // in adjacency would let BFS traverse through non-existent regions.
+        if (!regionNames.has(conn)) continue;
         adjacency.get(r.name)!.add(conn);
         if (!adjacency.has(conn)) adjacency.set(conn, new Set());
         adjacency.get(conn)!.add(r.name); // treat as undirected
