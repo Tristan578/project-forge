@@ -13,7 +13,10 @@ import {
   type TranslatableString,
   type LocaleBundle,
 } from '@/lib/i18n/gameLocalization';
-import { fetchAI } from '@/lib/ai/client';
+import { generateText } from 'ai';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 
 // ---------------------------------------------------------------------------
 // POST /api/generate/localize
@@ -127,9 +130,29 @@ export async function POST(request: NextRequest) {
     validatedTargets.push(locale);
   }
 
-  // 5. Translate each locale
+  // 5. Resolve API key once (before loop) — token cost is 5 per locale
+  const tokenCost = validatedTargets.length * 5;
+  let resolved;
+  try {
+    resolved = await resolveApiKey(
+      authResult.ctx.user.id,
+      'anthropic',
+      tokenCost,
+      'localize_scene',
+      { stringCount: validatedStrings.length, localeCount: validatedTargets.length },
+    );
+  } catch (err) {
+    if (err instanceof ApiKeyError) {
+      const status = err.code === 'INSUFFICIENT_TOKENS' ? 402 : 403;
+      return NextResponse.json({ error: err.message }, { status });
+    }
+    throw err;
+  }
+
+  // 6. Translate each locale
   const result: Record<string, LocaleBundle> = {};
   const CHUNK_SIZE = 200;
+  const anthropicProvider = createAnthropic({ apiKey: resolved.key });
 
   try {
     for (const targetLocale of validatedTargets) {
@@ -139,10 +162,11 @@ export async function POST(request: NextRequest) {
       for (const chunk of chunks) {
         const prompt = buildTranslationPrompt(chunk, sourceLocale, targetLocale);
 
-        const raw = await fetchAI(prompt, {
-          model: 'claude-sonnet-4-5',
-          systemOverride: 'You are a professional video game localizer. Return only valid JSON.',
-          priority: 2,
+        const { text: raw } = await generateText({
+          model: anthropicProvider(AI_MODEL_FAST),
+          system: 'You are a professional video game localizer. Return only valid JSON.',
+          prompt,
+          maxOutputTokens: 4096,
         });
 
         const { translations } = parseTranslationResponse(raw, chunk);

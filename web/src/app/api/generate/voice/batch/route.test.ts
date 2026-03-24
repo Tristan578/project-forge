@@ -253,6 +253,7 @@ describe('POST /api/generate/voice/batch', () => {
         user.id,
         5,
         expect.stringContaining('voice_batch_partial_failure'),
+        'usage_456',
       );
       expect(refundTokens).not.toHaveBeenCalled();
     });
@@ -307,7 +308,7 @@ describe('POST /api/generate/voice/batch', () => {
       expect(data.totalGenerated).toBe(1);
       expect(data.totalFailed).toBe(2);
       // 2 failed items * 5 tokens = 10 tokens refunded
-      expect(refundTokenAmount).toHaveBeenCalledWith(user.id, 10, expect.any(String));
+      expect(refundTokenAmount).toHaveBeenCalledWith(user.id, 10, expect.any(String), 'usage_abc');
     });
   });
 });
