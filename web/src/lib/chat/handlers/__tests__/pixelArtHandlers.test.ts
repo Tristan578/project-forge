@@ -2,6 +2,17 @@
  * Tests for pixelArtHandlers — pixel art generation, palette, and quantization commands.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+// trackJob accesses useGenerationStore which requires browser storage — mock it for node tests.
+vi.mock('../generationHandlers', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../generationHandlers')>();
+  return {
+    ...original,
+    trackJob: vi.fn(),
+    makeJobId: vi.fn(() => 'gen-test-123'),
+  };
+});
+
 import {
   handleGeneratePixelArt,
   handleSetPixelArtPalette,
