@@ -349,7 +349,7 @@ export function validateBalance(economy: GameEconomy): BalanceReport {
     }
 
     const totalWeight = table.entries.reduce((sum, e) => sum + e.weight, 0);
-    const maxWeight = Math.max(...table.entries.map((e) => e.weight));
+    const maxWeight = table.entries.reduce((a, e) => (e.weight > a ? e.weight : a), 0);
     if (totalWeight > 0 && maxWeight / totalWeight > 0.9) {
       issues.push({
         type: 'weight_imbalance',

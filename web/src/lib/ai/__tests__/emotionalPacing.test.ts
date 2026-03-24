@@ -395,4 +395,16 @@ describe('analyzePacing', () => {
     const analysis = analyzePacing(entities);
     expect(analysis.curve.points.length).toBeGreaterThan(0);
   });
+
+  it('does not stack overflow when analyzing a large entity set (regression: Math.min spread)', () => {
+    // >65k elements would crash Math.min(...array) — use 70k to exceed the limit
+    const entities: SceneEntityDescriptor[] = [];
+    for (let i = 0; i < 70000; i++) {
+      entities.push(makeEntity({ position: i / 70000, tags: ['dialogue'] }));
+    }
+    // Should not throw — reduce-based min is safe for any array size
+    expect(() => analyzePacing(entities)).not.toThrow();
+    const analysis = analyzePacing(entities);
+    expect(analysis.score).toBeGreaterThanOrEqual(0);
+  });
 });
