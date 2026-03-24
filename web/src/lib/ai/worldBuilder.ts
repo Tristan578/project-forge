@@ -645,6 +645,7 @@ export function validateWorldConsistency(world: GameWorld): ConsistencyReport {
   }
 
   // ---- 2. Faction relationship symmetry ----
+  const checkedPairs = new Set<string>();
   for (const faction of world.factions) {
     for (const [targetName, rel] of Object.entries(faction.relationships)) {
       // Target faction must exist
@@ -657,6 +658,13 @@ export function validateWorldConsistency(world: GameWorld): ConsistencyReport {
         continue;
       }
       // Relationship must be symmetric
+      // Skip pairs already checked (A→B and B→A are the same asymmetry).
+      // Without this, generateWithHealing's 5-error healing budget gets
+      // filled with duplicates, displacing unique errors from the AI prompt.
+      const pairKey = [faction.name, targetName].sort().join('::');
+      if (checkedPairs.has(pairKey)) continue;
+      checkedPairs.add(pairKey);
+
       const target = world.factions.find((f) => f.name === targetName);
       if (target) {
         const reverseRel = target.relationships[faction.name];
