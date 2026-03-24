@@ -1157,9 +1157,26 @@ useChatStore.subscribe((state, prevState) => {
   }
 });
 
-function saveConversationsToStorage(conversations: Conversation[], activeId?: string | null) {
+// ---------------------------------------------------------------------------
+// Debounced localStorage persistence — avoids blocking the main thread when
+// conversation state is updated repeatedly (e.g. during streaming).
+// We keep the latest pending write args and flush them via requestIdleCallback
+// (with a 2 s deadline) or setTimeout(0) as a fallback.
+// ---------------------------------------------------------------------------
+let _pendingSaveArgs: { conversations: Conversation[]; activeId?: string | null } | null = null;
+let _saveScheduled = false;
+
+/** @internal Exposed for tests to flush the pending save synchronously. */
+export function flushConversationSaveForTesting() {
+  flushConversationSave();
+}
+
+function flushConversationSave() {
+  _saveScheduled = false;
+  if (!_pendingSaveArgs) return;
+  const { conversations, activeId } = _pendingSaveArgs;
+  _pendingSaveArgs = null;
   try {
-    // Store only metadata + limited messages
     const toStore = conversations.map((c) => ({
       ...c,
       messages: c.messages.slice(-MAX_STORED_MESSAGES),
@@ -1174,6 +1191,19 @@ function saveConversationsToStorage(conversations: Conversation[], activeId?: st
     }
   } catch {
     // localStorage full or unavailable
+  }
+}
+
+function saveConversationsToStorage(conversations: Conversation[], activeId?: string | null) {
+  // Overwrite any previously queued write — the latest state wins.
+  _pendingSaveArgs = { conversations, activeId };
+  if (!_saveScheduled) {
+    _saveScheduled = true;
+    if (typeof requestIdleCallback !== 'undefined') {
+      requestIdleCallback(flushConversationSave, { timeout: 2000 });
+    } else {
+      setTimeout(flushConversationSave, 0);
+    }
   }
 }
 
