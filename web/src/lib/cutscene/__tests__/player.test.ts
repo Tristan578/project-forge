@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { applyEasing, buildCommand, CutscenePlayer } from '../player';
+import { applyEasing, buildCommand, CutscenePlayer, type CommandDispatcher } from '../player';
 import type { CutsceneTrack, CutsceneKeyframe } from '@/stores/cutsceneStore';
 import { useCutsceneStore } from '@/stores/cutsceneStore';
 
@@ -110,15 +110,15 @@ describe('buildCommand', () => {
 // ============================================================================
 
 describe('CutscenePlayer', () => {
-  let dispatch: ReturnType<typeof vi.fn>;
-  let onComplete: ReturnType<typeof vi.fn>;
-  let onStop: ReturnType<typeof vi.fn>;
+  let dispatch: CommandDispatcher;
+  let onComplete: (() => void) | undefined;
+  let onStop: (() => void) | undefined;
   let player: CutscenePlayer;
 
   beforeEach(() => {
-    dispatch = vi.fn();
-    onComplete = vi.fn();
-    onStop = vi.fn();
+    dispatch = vi.fn() as unknown as CommandDispatcher;
+    onComplete = vi.fn() as unknown as () => void;
+    onStop = vi.fn() as unknown as () => void;
     player = new CutscenePlayer({ dispatchCommand: dispatch, onComplete, onStop });
 
     // Reset store state

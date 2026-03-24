@@ -7,6 +7,10 @@
 import { z } from 'zod';
 import type { ToolHandler } from './types';
 import { parseArgs } from './types';
+import type { CutscenePlayer } from '@/lib/cutscene/player';
+
+// Module-level reference to the active player so stop_cutscene can reach it.
+let activePlayer: CutscenePlayer | null = null;
 
 export const cutsceneHandlers: Record<string, ToolHandler> = {
   generate_cutscene: async (args, ctx) => {
@@ -22,8 +26,9 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
     const { generateCutscene } = await import('@/lib/ai/cutsceneGenerator');
     const { useCutsceneStore } = await import('@/stores/cutsceneStore');
 
-    // Build entity refs from the current scene graph
-    const sceneEntities = Object.entries(ctx.store.sceneGraph ?? {}).map(
+    // Build entity refs from the current scene graph nodes (not the graph object itself)
+    const nodes = ctx.store.sceneGraph?.nodes ?? {};
+    const sceneEntities = Object.entries(nodes).map(
       ([id, node]) => ({
         id,
         name: (node as { name?: string }).name ?? id,
@@ -80,17 +85,26 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
 
     useCutsceneStore.getState().setActiveCutscene(p.data.cutsceneId);
 
+    // Stop any existing player before starting a new one
+    if (activePlayer) {
+      activePlayer.stop();
+      activePlayer = null;
+    }
+
     const player = new CutscenePlayer({
       dispatchCommand: ctx.dispatchCommand,
       onComplete: () => {
+        activePlayer = null;
         useCutsceneStore.getState().setActiveCutscene(null);
         ctx.dispatchCommand('stop', {});
       },
       onStop: () => {
+        activePlayer = null;
         useCutsceneStore.getState().setActiveCutscene(null);
       },
     });
 
+    activePlayer = player;
     player.load(cutscene);
     player.play();
 
@@ -109,6 +123,12 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
 
     if (state.playbackState === 'idle' || state.playbackState === 'stopped') {
       return { success: false, error: 'No cutscene is currently playing' };
+    }
+
+    // Stop the active player's rAF loop to prevent background command dispatch
+    if (activePlayer) {
+      activePlayer.stop();
+      activePlayer = null;
     }
 
     state.setPlaybackState('stopped');
