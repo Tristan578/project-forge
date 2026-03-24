@@ -13,9 +13,6 @@ import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistratio
 import { PostHogProvider } from "@/components/providers/PostHogProvider";
 import "./globals.css";
 
-// Prevent static prerendering — all pages require auth (ClerkProvider)
-export const dynamic = "force-dynamic";
-
 // Clerk validates key format at runtime — skip wrapping when key is missing/invalid (CI E2E tests)
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
 const hasValidClerkKey = clerkKey.startsWith("pk_test_") || clerkKey.startsWith("pk_live_");
