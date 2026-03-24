@@ -190,6 +190,45 @@ describe('applyConstraints', () => {
     expect(result.rooms.length).toBe(original + 3);
   });
 
+  // Regression: PF-770 — adjustRoomCount must insert rooms on the main path without
+  // creating branch detours. The exit room must still only connect back to the room
+  // that immediately precedes it, not to the room before the insertion point.
+  it('adjustRoomCount inserts rooms linearly without creating branch detours (PF-770)', () => {
+    const layout = getLinearLayout();
+    const result = applyConstraints(layout, [{ type: 'room_count', value: layout.rooms.length + 2 }]);
+    const exitRoom = result.rooms.find((r) => r.id === result.exitRoom);
+    // The exit room must have exactly 1 back-connection in a linear layout:
+    // it should connect only to the room directly before it, not to any earlier room.
+    expect(exitRoom).not.toBeUndefined();
+    const exitConnections = exitRoom!.connections;
+    // In a linear path the exit room connects back to exactly one preceding room.
+    expect(exitConnections).toHaveLength(1);
+    // That predecessor must itself connect forward to the exit, forming an unbroken chain.
+    const predecessor = result.rooms.find((r) => r.id === exitConnections[0]);
+    expect(predecessor).not.toBeUndefined();
+    expect(predecessor!.connections).toContain(result.exitRoom);
+  });
+
+  it('adjustRoomCount preserves layout validity after expansion (PF-770)', () => {
+    const layout = getLinearLayout();
+    const result = applyConstraints(layout, [{ type: 'room_count', value: layout.rooms.length + 3 }]);
+    const errors = validateLayout(result);
+    expect(errors).toEqual([]);
+  });
+
+  it('adjustRoomCount does not add extra connections to prevRoom (PF-770)', () => {
+    const layout = getLinearLayout();
+    const exitRoomId = layout.exitRoom;
+    const result = applyConstraints(layout, [{ type: 'room_count', value: layout.rooms.length + 1 }]);
+    // The room that was previously the exit's predecessor (now two steps before exit)
+    // must NOT still connect to the exit room — the new room is in between.
+    const originalPreExit = layout.rooms.find((r) => r.connections.includes(exitRoomId));
+    if (originalPreExit) {
+      const updatedPreExit = result.rooms.find((r) => r.id === originalPreExit.id);
+      expect(updatedPreExit?.connections).not.toContain(exitRoomId);
+    }
+  });
+
   it('adjusts room count downward by removing corridors', () => {
     const dungeonLayout = LEVEL_TEMPLATES.dungeon.generate();
     const original = dungeonLayout.rooms.length;

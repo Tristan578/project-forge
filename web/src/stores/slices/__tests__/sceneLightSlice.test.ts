@@ -10,7 +10,7 @@ import {
   hasSceneLights,
   describeSceneLights,
 } from '../sceneLightSlice';
-import type { SceneGraph, SceneNode } from '../types';
+import type { SceneGraph, SceneNode, LightData } from '../types';
 
 function makeStore() {
   return createSliceStore<SceneLightSlice>(createSceneLightSlice);
@@ -202,6 +202,116 @@ describe('sceneLightSlice', () => {
       store.getState().onLightNodeAdded(makeNode('p1', ['PointLight']));
       store.getState().setSceneLightAmbient([0, 0, 0], 0);
       expect(store.getState().sceneLightState.totalLightEntities).toBe(1);
+    });
+  });
+
+  // Regression: PF-795 — the store must aggregate per-entity LightData (color,
+  // intensity, shadowsEnabled) so the editor can render an accurate shadow preview.
+  describe('setLightEntityData / removeLightEntityData (PF-795)', () => {
+    function makeLightData(lightType: LightData['lightType']): LightData {
+      return {
+        lightType,
+        color: [1, 1, 1],
+        intensity: 500,
+        shadowsEnabled: true,
+        shadowDepthBias: 0.02,
+        shadowNormalBias: 0.6,
+        range: 20,
+        radius: 0,
+        innerAngle: 0,
+        outerAngle: 0.785,
+      };
+    }
+
+    it('starts with an empty lightDataMap (PF-795)', () => {
+      const store = makeStore();
+      expect(store.getState().sceneLightState.lightDataMap).toEqual({});
+    });
+
+    it('stores light data for a given entity (PF-795)', () => {
+      const store = makeStore();
+      const data = makeLightData('directional');
+      store.getState().setLightEntityData('d1', data);
+      expect(store.getState().sceneLightState.lightDataMap['d1']).toEqual(data);
+    });
+
+    it('overwrites existing data on subsequent call for same entity (PF-795)', () => {
+      const store = makeStore();
+      store.getState().setLightEntityData('p1', makeLightData('point'));
+      const updated = { ...makeLightData('point'), intensity: 1200 };
+      store.getState().setLightEntityData('p1', updated);
+      expect(store.getState().sceneLightState.lightDataMap['p1'].intensity).toBe(1200);
+    });
+
+    it('stores multiple entities independently (PF-795)', () => {
+      const store = makeStore();
+      store.getState().setLightEntityData('d1', makeLightData('directional'));
+      store.getState().setLightEntityData('p1', makeLightData('point'));
+      store.getState().setLightEntityData('s1', makeLightData('spot'));
+      const map = store.getState().sceneLightState.lightDataMap;
+      expect(Object.keys(map)).toHaveLength(3);
+      expect(map['d1'].lightType).toBe('directional');
+      expect(map['p1'].lightType).toBe('point');
+      expect(map['s1'].lightType).toBe('spot');
+    });
+
+    it('removes light data for a given entity (PF-795)', () => {
+      const store = makeStore();
+      store.getState().setLightEntityData('p1', makeLightData('point'));
+      store.getState().setLightEntityData('p2', makeLightData('point'));
+      store.getState().removeLightEntityData('p1');
+      const map = store.getState().sceneLightState.lightDataMap;
+      expect(map['p1']).toBeUndefined();
+      expect(map['p2']).not.toBeUndefined();
+    });
+
+    it('no-ops gracefully when removing an entity not in the map (PF-795)', () => {
+      const store = makeStore();
+      expect(() => store.getState().removeLightEntityData('nonexistent')).not.toThrow();
+      expect(store.getState().sceneLightState.lightDataMap).toEqual({});
+    });
+
+    it('setLightEntityData does not affect light entity counts (PF-795)', () => {
+      const store = makeStore();
+      store.getState().onLightNodeAdded(makeNode('p1', ['PointLight']));
+      store.getState().setLightEntityData('p1', makeLightData('point'));
+      expect(store.getState().sceneLightState.totalLightEntities).toBe(1);
+      expect(store.getState().sceneLightState.pointLights).toBe(1);
+    });
+
+    it('removeLightEntityData does not affect light entity counts (PF-795)', () => {
+      const store = makeStore();
+      store.getState().onLightNodeAdded(makeNode('p1', ['PointLight']));
+      store.getState().setLightEntityData('p1', makeLightData('point'));
+      store.getState().removeLightEntityData('p1');
+      // Count tracking (onLightNodeRemoved) is separate from data map
+      expect(store.getState().sceneLightState.pointLights).toBe(1);
+    });
+
+    it('setSceneLightAmbient does not clear lightDataMap (PF-795)', () => {
+      const store = makeStore();
+      store.getState().setLightEntityData('d1', makeLightData('directional'));
+      store.getState().setSceneLightAmbient([0.5, 0.5, 0.5], 200);
+      expect(store.getState().sceneLightState.lightDataMap['d1']).not.toBeUndefined();
+    });
+
+    it('recomputeLightState does not clear lightDataMap (PF-795)', () => {
+      const store = makeStore();
+      store.getState().setLightEntityData('d1', makeLightData('directional'));
+      store.getState().recomputeLightState(makeGraph([makeNode('d1', ['DirectionalLight'])]));
+      expect(store.getState().sceneLightState.lightDataMap['d1']).not.toBeUndefined();
+    });
+
+    it('shadowsEnabled is accessible for shadow preview via lightDataMap (PF-795)', () => {
+      const store = makeStore();
+      const withShadows = { ...makeLightData('directional'), shadowsEnabled: true };
+      const withoutShadows = { ...makeLightData('point'), shadowsEnabled: false };
+      store.getState().setLightEntityData('sun', withShadows);
+      store.getState().setLightEntityData('fill', withoutShadows);
+      const map = store.getState().sceneLightState.lightDataMap;
+      const shadowCasters = Object.values(map).filter((l) => l.shadowsEnabled);
+      expect(shadowCasters).toHaveLength(1);
+      expect(shadowCasters[0].lightType).toBe('directional');
     });
   });
 

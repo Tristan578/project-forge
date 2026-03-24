@@ -9,7 +9,7 @@
  */
 
 import { StateCreator } from 'zustand';
-import type { SceneGraph, SceneNode } from './types';
+import type { SceneGraph, SceneNode, LightData } from './types';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +28,12 @@ export interface SceneLightState {
   spotLights: number;
   /** Total count of all light entities (directional + point + spot). */
   totalLightEntities: number;
+  /**
+   * Per-entity light data keyed by entityId.
+   * Used by shadow preview and AI analysis to access actual light properties
+   * (color, intensity, shadowsEnabled, etc.) rather than just counts.
+   */
+  lightDataMap: Record<string, LightData>;
 }
 
 export interface SceneLightSlice {
@@ -59,6 +65,18 @@ export interface SceneLightSlice {
     color: [number, number, number],
     intensity: number,
   ) => void;
+
+  /**
+   * Store or update the full LightData for a specific light entity.
+   * Called when LIGHT_UPDATED or LIGHT_ADDED fires with component data.
+   */
+  setLightEntityData: (entityId: string, data: LightData) => void;
+
+  /**
+   * Remove a light entity's data from the map.
+   * Called when ENTITY_DELETED fires for a light entity.
+   */
+  removeLightEntityData: (entityId: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +116,7 @@ const DEFAULT_STATE: SceneLightState = {
   pointLights: 0,
   spotLights: 0,
   totalLightEntities: 0,
+  lightDataMap: {},
 };
 
 export const createSceneLightSlice: StateCreator<SceneLightSlice, [], [], SceneLightSlice> = (set, _get) => ({
@@ -164,6 +183,30 @@ export const createSceneLightSlice: StateCreator<SceneLightSlice, [], [], SceneL
         ambientIntensity: intensity,
       },
     }));
+  },
+
+  setLightEntityData: (entityId, data) => {
+    set((state) => ({
+      sceneLightState: {
+        ...state.sceneLightState,
+        lightDataMap: {
+          ...state.sceneLightState.lightDataMap,
+          [entityId]: data,
+        },
+      },
+    }));
+  },
+
+  removeLightEntityData: (entityId) => {
+    set((state) => {
+      const { [entityId]: _removed, ...rest } = state.sceneLightState.lightDataMap;
+      return {
+        sceneLightState: {
+          ...state.sceneLightState,
+          lightDataMap: rest,
+        },
+      };
+    });
   },
 });
 
