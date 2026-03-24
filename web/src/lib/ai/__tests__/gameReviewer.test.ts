@@ -397,10 +397,12 @@ describe('generateReview', () => {
       },
     });
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      body: stream,
-    }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+    ));
 
     const { generateReview } = await import('../gameReviewer');
 
@@ -432,12 +434,12 @@ describe('generateReview', () => {
   });
 
   it('throws on non-ok response', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: 'Internal Server Error',
-      json: () => Promise.resolve({ error: 'Server error' }),
-    }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Internal server error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ));
 
     const { generateReview } = await import('../gameReviewer');
 
@@ -461,7 +463,8 @@ describe('generateReview', () => {
       lightCount: 0,
     };
 
-    await expect(generateReview(context)).rejects.toThrow('Server error');
+    // fetchAI mapError transforms "Internal server" messages to a friendly string
+    await expect(generateReview(context)).rejects.toThrow(/service error/i);
 
     vi.unstubAllGlobals();
   });

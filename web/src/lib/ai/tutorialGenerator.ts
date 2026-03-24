@@ -7,6 +7,7 @@
  */
 
 import { AI_MODEL_PRIMARY } from './models';
+import { fetchAI } from './client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -386,46 +387,6 @@ export function parseTutorialResponse(raw: string): TutorialPlan {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse an SSE stream from the /api/chat endpoint and collect all text deltas.
- */
-async function readSSEStream(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<string> {
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let content = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
-
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(data) as Record<string, unknown>;
-      } catch {
-        // Partial JSON chunk — skip and continue reading
-        continue;
-      }
-      if (event.type === 'text_delta' && typeof event.text === 'string') {
-        content += event.text;
-      }
-      if (event.type === 'error' && typeof event.message === 'string') {
-        throw new Error(event.message);
-      }
-    }
-  }
-
-  return content;
-}
-
-/**
  * Generate a tutorial plan from detected game mechanics using AI.
  * Calls the /api/chat endpoint with a specialized system prompt.
  */
@@ -439,32 +400,13 @@ export async function generateTutorialPlan(
 
   const userMessage = buildTutorialPrompt(mechanics, options);
 
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: userMessage }],
-      model: AI_MODEL_PRIMARY,
-      sceneContext: '',
-      thinking: false,
-      systemOverride: TUTORIAL_SYSTEM_PROMPT,
-    }),
+  const content = await fetchAI(userMessage, {
+    model: AI_MODEL_PRIMARY,
+    sceneContext: '',
+    thinking: false,
+    systemOverride: TUTORIAL_SYSTEM_PROMPT,
+    priority: 2,
   });
-
-  if (!response.ok) {
-    const errorData = await response
-      .json()
-      .catch(() => ({ error: response.statusText }));
-    throw new Error(
-      (errorData as Record<string, string>).error ||
-        `Tutorial generation failed: ${response.status}`,
-    );
-  }
-
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const content = await readSSEStream(reader);
 
   if (!content.trim()) {
     throw new Error('AI returned an empty response');

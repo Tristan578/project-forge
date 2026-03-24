@@ -3,6 +3,7 @@
 // that compile to TypeScript scripts for the SpawnForge script worker.
 
 import { AI_MODEL_FAST } from './models';
+import { fetchAI } from './client';
 
 // ---- Types ----
 
@@ -651,57 +652,10 @@ Respond with ONLY valid JSON. No explanation, no markdown fences.`;
 export async function generateBehaviorTree(description: string): Promise<BehaviorTree> {
   const prompt = buildBehaviorTreePrompt(description);
 
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages: [
-        { role: 'user', content: prompt },
-      ],
-      model: AI_MODEL_FAST,
-      max_tokens: 2048,
-    }),
+  const content = await fetchAI(prompt, {
+    model: AI_MODEL_FAST,
+    priority: 2,
   });
-
-  if (!response.ok) {
-    throw new Error(`AI generation failed: ${response.status}`);
-  }
-
-  // /api/chat returns an SSE stream — read text deltas
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let content = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
-
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(data) as Record<string, unknown>;
-      } catch {
-        continue;
-      }
-      if (event.type === 'text_delta' && typeof event.text === 'string') {
-        content += event.text;
-      }
-      if (event.type === 'error' && typeof event.message === 'string') {
-        throw new Error(event.message);
-      }
-    }
-  }
 
   const tree = parseBehaviorTreeResponse(content);
   if (!tree) {

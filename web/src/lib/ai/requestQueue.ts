@@ -18,6 +18,18 @@
 /** Request priority. Lower number = higher priority. */
 export type Priority = 1 | 2 | 3;
 
+export interface AIRequestQueueOptions {
+  /** Maximum number of requests executing concurrently. Default: 3 */
+  maxConcurrent?: number;
+  /**
+   * Maximum number of requests allowed to sit in the pending queue
+   * (not counting those already running).  When the queue is full,
+   * `enqueue()` rejects immediately with a friendly backpressure error.
+   * Default: 20 (unlimited-ish for most interactive use cases).
+   */
+  maxQueueDepth?: number;
+}
+
 interface QueuedRequest<T> {
   fn: () => Promise<T>;
   priority: Priority;
@@ -32,11 +44,18 @@ interface QueuedRequest<T> {
 
 export class AIRequestQueue {
   private maxConcurrent: number;
+  private maxQueueDepth: number;
   private running = 0;
   private queue: QueuedRequest<unknown>[] = [];
 
-  constructor(maxConcurrent = 3) {
-    this.maxConcurrent = maxConcurrent;
+  constructor(maxConcurrentOrOptions: number | AIRequestQueueOptions = 3) {
+    if (typeof maxConcurrentOrOptions === 'number') {
+      this.maxConcurrent = maxConcurrentOrOptions;
+      this.maxQueueDepth = 20;
+    } else {
+      this.maxConcurrent = maxConcurrentOrOptions.maxConcurrent ?? 3;
+      this.maxQueueDepth = maxConcurrentOrOptions.maxQueueDepth ?? 20;
+    }
   }
 
   /**
@@ -45,6 +64,10 @@ export class AIRequestQueue {
    * If the signal is already aborted, the request is rejected immediately
    * without entering the queue.  While the request is queued (not yet
    * running), an abort removes it from the queue and rejects the promise.
+   *
+   * If the pending queue is at capacity (`maxQueueDepth`), the request is
+   * rejected immediately with a backpressure error — the caller should surface
+   * a friendly message like "Too many requests in progress, please wait."
    *
    * @param fn         Async function to execute
    * @param priority   Execution priority (1 = highest, 3 = lowest)
@@ -55,6 +78,15 @@ export class AIRequestQueue {
     // Reject immediately if already aborted
     if (signal?.aborted) {
       return Promise.reject(new Error('Request aborted'));
+    }
+
+    // Backpressure: reject if the pending queue is full.
+    // Only applies when the request would need to wait in the queue
+    // (i.e. all concurrency slots are occupied).
+    if (this.running >= this.maxConcurrent && this.queue.length >= this.maxQueueDepth) {
+      return Promise.reject(
+        new Error('Too many AI requests in progress — please wait a moment and try again.'),
+      );
     }
 
     return new Promise<T>((resolve, reject) => {

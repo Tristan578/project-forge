@@ -543,7 +543,11 @@ describe('error propagation across pipeline stages', () => {
     );
 
     const { generateGDD } = await import('@/lib/ai/gddGenerator');
-    await expect(generateGDD('a platformer')).rejects.toThrow('Unauthorized');
+    // After the unified AI client refactor (PF-650), mapError() normalises
+    // HTTP 401 responses into a user-friendly message rather than re-throwing
+    // the raw server error string. The important invariant is that a non-ok
+    // response still rejects -- the exact message reflects the mapped copy.
+    await expect(generateGDD('a platformer')).rejects.toThrow('Authentication required');
   });
 
   it('GDD SSE error event propagates as a thrown error', async () => {

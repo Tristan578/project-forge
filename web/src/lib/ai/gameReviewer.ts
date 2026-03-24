@@ -5,6 +5,7 @@
 
 import type { EditorState } from '@/stores/editorStore';
 import { AI_MODEL_FAST } from './models';
+import { fetchAI } from './client';
 
 // ---- Types ----
 
@@ -317,54 +318,16 @@ function buildReviewPrompt(context: ReviewContext): string {
 export async function generateReview(context: ReviewContext): Promise<GameReview> {
   const prompt = buildReviewPrompt(context);
 
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: `Please review this game based on the following data:\n\n${prompt}` }],
+  const fullText = await fetchAI(
+    `Please review this game based on the following data:\n\n${prompt}`,
+    {
       model: AI_MODEL_FAST,
       sceneContext: '',
       thinking: false,
       systemOverride: REVIEWER_SYSTEM_PROMPT,
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error((err as { error?: string }).error || `Review request failed: ${response.status}`);
-  }
-
-  // Read the streaming response and collect all text
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let fullText = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
-
-      try {
-        const event = JSON.parse(data) as { type: string; text?: string };
-        if (event.type === 'text_delta' && event.text) {
-          fullText += event.text;
-        }
-      } catch {
-        // skip malformed events
-      }
-    }
-  }
+      priority: 3,
+    },
+  );
 
   return parseReviewResponse(fullText);
 }

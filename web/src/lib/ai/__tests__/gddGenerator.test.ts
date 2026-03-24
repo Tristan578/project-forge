@@ -440,7 +440,8 @@ describe('generateGDD', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 }),
     );
-    await expect(generateGDD('a game')).rejects.toThrow('Rate limited');
+    // fetchAI's mapError transforms 429 into a user-friendly rate limit message
+    await expect(generateGDD('a game')).rejects.toThrow(/rate limit/i);
   });
 
   it('throws on empty AI response', async () => {

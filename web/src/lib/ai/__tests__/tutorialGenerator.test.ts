@@ -425,38 +425,67 @@ describe('generateTutorialPlan', () => {
     );
   });
 
+  /** Create an SSE response body compatible with fetchAI */
+  function makeSseResponse(text: string): Response {
+    const sseData = `data: ${JSON.stringify({ type: 'text_delta', text })}\n\ndata: {"type":"done"}\n\n`;
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(sseData));
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  }
+
   it('throws on non-ok response', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-        json: () => Promise.resolve({ error: 'Server error' }),
-      }),
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'Internal server error' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
     );
 
     const mechanics: GameMechanic[] = [
       { name: 'Movement', description: 'Move', inputRequired: 'WASD', complexity: 1 },
     ];
 
-    await expect(generateTutorialPlan(mechanics)).rejects.toThrow('Server error');
+    // fetchAI mapError transforms "Internal server" messages to a friendly string
+    await expect(generateTutorialPlan(mechanics)).rejects.toThrow(/service error/i);
+    vi.unstubAllGlobals();
   });
 
-  it('throws on empty response body', async () => {
+  it('throws on AI returned empty response', async () => {
+    // Return a stream with no text content — fetchAI resolves to '' which triggers
+    // the empty check in generateTutorialPlan
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        body: null,
-      }),
+      vi.fn().mockResolvedValue(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              const encoder = new TextEncoder();
+              controller.enqueue(encoder.encode('data: {"type":"done"}\n\n'));
+              controller.close();
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+        ),
+      ),
     );
 
     const mechanics: GameMechanic[] = [
       { name: 'Movement', description: 'Move', inputRequired: 'WASD', complexity: 1 },
     ];
 
-    await expect(generateTutorialPlan(mechanics)).rejects.toThrow('No response body');
+    await expect(generateTutorialPlan(mechanics)).rejects.toThrow('AI returned an empty response');
+    vi.unstubAllGlobals();
   });
 
   it('parses SSE stream and returns tutorial plan', async () => {
@@ -476,22 +505,7 @@ describe('generateTutorialPlan', () => {
       completionText: 'Done!',
     };
 
-    const sseData = `data: ${JSON.stringify({ type: 'text_delta', text: JSON.stringify(plan) })}\n\ndata: [DONE]\n\n`;
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      start(controller) {
-        controller.enqueue(encoder.encode(sseData));
-        controller.close();
-      },
-    });
-
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        body: stream,
-      }),
-    );
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSseResponse(JSON.stringify(plan))));
 
     const mechanics: GameMechanic[] = [
       { name: 'Movement', description: 'Move', inputRequired: 'WASD', complexity: 1 },
@@ -501,21 +515,18 @@ describe('generateTutorialPlan', () => {
     expect(result.steps).toHaveLength(1);
     expect(result.steps[0].mechanic).toBe('Movement');
     expect(result.introText).toBe('Welcome!');
+    vi.unstubAllGlobals();
   });
 
   it('sends correct request payload', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      body: new ReadableStream({
-        start(controller) {
-          const encoder = new TextEncoder();
-          const plan = { steps: [{ mechanic: 'X', instruction: 'Y' }], introText: 'A', completionText: 'B', estimatedDuration: '1m', difficulty: 'beginner' };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'text_delta', text: JSON.stringify(plan) })}\n\ndata: [DONE]\n\n`));
-          controller.close();
-        },
-      }),
-    });
-
+    const plan = {
+      steps: [{ mechanic: 'X', instruction: 'Y', order: 1, triggerCondition: 'start', completionCondition: 'end' }],
+      introText: 'A',
+      completionText: 'B',
+      estimatedDuration: '1m',
+      difficulty: 'beginner',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(makeSseResponse(JSON.stringify(plan)));
     vi.stubGlobal('fetch', fetchMock);
 
     const mechanics: GameMechanic[] = [
@@ -529,9 +540,10 @@ describe('generateTutorialPlan', () => {
       headers: { 'Content-Type': 'application/json' },
     }));
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string) as Record<string, unknown>;
     expect(body.systemOverride).toBe(TUTORIAL_SYSTEM_PROMPT);
-    expect(body.messages[0].content).toContain('Movement');
-    expect(body.messages[0].content).toContain('Maximum tutorial steps: 3');
+    expect((body.messages as Array<{ content: string }>)[0].content).toContain('Movement');
+    expect((body.messages as Array<{ content: string }>)[0].content).toContain('Maximum tutorial steps: 3');
+    vi.unstubAllGlobals();
   });
 });
