@@ -8,6 +8,7 @@
 
 import { AI_MODEL_PRIMARY } from './models';
 import { fetchAI } from './client';
+import { GDD_SCOPE_SET } from '@/lib/config/enums';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,7 +51,7 @@ export const GDD_STANDARD_SECTIONS = [
   'Technical Requirements',
 ] as const;
 
-const VALID_SCOPES: ReadonlySet<string> = new Set(['small', 'medium', 'large']);
+const VALID_SCOPES: ReadonlySet<string> = GDD_SCOPE_SET;
 
 export const GDD_SYSTEM_PROMPT = `You are a game design expert. Given a game idea description, generate a structured Game Design Document (GDD) in JSON format.
 

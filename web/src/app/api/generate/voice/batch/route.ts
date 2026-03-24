@@ -8,6 +8,7 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 interface BatchItem {
   nodeId: string;
@@ -65,8 +66,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'voiceSettings.voiceId is required' }, { status: 422 });
   }
 
-  // Token cost: 5 per item (discounted from 10 for single)
-  const tokenCost = items.length * 5;
+  // Token cost: discounted per-item rate (cheaper than single voice generation)
+  const tokenCost = items.length * TOKEN_COSTS.voice_batch_cost_per_item;
 
   let apiKey: string;
   let usageId: string | undefined;

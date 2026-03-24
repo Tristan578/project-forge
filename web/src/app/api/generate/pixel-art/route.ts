@@ -9,13 +9,20 @@ import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { TOKEN_COSTS as PRICING } from '@/lib/tokens/pricing';
+import {
+  PIXEL_ART_SIZES,
+  PIXEL_ART_DITHERING_MODES,
+  PIXEL_ART_STYLES,
+} from '@/lib/config/providers';
 
-const VALID_SIZES = [16, 32, 64, 128];
-const VALID_DITHERING = ['none', 'bayer4x4', 'bayer8x8'];
-const VALID_STYLES = ['character', 'prop', 'tile', 'icon', 'environment'];
+// Spread to mutable arrays so .includes() accepts unknown runtime values
+const VALID_SIZES: number[] = [...PIXEL_ART_SIZES];
+const VALID_DITHERING: string[] = [...PIXEL_ART_DITHERING_MODES];
+const VALID_STYLES: string[] = [...PIXEL_ART_STYLES];
+
 const VALID_PROVIDERS = ['auto', 'openai', 'replicate'];
 const PALETTE_IDS = Object.keys(PALETTES) as PaletteId[];
-const TOKEN_COSTS: Record<string, number> = { replicate: 10, openai: 20 };
 
 export async function POST(request: NextRequest) {
   try {
@@ -81,7 +88,9 @@ export async function POST(request: NextRequest) {
 
     // 3. Resolve provider
     const resolvedProvider = (!provider || provider === 'auto' || provider === 'replicate') ? 'replicate' : 'openai';
-    const tokenCost = TOKEN_COSTS[resolvedProvider] ?? 10;
+    const tokenCost = resolvedProvider === 'openai'
+      ? PRICING.pixel_art_openai
+      : PRICING.pixel_art_replicate;
 
     // 4. Resolve API key and charge tokens
     let usageId: string | undefined;

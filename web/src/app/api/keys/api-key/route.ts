@@ -8,8 +8,7 @@ import { apiKeys } from '@/lib/db/schema';
 import type { ApiKeyScope } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
-
-const VALID_SCOPES: ApiKeyScope[] = ['scene:read', 'scene:write', 'ai:generate', 'project:manage'];
+import { API_KEY_SCOPES, findInvalidScopes } from '@/lib/config/scopes';
 
 /** POST /api/keys/api-key — generate a new MCP API key */
 export async function POST(req: Request) {
@@ -26,10 +25,10 @@ export async function POST(req: Request) {
 
   const body = await req.json();
   const name = (body.name as string) || 'Default';
-  const scopes = (body.scopes as ApiKeyScope[]) || VALID_SCOPES;
+  const scopes = (body.scopes as ApiKeyScope[]) || [...API_KEY_SCOPES];
 
   // Validate scopes
-  const invalidScopes = scopes.filter((s: string) => !VALID_SCOPES.includes(s as ApiKeyScope));
+  const invalidScopes = findInvalidScopes(scopes);
   if (invalidScopes.length > 0) {
     return NextResponse.json(
       { error: `Invalid scopes: ${invalidScopes.join(', ')}` },

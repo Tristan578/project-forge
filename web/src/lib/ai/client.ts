@@ -8,6 +8,7 @@
 
 import { streamChat, type StreamCallbacks } from './streaming';
 import { aiQueue, type Priority } from './requestQueue';
+import { AI_MODEL_PRIMARY } from './models';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -92,7 +93,7 @@ function mapError(err: unknown): Error {
  */
 export async function fetchAI(prompt: string, options?: AIClientOptions): Promise<string> {
   const {
-    model = 'claude-sonnet-4-5',
+    model = AI_MODEL_PRIMARY,
     systemOverride,
     sceneContext = '',
     thinking = false,
@@ -167,7 +168,7 @@ export async function streamAI(
   callbacks?: StreamCallbacks,
 ): Promise<string> {
   const {
-    model = 'claude-sonnet-4-5',
+    model = AI_MODEL_PRIMARY,
     systemOverride,
     sceneContext = '',
     thinking = false,
