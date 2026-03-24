@@ -36,9 +36,9 @@ describe('QuickStartFlow', () => {
   it('renders step 1 (game type selection) on first render', () => {
     render(<QuickStartFlow onComplete={onComplete} onSkip={onSkip} />);
 
-    expect(screen.getByText('What kind of game?'))).not.toBeNull();
+    expect(screen.getByText('What kind of game?')).not.toBeNull();
     // Step progress text is split across nodes — check with regex
-    expect(screen.getByText(/Step 1 of 3/))).not.toBeNull();
+    expect(screen.getByText(/Step 1 of 3/)).not.toBeNull();
     // All 4 game type cards
     expect(screen.getAllByText('Platformer').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Shooter').length).toBeGreaterThan(0);
@@ -56,9 +56,9 @@ describe('QuickStartFlow', () => {
     expect(platformerBtn).not.toBeNull();
     fireEvent.click(platformerBtn!);
 
-    expect(screen.getByText('Describe your game'))).not.toBeNull();
-    expect(screen.getByText(/Step 2 of 3/))).not.toBeNull();
-    expect(screen.getByLabelText('Describe your game in one sentence'))).not.toBeNull();
+    expect(screen.getByText('Describe your game')).not.toBeNull();
+    expect(screen.getByText(/Step 2 of 3/)).not.toBeNull();
+    expect(screen.getByLabelText('Describe your game in one sentence')).not.toBeNull();
   });
 
   it('pre-fills the textarea with the template placeholder on type selection', () => {
@@ -89,10 +89,10 @@ describe('QuickStartFlow', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText('Your game is ready!'))).not.toBeNull();
+      expect(screen.getByText('Your game is ready!')).not.toBeNull();
     });
 
-    expect(screen.getByText(/Step 3 of 3/))).not.toBeNull();
+    expect(screen.getByText(/Step 3 of 3/)).not.toBeNull();
   });
 
   it('disables generate button when prompt is empty', () => {
@@ -158,10 +158,10 @@ describe('QuickStartFlow', () => {
       (b) => b.textContent?.includes('Platformer') && b.textContent?.includes('Jump, run'),
     )!;
     fireEvent.click(platformerBtn);
-    expect(screen.getByText('Describe your game'))).not.toBeNull();
+    expect(screen.getByText('Describe your game')).not.toBeNull();
 
     fireEvent.click(screen.getByLabelText('Go back'));
-    expect(screen.getByText('What kind of game?'))).not.toBeNull();
+    expect(screen.getByText('What kind of game?')).not.toBeNull();
   });
 
   it('navigates back from step 3 to step 2', async () => {
@@ -176,7 +176,7 @@ describe('QuickStartFlow', () => {
     await waitFor(() => screen.getByText('Your game is ready!'));
 
     fireEvent.click(screen.getByLabelText('Go back'));
-    expect(screen.getByText('Describe your game'))).not.toBeNull();
+    expect(screen.getByText('Describe your game')).not.toBeNull();
   });
 
   it('"Edit first, play later" button completes without entering play mode', async () => {
