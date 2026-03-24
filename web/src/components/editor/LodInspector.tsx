@@ -98,7 +98,7 @@ export function LodInspector() {
   const lodLabels = ['Full', 'Medium', 'Low', 'Lowest'];
 
   return (
-    <div className="border-t border-gray-700 pt-3 mt-3">
+    <div className="border-t border-zinc-700 pt-3 mt-3">
       <h3 className="text-sm font-medium mb-3">LOD (Level of Detail)</h3>
 
       {/* Auto Generate Toggle */}
@@ -115,7 +115,7 @@ export function LodInspector() {
       {/* LOD Distances */}
       <div className="space-y-3 mb-3">
         <div>
-          <label className="text-xs text-gray-400 block mb-1">LOD1 Distance</label>
+          <label className="text-xs text-zinc-400 block mb-1">LOD1 Distance</label>
           <input
             type="range"
             min="5"
@@ -125,11 +125,11 @@ export function LodInspector() {
             onChange={(e) => handleDistanceChange(0, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{lodConfig.lodDistances[0]}m</div>
+          <div className="text-xs text-zinc-400 text-right">{lodConfig.lodDistances[0]}m</div>
         </div>
 
         <div>
-          <label className="text-xs text-gray-400 block mb-1">LOD2 Distance</label>
+          <label className="text-xs text-zinc-400 block mb-1">LOD2 Distance</label>
           <input
             type="range"
             min="10"
@@ -139,11 +139,11 @@ export function LodInspector() {
             onChange={(e) => handleDistanceChange(1, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{lodConfig.lodDistances[1]}m</div>
+          <div className="text-xs text-zinc-400 text-right">{lodConfig.lodDistances[1]}m</div>
         </div>
 
         <div>
-          <label className="text-xs text-gray-400 block mb-1">LOD3 Distance</label>
+          <label className="text-xs text-zinc-400 block mb-1">LOD3 Distance</label>
           <input
             type="range"
             min="20"
@@ -153,14 +153,14 @@ export function LodInspector() {
             onChange={(e) => handleDistanceChange(2, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{lodConfig.lodDistances[2]}m</div>
+          <div className="text-xs text-zinc-400 text-right">{lodConfig.lodDistances[2]}m</div>
         </div>
       </div>
 
       {/* Triangle Reduction Ratios */}
       <div className="space-y-3 mb-3">
         <div>
-          <label className="text-xs text-gray-400 block mb-1">LOD1 Quality (50% default)</label>
+          <label className="text-xs text-zinc-400 block mb-1">LOD1 Quality (50% default)</label>
           <input
             type="range"
             min="0.1"
@@ -170,11 +170,11 @@ export function LodInspector() {
             onChange={(e) => handleRatioChange(0, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{Math.round(lodConfig.lodRatios[0] * 100)}%</div>
+          <div className="text-xs text-zinc-400 text-right">{Math.round(lodConfig.lodRatios[0] * 100)}%</div>
         </div>
 
         <div>
-          <label className="text-xs text-gray-400 block mb-1">LOD2 Quality (25% default)</label>
+          <label className="text-xs text-zinc-400 block mb-1">LOD2 Quality (25% default)</label>
           <input
             type="range"
             min="0.1"
@@ -184,11 +184,11 @@ export function LodInspector() {
             onChange={(e) => handleRatioChange(1, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{Math.round(lodConfig.lodRatios[1] * 100)}%</div>
+          <div className="text-xs text-zinc-400 text-right">{Math.round(lodConfig.lodRatios[1] * 100)}%</div>
         </div>
 
         <div>
-          <label className="text-xs text-gray-400 block mb-1">LOD3 Quality (10% default)</label>
+          <label className="text-xs text-zinc-400 block mb-1">LOD3 Quality (10% default)</label>
           <input
             type="range"
             min="0.1"
@@ -198,20 +198,20 @@ export function LodInspector() {
             onChange={(e) => handleRatioChange(2, parseFloat(e.target.value))}
             className="w-full"
           />
-          <div className="text-xs text-gray-500 text-right">{Math.round(lodConfig.lodRatios[2] * 100)}%</div>
+          <div className="text-xs text-zinc-400 text-right">{Math.round(lodConfig.lodRatios[2] * 100)}%</div>
         </div>
       </div>
 
       {/* Simplification Backend Selector */}
       <div className="mb-3">
-        <label className="text-xs text-gray-400 block mb-1">Simplification Algorithm</label>
+        <label className="text-xs text-zinc-400 block mb-1">Simplification Algorithm</label>
         <select
           value={backend}
           onChange={(e) => {
             const v = e.target.value;
             if (v === 'qem' || v === 'fast') handleBackendChange(v);
           }}
-          className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm"
+          className="w-full bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-sm"
         >
           <option value="qem">QEM — attribute-preserving (recommended)</option>
           <option value="fast">Fast — position-only (lower quality)</option>
@@ -234,7 +234,7 @@ export function LodInspector() {
       )}
 
       {/* Current LOD Level Display */}
-      <div className="mt-3 text-xs text-gray-400">
+      <div className="mt-3 text-xs text-zinc-400">
         Current LOD: Level {currentLod} ({lodLabels[currentLod] ?? 'Unknown'})
       </div>
     </div>

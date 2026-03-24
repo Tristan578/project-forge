@@ -100,12 +100,12 @@ export default function AdaptiveMusicInspector() {
   }, [stems]);
 
   return (
-    <div className="space-y-4 p-4 bg-gray-900 rounded-lg border border-gray-700">
+    <div className="space-y-4 p-4 bg-zinc-900 rounded-lg border border-zinc-700">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-200">Adaptive Music</h3>
+        <h3 className="text-sm font-semibold text-zinc-200">Adaptive Music</h3>
         <button
           onClick={handlePlayPause}
-          className="p-2 hover:bg-gray-800 rounded transition-colors"
+          className="p-2 hover:bg-zinc-800 rounded transition-colors"
           aria-label={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -115,8 +115,8 @@ export default function AdaptiveMusicInspector() {
       {/* Intensity Slider */}
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs">
-          <label className="text-gray-400">Intensity</label>
-          <span className="text-gray-300">{(intensity * 100).toFixed(0)}%</span>
+          <label className="text-zinc-400">Intensity</label>
+          <span className="text-zinc-300">{(intensity * 100).toFixed(0)}%</span>
         </div>
         <input
           type="range"
@@ -125,9 +125,9 @@ export default function AdaptiveMusicInspector() {
           step="0.01"
           value={intensity}
           onChange={(e) => handleIntensityChange(parseFloat(e.target.value))}
-          className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+          className="w-full h-2 bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
         />
-        <div className="flex justify-between text-xs text-gray-500">
+        <div className="flex justify-between text-xs text-zinc-400">
           <span>Ambient</span>
           <span>Full Mix</span>
         </div>
@@ -135,28 +135,28 @@ export default function AdaptiveMusicInspector() {
 
       {/* Stem Configuration */}
       <div className="space-y-2">
-        <h4 className="text-xs font-semibold text-gray-400">Stems</h4>
+        <h4 className="text-xs font-semibold text-zinc-400">Stems</h4>
         {(['pad', 'bass', 'melody', 'drums'] as const).map(stem => (
           <div key={stem} className="flex items-center gap-2">
-            <label className="text-xs text-gray-400 w-16 capitalize">{stem}</label>
+            <label className="text-xs text-zinc-400 w-16 capitalize">{stem}</label>
             <input
               type="text"
               value={stems[stem] || ''}
               onChange={(e) => handleStemChange(stem, e.target.value)}
               placeholder="Asset ID"
-              className="flex-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-gray-200"
+              className="flex-1 px-2 py-1 bg-zinc-800 border border-zinc-600 rounded text-xs text-zinc-200"
             />
           </div>
         ))}
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-400 w-16">BPM</label>
+          <label className="text-xs text-zinc-400 w-16">BPM</label>
           <input
             type="number"
             value={stems.bpm}
             onChange={(e) => handleStemChange('bpm', parseInt(e.target.value) || 120)}
             min="60"
             max="240"
-            className="flex-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-gray-200"
+            className="flex-1 px-2 py-1 bg-zinc-800 border border-zinc-600 rounded text-xs text-zinc-200"
           />
         </div>
         <button
@@ -169,7 +169,7 @@ export default function AdaptiveMusicInspector() {
 
       {/* Segment Selector */}
       <div className="space-y-2">
-        <h4 className="text-xs font-semibold text-gray-400">Segments</h4>
+        <h4 className="text-xs font-semibold text-zinc-400">Segments</h4>
         <div className="grid grid-cols-2 gap-2">
           {['intro', 'main', 'combat', 'calm', 'outro'].map(segment => (
             <button
@@ -178,7 +178,7 @@ export default function AdaptiveMusicInspector() {
               className={`px-2 py-1.5 rounded text-xs transition-colors capitalize ${
                 currentSegment === segment
                   ? 'bg-blue-600 text-white'
-                  : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                  : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
               }`}
             >
               {segment}
@@ -189,14 +189,14 @@ export default function AdaptiveMusicInspector() {
 
       {/* Audio Snapshots */}
       <div className="space-y-2">
-        <h4 className="text-xs font-semibold text-gray-400">Audio Snapshots</h4>
+        <h4 className="text-xs font-semibold text-zinc-400">Audio Snapshots</h4>
         <div className="flex gap-2">
           <input
             type="text"
             value={snapshotName}
             onChange={(e) => setSnapshotName(e.target.value)}
             placeholder="Snapshot name"
-            className="flex-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs text-gray-200"
+            className="flex-1 px-2 py-1 bg-zinc-800 border border-zinc-600 rounded text-xs text-zinc-200"
           />
           <button
             onClick={handleCreateSnapshot}
@@ -207,7 +207,7 @@ export default function AdaptiveMusicInspector() {
           </button>
           <button
             onClick={loadSnapshots}
-            className="p-1.5 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
+            className="p-1.5 bg-zinc-700 hover:bg-zinc-600 rounded transition-colors"
             aria-label="Refresh snapshots"
           >
             <Upload className="w-4 h-4" />
@@ -219,7 +219,7 @@ export default function AdaptiveMusicInspector() {
               <button
                 key={`${snapshot.name}-${idx}`}
                 onClick={() => handleApplySnapshot(snapshot.name)}
-                className="w-full px-2 py-1.5 bg-gray-800 hover:bg-gray-700 rounded text-xs text-left text-gray-300 transition-colors"
+                className="w-full px-2 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-xs text-left text-zinc-300 transition-colors"
               >
                 {snapshot.name}
               </button>

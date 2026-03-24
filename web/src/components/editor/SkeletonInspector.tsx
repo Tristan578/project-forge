@@ -21,7 +21,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
   if (!skeleton) {
     return (
       <div className="px-3 py-2 space-y-2">
-        <div className="text-sm text-gray-400 mb-2">No skeleton data</div>
+        <div className="text-sm text-zinc-400 mb-2">No skeleton data</div>
         <button
           onClick={() => {
             setSkeleton2d(entityId, {
@@ -100,7 +100,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
           <button
             onClick={() => setSelectedBone(bone.name)}
             className={`px-2 py-1 rounded text-sm flex-1 text-left ${
-              selectedBone === bone.name ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+              selectedBone === bone.name ? 'bg-blue-600' : 'bg-zinc-700 hover:bg-zinc-600'
             }`}
           >
             {bone.name}
@@ -127,9 +127,9 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             <InfoTooltip text="Tree view of all bones in the skeleton" />
           </label>
         </div>
-        <div className="bg-gray-800 rounded p-2 max-h-40 overflow-y-auto">
+        <div className="bg-zinc-800 rounded p-2 max-h-40 overflow-y-auto">
           {skeleton.bones.length === 0 ? (
-            <div className="text-xs text-gray-500">No bones</div>
+            <div className="text-xs text-zinc-400">No bones</div>
           ) : (
             buildBoneTree(null)
           )}
@@ -145,7 +145,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             value={newBoneName}
             onChange={(e) => setNewBoneName(e.target.value)}
             placeholder="Bone name"
-            className="flex-1 px-2 py-1 bg-gray-800 rounded text-sm"
+            className="flex-1 px-2 py-1 bg-zinc-800 rounded text-sm"
             onKeyDown={(e) => e.key === 'Enter' && handleAddBone()}
           />
           <button
@@ -155,19 +155,19 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
             <Plus className="w-4 h-4" />
           </button>
         </div>
-        <div className="text-xs text-gray-400 mt-1">
+        <div className="text-xs text-zinc-400 mt-1">
           {selectedBone ? `Parent: ${selectedBone}` : 'Root bone'}
         </div>
       </div>
 
       {/* Selected Bone Properties */}
       {selectedBoneData && (
-        <div className="border-t border-gray-700 pt-3">
+        <div className="border-t border-zinc-700 pt-3">
           <div className="text-sm font-medium mb-2">Bone: {selectedBoneData.name}</div>
 
           <div className="space-y-2">
             <div>
-              <label className="text-xs text-gray-400">Position</label>
+              <label className="text-xs text-zinc-400">Position</label>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -176,7 +176,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
                     parseFloat(e.target.value),
                     selectedBoneData.localPosition[1]
                   ])}
-                  className="w-20 px-2 py-1 bg-gray-800 rounded text-sm"
+                  className="w-20 px-2 py-1 bg-zinc-800 rounded text-sm"
                   step="0.1"
                 />
                 <input
@@ -186,25 +186,25 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
                     selectedBoneData.localPosition[0],
                     parseFloat(e.target.value)
                   ])}
-                  className="w-20 px-2 py-1 bg-gray-800 rounded text-sm"
+                  className="w-20 px-2 py-1 bg-zinc-800 rounded text-sm"
                   step="0.1"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-gray-400">Rotation (deg)</label>
+              <label className="text-xs text-zinc-400">Rotation (deg)</label>
               <input
                 type="number"
                 value={selectedBoneData.localRotation}
                 onChange={(e) => handleUpdateBone(selectedBoneData.name, 'rotation', parseFloat(e.target.value))}
-                className="w-full px-2 py-1 bg-gray-800 rounded text-sm"
+                className="w-full px-2 py-1 bg-zinc-800 rounded text-sm"
                 step="1"
               />
             </div>
 
             <div>
-              <label className="text-xs text-gray-400">Scale</label>
+              <label className="text-xs text-zinc-400">Scale</label>
               <div className="flex gap-2">
                 <input
                   type="number"
@@ -213,7 +213,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
                     parseFloat(e.target.value),
                     selectedBoneData.localScale[1]
                   ])}
-                  className="w-20 px-2 py-1 bg-gray-800 rounded text-sm"
+                  className="w-20 px-2 py-1 bg-zinc-800 rounded text-sm"
                   step="0.1"
                 />
                 <input
@@ -223,19 +223,19 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
                     selectedBoneData.localScale[0],
                     parseFloat(e.target.value)
                   ])}
-                  className="w-20 px-2 py-1 bg-gray-800 rounded text-sm"
+                  className="w-20 px-2 py-1 bg-zinc-800 rounded text-sm"
                   step="0.1"
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-xs text-gray-400">Length</label>
+              <label className="text-xs text-zinc-400">Length</label>
               <input
                 type="number"
                 value={selectedBoneData.length}
                 onChange={(e) => handleUpdateBone(selectedBoneData.name, 'length', parseFloat(e.target.value))}
-                className="w-full px-2 py-1 bg-gray-800 rounded text-sm"
+                className="w-full px-2 py-1 bg-zinc-800 rounded text-sm"
                 step="1"
               />
             </div>
@@ -252,7 +252,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
         <select
           value={selectedSkin}
           onChange={(e) => handleSkinChange(e.target.value)}
-          className="w-full px-2 py-1 bg-gray-800 rounded text-sm"
+          className="w-full px-2 py-1 bg-zinc-800 rounded text-sm"
         >
           {Object.keys(skeleton.skins).map(skinName => (
             <option key={skinName} value={skinName}>{skinName}</option>
@@ -266,12 +266,12 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
           <label className="text-sm font-medium block mb-1">IK Constraints</label>
           <div className="space-y-1">
             {skeleton.ikConstraints.map((ik, idx) => (
-              <div key={idx} className="text-xs bg-gray-800 rounded px-2 py-1">
+              <div key={idx} className="text-xs bg-zinc-800 rounded px-2 py-1">
                 <div className="font-medium">{ik.name}</div>
-                <div className="text-gray-400">
+                <div className="text-zinc-400">
                   Bones: {ik.boneChain.join(' → ')}
                 </div>
-                <div className="text-gray-400">
+                <div className="text-zinc-400">
                   Mix: {(ik.mix * 100).toFixed(0)}%
                 </div>
               </div>
@@ -289,7 +289,7 @@ export function SkeletonInspector({ entityId }: { entityId: string }) {
               <button
                 key={anim.name}
                 onClick={() => handlePlayAnimation(anim.name)}
-                className="w-full text-left px-2 py-1 bg-gray-800 hover:bg-gray-700 rounded text-sm"
+                className="w-full text-left px-2 py-1 bg-zinc-800 hover:bg-zinc-700 rounded text-sm"
               >
                 {anim.name} ({anim.duration.toFixed(1)}s)
               </button>

@@ -13,7 +13,7 @@ function statusColor(status: ServiceHealth['status']): string {
     case 'down':
       return 'bg-red-500';
     default:
-      return 'bg-gray-500';
+      return 'bg-zinc-500';
   }
 }
 
@@ -39,7 +39,7 @@ function statusTextColor(status: ServiceHealth['status']): string {
     case 'down':
       return 'text-red-500';
     default:
-      return 'text-gray-500';
+      return 'text-zinc-400';
   }
 }
 
@@ -53,32 +53,32 @@ function formatTimestamp(iso: string): string {
 
 export function ServiceStatusCard({ service }: ServiceStatusCardProps) {
   return (
-    <div className="rounded-lg border border-gray-700 bg-gray-800 p-4 dark:border-gray-700 dark:bg-gray-800">
+    <div className="rounded-lg border border-zinc-700 bg-zinc-800 p-4 dark:border-zinc-700 dark:bg-zinc-800">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
           <span
             className={`mt-0.5 h-3 w-3 flex-shrink-0 rounded-full ${statusColor(service.status)}`}
             aria-hidden="true"
           />
-          <h3 className="text-sm font-medium text-gray-100">{service.name}</h3>
+          <h3 className="text-sm font-medium text-zinc-100">{service.name}</h3>
         </div>
         <span className={`text-xs font-semibold ${statusTextColor(service.status)}`}>
           {statusLabel(service.status)}
         </span>
       </div>
 
-      <div className="mt-3 space-y-1 text-xs text-gray-400">
+      <div className="mt-3 space-y-1 text-xs text-zinc-400">
         {service.latencyMs > 0 && (
           <p>
-            <span className="font-medium text-gray-300">Latency:</span> {service.latencyMs}ms
+            <span className="font-medium text-zinc-300">Latency:</span> {service.latencyMs}ms
           </p>
         )}
         <p>
-          <span className="font-medium text-gray-300">Last checked:</span>{' '}
+          <span className="font-medium text-zinc-300">Last checked:</span>{' '}
           {formatTimestamp(service.lastChecked)}
         </p>
         {service.error && (
-          <p className="mt-2 rounded bg-gray-700 px-2 py-1 text-gray-300">{service.error}</p>
+          <p className="mt-2 rounded bg-zinc-700 px-2 py-1 text-zinc-300">{service.error}</p>
         )}
       </div>
     </div>

@@ -19,7 +19,7 @@ function overallBannerClass(overall: HealthReport['overall']): string {
     case 'down':
       return 'bg-red-600 text-white';
     default:
-      return 'bg-gray-600 text-white';
+      return 'bg-zinc-600 text-white';
   }
 }
 
@@ -74,7 +74,7 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-100">
+    <div className="min-h-screen bg-zinc-900 text-zinc-100">
       {/* Overall status banner */}
       <div className={`px-4 py-6 text-center ${overallBannerClass(report.overall)}`}>
         <h1 className="text-2xl font-bold">{overallLabel(report.overall)}</h1>
@@ -87,19 +87,19 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
         {/* Header row */}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold text-gray-100">Service Status</h2>
-            <p className="mt-0.5 text-sm text-gray-400">
+            <h2 className="text-lg font-semibold text-zinc-100">Service Status</h2>
+            <p className="mt-0.5 text-sm text-zinc-400">
               Last updated: {new Date(report.timestamp).toLocaleString()}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-gray-400">
+            <span className="text-sm text-zinc-400">
               {refreshing ? 'Refreshing...' : `Refreshes in ${secondsUntilRefresh}s`}
             </span>
             <button
               onClick={() => void fetchReport()}
               disabled={refreshing}
-              className="rounded-md bg-gray-700 px-3 py-1.5 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-md bg-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Refresh
             </button>
@@ -117,7 +117,7 @@ export function HealthDashboard({ initialReport }: HealthDashboardProps) {
         </div>
 
         {/* Footer */}
-        <p className="mt-8 text-center text-xs text-gray-500">
+        <p className="mt-8 text-center text-xs text-zinc-400">
           SpawnForge Health Dashboard &bull; Auto-refreshes every 30 seconds
         </p>
       </div>

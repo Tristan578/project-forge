@@ -131,7 +131,7 @@ export function CustomWgslEditor({ className = '' }: CustomWgslEditorProps) {
       {/* Header row */}
       <div className="flex items-center gap-2">
         <Code2 size={14} className="text-purple-400 flex-shrink-0" />
-        <span className="text-xs font-medium text-gray-300">Custom WGSL Shader</span>
+        <span className="text-xs font-medium text-zinc-300">Custom WGSL Shader</span>
         <div className="ml-auto flex items-center gap-1">
           {/* Status indicator */}
           {status === 'ok' && !isDirty && (
@@ -151,7 +151,7 @@ export function CustomWgslEditor({ className = '' }: CustomWgslEditorProps) {
         type="text"
         value={localName}
         onChange={(e) => setLocalName(e.target.value)}
-        className="w-full px-2 py-1 text-xs bg-gray-800 border border-gray-600 rounded text-gray-200 focus:border-purple-500 focus:outline-none"
+        className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-600 rounded text-zinc-200 focus:border-purple-500 focus:outline-none"
         placeholder="Shader name"
       />
 
@@ -159,18 +159,18 @@ export function CustomWgslEditor({ className = '' }: CustomWgslEditorProps) {
       <div className="relative">
         <button
           onClick={() => setShowTemplates((v) => !v)}
-          className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+          className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
         >
           <ChevronDown size={12} className={showTemplates ? 'rotate-180' : ''} />
           Insert template
         </button>
         {showTemplates && (
-          <div className="absolute top-6 left-0 z-50 w-48 bg-gray-800 border border-gray-600 rounded shadow-lg">
+          <div className="absolute top-6 left-0 z-50 w-48 bg-zinc-800 border border-zinc-600 rounded shadow-lg">
             {WGSL_TEMPLATES.map((tpl) => (
               <button
                 key={tpl.name}
                 onClick={() => handleTemplateSelect(tpl)}
-                className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-gray-700 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors"
               >
                 {tpl.name}
               </button>
@@ -184,7 +184,7 @@ export function CustomWgslEditor({ className = '' }: CustomWgslEditorProps) {
         value={localCode}
         onChange={(e) => setLocalCode(e.target.value)}
         onKeyDown={handleKeyDown}
-        className="w-full min-h-32 px-2 py-2 text-xs font-mono bg-gray-900 border border-gray-700 rounded text-green-300 placeholder-gray-600 focus:border-purple-500 focus:outline-none resize-y"
+        className="w-full min-h-32 px-2 py-2 text-xs font-mono bg-zinc-900 border border-zinc-700 rounded text-green-300 placeholder-zinc-600 focus:border-purple-500 focus:outline-none resize-y"
         placeholder="// WGSL function body&#10;// Inputs: base_color, world_pos, world_normal, uv,&#10;//         time, user_params_0..3, user_color&#10;// Must return: vec4<f32>&#10;return base_color;"
         spellCheck={false}
       />
@@ -208,9 +208,9 @@ export function CustomWgslEditor({ className = '' }: CustomWgslEditorProps) {
       )}
 
       {/* Usage hint */}
-      <p className="text-xs text-gray-600 leading-relaxed">
+      <p className="text-xs text-zinc-400 leading-relaxed">
         WebGPU only. Ctrl+Enter to compile. Entities use this shader when{' '}
-        <code className="text-gray-500">shaderType = &quot;custom_wgsl&quot;</code>.
+        <code className="text-zinc-400">shaderType = &quot;custom_wgsl&quot;</code>.
       </p>
     </div>
   );
