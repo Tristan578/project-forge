@@ -10493,6 +10493,25 @@
       "requiredScope": "shaders:write"
     },
     {
+      "name": "remove_shader_from_entity",
+      "description": "Remove the custom shader effect from an entity, restoring its default material rendering.",
+      "category": "shaders",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID to remove the shader from"
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "shaders:write"
+    },
+    {
       "name": "list_shader_presets",
       "description": "List all saved shader graphs",
       "category": "shaders",
