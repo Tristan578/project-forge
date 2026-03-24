@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { useChatStore, buildTruncatedApiMessages } from '../chatStore';
+import { useChatStore, buildTruncatedApiMessages, flushConversationSaveForTesting } from '../chatStore';
 import type { ChatMessage, Conversation } from '../chatStore';
 
 const CONVERSATIONS_KEY = 'forge-conversations';
@@ -141,6 +141,7 @@ describe('chatStore — conversation management', () => {
     it('persists conversations to localStorage', () => {
       const { createConversation } = useChatStore.getState();
       createConversation('Persisted');
+      flushConversationSaveForTesting();
 
       const stored = localStorage.getItem(CONVERSATIONS_KEY);
       expect(stored).toBeTruthy();
@@ -445,6 +446,7 @@ describe('chatStore — conversation management', () => {
       useChatStore.setState({ conversations: [conv] });
 
       useChatStore.getState().renameConversation('c1', 'After');
+      flushConversationSaveForTesting();
 
       const stored = localStorage.getItem(CONVERSATIONS_KEY);
       expect(stored).toBeTruthy();
