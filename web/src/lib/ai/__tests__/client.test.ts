@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { AIResponseCache } from '../promptCache';
 
 // ---------------------------------------------------------------------------
 // Mock fetch globally before importing the module under test
@@ -6,6 +7,29 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
+
+// ---------------------------------------------------------------------------
+// Mock promptCache so tests can control the AIResponseCache instance.
+// We use a getter that always returns the current _testCache so we can swap
+// it to a fresh instance in beforeEach, preventing cache cross-contamination.
+// ---------------------------------------------------------------------------
+
+let _testCache = new AIResponseCache();
+vi.mock('../promptCache', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../promptCache')>();
+  return {
+    ...original,
+    get aiResponseCache(): AIResponseCache {
+      return _testCache;
+    },
+  };
+});
+
+// Reset to a fresh cache instance before every test so cached responses from
+// one test cannot bleed into the next (same prompt → cache hit → no fetch call).
+beforeEach(() => {
+  _testCache = new AIResponseCache();
+});
 
 // ---------------------------------------------------------------------------
 // Helpers to create fake SSE streams
@@ -249,5 +273,157 @@ describe('fetchAI error mapping', () => {
     mockFetch.mockResolvedValueOnce(makeErrorResponse(404, { error: 'Not found' }));
     const { fetchAI } = await import('../client');
     await expect(fetchAI('prompt')).rejects.toThrow('Not found');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchAI — response cache integration
+// ---------------------------------------------------------------------------
+
+describe('fetchAI response caching', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns cached result without calling fetch a second time for identical prompt', async () => {
+    // First call — fetch returns the real response
+    mockFetch.mockResolvedValue(
+      makeOkResponse([
+        'data: {"type":"text_delta","text":"cached answer"}\n',
+        'data: {"type":"done"}\n',
+      ]),
+    );
+
+    // Import a fresh module instance so the cache starts empty
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+
+    const first = await fetchAI('what is 2+2', { model: 'claude-sonnet-4-5' });
+    expect(first).toBe('cached answer');
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    // Second call with identical args — should hit cache, not call fetch again
+    const second = await fetchAI('what is 2+2', { model: 'claude-sonnet-4-5' });
+    expect(second).toBe('cached answer');
+    expect(mockFetch).toHaveBeenCalledTimes(1); // still 1 — no second network call
+  });
+
+  it('calls fetch for a different prompt even if first is cached', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"answer A"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"answer B"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      );
+
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+
+    const a = await fetchAI('prompt A', { model: 'claude-sonnet-4-5' });
+    const b = await fetchAI('prompt B', { model: 'claude-sonnet-4-5' });
+
+    expect(a).toBe('answer A');
+    expect(b).toBe('answer B');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('bypasses cache and calls fetch when AbortSignal is provided', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"first"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"second"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      );
+
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+    const controller = new AbortController();
+
+    const first = await fetchAI('same prompt', { signal: controller.signal });
+    const second = await fetchAI('same prompt', { signal: controller.signal });
+
+    expect(first).toBe('first');
+    expect(second).toBe('second');
+    // Both calls must have hit fetch — signal bypasses the cache
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not serve cached response when thinking flag differs', async () => {
+    mockFetch
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"non-thinking answer"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      )
+      .mockResolvedValueOnce(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"thinking answer"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      );
+
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+
+    const nonThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-5', thinking: false });
+    const withThinking = await fetchAI('same prompt', { model: 'claude-sonnet-4-5', thinking: true });
+
+    expect(nonThinking).toBe('non-thinking answer');
+    expect(withThinking).toBe('thinking answer');
+    // Both must hit the network — thinking=true must not reuse the thinking=false cache entry
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('deduplicates concurrent in-flight requests for the same prompt', async () => {
+    let resolveResponse!: () => void;
+    const streamBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        resolveResponse = () => {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode('data: {"type":"text_delta","text":"deduped"}\n'));
+          controller.enqueue(encoder.encode('data: {"type":"done"}\n'));
+          controller.close();
+        };
+      },
+    });
+    mockFetch.mockResolvedValue(new Response(streamBody, { status: 200 }));
+
+    vi.resetModules();
+    const { fetchAI } = await import('../client');
+
+    // Start two concurrent calls before the first resolves
+    const p1 = fetchAI('concurrent prompt', { model: 'claude-sonnet-4-5' });
+    const p2 = fetchAI('concurrent prompt', { model: 'claude-sonnet-4-5' });
+
+    // Resolve the underlying stream
+    resolveResponse();
+
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    // Both callers get the same result
+    expect(r1).toBe('deduped');
+    expect(r2).toBe('deduped');
+    // fetch was called exactly once despite two concurrent callers
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });
