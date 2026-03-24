@@ -237,22 +237,56 @@ function ScoreBadge({ score }: { score: number }) {
 // Main Panel
 // ---------------------------------------------------------------------------
 
+// Stable selector type for pacing-relevant node data.
+interface PacingNodeInfo {
+  id: string;
+  name: string;
+  firstComponent: string | undefined;
+}
+
+// Selector that extracts only the fields relevant to pacing analysis
+// (id, name, first component type) — ignoring transform, material, etc.
+// Zustand's subscribe selector equality check uses shallow comparison by
+// default, so we serialise to a string to detect real structural changes.
+function selectPacingNodeKey(s: { sceneGraph: { nodes: Record<string, { name: string; components: string[] }> } }): string {
+  return Object.keys(s.sceneGraph.nodes)
+    .map((id) => {
+      const n = s.sceneGraph.nodes[id];
+      return `${id}:${n.name}:${n.components[0] ?? ''}`;
+    })
+    .join('|');
+}
+
 export function PacingAnalyzerPanel() {
-  const nodes = useEditorStore((s) => s.sceneGraph.nodes);
+  // Use a stable string key that only changes when entity ids/names/types
+  // change. Transform-only updates (position, rotation, scale) do not affect
+  // any of these fields, so they produce the same key and avoid a recompute.
+  const nodeKey = useEditorStore(selectPacingNodeKey);
+  // rootIds changes only when entities are added or removed — not on transforms.
   const rootIds = useEditorStore((s) => s.sceneGraph.rootIds);
   const [selectedTemplate, setSelectedTemplate] = useState<PacingTemplateId | ''>('');
 
+  // Derive stable PacingNodeInfo list from the current nodes, memoised on
+  // the key string so transform events (which don't change name/type/id)
+  // do not trigger a recompute.
+  const nodeInfos: PacingNodeInfo[] = useMemo(() => {
+    const nodes = useEditorStore.getState().sceneGraph.nodes;
+    return Object.keys(nodes).map((id) => ({
+      id,
+      name: nodes[id].name,
+      firstComponent: nodes[id].components[0],
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeKey]); // nodeKey encodes all pacing-relevant changes
+
   // Convert scene graph entities to descriptors.
-  // Iterate over rootIds (plus all nodes) so that transform-only updates
-  // (which mutate node data but don't change rootIds) do NOT trigger a
-  // recompute of the entity list.
   const entities: SceneEntityDescriptor[] = useMemo(() => {
-    const allIds = Object.keys(nodes);
-    if (allIds.length === 0) return [];
+    if (nodeInfos.length === 0) return [];
 
     // Distribute entities evenly across 0–1 based on their order.
     // Use rootIds to define ordering for root-level entities; remaining
     // children follow in insertion order.
+    const allIds = nodeInfos.map((n) => n.id);
     const rootIdSet = new Set(rootIds);
     const ordered = [
       ...rootIds,
@@ -260,18 +294,18 @@ export function PacingAnalyzerPanel() {
     ];
     return ordered
       .map((id, idx) => {
-        const node = nodes[id];
-        if (!node) return null;
+        const info = nodeInfos.find((n) => n.id === id);
+        if (!info) return null;
         return {
           id,
-          name: node.name,
-          type: node.components[0] ?? 'generic',
+          name: info.name,
+          type: info.firstComponent ?? 'generic',
           position: ordered.length > 1 ? idx / (ordered.length - 1) : 0.5,
-          tags: extractTags(node.name, node.components[0]),
+          tags: extractTags(info.name, info.firstComponent),
         };
       })
       .filter((e): e is SceneEntityDescriptor => e !== null);
-  }, [rootIds, nodes]);
+  }, [nodeInfos, rootIds]);
 
   const analysis: PacingAnalysis | null = useMemo(() => {
     if (entities.length === 0) return null;

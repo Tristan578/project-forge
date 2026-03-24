@@ -48,6 +48,9 @@ describe('usePointerLock', () => {
       writable: true,
       configurable: true,
     });
+    // Always restore real timers to prevent timer state from leaking between tests.
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 
   describe('activation conditions', () => {
@@ -116,6 +119,7 @@ describe('usePointerLock', () => {
   describe('mouse movement handling', () => {
     it('sends mouse_delta command when pointer is locked and mouse moves', async () => {
       vi.useFakeTimers();
+      vi.clearAllTimers();
       useEditorStore.setState({
         engineMode: 'play',
         activeGameCameraId: 'cam1',
@@ -129,7 +133,7 @@ describe('usePointerLock', () => {
         configurable: true,
       });
 
-      renderHook(() => usePointerLock('test-canvas'));
+      const { unmount } = renderHook(() => usePointerLock('test-canvas'));
 
       // Simulate mouse movement
       const moveEvent = new MouseEvent('mousemove', {
@@ -147,6 +151,112 @@ describe('usePointerLock', () => {
         dy: -5,
       });
 
+      unmount();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    });
+
+    it('accumulates deltas from multiple mousemove events into one dispatch per RAF (PF-874)', async () => {
+      // Isolate this test by unmounting any residual hooks, resetting timers,
+      // and creating a fresh canvas to avoid listener leaks from previous tests.
+      vi.useRealTimers(); // Start fresh — ensure no pending fake timers
+      vi.useFakeTimers({ now: 1000 }); // Start fake time at a known epoch
+
+      const freshCanvas = document.createElement('canvas');
+      freshCanvas.id = 'fresh-canvas-874';
+      freshCanvas.requestPointerLock = vi.fn();
+      document.body.appendChild(freshCanvas);
+
+      Object.defineProperty(document, 'pointerLockElement', {
+        value: freshCanvas,
+        writable: true,
+        configurable: true,
+      });
+
+      useEditorStore.setState({
+        engineMode: 'play',
+        activeGameCameraId: 'cam1',
+        allGameCameras: { cam1: { mode: 'firstPerson', targetEntity: null } },
+      });
+
+      const { unmount } = renderHook(() => usePointerLock('fresh-canvas-874'));
+
+      // Fire three movement events rapidly (simulating 240 Hz mouse)
+      const fire = (dx: number, dy: number) => {
+        const e = new MouseEvent('mousemove', { bubbles: true });
+        Object.defineProperty(e, 'movementX', { value: dx });
+        Object.defineProperty(e, 'movementY', { value: dy });
+        document.dispatchEvent(e);
+      };
+
+      fire(3, 1);
+      fire(3, 1);
+      fire(3, 1);
+
+      // Advance past the throttle interval — all three should be batched into ONE call.
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(mockHandleCommand).toHaveBeenCalledTimes(1);
+      expect(mockHandleCommand).toHaveBeenCalledWith('mouse_delta', {
+        dx: 9,
+        dy: 3,
+      });
+
+      unmount();
+      document.body.removeChild(freshCanvas);
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    });
+
+    it('throttles WASM dispatches: second event within 16ms is deferred (PF-874)', async () => {
+      vi.useRealTimers();
+      vi.useFakeTimers({ now: 1000 }); // Start at known epoch (1000ms)
+
+      const freshCanvas = document.createElement('canvas');
+      freshCanvas.id = 'fresh-canvas-874b';
+      freshCanvas.requestPointerLock = vi.fn();
+      document.body.appendChild(freshCanvas);
+
+      Object.defineProperty(document, 'pointerLockElement', {
+        value: freshCanvas,
+        writable: true,
+        configurable: true,
+      });
+
+      useEditorStore.setState({
+        engineMode: 'play',
+        activeGameCameraId: 'cam1',
+        allGameCameras: { cam1: { mode: 'firstPerson', targetEntity: null } },
+      });
+
+      const { unmount } = renderHook(() => usePointerLock('fresh-canvas-874b'));
+
+      const fire = (dx: number, dy: number) => {
+        const e = new MouseEvent('mousemove', { bubbles: true });
+        Object.defineProperty(e, 'movementX', { value: dx });
+        Object.defineProperty(e, 'movementY', { value: dy });
+        document.dispatchEvent(e);
+      };
+
+      // First dispatch: fire and advance well past throttle interval.
+      fire(5, 5);
+      await vi.advanceTimersByTimeAsync(20); // fake time: 1020ms
+      expect(mockHandleCommand).toHaveBeenCalledTimes(1);
+      // lastDispatchTime ≈ 1020ms (fake time when RAF fired)
+
+      // Second event: fired immediately after — fake time is still ~1020ms.
+      // Advancing only 10ms puts us at ~1030ms: diff = 10ms < 16ms → throttled.
+      fire(5, 5);
+      await vi.advanceTimersByTimeAsync(10); // fake time: 1030ms — still within throttle
+      expect(mockHandleCommand).toHaveBeenCalledTimes(1); // not dispatched yet
+
+      // Advance past the throttle interval from last dispatch (total >= 16ms).
+      await vi.advanceTimersByTimeAsync(20); // fake time: 1050ms — diff ≥ 16ms → dispatch
+      expect(mockHandleCommand).toHaveBeenCalledTimes(2);
+
+      unmount();
+      document.body.removeChild(freshCanvas);
+      vi.clearAllTimers();
       vi.useRealTimers();
     });
 
