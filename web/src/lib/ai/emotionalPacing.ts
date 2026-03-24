@@ -461,7 +461,7 @@ function detectIssues(curve: PacingCurve): PacingIssue[] {
   }
 
   // 4. No rest — never drops below 0.3
-  const minIntensity = Math.min(...pts.map((p) => p.intensity));
+  const minIntensity = pts.reduce((a, p) => (p.intensity < a ? p.intensity : a), Infinity);
   if (minIntensity > 0.3 && pts.length > 3) {
     issues.push({
       severity: 'warning',

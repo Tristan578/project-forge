@@ -280,6 +280,18 @@ describe('validateBalance', () => {
     expect(Array.isArray(report.issues)).toBe(true);
     expect(typeof report.passed).toBe('boolean');
   });
+
+  it('does not stack overflow when validating a large loot table (regression: Math.max spread)', () => {
+    const eco = makeValidEconomy();
+    // >65k entries would crash Math.max(...array.map(...)) — use 70k to exceed the limit
+    const entries: LootEntry[] = [];
+    for (let i = 0; i < 70000; i++) {
+      entries.push({ item: `Item${i}`, weight: 1, minQuantity: 1, maxQuantity: 1 });
+    }
+    eco.lootTables = [{ name: 'Large', entries }];
+    // Should not throw — reduce-based max is safe for any array size
+    expect(() => validateBalance(eco)).not.toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------
