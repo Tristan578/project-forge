@@ -71,23 +71,27 @@ export function stem(term: string): string {
 }
 
 /**
- * Tokenize text into lowercase terms, removing markdown syntax and punctuation,
- * then apply suffix stemming so inflected forms match their root.
+ * Split text into lowercase words after stripping markdown and punctuation.
+ * Does NOT stem — suitable for substring searches in snippet/section extraction.
  */
-function tokenize(text: string): string[] {
+function tokenizeRaw(text: string): string[] {
   return text
     .toLowerCase()
-    // Remove markdown syntax
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/`[^`]*`/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/[#*_|>\-=~]/g, ' ')
-    // Remove punctuation
     .replace(/[^\w\s]/g, ' ')
-    // Split on whitespace
     .split(/\s+/)
-    .filter(t => t.length > 1)
-    .map(stem);
+    .filter(t => t.length > 1);
+}
+
+/**
+ * Tokenize text into lowercase terms, removing markdown syntax and punctuation,
+ * then apply suffix stemming so inflected forms match their root.
+ */
+function tokenize(text: string): string[] {
+  return tokenizeRaw(text).map(stem);
 }
 
 /**
@@ -272,6 +276,10 @@ export function search(
   const results: SearchResult[] = [];
   const sortedEntries = [...scores.entries()].sort((a, b) => b[1] - a[1]);
 
+  // For snippet/section extraction use unstemmed terms so substring searches
+  // find the original words ("entities") rather than their stems ("entity").
+  const rawQueryTerms = tokenizeRaw(query);
+
   for (const [path, score] of sortedEntries.slice(0, maxResults)) {
     const doc = docIndex.docs.get(path);
     if (!doc) continue;
@@ -280,8 +288,8 @@ export function search(
       path,
       title: doc.title,
       score: Math.round(score * 100) / 100,
-      matchSection: findMatchSection(doc, queryTerms),
-      snippet: extractSnippet(doc, queryTerms),
+      matchSection: findMatchSection(doc, rawQueryTerms),
+      snippet: extractSnippet(doc, rawQueryTerms),
     });
   }
 
