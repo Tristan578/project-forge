@@ -33,10 +33,11 @@ export const handleGeneratePixelArt: ToolHandler = async (args): Promise<Executi
     return { success: false, error: `Invalid arguments: palette: Palette must be one of: ${Object.keys(PALETTES).join(', ')}` };
   }
 
-  const rawStyle = args['style'] ?? 'character';
-  const style: PixelArtStyle = (VALID_STYLES as readonly string[]).includes(rawStyle as string)
-    ? (rawStyle as PixelArtStyle)
-    : 'character';
+  const rawStyle = args['style'];
+  if (rawStyle !== undefined && rawStyle !== null && !(VALID_STYLES as readonly string[]).includes(rawStyle as string)) {
+    return { success: false, error: `Invalid arguments: style: Must be one of: ${VALID_STYLES.join(', ')}` };
+  }
+  const style: PixelArtStyle = ((VALID_STYLES as readonly string[]).includes(rawStyle as string) ? rawStyle : 'character') as PixelArtStyle;
 
   const rawDithering = args['dithering'] ?? 'none';
   if (typeof rawDithering !== 'string' || !(VALID_DITHERING as readonly string[]).includes(rawDithering)) {
