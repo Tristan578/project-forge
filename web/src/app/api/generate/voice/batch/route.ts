@@ -1,4 +1,5 @@
-export const maxDuration = 120; // seconds — batch voice generation processes up to 20 items sequentially
+import { API_MAX_DURATION_BATCH_S } from '@/lib/config/timeouts';
+export const maxDuration = API_MAX_DURATION_BATCH_S;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';

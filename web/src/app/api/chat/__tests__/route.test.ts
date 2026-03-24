@@ -330,7 +330,7 @@ describe('POST /api/chat', () => {
         'user-1',
         'anthropic',
         expect.any(Number),
-        'chat_short',
+        'chat_message',
         expect.objectContaining({ model: 'claude-sonnet-4.6' }),
       );
     });
@@ -352,7 +352,7 @@ describe('POST /api/chat', () => {
         'user-1',
         'anthropic',
         expect.any(Number),
-        'chat_long',
+        'chat_message',
         expect.anything(),
       );
     });

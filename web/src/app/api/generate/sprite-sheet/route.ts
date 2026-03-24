@@ -1,4 +1,5 @@
-export const maxDuration = 60; // seconds — sprite sheet generation
+import { API_MAX_DURATION_STANDARD_GEN_S } from '@/lib/config/timeouts';
+export const maxDuration = API_MAX_DURATION_STANDARD_GEN_S;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';

@@ -1,3 +1,5 @@
+import { SPRITE_TOKEN_COST } from '@/lib/config/providers';
+
 /** Token costs for all AI operations */
 export const TOKEN_COSTS = {
   // Chat
@@ -31,9 +33,9 @@ export const TOKEN_COSTS = {
   // Skybox
   skybox_generation: 50,
 
-  // Sprite generation (provider-specific)
-  sprite_generation_dalle3: 20,
-  sprite_generation_replicate: 10,
+  // Sprite generation (provider-specific) — derived from providers.ts
+  sprite_generation_dalle3: SPRITE_TOKEN_COST.dalle3,
+  sprite_generation_replicate: SPRITE_TOKEN_COST.sdxl,
 
   // Tileset generation
   tileset_generation: 50,

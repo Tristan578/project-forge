@@ -1,4 +1,4 @@
-export const maxDuration = 60; // seconds — sprite generation
+export const maxDuration = API_MAX_DURATION_STANDARD_GEN_S;
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
@@ -10,6 +10,8 @@ import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { refundTokens } from '@/lib/tokens/service';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
+import { SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
+import { API_MAX_DURATION_STANDARD_GEN_S } from '@/lib/config/timeouts';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -115,7 +117,7 @@ export async function POST(request: NextRequest) {
         jobId: finalJobId,
         provider: actualProvider,
         status: result.status,
-        estimatedSeconds: actualProvider === 'dalle3' ? 15 : 30,
+        estimatedSeconds: SPRITE_ESTIMATED_SECONDS[actualProvider],
         usageId,
       },
       { status: 201 }
