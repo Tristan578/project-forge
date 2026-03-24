@@ -71,18 +71,10 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
   const [focusedEntityId, setFocusedEntityId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  // Track expanded state — SceneNode defaults to expanded, so we start with all expanded
-  // We build from rootIds and assume all are expanded initially
-  const allNodeIds = useMemo(() => new Set(Object.keys(sceneGraph.nodes)), [sceneGraph]);
-  const effectiveExpandedIds = useMemo(() => {
-    // Start with all nodes expanded, then remove any explicitly collapsed.
-    // expandedIds stores IDs that are COLLAPSED (toggled from default expanded).
-    const expanded = new Set(allNodeIds);
-    for (const id of expandedIds) {
-      expanded.delete(id);
-    }
-    return expanded;
-  }, [allNodeIds, expandedIds]);
+  // effectiveExpandedIds: expandedIds stores the set of nodes the user has
+  // explicitly expanded (default is collapsed). Pass through directly — no
+  // inversion or rebuilding of the full node set needed.
+  const effectiveExpandedIds = expandedIds;
 
   const { ids: flatNodeIds, indexMap } = useMemo(() => {
     const ids = flattenVisibleNodes(
