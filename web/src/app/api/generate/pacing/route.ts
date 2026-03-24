@@ -10,7 +10,32 @@ import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
-import type { PacingReport, PacingSuggestion } from '@/lib/analysis/pacingTypes';
+// Inline types — the pacing analysis route receives these from the client.
+interface PacingSegment {
+  sceneIndex: number;
+  sceneName: string;
+  intensity: number;
+  emotion: string;
+}
+
+interface PacingCurve {
+  segments: PacingSegment[];
+  averageIntensity: number;
+  variance: number;
+}
+
+interface PacingSuggestion {
+  title: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+  sceneIndex?: number;
+}
+
+interface PacingReport {
+  score: number;
+  curve: PacingCurve;
+  suggestions: PacingSuggestion[];
+}
 
 // ---------------------------------------------------------------------------
 // Request body type
