@@ -296,6 +296,126 @@ describe('generationStore', () => {
     });
   });
 
+  describe('autoPlace / targetEntityId / materialSlot persistence', () => {
+    it('should store autoPlace on the job', () => {
+      const { addJob } = useGenerationStore.getState();
+      addJob({ ...mockJob, autoPlace: true, targetEntityId: 'entity-abc', materialSlot: 'base_color' });
+
+      const job = useGenerationStore.getState().jobs['client-123'];
+      expect(job.autoPlace).toBe(true);
+      expect(job.targetEntityId).toBe('entity-abc');
+      expect(job.materialSlot).toBe('base_color');
+    });
+
+    it('should send autoPlace/targetEntityId/materialSlot in POST parameters', async () => {
+      const { addJob } = useGenerationStore.getState();
+      addJob({ ...mockJob, autoPlace: true, targetEntityId: 'entity-xyz', materialSlot: 'normal_map' });
+
+      const fetchMock = vi.mocked(fetch);
+      await vi.waitFor(() => {
+        const postCalls = fetchMock.mock.calls.filter(
+          (c) => c[0] === '/api/jobs' && (c[1] as RequestInit)?.method === 'POST'
+        );
+        expect(postCalls).toHaveLength(1);
+        const body = JSON.parse((postCalls[0][1] as RequestInit).body as string);
+        expect(body.parameters.autoPlace).toBe(true);
+        expect(body.parameters.targetEntityId).toBe('entity-xyz');
+        expect(body.parameters.materialSlot).toBe('normal_map');
+      });
+    });
+
+    it('should not include undefined placement fields in POST parameters', async () => {
+      const { addJob } = useGenerationStore.getState();
+      addJob({ ...mockJob }); // no autoPlace/targetEntityId/materialSlot
+
+      const fetchMock = vi.mocked(fetch);
+      await vi.waitFor(() => {
+        const postCalls = fetchMock.mock.calls.filter(
+          (c) => c[0] === '/api/jobs' && (c[1] as RequestInit)?.method === 'POST'
+        );
+        expect(postCalls).toHaveLength(1);
+        const body = JSON.parse((postCalls[0][1] as RequestInit).body as string);
+        expect(body.parameters).toEqual({});
+      });
+    });
+
+    it('should preserve placement fields across updateJob calls', () => {
+      useGenerationStore.setState({
+        jobs: { 'client-123': { ...mockJob, autoPlace: true, targetEntityId: 'ent-1', materialSlot: 'roughness' } },
+      });
+      useGenerationStore.getState().updateJob('client-123', { status: 'processing', progress: 50 });
+
+      const job = useGenerationStore.getState().jobs['client-123'];
+      expect(job.autoPlace).toBe(true);
+      expect(job.targetEntityId).toBe('ent-1');
+      expect(job.materialSlot).toBe('roughness');
+    });
+
+    it('should restore autoPlace/targetEntityId/materialSlot from hydrateFromServer', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          jobs: [
+            {
+              id: 'srv-2',
+              providerJobId: 'prov-2',
+              provider: 'stability',
+              type: 'texture',
+              prompt: 'Rusty metal',
+              status: 'processing',
+              progress: 20,
+              createdAt: '2024-01-01T00:00:00Z',
+              updatedAt: '2024-01-01T00:00:30Z',
+              parameters: {
+                autoPlace: true,
+                targetEntityId: 'entity-restored',
+                materialSlot: 'metallic_roughness',
+              },
+            },
+          ],
+        }),
+      } as Response);
+
+      await useGenerationStore.getState().hydrateFromServer();
+
+      const jobs = Object.values(useGenerationStore.getState().jobs);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].autoPlace).toBe(true);
+      expect(jobs[0].targetEntityId).toBe('entity-restored');
+      expect(jobs[0].materialSlot).toBe('metallic_roughness');
+    });
+
+    it('should handle missing parameters key during hydration gracefully', async () => {
+      vi.mocked(fetch).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          jobs: [
+            {
+              id: 'srv-3',
+              providerJobId: 'prov-3',
+              provider: 'meshy',
+              type: 'model',
+              prompt: 'A tree',
+              status: 'processing',
+              progress: 10,
+              createdAt: '2024-01-01T00:00:00Z',
+              updatedAt: '2024-01-01T00:00:00Z',
+              // no parameters field
+            },
+          ],
+        }),
+      } as Response);
+
+      await useGenerationStore.getState().hydrateFromServer();
+
+      const jobs = Object.values(useGenerationStore.getState().jobs);
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0].autoPlace).toBeUndefined();
+      expect(jobs[0].targetEntityId).toBeUndefined();
+      expect(jobs[0].materialSlot).toBeUndefined();
+    });
+  });
+
   describe('Edge Cases', () => {
     it('should handle all generation types', () => {
       const { addJob } = useGenerationStore.getState();
