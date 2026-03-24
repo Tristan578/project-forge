@@ -48,7 +48,7 @@ export function generatePostMessageBridge(): string {
       width: window.innerWidth,
       height: window.innerHeight,
     });
-  });
+  }, { passive: true });
 
   // Listen for commands from parent (validate origin when known)
   window.addEventListener('message', function(event) {
