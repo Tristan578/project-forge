@@ -398,31 +398,44 @@ describe('generateWorld', () => {
   });
 
   it('throws on API error with message from response', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: false,
-      status: 402,
-      json: () => Promise.resolve({ error: 'Not enough tokens' }),
-    } as unknown as Response);
+    // fetchAI maps 402 / "insufficient credits" to a user-friendly message
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: 'insufficient credits' }), {
+        status: 402,
+        headers: { 'Content-Type': 'application/json' },
+      }) as unknown as Response,
+    );
 
-    await expect(generateWorld('A world', 'cyberpunk_city')).rejects.toThrow('Not enough tokens');
+    await expect(generateWorld('A world', 'cyberpunk_city')).rejects.toThrow(/credits/i);
   });
 
   it('throws on API error when no preset specified', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: () => Promise.resolve({ error: 'Internal server error' }),
-    } as unknown as Response);
+    // fetchAI maps 500 / "internal server" to a user-friendly message
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Internal server error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      }) as unknown as Response,
+    );
 
-    await expect(generateWorld('A world')).rejects.toThrow('Internal server error');
+    await expect(generateWorld('A world')).rejects.toThrow(/service error/i);
   });
 
   it('falls back on parse error from AI response', async () => {
-    vi.mocked(fetch).mockResolvedValue({
-      ok: true,
-      headers: new Headers({ 'content-type': 'application/json' }),
-      json: () => Promise.resolve({ content: 'not valid json' }),
-    } as Response);
+    // Return an SSE stream with unparseable JSON — generateWorld catches parse errors
+    // and falls back to the preset
+    const encoder = new TextEncoder();
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"type":"text_delta","text":"not valid json"}\ndata: {"type":"done"}\n'));
+            controller.close();
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      ) as unknown as Response,
+    );
 
     const result = await generateWorld('A world', 'post_apocalyptic');
     expect(result.name).toBe('The Scarred Earth');

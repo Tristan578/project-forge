@@ -580,20 +580,33 @@ describe('behaviorTree', () => {
       });
     }
 
+    /** Create a mock Response compatible with fetchAI (needs headers + ok + body) */
+    function mockOkResponse(lines: string[]): Response {
+      return new Response(mockSSEStream(lines), {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      });
+    }
+
     it('throws on non-ok response', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
-      await expect(generateBehaviorTree('test')).rejects.toThrow('AI generation failed: 500');
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'Internal server error' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ));
+      // fetchAI mapError transforms "Internal server" messages to a friendly string
+      await expect(generateBehaviorTree('test')).rejects.toThrow(/service error/i);
       vi.unstubAllGlobals();
     });
 
     it('throws on unparseable response', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockSSEStream([
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+        mockOkResponse([
           'data: {"type":"text_delta","text":"not valid json"}',
-          'data: [DONE]',
+          'data: {"type":"done"}',
         ]),
-      }));
+      ));
       await expect(generateBehaviorTree('test')).rejects.toThrow('Failed to parse');
       vi.unstubAllGlobals();
     });
@@ -605,13 +618,12 @@ describe('behaviorTree', () => {
         root: { id: 'r', type: 'action', name: 'idle' },
         variables: [],
       };
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-        ok: true,
-        body: mockSSEStream([
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+        mockOkResponse([
           `data: {"type":"text_delta","text":"${JSON.stringify(treeData).replace(/"/g, '\\"')}"}`,
-          'data: [DONE]',
+          'data: {"type":"done"}',
         ]),
-      }));
+      ));
       const tree = await generateBehaviorTree('idle NPC');
       expect(tree.name).toBe('Generated');
       vi.unstubAllGlobals();

@@ -7,6 +7,7 @@
  */
 
 import { AI_MODEL_PRIMARY } from './models';
+import { fetchAI } from './client';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -337,67 +338,13 @@ export async function generateGDD(
 
   const userMessage = buildUserPrompt(prompt, options);
 
-  const response = await fetch('/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      messages: [{ role: 'user', content: userMessage }],
-      model: AI_MODEL_PRIMARY,
-      sceneContext: '',
-      thinking: false,
-      systemOverride: GDD_SYSTEM_PROMPT,
-    }),
+  const content = await fetchAI(userMessage, {
+    model: AI_MODEL_PRIMARY,
+    sceneContext: '',
+    thinking: false,
+    systemOverride: GDD_SYSTEM_PROMPT,
+    priority: 2,
   });
-
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(
-      (errorData as Record<string, string>).error || `GDD generation failed: ${response.status}`,
-    );
-  }
-
-  // Parse SSE stream for text content
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error('No response body');
-
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let content = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
-
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
-
-      // Check for SSE error event before attempting JSON parse
-      let event: Record<string, unknown>;
-      try {
-        event = JSON.parse(data) as Record<string, unknown>;
-      } catch {
-        // Malformed SSE data — skip silently unless it looks like a JSON object
-        // (i.e. non-JSON text deltas or partial chunks are expected)
-        if (data.startsWith('{')) {
-          // Looked like JSON but wasn't — skip
-        }
-        continue;
-      }
-
-      if (event.type === 'error' && typeof event.message === 'string') {
-        throw new Error(event.message);
-      }
-      if (event.type === 'text_delta' && typeof event.text === 'string') {
-        content += event.text;
-      }
-    }
-  }
 
   if (!content.trim()) {
     throw new Error('AI returned an empty response');

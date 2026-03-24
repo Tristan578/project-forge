@@ -4,6 +4,7 @@
  */
 
 import { AI_MODEL_PRIMARY } from './models';
+import { fetchAI } from './client';
 
 // ---- Core Types ----
 
@@ -578,70 +579,12 @@ export async function generateWorld(description: string, preset?: string): Promi
     : description;
   const prompt = buildWorldPrompt(safeDescription, preset);
 
-  let response: Response;
-  try {
-    response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        messages: [{ role: 'user', content: prompt }],
-        model: AI_MODEL_PRIMARY,
-        max_tokens: 4096,
-        stream: false,
-      }),
-    });
-  } catch {
-    // Network error — fall back to preset
-    return structuredClone(fallback);
-  }
-
-  if (!response.ok) {
-    // Surface the error to the caller so the UI can show a meaningful message
-    // (e.g., "Not enough tokens" for 402, "Too many requests" for 429)
-    let errorMsg = `AI generation failed (${response.status})`;
-    try {
-      const errBody = await response.json();
-      if (errBody.error) errorMsg = errBody.error;
-    } catch { /* response may not be JSON */ }
-    throw new Error(errorMsg);
-  }
-
-  let content = '';
-  const contentType = response.headers.get('content-type') ?? '';
-
-  try {
-    if (contentType.includes('text/event-stream') && response.body) {
-      // SSE stream — read all chunks and extract content
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      const chunks: string[] = [];
-      let buffer = '';
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        // Process only complete lines; keep the last partial line in buffer
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
-            try {
-              const parsed = JSON.parse(line.slice(6));
-              // /api/chat SSE format: { type: 'text_delta', text: '...' }
-              if (parsed.type === 'text_delta' && typeof parsed.text === 'string') {
-                chunks.push(parsed.text);
-              }
-            } catch {
-              // skip unparseable SSE lines
-            }
-          }
-        }
-      }
-      content = chunks.join('');
-    }
-  } catch {
-    return structuredClone(fallback);
-  }
+  // Attempt AI generation — let HTTP/auth errors surface to the caller,
+  // but fall back to the preset on network failures or parse errors.
+  const content = await fetchAI(prompt, {
+    model: AI_MODEL_PRIMARY,
+    priority: 2,
+  });
 
   try {
     return parseWorldResponse(content);
