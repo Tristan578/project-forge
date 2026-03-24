@@ -29,6 +29,10 @@ const REQUIRED_VARS: RequiredVar[] = [
   { key: 'CLERK_SECRET_KEY', description: 'Clerk secret key for server-side auth' },
   { key: 'STRIPE_SECRET_KEY', description: 'Stripe secret key for payments' },
   { key: 'STRIPE_WEBHOOK_SECRET', description: 'Stripe webhook verification secret' },
+  { key: 'UPSTASH_REDIS_REST_URL', description: 'Upstash Redis URL for distributed rate limiting' },
+  { key: 'UPSTASH_REDIS_REST_TOKEN', description: 'Upstash Redis token for distributed rate limiting' },
+  { key: 'ANTHROPIC_API_KEY', description: 'Anthropic API key for AI chat and generation features' },
+  { key: 'ENCRYPTION_MASTER_KEY', description: '64-hex-char master key for BYOK AES-256-GCM encryption' },
 ];
 
 /** Optional environment variables — app works without these, using defaults. */
@@ -51,6 +55,16 @@ const OPTIONAL_VARS: OptionalVar[] = [
   {
     key: 'NEXT_PUBLIC_SENTRY_DSN',
     description: 'Sentry DSN for client-side error monitoring',
+    defaultValue: '',
+  },
+  {
+    key: 'NEXT_PUBLIC_POSTHOG_KEY',
+    description: 'PostHog project API key for product analytics',
+    defaultValue: '',
+  },
+  {
+    key: 'CLOUDFLARE_ACCOUNT_ID',
+    description: 'Cloudflare account ID for R2 asset storage',
     defaultValue: '',
   },
 ];
