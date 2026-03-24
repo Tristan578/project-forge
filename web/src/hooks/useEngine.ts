@@ -171,9 +171,32 @@ export async function probeWebGPU(): Promise<boolean> {
  */
 const ENGINE_CDN_BASE = (process.env.NEXT_PUBLIC_ENGINE_CDN_URL || '').replace(/\/+$/, '');
 
+/**
+ * Fetch the wasm-manifest.json from the given base path and return the
+ * content hash. Returns null when the manifest is absent (e.g. local dev
+ * without a WASM build, or legacy deployments). Never throws.
+ *
+ * Exported for unit testing only.
+ */
+export async function fetchWasmHash(basePath: string, signal?: AbortSignal): Promise<string | null> {
+  try {
+    const manifestUrl = `${basePath}wasm-manifest.json`;
+    const res = await fetch(manifestUrl, { signal, cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { hash?: string };
+    return typeof data.hash === 'string' && data.hash.length > 0 ? data.hash : null;
+  } catch {
+    return null;
+  }
+}
+
 async function loadWasmFromPath(basePath: string, jsFile: string, wasmFile: string, signal?: AbortSignal): Promise<WasmModule> {
   const wasm = await import(/* webpackIgnore: true */ `${basePath}${jsFile}`);
-  const wasmUrl = `${basePath}${wasmFile}`;
+
+  // Append content hash as a query param so browsers re-fetch after deployments.
+  // Falls back to the plain filename when no manifest exists.
+  const hash = await fetchWasmHash(basePath, signal);
+  const wasmUrl = hash ? `${basePath}${wasmFile}?v=${hash}` : `${basePath}${wasmFile}`;
 
   // Determine backend from the base path for CDN metrics
   const backend: 'webgpu' | 'webgl2' = basePath.includes('webgpu') ? 'webgpu' : 'webgl2';
