@@ -231,7 +231,9 @@ const PREFERRED_BACKEND_KEY = 'forge:preferred-backend';
 
 /**
  * Persist a backend preference that survives page reload.
- * Pass 'webgpu' or 'webgl2'. Clear by passing null/undefined.
+ * Pass 'webgpu' to force WebGPU, or 'webgl2' to force WebGL2.
+ * To clear the preference (revert to auto-detection), call
+ * `localStorage.removeItem('forge:preferred-backend')` directly.
  */
 export function setPreferredBackend(backend: string): void {
   if (typeof localStorage !== 'undefined') {
