@@ -13,6 +13,7 @@ import {
 } from '@/lib/chat/sanitizer';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
@@ -484,6 +485,29 @@ export async function POST(request: NextRequest) {
       stopWhen: stepCountIs(10),
       experimental_telemetry: { isEnabled: true },
       ...(providerOptions ? { providerOptions } : {}),
+      // Log actual LLM token usage to the cost ledger once the stream completes.
+      // usage.promptTokens and usage.completionTokens are the actual values from
+      // the model (not the estimated cost charged upfront via resolveApiKey).
+      onFinish: async ({ usage }) => {
+        if (auth.ctx.user.id && usage) {
+          const totalTokens = (usage.promptTokens ?? 0) + (usage.completionTokens ?? 0);
+          logCost(
+            auth.ctx.user.id,
+            'chat_message',
+            'anthropic',
+            null,
+            totalTokens,
+            {
+              model,
+              promptTokens: usage.promptTokens,
+              completionTokens: usage.completionTokens,
+              usageId,
+            },
+          ).catch((err: unknown) => {
+            captureException(err, { route: '/api/chat', phase: 'log_token_usage' });
+          });
+        }
+      },
       // Handle mid-stream errors: refund tokens when the stream fails after starting
       onError: async ({ error }) => {
         captureException(error, { route: '/api/chat', model, phase: 'mid-stream' });
