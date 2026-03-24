@@ -400,7 +400,7 @@ describe('POST /api/chat', () => {
       // Capture the onFinish callback passed to streamText and invoke it with
       // simulated usage data — this is the mechanism that logs real token counts
       // to the cost ledger rather than the upfront estimate.
-      let capturedOnFinish: ((event: { usage: { promptTokens: number; completionTokens: number } }) => Promise<void>) | undefined;
+      let capturedOnFinish: ((event: { usage: { inputTokens: number; outputTokens: number } }) => Promise<void>) | undefined;
       vi.mocked(streamText).mockImplementation(((opts: Record<string, unknown>) => {
         capturedOnFinish = opts.onFinish as typeof capturedOnFinish;
         return {
@@ -418,7 +418,7 @@ describe('POST /api/chat', () => {
 
       // Invoke the captured callback with real usage numbers
       expect(capturedOnFinish).toBeDefined();
-      await capturedOnFinish!({ usage: { promptTokens: 1200, completionTokens: 300 } });
+      await capturedOnFinish!({ usage: { inputTokens: 1200, outputTokens: 300 } });
 
       expect(logCost).toHaveBeenCalledWith(
         'user-1',

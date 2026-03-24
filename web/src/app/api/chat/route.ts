@@ -486,11 +486,11 @@ export async function POST(request: NextRequest) {
       experimental_telemetry: { isEnabled: true },
       ...(providerOptions ? { providerOptions } : {}),
       // Log actual LLM token usage to the cost ledger once the stream completes.
-      // usage.promptTokens and usage.completionTokens are the actual values from
+      // usage.inputTokens and usage.outputTokens are the actual values from
       // the model (not the estimated cost charged upfront via resolveApiKey).
       onFinish: async ({ usage }) => {
         if (auth.ctx.user.id && usage) {
-          const totalTokens = (usage.promptTokens ?? 0) + (usage.completionTokens ?? 0);
+          const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
           logCost(
             auth.ctx.user.id,
             'chat_message',
@@ -499,8 +499,8 @@ export async function POST(request: NextRequest) {
             totalTokens,
             {
               model,
-              promptTokens: usage.promptTokens,
-              completionTokens: usage.completionTokens,
+              promptTokens: usage.inputTokens,
+              completionTokens: usage.outputTokens,
               usageId,
             },
           ).catch((err: unknown) => {
