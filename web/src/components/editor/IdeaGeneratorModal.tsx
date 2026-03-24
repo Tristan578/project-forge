@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { Lightbulb, RefreshCw, Play, ChevronDown, ChevronUp, X } from 'lucide-react';
 import {
   generateIdeas,
@@ -36,12 +36,14 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
 
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Generate on open
-  useEffect(() => {
+  // Generate on open — use prev-value pattern to avoid setState in an effect body
+  const [prevIsOpen, setPrevIsOpen] = useState(false);
+  if (prevIsOpen !== isOpen) {
+    setPrevIsOpen(isOpen);
     if (isOpen) {
       setIdeas(generateIdeas(3, filters));
     }
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+  }
 
   // Focus trap
   const handleKeyDown = useCallback(

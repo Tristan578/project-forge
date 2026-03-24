@@ -131,6 +131,7 @@ export const ideaHandlers: Record<string, ToolHandler> = {
 
       idea = generateIdea({
         genreIds: [primaryGenre.id, secondaryGenre.id],
+        mechanicIds: selectedMechanics.map((m) => m.id),
       });
       // Overlay the requested title if provided
       if (p.data.title) {
@@ -194,9 +195,9 @@ export const ideaHandlers: Record<string, ToolHandler> = {
     const projectType = resolve2dOr3d(idea);
     const sceneName = `${p.data.title} - Main`;
 
-    // Reuse existing create_scene compound action to scaffold the project
+    // Reuse existing create_scene_from_description compound action to scaffold the project
     const { compoundHandlers } = await import('./compoundHandlers');
-    const createSceneHandler = compoundHandlers['create_scene'];
+    const createSceneHandler = compoundHandlers['create_scene_from_description'];
 
     const sceneResult = createSceneHandler
       ? await createSceneHandler(
