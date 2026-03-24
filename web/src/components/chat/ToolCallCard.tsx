@@ -310,11 +310,6 @@ const TOOL_LABELS: Record<string, string> = {
   translate_scene: 'Translate Scene',
   set_preview_locale: 'Preview Locale',
   list_locales: 'List Locales',
-  // Leaderboards
-  create_leaderboard: 'Create Leaderboard',
-  list_leaderboards: 'List Leaderboards',
-  configure_leaderboard: 'Configure Leaderboard',
-  delete_leaderboard: 'Delete Leaderboard',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {
