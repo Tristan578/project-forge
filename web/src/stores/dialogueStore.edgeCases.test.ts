@@ -696,7 +696,7 @@ describe('dialogueStore — edge cases (PF-360)', () => {
       const newTree = useDialogueStore.getState().dialogueTrees[newTreeId];
 
       const newChoiceNode = newTree.nodes.find(n => n.type === 'choice') as ChoiceNode;
-      expect(newChoiceNode).toBeDefined();
+      expect(newChoiceNode).toMatchObject({ type: 'choice' });
 
       // Choice that pointed to 'path_a' should now point to a new (different) ID
       const choice0NextId = newChoiceNode.choices[0].nextNodeId;
@@ -731,7 +731,7 @@ describe('dialogueStore — edge cases (PF-360)', () => {
       const newTree = useDialogueStore.getState().dialogueTrees[newTreeId];
 
       const newActionNode = newTree.nodes.find(n => n.type === 'action') as ActionNode;
-      expect(newActionNode).toBeDefined();
+      expect(newActionNode).toMatchObject({ type: 'action' });
 
       // Action next should be remapped to the new end node ID
       expect(newActionNode.next).not.toBe('end_node');

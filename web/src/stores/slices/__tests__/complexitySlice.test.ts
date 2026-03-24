@@ -85,10 +85,11 @@ describe('COMPLEXITY_FEATURES', () => {
 
 describe('COMPLEXITY_LABELS', () => {
   it('has a label for every level', () => {
-    const levels: ComplexityLevel[] = ['beginner', 'intermediate', 'expert'];
-    for (const level of levels) {
-      expect(COMPLEXITY_LABELS[level]).toBeTruthy();
-    }
+    expect(COMPLEXITY_LABELS).toEqual({
+      beginner: 'Beginner',
+      intermediate: 'Intermediate',
+      expert: 'Expert',
+    });
   });
 });
 
@@ -96,7 +97,8 @@ describe('COMPLEXITY_DESCRIPTIONS', () => {
   it('has a description for every level', () => {
     const levels: ComplexityLevel[] = ['beginner', 'intermediate', 'expert'];
     for (const level of levels) {
-      expect(COMPLEXITY_DESCRIPTIONS[level]).toBeTruthy();
+      expect(typeof COMPLEXITY_DESCRIPTIONS[level]).toBe('string');
+      expect(COMPLEXITY_DESCRIPTIONS[level].length).toBeGreaterThan(0);
     }
   });
 });

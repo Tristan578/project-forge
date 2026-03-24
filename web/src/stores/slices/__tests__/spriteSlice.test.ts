@@ -363,9 +363,9 @@ describe('spriteSlice', () => {
         store.getState().removeSortingLayer('Foreground');
 
         const layers = store.getState().sortingLayers;
-        expect(layers.find(l => l.name === 'Background')).toBeDefined();
-        expect(layers.find(l => l.name === 'Default')).toBeDefined();
-        expect(layers.find(l => l.name === 'UI')).toBeDefined();
+        expect(layers.find(l => l.name === 'Background')).toEqual({ name: 'Background', order: 0, visible: true });
+        expect(layers.find(l => l.name === 'Default')).toEqual({ name: 'Default', order: 1, visible: true });
+        expect(layers.find(l => l.name === 'UI')).toEqual({ name: 'UI', order: 3, visible: true });
       });
 
       it('should be a no-op when removing a nonexistent layer', () => {
