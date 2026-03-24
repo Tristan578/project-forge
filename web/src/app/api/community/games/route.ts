@@ -53,7 +53,9 @@ export async function GET(req: NextRequest) {
         );
       } else {
         // No games with this tag
-        return NextResponse.json({ games: [], hasMore: false });
+        const emptyResponse = NextResponse.json({ games: [], hasMore: false });
+        emptyResponse.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+        return emptyResponse;
       }
     }
 
@@ -178,7 +180,9 @@ export async function GET(req: NextRequest) {
       createdAt: g.createdAt.toISOString(),
     }));
 
-    return NextResponse.json({ games: formattedGames, hasMore });
+    const response = NextResponse.json({ games: formattedGames, hasMore });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    return response;
   } catch (error) {
     captureException(error, { route: '/api/community/games' });
     return NextResponse.json(

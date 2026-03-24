@@ -79,7 +79,7 @@ export async function GET(
       .then(() => {})
       .catch(() => {});
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       game: {
         id: game.id,
         title: game.title,
@@ -90,6 +90,10 @@ export async function GET(
         sceneData: project.sceneData,
       },
     });
+    // Short TTL: game data changes when creators republish; stale-while-revalidate
+    // lets the CDN serve fresh data without blocking the player.
+    response.headers.set('Cache-Control', 'public, s-maxage=30, stale-while-revalidate=120');
+    return response;
   } catch (error) {
     captureException(error, { route: '/api/play/[userId]/[slug]' });
     return NextResponse.json(

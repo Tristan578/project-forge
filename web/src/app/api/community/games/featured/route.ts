@@ -118,7 +118,9 @@ export async function GET(req: NextRequest) {
       createdAt: g.createdAt.toISOString(),
     }));
 
-    return NextResponse.json({ games: formattedGames });
+    const response = NextResponse.json({ games: formattedGames });
+    response.headers.set('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    return response;
   } catch (error) {
     captureException(error, { route: '/api/community/games/featured' });
     return NextResponse.json(
