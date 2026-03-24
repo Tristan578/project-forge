@@ -31,11 +31,15 @@ vi.mock('@/data/achievements', () => ({
   ],
 }));
 
-vi.mock('lucide-react', () => ({
-  X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
-  Box: ({ className }: { className?: string }) => <span data-testid="box-icon" className={className} />,
-  Star: ({ className }: { className?: string }) => <span data-testid="star-icon" className={className} />,
-}));
+vi.mock('lucide-react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('lucide-react')>();
+  return {
+    ...actual,
+    X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
+    Box: ({ className }: { className?: string }) => <span data-testid="box-icon" className={className} />,
+    Star: ({ className }: { className?: string }) => <span data-testid="star-icon" className={className} />,
+  };
+});
 
 describe('AchievementToast', () => {
   const mockDismissAchievementToast = vi.fn();
