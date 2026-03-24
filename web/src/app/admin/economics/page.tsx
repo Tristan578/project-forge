@@ -1,5 +1,7 @@
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
+
+export const dynamic = 'force-dynamic';
 import { AdminDashboard } from '@/components/admin/AdminDashboard';
 
 export default async function AdminEconomicsPage() {

@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@clerk/nextjs/server';
 import type { Metadata } from 'next';
+
+export const dynamic = 'force-dynamic';
 import LandingPage from './(marketing)/page';
 
 export const metadata: Metadata = {

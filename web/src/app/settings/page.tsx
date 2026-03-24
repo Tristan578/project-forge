@@ -1,6 +1,8 @@
 import { auth } from '@clerk/nextjs/server';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
+
+export const dynamic = 'force-dynamic';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 
 export default async function SettingsRoute() {
