@@ -10928,6 +10928,61 @@
       },
       "tokenCost": 0,
       "requiredScope": "project:manage"
+    },
+    {
+      "name": "build_world",
+      "description": "Generate a complete, internally consistent game world from a natural-language premise. Produces factions with mutual relationships, regions connected in a traversable graph, a chronological history timeline, discoverable lore entries, and gameplay rules. Applies self-healing validation to fix asymmetric relationships and isolated regions. Falls back to the closest genre preset if all retries fail. Token cost is high due to world size — use sparingly.",
+      "category": "world_building",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "premise": {
+            "type": "string",
+            "description": "Natural-language world concept, e.g. 'sci-fi world with 4 factions fighting over energy crystals'. Be specific about tone, conflict, and setting."
+          },
+          "genre": {
+            "type": "string",
+            "description": "Optional genre hint. Use a preset key for inspiration: 'medieval_fantasy', 'sci_fi_space', 'post_apocalyptic', 'cyberpunk_city', 'mythological'. Or provide a custom genre string."
+          },
+          "factionCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Desired number of factions (1-10). Default is 3. UI becomes unusable above 10."
+          },
+          "regionCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "Desired number of regions (1-20). Default is 5. Graph visualization breaks above 20."
+          }
+        },
+        "required": ["premise"]
+      },
+      "tokenCost": 3,
+      "requiredScope": "ai:generate"
+    },
+    {
+      "name": "get_current_world",
+      "description": "Retrieve the currently generated world data including factions, regions, timeline, lore, and a consistency report. Returns an error if no world has been generated yet.",
+      "category": "world_building",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "clear_world",
+      "description": "Clear the currently stored world data. Use before generating a completely new world to avoid stale data.",
+      "category": "world_building",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
     }
   ],
   "resources": [
