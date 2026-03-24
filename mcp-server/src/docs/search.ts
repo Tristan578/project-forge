@@ -83,7 +83,8 @@ function tokenizeRaw(text: string): string[] {
     .replace(/[#*_|>\-=~]/g, ' ')
     .replace(/[^\w\s]/g, ' ')
     .split(/\s+/)
-    .filter(t => t.length > 1);
+    .filter(t => t.length > 1)
+    .map(stem);
 }
 
 /**
