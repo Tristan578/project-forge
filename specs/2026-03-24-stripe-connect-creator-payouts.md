@@ -126,12 +126,14 @@ export const revenueEvents = pgTable(
     creatorShareCents: integer('creator_share_cents').notNull(),
     currency: text('currency').notNull().default('usd'),
     referenceId: text('reference_id'), // external ID (ad network impression ID, asset purchase ID)
+    payoutId: uuid('payout_id').references(() => payoutHistory.id), // null until claimed by a payout cron run
     metadata: jsonb('metadata'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('idx_re_creator_date').on(table.creatorId, table.createdAt),
     index('idx_re_game_date').on(table.gameId, table.createdAt),
+    index('idx_re_payout').on(table.payoutId),
     index('idx_re_source').on(table.source),
   ]
 );
@@ -153,6 +155,7 @@ export const payoutHistory = pgTable(
     periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
     periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
     revenueEventCount: integer('revenue_event_count').notNull().default(0),
+    idempotencyKey: text('idempotency_key').notNull().unique(), // e.g. payout:{creatorId}:{periodEnd}
     errorMessage: text('error_message'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     paidAt: timestamp('paid_at', { withTimezone: true }),
