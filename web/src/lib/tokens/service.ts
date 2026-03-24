@@ -242,7 +242,7 @@ export async function refundTokenAmount(
   // Determine which pool to refund to by checking the original charge source.
   // If a usageId is provided, look up that specific record; otherwise default
   // to addon tokens (safest fallback — monthly tokens may have reset).
-  let source: 'monthly' | 'addon' = 'addon';
+  let source: 'monthly' | 'addon' | 'mixed' = 'addon';
   if (usageId) {
     const [record] = await db
       .select({ source: tokenUsage.source })
@@ -251,10 +251,13 @@ export async function refundTokenAmount(
       .limit(1);
     if (record?.source === 'monthly') {
       source = 'monthly';
+    } else if (record?.source === 'mixed') {
+      source = 'mixed';
     }
   }
 
   if (source === 'monthly') {
+    // Refund to monthly allocation — decrement monthlyTokensUsed
     await db
       .update(users)
       .set({
@@ -262,7 +265,19 @@ export async function refundTokenAmount(
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));
+  } else if (source === 'mixed') {
+    // Mixed charges used both monthly and addon. For partial refunds we cannot
+    // determine the exact split, so we refund to addon (same as refundTokens
+    // full-refund behavior) — monthly allocation may have reset since the charge.
+    await db
+      .update(users)
+      .set({
+        addonTokens: sql`${users.addonTokens} + ${tokens}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
   } else {
+    // addon source or no usageId — credit addon tokens
     await db
       .update(users)
       .set({
