@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { trackPanelOpened, trackPanelClosed } from '@/lib/analytics/panelTracking';
 
 interface DrawerPanelProps {
@@ -21,12 +21,10 @@ export function DrawerPanel({ side, open, onClose, width = 280, children }: Draw
   const drawerRef = useRef<HTMLDivElement>(null);
 
   // Track panel open/close lifecycle with duration.
-  // openedAtRef is a plain ref (not state) because it must not trigger re-renders.
+  // Uses useEffect to avoid side effects during render (concurrent mode safety).
   const openedAtRef = useRef<number | null>(null);
-  const [prevOpen, setPrevOpen] = useState(open);
 
-  if (prevOpen !== open) {
-    setPrevOpen(open);
+  useEffect(() => {
     const panelId = PANEL_ID[side];
     if (open) {
       openedAtRef.current = Date.now();
@@ -35,7 +33,7 @@ export function DrawerPanel({ side, open, onClose, width = 280, children }: Draw
       trackPanelClosed(panelId, Date.now() - openedAtRef.current);
       openedAtRef.current = null;
     }
-  }
+  }, [open, side]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
