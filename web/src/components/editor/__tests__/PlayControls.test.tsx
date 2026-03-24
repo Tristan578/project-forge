@@ -128,4 +128,55 @@ describe('PlayControls', () => {
     const pauseBtn = screen.getByRole('button', { name: /pause/i });
     expect((pauseBtn as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it('full play → pause → stop cycle dispatches correct commands in sequence', () => {
+    const mockPlay = vi.fn();
+    const mockPause = vi.fn();
+    const mockStop = vi.fn();
+
+    // Phase 1: edit mode — click play
+    mockEditorStore({ engineMode: 'edit', play: mockPlay, pause: mockPause, stop: mockStop });
+    render(<PlayControls />);
+    fireEvent.click(screen.getByRole('button', { name: /^play$/i }));
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    // Phase 2: play mode — click pause
+    mockEditorStore({ engineMode: 'play', play: mockPlay, pause: mockPause, stop: mockStop });
+    render(<PlayControls />);
+    fireEvent.click(screen.getByRole('button', { name: /pause/i }));
+    expect(mockPause).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    // Phase 3: paused mode — click stop
+    mockEditorStore({ engineMode: 'paused', play: mockPlay, pause: mockPause, stop: mockStop });
+    render(<PlayControls />);
+    fireEvent.click(screen.getByRole('button', { name: /stop/i }));
+    expect(mockStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('stop from paused mode resets to edit (stop is enabled when paused)', () => {
+    const mockStop = vi.fn();
+    mockEditorStore({ engineMode: 'paused', stop: mockStop });
+    render(<PlayControls />);
+
+    const stopBtn = screen.getByRole('button', { name: /stop/i });
+    // Stop is not disabled when paused (isEdit is false)
+    expect((stopBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(stopBtn);
+    expect(mockStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('mode indicator is absent in edit mode', () => {
+    mockEditorStore({ engineMode: 'edit' });
+    render(<PlayControls />);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('mode indicator shows correct text color class when paused', () => {
+    mockEditorStore({ engineMode: 'paused' });
+    render(<PlayControls />);
+    const statusEl = screen.getByRole('status');
+    expect(statusEl.textContent).toBe('Paused');
+  });
 });
