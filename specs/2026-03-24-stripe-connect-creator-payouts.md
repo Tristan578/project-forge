@@ -279,13 +279,16 @@ transfer.failed → Update payout status to 'failed', set errorMessage
 
 A Vercel Cron Job runs weekly (Monday 06:00 UTC) to:
 
-1. Query all creators with `payoutsEnabled = true` and unpaid revenue events
+1. Query all creators with `payoutsEnabled = true` and unpaid revenue events (`payoutId IS NULL`)
 2. For each creator:
-   a. Sum `creator_share_cents` for events in the payout period
-   b. Skip if below `min_payout_cents` threshold ($10 default)
-   c. Create a Stripe Transfer to the connected account
-   d. Record in `payout_history`
-3. Send notification to creators with successful payouts (future: email via Clerk)
+   a. Create a `payout_history` record with status `'pending'` and a unique `idempotencyKey` (e.g. `payout:{creatorId}:{periodEnd}`)
+   b. Atomically mark matching `revenue_events` with the new `payoutId` (`UPDATE revenue_events SET payout_id = ? WHERE creator_id = ? AND payout_id IS NULL AND created_at < ?`)
+   c. Sum `creator_share_cents` from the now-claimed events
+   d. Skip if below `min_payout_cents` threshold ($10 default) — reset `payoutId` on claimed events
+   e. Create a Stripe Transfer with `idempotency_key` matching the payout record
+   f. Update `payout_history` status to `'completed'` with the Stripe transfer ID
+3. On retry: events already claimed by a `payoutId` are excluded from re-summation. The Stripe `idempotency_key` prevents duplicate transfers even if the cron fires twice.
+4. Send notification to creators with successful payouts (future: email via Clerk)
 
 ### Creator Dashboard UI
 
