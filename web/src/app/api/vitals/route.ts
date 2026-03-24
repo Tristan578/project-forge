@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 
 /**
@@ -57,21 +57,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Structured log for observability pipelines (Vercel, Datadog, etc.)
-  if (process.env.NODE_ENV === 'production') {
-    console.log(
-      JSON.stringify({
-        type: 'web-vital',
-        metric: body.name,
-        value: body.value,
-        delta: body.delta,
-        id: body.id,
-        timestamp: Date.now(),
-      })
-    );
-  } else {
-    console.log(`[Vitals] ${body.name}: ${body.value} (delta: ${body.delta})`);
-  }
+  // Schedule structured logging after the 204 response is sent — fire-and-forget,
+  // non-critical, so it should not delay the response to the client.
+  after(() => {
+    if (process.env.NODE_ENV === 'production') {
+      console.log(
+        JSON.stringify({
+          type: 'web-vital',
+          metric: body.name,
+          value: body.value,
+          delta: body.delta,
+          id: body.id,
+          timestamp: Date.now(),
+        })
+      );
+    } else {
+      console.log(`[Vitals] ${body.name}: ${body.value} (delta: ${body.delta})`);
+    }
+  });
 
   return new NextResponse(null, { status: 204 });
 }

@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
+// Mock next/server: execute after() callbacks synchronously so tests can
+// assert on side effects (logging) without needing to flush microtasks.
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>();
+  return {
+    ...actual,
+    after: vi.fn((cb: () => void) => { cb(); }),
+  };
+});
+
 // Mock rateLimit module
 vi.mock('@/lib/rateLimit', () => {
   const mockRateLimitPublicRoute = vi.fn().mockResolvedValue(null);
@@ -149,7 +159,7 @@ describe('POST /api/vitals', () => {
     expect(res.status).toBe(429);
   });
 
-  it('logs structured JSON in production', async () => {
+  it('logs structured JSON in production via after()', async () => {
     const originalEnv = process.env.NODE_ENV;
     // @ts-expect-error -- override for test
     process.env.NODE_ENV = 'production';
@@ -170,5 +180,20 @@ describe('POST /api/vitals', () => {
     consoleSpy.mockRestore();
     // @ts-expect-error -- restore
     process.env.NODE_ENV = originalEnv;
+  });
+
+  it('schedules logging via after() so response is not blocked', async () => {
+    const { after } = await import('next/server');
+    const afterMock = after as ReturnType<typeof vi.fn>;
+    afterMock.mockClear();
+
+    const { POST } = await import('@/app/api/vitals/route');
+    const req = makeRequest({ name: 'FCP', value: 1500, id: 'v4-after', delta: 1500 });
+    const res = await POST(req);
+
+    // Response must be 204 before after() callback runs
+    expect(res.status).toBe(204);
+    // after() must have been called once to schedule the logging callback
+    expect(afterMock).toHaveBeenCalledTimes(1);
   });
 });

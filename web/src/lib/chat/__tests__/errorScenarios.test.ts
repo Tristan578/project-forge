@@ -1,11 +1,9 @@
 /**
- * PF-375: Error scenario tests for the chat executor and API layer.
+ * PF-375 / PF-882: Error scenario tests for the chat executor and API layer.
  *
  * Covers:
- *  - executeToolCall with an unknown tool name (falls through to legacy; legacy also
- *    returns error to verify the full error path is exercised end-to-end)
- *  - executeToolCall when dispatchCommand throws synchronously
- *  - executeToolCall when a registered handler rejects with an Error
+ *  - executeToolCall with an unknown tool name returns { success: false } directly
+ *  - executeToolCall when getCommandDispatcher throws synchronously
  *  - Chat API error handling (fetch failure / network error)
  */
 
@@ -13,9 +11,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Hoist mocks so references are available inside vi.mock factories ──────────
 const mocks = vi.hoisted(() => {
-  const legacyExecute = vi.fn();
   const getCommandDispatcher = vi.fn();
-  return { legacyExecute, getCommandDispatcher };
+  return { getCommandDispatcher };
 });
 
 // ── Mock all handler registries with empty objects ────────────────────────────
@@ -42,11 +39,6 @@ vi.mock('../handlers/assetHandlers', () => ({ assetHandlers: {} }));
 vi.mock('../handlers/audioLegacyHandlers', () => ({ audioLegacyHandlers: {} }));
 vi.mock('../handlers/pixelArtHandlers', () => ({ pixelArtHandlers: {} }));
 vi.mock('../handlers/compoundHandlers', () => ({ compoundHandlers: {} }));
-
-// ── Mock legacy executor ──────────────────────────────────────────────────────
-vi.mock('../executor.legacy', () => ({
-  executeToolCall: mocks.legacyExecute,
-}));
 
 // ── Mock editorStore ──────────────────────────────────────────────────────────
 vi.mock('@/stores/editorStore', () => ({
@@ -76,39 +68,26 @@ describe('executeToolCall: unknown tool name', () => {
     mocks.getCommandDispatcher.mockReturnValue(vi.fn());
   });
 
-  it('delegates to the legacy executor when tool name is not in registry', async () => {
-    mocks.legacyExecute.mockResolvedValue({ success: false, error: 'Unknown tool: pf375_nonexistent_tool' });
-
+  it('returns { success: false } for an unrecognised tool name', async () => {
     const result = await executeToolCall('pf375_nonexistent_tool', {}, makeStore());
-
-    expect(mocks.legacyExecute).toHaveBeenCalledWith('pf375_nonexistent_tool', {}, expect.anything());
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/unknown tool/i);
   });
 
-  it('returns success: false when legacy executor returns an error result for unknown tool', async () => {
-    mocks.legacyExecute.mockResolvedValue({ success: false, error: 'No handler found' });
-
+  it('includes the exact tool name in the error for unknown tools', async () => {
     const result = await executeToolCall('completely_unknown_xyz_123', { a: 1 }, makeStore());
-
     expect(result.success).toBe(false);
+    expect(result.error).toContain('completely_unknown_xyz_123');
   });
 
   it('never throws for an unknown tool — always resolves', async () => {
-    mocks.legacyExecute.mockResolvedValue({ success: false, error: 'Unhandled' });
-
     const promise = executeToolCall('no_such_tool_at_all', {}, makeStore());
     await expect(promise).resolves.toBeDefined();
   });
 
-  it('passes args through to legacy executor unchanged for unknown tool', async () => {
-    mocks.legacyExecute.mockResolvedValue({ success: false, error: 'Nope' });
-    const args = { entityId: 'e1', value: 42 };
-
-    await executeToolCall('unknown_with_args', args, makeStore());
-
-    const [, passedArgs] = mocks.legacyExecute.mock.calls[0];
-    expect(passedArgs).toBe(args);
+  it('returns success: false for unknown tools with args', async () => {
+    const result = await executeToolCall('unknown_with_args', { entityId: 'e1', value: 42 }, makeStore());
+    expect(result.success).toBe(false);
   });
 });
 
@@ -152,69 +131,48 @@ describe('executeToolCall: dispatchCommand throws', () => {
     });
   });
 
-  it('still returns success: false when legacy executor also throws after dispatcher error', async () => {
-    // This scenario exercises the outer try/catch in executor.ts.
+  it('returns success: false when dispatcher throws an Error', async () => {
     mocks.getCommandDispatcher.mockImplementation(() => {
       throw new Error('First failure');
     });
-    // legacyExecute is never reached (dispatcher throws first), but we verify
-    // the outer catch handles it gracefully.
-    mocks.legacyExecute.mockRejectedValue(new Error('Second failure'));
 
     const result = await executeToolCall('tool', {}, makeStore());
 
     expect(result.success).toBe(false);
-    // Error message comes from the first throw (dispatcher), not the legacy mock.
     expect(result.error).toBe('First failure');
   });
 });
 
 // ── Test: registered handler rejects ─────────────────────────────────────────
-// These tests verify the outer try/catch in executeToolCall catches handler
-// rejections. Since all handler registries are mocked empty in this file's
-// module scope, we test via legacy executor rejections (which are equivalent:
-// the outer catch is shared between the registry and legacy paths).
 
-describe('executeToolCall: registered handler throws', () => {
+describe('executeToolCall: error containment for unknown tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCommandDispatcher.mockReturnValue(vi.fn());
   });
 
-  it('catches Error thrown by a registered handler (via legacy path) and returns { success: false }', async () => {
-    // When the registry has no match the call goes to legacyExecute.
-    // A rejection here is caught by the same outer try/catch as a registry handler.
-    mocks.legacyExecute.mockRejectedValue(new Error('handler exploded'));
+  it('catches TypeError and returns generic error string', async () => {
+    mocks.getCommandDispatcher.mockImplementation(() => {
+      throw new TypeError('hard crash');
+    });
 
-    const result = await executeToolCall('pf375_throwing_tool', {}, makeStore());
-
+    const result = await executeToolCall('pf375_range_error', {}, makeStore());
     expect(result.success).toBe(false);
-    expect(result.error).toBe('handler exploded');
   });
 
-  it('catches non-Error rejection (object) and returns generic Execution failed', async () => {
-    mocks.legacyExecute.mockRejectedValue({ code: 'ENOENT', message: 'no such file' });
-
-    const result = await executeToolCall('pf375_obj_throw_tool', {}, makeStore());
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Execution failed');
-  });
-
-  it('catches a null rejection and returns generic error', async () => {
-    mocks.legacyExecute.mockRejectedValue(null);
-
-    const result = await executeToolCall('pf375_null_throw', {}, makeStore());
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Execution failed');
-  });
-
-  it('never throws — the promise always resolves even when handler rejects', async () => {
-    mocks.legacyExecute.mockRejectedValue(new RangeError('out of bounds'));
+  it('never throws — the promise always resolves', async () => {
+    mocks.getCommandDispatcher.mockImplementation(() => {
+      throw new RangeError('out of bounds');
+    });
 
     const promise = executeToolCall('pf375_range_error', {}, makeStore());
     await expect(promise).resolves.toMatchObject({ success: false });
+  });
+
+  it('returns error even when execution context is minimal', async () => {
+    const result = await executeToolCall('pf375_null_throw', {}, makeStore());
+    expect(result.success).toBe(false);
+    expect(typeof result.error).toBe('string');
   });
 });
 

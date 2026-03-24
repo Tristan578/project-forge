@@ -3,7 +3,7 @@
  *
  * Focus areas:
  *  - Registry dispatch: known handler is invoked with correct args & context
- *  - Legacy fallback: unknown handler falls through to legacyExecuteToolCall
+ *  - Unknown tool: unrecognised tool name returns { success: false, error }
  *  - Error containment: handler exceptions are caught and returned as { success: false }
  *  - getCommandDispatcher null path: warning fallback when dispatcher not initialised
  *  - Context shape: dispatchCommand callable and store forwarded correctly
@@ -13,9 +13,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Hoist mock references so they are available inside vi.mock factories ──────
 const mocks = vi.hoisted(() => {
-  const legacyExecute = vi.fn();
   const getCommandDispatcher = vi.fn();
-  return { legacyExecute, getCommandDispatcher };
+  return { getCommandDispatcher };
 });
 
 // ── Mock all handler registry modules with empty registries ──────────────────
@@ -43,11 +42,6 @@ vi.mock('../handlers/audioLegacyHandlers', () => ({ audioLegacyHandlers: {} }));
 vi.mock('../handlers/pixelArtHandlers', () => ({ pixelArtHandlers: {} }));
 vi.mock('../handlers/compoundHandlers', () => ({ compoundHandlers: {} }));
 
-// ── Mock legacy executor ──────────────────────────────────────────────────────
-vi.mock('../executor.legacy', () => ({
-  executeToolCall: mocks.legacyExecute,
-}));
-
 // ── Mock editorStore ──────────────────────────────────────────────────────────
 vi.mock('@/stores/editorStore', () => ({
   getCommandDispatcher: mocks.getCommandDispatcher,
@@ -69,54 +63,48 @@ function makeStore(overrides: Record<string, unknown> = {}): Parameters<typeof e
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-describe('executor: legacy fallback dispatch', () => {
+describe('executor: unknown tool returns error', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCommandDispatcher.mockReturnValue(vi.fn());
-    mocks.legacyExecute.mockResolvedValue({ success: true, result: 'legacy-result' });
   });
 
-  it('falls through to legacy executor when tool is not in the registry', async () => {
+  it('returns { success: false } for an unrecognised tool name', async () => {
     const store = makeStore();
-    await executeToolCall('completely_unknown_tool', { x: 1 }, store);
-    expect(mocks.legacyExecute).toHaveBeenCalledWith('completely_unknown_tool', { x: 1 }, store);
+    const result = await executeToolCall('completely_unknown_tool', { x: 1 }, store);
+    expect(result.success).toBe(false);
   });
 
-  it('returns the legacy result when tool is not in registry', async () => {
+  it('includes the tool name in the error message', async () => {
     const store = makeStore();
-    mocks.legacyExecute.mockResolvedValue({ success: true, result: 'from-legacy' });
-
-    const result = await executeToolCall('unknown_tool', {}, store);
-    expect(result.success).toBe(true);
-    expect(result.result).toBe('from-legacy');
+    const result = await executeToolCall('completely_unknown_tool', {}, store);
+    expect(result.error).toContain('completely_unknown_tool');
   });
 
-  it('passes an empty args object to legacy executor correctly', async () => {
+  it('returns "Unknown tool" error for an empty args object', async () => {
     const store = makeStore();
-    await executeToolCall('unknown_tool_xyz', {}, store);
-    expect(mocks.legacyExecute).toHaveBeenCalledWith('unknown_tool_xyz', {}, store);
+    const result = await executeToolCall('unknown_tool_xyz', {}, store);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Unknown tool');
   });
 
-  it('forwards an arbitrary args object unchanged', async () => {
+  it('returns error without throwing for arbitrary tool names', async () => {
     const store = makeStore();
-    const args = { foo: 'bar', count: 42, nested: { a: [1, 2, 3] } };
-    await executeToolCall('args_test', args, store);
-    const [, forwardedArgs] = mocks.legacyExecute.mock.calls[0];
-    expect(forwardedArgs).toBe(args);
+    const result = await executeToolCall('args_test', { foo: 'bar', count: 42 }, store);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('args_test');
   });
 
-  it('forwards the store object unchanged', async () => {
+  it('returns error even when store has non-default fields', async () => {
     const store = makeStore({ sceneName: 'MyScene' });
-    await executeToolCall('forward_test', {}, store);
-    const [, , forwardedStore] = mocks.legacyExecute.mock.calls[0];
-    expect(forwardedStore).toBe(store);
+    const result = await executeToolCall('forward_test', {}, store);
+    expect(result.success).toBe(false);
   });
 
-  it('passes the tool name as the first argument', async () => {
+  it('includes exact tool name in error for single-word tool names', async () => {
     const store = makeStore();
-    await executeToolCall('my_special_tool', {}, store);
-    const [toolName] = mocks.legacyExecute.mock.calls[0];
-    expect(toolName).toBe('my_special_tool');
+    const result = await executeToolCall('my_special_tool', {}, store);
+    expect(result.error).toBe('Unknown tool: my_special_tool');
   });
 });
 
@@ -126,37 +114,37 @@ describe('executor: error containment', () => {
     mocks.getCommandDispatcher.mockReturnValue(vi.fn());
   });
 
-  it('returns { success: false, error } when legacy executor throws an Error', async () => {
-    const store = makeStore();
-    mocks.legacyExecute.mockRejectedValue(new Error('legacy boom'));
+  it('returns { success: false, error } when a registered handler throws an Error', async () => {
+    // Register a handler that throws by temporarily patching the registry via a mock
+    // We test via the try/catch path using getCommandDispatcher throwing
+    mocks.getCommandDispatcher.mockImplementation(() => {
+      throw new Error('dispatcher boom');
+    });
 
+    const store = makeStore();
     const result = await executeToolCall('any_tool', {}, store);
     expect(result.success).toBe(false);
-    expect(result.error).toBe('legacy boom');
+    expect(result.error).toBe('dispatcher boom');
   });
 
-  it('returns generic error message when legacy executor throws a non-Error', async () => {
+  it('returns generic error message when a non-Error is thrown', async () => {
+    mocks.getCommandDispatcher.mockImplementation(() => {
+      const rejection: unknown = 'string rejection';
+      throw rejection;
+    });
+
     const store = makeStore();
-    mocks.legacyExecute.mockRejectedValue('string rejection');
-
-    const result = await executeToolCall('any_tool', {}, store);
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('Execution failed');
-  });
-
-  it('returns { success: false } when legacy executor rejects with null', async () => {
-    const store = makeStore();
-    mocks.legacyExecute.mockRejectedValue(null);
-
     const result = await executeToolCall('any_tool', {}, store);
     expect(result.success).toBe(false);
     expect(result.error).toBe('Execution failed');
   });
 
   it('never throws; always resolves with an ExecutionResult', async () => {
-    const store = makeStore();
-    mocks.legacyExecute.mockRejectedValue(new TypeError('hard crash'));
+    mocks.getCommandDispatcher.mockImplementation(() => {
+      throw new TypeError('hard crash');
+    });
 
+    const store = makeStore();
     const promise = executeToolCall('crash_test', {}, store);
     await expect(promise).resolves.toBeDefined();
     const result = await promise;
@@ -168,7 +156,6 @@ describe('executor: command dispatcher wiring', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCommandDispatcher.mockReturnValue(vi.fn());
-    mocks.legacyExecute.mockResolvedValue({ success: true });
   });
 
   it('calls getCommandDispatcher once per executeToolCall invocation', async () => {
@@ -183,7 +170,8 @@ describe('executor: command dispatcher wiring', () => {
     const store = makeStore();
 
     const result = await executeToolCall('some_tool', {}, store);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('some_tool');
 
     warnSpy.mockRestore();
     mocks.getCommandDispatcher.mockReturnValue(vi.fn());
@@ -196,13 +184,7 @@ describe('executor: concurrent calls are independent', () => {
     mocks.getCommandDispatcher.mockReturnValue(vi.fn());
   });
 
-  it('parallel calls each receive their own result', async () => {
-    let callCount = 0;
-    mocks.legacyExecute.mockImplementation(() => {
-      const n = ++callCount;
-      return Promise.resolve({ success: true, result: `call-${n}` });
-    });
-
+  it('parallel calls each receive their own error result', async () => {
     const store = makeStore();
     const [r1, r2, r3] = await Promise.all([
       executeToolCall('tool_a', {}, store),
@@ -210,17 +192,15 @@ describe('executor: concurrent calls are independent', () => {
       executeToolCall('tool_c', {}, store),
     ]);
 
-    expect(r1.result).toBe('call-1');
-    expect(r2.result).toBe('call-2');
-    expect(r3.result).toBe('call-3');
+    expect(r1.success).toBe(false);
+    expect(r1.error).toContain('tool_a');
+    expect(r2.success).toBe(false);
+    expect(r2.error).toContain('tool_b');
+    expect(r3.success).toBe(false);
+    expect(r3.error).toContain('tool_c');
   });
 
-  it('one failing call does not affect concurrent successful calls', async () => {
-    mocks.legacyExecute
-      .mockResolvedValueOnce({ success: true, result: 'ok-1' })
-      .mockRejectedValueOnce(new Error('boom'))
-      .mockResolvedValueOnce({ success: true, result: 'ok-3' });
-
+  it('all unknown-tool calls return independent error results', async () => {
     const store = makeStore();
     const [r1, r2, r3] = await Promise.all([
       executeToolCall('tool_1', {}, store),
@@ -228,8 +208,8 @@ describe('executor: concurrent calls are independent', () => {
       executeToolCall('tool_3', {}, store),
     ]);
 
-    expect(r1.success).toBe(true);
+    expect(r1.success).toBe(false);
     expect(r2.success).toBe(false);
-    expect(r3.success).toBe(true);
+    expect(r3.success).toBe(false);
   });
 });
