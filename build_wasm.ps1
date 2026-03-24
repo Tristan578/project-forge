@@ -127,4 +127,30 @@ Copy-Item -Path "pkg-webgpu\*" -Destination (Join-Path $webPublic "engine-pkg-we
 Copy-Item -Path "pkg-webgl2-runtime\*" -Destination (Join-Path $webPublic "engine-pkg-webgl2-runtime") -Force
 Copy-Item -Path "pkg-webgpu-runtime\*" -Destination (Join-Path $webPublic "engine-pkg-webgpu-runtime") -Force
 
+# --- Generate content-hash manifests to enable cache-busting ---
+# Each engine package directory gets a wasm-manifest.json that contains the
+# SHA-256 hash of the .wasm binary (first 16 hex chars used as a short hash).
+# useEngine.ts reads this manifest before loading to append ?v=<hash> to
+# WASM URLs, preventing browsers from serving stale cached binaries after
+# a deployment.
+Write-Host "=== Generating WASM content-hash manifests ===" -ForegroundColor Cyan
+foreach ($variant in @("engine-pkg-webgl2", "engine-pkg-webgpu", "engine-pkg-webgl2-runtime", "engine-pkg-webgpu-runtime")) {
+    $destDir = Join-Path $webPublic $variant
+    $wasmPath = Join-Path $destDir "forge_engine_bg.wasm"
+    if (Test-Path $wasmPath) {
+        $hashBytes = (Get-FileHash -Algorithm SHA256 -Path $wasmPath).Hash
+        # Use first 16 hex chars as the content hash (64 bits of entropy — sufficient for cache-busting)
+        $shortHash = $hashBytes.Substring(0, 16).ToLower()
+        $manifest = @{
+            wasmFile = "forge_engine_bg.wasm"
+            jsFile   = "forge_engine.js"
+            hash     = $shortHash
+        } | ConvertTo-Json -Compress
+        $manifest | Set-Content -Path (Join-Path $destDir "wasm-manifest.json") -Encoding UTF8
+        Write-Host "  $variant hash: $shortHash" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  WARNING: $wasmPath not found, skipping manifest" -ForegroundColor Yellow
+    }
+}
+
 Write-Host "=== All WASM variants built successfully (editor + runtime) ===" -ForegroundColor Green
