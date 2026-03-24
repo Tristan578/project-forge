@@ -32,7 +32,7 @@ function jsonSchemaToZod(prop: Record<string, unknown>): z.ZodTypeAny {
       return z.array(z.unknown());
     }
     case 'object':
-      return z.record(z.unknown());
+      return z.record(z.string(), z.unknown());
     default:
       return z.unknown();
   }
