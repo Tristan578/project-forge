@@ -242,21 +242,17 @@ jobs:
       - name: Install wasm-opt (binaryen)
         run: sudo apt-get install -y binaryen
 
-      - name: Build WebGL2
+      - name: Build WebGL2 + wasm-bindgen
         working-directory: engine
-        run: cargo build --target wasm32-unknown-unknown --release --features webgl2
+        run: |
+          cargo build --target wasm32-unknown-unknown --release --features webgl2
+          wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
 
-      - name: Build WebGPU
+      - name: Build WebGPU + wasm-bindgen
         working-directory: engine
-        run: cargo build --target wasm32-unknown-unknown --release --features webgpu
-
-      - name: Run wasm-bindgen (WebGL2)
-        working-directory: engine
-        run: wasm-bindgen --target web --out-dir pkg-webgl2 target/wasm32-unknown-unknown/release/forge_engine.wasm
-
-      - name: Run wasm-bindgen (WebGPU)
-        working-directory: engine
-        run: wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
+        run: |
+          cargo build --target wasm32-unknown-unknown --release --features webgpu
+          wasm-bindgen --target web --out-dir pkg-webgpu target/wasm32-unknown-unknown/release/forge_engine.wasm
 
       - name: Build WebGL2 Runtime (stripped editor)
         working-directory: engine
