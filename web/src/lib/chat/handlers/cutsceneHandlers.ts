@@ -104,8 +104,10 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
       },
     });
 
-    activePlayer = player;
+    // Assign activePlayer AFTER load() because load() calls stop() internally,
+    // which triggers the onStop callback and would nullify activePlayer prematurely.
     player.load(cutscene);
+    activePlayer = player;
     player.play();
 
     return {
