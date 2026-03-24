@@ -233,27 +233,51 @@ export async function refundTokenAmount(
   userId: string,
   tokens: number,
   reason: string,
+  usageId?: string,
 ): Promise<void> {
   if (tokens <= 0) return;
 
   const db = getDb();
 
-  // Credit back to addon tokens (simplest path — avoids needing to know the
-  // original monthly/addon split for a partial refund)
-  await db
-    .update(users)
-    .set({
-      addonTokens: sql`${users.addonTokens} + ${tokens}`,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
+  // Determine which pool to refund to by checking the original charge source.
+  // If a usageId is provided, look up that specific record; otherwise default
+  // to addon tokens (safest fallback — monthly tokens may have reset).
+  let source: 'monthly' | 'addon' = 'addon';
+  if (usageId) {
+    const [record] = await db
+      .select({ source: tokenUsage.source })
+      .from(tokenUsage)
+      .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
+      .limit(1);
+    if (record?.source === 'monthly') {
+      source = 'monthly';
+    }
+  }
+
+  if (source === 'monthly') {
+    await db
+      .update(users)
+      .set({
+        monthlyTokensUsed: sql`GREATEST(0, ${users.monthlyTokensUsed} - ${tokens})`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  } else {
+    await db
+      .update(users)
+      .set({
+        addonTokens: sql`${users.addonTokens} + ${tokens}`,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+  }
 
   await db.insert(tokenUsage).values({
     userId,
     operation: 'partial_refund',
     tokens: -tokens,
-    source: 'addon',
-    metadata: { reason },
+    source,
+    metadata: { reason, ...(usageId ? { originalUsageId: usageId } : {}) },
   });
 }
 
