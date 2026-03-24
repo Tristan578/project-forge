@@ -7,7 +7,42 @@ import { ONBOARDING_TASKS, getTasksForProjectType } from '@/data/onboardingTasks
 import type { ProjectType } from '@/data/onboardingTasks';
 import { ACHIEVEMENTS } from '@/data/achievements';
 import { useProjectType } from '@/hooks/useProjectType';
-import * as Icons from 'lucide-react';
+import {
+  Sparkles,
+  Palette,
+  Atom,
+  Code,
+  Bot,
+  Layout,
+  Gamepad2,
+  Film,
+  Music,
+  Globe,
+  Award,
+  Trophy,
+  Layers,
+  Compass,
+  Crown,
+} from 'lucide-react';
+import type { LucideProps } from 'lucide-react';
+
+const ACHIEVEMENT_ICONS: Record<string, React.ComponentType<LucideProps>> = {
+  Sparkles,
+  Palette,
+  Atom,
+  Code,
+  Bot,
+  Layout,
+  Gamepad2,
+  Film,
+  Music,
+  Globe,
+  Award,
+  Trophy,
+  Layers,
+  Compass,
+  Crown,
+};
 
 export function OnboardingPanel() {
   const {
@@ -156,7 +191,7 @@ export function OnboardingPanel() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {ACHIEVEMENTS.map((achievement) => {
                 const isUnlocked = unlockedAchievements.includes(achievement.id);
-                const IconComponent = (Icons as unknown as Record<string, React.ComponentType<{ className?: string }>>)[achievement.icon];
+                const IconComponent = ACHIEVEMENT_ICONS[achievement.icon];
 
                 const tierColors = {
                   bronze: 'from-amber-700 to-amber-900',
