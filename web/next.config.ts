@@ -58,7 +58,10 @@ const nextConfig: NextConfig = {
     // Use the new scroll restoration handler that correctly restores scroll
     // position across App Router navigations (16.2+).
     appNewScrollHandler: true,
-    // Stores rendered RSC payloads so subsequent navigations to the same
+    // Enable the 'use cache' directive for Server Components. Allows
+    // cache-eligible components to declare cacheTag() and cacheLife() hints
+    // so Next.js can skip re-rendering on subsequent requests.
+    useCache: true,
   },
   images: {
     remotePatterns: [

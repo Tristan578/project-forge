@@ -7,6 +7,11 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, within } from '@/test/utils/componentTestUtils';
 import LandingPage from '../page';
 
+vi.mock('next/cache', () => ({
+  cacheLife: vi.fn(),
+  cacheTag: vi.fn(),
+}));
+
 vi.mock('next/link', () => ({
   default: ({
     children,
