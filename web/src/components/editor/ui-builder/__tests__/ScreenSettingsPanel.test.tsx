@@ -78,7 +78,7 @@ describe('ScreenSettingsPanel', () => {
     setupStore();
     render(<ScreenSettingsPanel />);
     const input = screen.getByDisplayValue('Main Menu');
-    expect(input).toBeDefined();
+    expect(input).not.toBeNull();
   });
 
   it('calls renameScreen when name input changes', () => {

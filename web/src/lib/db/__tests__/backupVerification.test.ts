@@ -74,7 +74,7 @@ describe('backup verification script coverage', () => {
     it.each(VERIFIED_TABLES_IN_SCRIPT)(
       'schema exports table "%s" that verify-db-backup.sh checks',
       (tableName) => {
-        expect(schema[tableName as keyof typeof schema]).toBeDefined();
+        expect(schema[tableName as keyof typeof schema]).not.toBeUndefined();
       }
     );
   });
@@ -83,7 +83,7 @@ describe('backup verification script coverage', () => {
     it.each(VERIFIED_ENUMS_IN_SCRIPT)(
       'schema exports enum "%s" that verify-db-backup.sh checks',
       (enumName) => {
-        expect(schema[enumName as keyof typeof schema]).toBeDefined();
+        expect(schema[enumName as keyof typeof schema]).not.toBeUndefined();
       }
     );
   });
@@ -92,7 +92,7 @@ describe('backup verification script coverage', () => {
     it.each(ROW_COUNTED_TABLES_IN_SCRIPT)(
       'schema exports table "%s" that verify-db-backup.sh counts rows for',
       (tableName) => {
-        expect(schema[tableName as keyof typeof schema]).toBeDefined();
+        expect(schema[tableName as keyof typeof schema]).not.toBeUndefined();
       }
     );
   });
@@ -135,7 +135,7 @@ describe('backup verification script coverage', () => {
         expect(
           schema[tableName as keyof typeof schema],
           `Table "${tableName}" is in verify-db-backup.sh but missing from schema.ts`
-        ).toBeDefined();
+        ).not.toBeNull();
       });
     });
 
@@ -166,7 +166,7 @@ describe('backup verification script coverage', () => {
         expect(
           schema[enumName as keyof typeof schema],
           `Enum "${enumName}" is in verify-db-backup.sh but missing from schema.ts`
-        ).toBeDefined();
+        ).not.toBeNull();
       });
     });
   });
@@ -188,7 +188,7 @@ describe('GDPR data export table coverage', () => {
   it.each(GDPR_EXPORT_TABLES)(
     'schema exports GDPR-covered table "%s"',
     (tableName) => {
-      expect(schema[tableName as keyof typeof schema]).toBeDefined();
+      expect(schema[tableName as keyof typeof schema]).not.toBeUndefined();
     }
   );
 
@@ -212,11 +212,11 @@ describe('GDPR data export table coverage', () => {
     const _genJobCheck: Pick<GenerationJobRow, 'id' | 'userId' | 'status'> = {} as Pick<GenerationJobRow, 'id' | 'userId' | 'status'>;
 
     // If any of the above fail to compile, the GDPR export query will break.
-    expect(_userCheck).toBeDefined();
-    expect(_projectCheck).toBeDefined();
-    expect(_tokenUsageCheck).toBeDefined();
-    expect(_creditTxnCheck).toBeDefined();
-    expect(_genJobCheck).toBeDefined();
+    expect(_userCheck).not.toBeUndefined();
+    expect(_projectCheck).not.toBeUndefined();
+    expect(_tokenUsageCheck).not.toBeUndefined();
+    expect(_creditTxnCheck).not.toBeUndefined();
+    expect(_genJobCheck).not.toBeUndefined();
   });
 });
 

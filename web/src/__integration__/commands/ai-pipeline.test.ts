@@ -153,10 +153,10 @@ describe('GDD → Level pipeline', () => {
     const genre = detectGenre(FIXTURE_GDD.summary);
     // "dungeon" keyword should trigger dungeon template selection in generateLevel
     const level = await generateLevel(FIXTURE_GDD.summary);
-    expect(level).toBeDefined();
+    expect(level).not.toBeUndefined();
     expect(level.rooms.length).toBeGreaterThan(0);
-    expect(level.startRoom).toBeTruthy();
-    expect(level.exitRoom).toBeTruthy();
+    expect(level.startRoom).not.toBeNull();
+    expect(level.exitRoom).not.toBeNull();
     // Genre-based selection should have some result
     expect(typeof genre).toBe('string');
   });
@@ -165,7 +165,7 @@ describe('GDD → Level pipeline', () => {
     // A GDD with dungeon/corridor mechanics → dungeon template
     const dungeonGDD = { ...FIXTURE_GDD, summary: 'A dungeon crawl with corridors and locked rooms' };
     const level = await generateLevel(dungeonGDD.summary);
-    expect(level.name).toBeTruthy();
+    expect(level.name).not.toBeNull();
     expect(level.rooms.every((r) => r.id)).toBe(true);
   });
 
@@ -359,7 +359,7 @@ describe('full pipeline: GDD → Level → Effects → Review', () => {
 
     // The GDD summary should work as a level description string
     const level = await generateLevel(gdd.summary);
-    expect(level.name).toBeTruthy();
+    expect(level.name).not.toBeNull();
     expect(level.rooms.length).toBeGreaterThan(0);
 
     // Level commands should be a non-empty array
@@ -369,7 +369,7 @@ describe('full pipeline: GDD → Level → Effects → Review', () => {
     // Commands feed into dispatch — verify shape
     for (const cmd of commands) {
       expect(typeof cmd.command).toBe('string');
-      expect(cmd.payload).toBeDefined();
+      expect(cmd.payload).not.toBeUndefined();
     }
   });
 
@@ -579,7 +579,7 @@ describe('partial pipeline: start from Level stage', () => {
 
   it('level can be generated independently without a GDD', async () => {
     const level = await generateLevel('an arena battle with waves');
-    expect(level).toBeDefined();
+    expect(level).not.toBeUndefined();
     expect(level.rooms.length).toBeGreaterThan(0);
     const errors = validateLayout(level);
     expect(errors).toHaveLength(0);

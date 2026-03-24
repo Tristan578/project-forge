@@ -189,7 +189,7 @@ describe('AnimationClipInspector', () => {
     // Stop button exists among buttons
     const buttons = document.querySelectorAll('button');
     const stopBtn = Array.from(buttons).find((b) => b.textContent?.includes('Stop'));
-    expect(stopBtn).toBeDefined();
+    expect(stopBtn).not.toBeNull();
   });
 
   it('calls previewClip play on Preview click', () => {
@@ -238,7 +238,7 @@ describe('AnimationClipInspector', () => {
     // The outer Add Track button (not in expanded track)
     const buttons = document.querySelectorAll('button');
     const addTrackBtn = Array.from(buttons).find((b) => b.textContent?.includes('Add Track'));
-    expect(addTrackBtn).toBeDefined();
+    expect(addTrackBtn).not.toBeNull();
   });
 
   it('opens add track form on click', () => {

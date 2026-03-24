@@ -110,9 +110,9 @@ describe('TimelinePanel constants', () => {
 
   it('each target has value, label, group, and color', () => {
     for (const target of PROPERTY_TARGETS) {
-      expect(target.value).toBeTruthy();
-      expect(target.label).toBeTruthy();
-      expect(target.group).toBeTruthy();
+      expect(target.value).not.toBeNull();
+      expect(target.label).not.toBeNull();
+      expect(target.group).not.toBeNull();
       expect(target.color).toMatch(/^#[0-9a-f]{6}$/);
     }
   });

@@ -15,7 +15,7 @@ describe('useVirtualList', () => {
     expect(result.current.startIndex).toBe(0);
     expect(result.current.totalHeight).toBe(3000);
     expect(result.current.offsetY).toBe(0);
-    expect(result.current.containerRef).toBeDefined();
+    expect(result.current.containerRef).not.toBeUndefined();
     expect(typeof result.current.onScroll).toBe('function');
   });
 

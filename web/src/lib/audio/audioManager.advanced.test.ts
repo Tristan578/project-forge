@@ -802,7 +802,7 @@ describe('audioManager - Advanced', () => {
 
       // Verify clamping happened by checking internal gain node
       const oneshot = getInternal().oneShotInstances.get(id) as { gainNode: MockGainNode } | undefined;
-      expect(oneshot).toBeDefined();
+      expect(oneshot).not.toBeUndefined();
       expect(oneshot!.gainNode.gain.value).toBeLessThanOrEqual(1);
     });
 

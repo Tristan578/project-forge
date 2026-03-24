@@ -263,7 +263,7 @@ describe('scriptWorker integration', () => {
 
       const commands = cmdMessages[0].commands as Array<Record<string, unknown>>;
       const transformCmd = commands.find(c => c.cmd === 'update_transform');
-      expect(transformCmd).toBeDefined();
+      expect(transformCmd).not.toBeUndefined();
     });
 
     it('should enforce per-frame command limit', () => {
@@ -292,7 +292,7 @@ describe('scriptWorker integration', () => {
       const limitError = errors.find(e =>
         typeof e.message === 'string' && e.message.includes('Command limit exceeded')
       );
-      expect(limitError).toBeDefined();
+      expect(limitError).not.toBeUndefined();
 
       // Commands should be truncated to 100
       const cmdMessages = getMessages('commands');
@@ -646,7 +646,7 @@ describe('scriptWorker integration', () => {
 
       const logs = getMessages('log');
       const scoreLog = logs.find(l => typeof l.message === 'string' && l.message.includes('score='));
-      expect(scoreLog).toBeDefined();
+      expect(scoreLog).not.toBeUndefined();
       expect(scoreLog!.message).toBe('score=42');
     });
   });

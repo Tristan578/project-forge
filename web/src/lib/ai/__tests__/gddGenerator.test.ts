@@ -472,7 +472,7 @@ describe('generateGDD', () => {
     expect(body.messages[0].content).toContain('Game idea: a puzzle game');
     expect(body.messages[0].content).toContain('Genre preference: Puzzle');
     expect(body.messages[0].content).toContain('Target scope: small');
-    expect(body.systemOverride).toBeDefined();
+    expect(body.systemOverride).not.toBeUndefined();
   });
 
   it('handles error event in SSE stream', async () => {

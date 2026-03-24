@@ -17,13 +17,13 @@ describe('MATERIAL_PRESETS', () => {
 
   it('should have all required fields', () => {
     for (const preset of MATERIAL_PRESETS) {
-      expect(preset.id).toBeTruthy();
-      expect(preset.name).toBeTruthy();
-      expect(preset.category).toBeTruthy();
-      expect(preset.description).toBeTruthy();
+      expect(preset.id).not.toBeNull();
+      expect(preset.name).not.toBeNull();
+      expect(preset.category).not.toBeNull();
+      expect(preset.description).not.toBeNull();
       expect(preset.tags.length).toBeGreaterThan(0);
-      expect(preset.data).toBeDefined();
-      expect(preset.data.baseColor).toBeDefined();
+      expect(preset.data).not.toBeUndefined();
+      expect(preset.data.baseColor).not.toBeUndefined();
     }
   });
 
@@ -44,7 +44,7 @@ describe('MATERIAL_PRESETS', () => {
 describe('getPresetById', () => {
   it('should find a preset by ID', () => {
     const preset = getPresetById('gold');
-    expect(preset).toBeDefined();
+    expect(preset).not.toBeUndefined();
     expect(preset!.name).toBe('Gold');
     expect(preset!.category).toBe('metal');
   });

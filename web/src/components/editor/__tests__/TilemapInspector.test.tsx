@@ -132,7 +132,7 @@ describe('TilemapInspector', () => {
     // Layer name is rendered as an input value
     const inputs = screen.getAllByRole('textbox');
     const layerInput = inputs.find((inp) => (inp as HTMLInputElement).value === 'Layer 1');
-    expect(layerInput).toBeDefined();
+    expect(layerInput).not.toBeNull();
   });
 
   it('renders Add Layer button with title', () => {

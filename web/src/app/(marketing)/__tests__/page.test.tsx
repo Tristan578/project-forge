@@ -75,7 +75,7 @@ describe('LandingPage', () => {
   it('renders the hero section with headline', () => {
     expect(
       screen.getByRole('heading', { name: /create games with ai/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('renders the primary CTA button linking to sign-up', () => {
@@ -151,7 +151,7 @@ describe('LandingPage', () => {
   it('renders the footer CTA section', () => {
     expect(
       screen.getByRole('heading', { name: /ready to create your first game/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('has proper heading hierarchy (h1 -> h2)', () => {
@@ -181,7 +181,7 @@ describe('LandingPage', () => {
   it('renders testimonials social proof section', () => {
     expect(
       screen.getByRole('heading', { name: /trusted by game creators/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('renders testimonials with realistic content (not placeholders)', () => {
@@ -197,7 +197,7 @@ describe('LandingPage', () => {
   it('renders the AI showcase section', () => {
     expect(
       screen.getByRole('heading', { name: /from prompt to playable/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('"See How It Works" CTA links to the demo section', () => {

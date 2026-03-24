@@ -69,7 +69,7 @@ describe('CanvasArea', () => {
     mockEditorStore();
     const { container } = render(<CanvasArea />);
     const canvas = container.querySelector('canvas');
-    expect(canvas).toBeDefined();
+    expect(canvas).not.toBeUndefined();
     expect(canvas?.id).toBe('game-canvas');
   });
 

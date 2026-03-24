@@ -112,7 +112,7 @@ describe('ChatMessage', () => {
       />
     );
     const reasoningBtn = screen.getByText('Reasoning');
-    expect(reasoningBtn).toBeDefined();
+    expect(reasoningBtn).not.toBeNull();
 
     // Initially closed
     expect(screen.queryByText('Let me think about this...')).toBeNull();

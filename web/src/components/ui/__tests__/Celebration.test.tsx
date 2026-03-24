@@ -36,7 +36,7 @@ describe('Celebration', () => {
     render(<Celebration title="Milestone" message="Great work." onDismiss={onDismiss} />);
 
     const btn = screen.getByRole('button', { name: /dismiss/i });
-    expect(btn).toBeDefined();
+    expect(btn).not.toBeNull();
   });
 
   it('calls onDismiss when dismiss button is clicked', () => {

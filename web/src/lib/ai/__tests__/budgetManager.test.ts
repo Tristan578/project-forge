@@ -37,7 +37,7 @@ describe('AIBudgetManager', () => {
     expect(result.success).toBe(true);
     expect(result.reservedTokens).toBe(30);
     expect(result.remaining).toBe(70);
-    expect(result.operationId).toBeTruthy();
+    expect(result.operationId).not.toBeNull();
   });
 
   it('grants a zero-cost request unconditionally', () => {

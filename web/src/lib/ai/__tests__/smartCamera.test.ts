@@ -47,18 +47,18 @@ describe('CAMERA_PRESETS', () => {
   it('every preset has required fields', () => {
     for (const key of PRESET_KEYS) {
       const preset = CAMERA_PRESETS[key];
-      expect(preset.name).toBeTruthy();
-      expect(preset.genre).toBeTruthy();
-      expect(preset.mode).toBeTruthy();
+      expect(preset.name).not.toBeNull();
+      expect(preset.genre).not.toBeNull();
+      expect(preset.mode).not.toBeNull();
       expect(typeof preset.followDistance).toBe('number');
       expect(typeof preset.followHeight).toBe('number');
       expect(typeof preset.followSmoothing).toBe('number');
       expect(typeof preset.fov).toBe('number');
       expect(typeof preset.lookAhead).toBe('number');
-      expect(preset.deadZone).toBeDefined();
+      expect(preset.deadZone).not.toBeUndefined();
       expect(typeof preset.deadZone.x).toBe('number');
       expect(typeof preset.deadZone.y).toBe('number');
-      expect(preset.shake).toBeDefined();
+      expect(preset.shake).not.toBeUndefined();
       expect(typeof preset.shake.enabled).toBe('boolean');
     }
   });
@@ -76,7 +76,7 @@ describe('CAMERA_PRESETS', () => {
   });
 
   it('top_down_strategy has bounds', () => {
-    expect(CAMERA_PRESETS['top_down_strategy'].bounds).toBeDefined();
+    expect(CAMERA_PRESETS['top_down_strategy'].bounds).not.toBeUndefined();
   });
 });
 
@@ -315,7 +315,7 @@ describe('interpolatePresets', () => {
       bounds: { minX: -20, maxX: 20, minY: -20, maxY: 20 },
     };
     const result = interpolatePresets(withBoundsA, withBoundsB, 0.5);
-    expect(result.bounds).toBeDefined();
+    expect(result.bounds).not.toBeUndefined();
     expect(result.bounds!.minX).toBeCloseTo(-15, 5);
   });
 
@@ -326,7 +326,7 @@ describe('interpolatePresets', () => {
     };
     const noBounds: CameraPreset = { ...presetB, bounds: undefined };
     const result = interpolatePresets(withBounds, noBounds, 0.3);
-    expect(result.bounds).toBeDefined();
+    expect(result.bounds).not.toBeUndefined();
     expect(result.bounds!.minX).toBe(-50);
   });
 });

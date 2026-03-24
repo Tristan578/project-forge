@@ -330,7 +330,7 @@ describe('SceneHierarchy', () => {
       fireEvent.keyDown(tree, { key: 'ArrowDown' });
     }
     // Should not crash — just wraps
-    expect(tree).toBeDefined();
+    expect(tree).not.toBeUndefined();
   });
 
   it('ArrowUp moves focus to previous node', () => {
@@ -450,6 +450,6 @@ describe('SceneHierarchy', () => {
     fireEvent.dragOver(tree, { preventDefault: vi.fn() });
 
     // Should not crash
-    expect(tree).toBeDefined();
+    expect(tree).not.toBeUndefined();
   });
 });

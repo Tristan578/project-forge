@@ -60,7 +60,7 @@ describe('EmptyState', () => {
       />
     );
     const button = screen.getByRole('button', { name: 'Add Entity' });
-    expect(button).toBeDefined();
+    expect(button).not.toBeNull();
   });
 
   it('calls action onClick when button is clicked', () => {
@@ -98,7 +98,7 @@ describe('EmptyState', () => {
         className="my-custom-class"
       />
     );
-    expect(container.firstChild).toBeDefined();
+    expect(container.firstChild).not.toBeNull();
     const wrapper = container.firstChild as HTMLElement;
     expect(wrapper.className).toContain('my-custom-class');
   });

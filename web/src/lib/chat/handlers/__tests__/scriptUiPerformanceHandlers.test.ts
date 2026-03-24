@@ -452,9 +452,9 @@ describe('scriptLibraryHandlers', () => {
       const { result } = await invokeScript('get_token_pricing');
       expect(result.success).toBe(true);
       const r = result.result as Record<string, unknown>;
-      expect(r.costs).toBeDefined();
-      expect(r.monthlyAllocations).toBeDefined();
-      expect(r.packages).toBeDefined();
+      expect(r.costs).not.toBeUndefined();
+      expect(r.monthlyAllocations).not.toBeUndefined();
+      expect(r.packages).not.toBeUndefined();
     });
   });
 

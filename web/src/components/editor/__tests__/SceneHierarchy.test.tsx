@@ -128,11 +128,11 @@ describe('SceneHierarchy', () => {
 
     // The SceneNode mock renders a div with the entity name
     const entityNode = screen.getByText('Cube');
-    expect(entityNode).toBeDefined();
+    expect(entityNode).not.toBeUndefined();
 
     // The selectEntity fn should be available in the rendered tree
     // (SceneNode is mocked, so we confirm the store wiring via mock injection)
-    expect(mockSelectEntity).toBeDefined();
+    expect(mockSelectEntity).not.toBeUndefined();
   });
 
   it('renders scene nodes when graph has entities', () => {

@@ -22,9 +22,9 @@ describe('EXPORT_PRESETS', () => {
 
   it('should have loading screen config for each preset', () => {
     for (const [key, preset] of Object.entries(EXPORT_PRESETS)) {
-      expect(preset.loadingScreen, `${key} loadingScreen`).toBeDefined();
-      expect(preset.loadingScreen.backgroundColor, `${key} bg color`).toBeDefined();
-      expect(preset.loadingScreen.progressBarColor, `${key} progress color`).toBeDefined();
+      expect(preset.loadingScreen, `${key} loadingScreen`).not.toBeUndefined();
+      expect(preset.loadingScreen.backgroundColor, `${key} bg color`).not.toBeUndefined();
+      expect(preset.loadingScreen.progressBarColor, `${key} progress color`).not.toBeUndefined();
     }
   });
 
@@ -53,7 +53,7 @@ describe('getPresetNames', () => {
 describe('getPreset', () => {
   it('should return a preset by name', () => {
     const preset = getPreset('itch-io');
-    expect(preset).toBeDefined();
+    expect(preset).not.toBeUndefined();
     expect(preset!.name).toBe('itch.io');
     expect(preset!.format).toBe('zip');
   });

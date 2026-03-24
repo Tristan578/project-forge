@@ -307,7 +307,7 @@ describe('BUILT_IN_SCHEMAS', () => {
       'update_light',
     ];
     for (const cmd of expectedCommands) {
-      expect(BUILT_IN_SCHEMAS[cmd], `Missing schema for ${cmd}`).toBeDefined();
+      expect(BUILT_IN_SCHEMAS[cmd], `Missing schema for ${cmd}`).not.toBeUndefined();
     }
   });
 });

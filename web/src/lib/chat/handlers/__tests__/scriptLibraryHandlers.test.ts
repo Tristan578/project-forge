@@ -286,8 +286,8 @@ describe('list_script_templates', () => {
     expect(result.success).toBe(true);
     const data = result.result as { templates: Array<{ id: string; name: string }> };
     expect(data.templates.length).toBeGreaterThan(0);
-    expect(data.templates[0].id).toBeTruthy();
-    expect(data.templates[0].name).toBeTruthy();
+    expect(data.templates[0].id).not.toBeNull();
+    expect(data.templates[0].name).not.toBeNull();
   });
 
   it('includes character_controller template', async () => {
@@ -700,9 +700,9 @@ describe('get_token_pricing', () => {
     const { result } = await invokeHandler(scriptLibraryHandlers, 'get_token_pricing', {});
     expect(result.success).toBe(true);
     const data = result.result as { costs: unknown; monthlyAllocations: unknown; packages: unknown };
-    expect(data.costs).toBeDefined();
-    expect(data.monthlyAllocations).toBeDefined();
-    expect(data.packages).toBeDefined();
+    expect(data.costs).not.toBeUndefined();
+    expect(data.monthlyAllocations).not.toBeUndefined();
+    expect(data.packages).not.toBeUndefined();
   });
 });
 

@@ -56,7 +56,7 @@ describe('GameAnalyticsCollector', () => {
   it('creates a session with correct initial state', () => {
     const id = collector.startSession(1000);
     const session = collector.getSessionSummary(id);
-    expect(session).toBeDefined();
+    expect(session).not.toBeUndefined();
     expect(session!.startTime).toBe(1000);
     expect(session!.endTime).toBeUndefined();
     expect(session!.duration).toBe(0);

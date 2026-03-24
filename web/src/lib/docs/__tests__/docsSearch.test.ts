@@ -50,7 +50,7 @@ describe('buildClientIndex', () => {
 
     // "entities" appears in doc 0 and doc 2
     const entityFreqs = index.termFreqs.get('entities');
-    expect(entityFreqs).toBeDefined();
+    expect(entityFreqs).not.toBeUndefined();
     expect(entityFreqs!.size).toBeGreaterThanOrEqual(1);
   });
 
@@ -119,7 +119,7 @@ describe('searchDocs', () => {
     const results = searchDocs('rapier rigid body', docs, index);
 
     const physDoc = results.find(r => r.path === '/docs/physics');
-    expect(physDoc).toBeDefined();
+    expect(physDoc).not.toBeUndefined();
     expect(physDoc!.matchSection).toBe('Rapier');
   });
 

@@ -496,7 +496,7 @@ describe('Export Pipeline Integration', () => {
       };
 
       const { modifiedScene } = await extractAssets(scene);
-      expect(modifiedScene).toBeDefined();
+      expect(modifiedScene).not.toBeUndefined();
     });
 
     it('should handle very large script source gracefully', () => {
@@ -517,7 +517,7 @@ describe('Export Pipeline Integration', () => {
 
       // Should not throw
       const { assets } = await extractAssets(scene);
-      expect(assets).toBeDefined();
+      expect(assets).not.toBeUndefined();
     });
 
     it('should preserve non-data-URL strings in scene', async () => {

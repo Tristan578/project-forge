@@ -93,7 +93,7 @@ describe('NodeInspector', () => {
   it('renders checkbox for bool port', () => {
     render(<NodeInspector node={makeNode('print_log')} onNodeDataChange={mockOnNodeDataChange} />);
     const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).toBeDefined();
+    expect(checkbox).not.toBeNull();
   });
 
   it('calls onNodeDataChange when text input changes', () => {

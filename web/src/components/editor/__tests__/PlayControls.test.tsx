@@ -66,7 +66,7 @@ describe('PlayControls', () => {
 
     // Pause button should be enabled in play mode
     const pauseBtn = screen.getByRole('button', { name: /pause/i });
-    expect(pauseBtn).toBeDefined();
+    expect(pauseBtn).not.toBeNull();
     fireEvent.click(pauseBtn);
     expect(mockPause).toHaveBeenCalledTimes(1);
 
@@ -76,7 +76,7 @@ describe('PlayControls', () => {
     mockEditorStore({ engineMode: 'paused', resume: mockResume });
     render(<PlayControls />);
     const resumeBtn = screen.getByRole('button', { name: /resume/i });
-    expect(resumeBtn).toBeDefined();
+    expect(resumeBtn).not.toBeNull();
     fireEvent.click(resumeBtn);
     expect(mockResume).toHaveBeenCalledTimes(1);
   });
@@ -87,7 +87,7 @@ describe('PlayControls', () => {
     render(<PlayControls />);
 
     const stopBtn = screen.getByRole('button', { name: /stop/i });
-    expect(stopBtn).toBeDefined();
+    expect(stopBtn).not.toBeNull();
     fireEvent.click(stopBtn);
     expect(mockStop).toHaveBeenCalledTimes(1);
   });
@@ -105,7 +105,7 @@ describe('PlayControls', () => {
     render(<PlayControls />);
     // In paused mode, the Resume button replaces Play; no play button present
     const resumeBtn = screen.getByRole('button', { name: /resume/i });
-    expect(resumeBtn).toBeDefined();
+    expect(resumeBtn).not.toBeNull();
   });
 
   it('stop button is disabled in edit mode', () => {

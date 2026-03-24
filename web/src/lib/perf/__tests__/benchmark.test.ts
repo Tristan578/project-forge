@@ -177,7 +177,7 @@ describe('detectRegressions()', () => {
     const baseline = makeReport([makeResult('op', { avg: 5, p50: 4, p95: 8, p99: 10 })]);
     const regressions = detectRegressions(current, baseline, 2.0);
     const avgRegression = regressions.find(r => r.metric === 'avg');
-    expect(avgRegression).toBeDefined();
+    expect(avgRegression).not.toBeUndefined();
     expect(avgRegression?.ratio).toBeCloseTo(11 / 5);
   });
 
@@ -186,7 +186,7 @@ describe('detectRegressions()', () => {
     const baseline = makeReport([makeResult('op', { avg: 5, p50: 4, p95: 8, p99: 10 })]);
     const regressions = detectRegressions(current, baseline, 2.0);
     const p95regression = regressions.find(r => r.metric === 'p95');
-    expect(p95regression).toBeDefined();
+    expect(p95regression).not.toBeUndefined();
   });
 
   it('skips benchmarks that exist in current but not in baseline', () => {

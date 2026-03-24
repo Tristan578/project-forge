@@ -54,7 +54,7 @@ describe('GenerationProgress', () => {
   it('renders with role="status" and aria-live="polite"', () => {
     render(<GenerationProgress operation="model" />);
     const el = screen.getByRole('status');
-    expect(el).toBeDefined();
+    expect(el).not.toBeNull();
     expect(el.getAttribute('aria-live')).toBe('polite');
   });
 
@@ -143,7 +143,7 @@ describe('GenerationProgress', () => {
   it('renders progressbar element in determinate mode', () => {
     render(<GenerationProgress operation="model" progress={50} />);
     const bar = screen.getByRole('progressbar');
-    expect(bar).toBeDefined();
+    expect(bar).not.toBeUndefined();
   });
 
   it('sets aria-valuenow to current progress', () => {

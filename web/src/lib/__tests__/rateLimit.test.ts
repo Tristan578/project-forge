@@ -124,8 +124,8 @@ describe('Upstash integration', () => {
     // Verify the Upstash packages are importable (installed as dependencies)
     const { Redis } = await import('@upstash/redis');
     const { Ratelimit } = await import('@upstash/ratelimit');
-    expect(Redis).toBeDefined();
-    expect(Ratelimit).toBeDefined();
+    expect(Redis).not.toBeUndefined();
+    expect(Ratelimit).not.toBeUndefined();
     expect(typeof Ratelimit.slidingWindow).toBe('function');
   });
 
@@ -323,7 +323,7 @@ describe('rateLimitAdminRoute', () => {
     const result = await rateLimitAdminRoute('admin-7', 'admin-test-5', 2, 60_000);
     expect(result).not.toBeNull();
     expect(result!.headers.get('X-RateLimit-Remaining')).toBe('0');
-    expect(result!.headers.get('Retry-After')).toBeTruthy();
-    expect(result!.headers.get('X-RateLimit-Reset')).toBeTruthy();
+    expect(result!.headers.get('Retry-After')).not.toBeNull();
+    expect(result!.headers.get('X-RateLimit-Reset')).not.toBeNull();
   });
 });

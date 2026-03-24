@@ -20,7 +20,7 @@ describe('ESTIMATED_TIMES', () => {
       'skybox', 'sprite', 'sprite_sheet', 'tileset', 'pixel-art',
     ];
     for (const type of expected) {
-      expect(ESTIMATED_TIMES[type], `missing entry for "${type}"`).toBeDefined();
+      expect(ESTIMATED_TIMES[type], `missing entry for "${type}"`).not.toBeUndefined();
     }
   });
 
@@ -33,7 +33,7 @@ describe('ESTIMATED_TIMES', () => {
 
   it('has a non-empty label for every entry', () => {
     for (const [type, range] of Object.entries(ESTIMATED_TIMES)) {
-      expect(range.label, `${type}.label`).toBeTruthy();
+      expect(range.label, `${type}.label`).not.toBeNull();
     }
   });
 
@@ -152,7 +152,7 @@ describe('getCurrentStage', () => {
 
   it('returns a middle stage at 50% progress', () => {
     const stage = getCurrentStage('model', 50);
-    expect(stage).toBeTruthy();
+    expect(stage).not.toBeNull();
     expect(stage).not.toBe('');
   });
 
@@ -164,7 +164,7 @@ describe('getCurrentStage', () => {
     for (const type of types) {
       for (const progress of [0, 25, 50, 75, 99, 100]) {
         const stage = getCurrentStage(type, progress);
-        expect(stage, `${type} @ ${progress}%`).toBeTruthy();
+        expect(stage, `${type} @ ${progress}%`).not.toBeNull();
       }
     }
   });
@@ -193,7 +193,7 @@ describe('GENERATION_STAGES', () => {
       'skybox', 'sprite', 'sprite_sheet', 'tileset', 'pixel-art',
     ];
     for (const type of expected) {
-      expect(GENERATION_STAGES[type], `missing stages for "${type}"`).toBeDefined();
+      expect(GENERATION_STAGES[type], `missing stages for "${type}"`).not.toBeUndefined();
       expect(GENERATION_STAGES[type].length, `empty stages for "${type}"`).toBeGreaterThan(0);
     }
   });
@@ -205,7 +205,7 @@ describe('GENERATION_STAGES', () => {
   it('each stage label is a non-empty string ending with "..."', () => {
     for (const [type, stages] of Object.entries(GENERATION_STAGES)) {
       for (const stage of stages) {
-        expect(stage, `${type} stage "${stage}"`).toBeTruthy();
+        expect(stage, `${type} stage "${stage}"`).not.toBeNull();
         expect(stage.endsWith('...'), `${type}: "${stage}" should end with "..."`).toBe(true);
       }
     }

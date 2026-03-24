@@ -56,7 +56,7 @@ describe('InputBindingsPanel', () => {
   it('renders collapsed by default with expand button', () => {
     render(<InputBindingsPanel />);
     const toggle = screen.getByRole('button', { name: /expand input bindings/i });
-    expect(toggle).toBeDefined();
+    expect(toggle).not.toBeUndefined();
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
   });
 

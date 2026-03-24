@@ -651,7 +651,7 @@ describe('healthChecks', () => {
       expect(report.services).toHaveLength(9);
       expect(report.environment).toBe('test');
       expect(report.version).toBe('abcdef12');
-      expect(report.timestamp).toBeDefined();
+      expect(report.timestamp).not.toBeUndefined();
       expect(['healthy', 'degraded', 'down']).toContain(report.overall);
     });
 

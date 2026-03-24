@@ -173,7 +173,7 @@ describe('SHADER_NODE_DEFINITIONS: input category', () => {
   });
 
   it('contains camera_position node', () => {
-    expect(SHADER_NODE_DEFINITIONS['camera_position']).toBeDefined();
+    expect(SHADER_NODE_DEFINITIONS['camera_position']).not.toBeUndefined();
   });
 });
 
@@ -183,7 +183,7 @@ describe('SHADER_NODE_DEFINITIONS: math category', () => {
   const mathOps = ['add', 'subtract', 'multiply', 'divide'];
 
   it.each(mathOps)('contains %s node', (op) => {
-    expect(SHADER_NODE_DEFINITIONS[op]).toBeDefined();
+    expect(SHADER_NODE_DEFINITIONS[op]).not.toBeUndefined();
     expect(SHADER_NODE_DEFINITIONS[op].category).toBe('math');
   });
 
@@ -211,8 +211,8 @@ describe('SHADER_NODE_DEFINITIONS: math category', () => {
   });
 
   it('contains sin and cos trig nodes', () => {
-    expect(SHADER_NODE_DEFINITIONS['sin']).toBeDefined();
-    expect(SHADER_NODE_DEFINITIONS['cos']).toBeDefined();
+    expect(SHADER_NODE_DEFINITIONS['sin']).not.toBeUndefined();
+    expect(SHADER_NODE_DEFINITIONS['cos']).not.toBeUndefined();
   });
 
   it('contains smoothstep node with edge0/edge1/value', () => {
@@ -247,7 +247,7 @@ describe('SHADER_NODE_DEFINITIONS: texture category', () => {
   });
 
   it('contains noise_texture node', () => {
-    expect(SHADER_NODE_DEFINITIONS['noise_texture']).toBeDefined();
+    expect(SHADER_NODE_DEFINITIONS['noise_texture']).not.toBeUndefined();
   });
 });
 
@@ -332,7 +332,7 @@ describe('SHADER_PORT_COMPATIBILITY: type compatibility matrix', () => {
 
   it('has an entry for every ShaderDataType', () => {
     for (const type of VALID_SHADER_TYPES) {
-      expect(SHADER_PORT_COMPATIBILITY[type]).toBeDefined();
+      expect(SHADER_PORT_COMPATIBILITY[type]).not.toBeUndefined();
     }
   });
 

@@ -14,7 +14,7 @@ describe('palettes', () => {
         'nes', 'game-boy', 'cga', 'custom',
       ];
       for (const id of ids) {
-        expect(PALETTES[id]).toBeDefined();
+        expect(PALETTES[id]).not.toBeUndefined();
       }
     });
 
@@ -79,7 +79,7 @@ describe('palettes', () => {
   describe('getPalette', () => {
     it('should return preset palette by id', () => {
       const palette = getPalette('pico-8');
-      expect(palette).toBeDefined();
+      expect(palette).not.toBeUndefined();
       expect(palette!.colors).toHaveLength(16);
     });
 

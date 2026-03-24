@@ -90,7 +90,7 @@ describe('InspectorErrorBoundary', () => {
       </InspectorErrorBoundary>
     );
     const retryButton = screen.getByText('Retry');
-    expect(retryButton).toBeDefined();
+    expect(retryButton).not.toBeNull();
     // Clicking retry resets state — child will throw again but error boundary catches it
     fireEvent.click(retryButton);
     // Still shows fallback after retry since child still throws

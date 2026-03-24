@@ -417,8 +417,8 @@ describe('POST /api/chat', () => {
       await res.text(); // drain stream
 
       // Invoke the captured callback with real usage numbers
-      expect(capturedOnFinish).toBeDefined();
-      await capturedOnFinish!({ usage: { inputTokens: 1200, outputTokens: 300 } });
+      expect(capturedOnFinish).not.toBeUndefined();
+      await capturedOnFinish!({ usage: { promptTokens: 1200, completionTokens: 300 } });
 
       expect(logCost).toHaveBeenCalledWith(
         'user-1',

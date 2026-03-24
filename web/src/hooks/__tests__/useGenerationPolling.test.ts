@@ -396,7 +396,7 @@ describe('useGenerationPolling', () => {
     const failCall = mockUpdateJob.mock.calls.find(
       (c: unknown[]) => (c[1] as Record<string, unknown>).error === 'Generation timed out',
     );
-    expect(failCall).toBeDefined();
+    expect(failCall).not.toBeUndefined();
   });
 
   // ---------------------------------------------------------------------------
@@ -636,7 +636,7 @@ describe('useGenerationPolling', () => {
     const completedCall = mockUpdateJob.mock.calls.find(
       (c: unknown[]) => (c[1] as Record<string, unknown>).status === 'completed',
     );
-    expect(completedCall).toBeDefined();
+    expect(completedCall).not.toBeUndefined();
     const meta = (completedCall![1] as Record<string, Record<string, unknown>>).metadata;
     expect(meta).toHaveProperty('spriteSheet');
 

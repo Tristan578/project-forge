@@ -242,7 +242,7 @@ describe('audioManager', () => {
   describe('ensureContext', () => {
     it('creates AudioContext lazily', () => {
       const ctx = audioManager.ensureContext();
-      expect(ctx).toBeDefined();
+      expect(ctx).not.toBeUndefined();
       expect(ctx.state).toBe('running');
     });
 
@@ -314,8 +314,8 @@ describe('audioManager', () => {
       });
 
       const instance = getInternal().instances.get('entity1');
-      expect(instance).toBeDefined();
-      expect(instance!.pannerNode).toBeDefined();
+      expect(instance).not.toBeUndefined();
+      expect(instance!.pannerNode).not.toBeUndefined();
     });
 
     it('play creates source and gain chain', () => {
@@ -334,7 +334,7 @@ describe('audioManager', () => {
 
       const instance = getInternal().instances.get('entity1');
       expect(instance!.isPlaying).toBe(true);
-      expect(instance!.source).toBeDefined();
+      expect(instance!.source).not.toBeUndefined();
     });
 
     it('play with spatial creates PannerNode chain', () => {
@@ -352,8 +352,8 @@ describe('audioManager', () => {
       audioManager.play('entity1');
 
       const instance = getInternal().instances.get('entity1');
-      expect(instance!.pannerNode).toBeDefined();
-      expect(instance!.source).toBeDefined();
+      expect(instance!.pannerNode).not.toBeUndefined();
+      expect(instance!.source).not.toBeUndefined();
     });
   });
 
@@ -778,7 +778,7 @@ describe('audioManager', () => {
 
       audioManager.updateOcclusionState('entity1', true);
       // Verify filter frequency is being ramped (mock doesn't track, but no error)
-      expect(filter).toBeDefined();
+      expect(filter).not.toBeUndefined();
       expect(filter.type).toBe('lowpass');
     });
 

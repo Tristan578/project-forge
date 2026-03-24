@@ -175,7 +175,7 @@ describe('buildSemanticIndex', () => {
 
     // The intro chunk should contain the intro text, not be empty
     const introChunk = index.chunks.find((c) => c.section === 'Empty Section Doc');
-    expect(introChunk).toBeDefined();
+    expect(introChunk).not.toBeUndefined();
     expect(introChunk!.content).toContain('Intro text here');
   });
 
@@ -192,7 +192,7 @@ describe('buildSemanticIndex', () => {
     const index = await buildSemanticIndex([doc]);
 
     const introChunk = index.chunks.find((c) => c.section === 'Off By One');
-    expect(introChunk).toBeDefined();
+    expect(introChunk).not.toBeUndefined();
     // Must contain the FULL intro including the trailing period
     expect(introChunk!.content).toContain('Complete intro text.');
   });

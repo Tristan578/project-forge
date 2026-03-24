@@ -190,7 +190,7 @@ describe('TaskboardPanel', () => {
       const bar75 = screen.getAllByRole('progressbar').find(
         (el) => el.getAttribute('aria-valuenow') === '75'
       );
-      expect(bar75).toBeDefined();
+      expect(bar75).not.toBeUndefined();
     });
   });
 
@@ -334,7 +334,7 @@ describe('TaskboardPanel', () => {
       resetStore(makeTasks());
       render(<TaskboardPanel />);
       const clearButton = screen.getByLabelText('Clear completed tasks');
-      expect(clearButton).toBeDefined();
+      expect(clearButton).not.toBeNull();
     });
 
     it('clears all done tasks when clear button is clicked', () => {

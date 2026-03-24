@@ -24,9 +24,9 @@ describe('GENRE_CATALOG', () => {
 
   it('each genre has required fields', () => {
     for (const genre of GENRE_CATALOG) {
-      expect(genre.id).toBeTruthy();
-      expect(genre.name).toBeTruthy();
-      expect(genre.description).toBeTruthy();
+      expect(genre.id).not.toBeNull();
+      expect(genre.name).not.toBeNull();
+      expect(genre.description).not.toBeNull();
       expect(typeof genre.trending).toBe('boolean');
       expect(genre.tags.length).toBeGreaterThan(0);
     }
@@ -50,9 +50,9 @@ describe('MECHANIC_CATALOG', () => {
 
   it('each mechanic has required fields', () => {
     for (const mechanic of MECHANIC_CATALOG) {
-      expect(mechanic.id).toBeTruthy();
-      expect(mechanic.name).toBeTruthy();
-      expect(mechanic.description).toBeTruthy();
+      expect(mechanic.id).not.toBeNull();
+      expect(mechanic.name).not.toBeNull();
+      expect(mechanic.description).not.toBeNull();
       expect(['low', 'medium', 'high']).toContain(mechanic.complexity);
       expect(mechanic.tags.length).toBeGreaterThan(0);
     }
@@ -239,16 +239,16 @@ describe('generateIdea', () => {
   it('returns a valid GameIdea', () => {
     const rng = seededRandom(42);
     const idea = generateIdea({}, rng);
-    expect(idea.id).toBeTruthy();
-    expect(idea.title).toBeTruthy();
-    expect(idea.description).toBeTruthy();
-    expect(idea.genreMix.primary).toBeTruthy();
-    expect(idea.genreMix.secondary).toBeTruthy();
+    expect(idea.id).not.toBeNull();
+    expect(idea.title).not.toBeNull();
+    expect(idea.description).not.toBeNull();
+    expect(idea.genreMix.primary).not.toBeNull();
+    expect(idea.genreMix.secondary).not.toBeNull();
     expect(idea.mechanicCombo.mechanics.length).toBeGreaterThan(0);
     expect(idea.score).toBeGreaterThanOrEqual(0);
     expect(idea.score).toBeLessThanOrEqual(100);
     expect(idea.hooks.length).toBeGreaterThan(0);
-    expect(idea.targetAudience).toBeTruthy();
+    expect(idea.targetAudience).not.toBeNull();
   });
 
   it('produces deterministic results with same seed', () => {
@@ -280,8 +280,8 @@ describe('generateIdea', () => {
     const rng = seededRandom(88);
     // Only 1 genre selected — should fall back
     const idea = generateIdea({ genreIds: ['platformer'] }, rng);
-    expect(idea.genreMix.primary).toBeTruthy();
-    expect(idea.genreMix.secondary).toBeTruthy();
+    expect(idea.genreMix.primary).not.toBeNull();
+    expect(idea.genreMix.secondary).not.toBeNull();
   });
 
   it('handles trending-only filter', () => {

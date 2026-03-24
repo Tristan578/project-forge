@@ -88,7 +88,7 @@ describe('GenerateModelDialog', () => {
   it('renders Generate button disabled when prompt is empty', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
     const generateBtn = screen.getByText('Generate');
-    expect(generateBtn).toBeDefined();
+    expect(generateBtn).not.toBeNull();
     // Button should be disabled when no prompt
     expect((generateBtn as HTMLButtonElement).disabled).toBe(true);
   });

@@ -146,7 +146,7 @@ describe('executor: error containment', () => {
 
     const store = makeStore();
     const promise = executeToolCall('crash_test', {}, store);
-    await expect(promise).resolves.toBeDefined();
+    await expect(promise).resolves.not.toBeUndefined();
     const result = await promise;
     expect(typeof result.success).toBe('boolean');
   });

@@ -86,7 +86,7 @@ describe('ProfileTab', () => {
     render(<ProfileTab />);
     fireEvent.click(screen.getByText('Edit'));
     const input = screen.getByRole('textbox') as HTMLInputElement;
-    expect(input).toBeDefined();
+    expect(input).not.toBeNull();
     expect(input.value).toBe('GameDev123');
   });
 

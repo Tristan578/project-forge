@@ -22,7 +22,7 @@ describe('asyncTypes', () => {
   it('has config for every channel', () => {
     for (const ch of ASYNC_CHANNELS) {
       const config = CHANNEL_CONFIGS[ch];
-      expect(config).toBeDefined();
+      expect(config).not.toBeUndefined();
       expect(typeof config.maxConcurrent).toBe('number');
       expect(typeof config.timeoutMs).toBe('number');
       expect(typeof config.supportsProgress).toBe('boolean');

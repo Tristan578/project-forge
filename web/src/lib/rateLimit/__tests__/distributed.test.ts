@@ -217,7 +217,7 @@ describe('distributedRateLimit — Upstash path', () => {
       .mockRejectedValueOnce(new Error('cleanup failed'));
 
     // Should not throw despite cleanup failure
-    await expect(distributedRateLimit('no-throw-key', 5, 60)).resolves.toBeDefined();
+    await expect(distributedRateLimit('no-throw-key', 5, 60)).resolves.not.toBeUndefined();
   });
 });
 

@@ -64,7 +64,7 @@ describe('DashboardLayout', () => {
   it('shows empty state when no projects loaded', async () => {
     render(<DashboardLayout />);
     const emptyText = await screen.findByText('No projects yet. Create your first game!');
-    expect(emptyText).toBeDefined();
+    expect(emptyText).not.toBeUndefined();
   });
 
   it('opens new project dialog when clicking the header New Project button', async () => {

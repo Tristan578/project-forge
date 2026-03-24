@@ -87,7 +87,7 @@ describe('GameDetailModal', () => {
 
     // Wait for async load
     const title = await screen.findByText('Amazing Game');
-    expect(title).toBeDefined();
+    expect(title).not.toBeUndefined();
     expect(screen.getByText('by Author')).not.toBeNull();
     expect(screen.getByText('A great game')).not.toBeNull();
   });

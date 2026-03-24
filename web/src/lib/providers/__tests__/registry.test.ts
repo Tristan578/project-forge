@@ -559,7 +559,7 @@ describe('registry — resolveBackendWithCircuitBreaker direct backend provider 
 
     const route = resolveBackendWithCircuitBreaker('chat');
     expect(route).not.toBeNull();
-    expect(route!.circuitBreakerWarning).toBeDefined();
+    expect(route!.circuitBreakerWarning).not.toBeUndefined();
     expect(route!.circuitBreakerWarning).toContain('HALF_OPEN');
 
     vi.useRealTimers();

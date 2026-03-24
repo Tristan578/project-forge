@@ -12,12 +12,16 @@ describe('command manifest', () => {
 
   it('every command has required fields', () => {
     for (const cmd of manifest.commands) {
-      expect(cmd.name, `command missing name`).toBeTruthy();
-      expect(cmd.description, `${cmd.name} missing description`).toBeTruthy();
-      expect(cmd.category, `${cmd.name} missing category`).toBeTruthy();
-      expect(cmd.parameters, `${cmd.name} missing parameters`).toBeDefined();
+      expect(typeof cmd.name, `command missing name`).toBe('string');
+      expect(cmd.name.length, `command has empty name`).toBeGreaterThan(0);
+      expect(typeof cmd.description, `${cmd.name} missing description`).toBe('string');
+      expect(cmd.description.length, `${cmd.name} has empty description`).toBeGreaterThan(0);
+      expect(typeof cmd.category, `${cmd.name} missing category`).toBe('string');
+      expect(cmd.category.length, `${cmd.name} has empty category`).toBeGreaterThan(0);
+      expect(cmd.parameters, `${cmd.name} missing parameters`).not.toBeUndefined();
       expect(typeof cmd.tokenCost, `${cmd.name} tokenCost not number`).toBe('number');
-      expect(cmd.requiredScope, `${cmd.name} missing requiredScope`).toBeTruthy();
+      expect(typeof cmd.requiredScope, `${cmd.name} missing requiredScope`).toBe('string');
+      expect(cmd.requiredScope.length, `${cmd.name} has empty requiredScope`).toBeGreaterThan(0);
     }
   });
 
@@ -31,7 +35,7 @@ describe('command manifest', () => {
     for (const cmd of manifest.commands) {
       const params = cmd.parameters as { type?: string; properties?: Record<string, unknown> };
       expect(params.type, `${cmd.name}: parameters.type should be 'object'`).toBe('object');
-      expect(params.properties, `${cmd.name}: parameters.properties missing`).toBeDefined();
+      expect(params.properties, `${cmd.name}: parameters.properties missing`).not.toBeUndefined();
     }
   });
 

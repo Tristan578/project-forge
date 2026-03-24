@@ -100,7 +100,7 @@ describe('EngineCrashOverlay', () => {
     expect(backup).not.toBeNull();
     const parsed = JSON.parse(backup!);
     expect(parsed.state).toBe('{"test": true}');
-    expect(parsed.timestamp).toBeDefined();
+    expect(parsed.timestamp).not.toBeUndefined();
     localStorage.removeItem('forge-editor-store');
     localStorage.removeItem('forge-editor-crash-backup');
   });

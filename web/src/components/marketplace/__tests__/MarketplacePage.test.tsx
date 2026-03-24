@@ -145,7 +145,7 @@ describe('MarketplacePage', () => {
     setupStore({ sortBy: 'popular' });
     render(<MarketplacePage />);
     const sortSelect = screen.getByDisplayValue('Most Popular');
-    expect(sortSelect).toBeDefined();
+    expect(sortSelect).not.toBeNull();
   });
 
   it('calls setSortBy when sort option is changed', () => {

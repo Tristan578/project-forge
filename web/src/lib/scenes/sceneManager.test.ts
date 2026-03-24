@@ -190,7 +190,7 @@ describe('sceneManager', () => {
       const result = switchScene(withTwo, sceneId);
       if ('error' in result) throw new Error(result.error);
       expect(result.project.activeSceneId).toBe(sceneId);
-      expect(result.sceneToLoad).toBeDefined();
+      expect(result.sceneToLoad).not.toBeUndefined();
     });
 
     it('switch to nonexistent scene returns error', () => {
@@ -210,21 +210,21 @@ describe('sceneManager', () => {
     it('getSceneById finds scene', () => {
       const project = createInitialProject();
       const scene = getSceneById(project, project.scenes[0].id);
-      expect(scene).toBeDefined();
+      expect(scene).not.toBeUndefined();
       expect(scene?.name).toBe('Main');
     });
 
     it('getSceneByName finds scene', () => {
       const project = createInitialProject();
       const scene = getSceneByName(project, 'Main');
-      expect(scene).toBeDefined();
+      expect(scene).not.toBeUndefined();
       expect(scene?.id).toBe(project.scenes[0].id);
     });
 
     it('getActiveScene returns active scene', () => {
       const project = createInitialProject();
       const active = getActiveScene(project);
-      expect(active).toBeDefined();
+      expect(active).not.toBeUndefined();
       expect(active?.id).toBe(project.activeSceneId);
     });
   });

@@ -375,9 +375,9 @@ describe('materialHandlers — list_shaders', () => {
     expect(data.shaders).toHaveLength(data.count);
     // Each entry must have the required fields
     for (const shader of data.shaders) {
-      expect(shader.type).toBeDefined();
-      expect(shader.name).toBeDefined();
-      expect(shader.description).toBeDefined();
+      expect(shader.type).not.toBeUndefined();
+      expect(shader.name).not.toBeUndefined();
+      expect(shader.description).not.toBeUndefined();
     }
   });
 

@@ -163,11 +163,11 @@ describe('detectPbrTextureSet', () => {
       makeFile('m_ao.png'),
     ];
     const set = detectPbrTextureSet(files);
-    expect(set!.albedo).toBeDefined();
-    expect(set!.normal).toBeDefined();
-    expect(set!.metallic).toBeDefined();
-    expect(set!.roughness).toBeDefined();
-    expect(set!.ao).toBeDefined();
+    expect(set!.albedo).not.toBeUndefined();
+    expect(set!.normal).not.toBeUndefined();
+    expect(set!.metallic).not.toBeUndefined();
+    expect(set!.roughness).not.toBeUndefined();
+    expect(set!.ao).not.toBeUndefined();
     expect(set!.unmatched).toHaveLength(0);
   });
 

@@ -144,7 +144,7 @@ describe('analyzeScene', () => {
         materials[`e${i}`] = { baseColor: [1, 1, 1], metallic: 0, perceptualRoughness: 0.5 };
       }
       const advice = analyzeScene(makeInput({ entityCount: 5, materials }));
-      expect(findAdvice(advice, 'default-materials')).toBeDefined();
+      expect(findAdvice(advice, 'default-materials')).not.toBeUndefined();
     });
 
     it('does not flag when materials are customized', () => {
@@ -165,7 +165,7 @@ describe('analyzeScene', () => {
           l1: { lightType: 'directional', color: [1, 1, 1], intensity: 1000, shadowsEnabled: false },
         },
       }));
-      expect(findAdvice(advice, 'no-shadows')).toBeDefined();
+      expect(findAdvice(advice, 'no-shadows')).not.toBeUndefined();
     });
 
     it('does not flag when at least one light has shadows', () => {
@@ -186,7 +186,7 @@ describe('analyzeScene', () => {
         lights[`l${i}`] = { lightType: 'point', color: [1, 1, 1], intensity: 500, shadowsEnabled: true };
       }
       const advice = analyzeScene(makeInput({ entityCount: 6, lights }));
-      expect(findAdvice(advice, 'too-many-shadow-lights')).toBeDefined();
+      expect(findAdvice(advice, 'too-many-shadow-lights')).not.toBeUndefined();
     });
   });
 
@@ -198,7 +198,7 @@ describe('analyzeScene', () => {
         e3: { position: [6, 22, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
       };
       const advice = analyzeScene(makeInput({ entityCount: 3, transforms }));
-      expect(findAdvice(advice, 'floating-entities')).toBeDefined();
+      expect(findAdvice(advice, 'floating-entities')).not.toBeUndefined();
     });
 
     it('does not flag lights positioned high', () => {
@@ -227,7 +227,7 @@ describe('analyzeScene', () => {
         lights: { l1: { lightType: 'point', color: [1, 1, 1], intensity: 100, shadowsEnabled: false } },
         ambientLight: { color: [1, 1, 1], brightness: 0.01 },
       }));
-      expect(findAdvice(advice, 'dark-scene')).toBeDefined();
+      expect(findAdvice(advice, 'dark-scene')).not.toBeUndefined();
     });
   });
 
@@ -236,11 +236,11 @@ describe('analyzeScene', () => {
       const advice = analyzeScene(makeInput());
       expect(Array.isArray(advice)).toBe(true);
       for (const item of advice) {
-        expect(item.id).toBeTruthy();
-        expect(item.severity).toBeTruthy();
-        expect(item.category).toBeTruthy();
-        expect(item.title).toBeTruthy();
-        expect(item.description).toBeTruthy();
+        expect(item.id).not.toBeNull();
+        expect(item.severity).not.toBeNull();
+        expect(item.category).not.toBeNull();
+        expect(item.title).not.toBeNull();
+        expect(item.description).not.toBeNull();
       }
     });
   });

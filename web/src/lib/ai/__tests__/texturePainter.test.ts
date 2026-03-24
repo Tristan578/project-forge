@@ -46,10 +46,10 @@ describe('TEXTURE_STYLES', () => {
 
   it('each style has required fields', () => {
     for (const style of TEXTURE_STYLES) {
-      expect(style.name).toBeTruthy();
-      expect(style.description).toBeTruthy();
-      expect(style.promptModifier).toBeTruthy();
-      expect(style.materialAdjustments).toBeDefined();
+      expect(style.name).not.toBeNull();
+      expect(style.description).not.toBeNull();
+      expect(style.promptModifier).not.toBeNull();
+      expect(style.materialAdjustments).not.toBeUndefined();
     }
   });
 
@@ -130,13 +130,13 @@ describe('clampIntensity', () => {
 describe('findStyleByName', () => {
   it('finds a style by exact name', () => {
     const style = findStyleByName('rusty');
-    expect(style).toBeDefined();
+    expect(style).not.toBeUndefined();
     expect(style!.name).toBe('rusty');
   });
 
   it('finds a style case-insensitively', () => {
     const style = findStyleByName('FROZEN');
-    expect(style).toBeDefined();
+    expect(style).not.toBeUndefined();
     expect(style!.name).toBe('frozen');
   });
 
@@ -286,7 +286,7 @@ describe('applyMaterialChanges', () => {
     applyMaterialChanges(style, 'e1', dispatch, 0.5, undefined, 0.5, 0.0, 0.4);
     const payload = dispatch.mock.calls[0][1] as Record<string, unknown>;
     // Expected: 0.4 + (0.7 - 0.4) * 0.5 = 0.4 + 0.15 = 0.55
-    expect(payload.emissive).toBeDefined();
+    expect(payload.emissive).not.toBeUndefined();
     const emissive = payload.emissive as number[];
     expect(emissive[0]).toBeCloseTo(0.55);
     expect(emissive[1]).toBeCloseTo(0.55);
@@ -310,7 +310,7 @@ describe('applyMaterialChanges', () => {
     applyMaterialChanges(style, 'e1', dispatch, 1.0);
     const payload = dispatch.mock.calls[0][1] as Record<string, unknown>;
     expect(payload.alphaMode).toBe('blend');
-    expect(payload.baseColor).toBeDefined();
+    expect(payload.baseColor).not.toBeUndefined();
   });
 
   it('does not include alphaMode for opaque styles', () => {

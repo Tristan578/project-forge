@@ -8,9 +8,9 @@ describe('onboardingTasks', () => {
 
   it('every task has required fields', () => {
     for (const task of ONBOARDING_TASKS) {
-      expect(task.id).toBeTruthy();
-      expect(task.label).toBeTruthy();
-      expect(task.description).toBeTruthy();
+      expect(task.id).not.toBeNull();
+      expect(task.label).not.toBeNull();
+      expect(task.description).not.toBeNull();
       expect(['basic', 'advanced']).toContain(task.category);
     }
   });
@@ -34,26 +34,26 @@ describe('onboardingTasks', () => {
 
       const sharedTasks = ONBOARDING_TASKS.filter((t) => !t.projectType);
       for (const shared of sharedTasks) {
-        expect(tasks3d.find((t) => t.id === shared.id)).toBeDefined();
-        expect(tasks2d.find((t) => t.id === shared.id)).toBeDefined();
+        expect(tasks3d.find((t) => t.id === shared.id)).not.toBeUndefined();
+        expect(tasks2d.find((t) => t.id === shared.id)).not.toBeUndefined();
       }
     });
 
     it('3D tasks include create-entity but not create-sprite', () => {
       const tasks3d = getTasksForProjectType(ONBOARDING_TASKS, '3d');
-      expect(tasks3d.find((t) => t.id === 'create-entity')).toBeDefined();
+      expect(tasks3d.find((t) => t.id === 'create-entity')).not.toBeUndefined();
       expect(tasks3d.find((t) => t.id === 'create-sprite')).toBeUndefined();
     });
 
     it('2D tasks include create-sprite but not create-entity', () => {
       const tasks2d = getTasksForProjectType(ONBOARDING_TASKS, '2d');
-      expect(tasks2d.find((t) => t.id === 'create-sprite')).toBeDefined();
+      expect(tasks2d.find((t) => t.id === 'create-sprite')).not.toBeUndefined();
       expect(tasks2d.find((t) => t.id === 'create-entity')).toBeUndefined();
     });
 
     it('2D tasks include create-tilemap but not add-particles', () => {
       const tasks2d = getTasksForProjectType(ONBOARDING_TASKS, '2d');
-      expect(tasks2d.find((t) => t.id === 'create-tilemap')).toBeDefined();
+      expect(tasks2d.find((t) => t.id === 'create-tilemap')).not.toBeUndefined();
       expect(tasks2d.find((t) => t.id === 'add-particles')).toBeUndefined();
     });
   });

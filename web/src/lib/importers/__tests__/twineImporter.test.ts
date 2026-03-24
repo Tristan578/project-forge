@@ -53,7 +53,7 @@ describe('parseTweeFile - single passage text node', () => {
   it('assigns a non-empty tree id', () => {
     const input = passage('P', '', 'Text.');
     const tree = parseTweeFile(input);
-    expect(tree.id).toBeTruthy();
+    expect(tree.id).not.toBeNull();
   });
 
   it('all nodes have valid types', () => {
@@ -117,8 +117,8 @@ describe('parseTweeFile - choice nodes', () => {
     expect(left!.nextNodeId).not.toBe(right!.nextNodeId);
 
     // Both should resolve to actual nodes
-    expect(tree.nodes.find((n) => n.id === left!.nextNodeId)).toBeDefined();
-    expect(tree.nodes.find((n) => n.id === right!.nextNodeId)).toBeDefined();
+    expect(tree.nodes.find((n) => n.id === left!.nextNodeId)).not.toBeUndefined();
+    expect(tree.nodes.find((n) => n.id === right!.nextNodeId)).not.toBeUndefined();
   });
 
   it('parses [[Display|Target]] pipe syntax correctly', () => {
@@ -132,7 +132,7 @@ describe('parseTweeFile - choice nodes', () => {
     expect(choiceNode).not.toBeNull();
     const choice = choiceNode!.choices[0];
     expect(choice.text).toBe('Pick this');
-    expect(tree.nodes.find((n) => n.id === choice.nextNodeId)).toBeDefined();
+    expect(tree.nodes.find((n) => n.id === choice.nextNodeId)).not.toBeUndefined();
   });
 
   it('produces unique choice IDs', () => {

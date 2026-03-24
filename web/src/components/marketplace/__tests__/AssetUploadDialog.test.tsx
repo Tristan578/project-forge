@@ -43,7 +43,7 @@ describe('AssetUploadDialog', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
     const selects = screen.getAllByRole('combobox');
     const categorySelect = selects[0] as HTMLSelectElement;
-    expect(categorySelect).toBeDefined();
+    expect(categorySelect).not.toBeNull();
     expect(categorySelect.value).toBe('model_3d');
   });
 
@@ -101,7 +101,7 @@ describe('AssetUploadDialog', () => {
     render(<AssetUploadDialog onClose={mockOnClose} onSuccess={mockOnSuccess} />);
     // Price field has type number with value 0
     const priceInput = screen.getByDisplayValue('0') as HTMLInputElement;
-    expect(priceInput).toBeDefined();
+    expect(priceInput).not.toBeNull();
     expect(priceInput.type).toBe('number');
   });
 });

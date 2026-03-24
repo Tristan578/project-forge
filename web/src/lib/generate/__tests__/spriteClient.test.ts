@@ -11,7 +11,7 @@ describe('SpriteClient', () => {
 
   it('initializes correctly', () => {
     const client = new SpriteClient(mockApiKey, 'dalle3');
-    expect(client).toBeDefined();
+    expect(client).not.toBeUndefined();
   });
 
   describe('generateSprite with DALL-E 3', () => {

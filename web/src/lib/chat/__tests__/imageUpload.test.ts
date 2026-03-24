@@ -40,14 +40,14 @@ describe('validateImageFile', () => {
   it('rejects unsupported file types', () => {
     const file = makeFile('test.bmp', 'image/bmp', 1000);
     const error = validateImageFile(file);
-    expect(error).toBeTruthy();
+    expect(error).not.toBeNull();
     expect(error).toContain('Unsupported file type');
   });
 
   it('rejects files over 5MB', () => {
     const file = makeFile('large.png', 'image/png', IMAGE_MAX_SIZE_BYTES + 1);
     const error = validateImageFile(file);
-    expect(error).toBeTruthy();
+    expect(error).not.toBeNull();
     expect(error).toContain('too large');
   });
 
@@ -285,7 +285,7 @@ describe('processImageFile (mocked DOM)', () => {
     const file = makeFile('photo.png', 'image/png', 1000);
     const result = await processImageFile(file);
     expect(result.success).toBe(false);
-    expect(result.error).toBeTruthy();
+    expect(result.error).not.toBeNull();
     expect(result.fileName).toBe('photo.png');
   });
 });

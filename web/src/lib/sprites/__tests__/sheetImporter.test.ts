@@ -105,14 +105,14 @@ describe('generateDefaultClips', () => {
 
   it('should create non-looping idle for 1 frame', () => {
     const clips = generateDefaultClips(makeFrames(1), 'sheet');
-    expect(clips['idle']).toBeDefined();
+    expect(clips['idle']).not.toBeUndefined();
     expect(clips['idle'].looping).toBe(false);
     expect(clips['idle'].frames).toEqual([0]);
   });
 
   it('should create looping idle for 2-4 frames', () => {
     const clips = generateDefaultClips(makeFrames(3), 'sheet');
-    expect(clips['idle']).toBeDefined();
+    expect(clips['idle']).not.toBeUndefined();
     expect(clips['idle'].looping).toBe(true);
     expect(clips['idle'].frames).toEqual([0, 1, 2]);
     expect(clips['walk']).toBeUndefined();
@@ -120,8 +120,8 @@ describe('generateDefaultClips', () => {
 
   it('should create idle + walk for 5-8 frames', () => {
     const clips = generateDefaultClips(makeFrames(6), 'sheet');
-    expect(clips['idle']).toBeDefined();
-    expect(clips['walk']).toBeDefined();
+    expect(clips['idle']).not.toBeUndefined();
+    expect(clips['walk']).not.toBeUndefined();
     expect(clips['idle'].frames).toEqual([0, 1, 2]); // first half (ceil(6/2) = 3)
     expect(clips['walk'].frames).toEqual([3, 4, 5]); // second half
     expect(clips['run']).toBeUndefined();
@@ -129,9 +129,9 @@ describe('generateDefaultClips', () => {
 
   it('should create idle + walk + run for 9+ frames', () => {
     const clips = generateDefaultClips(makeFrames(12), 'sheet');
-    expect(clips['idle']).toBeDefined();
-    expect(clips['walk']).toBeDefined();
-    expect(clips['run']).toBeDefined();
+    expect(clips['idle']).not.toBeUndefined();
+    expect(clips['walk']).not.toBeUndefined();
+    expect(clips['run']).not.toBeUndefined();
     // First third: ceil(12/3) = 4
     expect(clips['idle'].frames).toEqual([0, 1, 2, 3]);
     // Second third: ceil(24/3) = 8
@@ -171,7 +171,7 @@ describe('buildSpriteSheetData', () => {
     expect(gridMode.columns).toBe(2);
     expect(gridMode.rows).toBe(2);
     expect(gridMode.tileSize).toEqual([32, 32]);
-    expect(data.clips).toBeDefined();
-    expect(data.clips['idle']).toBeDefined();
+    expect(data.clips).not.toBeUndefined();
+    expect(data.clips['idle']).not.toBeUndefined();
   });
 });

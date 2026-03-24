@@ -49,7 +49,7 @@ describe('TokenWarningBanner', () => {
     mockState.tokenBalance = { monthlyRemaining: 500, monthlyTotal: 10000, addon: 0, total: 500, nextRefillDate: null };
     render(<TokenWarningBanner />);
     const banner = screen.getByTestId('token-warning-banner');
-    expect(banner).toBeDefined();
+    expect(banner).not.toBeUndefined();
     expect(banner.getAttribute('role')).toBe('alert');
     expect(screen.getByText(/below 20%/)).not.toBeNull();
   });
@@ -88,7 +88,7 @@ describe('TokenWarningBanner', () => {
     mockState.billingStatus = { tier: 'creator', stripeCustomerId: 'cus_123', billingCycleStart: null, subscriptionStatus: 'past_due' };
     render(<TokenWarningBanner />);
     const banner = screen.getByTestId('payment-warning-banner');
-    expect(banner).toBeDefined();
+    expect(banner).not.toBeUndefined();
     expect(banner.getAttribute('role')).toBe('alert');
     expect(screen.getByText(/payment method has failed/)).not.toBeNull();
   });

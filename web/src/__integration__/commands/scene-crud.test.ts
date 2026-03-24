@@ -80,7 +80,7 @@ describe('scene CRUD integration', () => {
       h.simulateEntitySpawned(makeNode('entity-1', 'TestCube'));
 
       const state = h.getState();
-      expect(state.sceneGraph.nodes['entity-1']).toBeDefined();
+      expect(state.sceneGraph.nodes['entity-1']).not.toBeUndefined();
       expect(state.sceneGraph.nodes['entity-1'].name).toBe('TestCube');
       expect(state.sceneGraph.rootIds).toContain('entity-1');
     });
@@ -146,7 +146,7 @@ describe('scene CRUD integration', () => {
 
     it('after engine confirms deletion, node is removed from sceneGraph', () => {
       h.simulateEntitySpawned(makeNode('entity-1', 'Cube'));
-      expect(h.getState().sceneGraph.nodes['entity-1']).toBeDefined();
+      expect(h.getState().sceneGraph.nodes['entity-1']).not.toBeUndefined();
 
       // Engine fires delete event:
       h.simulateEntityDeleted('entity-1');
@@ -264,7 +264,7 @@ describe('scene CRUD integration', () => {
       h.simulateEntitySpawned(makeNode('entity-2', 'Original (Copy)'));
 
       const state = h.getState();
-      expect(state.sceneGraph.nodes['entity-2']).toBeDefined();
+      expect(state.sceneGraph.nodes['entity-2']).not.toBeUndefined();
       expect(state.sceneGraph.nodes['entity-2'].name).toBe('Original (Copy)');
       expect(Object.keys(state.sceneGraph.nodes)).toHaveLength(2);
     });
@@ -353,7 +353,7 @@ describe('scene CRUD integration', () => {
 
       const state = h.getState();
       expect(state.sceneGraph.nodes['old-1']).toBeUndefined();
-      expect(state.sceneGraph.nodes['new-1']).toBeDefined();
+      expect(state.sceneGraph.nodes['new-1']).not.toBeUndefined();
     });
 
     it('empty scene load results in empty graph', () => {

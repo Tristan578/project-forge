@@ -57,7 +57,7 @@ describe('FeedbackDialog', () => {
   it('renders close button with aria-label', () => {
     render(<FeedbackDialog open={true} onClose={mockOnClose} />);
     const closeBtn = screen.getByRole('button', { name: /close feedback dialog/i });
-    expect(closeBtn).toBeDefined();
+    expect(closeBtn).not.toBeNull();
   });
 
   it('calls onClose when close button is clicked', () => {
@@ -69,7 +69,7 @@ describe('FeedbackDialog', () => {
   it('renders textarea with aria-label', () => {
     render(<FeedbackDialog open={true} onClose={mockOnClose} />);
     const textarea = screen.getByRole('textbox', { name: /feedback description/i });
-    expect(textarea).toBeDefined();
+    expect(textarea).not.toBeNull();
   });
 
   it('disables submit when description is too short', () => {

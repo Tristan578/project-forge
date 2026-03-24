@@ -281,7 +281,7 @@ describe('TimelinePanel component', () => {
 
     // Playhead time should have changed (won't be 0.00s anymore)
     // The exact time depends on zoom, offset, and pixelsPerSecond
-    expect(container.textContent).toBeDefined();
+    expect(container.textContent).not.toBeNull();
   });
 
   it('handles mouseUp to stop dragging', () => {
@@ -291,7 +291,7 @@ describe('TimelinePanel component', () => {
 
     // No error on mouseUp without prior drag
     fireEvent.mouseUp(canvas!);
-    expect(container.textContent).toBeDefined();
+    expect(container.textContent).not.toBeNull();
   });
 
   // ── Empty tracks ──────────────────────────────────────────────────────

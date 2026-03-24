@@ -17,7 +17,7 @@ describe('wgslCompiler', () => {
       edges: [],
     });
     const result = compileToWgsl(graph);
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error).toContain('No PBR Output node found');
     expect(result.code).toBe('');
   });
@@ -219,7 +219,7 @@ describe('wgslCompiler', () => {
       ],
     });
     const result = compileToWgsl(graph);
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error).toContain('Cyclic dependency');
   });
 
@@ -743,7 +743,7 @@ describe('compileToMegaShaderSlot', () => {
       edges: [],
     });
     const result = compileToMegaShaderSlot(graph);
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error).toContain('No PBR Output node found');
     expect(result.functionBody).toBe('');
   });
@@ -761,7 +761,7 @@ describe('compileToMegaShaderSlot', () => {
       ],
     });
     const result = compileToMegaShaderSlot(graph);
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error).toContain('Cyclic');
     expect(result.functionBody).toBe('');
   });

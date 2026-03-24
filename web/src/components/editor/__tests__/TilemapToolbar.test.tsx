@@ -128,6 +128,6 @@ describe('TilemapToolbar', () => {
     render(<TilemapToolbar />);
     // Paint button should be the "active" one — just verify it renders
     const paintButton = screen.getByTitle('Paint (B)');
-    expect(paintButton).toBeDefined();
+    expect(paintButton).not.toBeNull();
   });
 });

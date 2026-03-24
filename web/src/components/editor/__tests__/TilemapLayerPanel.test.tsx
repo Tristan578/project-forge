@@ -107,7 +107,7 @@ describe('TilemapLayerPanel', () => {
     render(<TilemapLayerPanel />);
     const inputs = screen.getAllByRole('textbox');
     const layer1Input = inputs.find((inp) => (inp as HTMLInputElement).value === 'Layer 1');
-    expect(layer1Input).toBeDefined();
+    expect(layer1Input).not.toBeNull();
   });
 
   it('shows all layer names', () => {

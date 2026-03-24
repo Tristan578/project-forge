@@ -110,7 +110,7 @@ describe('shaderEditorStore', () => {
       const graphId = createNewGraph('My Shader');
 
       const state = useShaderEditorStore.getState();
-      expect(state.graphs[graphId]).toBeDefined();
+      expect(state.graphs[graphId]).not.toBeUndefined();
       expect(state.graphs[graphId].name).toBe('My Shader');
       expect(state.graphs[graphId].nodes).toEqual([]);
       expect(state.graphs[graphId].edges).toEqual([]);
@@ -202,7 +202,7 @@ describe('shaderEditorStore', () => {
       const newId = duplicateGraph(graphId, 'Copy');
 
       const state = useShaderEditorStore.getState();
-      expect(state.graphs[newId]).toBeDefined();
+      expect(state.graphs[newId]).not.toBeUndefined();
       expect(state.graphs[newId].name).toBe('Copy');
       expect(state.graphs[newId].nodes).toHaveLength(1);
       expect(state.graphs[newId].id).toBe(newId);
@@ -232,7 +232,7 @@ describe('shaderEditorStore', () => {
       const graphId = saveGraph('My Shader');
 
       const state = useShaderEditorStore.getState();
-      expect(state.graphs[graphId]).toBeDefined();
+      expect(state.graphs[graphId]).not.toBeUndefined();
       expect(state.graphs[graphId].name).toBe('My Shader');
     });
 
@@ -413,7 +413,7 @@ describe('shaderEditorStore', () => {
       expect(edge.sourceHandle).toBe('color');
       expect(edge.target).toBe(node2);
       expect(edge.targetHandle).toBe('base_color');
-      expect(edge.id).toBeDefined();
+      expect(edge.id).not.toBeUndefined();
     });
 
     it('should remove edge', () => {

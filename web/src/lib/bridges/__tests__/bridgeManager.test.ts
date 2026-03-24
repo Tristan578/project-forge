@@ -64,7 +64,7 @@ describe('BridgeManager', () => {
       const paths = bridgeManager.getDefaultPaths('aseprite');
       expect(paths.darwin).toContain('Aseprite.app');
       expect(paths.win32).toContain('Aseprite');
-      expect(paths.linux).toBeDefined();
+      expect(paths.linux).not.toBeUndefined();
     });
   });
 
@@ -123,7 +123,7 @@ describe('BridgeManager', () => {
         aseprite: { paths: { darwin: '/usr/local/bin/aseprite' }, activeVersion: '1.3.17' },
       }));
       const config = bridgeManager.loadBridgesConfig();
-      expect(config.aseprite).toBeDefined();
+      expect(config.aseprite).not.toBeUndefined();
       expect(config.aseprite.activeVersion).toBe('1.3.17');
     });
 

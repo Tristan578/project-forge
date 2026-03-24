@@ -387,7 +387,7 @@ describe('getStylePresetKeys', () => {
 describe('getStylePreset', () => {
   it('returns the correct preset', () => {
     const style = getStylePreset('minimalist');
-    expect(style).toBeDefined();
+    expect(style).not.toBeUndefined();
     expect(style?.name).toBe('Minimalist');
   });
 

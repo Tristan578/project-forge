@@ -128,7 +128,7 @@ describe('workspaceStore', () => {
       applyPreset('default');
 
       expect(mockApi.toJSON).toHaveBeenCalled();
-      expect(mockLocalStorage.getItem('forge-workspace-layout')).toBeTruthy();
+      expect(mockLocalStorage.getItem('forge-workspace-layout')).not.toBeNull();
     });
   });
 
@@ -141,7 +141,7 @@ describe('workspaceStore', () => {
       saveLayout();
 
       expect(mockApi.toJSON).toHaveBeenCalled();
-      expect(mockLocalStorage.getItem('forge-workspace-layout')).toBeTruthy();
+      expect(mockLocalStorage.getItem('forge-workspace-layout')).not.toBeNull();
       // Should clear active preset indicator
       expect(useWorkspaceStore.getState().activePreset).toBeNull();
     });
@@ -196,7 +196,7 @@ describe('workspaceStore', () => {
       const state = useWorkspaceStore.getState();
       expect(state.customPresets).toHaveLength(1);
       expect(state.customPresets[0].name).toBe('My Layout');
-      expect(mockLocalStorage.getItem('forge-workspace-custom-presets')).toBeTruthy();
+      expect(mockLocalStorage.getItem('forge-workspace-custom-presets')).not.toBeNull();
     });
 
     it('should limit custom presets to 5', () => {

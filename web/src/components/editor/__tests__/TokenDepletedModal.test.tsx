@@ -62,7 +62,7 @@ describe('TokenDepletedModal', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
     const modal = screen.getByTestId('token-depleted-modal');
-    expect(modal).toBeDefined();
+    expect(modal).not.toBeUndefined();
     expect(modal.getAttribute('role')).toBe('dialog');
     expect(modal.getAttribute('aria-modal')).toBe('true');
   });
@@ -117,8 +117,8 @@ describe('TokenDepletedModal', () => {
     render(<TokenDepletedModal />);
     const modal = screen.getByTestId('token-depleted-modal');
     const labelId = modal.getAttribute('aria-labelledby');
-    expect(labelId).toBeTruthy();
-    expect(document.getElementById(labelId!)).toBeDefined();
+    expect(labelId).not.toBeNull();
+    expect(document.getElementById(labelId!)).not.toBeUndefined();
   });
 
   it('renders backdrop element when modal is visible', () => {
@@ -126,7 +126,7 @@ describe('TokenDepletedModal', () => {
     const { container } = render(<TokenDepletedModal />);
     // Backdrop has aria-hidden="true"
     const backdrop = container.querySelector('[aria-hidden="true"]');
-    expect(backdrop).toBeDefined();
+    expect(backdrop).not.toBeUndefined();
   });
 
   it('displays tier labels for all tiers', () => {

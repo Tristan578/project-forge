@@ -72,7 +72,7 @@ describe('GeneratePixelArtDialog', () => {
     render(<GeneratePixelArtDialog {...defaultProps} />);
     expect(
       screen.getByPlaceholderText(/describe your pixel art/i),
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('should show style selector', () => {

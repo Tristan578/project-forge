@@ -22,7 +22,7 @@ describe('DeltaSerializer', () => {
 
       expect(delta.isKeyframe).toBe(true);
       expect(delta.added).toContain('e1');
-      expect(delta.changed['e1']).toBeDefined();
+      expect(delta.changed['e1']).not.toBeUndefined();
     });
 
     it('produces empty delta when snapshots are identical', () => {
@@ -54,7 +54,7 @@ describe('DeltaSerializer', () => {
       const delta = serializer.computeDelta(state2);
 
       expect(delta.isKeyframe).toBe(false);
-      expect(delta.changed['e1']).toBeDefined();
+      expect(delta.changed['e1']).not.toBeUndefined();
       expect(delta.changed['e1'].position).toEqual([5, 0, 0]);
       // Unchanged component should NOT appear
       expect(delta.changed['e1'].rotation).toBeUndefined();
@@ -75,7 +75,7 @@ describe('DeltaSerializer', () => {
       const delta = serializer.computeDelta(state2);
 
       expect(delta.added).toContain('e2');
-      expect(delta.changed['e2']).toBeDefined();
+      expect(delta.changed['e2']).not.toBeUndefined();
       expect(delta.changed['e2'].position).toEqual([1, 1, 1]);
     });
 
@@ -121,7 +121,7 @@ describe('DeltaSerializer', () => {
       serializer.computeDelta(state1);
       const delta = serializer.computeDelta(state2);
 
-      expect(delta.changed['e1']).toBeDefined();
+      expect(delta.changed['e1']).not.toBeUndefined();
       expect('velocity' in delta.changed['e1']).toBe(true);
       expect(delta.changed['e1'].velocity).toBeUndefined();
     });
@@ -244,7 +244,7 @@ describe('DeltaSerializer', () => {
 
       const result = serializer.applyDelta(base, delta);
 
-      expect(result['e1']).toBeDefined();
+      expect(result['e1']).not.toBeUndefined();
       expect(result['e2']).toBeUndefined();
     });
 
@@ -262,7 +262,7 @@ describe('DeltaSerializer', () => {
 
       const result = serializer.applyDelta(base, delta);
 
-      expect(result['e1']).toBeDefined();
+      expect(result['e1']).not.toBeUndefined();
       expect(result['e3'].position).toEqual([9, 9, 9]);
     });
 

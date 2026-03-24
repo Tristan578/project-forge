@@ -184,9 +184,9 @@ describe('useScriptRunner', () => {
     const initMsg = workerPostMessages.find(
       (m) => (m as Record<string, unknown>).type === 'init',
     );
-    expect(initMsg).toBeDefined();
-    expect((initMsg as Record<string, unknown>).scripts).toBeDefined();
-    expect((initMsg as Record<string, unknown>).entityInfos).toBeDefined();
+    expect(initMsg).not.toBeUndefined();
+    expect((initMsg as Record<string, unknown>).scripts).not.toBeUndefined();
+    expect((initMsg as Record<string, unknown>).entityInfos).not.toBeUndefined();
   });
 
   it('sends scene_info message after init', () => {
@@ -196,7 +196,7 @@ describe('useScriptRunner', () => {
     const sceneMsg = workerPostMessages.find(
       (m) => (m as Record<string, unknown>).type === 'scene_info',
     );
-    expect(sceneMsg).toBeDefined();
+    expect(sceneMsg).not.toBeUndefined();
     expect((sceneMsg as Record<string, unknown>).currentScene).toBe('Main');
   });
 

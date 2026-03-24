@@ -90,13 +90,13 @@ describe('BOT_STRATEGIES', () => {
   it('should define configs for all 5 strategies', () => {
     expect(Object.keys(BOT_STRATEGIES)).toHaveLength(5);
     for (const s of allStrategies) {
-      expect(BOT_STRATEGIES[s]).toBeDefined();
+      expect(BOT_STRATEGIES[s]).not.toBeUndefined();
     }
   });
 
   it.each(allStrategies)('strategy "%s" has a name and description', (strategy) => {
     const config = BOT_STRATEGIES[strategy];
-    expect(config.name).toBeTruthy();
+    expect(config.name).not.toBeNull();
     expect(config.description.length).toBeGreaterThan(10);
   });
 
@@ -220,7 +220,7 @@ describe('simulatePlaytest', () => {
     const session = await simulatePlaytest(makeComplexScene(), 'explorer');
     const moveOrJump = session.actions.filter((a) => a.type === 'move' || a.type === 'jump');
     for (const action of moveOrJump) {
-      expect(action.direction).toBeDefined();
+      expect(action.direction).not.toBeUndefined();
       expect(action.direction!.x).toBeGreaterThanOrEqual(-1);
       expect(action.direction!.x).toBeLessThanOrEqual(1);
     }
@@ -293,7 +293,7 @@ describe('discovery severity', () => {
     const noController = session.discoveries.find(
       (d) => d.type === 'missing_feedback' && d.description.includes('character controller'),
     );
-    expect(noController).toBeDefined();
+    expect(noController).not.toBeUndefined();
     expect(noController!.severity).toBe('critical');
   });
 
@@ -365,8 +365,8 @@ describe('generatePlaytestReport', () => {
     const s2 = await simulatePlaytest(ctx, 'cautious');
     const report = generatePlaytestReport([s1, s2]);
 
-    expect(report.strategyComparison.explorer).toBeDefined();
-    expect(report.strategyComparison.cautious).toBeDefined();
+    expect(report.strategyComparison.explorer).not.toBeUndefined();
+    expect(report.strategyComparison.cautious).not.toBeUndefined();
     expect(report.strategyComparison.explorer.timeToComplete).toBeGreaterThan(0);
   });
 });

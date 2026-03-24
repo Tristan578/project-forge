@@ -89,7 +89,7 @@ describe('convertManifestToolToSdkTool', () => {
 
   it('returns a tool with an inputSchema', () => {
     const sdkTool = convertManifestToolToSdkTool(spawnEntityTool);
-    expect(sdkTool.inputSchema).toBeDefined();
+    expect(sdkTool.inputSchema).not.toBeUndefined();
   });
 
   it('does not include an execute function (tools are client-side)', () => {
@@ -100,19 +100,19 @@ describe('convertManifestToolToSdkTool', () => {
   it('handles input_schema format correctly', () => {
     const sdkTool = convertManifestToolToSdkTool(setMaterialTool);
     expect(sdkTool.description).toBe('Set material properties on an entity');
-    expect(sdkTool.inputSchema).toBeDefined();
+    expect(sdkTool.inputSchema).not.toBeUndefined();
   });
 
   it('handles array-style parameters format', () => {
     const sdkTool = convertManifestToolToSdkTool(arrayParamsTool);
     expect(sdkTool.description).toBe('Play an audio file');
-    expect(sdkTool.inputSchema).toBeDefined();
+    expect(sdkTool.inputSchema).not.toBeUndefined();
   });
 
   it('handles tools with no parameters', () => {
     const sdkTool = convertManifestToolToSdkTool(noParamsTool);
     expect(sdkTool.description).toBe('Remove all entities from the scene');
-    expect(sdkTool.inputSchema).toBeDefined();
+    expect(sdkTool.inputSchema).not.toBeUndefined();
   });
 
   it('prefers input_schema over parameters when both are present', () => {
@@ -130,7 +130,7 @@ describe('convertManifestToolToSdkTool', () => {
     };
     // Should not throw and should use input_schema (the function returns without error)
     const sdkTool = convertManifestToolToSdkTool(tool);
-    expect(sdkTool).toBeDefined();
+    expect(sdkTool).not.toBeUndefined();
   });
 });
 
@@ -177,8 +177,8 @@ describe('convertManifestToolsToSdkTools', () => {
       spawnEntityTool,
       arrayParamsTool,
     ]);
-    expect(result['spawn_entity'].inputSchema).toBeDefined();
-    expect(result['play_audio'].inputSchema).toBeDefined();
+    expect(result['spawn_entity'].inputSchema).not.toBeUndefined();
+    expect(result['play_audio'].inputSchema).not.toBeUndefined();
   });
 
   it('does not set execute on any tool', () => {
@@ -228,7 +228,7 @@ describe('buildInputSchema edge cases', () => {
       ],
     };
     const sdkTool = convertManifestToolToSdkTool(tool);
-    expect(sdkTool.inputSchema).toBeDefined();
+    expect(sdkTool.inputSchema).not.toBeUndefined();
   });
 
   it('handles nested JSON Schema properties object', () => {
@@ -251,6 +251,6 @@ describe('buildInputSchema edge cases', () => {
       },
     };
     const sdkTool = convertManifestToolToSdkTool(tool);
-    expect(sdkTool.inputSchema).toBeDefined();
+    expect(sdkTool.inputSchema).not.toBeUndefined();
   });
 });

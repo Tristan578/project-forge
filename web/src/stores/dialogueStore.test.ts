@@ -48,7 +48,7 @@ describe('dialogueStore', () => {
       const treeId = useDialogueStore.getState().addTree('Test Tree');
       const tree = useDialogueStore.getState().dialogueTrees[treeId];
 
-      expect(tree).toBeDefined();
+      expect(tree).not.toBeUndefined();
       expect(tree.name).toBe('Test Tree');
       expect(tree.nodes).toHaveLength(1);
       expect(tree.nodes[0].type).toBe('text');
@@ -65,7 +65,7 @@ describe('dialogueStore', () => {
 
     it('removeTree deletes tree', () => {
       const treeId = useDialogueStore.getState().addTree('Test Tree');
-      expect(useDialogueStore.getState().dialogueTrees[treeId]).toBeDefined();
+      expect(useDialogueStore.getState().dialogueTrees[treeId]).not.toBeUndefined();
 
       useDialogueStore.getState().removeTree(treeId);
       expect(useDialogueStore.getState().dialogueTrees[treeId]).toBeUndefined();
@@ -775,7 +775,7 @@ describe('dialogueStore', () => {
       expect(stored).not.toBeNull();
 
       const parsed = JSON.parse(stored!);
-      expect(parsed[treeId]).toBeDefined();
+      expect(parsed[treeId]).not.toBeUndefined();
       expect(parsed[treeId].name).toBe('Persistent Tree');
     });
 
