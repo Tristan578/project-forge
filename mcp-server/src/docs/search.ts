@@ -95,22 +95,6 @@ function tokenize(text: string): string[] {
 }
 
 /**
- * Tokenize text into lowercase terms, removing markdown syntax and punctuation,
- * then apply suffix stemming so inflected forms match their root.
- */
-function tokenize(text: string): string[] {
-  return tokenizeRaw(text).map(stem);
-}
-
-/**
- * Tokenize text into lowercase terms, removing markdown syntax and punctuation,
- * then apply suffix stemming so inflected forms match their root.
- */
-function tokenize(text: string): string[] {
-  return tokenizeRaw(text).map(stem);
-}
-
-/**
  * Build a term frequency index from all documents and their metadata.
  */
 export function buildIndex(docIndex: DocIndex): TermIndex {
