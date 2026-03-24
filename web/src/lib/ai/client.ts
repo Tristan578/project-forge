@@ -205,25 +205,34 @@ export async function streamAI(
     priority = 1,
   } = options ?? {};
 
-  return aiQueue.enqueue(async () => {
-    try {
-      return await streamChat({
-        messages: [{ role: 'user', content: prompt }],
-        model,
-        sceneContext,
-        thinking,
-        ...(systemOverride !== undefined ? { systemOverride } : {}),
-        callbacks,
-        // Note: streamChat does not yet accept signal — callers can cancel via
-        // the shared AbortController and the stream reader will throw on abort.
-        // Future: thread signal through streamChat when the API supports it.
-      });
-    } catch (err) {
-      // Ignore abort errors silently — the caller already knows they cancelled
-      if (err instanceof Error && (err.name === 'AbortError' || err.message.toLowerCase().includes('abort'))) {
-        return '';
+  try {
+    return await aiQueue.enqueue(async () => {
+      try {
+        return await streamChat({
+          messages: [{ role: 'user', content: prompt }],
+          model,
+          sceneContext,
+          thinking,
+          ...(systemOverride !== undefined ? { systemOverride } : {}),
+          callbacks,
+          // Note: streamChat does not yet accept signal — callers can cancel via
+          // the shared AbortController and the stream reader will throw on abort.
+          // Future: thread signal through streamChat when the API supports it.
+        });
+      } catch (err) {
+        // Ignore abort errors silently during stream execution
+        if (err instanceof Error && (err.name === 'AbortError' || err.message.toLowerCase().includes('abort'))) {
+          return '';
+        }
+        throw mapError(err);
       }
-      throw mapError(err);
+    }, priority, signal);
+  } catch (err) {
+    // Normalise queue-level abort (thrown when signal fires while waiting in
+    // the queue) to the same empty-string result as execution-level abort.
+    if (err instanceof Error && (err.name === 'AbortError' || err.message.toLowerCase().includes('abort'))) {
+      return '';
     }
-  }, priority, signal);
+    throw err;
+  }
 }
