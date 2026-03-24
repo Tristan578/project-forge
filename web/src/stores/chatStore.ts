@@ -1207,6 +1207,12 @@ function saveConversationsToStorage(conversations: Conversation[], activeId?: st
   }
 }
 
+// Flush pending saves on page unload to prevent data loss.
+// Uses 'pagehide' (fires reliably on mobile + desktop) over 'beforeunload'.
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushConversationSave);
+}
+
 /** Convert ChatMessages to Anthropic API format */
 function buildApiMessages(messages: ChatMessage[]): { role: string; content: unknown }[] {
   return messages
