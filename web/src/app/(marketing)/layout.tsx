@@ -1,6 +1,4 @@
-'use cache';
-
-export default async function MarketingLayout({
+export default function MarketingLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;

@@ -110,9 +110,5 @@ export function useCelebrations(): UseCelebrationsReturn {
     return unsub;
   }, [enqueueData]);
 
-  // Keep the hook reactive so callers re-render when activeCelebration changes.
-  useEditorStore((s) => s.nodeCount);
-  useEditorStore((s) => s.engineMode);
-
   return { activeCelebration, dismissCelebration, triggerMilestone };
 }
