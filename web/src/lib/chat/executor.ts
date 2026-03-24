@@ -31,6 +31,7 @@ import { assetHandlers } from './handlers/assetHandlers';
 import { audioLegacyHandlers } from './handlers/audioLegacyHandlers';
 import { pixelArtHandlers } from './handlers/pixelArtHandlers';
 import { compoundHandlers } from './handlers/compoundHandlers';
+import { leaderboardHandlers } from './handlers/leaderboardHandlers';
 
 /**
  * Merged handler registry.
@@ -59,6 +60,7 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...audioLegacyHandlers,
   ...pixelArtHandlers,
   ...compoundHandlers,
+  ...leaderboardHandlers,
 };
 
 /**
