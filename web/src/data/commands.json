@@ -10851,6 +10851,70 @@
       },
       "tokenCost": 0,
       "requiredScope": "scene:write"
+    },
+    {
+      "name": "extract_translatable_strings",
+      "description": "Scan the current scene and return all user-authored translatable strings (entity names, dialogue text, UI labels) with stable IDs and context metadata. Run this before translate_scene to see what will be translated.",
+      "category": "localization",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
+      "name": "translate_scene",
+      "description": "Batch-translate all extractable strings in the current scene into one or more target locales using AI. Strings are sent in chunks of 200. Translated bundles are stored and available for export. Variable placeholders (e.g. {playerName}) are preserved.",
+      "category": "localization",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "targetLocales": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "BCP-47 locale codes to translate to (e.g. [\"ja\", \"fr\", \"de\", \"zh-CN\"]). Maximum 10 per call."
+          },
+          "sourceLocale": {
+            "type": "string",
+            "description": "Source locale code. Defaults to \"en\".",
+            "default": "en"
+          }
+        },
+        "required": ["targetLocales"]
+      },
+      "tokenCost": 5,
+      "requiredScope": "generate:use"
+    },
+    {
+      "name": "set_preview_locale",
+      "description": "Switch the editor preview to display strings in a translated locale so you can review the translation in context. Pass null to return to the source locale. Only locales with stored translations can be previewed.",
+      "category": "localization",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "locale": {
+            "type": ["string", "null"],
+            "description": "BCP-47 locale code to preview (e.g. \"ja\"), or null to return to source text."
+          }
+        },
+        "required": ["locale"]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_locales",
+      "description": "List all stored locale translation bundles for the current project, including the string count per locale, the active preview locale, and the full list of supported locale codes.",
+      "category": "localization",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
     }
   ],
   "resources": [
