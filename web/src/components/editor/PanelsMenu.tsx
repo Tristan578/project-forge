@@ -3,9 +3,17 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { PanelTopOpen, Check } from 'lucide-react';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
-import { PANEL_DEFINITIONS } from '@/lib/workspace/panelRegistry';
+import { PANEL_DEFINITIONS, AI_PANELS_BY_CATEGORY, type AIPanelCategory } from '@/lib/workspace/panelRegistry';
 
-const PANEL_LIST = Object.values(PANEL_DEFINITIONS);
+/** Non-AI panels shown in the standard "Toggle Panels" section. */
+const STANDARD_PANEL_LIST = Object.values(PANEL_DEFINITIONS).filter((d) => !d.category);
+
+const AI_CATEGORY_LABELS: Record<AIPanelCategory, string> = {
+  creation: 'Creation',
+  polish: 'Polish',
+  intelligence: 'Intelligence',
+  tools: 'Tools',
+};
 
 export function PanelsMenu() {
   const [open, setOpen] = useState(false);
@@ -55,11 +63,12 @@ export function PanelsMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-48 rounded border border-zinc-700 bg-zinc-900 py-1 shadow-xl text-xs">
+        <div className="absolute right-0 top-full z-50 mt-1 w-52 rounded border border-zinc-700 bg-zinc-900 py-1 shadow-xl text-xs max-h-[80vh] overflow-y-auto">
+          {/* Standard (non-AI) panels */}
           <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-zinc-400">
-            Toggle Panels
+            Panels
           </div>
-          {PANEL_LIST.map((panel) => {
+          {STANDARD_PANEL_LIST.map((panel) => {
             const isOpen = openPanelIds.includes(panel.id);
             return (
               <button
@@ -77,6 +86,39 @@ export function PanelsMenu() {
                   <span className="ml-auto text-[10px] text-zinc-400">open</span>
                 )}
               </button>
+            );
+          })}
+
+          {/* AI panels grouped by category */}
+          {(Object.keys(AI_CATEGORY_LABELS) as AIPanelCategory[]).map((category) => {
+            const panels = AI_PANELS_BY_CATEGORY[category];
+            if (!panels.length) return null;
+            return (
+              <div key={category}>
+                <div className="mt-1 border-t border-zinc-800 px-2 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+                  {AI_CATEGORY_LABELS[category]}
+                </div>
+                {panels.map((panel) => {
+                  const isOpen = openPanelIds.includes(panel.id);
+                  return (
+                    <button
+                      key={panel.id}
+                      onClick={() => handleToggle(panel.id)}
+                      className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-zinc-300 hover:bg-zinc-800 transition-colors"
+                    >
+                      {isOpen ? (
+                        <Check size={12} className="text-green-400" />
+                      ) : (
+                        <span className="w-3" />
+                      )}
+                      <span>{panel.title}</span>
+                      {isOpen && (
+                        <span className="ml-auto text-[10px] text-zinc-400">open</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             );
           })}
         </div>
