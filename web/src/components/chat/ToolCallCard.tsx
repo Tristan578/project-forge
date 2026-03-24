@@ -307,6 +307,12 @@ const TOOL_LABELS: Record<string, string> = {
   translate_scene: 'Translate Scene',
   set_preview_locale: 'Preview Locale',
   list_locales: 'List Locales',
+  // Cutscene
+  generate_cutscene: 'Generate Cutscene',
+  play_cutscene: 'Play Cutscene',
+  stop_cutscene: 'Stop Cutscene',
+  list_cutscenes: 'List Cutscenes',
+  delete_cutscene: 'Delete Cutscene',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {
