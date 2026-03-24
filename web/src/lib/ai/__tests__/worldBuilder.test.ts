@@ -13,7 +13,6 @@ import {
   type TimelineEvent,
   type LoreEntry,
   type WorldRule,
-  type ConsistencyReport,
 } from '../worldBuilder';
 
 // ---- Type structure tests ----
