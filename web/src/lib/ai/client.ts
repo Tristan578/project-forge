@@ -123,7 +123,7 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
 
 async function fetchAIUncached(prompt: string, options?: AIClientOptions): Promise<string> {
   const {
-    model = 'claude-sonnet-4-5',
+    model = AI_MODEL_PRIMARY,
     systemOverride,
     sceneContext = '',
     thinking = false,
