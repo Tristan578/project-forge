@@ -66,8 +66,8 @@ export function WelcomeModal() {
       setShowIdeaGenerator(false);
       handleDismiss();
       // Send the idea to the AI chat so it scaffolds the project via start_from_idea
-      const genres = `${idea.genreMix.primary}/${idea.genreMix.secondary}`;
-      const mechanics = idea.mechanicCombo.mechanics.join(', ');
+      const genres = `${idea.genreMix.primary.name}/${idea.genreMix.secondary.name}`;
+      const mechanics = idea.mechanicCombo.mechanics.map((m) => m.name).join(', ');
       const prompt = `Create a game from this idea: "${idea.title}" — ${idea.description}. Genre: ${genres}. Mechanics: ${mechanics}.`;
       void sendMessage(prompt);
     },
