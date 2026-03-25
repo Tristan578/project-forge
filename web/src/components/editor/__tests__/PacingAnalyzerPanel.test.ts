@@ -37,22 +37,22 @@ describe('selectPacingKey (PF-873)', () => {
     const state = makeState([
       { id: 'e1', name: 'Cube', components: ['cube'] },
     ]);
-    expect(selectPacingKey(state)).toBe('e1:Cube:cube');
+    expect(selectPacingKey(state)).toBe('e1\x02Cube\x02cube');
   });
 
   it('uses "generic" when components array is empty', () => {
     const state = makeState([
       { id: 'e1', name: 'Empty', components: [] },
     ]);
-    expect(selectPacingKey(state)).toBe('e1:Empty:generic');
+    expect(selectPacingKey(state)).toBe('e1\x02Empty\x02generic');
   });
 
-  it('joins multiple entities with pipe separator', () => {
+  it('joins multiple entities with \\x01 separator', () => {
     const state = makeState([
       { id: 'e1', name: 'Cube', components: ['cube'] },
       { id: 'e2', name: 'Sphere', components: ['sphere'] },
     ]);
-    expect(selectPacingKey(state)).toBe('e1:Cube:cube|e2:Sphere:sphere');
+    expect(selectPacingKey(state)).toBe('e1\x02Cube\x02cube\x01e2\x02Sphere\x02sphere');
   });
 
   it('produces identical key when only visibility changes (PF-873 regression)', () => {
@@ -115,6 +115,19 @@ describe('selectPacingKey (PF-873)', () => {
     const state = makeState([
       { id: 'e1', name: 'Multi', components: ['cube', 'physics', 'audio'] },
     ]);
-    expect(selectPacingKey(state)).toBe('e1:Multi:cube');
+    expect(selectPacingKey(state)).toBe('e1\x02Multi\x02cube');
+  });
+
+  it('handles entity names containing colons or pipes without corruption', () => {
+    const state = makeState([
+      { id: 'e1', name: 'Boss:Phase2|Hard', components: ['enemy'] },
+    ]);
+    const key = selectPacingKey(state);
+    // Should encode cleanly — split on \x01 then \x02, not on : or |
+    expect(key).toBe('e1\x02Boss:Phase2|Hard\x02enemy');
+    const [id, name, type] = key.split('\x02');
+    expect(id).toBe('e1');
+    expect(name).toBe('Boss:Phase2|Hard');
+    expect(type).toBe('enemy');
   });
 });

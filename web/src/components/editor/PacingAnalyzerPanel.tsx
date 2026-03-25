@@ -255,16 +255,17 @@ export function selectPacingKey(s: { sceneGraph: { nodes: Record<string, { name:
     ...rootIds,
     ...allIds.filter((id) => !rootIdSet.has(id)),
   ];
-  // Encode as pipe-separated "id:name:component" entries. Any change to names
-  // or component types will produce a different string.
+  // Encode as \x01-separated "id\x02name\x02component" entries. Using control
+  // characters as delimiters avoids collisions with entity names or component
+  // types that may contain `:` or `|`.
   return ordered
     .map((id) => {
       const node = nodes[id];
       if (!node) return null;
-      return `${id}:${node.name}:${node.components[0] ?? 'generic'}`;
+      return `${id}\x02${node.name}\x02${node.components[0] ?? 'generic'}`;
     })
     .filter(Boolean)
-    .join('|');
+    .join('\x01');
 }
 
 export function PacingAnalyzerPanel() {
@@ -277,13 +278,9 @@ export function PacingAnalyzerPanel() {
   const entities: SceneEntityDescriptor[] = useMemo(() => {
     if (!pacingKey) return [];
 
-    const entries = pacingKey.split('|');
+    const entries = pacingKey.split('\x01');
     return entries.map((entry, idx) => {
-      const colonIdx = entry.indexOf(':');
-      const secondColon = entry.indexOf(':', colonIdx + 1);
-      const id = entry.slice(0, colonIdx);
-      const name = entry.slice(colonIdx + 1, secondColon);
-      const type = entry.slice(secondColon + 1);
+      const [id, name, type] = entry.split('\x02');
       return {
         id,
         name,
