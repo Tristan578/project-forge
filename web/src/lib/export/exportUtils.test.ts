@@ -81,6 +81,12 @@ describe('escapeScriptContent', () => {
     const safe = 'var x = 1; console.log(x);';
     expect(escapeScriptContent(safe)).toBe(safe);
   });
+
+  it('escapes </script> inside a JSON string value', () => {
+    const json = JSON.stringify({ name: '</script><img onerror=alert(1)>' });
+    const escaped = escapeScriptContent(json);
+    expect(escaped).not.toContain('</script>');
+  });
 });
 
 describe('validateCssColor', () => {

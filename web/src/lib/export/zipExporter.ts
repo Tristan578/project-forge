@@ -12,7 +12,7 @@ import { generatePostMessageBridge } from './embedGenerator';
 import type { ExportFormat } from './presets';
 import type { ScriptData } from '@/stores/editorStore';
 import { compressTexture, COMPRESSION_PRESETS, type CompressionConfig } from './textureCompression';
-import { escapeHtml, escapeScriptContent } from './exportUtils';
+import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
 
 export interface ZipExportOptions {
   format: ExportFormat;
@@ -205,7 +205,8 @@ function generateZipIndexHtml(options: {
   embedBridge?: string;
   orientationLock?: 'landscape' | 'portrait' | 'none';
 }): string {
-  const { title, bgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock } = options;
+  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock } = options;
+  const bgColor = validateCssColor(rawBgColor);
 
   const debugScript = includeDebug
     ? `
