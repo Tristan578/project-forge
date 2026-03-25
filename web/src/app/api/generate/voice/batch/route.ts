@@ -119,28 +119,17 @@ export async function POST(request: NextRequest) {
   }
 
   // Refund tokens for failed items.
-<<<<<<< HEAD
-  // We charged items.length * 5 upfront; give back 5 tokens per item that failed.
-=======
   // We charged items.length * voice_batch_cost_per_item upfront; refund per failed item.
->>>>>>> origin/fix/remaining-audit-gaps-push
   if (errors.length > 0 && usageId) {
     try {
       if (results.length === 0) {
         // All items failed — full refund via the original usage record
         await refundTokens(authResult.ctx.user.id, usageId);
       } else {
-<<<<<<< HEAD
-        // Partial failure — refund 5 tokens per failed item.
-        // Pass usageId so refundTokenAmount restores to the correct pool
-        // (monthly vs addon) instead of always crediting addon tokens.
-        const refundAmount = errors.length * 5;
-=======
         // Partial failure — refund per-item cost for each failed item.
         // Pass usageId so refundTokenAmount restores to the correct pool
         // (monthly vs addon) instead of always crediting addon tokens.
         const refundAmount = errors.length * TOKEN_COSTS.voice_batch_cost_per_item;
->>>>>>> origin/fix/remaining-audit-gaps-push
         await refundTokenAmount(
           authResult.ctx.user.id,
           refundAmount,

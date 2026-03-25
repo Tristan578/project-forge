@@ -286,10 +286,7 @@ export function PacingAnalyzerPanel() {
     // Distribute entities evenly across 0–1 based on their order.
     // Use rootIds to define ordering for root-level entities; remaining
     // children follow in insertion order.
-<<<<<<< HEAD
-=======
     const allIds = nodeInfos.map((n) => n.id);
->>>>>>> origin/fix/remaining-audit-gaps-push
     const rootIdSet = new Set(rootIds);
     const ordered = [
       ...rootIds,

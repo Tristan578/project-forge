@@ -452,21 +452,12 @@ describe('generateGDD', () => {
 
     await generateGDD('a puzzle game', { genre: 'Puzzle', scope: 'small' });
 
-<<<<<<< HEAD
     expect(fetchAIMock).toHaveBeenCalledOnce();
     const [prompt, options] = fetchAIMock.mock.calls[0] as [string, Record<string, unknown>];
     expect(prompt).toContain('Game idea: a puzzle game');
     expect(prompt).toContain('Genre preference: Puzzle');
     expect(prompt).toContain('Target scope: small');
     expect(options.systemOverride).toBeDefined();
-=======
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    const body = JSON.parse(fetchSpy.mock.calls[0][1]!.body as string);
-    expect(body.messages[0].content).toContain('Game idea: a puzzle game');
-    expect(body.messages[0].content).toContain('Genre preference: Puzzle');
-    expect(body.messages[0].content).toContain('Target scope: small');
-    expect(body.systemOverride).not.toBeUndefined();
->>>>>>> origin/fix/remaining-audit-gaps-push
   });
 
   it('handles error event in SSE stream', async () => {
