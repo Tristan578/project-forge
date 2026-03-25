@@ -4,6 +4,7 @@
  */
 
 const MAX_MESSAGE_LENGTH = 4000;
+const MAX_SYSTEM_PROMPT_LENGTH = 10000;
 const MAX_JSON_STRING_LENGTH = 1_000_000;
 const MAX_ARRAY_ELEMENTS = 100;
 
@@ -23,6 +24,34 @@ export function sanitizeChatInput(input: string): string {
 
   // Limit length
   sanitized = sanitized.slice(0, MAX_MESSAGE_LENGTH);
+
+  // Trim whitespace
+  sanitized = sanitized.trim();
+
+  return sanitized;
+}
+
+/**
+ * Sanitize a system prompt override.
+ *
+ * Unlike sanitizeChatInput (which is for user messages and caps at 4,000 chars),
+ * system prompts can legitimately be much longer. This function strips control
+ * characters and enforces the higher 10,000-char system-prompt limit without
+ * silently discarding valid content.
+ *
+ * @param input - Raw system prompt string
+ * @returns Sanitized string (max 10,000 chars, stripped of control characters)
+ */
+export function sanitizeSystemPrompt(input: string): string {
+  if (typeof input !== 'string') {
+    return '';
+  }
+
+  // Remove control characters (except tab, newline, carriage return)
+  let sanitized = input.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+
+  // Limit to the system-prompt maximum (not the shorter user-message maximum)
+  sanitized = sanitized.slice(0, MAX_SYSTEM_PROMPT_LENGTH);
 
   // Trim whitespace
   sanitized = sanitized.trim();

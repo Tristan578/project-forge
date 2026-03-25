@@ -16,10 +16,12 @@ vi.mock('@/lib/ai/cutsceneGenerator', () => ({
 // ---------------------------------------------------------------------------
 const mockLoad = vi.fn();
 const mockPlay = vi.fn();
+const mockStop = vi.fn();
 
 class MockCutscenePlayer {
   load = mockLoad;
   play = mockPlay;
+  stop = mockStop;
   constructor(_options: unknown) {}
 }
 
