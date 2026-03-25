@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
+import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
 
@@ -54,7 +55,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
       onClose();
       setPrompt('');
     } catch (err) {
-      alert((err as Error).message);
+      toast.error((err as Error).message);
     } finally {
       setIsSubmitting(false);
     }
@@ -64,12 +65,17 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-      <div className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="generate-music-dialog-title"
+        className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
           <div className="flex items-center gap-2">
             <Sparkles size={16} className="text-purple-400" />
-            <h2 className="text-base font-semibold text-zinc-100">Generate Music</h2>
+            <h2 id="generate-music-dialog-title" className="text-base font-semibold text-zinc-100">Generate Music</h2>
           </div>
           <button
             onClick={onClose}
