@@ -19,7 +19,6 @@ export async function POST() {
     await deleteUserAccount(authResult.ctx.user.id);
     return NextResponse.json({ deleted: true });
   } catch (err) {
-    console.error('Account deletion failed:', err);
     captureException(err, { route: '/api/user/delete' });
     return NextResponse.json(
       { error: 'Failed to delete account' },

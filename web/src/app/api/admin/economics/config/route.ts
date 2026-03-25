@@ -4,6 +4,7 @@ import { getDb } from '@/lib/db/client';
 import { tokenConfig, tierConfig } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { rateLimitAdminRoute } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function PUT(request: NextRequest) {
   const authResult = await authenticateRequest();
@@ -16,29 +17,40 @@ export async function PUT(request: NextRequest) {
   const limited = await rateLimitAdminRoute(authResult.ctx.user.id, 'admin-economics-config');
   if (limited) return limited;
 
-  const body = await request.json();
-  const db = getDb();
-
-  if (body.type === 'token_config') {
-    await db.update(tokenConfig)
-      .set({
-        tokenCost: body.tokenCost,
-        estimatedCostCents: body.estimatedCostCents,
-        active: body.active ? 1 : 0,
-        updatedAt: new Date(),
-      })
-      .where(eq(tokenConfig.id, body.id));
-  } else if (body.type === 'tier_config') {
-    await db.update(tierConfig)
-      .set({
-        monthlyTokens: body.monthlyTokens,
-        maxProjects: body.maxProjects,
-        maxPublished: body.maxPublished,
-        priceCentsMonthly: body.priceCentsMonthly,
-        updatedAt: new Date(),
-      })
-      .where(eq(tierConfig.id, body.id));
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  return NextResponse.json({ success: true });
+  try {
+    const db = getDb();
+
+    if (body.type === 'token_config') {
+      await db.update(tokenConfig)
+        .set({
+          tokenCost: body.tokenCost,
+          estimatedCostCents: body.estimatedCostCents,
+          active: body.active ? 1 : 0,
+          updatedAt: new Date(),
+        })
+        .where(eq(tokenConfig.id, body.id));
+    } else if (body.type === 'tier_config') {
+      await db.update(tierConfig)
+        .set({
+          monthlyTokens: body.monthlyTokens,
+          maxProjects: body.maxProjects,
+          maxPublished: body.maxPublished,
+          priceCentsMonthly: body.priceCentsMonthly,
+          updatedAt: new Date(),
+        })
+        .where(eq(tierConfig.id, body.id));
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    captureException(error, { route: '/api/admin/economics/config', method: 'PUT' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }

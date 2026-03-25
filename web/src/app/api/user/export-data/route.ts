@@ -176,7 +176,6 @@ export async function GET() {
       },
     });
   } catch (err) {
-    console.error('GDPR data export failed:', err);
     captureException(err, { route: '/api/user/export-data' });
     return NextResponse.json(
       { error: 'Failed to export user data' },

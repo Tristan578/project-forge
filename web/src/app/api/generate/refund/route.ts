@@ -41,7 +41,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (err) {
     captureException(err, { route: '/api/generate/refund', usageId });
-    const message = err instanceof Error ? err.message : 'Refund error';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Refund failed' }, { status: 500 });
   }
 }
