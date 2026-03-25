@@ -155,7 +155,7 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Install Vercel CLI
-        run: npm i -g vercel@50.34.3
+        run: npm i -g vercel@latest
 
       - name: Install dependencies
         working-directory: web
@@ -175,7 +175,10 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel build --token="$VERCEL_TOKEN"
+        run: |
+          # Ensure npm is discoverable by Vercel CLI's child processes
+          export PATH="$(dirname $(which npm)):$PATH"
+          vercel build --token="$VERCEL_TOKEN"
 
       - name: Deploy preview
         id: deploy
