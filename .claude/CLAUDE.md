@@ -62,7 +62,7 @@ python .claude/skills/arch-validator/check_arch.py   # Arch validator
 ```
 
 - Do NOT use native `cargo check`/`cargo build` without `--target wasm32-unknown-unknown`
-- Local testing without DB: use `http://localhost:3000/dev` (bypasses auth)
+- Local testing without DB: use `http://spawnforge.localhost:1355/dev` (bypasses auth). Fallback: `http://localhost:3000/dev`
 
 ## Cargo Features
 
@@ -189,76 +189,13 @@ Key rules:
 
 ## Phase Roadmap
 
-| Phase | Name | Status | Details |
-|-------|------|--------|---------|
-| 1-2 | Foundation | DONE | |
-| 3 | Rendering & Materials | DONE | |
-| 4-A | MCP Server (327 commands, 37 categories) | DONE | Initial 143, expanded across subsequent phases |
-| 4-B | AI Chat Panel | DONE | ChatPanel, ChatInput (image upload, voice, model selection), entity @-mentions, thinking mode, approval mode, batch undo, feedback, conversation persistence, streaming |
-| 5-A | Play/Edit Mode | DONE | |
-| 5-B | Input System | DONE | |
-| 5-C | Physics | DONE | |
-| 6 | Save/Load | DONE | |
-| 7 | Asset Pipeline | DONE | |
-| 8 | Game Scripting | DONE | |
-| 9 | Audio | DONE | |
-| 10 | Export | DONE | |
-| 11 | Platform & Payments | DONE | |
-| B | Post-Processing | DONE | |
-| A | Audio Mixer | DONE | |
-| C | GPU Particles | DONE | |
-| D-1 | Skeletal Animation | DONE | |
-| F-1 | Extended Primitives | DONE | |
-| E-1 | Extended Materials | DONE | |
-| A-3 | Audio Layering | DONE | |
-| E-2 | Custom Shader Library | DONE | |
-| F-2 | CSG Boolean Ops | DONE | |
-| F-3 | Procedural Terrain | DONE | |
-| F-4 | Procedural Mesh Gen | DONE | |
-| D-4 | Animation Blending | DONE | |
-| G-1 | Help & Documentation | DONE | |
-| G-2 | Script Runtime & HUD | DONE | |
-| 12 | Polish (responsive, onboarding, perf) | DONE | |
-| 13 | AI Chat & Orchestration | DONE | |
-| 32 | Chat UX Enhancements | DONE | Entity @-mentions, command preview/approval, response feedback, batch undo |
-| 35 | Quality Presets | DONE | Low/Medium/High/Ultra rendering presets (MSAA, shadows, bloom, sharpening, particles) |
-| 36 | Material Library Browser | DONE | 56 presets across 9 categories, CSS sphere previews, custom material saving |
-| T-1 | Test Infrastructure | DONE | Initial test foundation: fixtures, store/executor/sceneFile/material/hierarchy/script/clipboard/search tests |
-| H-1 | Prefab System | DONE | Entity templates, 8 built-in prefabs, localStorage persistence, search, import/export, 5 MCP commands |
-| H-2 | Multi-Scene / Level System | DONE | Multiple named scenes per project, scene switching, duplicate, import/export, 7 MCP commands |
-| T-2 | Test Coverage Expansion | DONE | 12,620+ web tests across 184+ files, export pipeline, audio manager, chat/user stores, dndUtils, API routes, db, generate, dialogue, UI builder, component tests |
-| G-3 | Skybox & Environment Maps | DONE | Procedural cubemap presets (Studio, Sunset, Overcast, Night, Bright Day), Skybox component, IBL, 3 MCP commands |
-| G-4 | Collision Events & Raycasting | DONE | Rapier CollisionEvent reading, forge.physics.onCollisionEnter/Exit, raycast API, 1 MCP command |
-| 26 | Physics Joints | DONE | 6 joint types (fixed, revolute, spherical, prismatic, rope, spring), JointInspector, limits/motors, 4 MCP commands |
-| 27 | Post-Processing Expansion | DONE | SSAO (WebGPU), depth of field, motion blur settings in PostProcessingSettings |
-| 5-D | Pre-Built Game Components | DONE | 12 drag-and-drop behaviors (CharacterController, Health, Collectible, etc.), GameComponentInspector, 5 MCP commands |
-| 14 | AI Asset Generation | DONE | 5 provider integrations (Meshy 3D/texture, ElevenLabs SFX/voice, Suno music), 9 API routes, generation store, polling hook, 5 UI dialogs, custom skybox, 8 MCP commands |
-| 19 | In-Game UI Builder | DONE | 10 widget types, WYSIWYG editor, screen presets (7), data binding, play-mode renderer, export runtime, script API (forge.ui.*), 15 MCP commands |
-| SEC | Security & Performance | DONE | CSP headers, WASM caching, wasm-opt pipeline, Cargo profile optimization, /dev route gate |
-| OBS | Cost Observability | DONE | Tier rename (starter/hobbyist/creator/pro), 4 DB tables (tokenConfig, tierConfig, costLog, creditTransactions), cost logger, credit manager, 2 MCP commands |
-| SCR | Script Library | DONE | Standalone scripts (localStorage CRUD), enhanced Script Explorer with library tab, import/export, 6 MCP commands, 18 tests |
-| DOC | In-Editor Documentation | DONE | DocsPanel with BM25 search, category tree, markdown renderer, API route, help buttons on 6 inspectors, F1 shortcut |
-| 4-C | Compound AI Actions | DONE | 8 compound tools (create_scene, create_level, setup_character, configure_mechanics, arrange_entities, apply_style, describe_scene, analyze_gameplay) |
-| 5-E | Game Cameras | DONE | 6 camera modes (ThirdPerson, FirstPerson, SideScroller, TopDown, Fixed, Orbital), GameCameraInspector, forge.camera script API, 4 MCP commands |
-| ST | Scene Transitions | DONE | CSS overlay transitions (fade, wipe, instant), forge.scene.load/restart/getCurrent/getAll script API, startSceneTransition async action, 2 MCP commands |
-| GT-1 | Game Templates | DONE | 5 starter templates (platformer, runner, shooter, puzzle, explorer), TemplateGallery, lazy-loaded data, 3 MCP commands |
-| D-2 | Keyframe Animation | DONE | AnimationClip system (Rust ECS), position/rotation/scale/color keyframes, easing modes, AnimationClipInspector, 8 MCP commands |
-| 9-C | Dialogue System | DONE | DialogueTree editor, 5 node types (text/choice/condition/action/end), runtime overlay with typewriter, forge.dialogue script API, conditions & actions, 8 MCP commands, 44 tests |
-| SEC-2 | Script Sandbox Hardening | DONE | Global shadowing, command whitelist, per-frame command limit, infinite loop watchdog, rate limiter, export closure fix |
-| MC | Mobile Game Player | DONE | Virtual joystick + buttons overlay, 5 touch presets, safe area CSS, auto quality reduction, PWA viewport, forge.input.isTouchDevice()/vibrate(), SceneSettings UI |
-| OBS-2 | Admin Economics Dashboard | DONE | /admin/economics page, cost analytics, per-user stats, token/tier config editors, API routes |
-| CP | Cloud Publishing | DONE | Publish to shareable URLs, publishStore, PublishDialog, slug validation, tier-based limits, 4 API routes, 4 MCP commands |
-| 15 | Visual Scripting | DONE | React Flow node graph editor, 73 node types (10 categories), graph-to-TypeScript compiler, CustomNode/NodePalette/NodeInspector, Code/Graph tabs, 5 MCP commands, 15 compiler tests |
-| E2E | Playwright E2E Tests | DONE | 81 E2E tests (11 spec files), EditorPage POM, smoke/CSS/entity-CRUD/inspector/layout/chat/settings/mixer/modals/export/script tests, WASM readiness hook |
-| 2D-1 | 2D Foundation | DONE | ProjectType (2D/3D), SpriteData ECS + Bevy Sprite rendering, Camera2dData + OrthographicProjection sync, sorting layers, SpriteInspector, Camera2dInspector, SortingLayerPanel, useProjectType hook, 8 MCP commands |
-| 2D-2 | Sprite Animation | DONE | SpriteSheetData, TextureAtlas slicing, frame timing, AnimationStateMachine evaluation, SpriteAnimationInspector, state transitions, forge.sprite script API, 6 MCP commands |
-| 2D-4 | 2D Physics | DONE | Physics2dData + Rapier2D integration (RapierPhysicsPlugin), 6 collider shapes, 4 joint types, one-way platforms, surface velocity, Physics2dInspector, forge.physics2d script API, 8 MCP commands |
-| 2D-3 | Tilemap System | DONE | TilesetData/TilemapData ECS + tile sprite rendering (TextureAtlas children), multi-layer tiles, hash-based change detection, TilesetPanel, TilemapInspector, TilemapToolbar, TilemapLayerPanel, tilemap editor tools, forge.tilemap script API, 10 MCP commands |
-| 2D-5 | Skeletal 2D Animation | DONE | SkeletonData2d/SkeletalAnimation2d/BlendTree2d ECS + runtime systems (animation playback, IK solving, vertex skinning), bone hierarchy, skins, auto-weight, SkeletonInspector, forge.skeleton2d script API, 11 MCP commands |
-| 20 | Advanced Audio | DONE | Spatial audio, bus mixer, reverb zones, adaptive music (multi-stem intensity crossfade), snapshots (save/load with gain ramp), occlusion (lowpass BiquadFilter), loop point detection (zero-crossing analysis), 6 MCP commands |
-| 24 | Editor Collaboration | REMOVED (PF-142) | Stubs removed — no networking backend existed. Will rebuild from scratch when real-time sync is prioritized |
-| 25 | Multiplayer Networking | REMOVED (PF-141) | Stubs removed — no networking backend existed. Will rebuild from scratch when multiplayer is prioritized |
-| 31 | LOD & Performance | DONE | QEM mesh simplification (Garland-Heckbert), LodMeshes pre-generated handles, distance-based LOD switching, real performance metrics (fps/triangles/draw calls/memory), PerformanceMetrics resource, LOD inspector, performance budget with warnings, 6 MCP commands |
+All 55 core phases are DONE. Key capabilities shipped:
+
+- **Engine**: 3D + 2D rendering (WebGPU/WebGL2), physics (Rapier 3D+2D), skeletal animation, particles (Hanabi GPU), LOD, post-processing, CSG booleans, procedural terrain/mesh
+- **Editor**: Material library (56 presets), visual scripting (73 node types), dialogue system, keyframe animation, in-game UI builder, tilemap editor, prefabs, multi-scene, game templates
+- **AI**: 345 MCP commands (40 categories), compound AI actions, 5 asset generation providers, AI chat with streaming/approval/undo
+- **Platform**: Stripe payments (4 tiers), cloud publishing, mobile PWA, E2E tests (81 specs), 13,600+ unit tests
+- **Removed**: Editor Collaboration (PF-142) and Multiplayer Networking (PF-141) — stubs removed, will rebuild when networking backend is ready
 
 ## New Component / Command Checklist
 
@@ -280,7 +217,7 @@ When adding a **new ECS component**, update these domain-scoped files:
 ### Web Layer (4 files)
 9. `web/src/stores/slices/<domain>Slice.ts` — State + actions (+ re-export from `slices/index.ts`)
 10. `web/src/hooks/events/<domain>Events.ts` — Event handler(s)
-11. `web/src/lib/chat/handlers/<domain>Handlers.ts` — Tool call handler(s) (partial migration; unmigrated tools fall through to `executor.legacy.ts`)
+11. `web/src/lib/chat/handlers/<domain>Handlers.ts` — Tool call handler(s) (registered in `executor.ts` handler registry)
 12. `web/src/components/editor/<Inspector>.tsx` — Inspector panel
 
 ### Integration (5 files)
@@ -313,7 +250,7 @@ When adding a **new ECS component**, update these domain-scoped files:
 - `/frontend` — React 19, Next.js 16, Zustand 5, Tailwind 4 patterns
 - `/mcp-commands` — MCP manifest, chat handlers, AI parity
 - `/testing` — Test patterns, coverage targets, anti-patterns (knowledge)
-- `/run-tests` — Execute test suites: lint, tsc, vitest, playwright, mcp (action)
+- `/test` — Execute test suites: lint, tsc, vitest, playwright, mcp (action)
 - `/troubleshoot` — Diagnose failures: WASM build, CI, dev server, production, E2E, engine panics, services
 - `/docs` — Documentation types, freshness rules, writing standards
 - `/design` — Architecture decisions, performance budgets, spec format

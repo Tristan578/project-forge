@@ -18,6 +18,9 @@ powershell -ExecutionPolicy Bypass -File build_wasm.ps1
 ### Web Frontend
 ```bash
 cd web && npm install && npm run dev
+# → http://spawnforge.localhost:1355 (via Portless)
+# Auth bypass: http://spawnforge.localhost:1355/dev
+# Fallback (no Portless): http://localhost:3000
 ```
 
 ## Test Commands
@@ -35,7 +38,7 @@ cd web && npx eslint --max-warnings 0 .
 # TypeScript
 cd web && npx tsc --noEmit
 
-# Unit tests (12,620+)
+# Unit tests (13,600+)
 cd web && npx vitest run
 
 # Unit tests with coverage
