@@ -1,5 +1,4 @@
-import { API_MAX_DURATION_SIMPLE_S } from '@/lib/config/timeouts';
-export const maxDuration = API_MAX_DURATION_SIMPLE_S;
+export const maxDuration = 10; // API_MAX_DURATION_SIMPLE_S
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
