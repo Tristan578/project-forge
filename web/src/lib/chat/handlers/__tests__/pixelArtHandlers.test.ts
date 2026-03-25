@@ -53,6 +53,12 @@ describe('handleGeneratePixelArt', () => {
     expect(result.error).toContain('Target size');
   });
 
+  it('should reject invalid style instead of silently falling back to default', async () => {
+    const result = await handleGeneratePixelArt({ prompt: 'a warrior knight', style: 'invalid_style' }, mockCtx);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('style');
+  });
+
   it('should succeed with valid args and return job metadata', async () => {
     mockFetch.mockResolvedValue({
       ok: true,

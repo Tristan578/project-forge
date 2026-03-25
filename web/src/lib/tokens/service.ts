@@ -145,11 +145,7 @@ export async function deductTokens(
     return deductTokens(userId, operation, tokenCost, provider, metadata, _retryCount + 1);
   }
 
-  // Log usage — for mixed-source charges, store the split so refunds can reverse proportionally
-  const usageMetadata = source === 'mixed'
-    ? { ...(metadata ?? {}), monthlyDeduct, addonDeduct }
-    : (metadata ?? null);
-
+  // Log usage
   const [usageRecord] = await db
     .insert(tokenUsage)
     .values({
@@ -158,7 +154,7 @@ export async function deductTokens(
       tokens: tokenCost,
       source,
       provider: provider ?? null,
-      metadata: usageMetadata,
+      metadata: metadata ?? null,
     })
     .returning({ id: tokenUsage.id });
 
@@ -203,17 +199,12 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
       })
       .where(eq(users.id, userId));
   } else if (record.source === 'mixed') {
-    // For mixed, reverse the original split stored in metadata.
-    // If metadata is missing (legacy records), fall back to addon-only refund.
-    const meta = record.metadata as Record<string, unknown> | null;
-    const savedMonthly = typeof meta?.monthlyDeduct === 'number' ? meta.monthlyDeduct : 0;
-    const savedAddon = typeof meta?.addonDeduct === 'number' ? meta.addonDeduct : record.tokens;
-
+    // For mixed, we refund everything to addon for simplicity
+    // (monthly may have reset since the charge)
     await db
       .update(users)
       .set({
-        monthlyTokensUsed: sql`GREATEST(0, ${users.monthlyTokensUsed} - ${savedMonthly})`,
-        addonTokens: sql`${users.addonTokens} + ${savedAddon}`,
+        addonTokens: sql`${users.addonTokens} + ${record.tokens}`,
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));
@@ -235,8 +226,14 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
  * Use this when only a subset of items in a batch operation failed — the caller
  * is responsible for calculating how many tokens to return.
  *
+ * Pass `usageId` (from the original `deductTokens` call) so the refund is
+ * credited to the correct pool (monthly vs addon).  When the original source
+ * was `monthly`, the refund reduces `monthlyTokensUsed`; for `addon` or
+ * `mixed` it increases `addonTokens` (matching the `refundTokens` behaviour
+ * for the mixed case).
+ *
  * For a complete operation failure (all items failed), prefer `refundTokens`
- * which looks up the original usage record and reverses the exact deduction.
+ * which reverses the exact deduction amount from the usage record.
  */
 export async function refundTokenAmount(
   userId: string,
@@ -248,9 +245,7 @@ export async function refundTokenAmount(
 
   const db = getDb();
 
-  // Determine which pool to refund to by checking the original charge source.
-  // If a usageId is provided, look up that specific record; otherwise default
-  // to addon tokens (safest fallback — monthly tokens may have reset).
+  // Determine the original source so we credit the right pool.
   let source: 'monthly' | 'addon' | 'mixed' = 'addon';
   if (usageId) {
     const [record] = await db
@@ -258,15 +253,10 @@ export async function refundTokenAmount(
       .from(tokenUsage)
       .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
       .limit(1);
-    if (record?.source === 'monthly') {
-      source = 'monthly';
-    } else if (record?.source === 'mixed') {
-      source = 'mixed';
-    }
+    if (record) source = record.source as 'monthly' | 'addon' | 'mixed';
   }
 
   if (source === 'monthly') {
-    // Refund to monthly allocation — decrement monthlyTokensUsed
     await db
       .update(users)
       .set({
@@ -274,19 +264,8 @@ export async function refundTokenAmount(
         updatedAt: new Date(),
       })
       .where(eq(users.id, userId));
-  } else if (source === 'mixed') {
-    // Mixed charges used both monthly and addon. For partial refunds we cannot
-    // determine the exact split, so we refund to addon (same as refundTokens
-    // full-refund behavior) — monthly allocation may have reset since the charge.
-    await db
-      .update(users)
-      .set({
-        addonTokens: sql`${users.addonTokens} + ${tokens}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
   } else {
-    // addon source or no usageId — credit addon tokens
+    // addon or mixed — refund to addonTokens (consistent with full refundTokens for mixed)
     await db
       .update(users)
       .set({
@@ -301,7 +280,7 @@ export async function refundTokenAmount(
     operation: 'partial_refund',
     tokens: -tokens,
     source,
-    metadata: { reason, ...(usageId ? { originalUsageId: usageId } : {}) },
+    metadata: { reason, ...(usageId ? { refundedUsageId: usageId } : {}) },
   });
 }
 

@@ -32,7 +32,7 @@ const MINIMAL_SCENE_JSON = JSON.stringify({
   ],
 });
 
-test.describe('load_scene store action @engine', () => {
+test.describe('load_scene store action @ui', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
   });
@@ -44,7 +44,7 @@ test.describe('load_scene store action @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 45_000 },
+      { timeout: 15_000 },
     );
 
     const hasLoadScene = await page.evaluate(() => {
@@ -63,7 +63,7 @@ test.describe('load_scene store action @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 45_000 },
+      { timeout: 15_000 },
     );
 
     const error = await page.evaluate((json: string) => {
@@ -88,7 +88,7 @@ test.describe('load_scene store action @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 45_000 },
+      { timeout: 15_000 },
     );
 
     // Should not throw — the store/engine should handle invalid JSON gracefully
@@ -106,20 +106,23 @@ test.describe('load_scene store action @engine', () => {
 
     expect(error).toBeNull();
 
-    // Editor layout should still be intact after the bad call
-    // Verify page is still responsive (not crashed). Don't assert on specific UI
-    // elements — this test is about crash resilience, not rendering correctness.
-    await expect(page.locator('body')).toBeVisible({ timeout: 5_000 });
+    // Editor store should still be accessible after the bad call
+    const storeStillAccessible = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      return !!store && typeof store.getState === 'function';
+    });
+    expect(storeStillAccessible).toBe(true);
   });
 
-  test('dispatchCommand load_scene call does not throw @engine', async ({ page }) => {
+  test('loadScene with valid JSON via store action does not throw', async ({ page }) => {
     await page.waitForFunction(
       () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
-        return store && typeof store.getState().dispatchCommand === 'function';
+        return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 45_000 },
+      { timeout: 15_000 },
     );
 
     const error = await page.evaluate((json: string) => {
@@ -127,7 +130,7 @@ test.describe('load_scene store action @engine', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
         if (!store) return 'Store unavailable';
-        store.getState().dispatchCommand('load_scene', { json });
+        store.getState().loadScene(json);
         return null;
       } catch (e) {
         return String(e);
