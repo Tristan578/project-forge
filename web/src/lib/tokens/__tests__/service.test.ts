@@ -31,12 +31,18 @@ function resetChain() {
   mockOrderBy.mockResolvedValue([]);
 }
 
+const mockNeonSql = Object.assign(
+  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]) => ({ query: 'mock' })),
+  { transaction: vi.fn().mockResolvedValue(undefined) }
+);
+
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(() => ({
     select: mockSelect,
     insert: mockInsert,
     update: mockUpdate,
   })),
+  getNeonSql: vi.fn(() => mockNeonSql),
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -469,40 +475,33 @@ describe('creditAddonTokens', () => {
     vi.clearAllMocks();
     vi.resetModules();
     resetChain();
+    mockNeonSql.transaction.mockResolvedValue(undefined);
   });
 
-  it('credits spark package tokens and logs purchase', async () => {
+  it('credits spark package tokens and logs purchase atomically', async () => {
     const { creditAddonTokens } = await import('../service');
-
-    mockWhere.mockResolvedValueOnce([]);
-    mockValues.mockReturnValueOnce(Promise.resolve());
 
     await creditAddonTokens('user-1', 'spark', 'pi_stripe_123');
 
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).toHaveBeenCalled();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    const statements = mockNeonSql.transaction.mock.calls[0][0];
+    expect(statements).toHaveLength(2);
   });
 
-  it('credits blaze package tokens', async () => {
+  it('credits blaze package tokens atomically', async () => {
     const { creditAddonTokens } = await import('../service');
-
-    mockWhere.mockResolvedValueOnce([]);
-    mockValues.mockReturnValueOnce(Promise.resolve());
 
     await creditAddonTokens('user-1', 'blaze', 'pi_stripe_456');
 
-    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('credits inferno package tokens', async () => {
+  it('credits inferno package tokens atomically', async () => {
     const { creditAddonTokens } = await import('../service');
-
-    mockWhere.mockResolvedValueOnce([]);
-    mockValues.mockReturnValueOnce(Promise.resolve());
 
     await creditAddonTokens('user-1', 'inferno', 'pi_stripe_789');
 
-    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 });
 

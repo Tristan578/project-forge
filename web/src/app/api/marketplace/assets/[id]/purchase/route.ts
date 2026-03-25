@@ -135,11 +135,13 @@ export async function POST(
       return NextResponse.json({ error: 'Balance changed, please retry' }, { status: 409 });
     }
 
-    // Update seller balance
+    // Update seller balance atomically — use SQL expression to avoid lost
+    // updates under concurrent purchases (PF-974). Never read-then-write
+    // for credit accumulation; always use += at the DB level.
     await db
       .update(users)
       .set({
-        earnedCredits: seller.earnedCredits + sellerEarnings,
+        earnedCredits: sql`${users.earnedCredits} + ${sellerEarnings}`,
       })
       .where(eq(users.id, seller.id));
 

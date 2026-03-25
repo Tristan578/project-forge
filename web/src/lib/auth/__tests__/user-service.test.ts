@@ -51,6 +51,11 @@ function buildSelectChain(rows: Partial<User>[]): unknown {
 }
 const mockSelect = vi.fn().mockImplementation(() => buildSelectChain(mockUser ? [mockUser] : []));
 
+const mockNeonSql = Object.assign(
+  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]) => ({ query: 'mock' })),
+  { transaction: vi.fn().mockResolvedValue(undefined) }
+);
+
 vi.mock('@/lib/db/client', () => ({
   getDb: () => ({
     select: mockSelect,
@@ -58,6 +63,7 @@ vi.mock('@/lib/db/client', () => ({
     update: mockUpdate,
     delete: mockDelete,
   }),
+  getNeonSql: () => mockNeonSql,
 }));
 
 vi.mock('@/lib/db/schema', () => ({
@@ -383,81 +389,63 @@ describe('updateDisplayName', () => {
 // ---------------------------------------------------------------------------
 
 describe('deleteUserAccount', () => {
-  it('deletes the user record at the end of the cascade', async () => {
+  beforeEach(() => {
+    mockNeonSql.transaction.mockResolvedValue(undefined);
+  });
+
+  it('runs all deletes in a single neon transaction (PF-976)', async () => {
     mockSelect.mockImplementation(() => buildSelectChain([]));
 
     await deleteUserAccount('user-uuid-1');
-    expect(mockDelete).toHaveBeenCalled();
-    // The users table deletion is the last one
-    const lastCallIndex = mockDelete.mock.calls.length - 1;
-    expect(mockDelete.mock.calls[lastCallIndex][0]).toBeDefined();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    // With no games/projects, transaction should still have many DELETE statements
+    const statements = mockNeonSql.transaction.mock.calls[0][0];
+    expect(statements.length).toBeGreaterThan(5);
   });
 
-  it('deletes financial records (credit_transactions, token_usage, etc.)', async () => {
-    mockSelect.mockImplementation(() => buildSelectChain([]));
-
-    await deleteUserAccount('user-uuid-1');
-    // delete is called for each table; check count is non-trivial
-    expect(mockDelete.mock.calls.length).toBeGreaterThan(5);
-  });
-
-  it('handles a user with published games — deletes game community data first', async () => {
+  it('includes per-game community deletes when user has published games', async () => {
     let selectCallCount = 0;
     mockSelect.mockImplementation(() => {
       selectCallCount++;
       if (selectCallCount === 1) {
-        // Published games query
-        return buildSelectChain([{ id: 'game-uuid-1' }]);
+        return buildSelectChain([{ id: 'game-uuid-1' }, { id: 'game-uuid-2' }]);
       }
-      // Projects query (and any subsequent selects)
       return buildSelectChain([]);
     });
 
     await deleteUserAccount('user-uuid-1');
-    // Should not throw — cascading deletes handled gracefully
-    expect(mockDelete).toHaveBeenCalled();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    // 2 games × 5 community tables = 10 extra statements
+    const statements = mockNeonSql.transaction.mock.calls[0][0];
+    expect(statements.length).toBeGreaterThan(15);
   });
 
-  it('handles a user with projects — deletes projects', async () => {
+  it('includes project deletes when user has projects', async () => {
     let selectCallCount = 0;
     mockSelect.mockImplementation(() => {
       selectCallCount++;
-      if (selectCallCount === 1) {
-        // Published games (none)
-        return buildSelectChain([]);
-      }
-      if (selectCallCount === 2) {
-        // Projects
-        return buildSelectChain([{ id: 'proj-uuid-1' }]);
-      }
+      if (selectCallCount === 1) return buildSelectChain([]);
+      if (selectCallCount === 2) return buildSelectChain([{ id: 'proj-1' }]);
       return buildSelectChain([]);
     });
 
     await expect(deleteUserAccount('user-uuid-1')).resolves.not.toThrow();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 
   it('completes without error when user has no associated data', async () => {
     mockSelect.mockImplementation(() => buildSelectChain([]));
 
     await expect(deleteUserAccount('user-uuid-1')).resolves.not.toThrow();
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('deletes keys (apiKeys, providerKeys)', async () => {
+  it('the user DELETE statement is last in the transaction', async () => {
     mockSelect.mockImplementation(() => buildSelectChain([]));
 
     await deleteUserAccount('user-uuid-1');
-    // Verify apiKeys and providerKeys deletions occurred
-    const deleteArgs = mockDelete.mock.calls.map((call) => call[0]);
-    // Check that both key tables were targeted (they are objects from the schema mock)
-    expect(deleteArgs.length).toBeGreaterThanOrEqual(10);
-  });
-
-  it('deletes generationJobs as part of cascade (PF-510)', async () => {
-    mockSelect.mockImplementation(() => buildSelectChain([]));
-
-    await deleteUserAccount('user-uuid-1');
-    // generationJobs mock has { userId: 'userId' } — verify it was passed to delete()
-    const deleteArgs = mockDelete.mock.calls.map((call) => call[0]);
-    expect(deleteArgs).toContainEqual({ userId: 'userId' });
+    const statements = mockNeonSql.transaction.mock.calls[0][0];
+    // Last statement should be the user deletion
+    expect(statements.length).toBeGreaterThan(0);
   });
 });

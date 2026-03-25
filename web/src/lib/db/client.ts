@@ -34,18 +34,41 @@ function createDb() {
   if (!databaseUrl) {
     throw new Error('DATABASE_URL environment variable is not set');
   }
-  const sql = neon(databaseUrl);
-  return drizzle(sql, { schema });
+  const sqlClient = neon(databaseUrl);
+  return { db: drizzle(sqlClient, { schema }), sql: sqlClient };
 }
 
 // Singleton for hot-reload in dev
-let _db: ReturnType<typeof createDb> | null = null;
+let _instance: ReturnType<typeof createDb> | null = null;
+
+function getInstance() {
+  if (!_instance) {
+    _instance = createDb();
+  }
+  return _instance;
+}
 
 export function getDb() {
-  if (!_db) {
-    _db = createDb();
-  }
-  return _db;
+  return getInstance().db;
+}
+
+/**
+ * Get the raw Neon SQL client for use with sql.transaction([...queries]).
+ *
+ * This is the ONLY supported way to run multi-statement transactions with the
+ * neon-http driver (PF-525). Use this when you need atomicity across multiple
+ * INSERT/UPDATE operations. Pass raw tagged-template queries built with the
+ * returned function.
+ *
+ * Example:
+ *   const sql = getNeonSql();
+ *   await sql.transaction([
+ *     sql`UPDATE users SET addon_tokens = addon_tokens + ${n} WHERE id = ${userId}`,
+ *     sql`INSERT INTO token_purchases (...) VALUES (...)`,
+ *   ]);
+ */
+export function getNeonSql() {
+  return getInstance().sql;
 }
 
 export type Db = ReturnType<typeof getDb>;
