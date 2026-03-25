@@ -4,7 +4,9 @@
  * When in Play mode with a FirstPerson camera active, this hook:
  * 1. Requests pointer lock on the canvas when clicked
  * 2. Captures raw mouse movement deltas (movementX/Y)
- * 3. Sends them to the engine as 'mouse_delta' commands
+ * 3. Batches accumulated deltas via requestAnimationFrame and dispatches at
+ *    ~60fps max — mousemove events may arrive at 240Hz+ but WASM only receives
+ *    one command per animation frame (PF-874)
  * 4. Releases pointer lock when Play mode ends or camera mode changes
  */
 
