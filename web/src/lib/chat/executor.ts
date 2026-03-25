@@ -37,6 +37,7 @@ import { cameraHandlers } from './handlers/cameraHandlers';
 import { worldHandlers } from './handlers/worldHandlers';
 import { localizationHandlers } from './handlers/localizationHandlers';
 import { economyHandlers } from './handlers/economyHandlers';
+import { questHandlers } from './handlers/questHandlers';
 
 /**
  * Merged handler registry.
@@ -71,6 +72,7 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...worldHandlers,
   ...localizationHandlers,
   ...economyHandlers,
+  ...questHandlers,
 };
 
 /**
