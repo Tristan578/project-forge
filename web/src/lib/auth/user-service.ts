@@ -104,11 +104,24 @@ export async function updateDisplayName(
 /**
  * Cascading hard delete of a user and all their data.
  *
- * All 18+ DELETE statements are submitted in a single neon sql.transaction()
+ * All DELETE statements are submitted in a single neon sql.transaction()
  * batch so either all rows are removed or none are (PF-976). The reads for
  * game/project IDs happen before the transaction so we can build the
  * per-game delete statements — reads outside the transaction are safe because
  * account deletion is not concurrent with itself.
+ *
+ * Deletion order enforces FK constraints:
+ *   community data on games
+ *   → user's own community interactions
+ *   → other users' reviews/purchases on this user's marketplace assets
+ *   → user's own marketplace interactions
+ *   → marketplace_assets / seller_profiles
+ *   → featured_games (FK → published_games)
+ *   → published_games
+ *   → generation_jobs (FK → projects)
+ *   → projects
+ *   → financial / key data
+ *   → users
  */
 export async function deleteUserAccount(userId: string): Promise<void> {
   const db = getDb();
@@ -141,6 +154,8 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     statements.push(neonSql`DELETE FROM game_likes    WHERE game_id  = ${gameId}`);
     statements.push(neonSql`DELETE FROM game_tags     WHERE game_id  = ${gameId}`);
     statements.push(neonSql`DELETE FROM game_forks    WHERE original_game_id = ${gameId}`);
+    // featured_games FK → published_games: must delete before published_games
+    statements.push(neonSql`DELETE FROM featured_games WHERE game_id = ${gameId}`);
   }
 
   // 2. User's own community interactions on other games
@@ -151,36 +166,54 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM user_follows  WHERE follower_id  = ${userId}`);
   statements.push(neonSql`DELETE FROM user_follows  WHERE following_id = ${userId}`);
 
-  // 3. Marketplace data
-  statements.push(neonSql`DELETE FROM asset_reviews      WHERE user_id   = ${userId}`);
-  statements.push(neonSql`DELETE FROM asset_purchases    WHERE buyer_id  = ${userId}`);
+  // 3. Other users' reviews and purchases on THIS user's marketplace assets
+  //    (FK: asset_reviews.asset_id → marketplace_assets.id,
+  //         asset_purchases.asset_id → marketplace_assets.id)
+  //    Must precede the marketplace_assets delete below.
+  statements.push(
+    neonSql`DELETE FROM asset_reviews   WHERE asset_id IN (SELECT id FROM marketplace_assets WHERE seller_id = ${userId})`,
+  );
+  statements.push(
+    neonSql`DELETE FROM asset_purchases WHERE asset_id IN (SELECT id FROM marketplace_assets WHERE seller_id = ${userId})`,
+  );
+
+  // 4. User's own marketplace interactions (reviews/purchases on other sellers' assets)
+  statements.push(neonSql`DELETE FROM asset_reviews   WHERE user_id  = ${userId}`);
+  statements.push(neonSql`DELETE FROM asset_purchases WHERE buyer_id = ${userId}`);
+
+  // 5. Marketplace assets and profile (after all dependent rows removed)
   statements.push(neonSql`DELETE FROM marketplace_assets WHERE seller_id = ${userId}`);
   statements.push(neonSql`DELETE FROM seller_profiles    WHERE user_id   = ${userId}`);
 
-  // 4. Published games (after community data; only if user had any)
+  // 6. Published games (after community data and featured_games; only if user had any)
   if (gameIds.length > 0) {
     statements.push(neonSql`DELETE FROM published_games WHERE user_id = ${userId}`);
   }
 
-  // 5. Projects (after published games that may reference them)
+  // 7. Generation jobs — must come BEFORE projects because generation_jobs.project_id
+  //    is a FK that references projects.id. Deleting projects first causes a FK violation.
+  statements.push(
+    neonSql`DELETE FROM generation_jobs WHERE project_id IN (SELECT id FROM projects WHERE user_id = ${userId})`,
+  );
+  // Catch-all: jobs that reference the user directly but may not be linked to a project
+  statements.push(neonSql`DELETE FROM generation_jobs WHERE user_id = ${userId}`);
+
+  // 8. Projects (after generation_jobs)
   if (projectIds.length > 0) {
     statements.push(neonSql`DELETE FROM projects WHERE user_id = ${userId}`);
   }
 
-  // 6. Generation jobs (references users + projects)
-  statements.push(neonSql`DELETE FROM generation_jobs WHERE user_id = ${userId}`);
-
-  // 7. Financial data
+  // 9. Financial data
   statements.push(neonSql`DELETE FROM cost_log             WHERE user_id = ${userId}`);
   statements.push(neonSql`DELETE FROM credit_transactions  WHERE user_id = ${userId}`);
   statements.push(neonSql`DELETE FROM token_usage          WHERE user_id = ${userId}`);
   statements.push(neonSql`DELETE FROM token_purchases      WHERE user_id = ${userId}`);
 
-  // 8. Keys
+  // 10. Keys
   statements.push(neonSql`DELETE FROM api_keys      WHERE user_id = ${userId}`);
   statements.push(neonSql`DELETE FROM provider_keys WHERE user_id = ${userId}`);
 
-  // 9. User record (last — all FK dependents removed above)
+  // 11. User record (last — all FK dependents removed above)
   statements.push(neonSql`DELETE FROM users WHERE id = ${userId}`);
 
   // Execute all statements atomically
