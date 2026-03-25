@@ -13,7 +13,7 @@ import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistratio
 import { PostHogProvider } from "@/components/providers/PostHogProvider";
 import "./globals.css";
 
-// Prevent static prerendering — all pages require auth (ClerkProvider)
+// Root layout calls getMessages() (next-intl) which reads from request context — must be dynamic
 export const dynamic = "force-dynamic";
 
 // Clerk validates key format at runtime — skip wrapping when key is missing/invalid (CI E2E tests)

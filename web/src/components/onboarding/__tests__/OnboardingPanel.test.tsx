@@ -59,13 +59,17 @@ vi.mock('@/data/achievements', () => ({
   ],
 }));
 
-vi.mock('lucide-react', () => ({
-  X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
-  CheckCircle2: (props: Record<string, unknown>) => <span data-testid="check-circle" {...props} />,
-  Circle: (props: Record<string, unknown>) => <span data-testid="circle" {...props} />,
-  Lock: (props: Record<string, unknown>) => <span data-testid="lock-icon" {...props} />,
-  Box: ({ className }: { className?: string }) => <span data-testid="box-icon" className={className} />,
-}));
+vi.mock('lucide-react', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('lucide-react')>();
+  return {
+    ...actual,
+    X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
+    CheckCircle2: (props: Record<string, unknown>) => <span data-testid="check-circle" {...props} />,
+    Circle: (props: Record<string, unknown>) => <span data-testid="circle" {...props} />,
+    Lock: (props: Record<string, unknown>) => <span data-testid="lock-icon" {...props} />,
+    Box: ({ className }: { className?: string }) => <span data-testid="box-icon" className={className} />,
+  };
+});
 
 describe('OnboardingPanel', () => {
   const mockSetShowOnboardingPanel = vi.fn();

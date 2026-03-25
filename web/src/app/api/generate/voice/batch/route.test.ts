@@ -6,6 +6,7 @@ import { POST } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { rateLimit } from '@/lib/rateLimit';
+import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 
 const mockGenerateVoice = vi.hoisted(() => vi.fn());
@@ -23,6 +24,13 @@ vi.mock('@/lib/generate/elevenlabsClient', () => ({
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
   rateLimitResponse: vi.fn().mockReturnValue(new Response('Rate Limited', { status: 429 })),
+}));
+vi.mock('@/lib/tokens/service', () => ({
+  refundTokens: vi.fn().mockResolvedValue(undefined),
+  refundTokenAmount: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
 }));
 
 interface BatchItem {
@@ -207,5 +215,100 @@ describe('POST /api/generate/voice/batch', () => {
     await expect(
       POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }))
     ).rejects.toThrow('DB connection failed');
+  });
+
+  describe('token refunds', () => {
+    it('calls refundTokens (full refund) when all items fail', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true, usageId: 'usage_123' });
+      mockGenerateVoice.mockRejectedValue(new Error('API unavailable'));
+
+      const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.totalGenerated).toBe(0);
+      expect(data.totalFailed).toBe(2);
+      expect(refundTokens).toHaveBeenCalledWith(user.id, 'usage_123');
+      expect(refundTokenAmount).not.toHaveBeenCalled();
+    });
+
+    it('calls refundTokenAmount (partial refund) when some items fail', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true, usageId: 'usage_456' });
+      mockGenerateVoice
+        .mockResolvedValueOnce({ audioBase64: 'ok==', durationSeconds: 1.0 })
+        .mockRejectedValueOnce(new Error('Item failed'));
+
+      const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.totalGenerated).toBe(1);
+      expect(data.totalFailed).toBe(1);
+      // 1 failed item * 5 tokens per item = 5 tokens refunded
+      expect(refundTokenAmount).toHaveBeenCalledWith(
+        user.id,
+        5,
+        expect.stringContaining('voice_batch_partial_failure'),
+        'usage_456',
+      );
+      expect(refundTokens).not.toHaveBeenCalled();
+    });
+
+    it('does not call any refund when all items succeed', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true, usageId: 'usage_789' });
+      mockGenerateVoice.mockResolvedValue({ audioBase64: 'ok==', durationSeconds: 1.0 });
+
+      const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+      const data = await res.json();
+
+      expect(res.status).toBe(200);
+      expect(data.totalFailed).toBe(0);
+      expect(refundTokens).not.toHaveBeenCalled();
+      expect(refundTokenAmount).not.toHaveBeenCalled();
+    });
+
+    it('does not refund when usageId is undefined (BYOK key)', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      // BYOK keys return no usageId
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'byok', key: 'user_key', metered: false });
+      mockGenerateVoice.mockRejectedValue(new Error('API unavailable'));
+
+      const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+      const data = await res.json();
+
+      expect(data.totalFailed).toBe(2);
+      expect(refundTokens).not.toHaveBeenCalled();
+      expect(refundTokenAmount).not.toHaveBeenCalled();
+    });
+
+    it('refunds 5 tokens per failed item for a 3-item batch with 2 failures', async () => {
+      const user = makeUser();
+      vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+      vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'el_key', metered: true, usageId: 'usage_abc' });
+      const threeItems: BatchItem[] = [
+        { nodeId: 'n1', text: 'Hello', speaker: 'narrator' },
+        { nodeId: 'n2', text: 'World', speaker: 'narrator' },
+        { nodeId: 'n3', text: 'Goodbye', speaker: 'narrator' },
+      ];
+      mockGenerateVoice
+        .mockResolvedValueOnce({ audioBase64: 'ok==', durationSeconds: 1.0 })
+        .mockRejectedValueOnce(new Error('fail'))
+        .mockRejectedValueOnce(new Error('fail'));
+
+      const res = await POST(makeRequest({ items: threeItems, voiceSettings: defaultVoiceSettings }));
+      const data = await res.json();
+
+      expect(data.totalGenerated).toBe(1);
+      expect(data.totalFailed).toBe(2);
+      // 2 failed items * 5 tokens = 10 tokens refunded
+      expect(refundTokenAmount).toHaveBeenCalledWith(user.id, 10, expect.any(String), 'usage_abc');
+    });
   });
 });

@@ -76,9 +76,11 @@ function TimeoutWarning({
 function FailedState({
   onCopyLog,
   copied,
+  onSwitchToWebGL2,
 }: {
   onCopyLog: () => void;
   copied: boolean;
+  onSwitchToWebGL2: () => void;
 }) {
   return (
     <div className="text-center">
@@ -91,6 +93,17 @@ function FailedState({
         <br />
         This may be a browser or GPU compatibility issue.
       </p>
+      <div className="mb-3">
+        <button
+          onClick={onSwitchToWebGL2}
+          className="w-full rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500"
+        >
+          Switch to WebGL2 Mode
+        </button>
+        <p className="mt-1 text-xs text-zinc-500">
+          Uses an older but more compatible renderer
+        </p>
+      </div>
       <div className="flex justify-center gap-3">
         <button
           onClick={onCopyLog}
@@ -102,7 +115,7 @@ function FailedState({
           href={GITHUB_ISSUES_URL}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500"
+          className="rounded bg-zinc-700 px-4 py-2 text-sm text-zinc-200 hover:bg-zinc-600"
         >
           Report Issue
         </a>
@@ -139,13 +152,18 @@ export function InitOverlay() {
     }
   };
 
+  const handleSwitchToWebGL2 = () => {
+    setPreferredBackend('webgl2');
+    window.location.reload();
+  };
+
   const showFailedState = retryCount >= 3 || (!canRetry && (isTimedOut || error));
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/95">
       <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
         {showFailedState ? (
-          <FailedState onCopyLog={handleCopyLog} copied={copied} />
+          <FailedState onCopyLog={handleCopyLog} copied={copied} onSwitchToWebGL2={handleSwitchToWebGL2} />
         ) : (
           <>
             <h2 className="mb-4 text-lg font-semibold text-zinc-100">

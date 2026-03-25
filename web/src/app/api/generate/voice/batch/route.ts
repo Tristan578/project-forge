@@ -7,7 +7,7 @@ import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { refundTokens } from '@/lib/tokens/service';
+import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 
 interface BatchItem {
   nodeId: string;
@@ -117,10 +117,23 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Refund tokens if every item in the batch failed
-  if (results.length === 0 && errors.length > 0 && usageId) {
+  // Refund tokens for failed items.
+  // We charged items.length * 5 upfront; give back 5 tokens per item that failed.
+  if (errors.length > 0 && usageId) {
     try {
-      await refundTokens(authResult.ctx.user.id, usageId);
+      if (results.length === 0) {
+        // All items failed — full refund via the original usage record
+        await refundTokens(authResult.ctx.user.id, usageId);
+      } else {
+        // Partial failure — refund 5 tokens per failed item
+        const refundAmount = errors.length * 5;
+        await refundTokenAmount(
+          authResult.ctx.user.id,
+          refundAmount,
+          `voice_batch_partial_failure:${errors.length}_of_${items.length}_failed`,
+          usageId,
+        );
+      }
     } catch (refundErr) {
       captureException(refundErr, { route: '/api/generate/voice/batch', action: 'refund', usageId });
     }
