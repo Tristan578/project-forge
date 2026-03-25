@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getProject, updateProject, deleteProject } from '@/lib/projects/service';
 import { parseJsonBody, requireString, requireObject, optionalString } from '@/lib/apiValidation';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 /**
  * GET /api/projects/[id]
@@ -16,13 +17,19 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { id } = await params;
-  const project = await getProject(authResult.ctx.user.id, id);
 
-  if (!project) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+  try {
+    const project = await getProject(authResult.ctx.user.id, id);
+
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(project);
+  } catch (error) {
+    captureException(error, { route: '/api/projects/[id]', method: 'GET' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  return NextResponse.json(project);
 }
 
 /**
@@ -78,13 +85,18 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     updates.entityCount = count;
   }
 
-  const project = await updateProject(authResult.ctx.user.id, id, updates);
+  try {
+    const project = await updateProject(authResult.ctx.user.id, id, updates);
 
-  if (!project) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    if (!project) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    return NextResponse.json(project);
+  } catch (error) {
+    captureException(error, { route: '/api/projects/[id]', method: 'PUT' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  return NextResponse.json(project);
 }
 
 /**
@@ -99,11 +111,17 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   const { id } = await params;
-  const deleted = await deleteProject(authResult.ctx.user.id, id);
 
-  if (!deleted) {
-    return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+  try {
+    const deleted = await deleteProject(authResult.ctx.user.id, id);
+
+    if (!deleted) {
+      return NextResponse.json({ error: 'Project not found' }, { status: 404 });
+    }
+
+    return new NextResponse(null, { status: 204 });
+  } catch (error) {
+    captureException(error, { route: '/api/projects/[id]', method: 'DELETE' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-
-  return new NextResponse(null, { status: 204 });
 }

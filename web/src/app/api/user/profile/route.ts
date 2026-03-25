@@ -54,8 +54,8 @@ export async function PUT(request: NextRequest) {
   } catch (err) {
     captureException(err, { route: '/api/user/profile', method: 'PUT' });
     return NextResponse.json(
-      { error: (err as Error).message },
-      { status: 400 }
+      { error: 'Failed to update profile' },
+      { status: 500 }
     );
   }
 }

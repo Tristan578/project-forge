@@ -13,9 +13,13 @@ export async function GET() {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
 
-  const projectsList = await listProjects(authResult.ctx.user.id);
-
-  return NextResponse.json(projectsList);
+  try {
+    const projectsList = await listProjects(authResult.ctx.user.id);
+    return NextResponse.json(projectsList);
+  } catch (error) {
+    captureException(error, { route: '/api/projects', method: 'GET' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
 }
 
 /**
@@ -56,6 +60,6 @@ export async function POST(req: Request) {
       );
     }
     captureException(error, { route: '/api/projects', action: 'create' });
-    throw error;
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
