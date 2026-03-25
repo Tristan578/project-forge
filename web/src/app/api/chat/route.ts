@@ -8,6 +8,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
 import {
   sanitizeChatInput,
+  sanitizeSystemPrompt,
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
@@ -440,8 +441,13 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    // Strip control characters and enforce length cap (reuse sanitizeChatInput logic)
-    effectiveSystemPrompt = sanitizeChatInput(systemOverride.slice(0, 10000));
+    // Strip control characters and enforce system-prompt length cap.
+    // sanitizeSystemPrompt uses MAX_SYSTEM_PROMPT_LENGTH (10,000) — NOT the
+    // 4,000-char user-message limit — so valid long system prompts are never
+    // silently truncated. (Prior code passed systemOverride through
+    // sanitizeChatInput which has a hardcoded 4,000-char cap, causing data
+    // loss for any system prompt between 4,001–10,000 chars.)
+    effectiveSystemPrompt = sanitizeSystemPrompt(systemOverride);
   }
 
   let systemText = effectiveSystemPrompt;
