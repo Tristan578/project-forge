@@ -165,6 +165,11 @@ export class CutscenePlayer {
 
   /** Stop playback and reset to start. */
   stop(): void {
+    // Only fire onStop when playback was actually in progress.
+    // load() calls stop() internally to reset state before loading a new
+    // cutscene — without this guard, load() would spuriously dispatch
+    // 'stop' even though nothing was playing.
+    const wasPlaying = this.rafHandle !== null || this.startTime !== null;
     if (this.rafHandle !== null) {
       cancelAnimationFrame(this.rafHandle);
       this.rafHandle = null;
@@ -174,7 +179,9 @@ export class CutscenePlayer {
     this.currentTime = 0;
     useCutsceneStore.getState().setPlaybackState('stopped');
     useCutsceneStore.getState().setPlaybackTime(0);
-    this.options.onStop?.();
+    if (wasPlaying) {
+      this.options.onStop?.();
+    }
   }
 
   /** Seek to a specific time in seconds. */
