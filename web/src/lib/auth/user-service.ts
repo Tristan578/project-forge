@@ -213,7 +213,11 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   statements.push(neonSql`DELETE FROM api_keys      WHERE user_id = ${userId}`);
   statements.push(neonSql`DELETE FROM provider_keys WHERE user_id = ${userId}`);
 
-  // 11. User record (last — all FK dependents removed above)
+  // 11. Feedback and moderation appeals (FK references users.id)
+  statements.push(neonSql`DELETE FROM feedback            WHERE user_id = ${userId}`);
+  statements.push(neonSql`DELETE FROM moderation_appeals  WHERE user_id = ${userId}`);
+
+  // 12. User record (last — all FK dependents removed above)
   statements.push(neonSql`DELETE FROM users WHERE id = ${userId}`);
 
   // Execute all statements atomically
