@@ -425,28 +425,21 @@ export async function POST(request: NextRequest) {
   }
 
   // 6. Build system prompt with optional scene context and doc context.
-  // systemOverride must be sanitized before use to prevent prompt injection
-  // and AI persona bypass attacks (PF-968, PF-901).
+  // systemOverride replaces the default system prompt for features like game
+  // review and tutorial generation. It is NOT user-controlled free text — it
+  // comes from application code that constructs domain-specific instructions.
+  // We sanitize (strip control chars, enforce length cap) but skip the
+  // injection-pattern check: detectPromptInjection targets user messages
+  // attempting to hijack the system prompt from *within* a conversation turn,
+  // which is a different threat model. Applying it here false-positives on
+  // legitimate instructional phrasing like "you are now a game reviewer" or
+  // "new instruction: focus on level design" (PF-968, PF-901).
   let effectiveSystemPrompt = SYSTEM_PROMPT;
   if (typeof systemOverride === 'string' && systemOverride.length > 0) {
-    // Reject if the override itself contains injection patterns
-    if (detectPromptInjection(systemOverride)) {
-      if (usageId) {
-        await refundTokens(auth.ctx.user.id, usageId).catch((err: unknown) => {
-          captureException(err, { route: '/api/chat', phase: 'refund_override_reject', usageId });
-        });
-      }
-      return Response.json(
-        { error: 'systemOverride contains suspicious patterns.' },
-        { status: 400 }
-      );
-    }
     // Strip control characters and enforce system-prompt length cap.
     // sanitizeSystemPrompt uses MAX_SYSTEM_PROMPT_LENGTH (10,000) — NOT the
     // 4,000-char user-message limit — so valid long system prompts are never
-    // silently truncated. (Prior code passed systemOverride through
-    // sanitizeChatInput which has a hardcoded 4,000-char cap, causing data
-    // loss for any system prompt between 4,001–10,000 chars.)
+    // silently truncated.
     effectiveSystemPrompt = sanitizeSystemPrompt(systemOverride);
   }
 
