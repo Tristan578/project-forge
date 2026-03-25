@@ -367,6 +367,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
   }, [primaryId, primaryAnimationClip, viewState.isPlaying, setClipProperty]);
 
   const handleStop = useCallback(() => {
+    playheadRef.current = 0;
     setViewState((prev) => ({ ...prev, isPlaying: false, playheadTime: 0 }));
   }, []);
 
