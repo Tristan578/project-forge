@@ -84,11 +84,14 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
     ctx.dispatchCommand('play', {});
 
     // Stop any existing player before starting a new one.
-    // Do NOT set activeCutscene yet — load() triggers stop() which calls onStop,
-    // and onStop nullifies activeCutsceneId. Set it AFTER load completes.
+    // Clear the reference BEFORE calling stop() so the onStop callback sees
+    // activePlayer = null and skips its own 'stop' dispatch — we already
+    // handled transition here and do not want a stale 'stop' after the new
+    // play command.
     if (activePlayer) {
-      activePlayer.stop();
+      const prev = activePlayer;
       activePlayer = null;
+      prev.stop();
     }
 
     const player = new CutscenePlayer({
@@ -99,10 +102,17 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
         ctx.dispatchCommand('stop', {});
       },
       onStop: () => {
+        // Only dispatch 'stop' when a cutscene was actually playing.
+        // load() calls stop() internally to reset state — at that point activePlayer
+        // is still null (set after load returns), so we must not fire 'stop'
+        // prematurely and cancel the play command that was just dispatched.
+        // Also skip if stop_cutscene already cleared activePlayer and dispatched 'stop'.
+        const wasPlaying = activePlayer !== null;
         activePlayer = null;
         useCutsceneStore.getState().setActiveCutscene(null);
-        // Clean up engine effects (camera, animations, audio) from the interrupted cutscene
-        ctx.dispatchCommand('stop', {});
+        if (wasPlaying) {
+          ctx.dispatchCommand('stop', {});
+        }
       },
     });
 
@@ -130,19 +140,20 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
       return { success: false, error: 'No cutscene is currently playing' };
     }
 
-    // Stop the active player's rAF loop. stop() fires onStop which handles
-    // engine cleanup (dispatches 'stop') and clears activeCutsceneId.
+    // Stop the active player's rAF loop if one exists.
+    // Clear the reference BEFORE calling stop() so the onStop callback sees
+    // activePlayer = null and skips its own 'stop' dispatch — we dispatch it
+    // directly below to ensure the caller's engine context receives the cleanup.
     if (activePlayer) {
-      activePlayer.stop();
+      const player = activePlayer;
       activePlayer = null;
-    } else {
-      // Defensive: no player ref but playback state says playing — clean up manually
-      state.setActiveCutscene(null);
-      ctx.dispatchCommand('stop', {});
+      player.stop();
     }
 
+    state.setActiveCutscene(null);
     state.setPlaybackState('stopped');
     state.setPlaybackTime(0);
+    ctx.dispatchCommand('stop', {});
 
     return { success: true, result: { message: 'Cutscene stopped' } };
   },
@@ -183,8 +194,9 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
 
     // Stop the active player if the deleted cutscene is currently playing
     if (activePlayer && state.activeCutsceneId === p.data.cutsceneId) {
-      activePlayer.stop();
+      const player = activePlayer;
       activePlayer = null;
+      player.stop();
     }
 
     state.deleteCutscene(p.data.cutsceneId);

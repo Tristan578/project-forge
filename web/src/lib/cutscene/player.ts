@@ -245,20 +245,28 @@ export class CutscenePlayer {
 
   private fireKeyframesAt(time: number): void {
     for (const item of this.scheduled) {
-      if (item.fired) continue;
       if (item.keyframe.timestamp > time) continue;
 
       const elapsed = time - item.keyframe.timestamp;
-      const progress = item.keyframe.duration > 0
-        ? Math.min(elapsed / item.keyframe.duration, 1)
-        : 1;
 
-      const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, progress);
-      if (cmd) {
-        this.options.dispatchCommand(cmd.command, cmd.payload);
+      if (item.keyframe.duration > 0) {
+        // Duration-based keyframe: re-fire every frame while within the window
+        // so that easing interpolation is applied continuously.
+        if (elapsed > item.keyframe.duration) continue;
+        const progress = Math.min(elapsed / item.keyframe.duration, 1);
+        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, progress);
+        if (cmd) {
+          this.options.dispatchCommand(cmd.command, cmd.payload);
+        }
+      } else {
+        // Instantaneous keyframe: fire once only to avoid duplicate commands.
+        if (item.fired) continue;
+        const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, 1);
+        if (cmd) {
+          this.options.dispatchCommand(cmd.command, cmd.payload);
+        }
+        item.fired = true;
       }
-
-      item.fired = true;
     }
   }
 }
