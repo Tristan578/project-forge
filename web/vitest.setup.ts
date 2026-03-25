@@ -46,9 +46,10 @@ if (typeof globalThis.localStorage?.clear !== 'function') {
 
 // Global test isolation — prevent state leaks between tests
 // ---------------------------------------------------------------------------
-import { afterEach } from 'vitest';
+import { afterEach, vi } from 'vitest';
 
 afterEach(() => {
+  vi.restoreAllMocks();
   // Clear localStorage between tests to prevent shared state leaks
   if (typeof globalThis.localStorage?.clear === 'function') {
     globalThis.localStorage.clear();
