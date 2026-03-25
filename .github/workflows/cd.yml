@@ -75,12 +75,10 @@ jobs:
 
   # ---- Quality Gates (must all pass before any deployment) ----
 
-  # Quality gate jobs only run on workflow_dispatch (manual triggers).
-  # On push to main, CI already validated the same SHA before the merge --
-  # re-running them wastes ~15 runner-minutes per push with zero benefit.
+  # Quality gate jobs run on every trigger (push to main and workflow_dispatch).
+  # This ensures merges that bypass branch protection are still validated before deploy.
   lint:
     name: Lint
-    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -102,7 +100,6 @@ jobs:
 
   typecheck:
     name: TypeScript
-    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -124,7 +121,6 @@ jobs:
 
   test-web:
     name: Web Tests
-    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -168,7 +164,6 @@ jobs:
 
   test-mcp:
     name: MCP Tests
-    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -251,7 +246,7 @@ jobs:
 
       - name: Try downloading WASM from CI (same SHA)
         id: ci-wasm
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
@@ -347,7 +342,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
@@ -447,7 +442,7 @@ jobs:
           sudo ./aws/install --update
 
       - name: Download WASM artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
@@ -514,7 +509,7 @@ jobs:
 
       - name: Download WASM artifacts
         if: ${{ vars.R2_CDN_ENABLED != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/
@@ -611,7 +606,7 @@ jobs:
 
       - name: Download WASM artifacts
         if: ${{ vars.R2_CDN_ENABLED != 'true' }}
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: wasm-binaries
           path: engine/

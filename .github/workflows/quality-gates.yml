@@ -51,7 +51,10 @@ on:
         value: ${{ jobs.coverage-ratchet.result }}
 
 permissions:
-  contents: read
+  # contents:write is required by the coverage-ratchet job which commits bumped
+  # thresholds back to the repository on merges to main (PF-911).
+  # Job-level overrides only work if the workflow-level grants the permission too.
+  contents: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -163,14 +166,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download coverage artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         continue-on-error: true
         with:
           name: coverage-report
