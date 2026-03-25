@@ -12,6 +12,7 @@ import { generatePostMessageBridge } from './embedGenerator';
 import type { ExportFormat } from './presets';
 import type { ScriptData } from '@/stores/editorStore';
 import { compressTexture, COMPRESSION_PRESETS, type CompressionConfig } from './textureCompression';
+import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
 
 export interface ZipExportOptions {
   format: ExportFormat;
@@ -204,7 +205,8 @@ function generateZipIndexHtml(options: {
   embedBridge?: string;
   orientationLock?: 'landscape' | 'portrait' | 'none';
 }): string {
-  const { title, bgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock } = options;
+  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock } = options;
+  const bgColor = validateCssColor(rawBgColor);
 
   const debugScript = includeDebug
     ? `
@@ -262,9 +264,9 @@ function generateZipIndexHtml(options: {
   <div id="forge-touch-overlay"></div>
 
   <script>
-    ${debugScript}
-    ${loadingScript}
-    ${embedBridge || ''}
+    ${escapeScriptContent(debugScript)}
+    ${escapeScriptContent(loadingScript)}
+    ${embedBridge ? escapeScriptContent(embedBridge) : ''}
   </script>
 
   <script type="module">
@@ -584,15 +586,6 @@ function crc32(data: Uint8Array): number {
   }
 
   return (crc ^ 0xFFFFFFFF) >>> 0;
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 /**

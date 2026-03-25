@@ -3,6 +3,8 @@
  * Generates custom loading HTML with various animation styles
  */
 
+import { escapeHtml, validateCssColor } from './exportUtils';
+
 export interface LoadingScreenConfig {
   backgroundColor: string;
   logoDataUrl?: string;
@@ -14,13 +16,16 @@ export interface LoadingScreenConfig {
 
 export function generateLoadingHtml(config: LoadingScreenConfig): string {
   const {
-    backgroundColor,
+    backgroundColor: rawBgColor,
     logoDataUrl,
-    progressBarColor,
+    progressBarColor: rawProgressColor,
     progressStyle,
     title,
     subtitle,
   } = config;
+
+  const backgroundColor = validateCssColor(rawBgColor);
+  const progressBarColor = validateCssColor(rawProgressColor);
 
   const logoHtml = logoDataUrl
     ? `<img src="${logoDataUrl}" alt="Game Logo" style="max-width: 200px; max-height: 100px; margin-bottom: 20px;" />`
@@ -161,15 +166,6 @@ function getProgressStyles(style: LoadingScreenConfig['progressStyle'], color: s
     default:
       return baseStyles;
   }
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 /**

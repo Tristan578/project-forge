@@ -391,7 +391,8 @@ describe('Export Pipeline Integration', () => {
       expect(html).toContain('&quot;quotes&quot;');
       expect(html).toContain('&amp;');
       // Apostrophe must also be escaped to keep the HTML attribute value safe
-      expect(html).toContain('&#39;');
+      // exportUtils.escapeHtml uses &#039; (5-digit form — both are valid HTML entities)
+      expect(html).toContain('&#039;');
     });
   });
 
