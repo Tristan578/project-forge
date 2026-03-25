@@ -130,16 +130,19 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
       return { success: false, error: 'No cutscene is currently playing' };
     }
 
-    // Stop the active player's rAF loop to prevent background command dispatch
+    // Stop the active player's rAF loop. stop() fires onStop which handles
+    // engine cleanup (dispatches 'stop') and clears activeCutsceneId.
     if (activePlayer) {
       activePlayer.stop();
       activePlayer = null;
+    } else {
+      // Defensive: no player ref but playback state says playing — clean up manually
+      state.setActiveCutscene(null);
+      ctx.dispatchCommand('stop', {});
     }
 
     state.setPlaybackState('stopped');
-    state.setActiveCutscene(null);
     state.setPlaybackTime(0);
-    ctx.dispatchCommand('stop', {});
 
     return { success: true, result: { message: 'Cutscene stopped' } };
   },
