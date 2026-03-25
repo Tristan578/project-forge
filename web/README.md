@@ -1,13 +1,13 @@
-# Project Forge — Web Frontend
+# SpawnForge — Web Frontend
 
-Next.js frontend for the Project Forge editor. See the [root README](../README.md) for full project documentation.
+Next.js frontend for the SpawnForge editor. See the [root README](../README.md) for full project documentation.
 
 ## Quick Start
 
 ```bash
 npm install
-cp .env.example .env   # Configure your environment variables
-npm run dev             # http://localhost:3000
+cp .env.example .env.local   # Configure your environment variables
+npm run dev                   # http://localhost:3000
 ```
 
 ## Scripts
