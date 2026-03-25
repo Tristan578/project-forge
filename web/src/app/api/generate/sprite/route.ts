@@ -1,4 +1,4 @@
-export const maxDuration = API_MAX_DURATION_STANDARD_GEN_S;
+export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
@@ -11,7 +11,7 @@ import { refundTokens } from '@/lib/tokens/service';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 import { SPRITE_ESTIMATED_SECONDS } from '@/lib/config/providers';
-import { API_MAX_DURATION_STANDARD_GEN_S } from '@/lib/config/timeouts';
+
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
