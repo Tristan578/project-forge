@@ -2,8 +2,10 @@ import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { DrawerPanel } from '../DrawerPanel';
 
-const mockTrackPanelOpened = vi.fn();
-const mockTrackPanelClosed = vi.fn();
+const { mockTrackPanelOpened, mockTrackPanelClosed } = vi.hoisted(() => ({
+  mockTrackPanelOpened: vi.fn(),
+  mockTrackPanelClosed: vi.fn(),
+}));
 
 vi.mock('@/lib/analytics/panelTracking', () => ({
   trackPanelOpened: mockTrackPanelOpened,
