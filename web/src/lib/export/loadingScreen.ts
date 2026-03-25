@@ -3,6 +3,8 @@
  * Generates custom loading HTML with various animation styles
  */
 
+import { escapeHtml } from './exportUtils';
+
 export interface LoadingScreenConfig {
   backgroundColor: string;
   logoDataUrl?: string;
@@ -161,15 +163,6 @@ function getProgressStyles(style: LoadingScreenConfig['progressStyle'], color: s
     default:
       return baseStyles;
   }
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 /**

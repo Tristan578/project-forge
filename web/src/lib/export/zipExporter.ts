@@ -12,6 +12,7 @@ import { generatePostMessageBridge } from './embedGenerator';
 import type { ExportFormat } from './presets';
 import type { ScriptData } from '@/stores/editorStore';
 import { compressTexture, COMPRESSION_PRESETS, type CompressionConfig } from './textureCompression';
+import { escapeHtml, escapeScriptContent } from './exportUtils';
 
 export interface ZipExportOptions {
   format: ExportFormat;
@@ -262,9 +263,9 @@ function generateZipIndexHtml(options: {
   <div id="forge-touch-overlay"></div>
 
   <script>
-    ${debugScript}
-    ${loadingScript}
-    ${embedBridge || ''}
+    ${escapeScriptContent(debugScript)}
+    ${escapeScriptContent(loadingScript)}
+    ${embedBridge ? escapeScriptContent(embedBridge) : ''}
   </script>
 
   <script type="module">
@@ -584,15 +585,6 @@ function crc32(data: Uint8Array): number {
   }
 
   return (crc ^ 0xFFFFFFFF) >>> 0;
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
 }
 
 /**

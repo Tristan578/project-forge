@@ -1,6 +1,7 @@
 import { generateUIRuntimeCode } from './uiRuntime';
 import { generateTouchCSS, generateTouchJS } from './touchControls';
 import type { MobileTouchConfig } from './touchControls';
+import { escapeHtml, escapeScriptContent, validateCssColor } from './exportUtils';
 
 export interface EmbeddedWasmData {
   jsBase64: string;     // JS glue code, base64-encoded
@@ -29,9 +30,14 @@ export function generateGameHTML(options: GameTemplateOptions): string {
       ? `width: ${resolution.split('x')[0]}px; height: ${resolution.split('x')[1]}px; margin: auto;`
       : `width: ${resolution.width}px; height: ${resolution.height}px; margin: auto;`;
 
-  const touchConfig: MobileTouchConfig | null = mobileTouchConfig
-    ? JSON.parse(mobileTouchConfig)
-    : null;
+  let touchConfig: MobileTouchConfig | null = null;
+  if (mobileTouchConfig) {
+    try {
+      touchConfig = JSON.parse(mobileTouchConfig) as MobileTouchConfig;
+    } catch {
+      touchConfig = null;
+    }
+  }
 
   const touchCSS = touchConfig?.enabled ? generateTouchCSS() : '';
   const touchJS = touchConfig?.enabled ? generateTouchJS(touchConfig) : '';
@@ -44,9 +50,9 @@ export function generateGameHTML(options: GameTemplateOptions): string {
   <title>${escapeHtml(title)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { overflow: hidden; background: ${bgColor}; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+    body { overflow: hidden; background: ${validateCssColor(bgColor)}; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
     canvas { ${canvasStyle} display: block; }
-    #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: ${bgColor}; z-index: 1000; transition: opacity 0.5s; }
+    #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: ${validateCssColor(bgColor)}; z-index: 1000; transition: opacity 0.5s; }
     #loading.hidden { opacity: 0; pointer-events: none; }
     .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.2); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -65,13 +71,13 @@ export function generateGameHTML(options: GameTemplateOptions): string {
 
   <script>
     // Scene data
-    window.__forgeSceneData = ${sceneData};
-    ${uiData ? `window.__forgeUIData = ${uiData};` : ''}
+    window.__forgeSceneData = ${escapeScriptContent(sceneData)};
+    ${uiData ? `window.__forgeUIData = ${escapeScriptContent(uiData)};` : ''}
   </script>
 
   ${touchJS ? `<script>${touchJS}</script>` : ''}
 
-  ${scriptBundle ? `<script>\n${scriptBundle}\n</script>` : ''}
+  ${scriptBundle ? `<script>\n${escapeScriptContent(scriptBundle)}\n</script>` : ''}
 
   ${embeddedWasm ? generateEmbeddedWasmScripts(embeddedWasm) : ''}
 
@@ -181,10 +187,6 @@ export function generateGameHTML(options: GameTemplateOptions): string {
   ${uiData ? generateUIRuntimeScript(uiData) : ''}
 </body>
 </html>`;
-}
-
-function escapeHtml(text: string): string {
-  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function generateUIRuntimeScript(uiData: string): string {
