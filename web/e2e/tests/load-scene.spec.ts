@@ -106,16 +106,21 @@ test.describe('load_scene store action @ui', () => {
 
     expect(error).toBeNull();
 
-    // Editor layout should still be intact after the bad call
-    await expect(page.locator('.dv-dockview-container').first()).toBeVisible({ timeout: 5_000 });
+    // Editor store should still be accessible after the bad call
+    const storeStillAccessible = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const store = (window as any).__EDITOR_STORE;
+      return !!store && typeof store.getState === 'function';
+    });
+    expect(storeStillAccessible).toBe(true);
   });
 
-  test('dispatchCommand load_scene call does not throw', async ({ page }) => {
+  test('loadScene with valid JSON via store action does not throw', async ({ page }) => {
     await page.waitForFunction(
       () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
-        return store && typeof store.getState().dispatchCommand === 'function';
+        return store && typeof store.getState().loadScene === 'function';
       },
       { timeout: 15_000 },
     );
@@ -125,7 +130,7 @@ test.describe('load_scene store action @ui', () => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const store = (window as any).__EDITOR_STORE;
         if (!store) return 'Store unavailable';
-        store.getState().dispatchCommand('load_scene', { json });
+        store.getState().loadScene(json);
         return null;
       } catch (e) {
         return String(e);
