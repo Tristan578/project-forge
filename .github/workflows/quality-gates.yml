@@ -50,11 +50,8 @@ on:
         description: 'Outcome of the coverage-ratchet job'
         value: ${{ jobs.coverage-ratchet.result }}
 
-# NOTE: No workflow-level permissions block here. As a reusable workflow,
-# permissions are inherited from the caller (ci.yml or cd.yml). Declaring
-# permissions here would cause startup_failure if they exceed the caller's
-# grants (e.g., ci.yml only grants contents:read for PRs).
-# Each job declares its own permissions as needed.
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -166,14 +163,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download coverage artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: coverage-report
