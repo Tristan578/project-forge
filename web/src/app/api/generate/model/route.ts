@@ -3,6 +3,7 @@ export const maxDuration = 180; // API_MAX_DURATION_HEAVY_GEN_S
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { getTokenCost } from '@/lib/tokens/pricing';
+import { refundTokens } from '@/lib/tokens/service';
 import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { withApiMiddleware } from '@/lib/api/middleware';
@@ -116,6 +117,14 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (err) {
+    // Refund tokens on Meshy provider failure (PF-895)
+    if (usageId) {
+      try {
+        await refundTokens(authResult.ctx.user.id, usageId);
+      } catch (refundErr) {
+        captureException(refundErr, { route: '/api/generate/model', action: 'refund', usageId });
+      }
+    }
     captureException(err, { route: '/api/generate/model', prompt: safePrompt, mode });
     const message = err instanceof Error ? err.message : 'Provider error';
     return NextResponse.json({ error: message }, { status: 500 });

@@ -34,8 +34,8 @@ export async function POST(request: NextRequest) {
 
   const { prompt, durationSeconds = 5 } = body;
 
-  // Validate
-  if (!prompt || prompt.length < 3 || prompt.length > 500) {
+  // Validate (PF-898: typeof guard prevents prototype/non-string values bypassing length check)
+  if (!prompt || typeof prompt !== 'string' || prompt.length < 3 || prompt.length > 500) {
     return NextResponse.json(
       { error: 'Prompt must be between 3 and 500 characters' },
       { status: 422 }
