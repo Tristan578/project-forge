@@ -3,8 +3,8 @@
  * Maps panel IDs to metadata used by WorkspaceProvider and preset layouts.
  */
 
-/** AI panel categories used to group panels in the AI Studio sidebar. */
-export type AIPanelCategory = 'creation' | 'polish' | 'intelligence' | 'tools';
+import type { AIPanelCategory } from '@/lib/config/enums';
+export type { AIPanelCategory };
 
 export interface PanelDefinition {
   id: string;

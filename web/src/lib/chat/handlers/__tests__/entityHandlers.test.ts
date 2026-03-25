@@ -12,6 +12,30 @@ beforeEach(() => {
 });
 
 // ===========================================================================
+// PF-854 regression — despawn_entity must NOT be registered in entityHandlers
+// (it lives exclusively in transformHandlers to prevent double-execution)
+// ===========================================================================
+
+describe('PF-854 regression: despawn_entity not in entityHandlers', () => {
+  it('entityHandlers does not register despawn_entity', () => {
+    expect(entityHandlers).not.toHaveProperty('despawn_entity');
+  });
+
+  it('transformHandlers registers despawn_entity', () => {
+    expect(transformHandlers).toHaveProperty('despawn_entity');
+    expect(typeof transformHandlers.despawn_entity).toBe('function');
+  });
+
+  it('despawn_entity executes exactly once per call via transformHandlers', async () => {
+    const { result, store } = await invokeHandler(transformHandlers, 'despawn_entity', {
+      entityId: 'ent-regression',
+    });
+    expect(result.success).toBe(true);
+    expect(store.deleteSelectedEntities).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ===========================================================================
 // spawn_entity
 // ===========================================================================
 

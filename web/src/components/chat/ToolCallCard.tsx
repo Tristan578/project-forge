@@ -165,6 +165,7 @@ const TOOL_LABELS: Record<string, string> = {
   get_game_camera: 'Get Game Camera',
   load_scene_with_transition: 'Load Scene',
   set_default_transition: 'Set Default Transition',
+  design_economy: 'Design Economy',
   generate_3d_model: 'Generate 3D Model',
   generate_3d_from_image: 'Generate 3D from Image',
   generate_texture: 'Generate Texture',
@@ -177,6 +178,9 @@ const TOOL_LABELS: Record<string, string> = {
   generate_sprite_sheet: 'Generate Sprite Sheet',
   generate_character: 'Generate Character',
   generate_tileset: 'Generate Tileset',
+  build_world: 'Build World',
+  get_current_world: 'Get World',
+  clear_world: 'Clear World',
   remove_background: 'Remove Background',
   apply_style_transfer: 'Apply Style Transfer',
   set_project_style: 'Set Project Style',
@@ -298,6 +302,11 @@ const TOOL_LABELS: Record<string, string> = {
   list_leaderboards: 'List Leaderboards',
   configure_leaderboard: 'Configure Leaderboard',
   delete_leaderboard: 'Delete Leaderboard',
+  // Localization
+  extract_translatable_strings: 'Extract Strings',
+  translate_scene: 'Translate Scene',
+  set_preview_locale: 'Preview Locale',
+  list_locales: 'List Locales',
 };
 
 function summarizeInput(name: string, input: Record<string, unknown>): string {

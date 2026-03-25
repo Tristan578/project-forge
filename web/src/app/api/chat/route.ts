@@ -1,4 +1,4 @@
-export const maxDuration = 120; // seconds — AI streaming + tool calls need more than the 10s default
+export const maxDuration = 120; // API_MAX_DURATION_CHAT_S
 
 import { NextRequest } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
@@ -13,6 +13,7 @@ import {
 } from '@/lib/chat/sanitizer';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { logCost } from '@/lib/costs/costLogger';
 import { buildDocContext } from '@/lib/chat/docContext';
 import type { DocEntry } from '@/lib/docs/docsIndex';
 import { resolveChatRoute } from '@/lib/providers/resolveChat';
@@ -374,8 +375,8 @@ export async function POST(request: NextRequest) {
         auth.ctx.user.id,
         'anthropic',
         estimatedCost,
-        messages.length > 3 ? 'chat_long' : 'chat_short',
-        { model }
+        'chat_message',
+        { model, length: messages.length > 3 ? 'long' : 'short' }
       );
       usageId = resolved.usageId;
     } catch (err) {
@@ -484,6 +485,31 @@ export async function POST(request: NextRequest) {
       stopWhen: stepCountIs(10),
       experimental_telemetry: { isEnabled: true },
       ...(providerOptions ? { providerOptions } : {}),
+      // Log actual LLM token usage to the cost ledger once the stream completes.
+      // usage.inputTokens and usage.outputTokens are the actual values from
+      // the model (not the estimated cost charged upfront via resolveApiKey).
+      onFinish: async ({ usage }) => {
+        // Only log cost when tokens were actually metered (direct backend with usageId).
+        // Gateway/BYOK requests don't have a usageId and should not be logged here.
+        if (auth.ctx.user.id && usageId && usage) {
+          const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+          logCost(
+            auth.ctx.user.id,
+            'chat_message',
+            isDirectBackend ? 'anthropic' : 'gateway',
+            null,
+            totalTokens,
+            {
+              model,
+              promptTokens: usage.inputTokens,
+              completionTokens: usage.outputTokens,
+              usageId,
+            },
+          ).catch((err: unknown) => {
+            captureException(err, { route: '/api/chat', phase: 'log_token_usage' });
+          });
+        }
+      },
       // Handle mid-stream errors: refund tokens when the stream fails after starting
       onError: async ({ error }) => {
         captureException(error, { route: '/api/chat', model, phase: 'mid-stream' });

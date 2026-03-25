@@ -397,6 +397,23 @@ declare namespace forge {
     function submit(name: string, playerName: string, score: number, metadata?: Record<string, unknown>): Promise<{ rank: number } | null>;
     /** Get the top N entries for a named leaderboard (default: top 10). */
     function getTop(name: string, limit?: number): Promise<Array<{ rank: number; playerName: string; score: number; metadata: Record<string, unknown> | null; createdAt: string }> | null>;
+  namespace i18n {
+    /**
+     * Resolve a string ID to its translation for the current locale.
+     * Falls back to the provided default text if no translation is available.
+     * @param stringId - Stable ID such as "ui.btn_start.text" or "dialogue.tree1.node2.text"
+     * @param defaultText - Text to return if no translation exists for this locale
+     */
+    function t(stringId: string, defaultText: string): string;
+    /**
+     * Switch the active locale at runtime (e.g. from a settings screen).
+     * @param locale - BCP-47 locale code such as "ja", "fr", "zh-CN"
+     */
+    function setLocale(locale: string): void;
+    /** Get the currently active locale code (e.g. "en", "ja"). */
+    function getLocale(): string;
+    /** Get all locale codes that have translations available. */
+    function getAvailableLocales(): string[];
   }
 }
 

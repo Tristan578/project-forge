@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildIndex, search } from './search.js';
+import { buildIndex, search, stem } from './search.js';
 import type { DocIndex, DocEntry, TopicMeta } from './loader.js';
 
 /**
@@ -185,6 +185,25 @@ describe('search', () => {
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].snippet.toLowerCase()).toContain('boolean');
     });
+
+    it('should extract snippet containing the original -ies word, not the stemmed form', () => {
+      // "entities" stems to "entity". The snippet must find "entities" in the
+      // original content — not search for the stem "entity" which is not a
+      // substring of "entities".
+      const docIndex = makeDocIndex([
+        {
+          path: 'ecs-guide',
+          title: 'ECS Guide',
+          content: 'Game entities are managed by the ECS. Each entity has components.',
+        },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('entities', docIndex, termIndex);
+
+      expect(results.length).toBeGreaterThan(0);
+      // Snippet must contain the actual word from the document, not default to start
+      expect(results[0].snippet.toLowerCase()).toContain('entities');
+    });
   });
 
   describe('Index Building', () => {
@@ -238,6 +257,111 @@ describe('search', () => {
 
       expect(results.length).toBeGreaterThanOrEqual(2);
       // Scores should be descending
+      for (let i = 1; i < results.length; i++) {
+        expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
+      }
+    });
+  });
+
+  describe('Stemming', () => {
+    it('should not change short terms', () => {
+      expect(stem('go')).toBe('go');
+      expect(stem('the')).toBe('the');
+    });
+
+    it('should remove -tion suffix', () => {
+      // "animation" (9 chars) → strip 4 → "anima"
+      expect(stem('animation')).toBe('anima');
+      // "generation" (10 chars) → strip 4 → "genera"
+      expect(stem('generation')).toBe('genera');
+    });
+
+    it('should remove -ing suffix', () => {
+      expect(stem('moving')).toBe('mov');
+    });
+
+    it('should undo consonant doubling on -ing', () => {
+      // "running" → "run"
+      expect(stem('running')).toBe('run');
+    });
+
+    it('should remove -ed suffix', () => {
+      expect(stem('rendered')).toBe('render');
+    });
+
+    it('should remove plural -s', () => {
+      // "scripts" → "script"
+      expect(stem('scripts')).toBe('script');
+    });
+
+    it('should remove -ies suffix', () => {
+      // "entities" → "entity"
+      expect(stem('entities')).toBe('entity');
+    });
+
+    it('should remove -ly suffix', () => {
+      expect(stem('smoothly')).toBe('smooth');
+    });
+
+    it('should match plural query to document with singular form', () => {
+      // Document has "script", query has "scripts" — both stem to "script"
+      const docIndex = makeDocIndex([
+        { path: 'scripting', title: 'Scripting Guide', content: 'Learn script authoring' },
+        { path: 'audio', title: 'Audio Guide', content: 'Configure audio buses' },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('scripts', docIndex, termIndex);
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].path).toBe('scripting');
+    });
+
+    it('should match -ing form query to document with noun form', () => {
+      // Document has "render", query has "rendering" — stemming should unify them
+      const docIndex = makeDocIndex([
+        { path: 'gfx', title: 'Graphics', content: 'WebGPU render pipeline for games' },
+        { path: 'audio', title: 'Audio', content: 'Sound processing pipeline' },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('rendering', docIndex, termIndex);
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].path).toBe('gfx');
+    });
+  });
+
+  describe('Phrase Matching', () => {
+    it('should rank phrase match higher than scattered term match', () => {
+      const docIndex = makeDocIndex([
+        {
+          path: 'exact',
+          title: 'Particle System',
+          content: 'The particle system lets you create GPU particles with emission rates',
+        },
+        {
+          path: 'scattered',
+          title: 'Various Features',
+          content: 'particle and system configuration for game effects',
+        },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('particle system', docIndex, termIndex);
+
+      expect(results.length).toBeGreaterThanOrEqual(2);
+      // "exact" has "particle system" as consecutive tokens → phrase bonus
+      expect(results[0].path).toBe('exact');
+    });
+
+    it('should not apply phrase bonus for single-term query', () => {
+      // Single term — phrase bonus should be 1.0 (no multiplier)
+      const docIndex = makeDocIndex([
+        { path: 'a', title: 'Physics', content: 'physics collider bodies' },
+        { path: 'b', title: 'Other', content: 'physics at the end' },
+      ]);
+      const termIndex = buildIndex(docIndex);
+      const results = search('physics', docIndex, termIndex);
+      // Should still return results and be sorted by score
+      expect(results.length).toBeGreaterThan(0);
       for (let i = 1; i < results.length; i++) {
         expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
       }

@@ -68,6 +68,21 @@ Performance budgets, browser limitations, version constraints.
 
 All designs must use: Bevy 0.18, Rapier 0.33, wasm-bindgen 0.2.108, Next.js 16, React 19, Zustand 5, TypeScript 5, Tailwind 4.
 
+## Taskboard Permissions
+
+You MUST NOT move tickets between columns. The orchestrator handles all ticket lifecycle transitions.
+
+You MAY:
+- Update ticket descriptions with architectural decisions and scope changes
+- Add subtasks to break down implementation steps
+- Create new tickets for work discovered during planning
+
+You MUST NOT:
+- Call `move_ticket` (MCP) or POST to `/api/tickets/:id/move` (REST)
+- Edit ticket priority, labels, or team assignment
+
+Report your spec back to the orchestrator. The orchestrator decides ticket transitions.
+
 ## Validation
 
 After creating a spec, verify:

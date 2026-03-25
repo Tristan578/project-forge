@@ -1,4 +1,4 @@
-export const maxDuration = 10; // seconds — simple DB refund operation
+export const maxDuration = 10; // API_MAX_DURATION_SIMPLE_S
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';

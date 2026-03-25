@@ -1,4 +1,7 @@
+'use cache';
 
+import { cacheLife } from 'next/cache';
+import { cacheTag } from 'next/cache';
 import Link from 'next/link';
 import {
   Bot,
@@ -272,7 +275,9 @@ const navLinks = [
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  cacheLife('days');
+  cacheTag('landing');
   return (
     <>
       {/* ---- Navigation ---- */}

@@ -293,3 +293,55 @@ describe('Sentry Session 2026-03-20: specific bug regressions', () => {
     expect(getDuration(1000)).toBe(1000); // custom duration preserved
   });
 });
+
+// ---------------------------------------------------------------------------
+// PF-892: anthropicAIIntegration must never appear in client config
+// ---------------------------------------------------------------------------
+
+describe('PF-892: Sentry client config must not include server-only AI integrations', () => {
+  /**
+   * anthropicAIIntegration and vercelAIIntegration are server-only Sentry
+   * integrations. Including them in the browser (client) config causes runtime
+   * errors because the Anthropic SDK is not available in the browser context.
+   *
+   * sentry.client.config.ts must only use browser-safe integrations:
+   *   - browserTracingIntegration
+   *   - replayIntegration
+   *
+   * sentry.server.config.ts and sentry.edge.config.ts may use:
+   *   - anthropicAIIntegration
+   *   - vercelAIIntegration
+   */
+  it('sentry.client.config.ts does not contain anthropicAIIntegration', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const clientConfigPath = path.resolve(
+      process.cwd(),
+      'sentry.client.config.ts',
+    );
+    const content = fs.readFileSync(clientConfigPath, 'utf-8');
+    expect(content).not.toContain('anthropicAIIntegration');
+  });
+
+  it('sentry.client.config.ts does not contain vercelAIIntegration', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const clientConfigPath = path.resolve(
+      process.cwd(),
+      'sentry.client.config.ts',
+    );
+    const content = fs.readFileSync(clientConfigPath, 'utf-8');
+    expect(content).not.toContain('vercelAIIntegration');
+  });
+
+  it('sentry.server.config.ts contains anthropicAIIntegration (server-side AI monitoring)', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const serverConfigPath = path.resolve(
+      process.cwd(),
+      'sentry.server.config.ts',
+    );
+    const content = fs.readFileSync(serverConfigPath, 'utf-8');
+    expect(content).toContain('anthropicAIIntegration');
+  });
+});

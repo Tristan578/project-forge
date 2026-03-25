@@ -1,3 +1,5 @@
+import { SPRITE_TOKEN_COST } from '@/lib/config/providers';
+
 /** Token costs for all AI operations */
 export const TOKEN_COSTS = {
   // Chat
@@ -30,6 +32,23 @@ export const TOKEN_COSTS = {
 
   // Skybox
   skybox_generation: 50,
+
+  // Sprite generation (provider-specific) — derived from providers.ts
+  sprite_generation_dalle3: SPRITE_TOKEN_COST.dalle3,
+  sprite_generation_replicate: SPRITE_TOKEN_COST.sdxl,
+
+  // Tileset generation
+  tileset_generation: 50,
+
+  // Pixel art generation (provider-specific)
+  pixel_art_replicate: 10,
+  pixel_art_openai: 20,
+
+  // Sprite sheet generation (cost per frame — multiply by frameCount at call site)
+  sprite_sheet_cost_per_frame: 15,
+
+  // Voice batch generation (cost per item — multiply by items.length at call site)
+  voice_batch_cost_per_item: 5,
 
   // Compound (estimated averages — actual cost may vary)
   compound_scene_simple: 50,

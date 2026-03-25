@@ -5,11 +5,10 @@ import { eq } from 'drizzle-orm';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { apiKeys } from '@/lib/db/schema';
-import type { ApiKeyScope } from '@/lib/db/schema';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
-
-const VALID_SCOPES: ApiKeyScope[] = ['scene:read', 'scene:write', 'ai:generate', 'project:manage'];
+import { API_KEY_SCOPES, findInvalidScopes, type ApiKeyScope } from '@/lib/config/scopes';
+import { RATE_LIMIT_ADMIN_WINDOW_MS } from '@/lib/config/timeouts';
 
 /** POST /api/keys/api-key — generate a new MCP API key */
 export async function POST(req: Request) {
@@ -17,19 +16,24 @@ export async function POST(req: Request) {
   if (!authResult.ok) return authResult.response;
 
   // Rate limit: 5 API key generation requests per minute per user
-  const rl = await rateLimit(`apikey-gen:${authResult.ctx.user.id}`, 5, 60_000);
+  const rl = await rateLimit(`apikey-gen:${authResult.ctx.user.id}`, 5, RATE_LIMIT_ADMIN_WINDOW_MS);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
   // MCP keys require Creator+ tier
   const tierCheck = assertTier(authResult.ctx.user, ['creator', 'pro']);
   if (tierCheck) return tierCheck;
 
-  const body = await req.json();
+  let body: { name?: unknown; scopes?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
   const name = (body.name as string) || 'Default';
-  const scopes = (body.scopes as ApiKeyScope[]) || VALID_SCOPES;
+  const scopes = (body.scopes as ApiKeyScope[]) || [...API_KEY_SCOPES];
 
   // Validate scopes
-  const invalidScopes = scopes.filter((s: string) => !VALID_SCOPES.includes(s as ApiKeyScope));
+  const invalidScopes = findInvalidScopes(scopes);
   if (invalidScopes.length > 0) {
     return NextResponse.json(
       { error: `Invalid scopes: ${invalidScopes.join(', ')}` },

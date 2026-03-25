@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest';
-import { useChatStore, type ChatMessage } from '@/stores/chatStore';
+import { useChatStore, type ChatMessage, flushConversationSaveForTesting } from '@/stores/chatStore';
 
 // Mock localStorage using vi.stubGlobal for proper cleanup
 const localStorageMock = (() => {
@@ -86,6 +86,7 @@ describe('Conversation Management', () => {
 
     it('persists conversations to localStorage', () => {
       useChatStore.getState().createConversation('Persisted');
+      flushConversationSaveForTesting();
       expect(localStorageMock.setItem).toHaveBeenCalled();
     });
 
@@ -172,8 +173,10 @@ describe('Conversation Management', () => {
 
     it('persists rename to localStorage', () => {
       const id = useChatStore.getState().createConversation('Before');
+      flushConversationSaveForTesting();
       localStorageMock.setItem.mockClear();
       useChatStore.getState().renameConversation(id, 'After');
+      flushConversationSaveForTesting();
       expect(localStorageMock.setItem).toHaveBeenCalled();
     });
   });

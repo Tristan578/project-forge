@@ -4,8 +4,6 @@ import { discoverTool } from '@/lib/bridges/bridgeManager';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export const runtime = 'nodejs';
-
 export async function GET() {
   const auth = await authenticateRequest();
   if (!auth.ok) {

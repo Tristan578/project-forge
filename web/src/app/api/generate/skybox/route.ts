@@ -1,4 +1,4 @@
-export const maxDuration = 60; // seconds — skybox generation
+export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';

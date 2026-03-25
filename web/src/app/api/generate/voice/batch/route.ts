@@ -1,4 +1,4 @@
-export const maxDuration = 120; // seconds — batch voice generation processes up to 20 items sequentially
+export const maxDuration = 120; // API_MAX_DURATION_BATCH_S
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
@@ -8,6 +8,7 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 interface BatchItem {
   nodeId: string;
@@ -65,8 +66,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'voiceSettings.voiceId is required' }, { status: 422 });
   }
 
-  // Token cost: 5 per item (discounted from 10 for single)
-  const tokenCost = items.length * 5;
+  // Token cost: discounted per-item rate (cheaper than single voice generation)
+  const tokenCost = items.length * TOKEN_COSTS.voice_batch_cost_per_item;
 
   let apiKey: string;
   let usageId: string | undefined;
@@ -125,7 +126,9 @@ export async function POST(request: NextRequest) {
         // All items failed — full refund via the original usage record
         await refundTokens(authResult.ctx.user.id, usageId);
       } else {
-        // Partial failure — refund 5 tokens per failed item
+        // Partial failure — refund 5 tokens per failed item.
+        // Pass usageId so refundTokenAmount restores to the correct pool
+        // (monthly vs addon) instead of always crediting addon tokens.
         const refundAmount = errors.length * 5;
         await refundTokenAmount(
           authResult.ctx.user.id,

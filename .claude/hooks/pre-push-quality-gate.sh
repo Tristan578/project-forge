@@ -56,7 +56,13 @@ if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
 fi
 
 # 2. ESLint on changed files only (fast, ~2-3s per file)
-TS_FILES=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
+# Filter to files that actually exist on disk (excludes deleted files in the diff)
+TS_FILES_RAW=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx)$' | grep '^web/' | sed 's|^web/||' || true)
+TS_FILES=""
+while IFS= read -r f; do
+  [ -n "$f" ] && [ -f "$WEB_DIR/$f" ] && TS_FILES="${TS_FILES} ${f}"
+done <<< "$TS_FILES_RAW"
+TS_FILES=$(echo "$TS_FILES" | xargs)
 if [ -n "$TS_FILES" ]; then
   # shellcheck disable=SC2086
   ESLINT_BIN="$WEB_DIR/node_modules/.bin/eslint"

@@ -1,4 +1,4 @@
-export const maxDuration = 60; // seconds — tileset generation
+export const maxDuration = 60; // API_MAX_DURATION_STANDARD_GEN_S
 
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
@@ -9,6 +9,7 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
+import { TOKEN_COSTS } from '@/lib/tokens/pricing';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
   const safePrompt = safety.filtered ?? prompt;
 
   // 3. Resolve API key (Replicate for tiling mode)
-  const tokenCost = 50;
+  const tokenCost = TOKEN_COSTS.tileset_generation;
 
   let apiKey: string;
   let usageId: string | undefined;

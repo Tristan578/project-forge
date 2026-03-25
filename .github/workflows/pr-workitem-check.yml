@@ -94,6 +94,13 @@ jobs:
             exit 1
           fi
 
+          # Verify PR body contains 'Closes #' for auto-close on merge.
+          # Uses $PR_BODY env var (safe — set above from github context).
+          if ! echo "$PR_BODY" | grep -qE '(Closes|Fixes|Resolves) #[0-9]+'; then
+            echo "::warning::PR body missing 'Closes #NNNN' — issues will not auto-close on merge."
+            echo "Add 'Closes #NNNN' with the GitHub issue number (not PF-XXX)."
+          fi
+
           echo "=== Work item check passed (found in: $FOUND_IN) ==="
 
       - name: Verify ticket exists on GitHub Project

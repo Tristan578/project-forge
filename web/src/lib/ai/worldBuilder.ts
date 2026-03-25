@@ -594,6 +594,251 @@ export async function generateWorld(description: string, preset?: string): Promi
   }
 }
 
+// ---- Consistency Validation ----
+
+export type ConsistencyIssueSeverity = 'error' | 'warning';
+
+export interface ConsistencyIssue {
+  severity: ConsistencyIssueSeverity;
+  category: 'faction_symmetry' | 'region_connectivity' | 'timeline_ordering' | 'lore_references' | 'name_uniqueness' | 'relationship_completeness';
+  message: string;
+}
+
+export interface ConsistencyReport {
+  valid: boolean;
+  issues: ConsistencyIssue[];
+}
+
+/**
+ * Validate internal consistency of a generated GameWorld.
+ * Returns a report with severity-scored issues.
+ */
+export function validateWorldConsistency(world: GameWorld): ConsistencyReport {
+  const issues: ConsistencyIssue[] = [];
+
+  const factionNames = new Set(world.factions.map((f) => f.name));
+  const regionNames = new Set(world.regions.map((r) => r.name));
+
+  // ---- 1. Name uniqueness ----
+  const seenFactionNames = new Set<string>();
+  for (const f of world.factions) {
+    if (seenFactionNames.has(f.name)) {
+      issues.push({ severity: 'error', category: 'name_uniqueness', message: `Duplicate faction name: "${f.name}"` });
+    }
+    seenFactionNames.add(f.name);
+  }
+
+  const seenRegionNames = new Set<string>();
+  for (const r of world.regions) {
+    if (seenRegionNames.has(r.name)) {
+      issues.push({ severity: 'error', category: 'name_uniqueness', message: `Duplicate region name: "${r.name}"` });
+    }
+    seenRegionNames.add(r.name);
+  }
+
+  const seenLoreTitles = new Set<string>();
+  for (const l of world.lore) {
+    if (seenLoreTitles.has(l.title)) {
+      issues.push({ severity: 'warning', category: 'name_uniqueness', message: `Duplicate lore title: "${l.title}"` });
+    }
+    seenLoreTitles.add(l.title);
+  }
+
+  // ---- 2. Faction relationship symmetry ----
+  for (const faction of world.factions) {
+    for (const [targetName, rel] of Object.entries(faction.relationships)) {
+      // Target faction must exist
+      if (!factionNames.has(targetName)) {
+        issues.push({
+          severity: 'error',
+          category: 'faction_symmetry',
+          message: `Faction "${faction.name}" references unknown faction "${targetName}" in relationships`,
+        });
+        continue;
+      }
+      // Relationship must be symmetric
+      const target = world.factions.find((f) => f.name === targetName);
+      if (target) {
+        const reverseRel = target.relationships[faction.name];
+        if (reverseRel === undefined) {
+          issues.push({
+            severity: 'warning',
+            category: 'faction_symmetry',
+            message: `Missing reverse relationship: "${targetName}" has no entry for "${faction.name}"`,
+          });
+        } else if (rel !== reverseRel) {
+          issues.push({
+            severity: 'error',
+            category: 'faction_symmetry',
+            message: `Asymmetric relationship: "${faction.name}" sees "${targetName}" as "${rel}" but "${targetName}" sees "${faction.name}" as "${reverseRel}"`,
+          });
+        }
+      }
+    }
+  }
+
+  // ---- 3. Relationship completeness ----
+  if (world.factions.length > 1) {
+    for (const faction of world.factions) {
+      for (const other of world.factions) {
+        if (other.name === faction.name) continue;
+        if (faction.relationships[other.name] === undefined) {
+          issues.push({
+            severity: 'warning',
+            category: 'relationship_completeness',
+            message: `Faction "${faction.name}" has no relationship entry for "${other.name}"`,
+          });
+        }
+      }
+    }
+  }
+
+  // ---- 4. Region connectivity (BFS reachability) ----
+  if (world.regions.length > 1) {
+    // Validate that all connectedTo references exist
+    for (const region of world.regions) {
+      for (const conn of region.connectedTo) {
+        if (!regionNames.has(conn)) {
+          issues.push({
+            severity: 'error',
+            category: 'region_connectivity',
+            message: `Region "${region.name}" connects to unknown region "${conn}"`,
+          });
+        }
+      }
+    }
+
+    // BFS reachability check — all regions must be reachable from first
+    const adjacency = new Map<string, Set<string>>();
+    for (const r of world.regions) {
+      if (!adjacency.has(r.name)) adjacency.set(r.name, new Set());
+      for (const conn of r.connectedTo) {
+        // Skip phantom references — already flagged above. Including them
+        // in adjacency would let BFS traverse through non-existent regions.
+        if (!regionNames.has(conn)) continue;
+        adjacency.get(r.name)!.add(conn);
+        if (!adjacency.has(conn)) adjacency.set(conn, new Set());
+        adjacency.get(conn)!.add(r.name); // treat as undirected
+      }
+    }
+    const visited = new Set<string>();
+    const queue: string[] = [world.regions[0].name];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      for (const neighbor of adjacency.get(current) ?? []) {
+        if (!visited.has(neighbor)) queue.push(neighbor);
+      }
+    }
+    for (const r of world.regions) {
+      if (!visited.has(r.name)) {
+        issues.push({
+          severity: 'warning',
+          category: 'region_connectivity',
+          message: `Region "${r.name}" is isolated (not reachable from "${world.regions[0].name}")`,
+        });
+      }
+    }
+  }
+
+  // ---- 5. Timeline ordering ----
+  for (let i = 1; i < world.timeline.length; i++) {
+    if (world.timeline[i].year < world.timeline[i - 1].year) {
+      issues.push({
+        severity: 'error',
+        category: 'timeline_ordering',
+        message: `Timeline out of order: "${world.timeline[i].name}" (year ${world.timeline[i].year}) comes after "${world.timeline[i - 1].name}" (year ${world.timeline[i - 1].year})`,
+      });
+    }
+  }
+  const seenYears = new Set<number>();
+  for (const event of world.timeline) {
+    if (seenYears.has(event.year)) {
+      issues.push({
+        severity: 'warning',
+        category: 'timeline_ordering',
+        message: `Duplicate timeline year: ${event.year}`,
+      });
+    }
+    seenYears.add(event.year);
+  }
+
+  // ---- 6. Lore references ----
+  for (const event of world.timeline) {
+    for (const fName of event.factionsInvolved) {
+      if (!factionNames.has(fName)) {
+        issues.push({
+          severity: 'warning',
+          category: 'lore_references',
+          message: `Timeline event "${event.name}" references unknown faction "${fName}"`,
+        });
+      }
+    }
+  }
+
+  return {
+    valid: !issues.some((i) => i.severity === 'error'),
+    issues,
+  };
+}
+
+/**
+ * Attempt self-healing of an inconsistent world by fixing common issues.
+ * Returns a repaired world (may still have warnings but errors should be resolved).
+ */
+export function healWorldConsistency(world: GameWorld): GameWorld {
+  const healed = structuredClone(world);
+
+  // Fix faction relationship symmetry: add missing reverse entries and resolve asymmetries
+  for (const faction of healed.factions) {
+    for (const [targetName, rel] of Object.entries(faction.relationships)) {
+      const target = healed.factions.find((f) => f.name === targetName);
+      if (!target) continue;
+      const reverseRel = target.relationships[faction.name];
+      if (reverseRel === undefined) {
+        // Add missing reverse entry
+        target.relationships[faction.name] = rel;
+      } else if (rel !== reverseRel) {
+        // Resolve asymmetry: prefer more hostile relationship (enemy > neutral > ally)
+        const priority: Record<string, number> = { enemy: 2, neutral: 1, ally: 0 };
+        const chosen = (priority[rel] ?? 1) >= (priority[reverseRel] ?? 1) ? rel : reverseRel;
+        faction.relationships[targetName] = chosen as 'ally' | 'enemy' | 'neutral';
+        target.relationships[faction.name] = chosen as 'ally' | 'enemy' | 'neutral';
+      }
+    }
+  }
+
+  // Fill in missing relationship entries with 'neutral'
+  for (const faction of healed.factions) {
+    for (const other of healed.factions) {
+      if (other.name === faction.name) continue;
+      if (faction.relationships[other.name] === undefined) {
+        faction.relationships[other.name] = 'neutral';
+      }
+    }
+  }
+
+  // Sort timeline chronologically
+  healed.timeline.sort((a, b) => a.year - b.year);
+
+  // Remove duplicate faction/region names (keep first occurrence)
+  const seenF = new Set<string>();
+  healed.factions = healed.factions.filter((f) => {
+    if (seenF.has(f.name)) return false;
+    seenF.add(f.name);
+    return true;
+  });
+  const seenR = new Set<string>();
+  healed.regions = healed.regions.filter((r) => {
+    if (seenR.has(r.name)) return false;
+    seenR.add(r.name);
+    return true;
+  });
+
+  return healed;
+}
+
 // ---- Markdown Export ----
 
 /**
