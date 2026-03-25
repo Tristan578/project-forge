@@ -68,6 +68,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
     isPlaying: false,
     recordingEnabled: false,
   });
+  const playheadRef = useRef(viewState.playheadTime);
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   const [isDraggingKeyframe, setIsDraggingKeyframe] = useState(false);
   const [dragStartX, setDragStartX] = useState(0);
@@ -226,8 +227,9 @@ export const TimelinePanel = memo(function TimelinePanel() {
     if (!viewState.isPlaying || !primaryId || !primaryAnimationClip) return;
 
     const interval = setInterval(() => {
-      const newTime = viewState.playheadTime + FRAME_DURATION * primaryAnimationClip.speed;
+      const newTime = playheadRef.current + FRAME_DURATION * primaryAnimationClip.speed;
       const clampedTime = Math.min(newTime, primaryAnimationClip.duration);
+      playheadRef.current = clampedTime;
 
       setViewState((prev) => ({ ...prev, playheadTime: clampedTime }));
 
@@ -243,7 +245,7 @@ export const TimelinePanel = memo(function TimelinePanel() {
     }, FRAME_DURATION * 1000);
 
     return () => clearInterval(interval);
-  }, [viewState.isPlaying, viewState.playheadTime, primaryId, primaryAnimationClip, setClipProperty]);
+  }, [viewState.isPlaying, primaryId, primaryAnimationClip, setClipProperty]);
 
   // Mouse handlers
   const handleMouseDown = useCallback(
@@ -265,7 +267,9 @@ export const TimelinePanel = memo(function TimelinePanel() {
       // Check if clicking ruler (jump playhead)
       if (y < RULER_HEIGHT) {
         const time = pixelsToTime(x, viewState.zoom, pixelsPerSecond) + viewState.offsetSeconds;
-        setViewState((prev) => ({ ...prev, playheadTime: Math.max(0, time) }));
+        const clampedTime = Math.max(0, time);
+        playheadRef.current = clampedTime;
+        setViewState((prev) => ({ ...prev, playheadTime: clampedTime }));
         return;
       }
 
@@ -316,7 +320,9 @@ export const TimelinePanel = memo(function TimelinePanel() {
 
       if (isDraggingPlayhead) {
         const time = pixelsToTime(x, viewState.zoom, pixelsPerSecond) + viewState.offsetSeconds;
-        setViewState((prev) => ({ ...prev, playheadTime: Math.max(0, time) }));
+        const clampedTime = Math.max(0, time);
+        playheadRef.current = clampedTime;
+        setViewState((prev) => ({ ...prev, playheadTime: clampedTime }));
       } else if (isDraggingKeyframe && primaryId) {
         // Calculate time delta
         const deltaPixels = x - dragStartX;
