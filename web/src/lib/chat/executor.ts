@@ -32,7 +32,10 @@ import { audioLegacyHandlers } from './handlers/audioLegacyHandlers';
 import { pixelArtHandlers } from './handlers/pixelArtHandlers';
 import { compoundHandlers } from './handlers/compoundHandlers';
 import { leaderboardHandlers } from './handlers/leaderboardHandlers';
+<<<<<<< HEAD
 import { ideaHandlers } from './handlers/ideaHandlers';
+=======
+>>>>>>> origin/fix/remaining-audit-gaps-push
 import { worldHandlers } from './handlers/worldHandlers';
 import { localizationHandlers } from './handlers/localizationHandlers';
 import { economyHandlers } from './handlers/economyHandlers';
@@ -65,7 +68,10 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...pixelArtHandlers,
   ...compoundHandlers,
   ...leaderboardHandlers,
+<<<<<<< HEAD
   ...ideaHandlers,
+=======
+>>>>>>> origin/fix/remaining-audit-gaps-push
   ...worldHandlers,
   ...localizationHandlers,
   ...economyHandlers,

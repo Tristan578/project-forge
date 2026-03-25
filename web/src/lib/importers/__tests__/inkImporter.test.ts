@@ -395,7 +395,7 @@ describe('parseInkJson - realistic sample', () => {
   it('produces a valid DialogueTree from realistic Ink JSON', () => {
     const tree = parseInkJson(realisticInk);
     expect(tree.nodes.length).toBeGreaterThan(0);
-    expect(tree.startNodeId).toBeTruthy();
+    expect(tree.startNodeId).not.toBeNull();
   });
 
   it('contains text nodes with the dialogue lines', () => {

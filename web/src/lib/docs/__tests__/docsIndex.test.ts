@@ -83,7 +83,7 @@ describe('getDocsByCategory', () => {
 describe('getDocByPath', () => {
   it('should find a doc by path', () => {
     const doc = getDocByPath(makeDocs(), '/docs/physics');
-    expect(doc).toBeDefined();
+    expect(doc).not.toBeUndefined();
     expect(doc!.title).toBe('Physics Engine');
   });
 

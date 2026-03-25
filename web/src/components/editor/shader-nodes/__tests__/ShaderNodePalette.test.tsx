@@ -29,7 +29,7 @@ describe('ShaderNodePalette', () => {
 
   it('renders the "Node Palette" header', () => {
     render(<ShaderNodePalette onClose={onClose} />);
-    expect(screen.getByText('Node Palette')).toBeDefined();
+    expect(screen.getByText('Node Palette')).not.toBeNull();
   });
 
   it('renders category headers', () => {

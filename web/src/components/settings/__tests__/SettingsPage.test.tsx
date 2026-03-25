@@ -62,7 +62,7 @@ describe('SettingsPage', () => {
 
   it('renders the Settings page heading', () => {
     render(<SettingsPage />);
-    expect(screen.getByText('Settings')).toBeDefined();
+    expect(screen.getByText('Settings')).not.toBeNull();
   });
 
   it('renders all five navigation tabs', () => {

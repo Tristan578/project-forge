@@ -77,7 +77,7 @@ describe('scriptSlice', () => {
       store.getState().setScript('ent-2', 'b', true);
       store.getState().removeScript('ent-1');
 
-      expect(store.getState().allScripts['ent-2']).toBeDefined();
+      expect(store.getState().allScripts['ent-2']).toEqual({ source: 'b', enabled: true });
     });
   });
 

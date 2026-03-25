@@ -147,7 +147,7 @@ describe('lookupEntity', () => {
     const node = makeNode({ entityId: 'e1', name: 'Box', components: ['Mesh3d'] });
     const idx = buildEntityIndex(makeGraph([node]));
     const result = lookupEntity(idx, 'e1');
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(result?.node.name).toBe('Box');
     expect(result?.entityType).toBe('mesh');
   });

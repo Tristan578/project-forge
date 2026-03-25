@@ -41,12 +41,12 @@ describe('buildTruncatedApiMessages', () => {
     const summaryMsg = result.find(
       (m) => typeof m.content === 'string' && m.content.includes('Earlier conversation summarized')
     );
-    expect(summaryMsg).toBeTruthy();
+    expect(summaryMsg).not.toBeNull();
     // Should still contain the final message
     const finalMsg = result.find(
       (m) => typeof m.content === 'string' && m.content === 'final message'
     );
-    expect(finalMsg).toBeTruthy();
+    expect(finalMsg).not.toBeNull();
   });
 
   it('preserves tool_use/tool_result pairs (drops both together)', () => {
@@ -78,7 +78,7 @@ describe('buildTruncatedApiMessages', () => {
     const finalMsg = result.find(
       (m) => typeof m.content === 'string' && (m.content === 'final question' || m.content.includes('final question'))
     );
-    expect(finalMsg).toBeTruthy();
+    expect(finalMsg).not.toBeNull();
 
     // Dropped messages should have produced a summary marker
     const hasSummary = result.some(
@@ -94,7 +94,7 @@ describe('buildTruncatedApiMessages', () => {
         if (hasToolResult) {
           // Must have a preceding assistant message with tool_use
           const prev = result[idx - 1];
-          expect(prev).toBeTruthy();
+          expect(prev).not.toBeNull();
           expect(prev.role).toBe('assistant');
         }
       }
@@ -142,7 +142,7 @@ describe('buildTruncatedApiMessages', () => {
     const summaryMsg = result.find(
       (m) => typeof m.content === 'string' && m.content.includes('Earlier conversation summarized')
     );
-    expect(summaryMsg).toBeTruthy();
+    expect(summaryMsg).not.toBeNull();
   });
 
   it('filters out system messages', () => {

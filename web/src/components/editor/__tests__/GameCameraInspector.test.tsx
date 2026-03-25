@@ -74,25 +74,25 @@ describe('GameCameraInspector', () => {
   it('shows "Add Game Camera" button when no camera configured', () => {
     setupStore({ primaryGameCamera: null });
     render(<GameCameraInspector />);
-    expect(screen.getByText('Add Game Camera')).toBeDefined();
+    expect(screen.getByText('Add Game Camera')).not.toBeNull();
   });
 
   it('renders Game Camera heading when camera configured', () => {
     setupStore();
     render(<GameCameraInspector />);
-    expect(screen.getByText('Game Camera')).toBeDefined();
+    expect(screen.getByText('Game Camera')).not.toBeNull();
   });
 
   it('renders Active checkbox', () => {
     setupStore();
     render(<GameCameraInspector />);
-    expect(screen.getByRole('checkbox')).toBeDefined();
+    expect(screen.getByRole('checkbox')).not.toBeNull();
   });
 
   it('renders Mode select dropdown', () => {
     setupStore();
     render(<GameCameraInspector />);
-    expect(screen.getByRole('combobox')).toBeDefined();
+    expect(screen.getByRole('combobox')).not.toBeNull();
   });
 
   it('shows 3rd Person Follow as default mode', () => {
@@ -105,15 +105,15 @@ describe('GameCameraInspector', () => {
   it('shows thirdPersonFollow params by default', () => {
     setupStore();
     render(<GameCameraInspector />);
-    expect(screen.getByText('Distance')).toBeDefined();
-    expect(screen.getByText('Look Ahead')).toBeDefined();
-    expect(screen.getByText('Smoothing')).toBeDefined();
+    expect(screen.getByText('Distance')).not.toBeNull();
+    expect(screen.getByText('Look Ahead')).not.toBeNull();
+    expect(screen.getByText('Smoothing')).not.toBeNull();
   });
 
   it('renders Test Shake button', () => {
     setupStore();
     render(<GameCameraInspector />);
-    expect(screen.getByText('Test Shake')).toBeDefined();
+    expect(screen.getByText('Test Shake')).not.toBeNull();
   });
 
   it('calls cameraShake when Test Shake is clicked', () => {
@@ -126,7 +126,7 @@ describe('GameCameraInspector', () => {
   it('renders Remove button', () => {
     setupStore();
     render(<GameCameraInspector />);
-    expect(screen.getByText('Remove')).toBeDefined();
+    expect(screen.getByText('Remove')).not.toBeNull();
   });
 
   it('calls removeGameCamera when Remove is clicked', () => {
@@ -148,7 +148,7 @@ describe('GameCameraInspector', () => {
       primaryGameCamera: { ...baseGameCamera, mode: 'fixed' as const },
     });
     render(<GameCameraInspector />);
-    expect(screen.getByText(/Camera position is set via entity transform/)).toBeDefined();
+    expect(screen.getByText(/Camera position is set via entity transform/)).not.toBeNull();
   });
 
   it('active checkbox is checked when this entity is the active camera', () => {

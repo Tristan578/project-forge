@@ -59,7 +59,7 @@ describe('HealthDashboard', () => {
     const report = makeReport('healthy', allHealthyServices);
     render(<HealthDashboard initialReport={report} />);
 
-    expect(screen.getByText('All Systems Operational')).toBeDefined();
+    expect(screen.getByText('All Systems Operational')).not.toBeNull();
   });
 
   it('renders the degraded banner when overall is degraded', () => {
@@ -72,7 +72,7 @@ describe('HealthDashboard', () => {
     const report = makeReport('degraded', services);
     render(<HealthDashboard initialReport={report} />);
 
-    expect(screen.getByText('Partial Service Disruption')).toBeDefined();
+    expect(screen.getByText('Partial Service Disruption')).not.toBeNull();
   });
 
   it('renders the down banner when overall is down', () => {
@@ -83,7 +83,7 @@ describe('HealthDashboard', () => {
     const report = makeReport('down', services);
     render(<HealthDashboard initialReport={report} />);
 
-    expect(screen.getByText('Major Outage Detected')).toBeDefined();
+    expect(screen.getByText('Major Outage Detected')).not.toBeNull();
   });
 
   it('renders a card for each service', () => {
@@ -99,9 +99,9 @@ describe('HealthDashboard', () => {
     const report = makeReport('healthy', allHealthyServices);
     render(<HealthDashboard initialReport={report} />);
 
-    expect(screen.getByText('Database (Neon)')).toBeDefined();
-    expect(screen.getByText('Clerk')).toBeDefined();
-    expect(screen.getByText('Engine CDN')).toBeDefined();
+    expect(screen.getByText('Database (Neon)')).not.toBeNull();
+    expect(screen.getByText('Clerk')).not.toBeNull();
+    expect(screen.getByText('Engine CDN')).not.toBeNull();
   });
 
   it('shows error message for degraded service', () => {
@@ -113,7 +113,7 @@ describe('HealthDashboard', () => {
     const report = makeReport('degraded', services);
     render(<HealthDashboard initialReport={report} />);
 
-    expect(screen.getByText('Missing providers: suno, meshy')).toBeDefined();
+    expect(screen.getByText('Missing providers: suno, meshy')).not.toBeNull();
   });
 
   it('shows error message for down service', () => {
@@ -123,7 +123,7 @@ describe('HealthDashboard', () => {
     const report = makeReport('down', services);
     render(<HealthDashboard initialReport={report} />);
 
-    expect(screen.getByText('DATABASE_URL not configured')).toBeDefined();
+    expect(screen.getByText('DATABASE_URL not configured')).not.toBeNull();
   });
 
   it('displays environment and version in the banner', () => {
@@ -131,15 +131,15 @@ describe('HealthDashboard', () => {
     render(<HealthDashboard initialReport={report} />);
 
     // Both "test" and "abcdef12" should appear
-    expect(screen.getByText(/test/)).toBeDefined();
-    expect(screen.getByText(/abcdef12/)).toBeDefined();
+    expect(screen.getByText(/test/)).not.toBeNull();
+    expect(screen.getByText(/abcdef12/)).not.toBeNull();
   });
 
   it('shows a refresh button', () => {
     const report = makeReport('healthy', allHealthyServices);
     render(<HealthDashboard initialReport={report} />);
 
-    expect(screen.getByRole('button', { name: /refresh/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /refresh/i })).not.toBeNull();
   });
 
   it('shows auto-refresh countdown', () => {
@@ -147,7 +147,7 @@ describe('HealthDashboard', () => {
     render(<HealthDashboard initialReport={report} />);
 
     // Countdown text appears (shows "Refreshes in Xs")
-    expect(screen.getByText(/refreshes in/i)).toBeDefined();
+    expect(screen.getByText(/refreshes in/i)).not.toBeNull();
   });
 
   it('calls /api/health when refresh button is clicked', async () => {
@@ -186,13 +186,13 @@ describe('HealthDashboard', () => {
     render(<HealthDashboard initialReport={degradedReport} />);
 
     // Initially shows degraded
-    expect(screen.getByText('Partial Service Disruption')).toBeDefined();
+    expect(screen.getByText('Partial Service Disruption')).not.toBeNull();
 
     const refreshBtn = screen.getByRole('button', { name: /refresh/i });
     refreshBtn.click();
 
     await waitFor(() => {
-      expect(screen.getByText('All Systems Operational')).toBeDefined();
+      expect(screen.getByText('All Systems Operational')).not.toBeNull();
     });
   });
 
@@ -208,7 +208,7 @@ describe('HealthDashboard', () => {
 
     // Should not throw — stale data should remain
     await waitFor(() => {
-      expect(screen.getByText('All Systems Operational')).toBeDefined();
+      expect(screen.getByText('All Systems Operational')).not.toBeNull();
     });
   });
 });

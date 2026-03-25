@@ -69,19 +69,19 @@ describe('PerformanceProfiler', () => {
   it('renders Performance heading', () => {
     setupStore();
     render(<PerformanceProfiler />);
-    expect(screen.getByText('Performance')).toBeDefined();
+    expect(screen.getByText('Performance')).not.toBeNull();
   });
 
   it('shows FPS in collapsed view', () => {
     setupStore({ isProfilerOpen: false, stats: { ...defaultStats, fps: 55 } });
     render(<PerformanceProfiler />);
-    expect(screen.getByText('55 FPS')).toBeDefined();
+    expect(screen.getByText('55 FPS')).not.toBeNull();
   });
 
   it('shows triangle count in collapsed view', () => {
     setupStore({ isProfilerOpen: false });
     render(<PerformanceProfiler />);
-    expect(screen.getByText(/tris/)).toBeDefined();
+    expect(screen.getByText(/tris/)).not.toBeNull();
   });
 
   it('calls setProfilerOpen when toggle button is clicked', () => {
@@ -94,23 +94,23 @@ describe('PerformanceProfiler', () => {
   it('shows expanded stats when isProfilerOpen is true', () => {
     setupStore({ isProfilerOpen: true });
     render(<PerformanceProfiler />);
-    expect(screen.getByText('Frame Time')).toBeDefined();
-    expect(screen.getByText('Triangles')).toBeDefined();
-    expect(screen.getByText('Draw Calls')).toBeDefined();
+    expect(screen.getByText('Frame Time')).not.toBeNull();
+    expect(screen.getByText('Triangles')).not.toBeNull();
+    expect(screen.getByText('Draw Calls')).not.toBeNull();
   });
 
   it('shows entity count when expanded', () => {
     setupStore({ isProfilerOpen: true, stats: { ...defaultStats, entityCount: 42 } });
     render(<PerformanceProfiler />);
-    expect(screen.getByText('Entities')).toBeDefined();
-    expect(screen.getByText('42')).toBeDefined();
+    expect(screen.getByText('Entities')).not.toBeNull();
+    expect(screen.getByText('42')).not.toBeNull();
   });
 
   it('shows memory usage when expanded', () => {
     setupStore({ isProfilerOpen: true, stats: { ...defaultStats, memoryUsage: 64.3 } });
     render(<PerformanceProfiler />);
-    expect(screen.getByText('Memory')).toBeDefined();
-    expect(screen.getByText(/64\.3 MB/)).toBeDefined();
+    expect(screen.getByText('Memory')).not.toBeNull();
+    expect(screen.getByText(/64\.3 MB/)).not.toBeNull();
   });
 
   it('shows warnings when present', () => {
@@ -119,8 +119,8 @@ describe('PerformanceProfiler', () => {
       warnings: ['High triangle count', 'Low FPS'],
     });
     render(<PerformanceProfiler />);
-    expect(screen.getByText('High triangle count')).toBeDefined();
-    expect(screen.getByText('Low FPS')).toBeDefined();
+    expect(screen.getByText('High triangle count')).not.toBeNull();
+    expect(screen.getByText('Low FPS')).not.toBeNull();
   });
 
   it('shows alert icon when warnings exist', () => {
@@ -129,7 +129,7 @@ describe('PerformanceProfiler', () => {
       warnings: ['High triangle count'],
     });
     render(<PerformanceProfiler />);
-    expect(screen.getByTestId('alert-triangle')).toBeDefined();
+    expect(screen.getByTestId('alert-triangle')).not.toBeNull();
   });
 
   it('aria-expanded is false when collapsed', () => {

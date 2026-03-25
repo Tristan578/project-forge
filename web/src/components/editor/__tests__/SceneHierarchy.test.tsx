@@ -79,13 +79,13 @@ describe('SceneHierarchy', () => {
   it('renders hierarchy header', () => {
     mockEditorStore();
     render(<SceneHierarchy />);
-    expect(screen.getByText('Scene Hierarchy')).toBeDefined();
+    expect(screen.getByText('Scene Hierarchy')).not.toBeNull();
   });
 
   it('shows loading skeleton when no entities exist', () => {
     mockEditorStore();
     render(<SceneHierarchy />);
-    expect(screen.getByText('No entities yet')).toBeDefined();
+    expect(screen.getByText('No entities yet')).not.toBeNull();
   });
 
   it('shows selected count when entities are selected', () => {
@@ -100,7 +100,7 @@ describe('SceneHierarchy', () => {
       },
     });
     render(<SceneHierarchy />);
-    expect(screen.getByText('2 selected')).toBeDefined();
+    expect(screen.getByText('2 selected')).not.toBeNull();
   });
 
   it('empty hierarchy shows placeholder "No entities yet"', () => {
@@ -109,7 +109,7 @@ describe('SceneHierarchy', () => {
       selectedIds: new Set(),
     });
     render(<SceneHierarchy />);
-    expect(screen.getByText('No entities yet')).toBeDefined();
+    expect(screen.getByText('No entities yet')).not.toBeNull();
   });
 
   it('entity selection updates via selectEntity store action', () => {
@@ -128,11 +128,11 @@ describe('SceneHierarchy', () => {
 
     // The SceneNode mock renders a div with the entity name
     const entityNode = screen.getByText('Cube');
-    expect(entityNode).toBeDefined();
+    expect(entityNode).not.toBeUndefined();
 
     // The selectEntity fn should be available in the rendered tree
     // (SceneNode is mocked, so we confirm the store wiring via mock injection)
-    expect(mockSelectEntity).toBeDefined();
+    expect(mockSelectEntity).not.toBeUndefined();
   });
 
   it('renders scene nodes when graph has entities', () => {
@@ -147,8 +147,8 @@ describe('SceneHierarchy', () => {
       selectedIds: new Set(),
     });
     render(<SceneHierarchy />);
-    expect(screen.getByText('Cube')).toBeDefined();
-    expect(screen.getByText('Sphere')).toBeDefined();
+    expect(screen.getByText('Cube')).not.toBeNull();
+    expect(screen.getByText('Sphere')).not.toBeNull();
   });
 
   it('does not show selected count when no entities are selected', () => {

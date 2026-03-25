@@ -605,7 +605,7 @@ describe('parseLdtkProject — entity instances', () => {
     const player = result.levels[0].entities.find(
       (e: LdtkEntitySpawnRequest) => e.identifier === 'Player',
     );
-    expect(player).toBeDefined();
+    expect(player).not.toBeUndefined();
     expect(player!.x).toBe(164);
     expect(player!.y).toBe(232);
   });
@@ -630,7 +630,7 @@ describe('parseLdtkProject — entity instances', () => {
     const coin = result.levels[0].entities.find(
       (e: LdtkEntitySpawnRequest) => e.identifier === 'Coin',
     )!;
-    expect(coin).toBeDefined();
+    expect(coin).not.toBeUndefined();
     expect(coin.fields).toEqual({});
   });
 
@@ -638,7 +638,7 @@ describe('parseLdtkProject — entity instances', () => {
     const player = result.levels[0].entities.find(
       (e: LdtkEntitySpawnRequest) => e.name === 'Player',
     );
-    expect(player).toBeDefined();
+    expect(player).not.toBeUndefined();
   });
 
   it('resolves level-scoped field instances', () => {

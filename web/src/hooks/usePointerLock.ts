@@ -34,27 +34,48 @@ export function usePointerLock(canvasId: string): void {
       }
     };
 
+    // Accumulate deltas and throttle dispatch to 60 Hz (16 ms minimum interval).
+    // This prevents overwhelming the WASM bridge on high-refresh-rate displays
+    // (120Hz, 144Hz, 240Hz) where requestAnimationFrame alone fires too often.
+    const TARGET_INTERVAL_MS = 1000 / 60; // ~16.67 ms
+
     let pendingDx = 0, pendingDy = 0;
+    let lastDispatchTime = 0; // milliseconds, from Date.now()
     let rafId: number | null = null;
+
+    const flushDelta = () => {
+      rafId = null;
+      // Use Date.now() (not performance.now()) so vitest fake timers can control it.
+      const now = Date.now();
+      if (now - lastDispatchTime < TARGET_INTERVAL_MS) {
+        // Not enough time has elapsed — schedule another check.
+        rafId = requestAnimationFrame(flushDelta);
+        return;
+      }
+      lastDispatchTime = now;
+      const wasm = getWasmModule();
+      if (pendingDx === 0 && pendingDy === 0) return;
+      if (!wasm) {
+        // Clear accumulated deltas to prevent a camera jump when WASM loads
+        pendingDx = 0;
+        pendingDy = 0;
+        return;
+      }
+      try {
+        wasm.handle_command('mouse_delta', { dx: pendingDx, dy: pendingDy });
+      } catch {
+        // Silently ignore command errors during mouse movement
+      }
+      pendingDx = 0;
+      pendingDy = 0;
+    };
 
     const handleMouseMove = (e: MouseEvent) => {
       if (document.pointerLockElement !== canvas) return;
       pendingDx += e.movementX;
       pendingDy += e.movementY;
       if (rafId === null) {
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          const wasm = getWasmModule();
-          if (wasm && (pendingDx !== 0 || pendingDy !== 0)) {
-            try {
-              wasm.handle_command('mouse_delta', { dx: pendingDx, dy: pendingDy });
-            } catch {
-              // Silently ignore command errors during mouse movement
-            }
-            pendingDx = 0;
-            pendingDy = 0;
-          }
-        });
+        rafId = requestAnimationFrame(flushDelta);
       }
     };
 

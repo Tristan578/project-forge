@@ -43,8 +43,8 @@ describe('ToolCallCard', () => {
         }}
       />
     );
-    expect(screen.getByText('Spawn Entity')).toBeDefined();
-    expect(screen.getByText('cube "MyCube"')).toBeDefined();
+    expect(screen.getByText('Spawn Entity')).not.toBeNull();
+    expect(screen.getByText('cube "MyCube"')).not.toBeNull();
   });
 
   it('renders a pending tool call with loading indicator', () => {
@@ -59,8 +59,8 @@ describe('ToolCallCard', () => {
         }}
       />
     );
-    expect(screen.getByText('Transform')).toBeDefined();
-    expect(screen.getByTestId('loader-icon')).toBeDefined();
+    expect(screen.getByText('Transform')).not.toBeNull();
+    expect(screen.getByTestId('loader-icon')).not.toBeNull();
   });
 
   it('shows approve/reject buttons for preview status', () => {
@@ -79,8 +79,8 @@ describe('ToolCallCard', () => {
         onReject={mockReject}
       />
     );
-    expect(screen.getByText('Approve')).toBeDefined();
-    expect(screen.getByText('Reject')).toBeDefined();
+    expect(screen.getByText('Approve')).not.toBeNull();
+    expect(screen.getByText('Reject')).not.toBeNull();
 
     fireEvent.click(screen.getByText('Approve'));
     expect(mockApprove).toHaveBeenCalledWith('tc-3');

@@ -61,9 +61,8 @@ export function useCelebrations(): UseCelebrationsReturn {
     setQueue((prev) => prev.slice(1));
   }, []);
 
-  // Subscribe to entity count changes outside of render (Zustand subscribe API).
-  // This runs in a useEffect so the subscription is set up after mount and
-  // cleaned up on unmount. The callback does NOT run during render.
+  // Subscribe to entity count changes. Early-exit when nodeCount is unchanged
+  // so we avoid any work on unrelated store updates.
   useEffect(() => {
     let prevCount = useEditorStore.getState().nodeCount;
 
@@ -90,7 +89,8 @@ export function useCelebrations(): UseCelebrationsReturn {
     return unsub;
   }, [enqueueData]);
 
-  // Subscribe to engine mode changes for FIRST_PLAY
+  // Subscribe to engine mode changes for FIRST_PLAY. Early-exit when
+  // engineMode is unchanged so we avoid any work on unrelated store updates.
   useEffect(() => {
     let playFired = false;
     let prevMode = useEditorStore.getState().engineMode;
@@ -109,11 +109,6 @@ export function useCelebrations(): UseCelebrationsReturn {
 
     return unsub;
   }, [enqueueData]);
-
-  // Expose the current engine mode and entity count for consumers (unused in this
-  // component but keeps the hook reactive so callers re-render with activeCelebration)
-  useEditorStore((s) => s.nodeCount);
-  useEditorStore((s) => s.engineMode);
 
   return { activeCelebration, dismissCelebration, triggerMilestone };
 }

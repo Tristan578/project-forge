@@ -18,9 +18,9 @@ describe('LEVEL_TEMPLATES', () => {
 
   it.each(templateIds)('template "%s" exists with name and description', (id) => {
     const template = LEVEL_TEMPLATES[id];
-    expect(template).toBeDefined();
-    expect(template.name).toBeTruthy();
-    expect(template.description).toBeTruthy();
+    expect(template).not.toBeUndefined();
+    expect(template.name).not.toBeNull();
+    expect(template.description).not.toBeNull();
     expect(typeof template.generate).toBe('function');
   });
 
@@ -336,7 +336,7 @@ describe('levelToCommands', () => {
     const root = commands.find(
       (c) => c.command === 'spawn_entity' && c.payload.name === layout.name,
     );
-    expect(root).toBeDefined();
+    expect(root).not.toBeUndefined();
   });
 
   it('generates corridor connections between rooms', () => {
@@ -381,7 +381,7 @@ describe('levelToCommands', () => {
           Array.isArray(c.payload.position) &&
           (c.payload.position as number[])[0] === expectedX,
       );
-      expect(spawnCmd).toBeDefined();
+      expect(spawnCmd).not.toBeUndefined();
     }
   });
 });

@@ -79,7 +79,7 @@ describe('loadMemories / saveMemories', () => {
 describe('addMemory', () => {
   it('adds a memory entry', () => {
     const entry = addMemory('proj1', 'style-preference', 'User likes metallic materials');
-    expect(entry.id).toBeTruthy();
+    expect(entry.id).not.toBeNull();
     expect(entry.content).toBe('User likes metallic materials');
     expect(entry.category).toBe('style-preference');
     expect(entry.importance).toBe(5); // default
@@ -267,7 +267,7 @@ describe('AI_MEMORY_CATEGORIES', () => {
       'project-context', 'correction', 'custom',
     ];
     for (const c of cats) {
-      expect(AI_MEMORY_CATEGORIES[c]).toBeTruthy();
+      expect(AI_MEMORY_CATEGORIES[c]).not.toBeNull();
     }
   });
 });

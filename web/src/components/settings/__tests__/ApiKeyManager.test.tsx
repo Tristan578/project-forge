@@ -38,24 +38,24 @@ describe('ApiKeyManager', () => {
   it('renders Provider API Keys heading', async () => {
     render(<ApiKeyManager />);
     await waitFor(() => {
-      expect(screen.getByText('Provider API Keys (BYOK)')).toBeDefined();
+      expect(screen.getByText('Provider API Keys (BYOK)')).not.toBeNull();
     });
   });
 
   it('renders MCP API Keys heading', async () => {
     render(<ApiKeyManager />);
     await waitFor(() => {
-      expect(screen.getByText('MCP API Keys')).toBeDefined();
+      expect(screen.getByText('MCP API Keys')).not.toBeNull();
     });
   });
 
   it('renders all provider labels', async () => {
     render(<ApiKeyManager />);
     await waitFor(() => {
-      expect(screen.getByText('Anthropic (Claude)')).toBeDefined();
-      expect(screen.getByText('Meshy')).toBeDefined();
-      expect(screen.getByText('ElevenLabs')).toBeDefined();
-      expect(screen.getByText('Suno')).toBeDefined();
+      expect(screen.getByText('Anthropic (Claude)')).not.toBeNull();
+      expect(screen.getByText('Meshy')).not.toBeNull();
+      expect(screen.getByText('ElevenLabs')).not.toBeNull();
+      expect(screen.getByText('Suno')).not.toBeNull();
     });
   });
 
@@ -74,14 +74,14 @@ describe('ApiKeyManager', () => {
       fireEvent.click(addKeyButtons[0]);
     });
     await waitFor(() => {
-      expect(screen.getByPlaceholderText('sk-ant-...')).toBeDefined();
+      expect(screen.getByPlaceholderText('sk-ant-...')).not.toBeNull();
     });
   });
 
   it('renders Generate API Key button', async () => {
     render(<ApiKeyManager />);
     await waitFor(() => {
-      expect(screen.getByText('Generate API Key')).toBeDefined();
+      expect(screen.getByText('Generate API Key')).not.toBeNull();
     });
   });
 
@@ -99,7 +99,7 @@ describe('ApiKeyManager', () => {
     });
     render(<ApiKeyManager />);
     await waitFor(() => {
-      expect(screen.getByText('Configured')).toBeDefined();
+      expect(screen.getByText('Configured')).not.toBeNull();
     });
   });
 
@@ -120,8 +120,8 @@ describe('ApiKeyManager', () => {
     });
     render(<ApiKeyManager />);
     await waitFor(() => {
-      expect(screen.getByText('Key 1')).toBeDefined();
-      expect(screen.getByText('sf_abc...')).toBeDefined();
+      expect(screen.getByText('Key 1')).not.toBeNull();
+      expect(screen.getByText('sf_abc...')).not.toBeNull();
     });
   });
 
@@ -141,11 +141,11 @@ describe('ApiKeyManager', () => {
     });
     render(<ApiKeyManager />);
     await waitFor(() => {
-      expect(screen.getByText('Generate API Key')).toBeDefined();
+      expect(screen.getByText('Generate API Key')).not.toBeNull();
     });
     fireEvent.click(screen.getByText('Generate API Key'));
     await waitFor(() => {
-      expect(screen.getByText(/error|failed|Server error/i)).toBeDefined();
+      expect(screen.getByText(/error|failed|Server error/i)).not.toBeNull();
     });
   });
 });

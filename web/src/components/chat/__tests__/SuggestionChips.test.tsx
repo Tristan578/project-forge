@@ -73,8 +73,8 @@ describe('SuggestionChips', () => {
         ]}
       />
     );
-    expect(screen.getByText('Add a cube')).toBeDefined();
-    expect(screen.getByText('Set lighting')).toBeDefined();
+    expect(screen.getByText('Add a cube')).not.toBeNull();
+    expect(screen.getByText('Set lighting')).not.toBeNull();
   });
 
   it('calls sendMessage when chip clicked', () => {

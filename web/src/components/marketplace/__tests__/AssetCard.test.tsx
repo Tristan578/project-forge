@@ -50,37 +50,37 @@ describe('AssetCard', () => {
 
   it('renders asset name', () => {
     render(<AssetCard asset={baseAsset} />);
-    expect(screen.getByText('Stone Wall Texture')).toBeDefined();
+    expect(screen.getByText('Stone Wall Texture')).not.toBeNull();
   });
 
   it('renders seller name', () => {
     render(<AssetCard asset={baseAsset} />);
-    expect(screen.getByText('by TextureArtist')).toBeDefined();
+    expect(screen.getByText('by TextureArtist')).not.toBeNull();
   });
 
   it('renders price in tokens', () => {
     render(<AssetCard asset={baseAsset} />);
-    expect(screen.getByText('50 tokens')).toBeDefined();
+    expect(screen.getByText('50 tokens')).not.toBeNull();
   });
 
   it('renders Free for zero-price assets', () => {
     render(<AssetCard asset={{ ...baseAsset, priceTokens: 0 }} />);
-    expect(screen.getByText('Free')).toBeDefined();
+    expect(screen.getByText('Free')).not.toBeNull();
   });
 
   it('renders rating', () => {
     render(<AssetCard asset={baseAsset} />);
-    expect(screen.getByText('4.5')).toBeDefined();
+    expect(screen.getByText('4.5')).not.toBeNull();
   });
 
   it('renders rating count', () => {
     render(<AssetCard asset={baseAsset} />);
-    expect(screen.getByText('(12)')).toBeDefined();
+    expect(screen.getByText('(12)')).not.toBeNull();
   });
 
   it('renders download count', () => {
     render(<AssetCard asset={baseAsset} />);
-    expect(screen.getByText('42')).toBeDefined();
+    expect(screen.getByText('42')).not.toBeNull();
   });
 
   it('renders category badge', () => {
@@ -92,7 +92,7 @@ describe('AssetCard', () => {
 
   it('renders AI badge for AI-generated assets', () => {
     render(<AssetCard asset={{ ...baseAsset, aiGenerated: true }} />);
-    expect(screen.getByText('AI')).toBeDefined();
+    expect(screen.getByText('AI')).not.toBeNull();
   });
 
   it('does not render AI badge for non-AI assets', () => {
@@ -103,7 +103,7 @@ describe('AssetCard', () => {
   it('shows AssetDetailModal when card clicked', () => {
     render(<AssetCard asset={baseAsset} />);
     fireEvent.click(screen.getByText('Stone Wall Texture'));
-    expect(screen.getByTestId('asset-detail-modal')).toBeDefined();
+    expect(screen.getByTestId('asset-detail-modal')).not.toBeNull();
   });
 
   it('hides AssetDetailModal when closed', () => {

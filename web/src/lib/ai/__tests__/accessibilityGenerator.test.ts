@@ -198,10 +198,10 @@ describe('colorsDistinguishableForColorblind', () => {
 
 describe('COLORBLIND_FILTERS', () => {
   it('has entries for all four types', () => {
-    expect(COLORBLIND_FILTERS.protanopia).toBeDefined();
-    expect(COLORBLIND_FILTERS.deuteranopia).toBeDefined();
-    expect(COLORBLIND_FILTERS.tritanopia).toBeDefined();
-    expect(COLORBLIND_FILTERS.achromatopsia).toBeDefined();
+    expect(COLORBLIND_FILTERS.protanopia).not.toBeUndefined();
+    expect(COLORBLIND_FILTERS.deuteranopia).not.toBeUndefined();
+    expect(COLORBLIND_FILTERS.tritanopia).not.toBeUndefined();
+    expect(COLORBLIND_FILTERS.achromatopsia).not.toBeUndefined();
   });
 
   it('contains valid CSS feColorMatrix values (20 numbers)', () => {
@@ -433,11 +433,11 @@ describe('generateAccessibilityProfile', () => {
       },
     });
     const profile = generateAccessibilityProfile(ctx);
-    expect(profile.colorblindMode).toBeDefined();
-    expect(profile.screenReader).toBeDefined();
-    expect(profile.inputRemapping).toBeDefined();
-    expect(profile.subtitles).toBeDefined();
-    expect(profile.fontSize).toBeDefined();
+    expect(profile.colorblindMode).not.toBeUndefined();
+    expect(profile.screenReader).not.toBeUndefined();
+    expect(profile.inputRemapping).not.toBeUndefined();
+    expect(profile.subtitles).not.toBeUndefined();
+    expect(profile.fontSize).not.toBeUndefined();
   });
 
   it('generates screen reader descriptions for all entities', () => {

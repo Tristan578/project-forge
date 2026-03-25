@@ -27,8 +27,8 @@ describe('Celebration', () => {
     const onDismiss = vi.fn();
     render(<Celebration title="First entity!" message="You added your first object." onDismiss={onDismiss} />);
 
-    expect(screen.getByText('First entity!')).toBeDefined();
-    expect(screen.getByText('You added your first object.')).toBeDefined();
+    expect(screen.getByText('First entity!')).not.toBeNull();
+    expect(screen.getByText('You added your first object.')).not.toBeNull();
   });
 
   it('renders a dismiss button with accessible label', () => {
@@ -36,7 +36,7 @@ describe('Celebration', () => {
     render(<Celebration title="Milestone" message="Great work." onDismiss={onDismiss} />);
 
     const btn = screen.getByRole('button', { name: /dismiss/i });
-    expect(btn).toBeDefined();
+    expect(btn).not.toBeNull();
   });
 
   it('calls onDismiss when dismiss button is clicked', () => {

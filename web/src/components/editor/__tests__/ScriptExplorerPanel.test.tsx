@@ -88,7 +88,7 @@ describe('ScriptExplorerPanel', () => {
   it('renders Scripts header', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
-    expect(screen.getByText('Scripts')).toBeDefined();
+    expect(screen.getByText('Scripts')).not.toBeNull();
   });
 
   // ── Tabs ──────────────────────────────────────────────────────────────
@@ -96,14 +96,14 @@ describe('ScriptExplorerPanel', () => {
   it('renders Entity and Library tabs', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
-    expect(screen.getByText(/Entity/)).toBeDefined();
-    expect(screen.getByText(/Library/)).toBeDefined();
+    expect(screen.getByText(/Entity/)).not.toBeNull();
+    expect(screen.getByText(/Library/)).not.toBeNull();
   });
 
   it('shows entity count in tab', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
-    expect(screen.getByText(/Entity \(2\)/)).toBeDefined();
+    expect(screen.getByText(/Entity \(2\)/)).not.toBeNull();
   });
 
   // ── Entity tab ────────────────────────────────────────────────────────
@@ -111,20 +111,20 @@ describe('ScriptExplorerPanel', () => {
   it('renders entity script entries', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
-    expect(screen.getByText('Player')).toBeDefined();
-    expect(screen.getByText('Enemy')).toBeDefined();
+    expect(screen.getByText('Player')).not.toBeNull();
+    expect(screen.getByText('Enemy')).not.toBeNull();
   });
 
   it('shows disabled label for disabled scripts', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
-    expect(screen.getByText(/\(disabled\)/)).toBeDefined();
+    expect(screen.getByText(/\(disabled\)/)).not.toBeNull();
   });
 
   it('shows char count for scripts', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
-    expect(screen.getByText(/21 chars/)).toBeDefined(); // 'function onStart() {}'.length = 21
+    expect(screen.getByText(/21 chars/)).not.toBeNull(); // 'function onStart() {}'.length = 21
   });
 
   it('selects entity and opens editor on click', () => {
@@ -148,7 +148,7 @@ describe('ScriptExplorerPanel', () => {
   it('renders search input', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
-    expect(screen.getByPlaceholderText('Filter scripts...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Filter scripts...')).not.toBeNull();
   });
 
   it('filters entity scripts by name', () => {
@@ -157,7 +157,7 @@ describe('ScriptExplorerPanel', () => {
     fireEvent.change(screen.getByPlaceholderText('Filter scripts...'), {
       target: { value: 'Play' },
     });
-    expect(screen.getByText('Player')).toBeDefined();
+    expect(screen.getByText('Player')).not.toBeNull();
     expect(screen.queryByText('Enemy')).toBeNull();
   });
 
@@ -167,7 +167,7 @@ describe('ScriptExplorerPanel', () => {
     fireEvent.change(screen.getByPlaceholderText('Filter scripts...'), {
       target: { value: 'zzzzz' },
     });
-    expect(screen.getByText('No matches')).toBeDefined();
+    expect(screen.getByText('No matches')).not.toBeNull();
   });
 
   // ── Empty entity state ────────────────────────────────────────────────
@@ -175,7 +175,7 @@ describe('ScriptExplorerPanel', () => {
   it('shows empty state when no entity scripts', () => {
     setupStore({ allScripts: {} });
     render(<ScriptExplorerPanel />);
-    expect(screen.getByText('No entity scripts')).toBeDefined();
+    expect(screen.getByText('No entity scripts')).not.toBeNull();
   });
 
   // ── Library tab ───────────────────────────────────────────────────────
@@ -187,7 +187,7 @@ describe('ScriptExplorerPanel', () => {
     ]);
     render(<ScriptExplorerPanel />);
     fireEvent.click(screen.getByText(/Library/));
-    expect(screen.getByText('Helper')).toBeDefined();
+    expect(screen.getByText('Helper')).not.toBeNull();
   });
 
   it('shows empty library state', () => {
@@ -195,7 +195,7 @@ describe('ScriptExplorerPanel', () => {
     vi.mocked(loadScripts).mockReturnValue([]);
     render(<ScriptExplorerPanel />);
     fireEvent.click(screen.getByText(/Library/));
-    expect(screen.getByText('No library scripts')).toBeDefined();
+    expect(screen.getByText('No library scripts')).not.toBeNull();
   });
 
   // ── New script menu ───────────────────────────────────────────────────
@@ -204,8 +204,8 @@ describe('ScriptExplorerPanel', () => {
     setupStore();
     render(<ScriptExplorerPanel />);
     fireEvent.click(screen.getByTitle('New script'));
-    expect(screen.getByText('Blank Script')).toBeDefined();
-    expect(screen.getByText('From Template')).toBeDefined();
+    expect(screen.getByText('Blank Script')).not.toBeNull();
+    expect(screen.getByText('From Template')).not.toBeNull();
   });
 
   it('creates blank script from menu', () => {

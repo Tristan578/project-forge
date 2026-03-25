@@ -130,11 +130,11 @@ describe('TimelinePanel component', () => {
     setupStore();
     render(<TimelinePanel />);
 
-    expect(screen.getByTitle('Play')).toBeDefined();
-    expect(screen.getByTitle('Stop')).toBeDefined();
-    expect(screen.getByTitle('Toggle Recording')).toBeDefined();
-    expect(screen.getByTitle('Zoom In')).toBeDefined();
-    expect(screen.getByTitle('Zoom Out')).toBeDefined();
+    expect(screen.getByTitle('Play')).not.toBeNull();
+    expect(screen.getByTitle('Stop')).not.toBeNull();
+    expect(screen.getByTitle('Toggle Recording')).not.toBeNull();
+    expect(screen.getByTitle('Zoom In')).not.toBeNull();
+    expect(screen.getByTitle('Zoom Out')).not.toBeNull();
   });
 
   it('displays entity name and time info', () => {
@@ -177,7 +177,7 @@ describe('TimelinePanel component', () => {
     fireEvent.click(playBtn);
 
     // After clicking play, button should now show Pause
-    expect(screen.getByTitle('Pause')).toBeDefined();
+    expect(screen.getByTitle('Pause')).not.toBeNull();
     expect(mockSetClipProperty).toHaveBeenCalled();
   });
 
@@ -190,7 +190,7 @@ describe('TimelinePanel component', () => {
     fireEvent.click(screen.getByTitle('Stop'));
 
     // Should show Play again (not Pause)
-    expect(screen.getByTitle('Play')).toBeDefined();
+    expect(screen.getByTitle('Play')).not.toBeNull();
     // Playhead time should reset to 0.00s in the same render
     expect(container.textContent).toContain('0.00s');
   });
@@ -245,7 +245,7 @@ describe('TimelinePanel component', () => {
     const recordBtn = screen.getByTitle('Toggle Recording');
     fireEvent.click(recordBtn);
 
-    expect(screen.getByText('Recording')).toBeDefined();
+    expect(screen.getByText('Recording')).not.toBeNull();
 
     // Toggle off
     fireEvent.click(screen.getByTitle('Toggle Recording'));
@@ -281,7 +281,7 @@ describe('TimelinePanel component', () => {
 
     // Playhead time should have changed (won't be 0.00s anymore)
     // The exact time depends on zoom, offset, and pixelsPerSecond
-    expect(container.textContent).toBeDefined();
+    expect(container.textContent).not.toBeNull();
   });
 
   it('handles mouseUp to stop dragging', () => {
@@ -291,7 +291,7 @@ describe('TimelinePanel component', () => {
 
     // No error on mouseUp without prior drag
     fireEvent.mouseUp(canvas!);
-    expect(container.textContent).toBeDefined();
+    expect(container.textContent).not.toBeNull();
   });
 
   // ── Empty tracks ──────────────────────────────────────────────────────
@@ -308,6 +308,6 @@ describe('TimelinePanel component', () => {
       },
     });
     render(<TimelinePanel />);
-    expect(screen.getByTitle('Play')).toBeDefined();
+    expect(screen.getByTitle('Play')).not.toBeNull();
   });
 });

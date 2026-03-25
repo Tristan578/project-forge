@@ -26,12 +26,12 @@ describe('InfoTooltip', () => {
 
   it('renders icon when term exists in dictionary', () => {
     render(<InfoTooltip term="bloom" />);
-    expect(screen.getByTestId('help-circle-icon')).toBeDefined();
+    expect(screen.getByTestId('help-circle-icon')).not.toBeNull();
   });
 
   it('renders icon when text override provided', () => {
     render(<InfoTooltip text="Custom tooltip text" />);
-    expect(screen.getByTestId('help-circle-icon')).toBeDefined();
+    expect(screen.getByTestId('help-circle-icon')).not.toBeNull();
   });
 
   it('returns null when term not in dictionary', () => {

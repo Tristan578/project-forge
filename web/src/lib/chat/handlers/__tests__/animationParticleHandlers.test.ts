@@ -302,7 +302,7 @@ describe('animationParticleHandlers', () => {
 
     it('returns message when no clip', async () => {
       const { result } = await invokeHandler(animationParticleHandlers, 'get_animation_clip', {});
-      expect((result.result as Record<string, unknown>).message).toBeDefined();
+      expect((result.result as Record<string, unknown>).message).not.toBeUndefined();
     });
   });
 });

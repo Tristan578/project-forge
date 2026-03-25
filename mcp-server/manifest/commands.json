@@ -5358,6 +5358,46 @@
       "requiredScope": "scene:read"
     },
     {
+      "name": "configure_smart_camera",
+      "description": "Apply an optimal camera preset for a game genre on a camera entity. Selects from 8 genre presets (platformer_2d, platformer_3d, fps_shooter, rpg_exploration, top_down_strategy, racing, puzzle, horror) based on the genre parameter, or auto-detects from scene context when genre is omitted. Dispatches set_game_camera and set_active_game_camera commands immediately.",
+      "category": "game_cameras",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entityId": {
+            "type": "string",
+            "description": "Entity ID of the camera to configure"
+          },
+          "genre": {
+            "type": "string",
+            "description": "Game genre hint. Accepts preset keys (platformer_2d, platformer_3d, fps_shooter, rpg_exploration, top_down_strategy, racing, puzzle, horror) or common aliases (fps, rpg, top-down, platformer, horror, etc.). When omitted the system auto-detects from scene entities."
+          },
+          "projectType": {
+            "type": "string",
+            "enum": ["2d", "3d"],
+            "description": "Whether the project is 2D or 3D. Affects heuristic scoring when genre is omitted. Defaults to 3d."
+          }
+        },
+        "required": [
+          "entityId"
+        ]
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:write"
+    },
+    {
+      "name": "list_camera_presets",
+      "description": "List all available smart camera presets with their genre, mode, FOV, and shake settings. Use this before configure_smart_camera to see valid genre keys.",
+      "category": "game_cameras",
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "tokenCost": 0,
+      "requiredScope": "scene:read"
+    },
+    {
       "name": "generate_3d_model",
       "description": "Generate a 3D model from a text description using AI",
       "category": "generation",

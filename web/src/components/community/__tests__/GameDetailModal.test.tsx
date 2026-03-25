@@ -56,7 +56,7 @@ describe('GameDetailModal', () => {
   it('shows loading state initially', () => {
     mockFetch.mockReturnValue(new Promise(() => {})); // Never resolves
     render(<GameDetailModal gameId="game-1" onClose={vi.fn()} />);
-    expect(screen.getByText('Loading...')).toBeDefined();
+    expect(screen.getByText('Loading...')).not.toBeNull();
   });
 
   it('renders game details after loading', async () => {
@@ -87,9 +87,9 @@ describe('GameDetailModal', () => {
 
     // Wait for async load
     const title = await screen.findByText('Amazing Game');
-    expect(title).toBeDefined();
-    expect(screen.getByText('by Author')).toBeDefined();
-    expect(screen.getByText('A great game')).toBeDefined();
+    expect(title).not.toBeUndefined();
+    expect(screen.getByText('by Author')).not.toBeNull();
+    expect(screen.getByText('A great game')).not.toBeNull();
   });
 
   it('renders nothing if game fetch fails', async () => {

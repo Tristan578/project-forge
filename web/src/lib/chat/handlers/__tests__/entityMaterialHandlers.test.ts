@@ -1452,7 +1452,7 @@ describe('shaderHandlers', () => {
         { store, dispatchCommand: vi.fn() }
       );
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('returns error when no active graph', async () => {

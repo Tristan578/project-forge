@@ -46,49 +46,49 @@ describe('GenerateModelDialog', () => {
 
   it('renders Generate 3D Model heading', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Generate 3D Model')).toBeDefined();
+    expect(screen.getByText('Generate 3D Model')).not.toBeNull();
   });
 
   it('renders Prompt textarea', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText(/medieval wooden treasure chest/)).toBeDefined();
+    expect(screen.getByPlaceholderText(/medieval wooden treasure chest/)).not.toBeNull();
   });
 
   it('renders Art Style select', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Realistic')).toBeDefined();
-    expect(screen.getByText('Cartoon')).toBeDefined();
-    expect(screen.getByText('Low Poly')).toBeDefined();
+    expect(screen.getByText('Realistic')).not.toBeNull();
+    expect(screen.getByText('Cartoon')).not.toBeNull();
+    expect(screen.getByText('Low Poly')).not.toBeNull();
   });
 
   it('renders Quality options', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Standard (100 tokens)')).toBeDefined();
-    expect(screen.getByText('High (200 tokens)')).toBeDefined();
+    expect(screen.getByText('Standard (100 tokens)')).not.toBeNull();
+    expect(screen.getByText('High (200 tokens)')).not.toBeNull();
   });
 
   it('renders Poly Budget options', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('10K (Mobile-friendly)')).toBeDefined();
-    expect(screen.getByText('30K (Standard)')).toBeDefined();
+    expect(screen.getByText('10K (Mobile-friendly)')).not.toBeNull();
+    expect(screen.getByText('30K (Standard)')).not.toBeNull();
   });
 
   it('renders token cost display', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Token cost:')).toBeDefined();
-    expect(screen.getByText('100')).toBeDefined();
+    expect(screen.getByText('Token cost:')).not.toBeNull();
+    expect(screen.getByText('100')).not.toBeNull();
   });
 
   it('renders token balance display', () => {
     setupStore(5000);
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('5000')).toBeDefined();
+    expect(screen.getByText('5000')).not.toBeNull();
   });
 
   it('renders Generate button disabled when prompt is empty', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
     const generateBtn = screen.getByText('Generate');
-    expect(generateBtn).toBeDefined();
+    expect(generateBtn).not.toBeNull();
     // Button should be disabled when no prompt
     expect((generateBtn as HTMLButtonElement).disabled).toBe(true);
   });
@@ -103,7 +103,7 @@ describe('GenerateModelDialog', () => {
 
   it('renders Cancel button', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Cancel')).toBeDefined();
+    expect(screen.getByText('Cancel')).not.toBeNull();
   });
 
   it('calls onClose when Cancel clicked', () => {
@@ -129,6 +129,6 @@ describe('GenerateModelDialog', () => {
 
   it('shows prompt character count', () => {
     render(<GenerateModelDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('0/500')).toBeDefined();
+    expect(screen.getByText('0/500')).not.toBeNull();
   });
 });

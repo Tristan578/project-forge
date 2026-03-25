@@ -238,7 +238,7 @@ describe('effectSystem — generateEffectBindings contract', () => {
     const result = await generateEffectBindings('A platformer', mockFetcher);
     expect(result.length).toBeGreaterThan(0);
     for (const binding of result) {
-      expect(binding.event).toBeDefined();
+      expect(binding.event).not.toBeUndefined();
       expect(typeof binding.event.name).toBe('string');
       expect(typeof binding.event.category).toBe('string');
       expect(Array.isArray(binding.effects)).toBe(true);

@@ -51,7 +51,7 @@ describe('MONITORED_SERVICES', () => {
 describe('findServiceByHealthCheckName', () => {
   it('returns the matching service config', () => {
     const result = findServiceByHealthCheckName('Database (Neon)');
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(result?.id).toBe('database');
   });
 
@@ -62,14 +62,14 @@ describe('findServiceByHealthCheckName', () => {
 
   it('returns correct config for Clerk health check name', () => {
     const result = findServiceByHealthCheckName('Clerk');
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(result?.id).toBe('auth');
     expect(result?.critical).toBe(true);
   });
 
   it('returns correct config for Engine CDN', () => {
     const result = findServiceByHealthCheckName('Engine CDN');
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(result?.id).toBe('engine_cdn');
   });
 });
@@ -77,7 +77,7 @@ describe('findServiceByHealthCheckName', () => {
 describe('findServiceById', () => {
   it('returns the matching service config', () => {
     const result = findServiceById('database');
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(result?.healthCheckName).toBe('Database (Neon)');
   });
 
@@ -88,14 +88,14 @@ describe('findServiceById', () => {
 
   it('returns correct config for auth', () => {
     const result = findServiceById('auth');
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(result?.healthCheckName).toBe('Clerk');
     expect(result?.critical).toBe(true);
   });
 
   it('returns correct config for ai', () => {
     const result = findServiceById('ai');
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(result?.critical).toBe(false);
   });
 });

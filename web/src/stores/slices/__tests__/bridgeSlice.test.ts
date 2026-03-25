@@ -28,7 +28,12 @@ describe('BridgeSlice', () => {
         activeVersion: '1.3.17',
         status: 'connected',
       });
-      expect(store.getState().bridgeTools.aseprite).toBeDefined();
+      expect(store.getState().bridgeTools.aseprite).toMatchObject({
+        id: 'aseprite',
+        name: 'Aseprite',
+        status: 'connected',
+        activeVersion: '1.3.17',
+      });
       expect(store.getState().bridgeTools.aseprite.status).toBe('connected');
     });
 

@@ -122,8 +122,8 @@ describe('generateSuggestions', () => {
     const state = emptyEditorState();
     const suggestions = generateSuggestions(state);
     for (const s of suggestions) {
-      expect(s.label).toBeTruthy();
-      expect(s.prompt).toBeTruthy();
+      expect(s.label).not.toBeNull();
+      expect(s.prompt).not.toBeNull();
       expect(s.prompt.length).toBeGreaterThan(s.label.length);
     }
   });

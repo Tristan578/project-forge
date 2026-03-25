@@ -311,8 +311,8 @@ describe('getAnimationTypeInfo', () => {
     'returns info for %s',
     (type) => {
       const info = getAnimationTypeInfo(type);
-      expect(info.label).toBeTruthy();
-      expect(info.description).toBeTruthy();
+      expect(info.label).not.toBeNull();
+      expect(info.description).not.toBeNull();
       expect(typeof info.looping).toBe('boolean');
       expect(info.defaultDuration).toBeGreaterThan(0);
     },

@@ -645,6 +645,10 @@ export function validateWorldConsistency(world: GameWorld): ConsistencyReport {
   }
 
   // ---- 2. Faction relationship symmetry ----
+<<<<<<< HEAD
+=======
+  const checkedPairs = new Set<string>();
+>>>>>>> origin/fix/remaining-audit-gaps-push
   for (const faction of world.factions) {
     for (const [targetName, rel] of Object.entries(faction.relationships)) {
       // Target faction must exist
@@ -657,6 +661,16 @@ export function validateWorldConsistency(world: GameWorld): ConsistencyReport {
         continue;
       }
       // Relationship must be symmetric
+<<<<<<< HEAD
+=======
+      // Skip pairs already checked (A→B and B→A are the same asymmetry).
+      // Without this, generateWithHealing's 5-error healing budget gets
+      // filled with duplicates, displacing unique errors from the AI prompt.
+      const pairKey = [faction.name, targetName].sort().join('::');
+      if (checkedPairs.has(pairKey)) continue;
+      checkedPairs.add(pairKey);
+
+>>>>>>> origin/fix/remaining-audit-gaps-push
       const target = world.factions.find((f) => f.name === targetName);
       if (target) {
         const reverseRel = target.relationships[faction.name];
@@ -713,6 +727,12 @@ export function validateWorldConsistency(world: GameWorld): ConsistencyReport {
     for (const r of world.regions) {
       if (!adjacency.has(r.name)) adjacency.set(r.name, new Set());
       for (const conn of r.connectedTo) {
+<<<<<<< HEAD
+=======
+        // Skip phantom references — already flagged above. Including them
+        // in adjacency would let BFS traverse through non-existent regions.
+        if (!regionNames.has(conn)) continue;
+>>>>>>> origin/fix/remaining-audit-gaps-push
         adjacency.get(r.name)!.add(conn);
         if (!adjacency.has(conn)) adjacency.set(conn, new Set());
         adjacency.get(conn)!.add(r.name); // treat as undirected

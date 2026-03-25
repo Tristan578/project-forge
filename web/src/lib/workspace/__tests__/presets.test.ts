@@ -75,9 +75,9 @@ type MockApi = ReturnType<typeof makeMockApi>;
 
 describe('LAYOUT_PRESETS structure', () => {
   it('exports all three presets', () => {
-    expect(LAYOUT_PRESETS.default).toBeDefined();
-    expect(LAYOUT_PRESETS.scripting).toBeDefined();
-    expect(LAYOUT_PRESETS.presentation).toBeDefined();
+    expect(LAYOUT_PRESETS.default).not.toBeUndefined();
+    expect(LAYOUT_PRESETS.scripting).not.toBeUndefined();
+    expect(LAYOUT_PRESETS.presentation).not.toBeUndefined();
   });
 
   it('each preset has id, name, description, and apply function', () => {
@@ -124,13 +124,13 @@ describe('LAYOUT_PRESETS.default', () => {
 
   it('adds scene-settings panel as inactive', () => {
     const call = api._panelCalls.find((c) => c.id === 'scene-settings');
-    expect(call).toBeDefined();
+    expect(call).not.toBeUndefined();
     expect(call?.args.inactive).toBe(true);
   });
 
   it('adds ui-builder panel as inactive', () => {
     const call = api._panelCalls.find((c) => c.id === 'ui-builder');
-    expect(call).toBeDefined();
+    expect(call).not.toBeUndefined();
     expect(call?.args.inactive).toBe(true);
   });
 
@@ -141,7 +141,7 @@ describe('LAYOUT_PRESETS.default', () => {
 
   it('adds audio-mixer panel as inactive', () => {
     const call = api._panelCalls.find((c) => c.id === 'audio-mixer');
-    expect(call).toBeDefined();
+    expect(call).not.toBeUndefined();
     expect(call?.args.inactive).toBe(true);
   });
 
@@ -170,13 +170,13 @@ describe('LAYOUT_PRESETS.default', () => {
 
   it('includes initialWidth for scene-hierarchy', () => {
     const call = api._panelCalls.find((c) => c.id === 'scene-hierarchy');
-    expect(call?.args.initialWidth).toBeDefined();
+    expect(call?.args.initialWidth).not.toBeUndefined();
     expect(typeof call?.args.initialWidth).toBe('number');
   });
 
   it('includes initialWidth for inspector', () => {
     const call = api._panelCalls.find((c) => c.id === 'inspector');
-    expect(call?.args.initialWidth).toBeDefined();
+    expect(call?.args.initialWidth).not.toBeUndefined();
   });
 
   it('applies minimumWidth from PANEL_DEFINITIONS for viewport', () => {
@@ -209,7 +209,7 @@ describe('LAYOUT_PRESETS.scripting', () => {
 
   it('adds scene-viewport as inactive tab behind script-editor', () => {
     const call = api._panelCalls.find((c) => c.id === 'scene-viewport');
-    expect(call).toBeDefined();
+    expect(call).not.toBeUndefined();
     expect(call?.args.inactive).toBe(true);
   });
 
@@ -220,7 +220,7 @@ describe('LAYOUT_PRESETS.scripting', () => {
 
   it('adds scene-hierarchy as inactive behind script-explorer', () => {
     const call = api._panelCalls.find((c) => c.id === 'scene-hierarchy');
-    expect(call).toBeDefined();
+    expect(call).not.toBeUndefined();
     expect(call?.args.inactive).toBe(true);
   });
 
@@ -291,7 +291,7 @@ describe('LAYOUT_PRESETS.presentation', () => {
 
   it('asset-browser has smaller initialHeight than default', () => {
     const presCall = api._panelCalls.find((c) => c.id === 'asset-browser');
-    expect(presCall?.args.initialHeight).toBeDefined();
+    expect(presCall?.args.initialHeight).not.toBeUndefined();
     expect(presCall?.args.initialHeight as number).toBeLessThan(200);
   });
 });

@@ -99,7 +99,7 @@ describe('securityHandlers', () => {
       expect(result.success).toBe(true);
       const data = result.result as { status: string; settings: unknown };
       expect(data.status).toBe('Security features enabled');
-      expect(data.settings).toBeDefined();
+      expect(data.settings).not.toBeUndefined();
     });
 
     it('calls getSecurityStatus once', async () => {
@@ -407,7 +407,7 @@ describe('dialogueHandlers', () => {
 
       expect(result.success).toBe(true);
       const data = result.result as { nodeId: string; message: string };
-      expect(data.nodeId).toBeTruthy();
+      expect(data.nodeId).not.toBeNull();
       expect(data.message).toContain('text');
       expect(mockAddNode).toHaveBeenCalledTimes(1);
       const [, node] = mockAddNode.mock.calls[0] as [
@@ -519,7 +519,7 @@ describe('dialogueHandlers', () => {
         { next: string },
       ];
       expect(fromNodeId).toBe(existingNodeId);
-      expect(updates.next).toBeTruthy();
+      expect(updates.next).not.toBeNull();
     });
 
     it('does not call updateNode when connectFromNodeId node has no next field', async () => {
@@ -689,7 +689,7 @@ describe('dialogueHandlers', () => {
 
       expect(result.success).toBe(true);
       const data = result.result as { choiceId: string; message: string };
-      expect(data.choiceId).toBeTruthy();
+      expect(data.choiceId).not.toBeNull();
       expect(data.message).toBe('Choice added');
 
       expect(mockUpdateNode).toHaveBeenCalledTimes(1);

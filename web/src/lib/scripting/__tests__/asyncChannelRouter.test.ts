@@ -104,7 +104,7 @@ describe('AsyncChannelRouter', () => {
     const responses = router.flush();
 
     const overflowResp = responses?.find(r => r.requestId === 'req_overflow');
-    expect(overflowResp).toBeDefined();
+    expect(overflowResp).not.toBeUndefined();
     expect(overflowResp!.status).toBe('error');
     expect(overflowResp!.error).toContain('max concurrency');
 

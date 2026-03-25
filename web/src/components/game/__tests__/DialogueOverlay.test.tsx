@@ -114,7 +114,7 @@ describe('DialogueOverlay', () => {
       typewriterComplete: true,
     });
     render(<DialogueOverlay />);
-    expect(screen.getByText('Hero')).toBeDefined();
+    expect(screen.getByText('Hero')).not.toBeNull();
   });
 
   it('renders dialogue text content', () => {
@@ -143,7 +143,7 @@ describe('DialogueOverlay', () => {
       currentChoices: [{ id: 'choice-1', text: 'Enter' }],
     });
     render(<DialogueOverlay />);
-    expect(screen.getByText('Enter')).toBeDefined();
+    expect(screen.getByText('Enter')).not.toBeNull();
   });
 
   it('calls selectChoice when choice button clicked', () => {
@@ -184,7 +184,7 @@ describe('DialogueOverlay', () => {
     });
     render(<DialogueOverlay />);
     fireEvent.click(screen.getByText('H — History'));
-    expect(screen.getByText('Dialogue History')).toBeDefined();
+    expect(screen.getByText('Dialogue History')).not.toBeNull();
   });
 
   it('shows Space to continue hint when typewriter is done', () => {
@@ -196,6 +196,6 @@ describe('DialogueOverlay', () => {
       typewriterComplete: true,
     });
     render(<DialogueOverlay />);
-    expect(screen.getByText(/Space to continue/)).toBeDefined();
+    expect(screen.getByText(/Space to continue/)).not.toBeNull();
   });
 });

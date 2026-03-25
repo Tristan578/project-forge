@@ -47,7 +47,7 @@ describe('BUILT_IN_PREFABS - count and top-level structure', () => {
       expect(prefab.category.length).toBeGreaterThan(0);
       expect(typeof prefab.description).toBe('string');
       expect(prefab.description.length).toBeGreaterThan(0);
-      expect(prefab.snapshot).toBeDefined();
+      expect(prefab.snapshot).not.toBeUndefined();
       expect(typeof prefab.createdAt).toBe('string');
       expect(typeof prefab.updatedAt).toBe('string');
     }
@@ -91,7 +91,7 @@ describe('builtin_player', () => {
   const player = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_player')!;
 
   it('exists', () => {
-    expect(player).toBeDefined();
+    expect(player).not.toBeUndefined();
   });
 
   it('has capsule entityType', () => {
@@ -136,7 +136,7 @@ describe('builtin_collectible', () => {
   const collectible = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_collectible')!;
 
   it('exists', () => {
-    expect(collectible).toBeDefined();
+    expect(collectible).not.toBeUndefined();
   });
 
   it('has torus entityType', () => {
@@ -172,7 +172,7 @@ describe('builtin_physics_crate', () => {
   const crate = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_physics_crate')!;
 
   it('exists', () => {
-    expect(crate).toBeDefined();
+    expect(crate).not.toBeUndefined();
   });
 
   it('has cube entityType', () => {
@@ -211,7 +211,7 @@ describe('builtin_light_rig', () => {
   const light = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_light_rig')!;
 
   it('exists', () => {
-    expect(light).toBeDefined();
+    expect(light).not.toBeUndefined();
   });
 
   it('has point_light entityType', () => {
@@ -250,7 +250,7 @@ describe('builtin_patrol_enemy', () => {
   const enemy = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_patrol_enemy')!;
 
   it('exists', () => {
-    expect(enemy).toBeDefined();
+    expect(enemy).not.toBeUndefined();
   });
 
   it('has sphere entityType', () => {
@@ -286,7 +286,7 @@ describe('builtin_bouncy_ball', () => {
   const ball = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_bouncy_ball')!;
 
   it('exists', () => {
-    expect(ball).toBeDefined();
+    expect(ball).not.toBeUndefined();
   });
 
   it('has sphere entityType', () => {
@@ -318,7 +318,7 @@ describe('builtin_glass_panel', () => {
   const glass = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_glass_panel')!;
 
   it('exists', () => {
-    expect(glass).toBeDefined();
+    expect(glass).not.toBeUndefined();
   });
 
   it('has plane entityType', () => {
@@ -359,7 +359,7 @@ describe('builtin_fire', () => {
   const fire = BUILT_IN_PREFABS.find((p) => p.id === 'builtin_fire')!;
 
   it('exists', () => {
-    expect(fire).toBeDefined();
+    expect(fire).not.toBeUndefined();
   });
 
   it('has fire particle preset', () => {

@@ -42,8 +42,8 @@ describe('parseSpineJson - input validation', () => {
 
   it('returns a result for minimal valid input', () => {
     const result = parseSpineJson(minimalSkeleton());
-    expect(result).toBeDefined();
-    expect(result.skeleton).toBeDefined();
+    expect(result).not.toBeUndefined();
+    expect(result.skeleton).not.toBeUndefined();
   });
 });
 
@@ -94,7 +94,7 @@ describe('parseSpineJson - minimal skeleton', () => {
   });
 
   it('default skin is created automatically', () => {
-    expect(result.skeleton.skins['default']).toBeDefined();
+    expect(result.skeleton.skins['default']).not.toBeUndefined();
   });
 
   it('activeSkin is "default"', () => {
@@ -297,8 +297,8 @@ describe('parseSpineJson - skin parsing', () => {
 
   it('parses both skins', () => {
     expect(Object.keys(skeleton.skins)).toHaveLength(2);
-    expect(skeleton.skins['default']).toBeDefined();
-    expect(skeleton.skins['armor']).toBeDefined();
+    expect(skeleton.skins['default']).not.toBeUndefined();
+    expect(skeleton.skins['armor']).not.toBeUndefined();
   });
 
   it('activeSkin is default', () => {
@@ -307,13 +307,13 @@ describe('parseSpineJson - skin parsing', () => {
 
   it('default skin has body/body attachment', () => {
     const attach = skeleton.skins['default'].attachments['body/body'];
-    expect(attach).toBeDefined();
+    expect(attach).not.toBeUndefined();
     expect(attach.type).toBe('sprite');
   });
 
   it('armor skin has correct attachment key', () => {
     const attach = skeleton.skins['armor'].attachments['body/armor_body'];
-    expect(attach).toBeDefined();
+    expect(attach).not.toBeUndefined();
   });
 
   it('attachment offset is mapped', () => {
@@ -450,7 +450,7 @@ describe('parseSpineJson - animation keyframe extraction', () => {
   it('walk root bone has rotation keyframes', () => {
     const walk = result.animations.find((a) => a.name === 'walk');
     const track = walk?.animation.tracks['root'];
-    expect(track).toBeDefined();
+    expect(track).not.toBeUndefined();
     const rotKfs = track?.filter((k) => k.rotation !== undefined);
     expect(rotKfs?.length).toBeGreaterThanOrEqual(3);
   });
@@ -592,7 +592,7 @@ describe('parseSpineJson - warnings', () => {
     };
     expect(() => parseSpineJson(json)).not.toThrow();
     const result = parseSpineJson(json);
-    expect(result.skeleton.skins['default']).toBeDefined();
+    expect(result.skeleton.skins['default']).not.toBeUndefined();
   });
 
   it('returns no warnings for well-formed input', () => {
@@ -629,13 +629,13 @@ describe('parseSpineJson - missing optional fields', () => {
 
   it('handles missing skins gracefully', () => {
     const result = parseSpineJson({ bones: [{ name: 'root' }] });
-    expect(result.skeleton.skins['default']).toBeDefined();
+    expect(result.skeleton.skins['default']).not.toBeUndefined();
   });
 
   it('handles empty skins array', () => {
     const result = parseSpineJson({ bones: [{ name: 'root' }], skins: [] });
     expect(result.skeleton.activeSkin).toBe('default');
-    expect(result.skeleton.skins['default']).toBeDefined();
+    expect(result.skeleton.skins['default']).not.toBeUndefined();
   });
 
   it('handles animation with no bones timeline', () => {
@@ -644,7 +644,7 @@ describe('parseSpineJson - missing optional fields', () => {
       animations: { idle: {} },
     });
     const idle = result.animations.find((a) => a.name === 'idle');
-    expect(idle).toBeDefined();
+    expect(idle).not.toBeUndefined();
     expect(idle?.animation.tracks).toEqual({});
   });
 });

@@ -72,35 +72,35 @@ describe('VoiceProfilePanel', () => {
 
   it('renders Voice Profiles heading', () => {
     render(<VoiceProfilePanel />);
-    expect(screen.getByText('Voice Profiles')).toBeDefined();
+    expect(screen.getByText('Voice Profiles')).not.toBeNull();
   });
 
   it('shows "No voice profiles" when empty', () => {
     render(<VoiceProfilePanel />);
-    expect(screen.getByText('No voice profiles')).toBeDefined();
+    expect(screen.getByText('No voice profiles')).not.toBeNull();
   });
 
   it('shows profile count badge', () => {
     render(<VoiceProfilePanel />);
-    expect(screen.getByText('(0)')).toBeDefined();
+    expect(screen.getByText('(0)')).not.toBeNull();
   });
 
   it('shows Add voice profile button', () => {
     render(<VoiceProfilePanel />);
-    expect(screen.getByTitle('Add voice profile')).toBeDefined();
+    expect(screen.getByTitle('Add voice profile')).not.toBeNull();
   });
 
   it('shows add form when + button clicked', () => {
     render(<VoiceProfilePanel />);
     fireEvent.click(screen.getByTitle('Add voice profile'));
     // When no unmapped speakers, shows a text input for speaker name
-    expect(screen.getByPlaceholderText('Speaker name')).toBeDefined();
+    expect(screen.getByPlaceholderText('Speaker name')).not.toBeNull();
   });
 
   it('shows Cancel button in add form', () => {
     render(<VoiceProfilePanel />);
     fireEvent.click(screen.getByTitle('Add voice profile'));
-    expect(screen.getByText('Cancel')).toBeDefined();
+    expect(screen.getByText('Cancel')).not.toBeNull();
   });
 
   it('hides add form when Cancel clicked', () => {
@@ -113,19 +113,19 @@ describe('VoiceProfilePanel', () => {
   it('renders profile speaker name when profiles exist', () => {
     setupStore({ profiles: { Hero: baseProfile } });
     render(<VoiceProfilePanel />);
-    expect(screen.getByText('Hero')).toBeDefined();
+    expect(screen.getByText('Hero')).not.toBeNull();
   });
 
   it('shows profile voice label', () => {
     setupStore({ profiles: { Hero: baseProfile } });
     render(<VoiceProfilePanel />);
-    expect(screen.getByText('Alice')).toBeDefined();
+    expect(screen.getByText('Alice')).not.toBeNull();
   });
 
   it('shows profile count with profiles', () => {
     setupStore({ profiles: { Hero: baseProfile } });
     render(<VoiceProfilePanel />);
-    expect(screen.getByText('(1)')).toBeDefined();
+    expect(screen.getByText('(1)')).not.toBeNull();
   });
 
   it('expands edit panel when profile row clicked', () => {
@@ -133,7 +133,7 @@ describe('VoiceProfilePanel', () => {
     render(<VoiceProfilePanel />);
     // Click the profile row button (shows speaker name)
     fireEvent.click(screen.getByText('Hero'));
-    expect(screen.getByText('Stability')).toBeDefined();
+    expect(screen.getByText('Stability')).not.toBeNull();
   });
 
   it('calls setProfile when Save clicked in edit panel', () => {

@@ -201,14 +201,14 @@ describe('type exports', () => {
     const keys = Object.keys(TOKEN_COSTS);
     keys.forEach((key) => {
       const op: OperationType = key as OperationType;
-      expect(TOKEN_COSTS[op]).toBeDefined();
+      expect(TOKEN_COSTS[op]).not.toBeUndefined();
     });
   });
 
   it('TokenPackage covers all TOKEN_PACKAGES keys', () => {
     const keys = Object.keys(TOKEN_PACKAGES) as TokenPackage[];
     keys.forEach((key) => {
-      expect(TOKEN_PACKAGES[key]).toBeDefined();
+      expect(TOKEN_PACKAGES[key]).not.toBeUndefined();
     });
   });
 });

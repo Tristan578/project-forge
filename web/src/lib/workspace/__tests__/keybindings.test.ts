@@ -20,10 +20,10 @@ describe('DEFAULT_BINDINGS', () => {
 
   it('should have all required fields', () => {
     for (const binding of DEFAULT_BINDINGS) {
-      expect(binding.action).toBeTruthy();
-      expect(binding.label).toBeTruthy();
-      expect(binding.category).toBeTruthy();
-      expect(binding.defaultKey).toBeTruthy();
+      expect(binding.action).not.toBeNull();
+      expect(binding.label).not.toBeNull();
+      expect(binding.category).not.toBeNull();
+      expect(binding.defaultKey).not.toBeNull();
       expect(binding.customKey).toBeNull();
     }
   });
@@ -113,10 +113,10 @@ describe('eventToKeyCombo', () => {
 describe('groupByCategory', () => {
   it('should group bindings by category', () => {
     const groups = groupByCategory(DEFAULT_BINDINGS);
-    expect(groups['Selection']).toBeDefined();
-    expect(groups['Transform']).toBeDefined();
-    expect(groups['History']).toBeDefined();
-    expect(groups['Scene']).toBeDefined();
+    expect(groups['Selection']).not.toBeUndefined();
+    expect(groups['Transform']).not.toBeUndefined();
+    expect(groups['History']).not.toBeUndefined();
+    expect(groups['Scene']).not.toBeUndefined();
   });
 
   it('should include all bindings', () => {

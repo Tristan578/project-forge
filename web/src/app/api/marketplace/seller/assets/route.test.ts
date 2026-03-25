@@ -110,7 +110,7 @@ describe('POST /api/marketplace/seller/assets', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBeDefined();
+    expect(body.error).toBe('Description is required and must be a string');
   });
 
   it('should create a new asset listing', async () => {

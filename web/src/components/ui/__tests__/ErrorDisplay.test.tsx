@@ -34,17 +34,17 @@ describe('ErrorDisplay — inline variant', () => {
 
   it('shows the error icon by default (severity=error)', () => {
     render(<ErrorDisplay variant="inline" message="Error" />);
-    expect(screen.getByTestId('icon-alert-circle')).toBeDefined();
+    expect(screen.getByTestId('icon-alert-circle')).not.toBeNull();
   });
 
   it('shows the warning icon when severity=warning', () => {
     render(<ErrorDisplay variant="inline" severity="warning" message="Warning" />);
-    expect(screen.getByTestId('icon-alert-triangle')).toBeDefined();
+    expect(screen.getByTestId('icon-alert-triangle')).not.toBeNull();
   });
 
   it('shows the info icon when severity=info', () => {
     render(<ErrorDisplay variant="inline" severity="info" message="Info" />);
-    expect(screen.getByTestId('icon-info')).toBeDefined();
+    expect(screen.getByTestId('icon-info')).not.toBeNull();
   });
 
   it('does not render a title (inline has no title)', () => {
@@ -188,17 +188,17 @@ describe('ErrorDisplay — card variant', () => {
 
   it('shows the large error icon by default', () => {
     render(<ErrorDisplay variant="card" message="Error." />);
-    expect(screen.getByTestId('icon-alert-circle')).toBeDefined();
+    expect(screen.getByTestId('icon-alert-circle')).not.toBeNull();
   });
 
   it('shows the warning icon when severity=warning', () => {
     render(<ErrorDisplay variant="card" severity="warning" message="Warning." />);
-    expect(screen.getByTestId('icon-alert-triangle')).toBeDefined();
+    expect(screen.getByTestId('icon-alert-triangle')).not.toBeNull();
   });
 
   it('shows the info icon when severity=info', () => {
     render(<ErrorDisplay variant="card" severity="info" message="Info." />);
-    expect(screen.getByTestId('icon-info')).toBeDefined();
+    expect(screen.getByTestId('icon-info')).not.toBeNull();
   });
 
   it('has role=alert for screen readers', () => {
@@ -220,6 +220,6 @@ describe('ErrorDisplay — user-safety invariants', () => {
   it('renders message exactly as provided (no wrapping or modification)', () => {
     const msg = 'Check your internet connection and try again.';
     render(<ErrorDisplay variant="banner" message={msg} />);
-    expect(screen.getByText(msg)).toBeDefined();
+    expect(screen.getByText(msg)).not.toBeNull();
   });
 });

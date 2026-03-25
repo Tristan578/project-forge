@@ -75,9 +75,9 @@ describe('GET /api/capabilities', () => {
       const res = await GET(new NextRequest('http://localhost/api/capabilities'));
       const body: CapabilitiesResponse = await res.json();
       for (const cap of body.capabilities) {
-        expect(cap.hint).toBeDefined();
+        expect(typeof cap.hint).toBe('string');
         expect(cap.hint).toContain('Settings');
-        expect(cap.requiredProviders).toBeDefined();
+        expect(Array.isArray(cap.requiredProviders)).toBe(true);
         expect(cap.requiredProviders!.length).toBeGreaterThan(0);
       }
     });

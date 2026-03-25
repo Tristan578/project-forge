@@ -82,7 +82,7 @@ describe('executeToolCall: unknown tool name', () => {
 
   it('never throws for an unknown tool — always resolves', async () => {
     const promise = executeToolCall('no_such_tool_at_all', {}, makeStore());
-    await expect(promise).resolves.toBeDefined();
+    await expect(promise).resolves.not.toBeUndefined();
   });
 
   it('returns success: false for unknown tools with args', async () => {

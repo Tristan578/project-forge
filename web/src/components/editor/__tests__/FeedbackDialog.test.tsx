@@ -36,8 +36,8 @@ describe('FeedbackDialog', () => {
 
   it('renders dialog when open', () => {
     render(<FeedbackDialog open={true} onClose={mockOnClose} />);
-    expect(screen.getByRole('dialog')).toBeDefined();
-    expect(screen.getByText('Send Feedback')).toBeDefined();
+    expect(screen.getByRole('dialog')).not.toBeNull();
+    expect(screen.getByText('Send Feedback')).not.toBeNull();
   });
 
   it('has correct ARIA attributes', () => {
@@ -49,15 +49,15 @@ describe('FeedbackDialog', () => {
 
   it('renders all three feedback type buttons', () => {
     render(<FeedbackDialog open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Bug Report')).toBeDefined();
-    expect(screen.getByText('Feature Request')).toBeDefined();
-    expect(screen.getByText('General Feedback')).toBeDefined();
+    expect(screen.getByText('Bug Report')).not.toBeNull();
+    expect(screen.getByText('Feature Request')).not.toBeNull();
+    expect(screen.getByText('General Feedback')).not.toBeNull();
   });
 
   it('renders close button with aria-label', () => {
     render(<FeedbackDialog open={true} onClose={mockOnClose} />);
     const closeBtn = screen.getByRole('button', { name: /close feedback dialog/i });
-    expect(closeBtn).toBeDefined();
+    expect(closeBtn).not.toBeNull();
   });
 
   it('calls onClose when close button is clicked', () => {
@@ -69,7 +69,7 @@ describe('FeedbackDialog', () => {
   it('renders textarea with aria-label', () => {
     render(<FeedbackDialog open={true} onClose={mockOnClose} />);
     const textarea = screen.getByRole('textbox', { name: /feedback description/i });
-    expect(textarea).toBeDefined();
+    expect(textarea).not.toBeNull();
   });
 
   it('disables submit when description is too short', () => {
@@ -97,7 +97,7 @@ describe('FeedbackDialog', () => {
     fireEvent.change(textarea, { target: { value: 'short' } });
 
     // Submit is disabled but let's verify the minimum warning appears
-    expect(screen.getByText('Minimum 10 characters')).toBeDefined();
+    expect(screen.getByText('Minimum 10 characters')).not.toBeNull();
   });
 
   it('submits feedback successfully and shows confirmation', async () => {
@@ -118,7 +118,7 @@ describe('FeedbackDialog', () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(screen.getByText('Thanks for your feedback!')).toBeDefined();
+      expect(screen.getByText('Thanks for your feedback!')).not.toBeNull();
     });
 
     expect(global.fetch).toHaveBeenCalledWith('/api/feedback', expect.objectContaining({
@@ -140,17 +140,17 @@ describe('FeedbackDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: /submit feedback/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('alert')).toBeDefined();
-      expect(screen.getByText('Server error')).toBeDefined();
+      expect(screen.getByRole('alert')).not.toBeNull();
+      expect(screen.getByText('Server error')).not.toBeNull();
     });
   });
 
   it('displays character count', () => {
     render(<FeedbackDialog open={true} onClose={mockOnClose} />);
-    expect(screen.getByText('0/5000')).toBeDefined();
+    expect(screen.getByText('0/5000')).not.toBeNull();
 
     const textarea = screen.getByRole('textbox', { name: /feedback description/i });
     fireEvent.change(textarea, { target: { value: 'Hello' } });
-    expect(screen.getByText('5/5000')).toBeDefined();
+    expect(screen.getByText('5/5000')).not.toBeNull();
   });
 });

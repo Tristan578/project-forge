@@ -235,7 +235,7 @@ describe('postProcess', () => {
     const result = postProcess('sfx', 'explosion boom');
     expect(result.ok).toBe(true);
     expect(result.metadata.sfxCategory).toBe('explosion');
-    expect(result.metadata.spatialDefaults).toBeDefined();
+    expect(result.metadata.spatialDefaults).not.toBeUndefined();
   });
 
   it('should process sfx with explicit config', () => {
@@ -267,7 +267,7 @@ describe('postProcess', () => {
       const result = postProcess(type, 'character idle');
       expect(result.ok).toBe(true);
       expect(result.metadata.spriteType).toBe(type);
-      expect(result.metadata.assetName).toBeDefined();
+      expect(result.metadata.assetName).not.toBeUndefined();
     }
   });
 

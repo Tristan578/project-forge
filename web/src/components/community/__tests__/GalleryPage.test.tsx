@@ -66,21 +66,21 @@ describe('GalleryPage', () => {
 
   it('renders without crashing', () => {
     render(<GalleryPage />);
-    expect(screen.getByText('Community Gallery')).toBeDefined();
-    expect(screen.getByText('Discover and play games created by the community')).toBeDefined();
+    expect(screen.getByText('Community Gallery')).not.toBeNull();
+    expect(screen.getByText('Discover and play games created by the community')).not.toBeNull();
   });
 
   it('shows empty state when no games', () => {
     render(<GalleryPage />);
-    expect(screen.getByText('No games found. Try different filters.')).toBeDefined();
+    expect(screen.getByText('No games found. Try different filters.')).not.toBeNull();
   });
 
   it('renders sort tabs', () => {
     render(<GalleryPage />);
-    expect(screen.getByText('Trending')).toBeDefined();
-    expect(screen.getByText('Newest')).toBeDefined();
-    expect(screen.getByText('Top Rated')).toBeDefined();
-    expect(screen.getByText('Most Played')).toBeDefined();
+    expect(screen.getByText('Trending')).not.toBeNull();
+    expect(screen.getByText('Newest')).not.toBeNull();
+    expect(screen.getByText('Top Rated')).not.toBeNull();
+    expect(screen.getByText('Most Played')).not.toBeNull();
   });
 
   it('calls setSortBy when a sort tab is clicked', () => {

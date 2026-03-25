@@ -219,7 +219,7 @@ describe('reaperBridge', () => {
       );
 
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('rejects invalid binary path without calling execFile', async () => {

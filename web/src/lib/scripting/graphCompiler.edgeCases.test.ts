@@ -1022,7 +1022,7 @@ describe('graphCompiler - Edge Cases', () => {
       expect(result.success).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
       const cycleError = result.errors.find(e => e.message.includes('Cycle detected'));
-      expect(cycleError).toBeDefined();
+      expect(cycleError).not.toBeUndefined();
       expect(cycleError!.nodeId).toBe('a');
     });
 
@@ -1040,7 +1040,7 @@ describe('graphCompiler - Edge Cases', () => {
       const result = compileGraph(graph);
       expect(result.success).toBe(false);
       const cycleError = result.errors.find(e => e.message.includes('Cycle detected'));
-      expect(cycleError).toBeDefined();
+      expect(cycleError).not.toBeUndefined();
       expect(cycleError!.nodeId).toBe('2');
     });
 
@@ -1062,7 +1062,7 @@ describe('graphCompiler - Edge Cases', () => {
       const result = compileGraph(graph);
       expect(result.success).toBe(false);
       const cycleError = result.errors.find(e => e.message.includes('Cycle detected'));
-      expect(cycleError).toBeDefined();
+      expect(cycleError).not.toBeUndefined();
       expect(cycleError!.nodeId).toBe('a');
       // The error message should contain the cycle path
       expect(cycleError!.message).toContain('a');
@@ -1088,7 +1088,7 @@ describe('graphCompiler - Edge Cases', () => {
       const result = compileGraph(graph);
       expect(result.success).toBe(false);
       const cycleError = result.errors.find(e => e.message.includes('Data cycle detected'));
-      expect(cycleError).toBeDefined();
+      expect(cycleError).not.toBeUndefined();
     });
 
     it('compiles valid acyclic graph correctly after cycle detection was added (regression)', () => {

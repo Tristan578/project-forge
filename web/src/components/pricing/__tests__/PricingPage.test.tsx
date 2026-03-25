@@ -31,69 +31,58 @@ describe('PricingPage', () => {
 
   it('renders SpawnForge brand heading', () => {
     render(<PricingPage />);
-    expect(screen.getByText('SpawnForge')).toBeDefined();
+    expect(screen.getByText('SpawnForge')).not.toBeNull();
   });
 
   it('renders hero headline', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Build Games with AI')).toBeDefined();
+    expect(screen.getByText('Build Games with AI')).not.toBeNull();
   });
 
   it('renders subtitle', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Choose the plan that\'s right for you')).toBeDefined();
+    expect(screen.getByText('Choose the plan that\'s right for you')).not.toBeNull();
   });
 
   it('renders Free tier card', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Free')).toBeDefined();
-    expect(screen.getByText('$0')).toBeDefined();
+    expect(screen.getByText('Free')).not.toBeNull();
+    expect(screen.getByText('$0')).not.toBeNull();
   });
 
   it('renders Starter tier card', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Starter')).toBeDefined();
-    expect(screen.getByText('$9')).toBeDefined();
+    expect(screen.getByText('Starter')).not.toBeNull();
+    expect(screen.getByText('$9')).not.toBeNull();
   });
 
   it('renders Creator tier card', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Creator')).toBeDefined();
+    expect(screen.getByText('Creator')).not.toBeNull();
   });
 
   it('renders Studio tier card', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Studio')).toBeDefined();
+    expect(screen.getByText('Studio')).not.toBeNull();
   });
 
   it('renders Get Started button for Free tier', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Get Started')).toBeDefined();
+    expect(screen.getByText('Get Started')).not.toBeNull();
   });
 
   it('renders Sign In button when not signed in', () => {
     render(<PricingPage />);
-    expect(screen.getByText('Sign In')).toBeDefined();
+    expect(screen.getByText('Sign In')).not.toBeNull();
   });
 
   it('renders Dashboard button when signed in', async () => {
-    // hasClerk is a module-level constant in PricingPage — must stub the env
-    // and reset modules so the constant re-evaluates to true before rendering.
-    vi.stubEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_stub');
-    vi.resetModules();
-
-    // Re-mock @clerk/nextjs after resetModules so the fresh module picks it up.
-    vi.doMock('@clerk/nextjs', () => ({
-      useAuth: vi.fn(() => ({ isSignedIn: true })),
-    }));
-
-    const { render: localRender } = await import('@/test/utils/componentTestUtils');
-    const { PricingPage: FreshPricingPage } = await import('../PricingPage');
-
-    localRender(<FreshPricingPage />);
-    expect(screen.getByText('Dashboard')).toBeDefined();
-
-    vi.unstubAllEnvs();
+    const { useAuth } = await import('@clerk/nextjs');
+    vi.mocked(useAuth).mockReturnValue({ isSignedIn: true } as ReturnType<typeof useAuth>);
+    render(<PricingPage />);
+    expect(screen.getByText('Dashboard')).not.toBeNull();
+    // Reset
+    vi.mocked(useAuth).mockReturnValue({ isSignedIn: false } as ReturnType<typeof useAuth>);
   });
 
   it('renders multiple per-month price labels', () => {

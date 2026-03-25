@@ -75,7 +75,7 @@ describe('LandingPage', () => {
   it('renders the hero section with headline', () => {
     expect(
       screen.getByRole('heading', { name: /create games with ai/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('renders the primary CTA button linking to sign-up', () => {
@@ -98,7 +98,7 @@ describe('LandingPage', () => {
       'Secure by Default',
     ];
     for (const title of expectedFeatures) {
-      expect(screen.getByText(title)).toBeDefined();
+      expect(screen.getByText(title)).not.toBeNull();
     }
   });
 
@@ -151,7 +151,7 @@ describe('LandingPage', () => {
   it('renders the footer CTA section', () => {
     expect(
       screen.getByRole('heading', { name: /ready to create your first game/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('has proper heading hierarchy (h1 -> h2)', () => {
@@ -163,10 +163,10 @@ describe('LandingPage', () => {
 
   it('renders navigation with section links', () => {
     const nav = screen.getByRole('navigation', { name: /main navigation/i });
-    expect(within(nav).getByText('Features')).toBeDefined();
-    expect(within(nav).getByText('How It Works')).toBeDefined();
-    expect(within(nav).getByText('Compare')).toBeDefined();
-    expect(within(nav).getByText('Pricing')).toBeDefined();
+    expect(within(nav).getByText('Features')).not.toBeNull();
+    expect(within(nav).getByText('How It Works')).not.toBeNull();
+    expect(within(nav).getByText('Compare')).not.toBeNull();
+    expect(within(nav).getByText('Pricing')).not.toBeNull();
   });
 
   it('renders responsive classes on feature grid', () => {
@@ -181,7 +181,7 @@ describe('LandingPage', () => {
   it('renders testimonials social proof section', () => {
     expect(
       screen.getByRole('heading', { name: /trusted by game creators/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('renders testimonials with realistic content (not placeholders)', () => {
@@ -197,7 +197,7 @@ describe('LandingPage', () => {
   it('renders the AI showcase section', () => {
     expect(
       screen.getByRole('heading', { name: /from prompt to playable/i })
-    ).toBeDefined();
+    ).not.toBeNull();
   });
 
   it('"See How It Works" CTA links to the demo section', () => {
@@ -207,8 +207,8 @@ describe('LandingPage', () => {
 
   it('renders footer links', () => {
     const footer = screen.getByRole('contentinfo');
-    expect(within(footer).getByText('Pricing')).toBeDefined();
-    expect(within(footer).getByText('Terms')).toBeDefined();
-    expect(within(footer).getByText('Privacy')).toBeDefined();
+    expect(within(footer).getByText('Pricing')).not.toBeNull();
+    expect(within(footer).getByText('Terms')).not.toBeNull();
+    expect(within(footer).getByText('Privacy')).not.toBeNull();
   });
 });

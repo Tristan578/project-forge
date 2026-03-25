@@ -336,6 +336,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'gdd-generator',
     minWidth: 280,
     minHeight: 200,
+    category: 'creation',
   },
   'voice-profile': {
     id: 'voice-profile',
@@ -343,6 +344,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     component: 'voice-profile',
     minWidth: 260,
     minHeight: 200,
+    category: 'creation',
   },
   'shader-editor': {
     id: 'shader-editor',
@@ -351,6 +353,7 @@ export const PANEL_DEFINITIONS: Record<string, PanelDefinition> = {
     minWidth: 400,
     minHeight: 300,
     renderer: 'always',
+    category: 'tools',
   },
 };
 

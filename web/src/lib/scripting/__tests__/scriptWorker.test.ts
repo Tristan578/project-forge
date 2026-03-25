@@ -213,7 +213,7 @@ describe('scriptWorker', () => {
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
 
     const cmdMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'commands');
-    expect(cmdMsg).toBeDefined();
+    expect(cmdMsg).not.toBeUndefined();
     expect(cmdMsg![0].commands).toContainEqual(
       expect.objectContaining({ cmd: 'update_transform', entityId: 'e1', position: [1, 2, 3] })
     );
@@ -676,7 +676,7 @@ describe('scriptWorker', () => {
     await handler(initMsg([{ entityId: 'e1', enabled: true, source: code }]));
 
     const uiMsg = mockPostMessage.mock.calls.find((c) => c[0]?.type === 'ui');
-    expect(uiMsg).toBeDefined();
+    expect(uiMsg).not.toBeUndefined();
     expect(uiMsg![0].elements).toContainEqual(
       expect.objectContaining({ id: 'score', text: 'Score: 100', x: 10, y: 10, fontSize: 32, color: 'red' })
     );

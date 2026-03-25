@@ -41,44 +41,44 @@ describe('SettingsPanel', () => {
 
   it('renders Settings heading', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
-    expect(screen.getByText('Settings')).toBeDefined();
+    expect(screen.getByText('Settings')).not.toBeNull();
   });
 
   it('renders dialog role', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
-    expect(screen.getByRole('dialog')).toBeDefined();
+    expect(screen.getByRole('dialog')).not.toBeNull();
   });
 
   it('renders Tokens tab button', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
-    expect(screen.getByRole('tab', { name: /Tokens/ })).toBeDefined();
+    expect(screen.getByRole('tab', { name: /Tokens/ })).not.toBeNull();
   });
 
   it('renders API Keys tab button', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
-    expect(screen.getByRole('tab', { name: /API Keys/ })).toBeDefined();
+    expect(screen.getByRole('tab', { name: /API Keys/ })).not.toBeNull();
   });
 
   it('renders Billing tab button', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
-    expect(screen.getByRole('tab', { name: /Billing/ })).toBeDefined();
+    expect(screen.getByRole('tab', { name: /Billing/ })).not.toBeNull();
   });
 
   it('shows TokenDashboard by default', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
-    expect(screen.getByTestId('token-dashboard')).toBeDefined();
+    expect(screen.getByTestId('token-dashboard')).not.toBeNull();
   });
 
   it('shows ApiKeyManager when API Keys tab clicked', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
     fireEvent.click(screen.getByRole('tab', { name: /API Keys/ }));
-    expect(screen.getByTestId('api-key-manager')).toBeDefined();
+    expect(screen.getByTestId('api-key-manager')).not.toBeNull();
   });
 
   it('shows BillingTab when Billing tab clicked', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
     fireEvent.click(screen.getByRole('tab', { name: /Billing/ }));
-    expect(screen.getByTestId('billing-tab')).toBeDefined();
+    expect(screen.getByTestId('billing-tab')).not.toBeNull();
   });
 
   it('calls onClose when X button clicked', () => {
@@ -108,6 +108,6 @@ describe('SettingsPanel', () => {
     const tablist = screen.getByRole('tablist');
     fireEvent.keyDown(tablist, { key: 'ArrowRight' });
     // After ArrowRight from 'tokens', active tab is 'keys'
-    expect(screen.getByTestId('api-key-manager')).toBeDefined();
+    expect(screen.getByTestId('api-key-manager')).not.toBeNull();
   });
 });

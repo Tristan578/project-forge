@@ -34,8 +34,8 @@ describe('sitemap', () => {
   it('all entries have lastModified and changeFrequency', () => {
     const result = sitemap();
     for (const entry of result) {
-      expect(entry.lastModified).toBeDefined();
-      expect(entry.changeFrequency).toBeDefined();
+      expect(entry.lastModified).toBeInstanceOf(Date);
+      expect(typeof entry.changeFrequency).toBe('string');
     }
   });
 

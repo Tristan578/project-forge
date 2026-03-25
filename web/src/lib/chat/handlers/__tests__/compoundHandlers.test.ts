@@ -142,7 +142,7 @@ describe('compoundHandlers', () => {
       const data = result.result as Record<string, unknown>;
       const entities = data.entities as Array<Record<string, unknown>>;
       expect(entities[0].hasParticles).toBe(true);
-      expect(data.inputBindings).toBeDefined();
+      expect(data.inputBindings).not.toBeUndefined();
     });
 
     it('filters by entity IDs when filterEntityIds provided', async () => {

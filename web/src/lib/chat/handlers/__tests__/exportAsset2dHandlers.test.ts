@@ -1923,7 +1923,7 @@ describe('handlers2d skeleton 2D commands', () => {
       const updated = (store.setSkeleton2d as ReturnType<typeof vi.fn>).mock.calls[0][1];
       expect(updated.bones).toHaveLength(3);
       const newBone = updated.bones.find((b: { name: string }) => b.name === 'hand');
-      expect(newBone).toBeTruthy();
+      expect(newBone).not.toBeNull();
       expect(newBone.parentBone).toBe('arm');
     });
 

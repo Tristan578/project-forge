@@ -24,7 +24,7 @@ describe('parseHandlerArgs', () => {
       },
     );
     expect(result.data).toBeUndefined();
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error!.success).toBe(false);
     expect(result.error!.error).toContain('entityId');
     expect(result.error!.error).toContain('required');
@@ -51,7 +51,7 @@ describe('parseHandlerArgs', () => {
         name: { validate: boundedString(1, 128), optional: true },
       },
     );
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error!.error).toContain('name');
   });
 
@@ -63,7 +63,7 @@ describe('parseHandlerArgs', () => {
         speed: { validate: positiveNumber() },
       },
     );
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error!.error).toContain('entityId');
     expect(result.error!.error).toContain('speed');
   });
@@ -94,7 +94,7 @@ describe('parseHandlerArgs', () => {
       { mode: 'fly' },
       { mode: { validate: enumValue(modes) } },
     );
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error!.error).toContain('must be one of');
   });
 
@@ -103,7 +103,7 @@ describe('parseHandlerArgs', () => {
       { entityId: null },
       { entityId: { validate: entityId() } },
     );
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
     expect(result.error!.error).toContain('required');
   });
 
@@ -148,6 +148,6 @@ describe('parseHandlerArgs', () => {
       { enabled: 'yes' },
       { enabled: { validate: boolean() } },
     );
-    expect(result.error).toBeDefined();
+    expect(result.error).not.toBeUndefined();
   });
 });

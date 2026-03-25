@@ -38,7 +38,7 @@ describe('DrawerPanel', () => {
     expect(backdrop).not.toBeNull();
     
     // Content should exist
-    expect(screen.getByTestId('drawer-content')).toBeDefined();
+    expect(screen.getByTestId('drawer-content')).not.toBeNull();
   });
 
   it('hides backdrop and translates off-screen when closed', () => {

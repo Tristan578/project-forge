@@ -80,7 +80,7 @@ describe('/api/user/export-data', () => {
     expect(res.headers.get('Content-Type')).toBe('application/json');
 
     const data = await res.json();
-    expect(data.exportedAt).toBeDefined();
+    expect(typeof data.exportedAt).toBe('string');
     expect(data.profile).toEqual(expect.objectContaining({ id: 'user-uuid-1' }));
     expect(data.projects).toEqual([expect.objectContaining({ id: 'proj-1' })]);
     expect(data.tokenUsage).toEqual([]);

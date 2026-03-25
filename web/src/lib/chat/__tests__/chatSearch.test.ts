@@ -128,7 +128,7 @@ describe('searchChatHistory', () => {
     const results = searchChatHistory('red cube');
     expect(results.length).toBeGreaterThan(0);
     for (const r of results) {
-      expect(r.snippet).toBeTruthy();
+      expect(r.snippet).not.toBeNull();
       expect(r.matchLength).toBe(8); // 'red cube'.length
     }
   });

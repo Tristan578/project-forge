@@ -65,8 +65,8 @@ describe('useEngine AbortController', () => {
       // If fetch was called, it should have received a signal option
       if (fetchSpy.mock.calls.length > 0) {
         const fetchOptions = fetchSpy.mock.calls[0][1] as RequestInit | undefined;
-        expect(fetchOptions).toBeDefined();
-        expect(fetchOptions?.signal).toBeDefined();
+        expect(fetchOptions).not.toBeUndefined();
+        expect(fetchOptions?.signal).not.toBeUndefined();
       }
     } finally {
       fetchSpy.mockRestore();

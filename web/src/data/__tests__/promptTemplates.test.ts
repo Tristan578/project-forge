@@ -16,11 +16,11 @@ describe('promptTemplates data', () => {
 
   it('every template has required fields', () => {
     for (const t of BUILT_IN_TEMPLATES) {
-      expect(t.id).toBeTruthy();
-      expect(t.name).toBeTruthy();
-      expect(t.description).toBeTruthy();
-      expect(t.prompt).toBeTruthy();
-      expect(t.category).toBeTruthy();
+      expect(t.id).not.toBeNull();
+      expect(t.name).not.toBeNull();
+      expect(t.description).not.toBeNull();
+      expect(t.prompt).not.toBeNull();
+      expect(t.category).not.toBeNull();
       expect(Array.isArray(t.variables)).toBe(true);
       expect(Array.isArray(t.tags)).toBe(true);
       expect(t.tags.length).toBeGreaterThan(0);
@@ -51,7 +51,7 @@ describe('promptTemplates data', () => {
     for (const t of BUILT_IN_TEMPLATES) {
       for (const v of t.variables) {
         if (v.type === 'select') {
-          expect(v.options).toBeDefined();
+          expect(v.options).not.toBeUndefined();
           expect(v.options!.length).toBeGreaterThan(0);
         }
       }
@@ -64,9 +64,9 @@ describe('promptTemplates data', () => {
       'scripting', 'lighting', 'animation', 'optimization', 'gameplay',
     ];
     for (const c of cats) {
-      expect(PROMPT_CATEGORIES[c]).toBeDefined();
-      expect(PROMPT_CATEGORIES[c].label).toBeTruthy();
-      expect(PROMPT_CATEGORIES[c].description).toBeTruthy();
+      expect(PROMPT_CATEGORIES[c]).not.toBeUndefined();
+      expect(PROMPT_CATEGORIES[c].label).not.toBeNull();
+      expect(PROMPT_CATEGORIES[c].description).not.toBeNull();
     }
   });
 });

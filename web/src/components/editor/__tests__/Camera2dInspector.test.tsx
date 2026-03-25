@@ -52,13 +52,13 @@ describe('Camera2dInspector', () => {
   it('renders 2D Camera heading', () => {
     setupStore();
     render(<Camera2dInspector />);
-    expect(screen.getByText('2D Camera')).toBeDefined();
+    expect(screen.getByText('2D Camera')).not.toBeNull();
   });
 
   it('renders Zoom label', () => {
     setupStore();
     render(<Camera2dInspector />);
-    expect(screen.getByText('Zoom')).toBeDefined();
+    expect(screen.getByText('Zoom')).not.toBeNull();
   });
 
   it('renders zoom range input with current value', () => {
@@ -71,13 +71,13 @@ describe('Camera2dInspector', () => {
   it('renders zoom display value formatted to 1 decimal', () => {
     setupStore({ camera2dData: { ...baseCamera2d, zoom: 1.0 } });
     render(<Camera2dInspector />);
-    expect(screen.getByText('1.0')).toBeDefined();
+    expect(screen.getByText('1.0')).not.toBeNull();
   });
 
   it('renders Pixel Perfect checkbox', () => {
     setupStore();
     render(<Camera2dInspector />);
-    expect(screen.getByText('Pixel Perfect')).toBeDefined();
+    expect(screen.getByText('Pixel Perfect')).not.toBeNull();
   });
 
   it('pixel perfect checkbox reflects state', () => {
@@ -101,7 +101,7 @@ describe('Camera2dInspector', () => {
   it('renders Enable Bounds checkbox', () => {
     setupStore();
     render(<Camera2dInspector />);
-    expect(screen.getByText('Enable Bounds')).toBeDefined();
+    expect(screen.getByText('Enable Bounds')).not.toBeNull();
   });
 
   it('does not show bounds inputs when bounds is null', () => {
@@ -119,10 +119,10 @@ describe('Camera2dInspector', () => {
       },
     });
     render(<Camera2dInspector />);
-    expect(screen.getByText('Min X')).toBeDefined();
-    expect(screen.getByText('Max X')).toBeDefined();
-    expect(screen.getByText('Min Y')).toBeDefined();
-    expect(screen.getByText('Max Y')).toBeDefined();
+    expect(screen.getByText('Min X')).not.toBeNull();
+    expect(screen.getByText('Max X')).not.toBeNull();
+    expect(screen.getByText('Min Y')).not.toBeNull();
+    expect(screen.getByText('Max Y')).not.toBeNull();
   });
 
   it('calls setCamera2dData with default bounds when Enable Bounds checked', () => {

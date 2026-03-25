@@ -25,17 +25,17 @@ describe('UpgradePrompt', () => {
 
   it('renders Upgrade Required heading', () => {
     render(<UpgradePrompt feature="AI Chat" requiredTier="creator" onClose={mockOnClose} />);
-    expect(screen.getByText('Upgrade Required')).toBeDefined();
+    expect(screen.getByText('Upgrade Required')).not.toBeNull();
   });
 
   it('renders the feature name', () => {
     render(<UpgradePrompt feature="AI Chat" requiredTier="creator" onClose={mockOnClose} />);
-    expect(screen.getByText('AI Chat')).toBeDefined();
+    expect(screen.getByText('AI Chat')).not.toBeNull();
   });
 
   it('renders the required tier', () => {
     render(<UpgradePrompt feature="AI Chat" requiredTier="creator" onClose={mockOnClose} />);
-    expect(screen.getByText('creator')).toBeDefined();
+    expect(screen.getByText('creator')).not.toBeNull();
   });
 
   it('renders View Plans link pointing to /pricing', () => {
@@ -46,7 +46,7 @@ describe('UpgradePrompt', () => {
 
   it('renders Maybe Later button', () => {
     render(<UpgradePrompt feature="AI Chat" requiredTier="creator" onClose={mockOnClose} />);
-    expect(screen.getByText('Maybe Later')).toBeDefined();
+    expect(screen.getByText('Maybe Later')).not.toBeNull();
   });
 
   it('calls onClose when Maybe Later clicked', () => {
@@ -63,6 +63,6 @@ describe('UpgradePrompt', () => {
 
   it('renders zap icon', () => {
     render(<UpgradePrompt feature="AI Chat" requiredTier="creator" onClose={mockOnClose} />);
-    expect(screen.getByTestId('zap-icon')).toBeDefined();
+    expect(screen.getByTestId('zap-icon')).not.toBeNull();
   });
 });

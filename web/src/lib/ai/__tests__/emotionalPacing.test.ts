@@ -78,21 +78,21 @@ describe('analyzeScene', () => {
     const curve = analyzeScene(entities);
     // bucket index 5 → position 5/9
     const mid = curve.points.find((p) => p.emotion === 'calm' && p.intensity > 0.1);
-    expect(mid).toBeDefined();
+    expect(mid).not.toBeUndefined();
   });
 
   it('assigns fear emotion to horror-tagged entities', () => {
     const entities = [makeEntity({ position: 0.3, tags: ['horror'] })];
     const curve = analyzeScene(entities);
     const fearPoint = curve.points.find((p) => p.emotion === 'fear');
-    expect(fearPoint).toBeDefined();
+    expect(fearPoint).not.toBeUndefined();
   });
 
   it('assigns wonder emotion to vista-tagged entities', () => {
     const entities = [makeEntity({ position: 0.7, tags: ['vista'] })];
     const curve = analyzeScene(entities);
     const wonderPoint = curve.points.find((p) => p.emotion === 'wonder');
-    expect(wonderPoint).toBeDefined();
+    expect(wonderPoint).not.toBeUndefined();
   });
 
   it('handles unknown tags gracefully (produces a valid curve)', () => {
@@ -135,10 +135,10 @@ describe('analyzeScene', () => {
 describe('PACING_TEMPLATES', () => {
   it('contains all 4 templates', () => {
     expect(Object.keys(PACING_TEMPLATES)).toHaveLength(4);
-    expect(PACING_TEMPLATES.action_adventure).toBeDefined();
-    expect(PACING_TEMPLATES.horror).toBeDefined();
-    expect(PACING_TEMPLATES.puzzle).toBeDefined();
-    expect(PACING_TEMPLATES.narrative).toBeDefined();
+    expect(PACING_TEMPLATES.action_adventure).not.toBeUndefined();
+    expect(PACING_TEMPLATES.horror).not.toBeUndefined();
+    expect(PACING_TEMPLATES.puzzle).not.toBeUndefined();
+    expect(PACING_TEMPLATES.narrative).not.toBeUndefined();
   });
 
   it('each template has non-empty points', () => {
@@ -250,7 +250,7 @@ describe('analyzePacing', () => {
       [0.9, ['boss']],
     ]);
     const analysis = analyzePacing(entities);
-    expect(analysis.curve).toBeDefined();
+    expect(analysis.curve).not.toBeUndefined();
     expect(analysis.issues).toBeInstanceOf(Array);
     expect(analysis.suggestions).toBeInstanceOf(Array);
     expect(analysis.score).toBeGreaterThanOrEqual(0);
@@ -268,7 +268,7 @@ describe('analyzePacing', () => {
     const noClimax = analysis.issues.find((i) =>
       i.message.includes('No emotional climax'),
     );
-    expect(noClimax).toBeDefined();
+    expect(noClimax).not.toBeUndefined();
     expect(noClimax!.severity).toBe('error');
   });
 
@@ -306,7 +306,7 @@ describe('analyzePacing', () => {
       s.title.includes('Opening Hook'),
     );
     // First bucket (position 0) has no entities → low intensity → suggestion triggered
-    expect(hook).toBeDefined();
+    expect(hook).not.toBeUndefined();
   });
 
   it('generates suggestion for missing resolution when last point is intense', () => {
@@ -327,7 +327,7 @@ describe('analyzePacing', () => {
       const resolution = analysis.suggestions.find((s) =>
         s.title.includes('Resolution'),
       );
-      expect(resolution).toBeDefined();
+      expect(resolution).not.toBeUndefined();
     } else {
       // If bucketing diluted intensity, just verify curve is valid
       expect(analysis.curve.points.length).toBeGreaterThan(0);
@@ -371,7 +371,7 @@ describe('analyzePacing', () => {
     const variety = analysis.suggestions.find((s) =>
       s.title.includes('Emotional Variety'),
     );
-    expect(variety).toBeDefined();
+    expect(variety).not.toBeUndefined();
   });
 
   it('applies template blending to score calculation', () => {

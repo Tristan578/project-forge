@@ -79,27 +79,27 @@ describe('CustomNode', () => {
 
   it('renders unknown node fallback when no definition found', () => {
     render(<CustomNode {...makeNodeProps('unknown_type')} />);
-    expect(screen.getByText('Unknown: unknown_type')).toBeDefined();
+    expect(screen.getByText('Unknown: unknown_type')).not.toBeNull();
   });
 
   it('renders node label from definition', () => {
     render(<CustomNode {...makeNodeProps('on_start')} />);
-    expect(screen.getByText('On Start')).toBeDefined();
+    expect(screen.getByText('On Start')).not.toBeNull();
   });
 
   it('renders node label for print_log', () => {
     render(<CustomNode {...makeNodeProps('print_log')} />);
-    expect(screen.getByText('Print Log')).toBeDefined();
+    expect(screen.getByText('Print Log')).not.toBeNull();
   });
 
   it('renders input port names', () => {
     render(<CustomNode {...makeNodeProps('print_log')} />);
-    expect(screen.getByText('Message')).toBeDefined();
+    expect(screen.getByText('Message')).not.toBeNull();
   });
 
   it('renders output port Exec Out', () => {
     render(<CustomNode {...makeNodeProps('on_start')} />);
-    expect(screen.getByText('Exec Out')).toBeDefined();
+    expect(screen.getByText('Exec Out')).not.toBeNull();
   });
 
   it('renders target handles for inputs', () => {

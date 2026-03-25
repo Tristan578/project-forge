@@ -111,7 +111,7 @@ describe('legacy: describe_scene', () => {
     expect(result.success).toBe(true);
     const r = result.result as Record<string, unknown>;
     expect(r.entityCount).toBe(2);
-    expect(r.typeCounts).toBeDefined();
+    expect(r.typeCounts).not.toBeUndefined();
     expect(typeof r.summary).toBe('string');
   });
 
@@ -127,7 +127,7 @@ describe('legacy: describe_scene', () => {
     expect(result.success).toBe(true);
     const r = result.result as Record<string, unknown>;
     expect(Array.isArray(r.entities)).toBe(true);
-    expect(r.environment).toBeDefined();
+    expect(r.environment).not.toBeUndefined();
     expect(r.engineMode).toBe('edit');
   });
 
@@ -433,7 +433,7 @@ describe('legacy: arrange_entities', () => {
     const r = result.result as Record<string, unknown>;
     const ops = r.operations as Array<{ success: boolean; entityId?: string; error?: string }>;
     const ghost = ops.find(op => !op.entityId || op.error === 'Entity not found');
-    expect(ghost).toBeDefined();
+    expect(ghost).not.toBeUndefined();
   });
 
   it('faceCenter option on circle pattern also calls updateTransform for rotation', async () => {
@@ -836,7 +836,7 @@ describe('legacy: error containment', () => {
 
     // The inner per-entity try/catch catches it; compound result is still returned
     // success depends on whether any entity succeeded. 0/1 => success: false for outer.
-    expect(result).toBeDefined();
+    expect(result).not.toBeUndefined();
     expect(typeof result.success).toBe('boolean');
   });
 });

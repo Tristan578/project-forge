@@ -57,26 +57,26 @@ describe('GenerateSpriteDialog', () => {
 
   it('renders Generate Sprite heading', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Generate Sprite')).toBeDefined();
+    expect(screen.getByText('Generate Sprite')).not.toBeNull();
   });
 
   it('renders Single Sprite/Sprite Sheet/Tileset tabs', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Single Sprite')).toBeDefined();
-    expect(screen.getByText('Sprite Sheet')).toBeDefined();
-    expect(screen.getByText('Tileset')).toBeDefined();
+    expect(screen.getByText('Single Sprite')).not.toBeNull();
+    expect(screen.getByText('Sprite Sheet')).not.toBeNull();
+    expect(screen.getByText('Tileset')).not.toBeNull();
   });
 
   it('shows style options (Pixel Art, Hand-Drawn, etc.)', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Pixel Art')).toBeDefined();
-    expect(screen.getByText('Hand-Drawn')).toBeDefined();
-    expect(screen.getByText('Vector')).toBeDefined();
+    expect(screen.getByText('Pixel Art')).not.toBeNull();
+    expect(screen.getByText('Hand-Drawn')).not.toBeNull();
+    expect(screen.getByText('Vector')).not.toBeNull();
   });
 
   it('renders token cost of 15 for single sprite', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('15')).toBeDefined();
+    expect(screen.getByText('15')).not.toBeNull();
   });
 
   it('disables Generate when prompt is empty', () => {
@@ -98,7 +98,7 @@ describe('GenerateSpriteDialog', () => {
     // Tileset tab shows 50 token cost
     const tilesetTabs = screen.getAllByText('Tileset');
     fireEvent.click(tilesetTabs[0]);
-    expect(screen.getByText('50')).toBeDefined();
+    expect(screen.getByText('50')).not.toBeNull();
   });
 
   it('calls onClose when Cancel clicked', () => {
@@ -116,13 +116,13 @@ describe('GenerateSpriteDialog', () => {
   it('shows frame count option in Sheet tab', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
     fireEvent.click(screen.getByText('Sprite Sheet'));
-    expect(screen.getByText(/Frame Count/)).toBeDefined();
+    expect(screen.getByText(/Frame Count/)).not.toBeNull();
   });
 
   it('shows tile size option in Tileset tab', () => {
     render(<GenerateSpriteDialog isOpen={true} onClose={mockOnClose} />);
     const tilesetTabs = screen.getAllByText('Tileset');
     fireEvent.click(tilesetTabs[0]);
-    expect(screen.getByText(/Tile Size/)).toBeDefined();
+    expect(screen.getByText(/Tile Size/)).not.toBeNull();
   });
 });

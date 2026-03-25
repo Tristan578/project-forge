@@ -63,56 +63,56 @@ describe('AdminDashboard', () => {
   it('shows loading spinner initially', () => {
     global.fetch = vi.fn().mockReturnValue(new Promise(() => {}));
     render(<AdminDashboard />);
-    expect(screen.getByText('Loading dashboard...')).toBeDefined();
+    expect(screen.getByText('Loading dashboard...')).not.toBeNull();
   });
 
   it('renders Admin Economics Dashboard heading', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Admin Economics Dashboard')).toBeDefined();
+      expect(screen.getByText('Admin Economics Dashboard')).not.toBeNull();
     });
   });
 
   it('renders User Statistics section', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('User Statistics')).toBeDefined();
+      expect(screen.getByText('User Statistics')).not.toBeNull();
     }, { timeout: 5000 });
   });
 
   it('renders total user count', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('150')).toBeDefined();
+      expect(screen.getByText('150')).not.toBeNull();
     }, { timeout: 5000 });
   });
 
   it('renders tier counts', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('90')).toBeDefined(); // starterCount
-      expect(screen.getByText('35')).toBeDefined(); // hobbyistCount
+      expect(screen.getByText('90')).not.toBeNull(); // starterCount
+      expect(screen.getByText('35')).not.toBeNull(); // hobbyistCount
     }, { timeout: 5000 });
   });
 
   it('renders Cost by Action section', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText(/Cost by Action/)).toBeDefined();
+      expect(screen.getByText(/Cost by Action/)).not.toBeNull();
     }, { timeout: 5000 });
   });
 
   it('renders Token Pricing Config section', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Token Pricing Config')).toBeDefined();
+      expect(screen.getByText('Token Pricing Config')).not.toBeNull();
     }, { timeout: 5000 });
   });
 
   it('renders Tier Config section', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Tier Config')).toBeDefined();
+      expect(screen.getByText('Tier Config')).not.toBeNull();
     }, { timeout: 5000 });
   });
 
@@ -120,15 +120,15 @@ describe('AdminDashboard', () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 403 });
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Error')).toBeDefined();
-      expect(screen.getByText('Retry')).toBeDefined();
+      expect(screen.getByText('Error')).not.toBeNull();
+      expect(screen.getByText('Retry')).not.toBeNull();
     }, { timeout: 5000 });
   });
 
   it('renders token cost input field from config data', async () => {
     render(<AdminDashboard />);
     await waitFor(() => {
-      expect(screen.getByText('Token Pricing Config')).toBeDefined();
+      expect(screen.getByText('Token Pricing Config')).not.toBeNull();
       // tokenConfig with actionType 'generate_model' and tokenCost 20
       const inputs = document.querySelectorAll('input[type="number"]');
       expect(inputs.length).toBeGreaterThanOrEqual(1);

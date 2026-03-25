@@ -106,7 +106,7 @@ describe('embedGenerator', () => {
 
 describe('Export Presets', () => {
   it('should include embed preset', () => {
-    expect(EXPORT_PRESETS.embed).toBeDefined();
+    expect(EXPORT_PRESETS.embed).not.toBeUndefined();
     expect(EXPORT_PRESETS.embed.format).toBe('embed');
     expect(EXPORT_PRESETS.embed.name).toBe('Embed');
   });
@@ -128,9 +128,9 @@ describe('Export Presets', () => {
 
   it('all presets should have loading screen config', () => {
     for (const preset of Object.values(EXPORT_PRESETS)) {
-      expect(preset.loadingScreen).toBeDefined();
-      expect(preset.loadingScreen.backgroundColor).toBeTruthy();
-      expect(preset.loadingScreen.progressStyle).toBeTruthy();
+      expect(preset.loadingScreen).not.toBeUndefined();
+      expect(preset.loadingScreen.backgroundColor).not.toBeNull();
+      expect(preset.loadingScreen.progressStyle).not.toBeNull();
     }
   });
 

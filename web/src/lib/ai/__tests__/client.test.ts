@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AIResponseCache } from '../promptCache';
+<<<<<<< HEAD
 
 // ---------------------------------------------------------------------------
 // Mock aiResponseCache as a transparent pass-through so tests are not
@@ -25,6 +26,8 @@ vi.mock('@/lib/ai/promptCache', () => {
     aiResponseCache: passthrough,
   };
 });
+=======
+>>>>>>> origin/fix/remaining-audit-gaps-push
 
 // ---------------------------------------------------------------------------
 // Mock fetch globally before importing the module under test

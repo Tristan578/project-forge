@@ -59,7 +59,7 @@ describe('scriptWorker async protocol', () => {
       (call: unknown[]) => (call[0] as Record<string, unknown>).type === 'async_request',
     );
 
-    expect(asyncMsg).toBeDefined();
+    expect(asyncMsg).not.toBeUndefined();
     const msg = asyncMsg![0] as Record<string, unknown>;
     expect(msg.type).toBe('async_request');
     expect(msg.channel).toBe('physics');
@@ -131,7 +131,7 @@ describe('scriptWorker async protocol', () => {
         return msg.type === 'log' && (msg.message as string)?.includes('got:');
       },
     );
-    expect(logMsg).toBeDefined();
+    expect(logMsg).not.toBeUndefined();
     expect((logMsg![0] as Record<string, unknown>).message).toContain('"hit":true');
   });
 
@@ -174,7 +174,7 @@ describe('scriptWorker async protocol', () => {
         return msg.type === 'log' && (msg.message as string)?.includes('error:');
       },
     );
-    expect(logMsg).toBeDefined();
+    expect(logMsg).not.toBeUndefined();
     expect((logMsg![0] as Record<string, unknown>).message).toContain('Engine not ready');
   });
 
@@ -234,7 +234,7 @@ describe('scriptWorker async protocol', () => {
         return msg.type === 'log' && (msg.message as string)?.includes('progress: 50');
       },
     );
-    expect(progressLog).toBeDefined();
+    expect(progressLog).not.toBeUndefined();
 
     const doneLog = mockPostMessage.mock.calls.find(
       (call: unknown[]) => {
@@ -242,7 +242,7 @@ describe('scriptWorker async protocol', () => {
         return msg.type === 'log' && (msg.message as string)?.includes('done:');
       },
     );
-    expect(doneLog).toBeDefined();
+    expect(doneLog).not.toBeUndefined();
   });
 
   // ─── Stop cleans up pending ───────────────────────────────────
@@ -271,7 +271,7 @@ describe('scriptWorker async protocol', () => {
         return msg.type === 'log' && (msg.message as string)?.includes('rejected:');
       },
     );
-    expect(rejectLog).toBeDefined();
+    expect(rejectLog).not.toBeUndefined();
     expect((rejectLog![0] as Record<string, unknown>).message).toContain('Script execution stopped');
   });
 

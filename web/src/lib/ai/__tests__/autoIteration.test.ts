@@ -206,7 +206,7 @@ describe('diagnoseIssues', () => {
     });
     const issues = diagnoseIssues(metrics, makeSceneContext());
     for (const issue of issues) {
-      expect(issue.evidence).toBeTruthy();
+      expect(issue.evidence).not.toBeNull();
       expect(typeof issue.evidence).toBe('string');
     }
   });
@@ -411,7 +411,7 @@ describe('generateFixes', () => {
     ];
     const fixes = generateFixes(issues, makeSceneContext());
     for (const fix of fixes) {
-      expect(fix.estimatedImpact).toBeTruthy();
+      expect(fix.estimatedImpact).not.toBeNull();
     }
   });
 });

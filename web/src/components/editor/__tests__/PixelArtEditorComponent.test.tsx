@@ -86,7 +86,7 @@ describe('PixelArtEditor', () => {
 
   it('renders the editor when open is true', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Pixel Art Editor')).toBeDefined();
+    expect(screen.getByText('Pixel Art Editor')).not.toBeNull();
   });
 
   // ── Tool buttons ─────────────────────────────────────────────────────────
@@ -95,7 +95,7 @@ describe('PixelArtEditor', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
     const toolButtons = ['Pencil (B)', 'Eraser (E)', 'Fill (G)', 'Line (L)', 'Rectangle (R)', 'Eyedropper (I)'];
     for (const title of toolButtons) {
-      expect(screen.getByTitle(title)).toBeDefined();
+      expect(screen.getByTitle(title)).not.toBeNull();
     }
   });
 
@@ -141,47 +141,47 @@ describe('PixelArtEditor', () => {
   it('renders canvas size selector with default 16x16', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
     // Info text at bottom shows size
-    expect(screen.getByText('16x16px')).toBeDefined();
+    expect(screen.getByText('16x16px')).not.toBeNull();
   });
 
   it('changes canvas size via select dropdown', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
     const select = screen.getByDisplayValue('16x16') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: '32' } });
-    expect(screen.getByText('32x32px')).toBeDefined();
+    expect(screen.getByText('32x32px')).not.toBeNull();
   });
 
   // ── Zoom ─────────────────────────────────────────────────────────────────
 
   it('shows default zoom level', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Zoom: 16x')).toBeDefined();
+    expect(screen.getByText('Zoom: 16x')).not.toBeNull();
   });
 
   it('zoom in doubles zoom up to 64', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
     const zoomInBtn = screen.getByTitle('Zoom in');
     fireEvent.click(zoomInBtn);
-    expect(screen.getByText('Zoom: 32x')).toBeDefined();
+    expect(screen.getByText('Zoom: 32x')).not.toBeNull();
     fireEvent.click(zoomInBtn);
-    expect(screen.getByText('Zoom: 64x')).toBeDefined();
+    expect(screen.getByText('Zoom: 64x')).not.toBeNull();
     // At max — still 64
     fireEvent.click(zoomInBtn);
-    expect(screen.getByText('Zoom: 64x')).toBeDefined();
+    expect(screen.getByText('Zoom: 64x')).not.toBeNull();
   });
 
   it('zoom out halves zoom down to 2', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
     const zoomOutBtn = screen.getByTitle('Zoom out');
     fireEvent.click(zoomOutBtn);
-    expect(screen.getByText('Zoom: 8x')).toBeDefined();
+    expect(screen.getByText('Zoom: 8x')).not.toBeNull();
     fireEvent.click(zoomOutBtn);
-    expect(screen.getByText('Zoom: 4x')).toBeDefined();
+    expect(screen.getByText('Zoom: 4x')).not.toBeNull();
     fireEvent.click(zoomOutBtn);
-    expect(screen.getByText('Zoom: 2x')).toBeDefined();
+    expect(screen.getByText('Zoom: 2x')).not.toBeNull();
     // At min — still 2
     fireEvent.click(zoomOutBtn);
-    expect(screen.getByText('Zoom: 2x')).toBeDefined();
+    expect(screen.getByText('Zoom: 2x')).not.toBeNull();
   });
 
   // ── Grid toggle ──────────────────────────────────────────────────────────
@@ -228,7 +228,7 @@ describe('PixelArtEditor', () => {
 
   it('renders export PNG button', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Export PNG')).toBeDefined();
+    expect(screen.getByText('Export PNG')).not.toBeNull();
   });
 
   // ── Apply to Sprite ──────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ describe('PixelArtEditor', () => {
     render(
       <PixelArtEditor open={true} onClose={vi.fn()} entityId="ent-1" />
     );
-    expect(screen.getByText('Apply to Sprite')).toBeDefined();
+    expect(screen.getByText('Apply to Sprite')).not.toBeNull();
   });
 
   it('calls loadTexture and onClose when apply is clicked', () => {
@@ -264,7 +264,7 @@ describe('PixelArtEditor', () => {
 
   it('renders default palette colors', () => {
     render(<PixelArtEditor open={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Palette')).toBeDefined();
+    expect(screen.getByText('Palette')).not.toBeNull();
     // Default palette has 16 colors
     const paletteButtons = screen.getAllByTitle(/#[0-9a-f]{6}/i);
     expect(paletteButtons.length).toBe(16);

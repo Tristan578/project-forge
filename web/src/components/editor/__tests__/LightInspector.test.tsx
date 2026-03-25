@@ -62,8 +62,8 @@ describe('LightInspector', () => {
       },
     });
     render(<LightInspector />);
-    expect(screen.getByText('Light (Point)')).toBeDefined();
-    expect(screen.getByText('Shadows')).toBeDefined();
+    expect(screen.getByText('Light (Point)')).not.toBeNull();
+    expect(screen.getByText('Shadows')).not.toBeNull();
   });
 
   it('renders directional light with illuminance label', () => {
@@ -83,9 +83,9 @@ describe('LightInspector', () => {
       },
     });
     render(<LightInspector />);
-    expect(screen.getByText('Light (Directional)')).toBeDefined();
-    expect(screen.getByText('Illuminance')).toBeDefined();
+    expect(screen.getByText('Light (Directional)')).not.toBeNull();
+    expect(screen.getByText('Illuminance')).not.toBeNull();
     // Shadows enabled shows bias controls
-    expect(screen.getByText('Depth Bias')).toBeDefined();
+    expect(screen.getByText('Depth Bias')).not.toBeNull();
   });
 });

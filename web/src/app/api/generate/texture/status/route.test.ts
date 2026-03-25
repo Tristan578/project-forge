@@ -80,7 +80,7 @@ describe('GET /api/generate/texture/status', () => {
     expect(res.status).toBe(200);
     expect(data.status).toBe('completed');
     expect(data.progress).toBe(100);
-    expect(data.maps).toBeDefined();
+    expect(data.maps).toEqual({ albedo: 'https://cdn.meshy.ai/albedo.png' });
   });
 
   it('returns failed status when Meshy reports FAILED', async () => {

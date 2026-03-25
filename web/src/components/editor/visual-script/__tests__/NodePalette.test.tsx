@@ -45,19 +45,19 @@ describe('NodePalette', () => {
 
   it('renders Node Palette heading', () => {
     render(<NodePalette onClose={mockOnClose} />);
-    expect(screen.getByText('Node Palette')).toBeDefined();
+    expect(screen.getByText('Node Palette')).not.toBeNull();
   });
 
   it('renders category labels', () => {
     render(<NodePalette onClose={mockOnClose} />);
-    expect(screen.getByText('Events')).toBeDefined();
-    expect(screen.getByText('Actions')).toBeDefined();
+    expect(screen.getByText('Events')).not.toBeNull();
+    expect(screen.getByText('Actions')).not.toBeNull();
   });
 
   it('shows events nodes expanded by default', () => {
     render(<NodePalette onClose={mockOnClose} />);
-    expect(screen.getByText('On Start')).toBeDefined();
-    expect(screen.getByText('On Update')).toBeDefined();
+    expect(screen.getByText('On Start')).not.toBeNull();
+    expect(screen.getByText('On Update')).not.toBeNull();
   });
 
   it('does not show actions nodes when Actions is collapsed', () => {
@@ -69,19 +69,19 @@ describe('NodePalette', () => {
   it('expands Actions category when clicked', () => {
     render(<NodePalette onClose={mockOnClose} />);
     fireEvent.click(screen.getByText('Actions'));
-    expect(screen.getByText('Move Entity')).toBeDefined();
+    expect(screen.getByText('Move Entity')).not.toBeNull();
   });
 
   it('renders search input', () => {
     render(<NodePalette onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText('Search nodes...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Search nodes...')).not.toBeNull();
   });
 
   it('filters nodes on search', () => {
     render(<NodePalette onClose={mockOnClose} />);
     const input = screen.getByPlaceholderText('Search nodes...');
     fireEvent.change(input, { target: { value: 'Move' } });
-    expect(screen.getByText('Move Entity')).toBeDefined();
+    expect(screen.getByText('Move Entity')).not.toBeNull();
     expect(screen.queryByText('On Start')).toBeNull();
   });
 

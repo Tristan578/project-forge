@@ -149,16 +149,16 @@ describe('NARRATIVE_PRESETS', () => {
   it.each(Object.entries(NARRATIVE_PRESETS))(
     'preset "%s" should have valid structure',
     (_key, preset) => {
-      expect(preset.id).toBeTruthy();
-      expect(preset.name).toBeTruthy();
-      expect(preset.description).toBeTruthy();
+      expect(preset.id).not.toBeNull();
+      expect(preset.name).not.toBeNull();
+      expect(preset.description).not.toBeNull();
       expect(preset.actStructure.length).toBeGreaterThanOrEqual(2);
       expect(preset.suggestedCharacterRoles.length).toBeGreaterThanOrEqual(2);
       expect(preset.endingTypes.length).toBeGreaterThanOrEqual(2);
 
       for (const act of preset.actStructure) {
-        expect(act.name).toBeTruthy();
-        expect(act.purpose).toBeTruthy();
+        expect(act.name).not.toBeNull();
+        expect(act.purpose).not.toBeNull();
       }
     },
   );
@@ -355,7 +355,7 @@ describe('narrativeToDialogueTree', () => {
     const tree = narrativeToDialogueTree(arc);
 
     const node0 = tree.nodes.find((n) => n.id === 'scene_1_1_d0');
-    expect(node0).toBeDefined();
+    expect(node0).not.toBeUndefined();
     expect(node0!.type).toBe('text');
     if (node0!.type === 'text') {
       expect(node0!.next).toBe('scene_1_1_d1');
@@ -367,7 +367,7 @@ describe('narrativeToDialogueTree', () => {
     const tree = narrativeToDialogueTree(arc);
 
     const lastTextInScene1 = tree.nodes.find((n) => n.id === 'scene_1_1_d1');
-    expect(lastTextInScene1).toBeDefined();
+    expect(lastTextInScene1).not.toBeUndefined();
     if (lastTextInScene1!.type === 'text') {
       expect(lastTextInScene1!.next).toBe('scene_1_1_choices');
     }
@@ -378,7 +378,7 @@ describe('narrativeToDialogueTree', () => {
     const tree = narrativeToDialogueTree(arc);
 
     const choiceNode = tree.nodes.find((n) => n.id === 'scene_1_1_choices');
-    expect(choiceNode).toBeDefined();
+    expect(choiceNode).not.toBeUndefined();
     if (choiceNode!.type === 'choice') {
       // First choice -> scene_1_2 -> scene_1_2_d0
       expect(choiceNode!.choices[0].nextNodeId).toBe('scene_1_2_d0');
@@ -393,7 +393,7 @@ describe('narrativeToDialogueTree', () => {
 
     // scene_1_2 has one dialogue line and nextSceneId -> scene_2_1
     const lastInScene12 = tree.nodes.find((n) => n.id === 'scene_1_2_d0');
-    expect(lastInScene12).toBeDefined();
+    expect(lastInScene12).not.toBeUndefined();
     if (lastInScene12!.type === 'text') {
       expect(lastInScene12!.next).toBe('scene_2_1_d0');
     }
@@ -429,7 +429,7 @@ describe('narrativeToDialogueTree', () => {
 
     // scene_1_2's last text node should link to scene_2_1's entry (not scene_passthrough_d0)
     const scene12Node = tree.nodes.find((n) => n.id === 'scene_1_2_d0');
-    expect(scene12Node).toBeDefined();
+    expect(scene12Node).not.toBeUndefined();
     if (scene12Node?.type === 'text') {
       // Pass-through should resolve to scene_2_1_d0 not a stale _d0 placeholder
       expect(scene12Node.next).toBe('scene_2_1_d0');

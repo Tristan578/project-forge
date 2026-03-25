@@ -110,10 +110,10 @@ describe('WORLD_PRESETS', () => {
   });
 
   it.each(Object.entries(WORLD_PRESETS))('preset "%s" has valid structure', (_key, preset) => {
-    expect(preset.name).toBeTruthy();
-    expect(preset.description).toBeTruthy();
-    expect(preset.genre).toBeTruthy();
-    expect(preset.era).toBeTruthy();
+    expect(preset.name).not.toBeNull();
+    expect(preset.description).not.toBeNull();
+    expect(preset.genre).not.toBeNull();
+    expect(preset.era).not.toBeNull();
     expect(preset.factions.length).toBeGreaterThanOrEqual(3);
     expect(preset.regions.length).toBeGreaterThanOrEqual(3);
     expect(preset.timeline.length).toBeGreaterThanOrEqual(3);

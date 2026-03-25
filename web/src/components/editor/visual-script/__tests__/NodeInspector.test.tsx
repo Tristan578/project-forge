@@ -54,7 +54,7 @@ describe('NodeInspector', () => {
 
   it('renders placeholder when no node is selected', () => {
     render(<NodeInspector node={null} onNodeDataChange={mockOnNodeDataChange} />);
-    expect(screen.getByText('Select a node to edit its properties')).toBeDefined();
+    expect(screen.getByText('Select a node to edit its properties')).not.toBeNull();
   });
 
   it('returns null when node type has no definition', () => {
@@ -65,17 +65,17 @@ describe('NodeInspector', () => {
 
   it('renders node label', () => {
     render(<NodeInspector node={makeNode('on_start')} onNodeDataChange={mockOnNodeDataChange} />);
-    expect(screen.getByText('On Start')).toBeDefined();
+    expect(screen.getByText('On Start')).not.toBeNull();
   });
 
   it('renders node description', () => {
     render(<NodeInspector node={makeNode('on_start')} onNodeDataChange={mockOnNodeDataChange} />);
-    expect(screen.getByText('Runs when game starts')).toBeDefined();
+    expect(screen.getByText('Runs when game starts')).not.toBeNull();
   });
 
   it('shows "No editable properties" when no non-exec inputs', () => {
     render(<NodeInspector node={makeNode('on_start')} onNodeDataChange={mockOnNodeDataChange} />);
-    expect(screen.getByText('No editable properties')).toBeDefined();
+    expect(screen.getByText('No editable properties')).not.toBeNull();
   });
 
   it('renders text input for string port', () => {
@@ -93,7 +93,7 @@ describe('NodeInspector', () => {
   it('renders checkbox for bool port', () => {
     render(<NodeInspector node={makeNode('print_log')} onNodeDataChange={mockOnNodeDataChange} />);
     const checkbox = screen.getByRole('checkbox');
-    expect(checkbox).toBeDefined();
+    expect(checkbox).not.toBeNull();
   });
 
   it('calls onNodeDataChange when text input changes', () => {
@@ -119,8 +119,8 @@ describe('NodeInspector', () => {
 
   it('shows port labels', () => {
     render(<NodeInspector node={makeNode('print_log')} onNodeDataChange={mockOnNodeDataChange} />);
-    expect(screen.getByText('Message')).toBeDefined();
-    expect(screen.getByText('Count')).toBeDefined();
-    expect(screen.getByText('Enabled')).toBeDefined();
+    expect(screen.getByText('Message')).not.toBeNull();
+    expect(screen.getByText('Count')).not.toBeNull();
+    expect(screen.getByText('Enabled')).not.toBeNull();
   });
 });

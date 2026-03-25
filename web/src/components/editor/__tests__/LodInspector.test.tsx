@@ -87,50 +87,50 @@ describe('LodInspector', () => {
   it('renders LOD heading for mesh entity', () => {
     setupStore();
     render(<LodInspector />);
-    expect(screen.getByText('LOD (Level of Detail)')).toBeDefined();
+    expect(screen.getByText('LOD (Level of Detail)')).not.toBeNull();
   });
 
   it('renders Auto-generate LODs checkbox', () => {
     setupStore();
     render(<LodInspector />);
-    expect(screen.getByText('Auto-generate LODs')).toBeDefined();
+    expect(screen.getByText('Auto-generate LODs')).not.toBeNull();
   });
 
   it('renders LOD distance labels', () => {
     setupStore();
     render(<LodInspector />);
-    expect(screen.getByText('LOD1 Distance')).toBeDefined();
-    expect(screen.getByText('LOD2 Distance')).toBeDefined();
-    expect(screen.getByText('LOD3 Distance')).toBeDefined();
+    expect(screen.getByText('LOD1 Distance')).not.toBeNull();
+    expect(screen.getByText('LOD2 Distance')).not.toBeNull();
+    expect(screen.getByText('LOD3 Distance')).not.toBeNull();
   });
 
   it('renders LOD quality labels', () => {
     setupStore();
     render(<LodInspector />);
-    expect(screen.getByText(/LOD1 Quality/)).toBeDefined();
-    expect(screen.getByText(/LOD2 Quality/)).toBeDefined();
-    expect(screen.getByText(/LOD3 Quality/)).toBeDefined();
+    expect(screen.getByText(/LOD1 Quality/)).not.toBeNull();
+    expect(screen.getByText(/LOD2 Quality/)).not.toBeNull();
+    expect(screen.getByText(/LOD3 Quality/)).not.toBeNull();
   });
 
   it('renders Simplification Algorithm select', () => {
     setupStore();
     render(<LodInspector />);
-    expect(screen.getByText('Simplification Algorithm')).toBeDefined();
-    expect(screen.getByRole('option', { name: /QEM/ })).toBeDefined();
-    expect(screen.getByRole('option', { name: /Fast/ })).toBeDefined();
+    expect(screen.getByText('Simplification Algorithm')).not.toBeNull();
+    expect(screen.getByRole('option', { name: /QEM/ })).not.toBeNull();
+    expect(screen.getByRole('option', { name: /Fast/ })).not.toBeNull();
   });
 
   it('renders Generate LOD Meshes button', () => {
     setupStore();
     render(<LodInspector />);
-    expect(screen.getByText('Generate LOD Meshes')).toBeDefined();
+    expect(screen.getByText('Generate LOD Meshes')).not.toBeNull();
   });
 
   it('shows Current LOD level', () => {
     setupStore({ lodLevels: { 'entity-1': 0 } });
     render(<LodInspector />);
-    expect(screen.getByText(/Current LOD: Level 0/)).toBeDefined();
-    expect(screen.getByText(/Full/)).toBeDefined();
+    expect(screen.getByText(/Current LOD: Level 0/)).not.toBeNull();
+    expect(screen.getByText(/Full/)).not.toBeNull();
   });
 
   it('dispatches set_lod and generate_lods when Generate clicked', () => {
@@ -145,7 +145,7 @@ describe('LodInspector', () => {
     setupStore();
     render(<LodInspector />);
     fireEvent.click(screen.getByText('Generate LOD Meshes'));
-    expect(screen.getByText(/LOD meshes generated/)).toBeDefined();
+    expect(screen.getByText(/LOD meshes generated/)).not.toBeNull();
   });
 
   it('dispatches set_simplification_backend when algorithm changed', () => {

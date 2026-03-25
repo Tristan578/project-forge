@@ -107,7 +107,7 @@ describe('GET /api/generate/sprite/status', () => {
 
     expect(res.status).toBe(200);
     expect(data.status).toBe('failed');
-    expect(data.error).toBeTruthy();
+    expect(data.error).toBe('Sprite generation failed');
   });
 
   it('returns processing status for in-progress prediction', async () => {

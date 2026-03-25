@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, users, leaderboards, leaderboardEntries } from '@/lib/db/schema';
 import { eq, and, desc, asc, gt, count, lt } from 'drizzle-orm';
@@ -40,13 +40,12 @@ async function resolvePublishedGame(clerkId: string, slug: string) {
 /**
  * Hash an IP address with a daily salt for privacy-preserving deduplication.
  * The salt rotates daily so stored hashes are not linkable across days.
- *
- * When the IP is undeterminable ('unknown'), a random per-request nonce is
- * used instead, ensuring unknown-IP users cannot falsely collide with each other.
  */
 function hashIp(ip: string): string {
   const daySalt = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  const key = ip === 'unknown' ? `nonce:${Math.random().toString(36).slice(2)}` : ip;
+  // When IP is unknown (proxy/VPN), use a random nonce so different users
+  // behind the same proxy don't collide on the dedup check.
+  const key = ip === 'unknown' ? `nonce:${randomBytes(16).toString('hex')}` : ip;
   return createHash('sha256').update(`${key}:${daySalt}`).digest('hex').slice(0, 32);
 }
 

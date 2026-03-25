@@ -190,7 +190,7 @@ describe('resolveChat — Anthropic direct path', () => {
 
     const usageEvents = events.filter((e) => e.type === 'usage');
     const inputUsage = usageEvents.find((e) => e.inputTokens !== undefined);
-    expect(inputUsage).toBeDefined();
+    expect(inputUsage).not.toBeUndefined();
     expect(inputUsage!.inputTokens).toBe(10);
   });
 
@@ -260,7 +260,7 @@ describe('resolveChat — Anthropic direct path', () => {
 
     const events = await collectEvents(result.stream as AsyncGenerator<Record<string, unknown>>);
     const toolStart = events.find((e) => e.type === 'tool_start');
-    expect(toolStart).toBeDefined();
+    expect(toolStart).not.toBeUndefined();
     expect(toolStart!.name).toBe('spawn_entity');
     expect(toolStart!.id).toBe('tu_1');
 
@@ -313,15 +313,15 @@ describe('resolveChat — OpenAI-compatible gateway path', () => {
 
     const events = await collectEvents(result.stream as AsyncGenerator<Record<string, unknown>>);
     const textDelta = events.find((e) => e.type === 'text_delta');
-    expect(textDelta).toBeDefined();
+    expect(textDelta).not.toBeUndefined();
     expect(textDelta!.text).toBe('Hi');
 
     const turnComplete = events.find((e) => e.type === 'turn_complete');
-    expect(turnComplete).toBeDefined();
+    expect(turnComplete).not.toBeUndefined();
     expect(turnComplete!.stop_reason).toBe('stop');
 
     const usageEvent = events.find((e) => e.type === 'usage' && e.inputTokens !== undefined);
-    expect(usageEvent).toBeDefined();
+    expect(usageEvent).not.toBeUndefined();
     expect(usageEvent!.inputTokens).toBe(5);
   });
 
@@ -340,7 +340,7 @@ describe('resolveChat — OpenAI-compatible gateway path', () => {
 
     const events = await collectEvents(result.stream as AsyncGenerator<Record<string, unknown>>);
     const errorEvent = events.find((e) => e.type === 'error');
-    expect(errorEvent).toBeDefined();
+    expect(errorEvent).not.toBeUndefined();
   });
 
   it('calls the correct OpenAI-compat endpoint URL', async () => {
@@ -437,7 +437,7 @@ describe('resolveChat — circuitBreakerWarning (PF-737)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // PF-737: circuitBreakerWarning must be surfaced in the result, not discarded
-    expect(result.circuitBreakerWarning).toBeDefined();
+    expect(result.circuitBreakerWarning).not.toBeUndefined();
     expect(result.circuitBreakerWarning).toContain('WARNING');
     expect(result.circuitBreakerWarning).toContain('vercel-gateway');
   });
@@ -520,7 +520,7 @@ describe('resolveChat — system prompt', () => {
       messages: Array<{ role: string; content: string }>;
     };
     const systemMsg = body.messages.find((m) => m.role === 'system');
-    expect(systemMsg).toBeDefined();
+    expect(systemMsg).not.toBeUndefined();
     expect(systemMsg!.content).toContain('game engine assistant');
   });
 });

@@ -19,9 +19,9 @@ describe('CookieConsent', () => {
 
   it('shows banner when no consent is stored', () => {
     render(<CookieConsent />);
-    expect(screen.getByText(/cookies/i)).toBeDefined();
-    expect(screen.getByText('Accept')).toBeDefined();
-    expect(screen.getByText('Decline')).toBeDefined();
+    expect(screen.getByText(/cookies/i)).not.toBeNull();
+    expect(screen.getByText('Accept')).not.toBeNull();
+    expect(screen.getByText('Decline')).not.toBeNull();
   });
 
   it('hides banner when consent was previously accepted', () => {

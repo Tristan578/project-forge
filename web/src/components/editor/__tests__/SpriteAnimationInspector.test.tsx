@@ -114,31 +114,31 @@ describe('SpriteAnimationInspector', () => {
   it('renders Sprite Sheet heading when sheet present', () => {
     setupStore();
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('Sprite Sheet')).toBeDefined();
+    expect(screen.getByText('Sprite Sheet')).not.toBeNull();
   });
 
   it('shows asset ID', () => {
     setupStore();
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText(/sheet-1/)).toBeDefined();
+    expect(screen.getByText(/sheet-1/)).not.toBeNull();
   });
 
   it('shows frame count', () => {
     setupStore();
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText(/Frames: 2/)).toBeDefined();
+    expect(screen.getByText(/Frames: 2/)).not.toBeNull();
   });
 
   it('shows clip count', () => {
     setupStore();
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText(/Clips: 2/)).toBeDefined();
+    expect(screen.getByText(/Clips: 2/)).not.toBeNull();
   });
 
   it('renders Animation Clips heading when clips present', () => {
     setupStore();
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('Animation Clips')).toBeDefined();
+    expect(screen.getByText('Animation Clips')).not.toBeNull();
   });
 
   it('renders clip names', () => {
@@ -159,13 +159,13 @@ describe('SpriteAnimationInspector', () => {
   it('renders Playback heading when animator present', () => {
     setupStore();
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('Playback')).toBeDefined();
+    expect(screen.getByText('Playback')).not.toBeNull();
   });
 
   it('shows current clip in playback section', () => {
     setupStore();
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('Current Clip')).toBeDefined();
+    expect(screen.getByText('Current Clip')).not.toBeNull();
   });
 
   it('renders Play and Stop buttons in playback section', () => {
@@ -174,19 +174,19 @@ describe('SpriteAnimationInspector', () => {
     // There are Play buttons in both clip list and playback — use getAllByText
     const playButtons = screen.getAllByText('Play');
     expect(playButtons.length).toBeGreaterThan(0);
-    expect(screen.getByText('Stop')).toBeDefined();
+    expect(screen.getByText('Stop')).not.toBeNull();
   });
 
   it('shows playing status', () => {
     setupStore({ animator: { ...baseAnimator, playing: false } });
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText(/Stopped/)).toBeDefined();
+    expect(screen.getByText(/Stopped/)).not.toBeNull();
   });
 
   it('shows playing indicator when playing is true', () => {
     setupStore({ animator: { ...baseAnimator, playing: true } });
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText(/Playing/)).toBeDefined();
+    expect(screen.getByText(/Playing/)).not.toBeNull();
   });
 
   it('calls setSpriteAnimator with playing=false when Stop clicked', () => {
@@ -202,13 +202,13 @@ describe('SpriteAnimationInspector', () => {
   it('renders State Machine section when stateMachine provided', () => {
     setupStore({ stateMachine: baseStateMachine });
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('State Machine')).toBeDefined();
+    expect(screen.getByText('State Machine')).not.toBeNull();
   });
 
   it('shows current state in state machine section', () => {
     setupStore({ stateMachine: baseStateMachine });
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('Current State:')).toBeDefined();
+    expect(screen.getByText('Current State:')).not.toBeNull();
     // 'idle' appears multiple times — just confirm it exists somewhere
     expect(screen.getAllByText(/idle/).length).toBeGreaterThan(0);
   });
@@ -216,12 +216,12 @@ describe('SpriteAnimationInspector', () => {
   it('shows bool parameter as checkbox', () => {
     setupStore({ stateMachine: baseStateMachine });
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('isRunning')).toBeDefined();
+    expect(screen.getByText('isRunning')).not.toBeNull();
   });
 
   it('shows float parameter as number input', () => {
     setupStore({ stateMachine: baseStateMachine });
     render(<SpriteAnimationInspector />);
-    expect(screen.getByText('speed')).toBeDefined();
+    expect(screen.getByText('speed')).not.toBeNull();
   });
 });

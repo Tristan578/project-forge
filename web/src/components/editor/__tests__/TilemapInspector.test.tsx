@@ -73,13 +73,13 @@ describe('TilemapInspector', () => {
   it('renders Tilemap heading in 2D project', () => {
     setupStore();
     render(<TilemapInspector />);
-    expect(screen.getByText('Tilemap')).toBeDefined();
+    expect(screen.getByText('Tilemap')).not.toBeNull();
   });
 
   it('shows Add Tilemap button when no tilemap data', () => {
     setupStore();
     render(<TilemapInspector />);
-    expect(screen.getByText('Add Tilemap')).toBeDefined();
+    expect(screen.getByText('Add Tilemap')).not.toBeNull();
   });
 
   it('calls setTilemapData with defaults when Add Tilemap clicked', () => {
@@ -95,19 +95,19 @@ describe('TilemapInspector', () => {
   it('shows tilemap controls when data exists', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
-    expect(screen.getByText('Tileset')).toBeDefined();
+    expect(screen.getByText('Tileset')).not.toBeNull();
   });
 
   it('renders Map Size label', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
-    expect(screen.getByText('Map Size (tiles)')).toBeDefined();
+    expect(screen.getByText('Map Size (tiles)')).not.toBeNull();
   });
 
   it('renders tileset select with None option', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
-    expect(screen.getByRole('option', { name: 'None' })).toBeDefined();
+    expect(screen.getByRole('option', { name: 'None' })).not.toBeNull();
   });
 
   it('shows available tilesets in select', () => {
@@ -116,14 +116,14 @@ describe('TilemapInspector', () => {
       tilesets: { 'ts-1': { name: 'Dungeon Tiles' } },
     });
     render(<TilemapInspector />);
-    expect(screen.getByText('Dungeon Tiles')).toBeDefined();
+    expect(screen.getByText('Dungeon Tiles')).not.toBeNull();
   });
 
   it('shows tile size as read-only', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
-    expect(screen.getByText('Tile Size (px)')).toBeDefined();
-    expect(screen.getByText('32 × 32')).toBeDefined();
+    expect(screen.getByText('Tile Size (px)')).not.toBeNull();
+    expect(screen.getByText('32 × 32')).not.toBeNull();
   });
 
   it('shows Layer 1 name input in layers list', () => {
@@ -132,13 +132,13 @@ describe('TilemapInspector', () => {
     // Layer name is rendered as an input value
     const inputs = screen.getAllByRole('textbox');
     const layerInput = inputs.find((inp) => (inp as HTMLInputElement).value === 'Layer 1');
-    expect(layerInput).toBeDefined();
+    expect(layerInput).not.toBeNull();
   });
 
   it('renders Add Layer button with title', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
-    expect(screen.getByTitle('Add Layer')).toBeDefined();
+    expect(screen.getByTitle('Add Layer')).not.toBeNull();
   });
 
   it('calls setTilemapData with new layer when Add Layer clicked', () => {
@@ -158,7 +158,7 @@ describe('TilemapInspector', () => {
   it('shows Remove Tilemap button', () => {
     setupStore({ tilemapData: baseTilemapData });
     render(<TilemapInspector />);
-    expect(screen.getByText('Remove Tilemap')).toBeDefined();
+    expect(screen.getByText('Remove Tilemap')).not.toBeNull();
   });
 
   it('calls removeTilemapData when Remove Tilemap confirmed', () => {

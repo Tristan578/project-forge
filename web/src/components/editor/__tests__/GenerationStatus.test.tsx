@@ -99,7 +99,7 @@ describe('GenerationStatus', () => {
   it('shows Generating button with count when active jobs exist', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
-    expect(screen.getByText('Generating (1)')).toBeDefined();
+    expect(screen.getByText('Generating (1)')).not.toBeNull();
   });
 
   it('shows count of multiple active jobs', () => {
@@ -110,7 +110,7 @@ describe('GenerationStatus', () => {
       },
     });
     render(<GenerationStatus />);
-    expect(screen.getByText('Generating (2)')).toBeDefined();
+    expect(screen.getByText('Generating (2)')).not.toBeNull();
   });
 
   it('does not show dropdown initially', () => {
@@ -123,21 +123,21 @@ describe('GenerationStatus', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('Generation Jobs')).toBeDefined();
+    expect(screen.getByText('Generation Jobs')).not.toBeNull();
   });
 
   it('shows job type in dropdown', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText(/3D model/i)).toBeDefined();
+    expect(screen.getByText(/3D model/i)).not.toBeNull();
   });
 
   it('shows processing status with progress', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('50%')).toBeDefined();
+    expect(screen.getByText('50%')).not.toBeNull();
   });
 
   it('shows Completed status for completed jobs', () => {
@@ -145,21 +145,21 @@ describe('GenerationStatus', () => {
     setupStore({ jobs: { 'job-1': pendingJob, 'job-2': completedJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('Completed')).toBeDefined();
+    expect(screen.getByText('Completed')).not.toBeNull();
   });
 
   it('shows Failed status for failed jobs', () => {
     setupStore({ jobs: { 'job-1': pendingJob, 'job-3': failedJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('Failed')).toBeDefined();
+    expect(screen.getByText('Failed')).not.toBeNull();
   });
 
   it('shows error message for failed jobs', () => {
     setupStore({ jobs: { 'job-1': pendingJob, 'job-3': failedJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('API rate limit exceeded')).toBeDefined();
+    expect(screen.getByText('API rate limit exceeded')).not.toBeNull();
   });
 
   it('calls clearCompleted when trash button clicked', () => {
@@ -174,6 +174,6 @@ describe('GenerationStatus', () => {
     setupStore({ jobs: { 'job-1': pendingJob } });
     render(<GenerationStatus />);
     fireEvent.click(screen.getByText('Generating (1)'));
-    expect(screen.getByText('A red cube')).toBeDefined();
+    expect(screen.getByText('A red cube')).not.toBeNull();
   });
 });

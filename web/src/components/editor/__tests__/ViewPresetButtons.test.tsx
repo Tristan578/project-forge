@@ -44,31 +44,31 @@ describe('ViewPresetButtons', () => {
   it('renders toolbar with camera preset buttons', () => {
     setupStore();
     render(<ViewPresetButtons />);
-    expect(screen.getByRole('toolbar')).toBeDefined();
+    expect(screen.getByRole('toolbar')).not.toBeNull();
   });
 
   it('renders Top View button', () => {
     setupStore();
     render(<ViewPresetButtons />);
-    expect(screen.getByLabelText('Top View (Numpad 7)')).toBeDefined();
+    expect(screen.getByLabelText('Top View (Numpad 7)')).not.toBeNull();
   });
 
   it('renders Front View button', () => {
     setupStore();
     render(<ViewPresetButtons />);
-    expect(screen.getByLabelText('Front View (Numpad 1)')).toBeDefined();
+    expect(screen.getByLabelText('Front View (Numpad 1)')).not.toBeNull();
   });
 
   it('renders Right View button', () => {
     setupStore();
     render(<ViewPresetButtons />);
-    expect(screen.getByLabelText('Right View (Numpad 3)')).toBeDefined();
+    expect(screen.getByLabelText('Right View (Numpad 3)')).not.toBeNull();
   });
 
   it('renders Perspective View button', () => {
     setupStore();
     render(<ViewPresetButtons />);
-    expect(screen.getByLabelText('Perspective View (Numpad 5)')).toBeDefined();
+    expect(screen.getByLabelText('Perspective View (Numpad 5)')).not.toBeNull();
   });
 
   it('marks active preset button as pressed', () => {

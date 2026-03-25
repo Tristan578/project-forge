@@ -294,7 +294,7 @@ describe('audioManager - Occlusion Enhancement', () => {
     audioManager.setOcclusion('e1', true);
 
     const filter = getInternal().occlusionFilters.get('e1');
-    expect(filter).toBeDefined();
+    expect(filter).not.toBeUndefined();
 
     audioManager.updateOcclusionAmount('e1', 0.0);
 

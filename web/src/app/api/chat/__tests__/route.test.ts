@@ -417,7 +417,11 @@ describe('POST /api/chat', () => {
       await res.text(); // drain stream
 
       // Invoke the captured callback with real usage numbers
+<<<<<<< HEAD
       expect(capturedOnFinish).toBeDefined();
+=======
+      expect(capturedOnFinish).not.toBeUndefined();
+>>>>>>> origin/fix/remaining-audit-gaps-push
       await capturedOnFinish!({ usage: { inputTokens: 1200, outputTokens: 300 } });
 
       expect(logCost).toHaveBeenCalledWith(

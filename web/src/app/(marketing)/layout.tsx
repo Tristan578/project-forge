@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 'use cache';
 
 import type { Metadata } from 'next';
@@ -15,6 +16,9 @@ export const metadata: Metadata = {
 };
 
 export default async function MarketingLayout({
+=======
+export default function MarketingLayout({
+>>>>>>> origin/fix/remaining-audit-gaps-push
   children,
 }: Readonly<{
   children: React.ReactNode;

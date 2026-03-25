@@ -78,7 +78,7 @@ describe('ScreenSettingsPanel', () => {
     setupStore();
     render(<ScreenSettingsPanel />);
     const input = screen.getByDisplayValue('Main Menu');
-    expect(input).toBeDefined();
+    expect(input).not.toBeNull();
   });
 
   it('calls renameScreen when name input changes', () => {
@@ -148,7 +148,7 @@ describe('ScreenSettingsPanel', () => {
     it('renders the Transition section heading', () => {
       setupStore();
       render(<ScreenSettingsPanel />);
-      expect(screen.getByText('Transition')).toBeDefined();
+      expect(screen.getByText('Transition')).not.toBeNull();
     });
 
     it('calls updateScreen with transition type when changed to fade', () => {
@@ -184,22 +184,22 @@ describe('ScreenSettingsPanel', () => {
     it('renders all transition type options', () => {
       setupStore();
       render(<ScreenSettingsPanel />);
-      expect(screen.getByRole('option', { name: 'None' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Fade' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Slide Left' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Slide Right' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Slide Up' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Slide Down' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Scale' })).toBeDefined();
+      expect(screen.getByRole('option', { name: 'None' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Fade' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Slide Left' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Slide Right' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Slide Up' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Slide Down' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Scale' })).not.toBeNull();
     });
 
     it('renders all easing options', () => {
       setupStore();
       render(<ScreenSettingsPanel />);
-      expect(screen.getByRole('option', { name: 'Linear' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Ease In' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Ease Out' })).toBeDefined();
-      expect(screen.getByRole('option', { name: 'Ease In Out' })).toBeDefined();
+      expect(screen.getByRole('option', { name: 'Linear' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Ease In' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Ease Out' })).not.toBeNull();
+      expect(screen.getByRole('option', { name: 'Ease In Out' })).not.toBeNull();
     });
   });
 
@@ -207,7 +207,7 @@ describe('ScreenSettingsPanel', () => {
     it('renders Delete Screen button', () => {
       setupStore();
       render(<ScreenSettingsPanel />);
-      expect(screen.getByText('Delete Screen')).toBeDefined();
+      expect(screen.getByText('Delete Screen')).not.toBeNull();
     });
 
     it('calls deleteScreen when delete is confirmed', () => {

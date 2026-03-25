@@ -8,8 +8,13 @@
 
 import { streamChat, type StreamCallbacks } from './streaming';
 import { aiQueue, type Priority } from './requestQueue';
+<<<<<<< HEAD
 import { aiResponseCache } from './promptCache';
 import { AI_MODEL_PRIMARY } from './models';
+=======
+import { AI_MODEL_PRIMARY } from './models';
+import { aiResponseCache } from './promptCache';
+>>>>>>> origin/fix/remaining-audit-gaps-push
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,6 +104,10 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
     model = AI_MODEL_PRIMARY,
     systemOverride,
     sceneContext = '',
+<<<<<<< HEAD
+=======
+    thinking = false,
+>>>>>>> origin/fix/remaining-audit-gaps-push
     signal,
   } = options ?? {};
 
@@ -109,11 +118,18 @@ export async function fetchAI(prompt: string, options?: AIClientOptions): Promis
   // AbortSignal-controlled requests skip the cache so that a cancelled
   // request cannot poison the cache with a partial result.
   if (!signal) {
+<<<<<<< HEAD
     const thinking = options?.thinking ?? false;
     const cacheKey = await aiResponseCache.computeKey(
       `${model}:${thinking ? 'thinking' : 'standard'}`,
       systemOverride ?? '',
       `${sceneContext}\x00${prompt}`,
+=======
+    const cacheKey = await aiResponseCache.computeKey(
+      model,
+      systemOverride ?? '',
+      `${sceneContext}\x00${prompt}\x00${thinking}`,
+>>>>>>> origin/fix/remaining-audit-gaps-push
     );
     return aiResponseCache.dedup(cacheKey, () => fetchAIUncached(prompt, options));
   }

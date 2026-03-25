@@ -24,7 +24,7 @@ describe('EmptyState', () => {
         description="Add something to get started"
       />
     );
-    expect(screen.getByText('No entities yet')).toBeDefined();
+    expect(screen.getByText('No entities yet')).not.toBeNull();
   });
 
   it('renders the description text', () => {
@@ -35,7 +35,7 @@ describe('EmptyState', () => {
         description="Add something to get started"
       />
     );
-    expect(screen.getByText('Add something to get started')).toBeDefined();
+    expect(screen.getByText('Add something to get started')).not.toBeNull();
   });
 
   it('renders the icon', () => {
@@ -46,7 +46,7 @@ describe('EmptyState', () => {
         description="Add something to get started"
       />
     );
-    expect(screen.getByTestId('empty-state-icon')).toBeDefined();
+    expect(screen.getByTestId('empty-state-icon')).not.toBeNull();
   });
 
   it('renders an action button when action prop provided', () => {
@@ -60,7 +60,7 @@ describe('EmptyState', () => {
       />
     );
     const button = screen.getByRole('button', { name: 'Add Entity' });
-    expect(button).toBeDefined();
+    expect(button).not.toBeNull();
   });
 
   it('calls action onClick when button is clicked', () => {
@@ -98,7 +98,7 @@ describe('EmptyState', () => {
         className="my-custom-class"
       />
     );
-    expect(container.firstChild).toBeDefined();
+    expect(container.firstChild).not.toBeNull();
     const wrapper = container.firstChild as HTMLElement;
     expect(wrapper.className).toContain('my-custom-class');
   });

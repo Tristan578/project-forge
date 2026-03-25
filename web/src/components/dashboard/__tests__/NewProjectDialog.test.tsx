@@ -22,9 +22,9 @@ describe('NewProjectDialog', () => {
     render(
       <NewProjectDialog isOpen={true} onClose={vi.fn()} onCreate={vi.fn()} />
     );
-    expect(screen.getByText('New Project')).toBeDefined();
-    expect(screen.getByText('Project Name')).toBeDefined();
-    expect(screen.getByDisplayValue('My Game')).toBeDefined();
+    expect(screen.getByText('New Project')).not.toBeNull();
+    expect(screen.getByText('Project Name')).not.toBeNull();
+    expect(screen.getByDisplayValue('My Game')).not.toBeNull();
   });
 
   it('calls onCreate with trimmed name when Create is clicked', () => {

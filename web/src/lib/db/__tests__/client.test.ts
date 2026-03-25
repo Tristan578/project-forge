@@ -38,7 +38,7 @@ describe('db/client', () => {
       const db = getDb();
       expect(mockNeon).toHaveBeenCalledWith('postgres://test:test@localhost/testdb');
       expect(mockDrizzle).toHaveBeenCalled();
-      expect(db).toBeDefined();
+      expect(db).not.toBeUndefined();
       delete process.env.DATABASE_URL;
     });
 

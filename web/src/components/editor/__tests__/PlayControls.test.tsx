@@ -33,22 +33,22 @@ describe('PlayControls', () => {
   it('renders play, pause, and stop buttons in edit mode', () => {
     mockEditorStore();
     render(<PlayControls />);
-    expect(screen.getByRole('button', { name: /play/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /pause/i })).toBeDefined();
-    expect(screen.getByRole('button', { name: /stop/i })).toBeDefined();
+    expect(screen.getByRole('button', { name: /play/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /pause/i })).not.toBeNull();
+    expect(screen.getByRole('button', { name: /stop/i })).not.toBeNull();
   });
 
   it('shows Playing status indicator when in play mode', () => {
     mockEditorStore({ engineMode: 'play' });
     render(<PlayControls />);
-    expect(screen.getByText('Playing')).toBeDefined();
+    expect(screen.getByText('Playing')).not.toBeNull();
   });
 
   it('shows Paused status and resume button when paused', () => {
     mockEditorStore({ engineMode: 'paused' });
     render(<PlayControls />);
-    expect(screen.getByText('Paused')).toBeDefined();
-    expect(screen.getByRole('button', { name: /resume/i })).toBeDefined();
+    expect(screen.getByText('Paused')).not.toBeNull();
+    expect(screen.getByRole('button', { name: /resume/i })).not.toBeNull();
   });
 
   it('calls play when play button is clicked in edit mode', () => {
@@ -66,7 +66,7 @@ describe('PlayControls', () => {
 
     // Pause button should be enabled in play mode
     const pauseBtn = screen.getByRole('button', { name: /pause/i });
-    expect(pauseBtn).toBeDefined();
+    expect(pauseBtn).not.toBeNull();
     fireEvent.click(pauseBtn);
     expect(mockPause).toHaveBeenCalledTimes(1);
 
@@ -76,7 +76,7 @@ describe('PlayControls', () => {
     mockEditorStore({ engineMode: 'paused', resume: mockResume });
     render(<PlayControls />);
     const resumeBtn = screen.getByRole('button', { name: /resume/i });
-    expect(resumeBtn).toBeDefined();
+    expect(resumeBtn).not.toBeNull();
     fireEvent.click(resumeBtn);
     expect(mockResume).toHaveBeenCalledTimes(1);
   });
@@ -87,7 +87,7 @@ describe('PlayControls', () => {
     render(<PlayControls />);
 
     const stopBtn = screen.getByRole('button', { name: /stop/i });
-    expect(stopBtn).toBeDefined();
+    expect(stopBtn).not.toBeNull();
     fireEvent.click(stopBtn);
     expect(mockStop).toHaveBeenCalledTimes(1);
   });
@@ -105,7 +105,7 @@ describe('PlayControls', () => {
     render(<PlayControls />);
     // In paused mode, the Resume button replaces Play; no play button present
     const resumeBtn = screen.getByRole('button', { name: /resume/i });
-    expect(resumeBtn).toBeDefined();
+    expect(resumeBtn).not.toBeNull();
   });
 
   it('stop button is disabled in edit mode', () => {
@@ -127,5 +127,56 @@ describe('PlayControls', () => {
     render(<PlayControls />);
     const pauseBtn = screen.getByRole('button', { name: /pause/i });
     expect((pauseBtn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('full play → pause → stop cycle dispatches correct commands in sequence', () => {
+    const mockPlay = vi.fn();
+    const mockPause = vi.fn();
+    const mockStop = vi.fn();
+
+    // Phase 1: edit mode — click play
+    mockEditorStore({ engineMode: 'edit', play: mockPlay, pause: mockPause, stop: mockStop });
+    render(<PlayControls />);
+    fireEvent.click(screen.getByRole('button', { name: /^play$/i }));
+    expect(mockPlay).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    // Phase 2: play mode — click pause
+    mockEditorStore({ engineMode: 'play', play: mockPlay, pause: mockPause, stop: mockStop });
+    render(<PlayControls />);
+    fireEvent.click(screen.getByRole('button', { name: /pause/i }));
+    expect(mockPause).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    // Phase 3: paused mode — click stop
+    mockEditorStore({ engineMode: 'paused', play: mockPlay, pause: mockPause, stop: mockStop });
+    render(<PlayControls />);
+    fireEvent.click(screen.getByRole('button', { name: /stop/i }));
+    expect(mockStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('stop from paused mode resets to edit (stop is enabled when paused)', () => {
+    const mockStop = vi.fn();
+    mockEditorStore({ engineMode: 'paused', stop: mockStop });
+    render(<PlayControls />);
+
+    const stopBtn = screen.getByRole('button', { name: /stop/i });
+    // Stop is not disabled when paused (isEdit is false)
+    expect((stopBtn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(stopBtn);
+    expect(mockStop).toHaveBeenCalledTimes(1);
+  });
+
+  it('mode indicator is absent in edit mode', () => {
+    mockEditorStore({ engineMode: 'edit' });
+    render(<PlayControls />);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('mode indicator shows correct text color class when paused', () => {
+    mockEditorStore({ engineMode: 'paused' });
+    render(<PlayControls />);
+    const statusEl = screen.getByRole('status');
+    expect(statusEl.textContent).toBe('Paused');
   });
 });

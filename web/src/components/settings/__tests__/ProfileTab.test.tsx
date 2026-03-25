@@ -50,43 +50,43 @@ describe('ProfileTab', () => {
 
   it('renders Display Name section', () => {
     render(<ProfileTab />);
-    expect(screen.getByText('Display Name')).toBeDefined();
+    expect(screen.getByText('Display Name')).not.toBeNull();
   });
 
   it('renders current display name', () => {
     render(<ProfileTab />);
-    expect(screen.getByText('GameDev123')).toBeDefined();
+    expect(screen.getByText('GameDev123')).not.toBeNull();
   });
 
   it('renders Email section', () => {
     render(<ProfileTab />);
-    expect(screen.getByText('Email')).toBeDefined();
-    expect(screen.getByText('gamedev@example.com')).toBeDefined();
+    expect(screen.getByText('Email')).not.toBeNull();
+    expect(screen.getByText('gamedev@example.com')).not.toBeNull();
   });
 
   it('renders Plan section with tier badge', () => {
     render(<ProfileTab />);
-    expect(screen.getByText('Plan')).toBeDefined();
+    expect(screen.getByText('Plan')).not.toBeNull();
     expect(screen.getAllByText(/hobbyist/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders Member Since section', () => {
     render(<ProfileTab />);
-    expect(screen.getByText('Member Since')).toBeDefined();
+    expect(screen.getByText('Member Since')).not.toBeNull();
     // Date rendering may shift by timezone — just verify year/month are present
-    expect(screen.getByText(/2024/)).toBeDefined();
+    expect(screen.getByText(/2024/)).not.toBeNull();
   });
 
   it('renders Edit button for display name', () => {
     render(<ProfileTab />);
-    expect(screen.getByText('Edit')).toBeDefined();
+    expect(screen.getByText('Edit')).not.toBeNull();
   });
 
   it('shows edit input when Edit clicked', () => {
     render(<ProfileTab />);
     fireEvent.click(screen.getByText('Edit'));
     const input = screen.getByRole('textbox') as HTMLInputElement;
-    expect(input).toBeDefined();
+    expect(input).not.toBeNull();
     expect(input.value).toBe('GameDev123');
   });
 
@@ -95,7 +95,7 @@ describe('ProfileTab', () => {
     fireEvent.click(screen.getByText('Edit'));
     const input = screen.getByRole('textbox') as HTMLInputElement;
     fireEvent.change(input, { target: { value: 'NewName' } });
-    expect(screen.getByText('7/50')).toBeDefined();
+    expect(screen.getByText('7/50')).not.toBeNull();
   });
 
   it('cancels edit on Cancel click', () => {
@@ -103,23 +103,23 @@ describe('ProfileTab', () => {
     fireEvent.click(screen.getByText('Edit'));
     fireEvent.click(screen.getByLabelText('Cancel'));
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(screen.getByText('GameDev123')).toBeDefined();
+    expect(screen.getByText('GameDev123')).not.toBeNull();
   });
 
   it('shows Not set when displayName is null', () => {
     setupStore({ displayName: null });
     render(<ProfileTab />);
-    expect(screen.getByText('Not set')).toBeDefined();
+    expect(screen.getByText('Not set')).not.toBeNull();
   });
 
   it('renders Avatar managed by Clerk message', () => {
     render(<ProfileTab />);
-    expect(screen.getByText('Avatar managed by your Clerk account')).toBeDefined();
+    expect(screen.getByText('Avatar managed by your Clerk account')).not.toBeNull();
   });
 
   it('renders initials avatar fallback when no Clerk image', () => {
     render(<ProfileTab />);
     // Should render 'G' for 'GameDev123'
-    expect(screen.getByText('G')).toBeDefined();
+    expect(screen.getByText('G')).not.toBeNull();
   });
 });

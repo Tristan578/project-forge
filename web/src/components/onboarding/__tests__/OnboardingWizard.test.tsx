@@ -56,15 +56,15 @@ describe('OnboardingWizard', () => {
 
   it('renders the wizard with "Welcome to SpawnForge" heading', () => {
     render(<OnboardingWizard onComplete={onComplete} />);
-    expect(screen.getByText('Welcome to SpawnForge')).toBeTruthy();
+    expect(screen.getByText('Welcome to SpawnForge')).not.toBeNull();
   });
 
   it('renders all 4 path cards when AI is enabled (non-starter tier)', () => {
     render(<OnboardingWizard onComplete={onComplete} />);
-    expect(screen.getByText('Build with AI')).toBeTruthy();
-    expect(screen.getByText('Start from Template')).toBeTruthy();
-    expect(screen.getByText('Blank Canvas')).toBeTruthy();
-    expect(screen.getByText('Take a Tour')).toBeTruthy();
+    expect(screen.getByText('Build with AI')).not.toBeNull();
+    expect(screen.getByText('Start from Template')).not.toBeNull();
+    expect(screen.getByText('Blank Canvas')).not.toBeNull();
+    expect(screen.getByText('Take a Tour')).not.toBeNull();
   });
 
   it('renders a dialog with aria-modal and aria-labelledby attributes', () => {
@@ -93,7 +93,7 @@ describe('OnboardingWizard', () => {
     // Find the upgrade link within the AI card specifically
     const aiCard = screen.getByTestId('path-card-ai');
     const link = aiCard.querySelector('a[href="/pricing"]');
-    expect(link).toBeTruthy();
+    expect(link).not.toBeNull();
   });
 
   it('renders non-starter AI card as a clickable button', () => {
@@ -134,7 +134,7 @@ describe('OnboardingWizard', () => {
   it('clicking "Start from Template" shows the inline template selector', () => {
     render(<OnboardingWizard onComplete={onComplete} />);
     fireEvent.click(screen.getByTestId('path-card-template'));
-    expect(screen.getByText('Choose a starter template')).toBeTruthy();
+    expect(screen.getByText('Choose a starter template')).not.toBeNull();
     // Path cards are hidden
     expect(screen.queryByText('Build with AI')).toBeNull();
   });
@@ -144,7 +144,7 @@ describe('OnboardingWizard', () => {
     fireEvent.click(screen.getByTestId('path-card-template'));
     const templates = ['platformer', 'runner', 'shooter', 'puzzle', 'explorer'];
     for (const t of templates) {
-      expect(screen.getByTestId(`template-card-${t}`)).toBeTruthy();
+      expect(screen.getByTestId(`template-card-${t}`)).not.toBeNull();
     }
   });
 
@@ -153,7 +153,7 @@ describe('OnboardingWizard', () => {
     fireEvent.click(screen.getByTestId('path-card-template'));
     fireEvent.click(screen.getByRole('button', { name: 'Back to path selection' }));
     // Path cards visible again
-    expect(screen.getByText('Build with AI')).toBeTruthy();
+    expect(screen.getByText('Build with AI')).not.toBeNull();
   });
 
   it('selecting a template calls completeOnboarding and onComplete', async () => {

@@ -20,7 +20,7 @@ describe('RIG_TEMPLATES', () => {
   it('contains all 7 rig types', () => {
     expect(Object.keys(RIG_TEMPLATES)).toHaveLength(7);
     for (const type of templateTypes) {
-      expect(RIG_TEMPLATES[type]).toBeDefined();
+      expect(RIG_TEMPLATES[type]).not.toBeUndefined();
     }
   });
 

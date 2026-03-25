@@ -79,7 +79,7 @@ describe('AsepriteBridge', () => {
       );
 
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('writes temporary Lua script file', async () => {

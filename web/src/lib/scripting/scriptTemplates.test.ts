@@ -82,7 +82,7 @@ describe('scriptTemplates', () => {
   describe('Specific Templates', () => {
     it('character_controller should use forge.input API', () => {
       const template = SCRIPT_TEMPLATES.find(t => t.id === 'character_controller');
-      expect(template).toBeDefined();
+      expect(template).not.toBeUndefined();
       expect(template?.source).toContain('forge.input');
       expect(template?.source).toContain('isPressed');
       expect(template?.source).toContain('justPressed');
@@ -90,7 +90,7 @@ describe('scriptTemplates', () => {
 
     it('health_system should use forge.ui API for HP display', () => {
       const template = SCRIPT_TEMPLATES.find(t => t.id === 'health_system');
-      expect(template).toBeDefined();
+      expect(template).not.toBeUndefined();
       expect(template?.source).toContain('forge.ui');
       expect(template?.source).toContain('showText');
       expect(template?.source).toContain('HP');
@@ -98,20 +98,20 @@ describe('scriptTemplates', () => {
 
     it('enemy_patrol should use forge.physics.distanceTo', () => {
       const template = SCRIPT_TEMPLATES.find(t => t.id === 'enemy_patrol');
-      expect(template).toBeDefined();
+      expect(template).not.toBeUndefined();
       expect(template?.source).toContain('forge.physics.distanceTo');
     });
 
     it('projectile should spawn entities', () => {
       const template = SCRIPT_TEMPLATES.find(t => t.id === 'projectile');
-      expect(template).toBeDefined();
+      expect(template).not.toBeUndefined();
       expect(template?.source).toContain('forge.spawn');
       expect(template?.source).toContain('forge.destroy');
     });
 
     it('day_night_cycle should manipulate time of day', () => {
       const template = SCRIPT_TEMPLATES.find(t => t.id === 'day_night_cycle');
-      expect(template).toBeDefined();
+      expect(template).not.toBeUndefined();
       expect(template?.source).toContain('timeOfDay');
       expect(template?.source).toContain('CYCLE_DURATION');
     });

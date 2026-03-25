@@ -154,7 +154,7 @@ describe('POST /api/admin/featured', () => {
     const body = await res.json();
 
     expect(res.status).toBe(201);
-    expect(body.featured).toBeDefined();
+    expect(body.featured).toEqual({ id: 'f-new', gameId: 'g1', position: 0 });
   });
 
   it('should return 409 when max featured limit reached', async () => {

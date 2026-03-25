@@ -180,7 +180,7 @@ describe('syncUserFromClerk', () => {
     expect(mockOnConflictDoUpdate).toHaveBeenCalledOnce();
     const conflictArg = mockOnConflictDoUpdate.mock.calls[0][0];
     // target should reference clerkId column
-    expect(conflictArg.target).toBeDefined();
+    expect(conflictArg.target).not.toBeUndefined();
   });
 
   it('builds display name from first and last name', async () => {
@@ -390,7 +390,7 @@ describe('deleteUserAccount', () => {
     expect(mockDelete).toHaveBeenCalled();
     // The users table deletion is the last one
     const lastCallIndex = mockDelete.mock.calls.length - 1;
-    expect(mockDelete.mock.calls[lastCallIndex][0]).toBeDefined();
+    expect(mockDelete.mock.calls[lastCallIndex][0]).not.toBeUndefined();
   });
 
   it('deletes financial records (credit_transactions, token_usage, etc.)', async () => {

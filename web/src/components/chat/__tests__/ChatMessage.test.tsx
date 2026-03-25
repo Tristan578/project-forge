@@ -64,8 +64,8 @@ describe('ChatMessage', () => {
         }}
       />
     );
-    expect(screen.getByText('You')).toBeDefined();
-    expect(screen.getByText('Hello AI!')).toBeDefined();
+    expect(screen.getByText('You')).not.toBeNull();
+    expect(screen.getByText('Hello AI!')).not.toBeNull();
   });
 
   it('renders an assistant message', () => {
@@ -80,8 +80,8 @@ describe('ChatMessage', () => {
         }}
       />
     );
-    expect(screen.getByText('AI')).toBeDefined();
-    expect(screen.getByText('I can help you build a game.')).toBeDefined();
+    expect(screen.getByText('AI')).not.toBeNull();
+    expect(screen.getByText('I can help you build a game.')).not.toBeNull();
   });
 
   it('renders a system message', () => {
@@ -95,7 +95,7 @@ describe('ChatMessage', () => {
         }}
       />
     );
-    expect(screen.getByText('Session started')).toBeDefined();
+    expect(screen.getByText('Session started')).not.toBeNull();
   });
 
   it('renders thinking section when present and toggles it', () => {
@@ -112,13 +112,13 @@ describe('ChatMessage', () => {
       />
     );
     const reasoningBtn = screen.getByText('Reasoning');
-    expect(reasoningBtn).toBeDefined();
+    expect(reasoningBtn).not.toBeNull();
 
     // Initially closed
     expect(screen.queryByText('Let me think about this...')).toBeNull();
 
     // Toggle open
     fireEvent.click(reasoningBtn);
-    expect(screen.getByText('Let me think about this...')).toBeDefined();
+    expect(screen.getByText('Let me think about this...')).not.toBeNull();
   });
 });

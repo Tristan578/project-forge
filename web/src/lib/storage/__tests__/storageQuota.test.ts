@@ -171,7 +171,7 @@ describe('storageQuota', () => {
 
       evictOldAutoSaves(1);
 
-      expect(s.data['forge-autosave-3']).toBeDefined();
+      expect(s.data['forge-autosave-3']).not.toBeUndefined();
       expect(s.data['forge:autosave']).toBeUndefined();
       expect(s.data['forge-autosave-2']).toBeUndefined();
     });
@@ -193,7 +193,7 @@ describe('storageQuota', () => {
 
       const freed = evictOldAutoSaves(2);
       expect(freed).toBe(0);
-      expect(s.data['forge:autosave']).toBeDefined();
+      expect(s.data['forge:autosave']).not.toBeUndefined();
     });
 
     it('treats entries without parseable timestamps as oldest (evicted first)', () => {
@@ -205,7 +205,7 @@ describe('storageQuota', () => {
       evictOldAutoSaves(1);
 
       expect(s.data['forge:autosave']).toBeUndefined();
-      expect(s.data['forge-autosave-newer']).toBeDefined();
+      expect(s.data['forge-autosave-newer']).not.toBeUndefined();
     });
 
     it('evicts the autosave triplet atomically (all three keys together)', () => {
@@ -225,7 +225,7 @@ describe('storageQuota', () => {
       expect(s.data['forge:autosave:name']).toBeUndefined();
       expect(s.data['forge:autosave:time']).toBeUndefined();
       // The newer standalone entry should be kept
-      expect(s.data['forge-autosave-other']).toBeDefined();
+      expect(s.data['forge-autosave-other']).not.toBeUndefined();
     });
 
     it('does not partially evict the autosave triplet', () => {
@@ -238,9 +238,9 @@ describe('storageQuota', () => {
       // Keep 1 — the triplet is the only group, so nothing is evicted
       evictOldAutoSaves(1);
 
-      expect(s.data['forge:autosave']).toBeDefined();
-      expect(s.data['forge:autosave:name']).toBeDefined();
-      expect(s.data['forge:autosave:time']).toBeDefined();
+      expect(s.data['forge:autosave']).not.toBeUndefined();
+      expect(s.data['forge:autosave:name']).not.toBeUndefined();
+      expect(s.data['forge:autosave:time']).not.toBeUndefined();
     });
 
     it('respects protectedKeys and skips protected entries during eviction', () => {
@@ -255,9 +255,9 @@ describe('storageQuota', () => {
 
       // Nothing should be evicted because all keys are protected
       expect(freed).toBe(0);
-      expect(s.data['forge:autosave']).toBeDefined();
-      expect(s.data['forge:autosave:name']).toBeDefined();
-      expect(s.data['forge:autosave:time']).toBeDefined();
+      expect(s.data['forge:autosave']).not.toBeUndefined();
+      expect(s.data['forge:autosave:name']).not.toBeUndefined();
+      expect(s.data['forge:autosave:time']).not.toBeUndefined();
     });
   });
 

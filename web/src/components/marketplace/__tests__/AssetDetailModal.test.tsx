@@ -69,27 +69,27 @@ describe('AssetDetailModal', () => {
     // fetch will not resolve immediately so loading renders first
     global.fetch = vi.fn().mockReturnValue(new Promise(() => {}));
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
-    expect(screen.getByText('Loading...')).toBeDefined();
+    expect(screen.getByText('Loading...')).not.toBeNull();
   });
 
   it('renders asset name after loading', async () => {
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('Stone Wall Texture')).toBeDefined();
+      expect(screen.getByText('Stone Wall Texture')).not.toBeNull();
     });
   });
 
   it('renders asset description', async () => {
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('A beautiful stone wall texture for game environments.')).toBeDefined();
+      expect(screen.getByText('A beautiful stone wall texture for game environments.')).not.toBeNull();
     });
   });
 
   it('renders price in tokens', async () => {
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('50 tokens')).toBeDefined();
+      expect(screen.getByText('50 tokens')).not.toBeNull();
     });
   });
 
@@ -107,22 +107,22 @@ describe('AssetDetailModal', () => {
   it('renders seller name', async () => {
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('TextureArtist')).toBeDefined();
+      expect(screen.getByText('TextureArtist')).not.toBeNull();
     });
   });
 
   it('renders tags', async () => {
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('stone')).toBeDefined();
-      expect(screen.getByText('wall')).toBeDefined();
+      expect(screen.getByText('stone')).not.toBeNull();
+      expect(screen.getByText('wall')).not.toBeNull();
     });
   });
 
   it('renders Purchase button when not purchased', async () => {
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('Purchase')).toBeDefined();
+      expect(screen.getByText('Purchase')).not.toBeNull();
     });
   });
 
@@ -139,7 +139,7 @@ describe('AssetDetailModal', () => {
     });
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('Download')).toBeDefined();
+      expect(screen.getByText('Download')).not.toBeNull();
     });
   });
 
@@ -154,7 +154,7 @@ describe('AssetDetailModal', () => {
     });
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText(/AI-generated/)).toBeDefined();
+      expect(screen.getByText(/AI-generated/)).not.toBeNull();
     });
   });
 
@@ -177,8 +177,8 @@ describe('AssetDetailModal', () => {
     });
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('Great asset!')).toBeDefined();
-      expect(screen.getByText('PlayerOne')).toBeDefined();
+      expect(screen.getByText('Great asset!')).not.toBeNull();
+      expect(screen.getByText('PlayerOne')).not.toBeNull();
     });
   });
 
@@ -186,14 +186,14 @@ describe('AssetDetailModal', () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: false });
     render(<AssetDetailModal assetId="bad-id" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('Asset not found')).toBeDefined();
+      expect(screen.getByText('Asset not found')).not.toBeNull();
     });
   });
 
   it('calls onClose when X button clicked', async () => {
     render(<AssetDetailModal assetId="asset-1" onClose={mockOnClose} />);
     await waitFor(() => {
-      expect(screen.getByText('Stone Wall Texture')).toBeDefined();
+      expect(screen.getByText('Stone Wall Texture')).not.toBeNull();
     });
     fireEvent.click(screen.getByTestId('x-icon'));
     expect(mockOnClose).toHaveBeenCalled();

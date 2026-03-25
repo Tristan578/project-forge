@@ -810,7 +810,7 @@ describe('physicsJointHandlers', () => {
         entityId: 'ent1',
       });
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('sculpts terrain with valid params', async () => {
@@ -869,7 +869,7 @@ describe('physicsJointHandlers', () => {
         shape: 'triangle',
       });
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('extrudes a circle shape with options', async () => {
@@ -923,7 +923,7 @@ describe('physicsJointHandlers', () => {
         profile: [[0, 0]],
       });
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('lathes a valid profile', async () => {
@@ -1002,7 +1002,7 @@ describe('physicsJointHandlers', () => {
     it('returns error when entityIds is missing', async () => {
       const { result } = await invokeHandler(physicsJointHandlers, 'combine_meshes', {});
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('returns error when fewer than 2 entities', async () => {

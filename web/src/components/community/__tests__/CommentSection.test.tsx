@@ -39,7 +39,7 @@ describe('CommentSection', () => {
         onAddComment={vi.fn()}
       />
     );
-    expect(screen.getByText(`Comments (${mockComments.length})`)).toBeDefined();
+    expect(screen.getByText(`Comments (${mockComments.length})`)).not.toBeNull();
   });
 
   it('renders top-level comments and replies', () => {
@@ -50,10 +50,10 @@ describe('CommentSection', () => {
         onAddComment={vi.fn()}
       />
     );
-    expect(screen.getByText('Great game!')).toBeDefined();
-    expect(screen.getByText('Alice')).toBeDefined();
-    expect(screen.getByText('Thanks!')).toBeDefined();
-    expect(screen.getByText('Bob')).toBeDefined();
+    expect(screen.getByText('Great game!')).not.toBeNull();
+    expect(screen.getByText('Alice')).not.toBeNull();
+    expect(screen.getByText('Thanks!')).not.toBeNull();
+    expect(screen.getByText('Bob')).not.toBeNull();
   });
 
   it('shows empty state when no comments', () => {
@@ -64,7 +64,7 @@ describe('CommentSection', () => {
         onAddComment={vi.fn()}
       />
     );
-    expect(screen.getByText('No comments yet. Be the first to comment!')).toBeDefined();
+    expect(screen.getByText('No comments yet. Be the first to comment!')).not.toBeNull();
   });
 
   it('submits a new comment', () => {

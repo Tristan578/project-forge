@@ -39,7 +39,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
     }
   }
 
-  // Close on Escape (only if not editing a binding)
+  // Close on Escape (only if not editing a binding and no higher modal is stacked on top)
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (editingAction) {
@@ -61,7 +61,16 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
         return;
       }
 
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        // Don't steal Escape from a modal rendered on top of this panel
+        // (e.g. WelcomeModal, TutorialOverlay, TokenDepletedModal).
+        // Check for any dialog with aria-modal that is NOT this panel's dialog.
+        const otherModal = document.querySelector(
+          '[role="dialog"][aria-modal="true"]:not([aria-labelledby="shortcuts-dialog-title"])'
+        );
+        if (otherModal) return;
+        onClose();
+      }
     },
     [editingAction, onClose, refreshBindings]
   );

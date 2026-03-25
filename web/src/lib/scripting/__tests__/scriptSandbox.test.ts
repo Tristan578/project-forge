@@ -186,7 +186,7 @@ describe('Script Sandbox Security', () => {
         function onStart() { void entityId; }
       `);
       // entityId is scoped — we can't easily capture it outside, but compilation should succeed
-      expect(result.onStart).toBeDefined();
+      expect(result.onStart).not.toBeUndefined();
     });
   });
 
@@ -424,7 +424,7 @@ describe('Script Sandbox Security', () => {
       if (result.onUpdate) {
         result.onUpdate(0.016);
       }
-      expect(result.onUpdate).toBeDefined();
+      expect(result.onUpdate).not.toBeUndefined();
     });
   });
 

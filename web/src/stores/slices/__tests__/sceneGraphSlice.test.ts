@@ -278,7 +278,7 @@ describe('sceneGraphSlice', () => {
       store.getState().addNode(newChildNode);
 
       const { sceneGraph } = store.getState();
-      expect(sceneGraph.nodes['child-1']).toBeDefined();
+      expect(sceneGraph.nodes['child-1']).toEqual(newChildNode);
       expect(sceneGraph.nodes['cube-1'].children).toContain('child-1');
     });
 
@@ -293,7 +293,7 @@ describe('sceneGraphSlice', () => {
       store.getState().setFullGraph({ nodes: {}, rootIds: [] });
       store.getState().addNode(newChildNode);
 
-      expect(store.getState().sceneGraph.nodes['child-1']).toBeDefined();
+      expect(store.getState().sceneGraph.nodes['child-1']).toEqual(newChildNode);
     });
   });
 

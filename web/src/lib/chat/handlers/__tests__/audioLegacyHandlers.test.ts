@@ -90,7 +90,7 @@ describe('audioLegacyHandlers', () => {
     it('fails without entityId', async () => {
       const { result } = await invoke('set_audio', {});
       expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
+      expect(result.error).not.toBeUndefined();
     });
 
     it('includes assetId when provided', async () => {

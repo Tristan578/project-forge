@@ -50,16 +50,16 @@ describe('WidgetPalette', () => {
   it('renders all widget type labels', () => {
     setupStore();
     render(<WidgetPalette />);
-    expect(screen.getByText('Text')).toBeDefined();
-    expect(screen.getByText('Image')).toBeDefined();
-    expect(screen.getByText('Button')).toBeDefined();
-    expect(screen.getByText('Progress')).toBeDefined();
-    expect(screen.getByText('Panel')).toBeDefined();
-    expect(screen.getByText('Grid')).toBeDefined();
-    expect(screen.getByText('Scroll')).toBeDefined();
-    expect(screen.getByText('Slider')).toBeDefined();
-    expect(screen.getByText('Toggle')).toBeDefined();
-    expect(screen.getByText('Minimap')).toBeDefined();
+    expect(screen.getByText('Text')).not.toBeNull();
+    expect(screen.getByText('Image')).not.toBeNull();
+    expect(screen.getByText('Button')).not.toBeNull();
+    expect(screen.getByText('Progress')).not.toBeNull();
+    expect(screen.getByText('Panel')).not.toBeNull();
+    expect(screen.getByText('Grid')).not.toBeNull();
+    expect(screen.getByText('Scroll')).not.toBeNull();
+    expect(screen.getByText('Slider')).not.toBeNull();
+    expect(screen.getByText('Toggle')).not.toBeNull();
+    expect(screen.getByText('Minimap')).not.toBeNull();
   });
 
   it('calls addWidget with correct type when Text button is clicked', () => {

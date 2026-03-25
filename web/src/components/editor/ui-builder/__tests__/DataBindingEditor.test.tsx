@@ -49,7 +49,7 @@ describe('DataBindingEditor', () => {
   describe('when no binding is present', () => {
     it('renders "Add" button', () => {
       render(<DataBindingEditor {...BASE_PROPS} binding={null} />);
-      expect(screen.getByText('Add')).toBeDefined();
+      expect(screen.getByText('Add')).not.toBeNull();
     });
 
     it('does not render stateKey input', () => {
@@ -77,7 +77,7 @@ describe('DataBindingEditor', () => {
 
     it('renders "Remove" button', () => {
       render(<DataBindingEditor {...BASE_PROPS} binding={binding} />);
-      expect(screen.getByText('Remove')).toBeDefined();
+      expect(screen.getByText('Remove')).not.toBeNull();
     });
 
     it('renders stateKey input with current value', () => {
@@ -189,7 +189,7 @@ describe('DataBindingEditor', () => {
         transform: { type: 'multiply', factor: 2.5 },
       };
       render(<DataBindingEditor {...BASE_PROPS} binding={bindingWithMultiply} />);
-      expect(screen.getByText('Factor')).toBeDefined();
+      expect(screen.getByText('Factor')).not.toBeNull();
     });
 
     it('updates multiply factor when changed', () => {
@@ -214,7 +214,7 @@ describe('DataBindingEditor', () => {
         transform: { type: 'round', decimals: 2 },
       };
       render(<DataBindingEditor {...BASE_PROPS} binding={bindingWithRound} />);
-      expect(screen.getByText('Decimals')).toBeDefined();
+      expect(screen.getByText('Decimals')).not.toBeNull();
     });
 
     it('does not show transform-specific fields when transform is null', () => {

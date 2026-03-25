@@ -217,7 +217,7 @@ describe('add_dialogue_node', () => {
     expect(mockUpdateNode).toHaveBeenCalledTimes(1);
     const [, connectedId, updates] = mockUpdateNode.mock.calls[0] as [string, string, { next: string }];
     expect(connectedId).toBe(fromNodeId);
-    expect(updates.next).toBeTruthy();
+    expect(updates.next).not.toBeNull();
   });
 
   it('skips connection when fromNode has no next field (e.g. end node)', async () => {
@@ -304,7 +304,7 @@ describe('set_dialogue_choice', () => {
     });
     expect(result.success).toBe(true);
     const data = result.result as { choiceId: string; message: string };
-    expect(data.choiceId).toBeTruthy();
+    expect(data.choiceId).not.toBeNull();
     expect(data.message).toBe('Choice added');
     const [, , updates] = mockUpdateNode.mock.calls[0] as [
       string,

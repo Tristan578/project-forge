@@ -53,9 +53,9 @@ describe('Bridge types', () => {
       win32: 'C:\\Program Files\\Aseprite\\aseprite.exe',
       linux: '/usr/bin/aseprite',
     };
-    expect(paths.darwin).toBeDefined();
-    expect(paths.win32).toBeDefined();
-    expect(paths.linux).toBeDefined();
+    expect(paths.darwin).not.toBeUndefined();
+    expect(paths.win32).not.toBeUndefined();
+    expect(paths.linux).not.toBeUndefined();
   });
 
   it('BridgeToolStatus covers expected values', () => {

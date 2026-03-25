@@ -47,7 +47,7 @@ describe('GET /api/openapi', () => {
     const body = await res.json();
 
     expect(res.status).toBe(404);
-    expect(body.error).toBeTruthy();
+    expect(body.error).toBe('OpenAPI spec not yet generated');
   });
 
   it('should return 500 when spec file has invalid JSON', async () => {
@@ -58,6 +58,6 @@ describe('GET /api/openapi', () => {
     const body = await res.json();
 
     expect(res.status).toBe(500);
-    expect(body.error).toBeDefined();
+    expect(typeof body.error).toBe('string');
   });
 });

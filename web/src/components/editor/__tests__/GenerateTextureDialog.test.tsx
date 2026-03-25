@@ -56,25 +56,25 @@ describe('GenerateTextureDialog', () => {
 
   it('renders Generate Texture heading', () => {
     render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByText('Generate Texture')).toBeDefined();
+    expect(screen.getByText('Generate Texture')).not.toBeNull();
   });
 
   it('renders prompt textarea', () => {
     render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByPlaceholderText('Weathered red brick wall with moss')).toBeDefined();
+    expect(screen.getByPlaceholderText('Weathered red brick wall with moss')).not.toBeNull();
   });
 
   it('renders Resolution select with 1024x1024 and 2048x2048 options', () => {
     render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByText('1024x1024')).toBeDefined();
-    expect(screen.getByText('2048x2048')).toBeDefined();
+    expect(screen.getByText('1024x1024')).not.toBeNull();
+    expect(screen.getByText('2048x2048')).not.toBeNull();
   });
 
   it('renders Style options (Realistic, Stylized, Cartoon)', () => {
     render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByText('Realistic')).toBeDefined();
-    expect(screen.getByText('Stylized')).toBeDefined();
-    expect(screen.getByText('Cartoon')).toBeDefined();
+    expect(screen.getByText('Realistic')).not.toBeNull();
+    expect(screen.getByText('Stylized')).not.toBeNull();
+    expect(screen.getByText('Cartoon')).not.toBeNull();
   });
 
   it('renders Tiling checkbox', () => {
@@ -85,7 +85,7 @@ describe('GenerateTextureDialog', () => {
 
   it('renders token cost of 30', () => {
     render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByText('30')).toBeDefined();
+    expect(screen.getByText('30')).not.toBeNull();
   });
 
   it('disables Generate when prompt empty', () => {
@@ -116,7 +116,7 @@ describe('GenerateTextureDialog', () => {
 
   it('shows Apply to entity name', () => {
     render(<GenerateTextureDialog isOpen={true} onClose={mockOnClose} entityId="entity-1" />);
-    expect(screen.getByText(/Apply to:/)).toBeDefined();
-    expect(screen.getByText('Cube')).toBeDefined();
+    expect(screen.getByText(/Apply to:/)).not.toBeNull();
+    expect(screen.getByText('Cube')).not.toBeNull();
   });
 });

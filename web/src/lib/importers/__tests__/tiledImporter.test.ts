@@ -297,7 +297,7 @@ describe('parseTiledMap — object layer', () => {
 
   it('maps Player object correctly', () => {
     const player = result.entities.find(e => e.name === 'Player') as SpawnRequest;
-    expect(player).toBeDefined();
+    expect(player).not.toBeUndefined();
     expect(player.objectType).toBe('spawn_point');
     expect(player.x).toBe(64);
     expect(player.y).toBe(96);
@@ -314,7 +314,7 @@ describe('parseTiledMap — object layer', () => {
   it('creates default name for unnamed objects', () => {
     // All our test objects have names so this checks the Coin
     const coin = result.entities.find(e => e.name === 'Coin') as SpawnRequest;
-    expect(coin).toBeDefined();
+    expect(coin).not.toBeUndefined();
   });
 
   it('includes the tile layer alongside entity spawn requests', () => {

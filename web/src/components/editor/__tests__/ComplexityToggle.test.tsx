@@ -60,9 +60,9 @@ describe('ComplexityToggle (full panel)', () => {
 
   it('renders all three level options', () => {
     render(<ComplexityToggle />);
-    expect(screen.getByText('Beginner')).toBeDefined();
-    expect(screen.getByText('Intermediate')).toBeDefined();
-    expect(screen.getByText('Expert')).toBeDefined();
+    expect(screen.getByText('Beginner')).not.toBeNull();
+    expect(screen.getByText('Intermediate')).not.toBeNull();
+    expect(screen.getByText('Expert')).not.toBeNull();
   });
 
   it('marks the current level as active', () => {
@@ -83,21 +83,21 @@ describe('ComplexityToggle (full panel)', () => {
   it('displays descriptions for each level', () => {
     render(<ComplexityToggle />);
     // Beginner description text should appear
-    expect(screen.getByText(/Essential tools/)).toBeDefined();
+    expect(screen.getByText(/Essential tools/)).not.toBeNull();
     // Intermediate description text should appear
-    expect(screen.getByText(/Adds physics/)).toBeDefined();
+    expect(screen.getByText(/Adds physics/)).not.toBeNull();
     // Expert description text should appear
-    expect(screen.getByText(/Full feature set/)).toBeDefined();
+    expect(screen.getByText(/Full feature set/)).not.toBeNull();
   });
 
   it('shows the "always available" note', () => {
     render(<ComplexityToggle />);
-    expect(screen.getByText(/Critical features are always available/)).toBeDefined();
+    expect(screen.getByText(/Critical features are always available/)).not.toBeNull();
   });
 
   it('renders the listbox with accessible label', () => {
     render(<ComplexityToggle />);
-    expect(screen.getByRole('listbox', { name: 'Complexity level' })).toBeDefined();
+    expect(screen.getByRole('listbox', { name: 'Complexity level' })).not.toBeNull();
   });
 });
 
@@ -114,14 +114,14 @@ describe('ComplexityToggle (compact)', () => {
   it('renders a badge button with current level label', () => {
     render(<ComplexityToggle compact />);
     // The button should show the current level label
-    expect(screen.getByRole('button', { name: /Complexity level: Beginner/ })).toBeDefined();
+    expect(screen.getByRole('button', { name: /Complexity level: Beginner/ })).not.toBeNull();
   });
 
   it('opens the dropdown on click', () => {
     render(<ComplexityToggle compact />);
     const badge = screen.getByRole('button', { name: /Complexity level: Beginner/ });
     fireEvent.click(badge);
-    expect(screen.getByRole('listbox', { name: 'Select complexity level' })).toBeDefined();
+    expect(screen.getByRole('listbox', { name: 'Select complexity level' })).not.toBeNull();
   });
 
   it('closes the dropdown after selecting a level', () => {
@@ -150,7 +150,7 @@ describe('ComplexityToggle (compact)', () => {
     render(<ComplexityToggle compact />);
     const badge = screen.getByRole('button', { name: /Complexity level: Beginner/ });
     fireEvent.click(badge);
-    expect(screen.getByRole('listbox', { name: 'Select complexity level' })).toBeDefined();
+    expect(screen.getByRole('listbox', { name: 'Select complexity level' })).not.toBeNull();
     fireEvent.click(badge);
     expect(screen.queryByRole('listbox', { name: 'Select complexity level' })).toBeNull();
   });

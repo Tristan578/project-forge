@@ -60,9 +60,9 @@ describe('DESIGN_PRINCIPLES catalog', () => {
 
   it('every principle has required fields', () => {
     for (const p of DESIGN_PRINCIPLES) {
-      expect(p.id).toBeTruthy();
-      expect(p.name).toBeTruthy();
-      expect(p.category).toBeTruthy();
+      expect(p.id).not.toBeNull();
+      expect(p.name).not.toBeNull();
+      expect(p.category).not.toBeNull();
       expect(p.description.length).toBeGreaterThan(10);
       expect(p.example.length).toBeGreaterThan(10);
       expect(p.keywords.length).toBeGreaterThan(0);
@@ -203,8 +203,8 @@ describe('suggestLessons', () => {
     });
     const lessons = suggestLessons(ctx);
     for (const lesson of lessons) {
-      expect(lesson.principle).toBeTruthy();
-      expect(lesson.category).toBeTruthy();
+      expect(lesson.principle).not.toBeNull();
+      expect(lesson.category).not.toBeNull();
       expect(lesson.explanation.length).toBeGreaterThan(10);
       expect(lesson.example.length).toBeGreaterThan(5);
       expect(lesson.relevance.length).toBeGreaterThan(5);
@@ -286,7 +286,7 @@ describe('generateDesignCritique', () => {
     });
     const critique = generateDesignCritique(ctx);
     const kissScore = critique.scores.find((s) => s.principle === 'KISS');
-    expect(kissScore).toBeDefined();
+    expect(kissScore).not.toBeUndefined();
     expect(kissScore!.score).toBeGreaterThanOrEqual(7);
   });
 
@@ -302,7 +302,7 @@ describe('generateDesignCritique', () => {
     });
     const critique = generateDesignCritique(ctx);
     const juiceScore = critique.scores.find((s) => s.principle === 'Juice / Game Feel');
-    expect(juiceScore).toBeDefined();
+    expect(juiceScore).not.toBeUndefined();
     expect(juiceScore!.score).toBeGreaterThanOrEqual(7);
   });
 
@@ -317,7 +317,7 @@ describe('generateDesignCritique', () => {
     });
     const critique = generateDesignCritique(ctx);
     const gameplayScore = critique.scores.find((s) => s.principle === 'Gameplay Loop');
-    expect(gameplayScore).toBeDefined();
+    expect(gameplayScore).not.toBeUndefined();
     expect(gameplayScore!.score).toBeGreaterThanOrEqual(7);
   });
 
@@ -341,7 +341,7 @@ describe('generateDesignCritique', () => {
     const critique = generateDesignCritique(ctx);
     expect(critique.scores.length).toBeGreaterThan(0);
     for (const score of critique.scores) {
-      expect(score.principle).toBeTruthy();
+      expect(score.principle).not.toBeNull();
       expect(score.score).toBeGreaterThanOrEqual(0);
       expect(score.score).toBeLessThanOrEqual(10);
       expect(score.feedback.length).toBeGreaterThan(0);
@@ -355,7 +355,7 @@ describe('generateDesignCritique', () => {
     const ctx = makeCtx({ entityCount: 6, entities });
     const critique = generateDesignCritique(ctx);
     const layoutScore = critique.scores.find((s) => s.principle === 'Level Layout');
-    expect(layoutScore).toBeDefined();
+    expect(layoutScore).not.toBeUndefined();
   });
 });
 

@@ -213,7 +213,7 @@ describe('validateEnv', () => {
     it('exports OPTIONAL_VARS with defaults', async () => {
       const { OPTIONAL_VARS } = await import('../validateEnv');
       const appUrl = OPTIONAL_VARS.find((v) => v.key === 'NEXT_PUBLIC_APP_URL');
-      expect(appUrl).toBeDefined();
+      expect(appUrl).not.toBeUndefined();
       expect(appUrl!.defaultValue).toBe('http://localhost:3000');
     });
   });

@@ -238,7 +238,7 @@ describe('SunoClient', () => {
 
       const client = new SunoClient({ apiKey: mockApiKey });
       // Should not throw
-      await expect(client.getStatus('task-123_ABC')).resolves.toBeDefined();
+      await expect(client.getStatus('task-123_ABC')).resolves.not.toBeUndefined();
     });
 
     it('throws on non-ok response', async () => {

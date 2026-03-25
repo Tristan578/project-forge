@@ -41,7 +41,7 @@ describe('/api/user/profile', () => {
       expect(data.displayName).toBe('Test Profile');
       expect(data.email).toBe('profile@example.com');
       expect(data.tier).toBe('creator');
-      expect(data.createdAt).toBeDefined();
+      expect(typeof data.createdAt).toBe('string');
     });
   });
 

@@ -148,7 +148,7 @@ describe('NODE_DEFINITION_MAP: keyed access', () => {
   });
 
   it('can look up a known node by type', () => {
-    expect(NODE_DEFINITION_MAP['OnStart']).toBeDefined();
+    expect(NODE_DEFINITION_MAP['OnStart']).not.toBeUndefined();
     expect(NODE_DEFINITION_MAP['OnStart'].label).toBe('On Start');
   });
 
@@ -235,13 +235,13 @@ describe('NODE_DEFINITIONS: events category', () => {
   });
 
   it('contains collision event nodes', () => {
-    expect(NODE_DEFINITION_MAP['OnCollisionEnter']).toBeDefined();
-    expect(NODE_DEFINITION_MAP['OnCollisionExit']).toBeDefined();
+    expect(NODE_DEFINITION_MAP['OnCollisionEnter']).not.toBeUndefined();
+    expect(NODE_DEFINITION_MAP['OnCollisionExit']).not.toBeUndefined();
   });
 
   it('contains trigger event nodes', () => {
-    expect(NODE_DEFINITION_MAP['OnTriggerEnter']).toBeDefined();
-    expect(NODE_DEFINITION_MAP['OnTriggerExit']).toBeDefined();
+    expect(NODE_DEFINITION_MAP['OnTriggerEnter']).not.toBeUndefined();
+    expect(NODE_DEFINITION_MAP['OnTriggerExit']).not.toBeUndefined();
   });
 });
 
@@ -263,15 +263,15 @@ describe('NODE_DEFINITIONS: flow category', () => {
   });
 
   it('contains WhileLoop node', () => {
-    expect(NODE_DEFINITION_MAP['WhileLoop']).toBeDefined();
+    expect(NODE_DEFINITION_MAP['WhileLoop']).not.toBeUndefined();
   });
 });
 
 describe('NODE_DEFINITIONS: math category', () => {
   it('contains Add, Subtract, Multiply nodes', () => {
-    expect(NODE_DEFINITION_MAP['Add']).toBeDefined();
-    expect(NODE_DEFINITION_MAP['Subtract']).toBeDefined();
-    expect(NODE_DEFINITION_MAP['Multiply']).toBeDefined();
+    expect(NODE_DEFINITION_MAP['Add']).not.toBeUndefined();
+    expect(NODE_DEFINITION_MAP['Subtract']).not.toBeUndefined();
+    expect(NODE_DEFINITION_MAP['Multiply']).not.toBeUndefined();
   });
 
   it('math nodes have a/b inputs and result output', () => {
@@ -328,8 +328,8 @@ describe('NODE_DEFINITIONS: entity category', () => {
 
 describe('NODE_DEFINITIONS: ui category', () => {
   it('contains ShowScreen and HideScreen nodes', () => {
-    expect(NODE_DEFINITION_MAP['ShowScreen']).toBeDefined();
-    expect(NODE_DEFINITION_MAP['HideScreen']).toBeDefined();
+    expect(NODE_DEFINITION_MAP['ShowScreen']).not.toBeUndefined();
+    expect(NODE_DEFINITION_MAP['HideScreen']).not.toBeUndefined();
   });
 
   it('ShowScreen has screenName input and exec ports', () => {

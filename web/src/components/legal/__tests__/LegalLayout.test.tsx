@@ -32,7 +32,7 @@ describe('LegalLayout', () => {
       </LegalLayout>
     );
     // Title appears multiple times (h1 + nav link); use heading role to find the h1
-    expect(screen.getByRole('heading', { name: 'Terms of Service' })).toBeDefined();
+    expect(screen.getByRole('heading', { name: 'Terms of Service' })).not.toBeNull();
   });
 
   it('renders last updated date', () => {
@@ -41,7 +41,7 @@ describe('LegalLayout', () => {
         <p>Content</p>
       </LegalLayout>
     );
-    expect(screen.getByText(/Last updated: January 1, 2024/)).toBeDefined();
+    expect(screen.getByText(/Last updated: January 1, 2024/)).not.toBeNull();
   });
 
   it('renders table of contents items', () => {
@@ -50,8 +50,8 @@ describe('LegalLayout', () => {
         <p>Content</p>
       </LegalLayout>
     );
-    expect(screen.getByText('Introduction')).toBeDefined();
-    expect(screen.getByText('Terms of Use')).toBeDefined();
+    expect(screen.getByText('Introduction')).not.toBeNull();
+    expect(screen.getByText('Terms of Use')).not.toBeNull();
     expect(screen.getAllByText('Privacy Policy').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -61,7 +61,7 @@ describe('LegalLayout', () => {
         <p>This is the legal content.</p>
       </LegalLayout>
     );
-    expect(screen.getByText('This is the legal content.')).toBeDefined();
+    expect(screen.getByText('This is the legal content.')).not.toBeNull();
   });
 
   it('renders SpawnForge brand link', () => {
@@ -79,7 +79,7 @@ describe('LegalLayout', () => {
         <p>Content</p>
       </LegalLayout>
     );
-    expect(screen.getByText(/Back to home/)).toBeDefined();
+    expect(screen.getByText(/Back to home/)).not.toBeNull();
   });
 
   it('renders footer with copyright notice', () => {
@@ -88,7 +88,7 @@ describe('LegalLayout', () => {
         <p>Content</p>
       </LegalLayout>
     );
-    expect(screen.getByText(/SpawnForge\. All rights reserved\./)).toBeDefined();
+    expect(screen.getByText(/SpawnForge\. All rights reserved\./)).not.toBeNull();
   });
 
   it('renders TOC anchor hrefs with correct ids', () => {

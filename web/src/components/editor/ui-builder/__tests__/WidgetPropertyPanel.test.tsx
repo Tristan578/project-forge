@@ -296,7 +296,7 @@ describe('WidgetPropertyPanel', () => {
       it('renders Asset ID input', () => {
         setupStore(makeWidget('image'));
         render(<WidgetPropertyPanel />);
-        expect(screen.getByPlaceholderText('asset_123')).toBeDefined();
+        expect(screen.getByPlaceholderText('asset_123')).not.toBeNull();
       });
 
       it('calls updateWidget with assetId when Asset ID changes', () => {

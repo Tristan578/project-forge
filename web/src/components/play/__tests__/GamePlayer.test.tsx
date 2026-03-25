@@ -43,13 +43,13 @@ describe('GamePlayer', () => {
   it('shows loading spinner initially', () => {
     global.fetch = vi.fn().mockImplementation(() => new Promise(() => {})); // never resolves
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
-    expect(screen.getByText('Loading game...')).toBeDefined();
+    expect(screen.getByText('Loading game...')).not.toBeNull();
   });
 
   it('shows loader icon while loading', () => {
     global.fetch = vi.fn().mockImplementation(() => new Promise(() => {}));
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
-    expect(screen.getByTestId('loader-icon')).toBeDefined();
+    expect(screen.getByTestId('loader-icon')).not.toBeNull();
   });
 
   it('renders game title after successful fetch', async () => {
@@ -59,7 +59,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
     await waitFor(() => {
-      expect(screen.getByText('My Awesome Game')).toBeDefined();
+      expect(screen.getByText('My Awesome Game')).not.toBeNull();
     });
   });
 
@@ -70,7 +70,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
     await waitFor(() => {
-      expect(screen.getByText('by Alice')).toBeDefined();
+      expect(screen.getByText('by Alice')).not.toBeNull();
     });
   });
 
@@ -81,7 +81,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
     await waitFor(() => {
-      expect(screen.getByText('Click to play')).toBeDefined();
+      expect(screen.getByText('Click to play')).not.toBeNull();
     });
   });
 
@@ -92,7 +92,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="nonexistent" />);
     await waitFor(() => {
-      expect(screen.getByText('Game Not Found')).toBeDefined();
+      expect(screen.getByText('Game Not Found')).not.toBeNull();
     });
   });
 
@@ -103,7 +103,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="nonexistent" />);
     await waitFor(() => {
-      expect(screen.getByText('Game not found')).toBeDefined();
+      expect(screen.getByText('Game not found')).not.toBeNull();
     });
   });
 
@@ -114,7 +114,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="nonexistent" />);
     await waitFor(() => {
-      expect(screen.getByText('Back to SpawnForge')).toBeDefined();
+      expect(screen.getByText('Back to SpawnForge')).not.toBeNull();
     });
   });
 
@@ -125,7 +125,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="some-game" />);
     await waitFor(() => {
-      expect(screen.getByText('Something Went Wrong')).toBeDefined();
+      expect(screen.getByText('Something Went Wrong')).not.toBeNull();
     });
   });
 
@@ -133,7 +133,7 @@ describe('GamePlayer', () => {
     global.fetch = vi.fn().mockRejectedValue(new Error('Network failure'));
     render(<GamePlayer userId="user-1" slug="some-game" />);
     await waitFor(() => {
-      expect(screen.getByText('Network error -- could not load game')).toBeDefined();
+      expect(screen.getByText('Network error -- could not load game')).not.toBeNull();
     });
   });
 
@@ -144,7 +144,7 @@ describe('GamePlayer', () => {
     });
     render(<GamePlayer userId="user-1" slug="my-awesome-game" />);
     await waitFor(() => {
-      expect(screen.getByTestId('maximize-icon')).toBeDefined();
+      expect(screen.getByTestId('maximize-icon')).not.toBeNull();
     });
   });
 });

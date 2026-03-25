@@ -435,7 +435,7 @@ describe('Script Sandbox Security: Rate Limiter (unit)', () => {
     expect(pendingCommands).toHaveLength(100);
     // Commands after index 99 are dropped
     expect(pendingCommands.find(c => c.entityId === 'entity-100')).toBeUndefined();
-    expect(pendingCommands.find(c => c.entityId === 'entity-99')).toBeDefined();
+    expect(pendingCommands.find(c => c.entityId === 'entity-99')).not.toBeUndefined();
   });
 });
 
@@ -483,7 +483,7 @@ describe('Script Sandbox Security: Rate Limiter (worker integration)', () => {
     const limitError = errors.find(e =>
       typeof e.message === 'string' && e.message.includes('Command limit exceeded'),
     );
-    expect(limitError).toBeDefined();
+    expect(limitError).not.toBeUndefined();
   });
 
   it('limit error message includes actual count and max count', () => {
@@ -592,7 +592,7 @@ describe('Script Sandbox Security: Rate Limiter (worker integration)', () => {
     const limitError = errors.find(e =>
       typeof e.message === 'string' && e.message.includes('Command limit exceeded'),
     );
-    expect(limitError).toBeDefined();
+    expect(limitError).not.toBeUndefined();
   });
 });
 
@@ -1150,7 +1150,7 @@ describe('Script Sandbox Security: Full Worker Security Flow', () => {
 
     const logs = getMessages('log');
     const goodLog = logs.find(l => l.message === 'good ran');
-    expect(goodLog).toBeDefined();
+    expect(goodLog).not.toBeUndefined();
   });
 
   it('stop message clears all scripts so subsequent ticks produce no output', () => {
@@ -1201,7 +1201,7 @@ describe('Script Sandbox Security: Full Worker Security Flow', () => {
 
     const logs = getMessages('log');
     const stateLog = logs.find(l => typeof l.message === 'string' && l.message.startsWith('x='));
-    expect(stateLog).toBeDefined();
+    expect(stateLog).not.toBeUndefined();
     // After re-init the shared state is reset; x is undefined
     expect(stateLog!.message as string).toBe('x=undefined');
   });
@@ -1252,7 +1252,7 @@ describe('Script Sandbox Security: Full Worker Security Flow', () => {
 
     const logs = getMessages('log');
     const scoreLog = logs.find(l => typeof l.message === 'string' && l.message.includes('score='));
-    expect(scoreLog).toBeDefined();
+    expect(scoreLog).not.toBeUndefined();
     expect(scoreLog!.message as string).toBe('score=42');
   });
 
@@ -1281,8 +1281,8 @@ describe('Script Sandbox Security: Full Worker Security Flow', () => {
     const logs = getMessages('log');
     const aLog = logs.find(l => l.message === 'a destroyed');
     const bLog = logs.find(l => l.message === 'b destroyed');
-    expect(aLog).toBeDefined();
-    expect(bLog).toBeDefined();
+    expect(aLog).not.toBeUndefined();
+    expect(bLog).not.toBeUndefined();
   });
 
   it('onDestroy error does not prevent UI clear message from being sent', () => {
@@ -1309,7 +1309,7 @@ describe('Script Sandbox Security: Full Worker Security Flow', () => {
     const uiMsgs = getMessages('ui');
     expect(uiMsgs.length).toBeGreaterThanOrEqual(1);
     const clearMsg = uiMsgs.find(m => Array.isArray(m.elements) && (m.elements as unknown[]).length === 0);
-    expect(clearMsg).toBeDefined();
+    expect(clearMsg).not.toBeUndefined();
   });
 });
 
@@ -1377,7 +1377,7 @@ describe('Script Sandbox Security: Memory Limit Detection', () => {
     const memError = errors.find(e =>
       typeof e.message === 'string' && e.message.includes('memory limit exceeded'),
     );
-    expect(memError).toBeDefined();
+    expect(memError).not.toBeUndefined();
   });
 
   it('memory error message includes heap usage and limit', () => {
@@ -1414,7 +1414,7 @@ describe('Script Sandbox Security: Memory Limit Detection', () => {
     const memError = errors.find(e =>
       typeof e.message === 'string' && e.message.includes('memory limit exceeded'),
     );
-    expect(memError).toBeDefined();
+    expect(memError).not.toBeUndefined();
     // Message should contain both "MB" references (usage + limit)
     const msgText = memError!.message as string;
     expect(msgText).toContain('MB');
@@ -1458,7 +1458,7 @@ describe('Script Sandbox Security: Memory Limit Detection', () => {
     expect(memError).toBeUndefined();
 
     const logs = getMessages('log');
-    expect(logs.find(l => l.message === 'running')).toBeDefined();
+    expect(logs.find(l => l.message === 'running')).not.toBeUndefined();
   });
 
   it('memory limit is configurable via set_limits message', () => {
@@ -1571,7 +1571,7 @@ describe('Script Sandbox Security: Frame Time Limit Detection', () => {
     const timeError = errors.find(e =>
       typeof e.message === 'string' && e.message.includes('frame time limit exceeded'),
     );
-    expect(timeError).toBeDefined();
+    expect(timeError).not.toBeUndefined();
   });
 
   it('frame time error message includes elapsed ms and entity id', () => {
@@ -1606,7 +1606,7 @@ describe('Script Sandbox Security: Frame Time Limit Detection', () => {
     const timeError = errors.find(e =>
       typeof e.message === 'string' && e.message.includes('frame time limit exceeded'),
     );
-    expect(timeError).toBeDefined();
+    expect(timeError).not.toBeUndefined();
     expect(timeError!.message as string).toContain('slow-entity');
     expect(timeError!.message as string).toContain('ms');
   });
@@ -1651,7 +1651,7 @@ describe('Script Sandbox Security: Frame Time Limit Detection', () => {
     const warnLog = logs.find(l =>
       l.level === 'warn' && typeof l.message === 'string' && l.message.includes('ms'),
     );
-    expect(warnLog).toBeDefined();
+    expect(warnLog).not.toBeUndefined();
   });
 
   it('does not warn or error for a fast frame', () => {

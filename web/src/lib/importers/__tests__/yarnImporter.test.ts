@@ -100,8 +100,8 @@ describe('parseYarnFile - choices', () => {
     const leftChoice = choiceNode!.choices.find((c) => c.text === 'Go left');
     const rightChoice = choiceNode!.choices.find((c) => c.text === 'Go right');
 
-    expect(leftChoice!.nextNodeId).toBeDefined();
-    expect(rightChoice!.nextNodeId).toBeDefined();
+    expect(leftChoice!.nextNodeId).not.toBeUndefined();
+    expect(rightChoice!.nextNodeId).not.toBeUndefined();
     expect(leftChoice!.nextNodeId).not.toBe(rightChoice!.nextNodeId);
 
     // The resolved IDs must exist in the tree
@@ -130,7 +130,7 @@ describe('parseYarnFile - choices', () => {
 
     // The choice itself should have the text before [[
     const choice = choiceNode!.choices[0];
-    expect(choice.nextNodeId).toBeDefined();
+    expect(choice.nextNodeId).not.toBeUndefined();
     const resolved = tree.nodes.find((n) => n.id === choice.nextNodeId);
     expect(resolved).not.toBeNull();
   });

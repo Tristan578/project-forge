@@ -67,28 +67,28 @@ describe('MaterialLibraryPanel', () => {
   it('renders search input', () => {
     setupStore();
     render(<MaterialLibraryPanel />);
-    expect(screen.getByPlaceholderText('Search materials...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Search materials...')).not.toBeNull();
   });
 
   it('renders category filter pills', () => {
     setupStore();
     render(<MaterialLibraryPanel />);
-    expect(screen.getByText('metal')).toBeDefined();
-    expect(screen.getByText('wood')).toBeDefined();
-    expect(screen.getByText('basic')).toBeDefined();
+    expect(screen.getByText('metal')).not.toBeNull();
+    expect(screen.getByText('wood')).not.toBeNull();
+    expect(screen.getByText('basic')).not.toBeNull();
   });
 
   it('renders material preset names', () => {
     setupStore();
     render(<MaterialLibraryPanel />);
-    expect(screen.getByText('Iron')).toBeDefined();
-    expect(screen.getByText('Oak Wood')).toBeDefined();
+    expect(screen.getByText('Iron')).not.toBeNull();
+    expect(screen.getByText('Oak Wood')).not.toBeNull();
   });
 
   it('shows "Select an entity" message when no primaryId', () => {
     setupStore({ primaryId: null });
     render(<MaterialLibraryPanel />);
-    expect(screen.getByText('Select an entity to apply materials')).toBeDefined();
+    expect(screen.getByText('Select an entity to apply materials')).not.toBeNull();
   });
 
   it('does not show "Select an entity" message when entity selected', () => {
@@ -102,7 +102,7 @@ describe('MaterialLibraryPanel', () => {
     render(<MaterialLibraryPanel />);
     const searchInput = screen.getByPlaceholderText('Search materials...');
     fireEvent.change(searchInput, { target: { value: 'iron' } });
-    expect(screen.getByText('Iron')).toBeDefined();
+    expect(screen.getByText('Iron')).not.toBeNull();
     expect(screen.queryByText('Oak Wood')).toBeNull();
   });
 
@@ -111,7 +111,7 @@ describe('MaterialLibraryPanel', () => {
     render(<MaterialLibraryPanel />);
     const searchInput = screen.getByPlaceholderText('Search materials...');
     fireEvent.change(searchInput, { target: { value: 'xyznotfound' } });
-    expect(screen.getByText('No materials found')).toBeDefined();
+    expect(screen.getByText('No materials found')).not.toBeNull();
   });
 
   it('calls updateMaterial when material card clicked', () => {
@@ -132,7 +132,7 @@ describe('MaterialLibraryPanel', () => {
     // Click metal category to filter — should hide oak wood (wood category)
     const metalButton = screen.getByText('metal').closest('button')!;
     fireEvent.click(metalButton);
-    expect(screen.getByText('Iron')).toBeDefined();
+    expect(screen.getByText('Iron')).not.toBeNull();
     // Oak Wood is in 'wood' category — should be hidden
     expect(screen.queryByText('Oak Wood')).toBeNull();
   });

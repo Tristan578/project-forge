@@ -79,11 +79,11 @@ describe('AnimationInspector', () => {
       },
     });
     render(<AnimationInspector />);
-    expect(screen.getByText('Animation')).toBeDefined();
-    expect(screen.getByText('Playing')).toBeDefined();
-    expect(screen.getByText('Speed')).toBeDefined();
-    expect(screen.getByText('Loop')).toBeDefined();
+    expect(screen.getByText('Animation')).not.toBeNull();
+    expect(screen.getByText('Playing')).not.toBeNull();
+    expect(screen.getByText('Speed')).not.toBeNull();
+    expect(screen.getByText('Loop')).not.toBeNull();
     // Blend weights section for multiple clips
-    expect(screen.getByText('Blend Weights')).toBeDefined();
+    expect(screen.getByText('Blend Weights')).not.toBeNull();
   });
 });

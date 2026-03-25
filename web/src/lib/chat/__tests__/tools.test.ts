@@ -11,11 +11,11 @@ describe('getChatTools', () => {
   it('should have valid tool structure', () => {
     const tools = getChatTools();
     for (const tool of tools) {
-      expect(tool.name).toBeDefined();
+      expect(tool.name).not.toBeUndefined();
       expect(typeof tool.name).toBe('string');
-      expect(tool.description).toBeDefined();
+      expect(tool.description).not.toBeUndefined();
       expect(typeof tool.description).toBe('string');
-      expect(tool.input_schema).toBeDefined();
+      expect(tool.input_schema).not.toBeUndefined();
       expect(tool.input_schema.type).toBe('object');
     }
   });
@@ -23,8 +23,8 @@ describe('getChatTools', () => {
   it('should include spawn_entity tool', () => {
     const tools = getChatTools();
     const spawn = tools.find((t) => t.name === 'spawn_entity');
-    expect(spawn).toBeDefined();
-    expect(spawn!.input_schema.properties).toBeDefined();
+    expect(spawn).not.toBeUndefined();
+    expect(spawn!.input_schema.properties).not.toBeUndefined();
   });
 });
 
@@ -48,11 +48,11 @@ describe('getCommandNames', () => {
 describe('getCommandDef', () => {
   it('should find a known command', () => {
     const cmd = getCommandDef('spawn_entity');
-    expect(cmd).toBeDefined();
+    expect(cmd).not.toBeUndefined();
     expect(cmd!.name).toBe('spawn_entity');
-    expect(cmd!.description).toBeDefined();
-    expect(cmd!.category).toBeDefined();
-    expect(cmd!.parameters).toBeDefined();
+    expect(cmd!.description).not.toBeUndefined();
+    expect(cmd!.category).not.toBeUndefined();
+    expect(cmd!.parameters).not.toBeUndefined();
     expect(typeof cmd!.tokenCost).toBe('number');
   });
 
