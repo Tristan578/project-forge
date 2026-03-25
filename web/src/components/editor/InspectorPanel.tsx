@@ -41,6 +41,8 @@ import {
 import { radToDeg, degToRad } from '@/lib/colorUtils';
 import { useComplexityStore } from '@/stores/slices/complexitySlice';
 
+const EMPTY_COMPONENTS: string[] = [];
+
 export const InspectorPanel = memo(function InspectorPanel() {
   const isSectionVisible = useComplexityStore((s) => s.isInspectorSectionVisible);
   const primaryId = useEditorStore((s) => s.primaryId);
@@ -53,12 +55,11 @@ export const InspectorPanel = memo(function InspectorPanel() {
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
   const hasScript = primaryId ? !!allScripts[primaryId] : false;
   const projectType = useEditorStore((s) => s.projectType);
-  const sceneGraph = useEditorStore((s) => s.sceneGraph);
+  const entityComponents = useEditorStore((s) =>
+    primaryId ? (s.sceneGraph.nodes[primaryId]?.components ?? EMPTY_COMPONENTS) : EMPTY_COMPONENTS
+  );
   const is2D = projectType === '2d';
   const skeletons2d = useEditorStore((s) => s.skeletons2d);
-
-  // Determine entity type from scene graph components
-  const entityType = primaryId ? sceneGraph.nodes[primaryId]?.components : [];
   const hasSkeleton = primaryId ? !!skeletons2d[primaryId] : false;
 
   const [localName, setLocalName] = useState(primaryName ?? '');
@@ -313,7 +314,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* 2D Sprite section (only for sprite entities in 2D projects) */}
-      {is2D && entityType.includes('Sprite') && isSectionVisible('sprite') && (
+      {is2D && entityComponents.includes('Sprite') && isSectionVisible('sprite') && (
         <InspectorErrorBoundary section="Sprite">
           <CollapsibleSection id="sprite" title="Sprite">
             <SpriteInspector />
@@ -322,7 +323,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Sprite Animation section (for sprites with animation data) */}
-      {is2D && entityType.includes('Sprite') && isSectionVisible('sprite-animation') && (
+      {is2D && entityComponents.includes('Sprite') && isSectionVisible('sprite-animation') && (
         <InspectorErrorBoundary section="Sprite Animation">
           <CollapsibleSection id="sprite-animation" title="Sprite Animation">
             <SpriteAnimationInspector />
@@ -331,7 +332,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* Skeletal 2D Animation section (for entities with skeleton data in 2D projects) */}
-      {is2D && primaryId && (hasSkeleton || entityType.includes('Sprite')) && isSectionVisible('skeleton-2d') && (
+      {is2D && primaryId && (hasSkeleton || entityComponents.includes('Sprite')) && isSectionVisible('skeleton-2d') && (
         <InspectorErrorBoundary section="Skeleton 2D">
           <CollapsibleSection id="skeleton-2d" title="Skeleton 2D">
             <SkeletonInspector entityId={primaryId} />
@@ -340,7 +341,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       )}
 
       {/* 2D Camera section (only for camera2d entities in 2D projects) */}
-      {is2D && entityType.includes('Camera2d') && isSectionVisible('camera-2d') && (
+      {is2D && entityComponents.includes('Camera2d') && isSectionVisible('camera-2d') && (
         <InspectorErrorBoundary section="Camera 2D">
           <CollapsibleSection id="camera-2d" title="Camera 2D">
             <Camera2dInspector />
