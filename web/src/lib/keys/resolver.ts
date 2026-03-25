@@ -23,7 +23,7 @@ export class ApiKeyError extends Error {
 }
 
 const PLATFORM_KEY_ENV: Record<Provider, string> = {
-  anthropic: 'PLATFORM_ANTHROPIC_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
   meshy: 'PLATFORM_MESHY_KEY',
   hyper3d: 'PLATFORM_HYPER3D_KEY',
   elevenlabs: 'PLATFORM_ELEVENLABS_KEY',

@@ -87,8 +87,8 @@ describe('GET /api/capabilities', () => {
   // Direct provider keys
   // ---------------------------------------------------------------------------
   describe('direct provider keys', () => {
-    it('marks chat as available when PLATFORM_ANTHROPIC_KEY is set', async () => {
-      vi.stubEnv('PLATFORM_ANTHROPIC_KEY', 'sk-test-key');
+    it('marks chat as available when ANTHROPIC_API_KEY is set', async () => {
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test-key');
       vi.resetModules();
       const mod = await import('../route');
       const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));
@@ -209,7 +209,7 @@ describe('GET /api/capabilities', () => {
     });
 
     it('does not include hint for available capabilities', async () => {
-      vi.stubEnv('PLATFORM_ANTHROPIC_KEY', 'sk-test');
+      vi.stubEnv('ANTHROPIC_API_KEY', 'sk-test');
       vi.resetModules();
       const mod = await import('../route');
       const res = await mod.GET(new NextRequest('http://localhost/api/capabilities'));

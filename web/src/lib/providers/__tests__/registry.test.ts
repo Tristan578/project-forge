@@ -28,7 +28,7 @@ function clearAllProviderEnv(): void {
     'VERCEL_ENV',
     'OPENROUTER_API_KEY',
     'GITHUB_MODELS_PAT',
-    'PLATFORM_ANTHROPIC_KEY',
+    'ANTHROPIC_API_KEY',
     'PLATFORM_OPENAI_KEY',
     'PLATFORM_MESHY_KEY',
     'PLATFORM_HYPER3D_KEY',
@@ -474,7 +474,7 @@ describe('registry — resolveBackendWithCircuitBreaker direct backend provider 
   });
 
   it('returns a route for direct backend chat capability without circuitBreakerWarning', async () => {
-    setEnv({ PLATFORM_ANTHROPIC_KEY: 'sk-test' });
+    setEnv({ ANTHROPIC_API_KEY: 'sk-test' });
     const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');
     const { resetAllBreakers } = await import('@/lib/providers/circuitBreaker');
     resetAllBreakers();
@@ -520,7 +520,7 @@ describe('registry — resolveBackendWithCircuitBreaker direct backend provider 
 
   it('skips direct backend for chat when anthropic breaker is OPEN, falls back to gateway', async () => {
     setEnv({
-      PLATFORM_ANTHROPIC_KEY: 'sk-test',
+      ANTHROPIC_API_KEY: 'sk-test',
       AI_GATEWAY_API_KEY: 'gw-key',
     });
     const { resolveBackendWithCircuitBreaker } = await import('@/lib/providers/registry');

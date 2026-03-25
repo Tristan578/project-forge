@@ -28,7 +28,7 @@ const ALL_CAPABILITIES: ReadonlyArray<ProviderCapability> = [
  * For capabilities that need multiple providers, the primary one is listed.
  */
 const CAPABILITY_ENV_MAP: Record<ProviderCapability, string> = {
-  chat: 'PLATFORM_ANTHROPIC_KEY',
+  chat: 'ANTHROPIC_API_KEY',
   embedding: 'PLATFORM_OPENAI_KEY',
   image: 'PLATFORM_OPENAI_KEY',
   model3d: 'PLATFORM_MESHY_KEY',
@@ -42,7 +42,7 @@ const CAPABILITY_ENV_MAP: Record<ProviderCapability, string> = {
 
 /** Maps a named direct provider to its environment variable */
 const DIRECT_PROVIDER_ENV: Record<string, string> = {
-  anthropic: 'PLATFORM_ANTHROPIC_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
   openai: 'PLATFORM_OPENAI_KEY',
   meshy: 'PLATFORM_MESHY_KEY',
   hyper3d: 'PLATFORM_HYPER3D_KEY',
@@ -90,7 +90,7 @@ export const directBackend: ProviderBackend = {
   getApiKey(): string {
     // Return Anthropic key as the primary key for general use;
     // callers should use getDirectProviderKey() for specific providers
-    return process.env.PLATFORM_ANTHROPIC_KEY ?? '';
+    return process.env.ANTHROPIC_API_KEY ?? '';
   },
 
   getEndpoint(): string {

@@ -9,7 +9,7 @@ import { rateLimitPublicRoute } from '@/lib/rateLimit';
  */
 const CAPABILITY_KEY_MAP: Record<ProviderCapability, string[]> = {
   chat: [
-    'PLATFORM_ANTHROPIC_KEY',
+    'ANTHROPIC_API_KEY',
     'AI_GATEWAY_API_KEY',
     'OPENROUTER_API_KEY',
     'GITHUB_MODELS_PAT',
@@ -36,7 +36,7 @@ const CAPABILITY_KEY_MAP: Record<ProviderCapability, string[]> = {
 
 /** Human-readable provider names for each env var */
 const ENV_VAR_PROVIDER_NAMES: Record<string, string> = {
-  PLATFORM_ANTHROPIC_KEY: 'Anthropic',
+  ANTHROPIC_API_KEY: 'Anthropic',
   PLATFORM_OPENAI_KEY: 'OpenAI',
   PLATFORM_MESHY_KEY: 'Meshy',
   PLATFORM_ELEVENLABS_KEY: 'ElevenLabs',
