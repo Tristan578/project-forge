@@ -8,6 +8,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { refundTokens } from '@/lib/tokens/service';
 import {
   sanitizeChatInput,
+  sanitizeSystemPrompt,
   validateBodySize,
   detectPromptInjection,
 } from '@/lib/chat/sanitizer';
@@ -423,11 +424,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // 6. Build system prompt with optional scene context and doc context
-  const effectiveSystemPrompt =
-    typeof systemOverride === 'string' && systemOverride.length > 0
-      ? systemOverride
-      : SYSTEM_PROMPT;
+  // 6. Build system prompt with optional scene context and doc context.
+  // systemOverride replaces the default system prompt for features like game
+  // review and tutorial generation. It is NOT user-controlled free text — it
+  // comes from application code that constructs domain-specific instructions.
+  // We sanitize (strip control chars, enforce length cap) but skip the
+  // injection-pattern check: detectPromptInjection targets user messages
+  // attempting to hijack the system prompt from *within* a conversation turn,
+  // which is a different threat model. Applying it here false-positives on
+  // legitimate instructional phrasing like "you are now a game reviewer" or
+  // "new instruction: focus on level design" (PF-968, PF-901).
+  let effectiveSystemPrompt = SYSTEM_PROMPT;
+  if (typeof systemOverride === 'string' && systemOverride.length > 0) {
+    // Strip control characters and enforce system-prompt length cap.
+    // sanitizeSystemPrompt uses MAX_SYSTEM_PROMPT_LENGTH (10,000) — NOT the
+    // 4,000-char user-message limit — so valid long system prompts are never
+    // silently truncated.
+    effectiveSystemPrompt = sanitizeSystemPrompt(systemOverride);
+  }
 
   let systemText = effectiveSystemPrompt;
   if (sceneContext) {
