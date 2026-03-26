@@ -166,9 +166,10 @@ describe('GET /api/tokens/balance — negative cases', () => {
   });
 
   it('returns 401 when Clerk is not configured (no auth)', async () => {
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: false,
-      response: makeUnauthedResponse(),
+    mockWithApiMiddleware.mockResolvedValue({
+      error: makeUnauthedResponse(),
+      userId: null,
+      authContext: null,
     });
 
     const { GET } = await import('@/app/api/tokens/balance/route');
@@ -179,9 +180,10 @@ describe('GET /api/tokens/balance — negative cases', () => {
 
   it('returns token balance when auth succeeds', async () => {
     const fakeBalance = { monthlyRemaining: 100, monthlyTotal: 500, addon: 0, total: 100 };
-    mockAuthenticateRequest.mockResolvedValue({
-      ok: true,
-      ctx: { user: { id: 'user-1' }, clerkId: 'clerk_1' },
+    mockWithApiMiddleware.mockResolvedValue({
+      error: undefined,
+      userId: 'user-1',
+      authContext: { user: { id: 'user-1' }, clerkId: 'clerk_1' },
     });
     mockGetTokenBalance.mockResolvedValue(fakeBalance);
 
