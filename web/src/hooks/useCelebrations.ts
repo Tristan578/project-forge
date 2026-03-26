@@ -110,10 +110,5 @@ export function useCelebrations(): UseCelebrationsReturn {
     return unsub;
   }, [enqueueData]);
 
-  // Expose the current engine mode and entity count for consumers (unused in this
-  // component but keeps the hook reactive so callers re-render with activeCelebration)
-  useEditorStore((s) => s.nodeCount);
-  useEditorStore((s) => s.engineMode);
-
   return { activeCelebration, dismissCelebration, triggerMilestone };
 }

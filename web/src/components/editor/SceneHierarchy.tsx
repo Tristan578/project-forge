@@ -359,11 +359,12 @@ export const SceneHierarchy = memo(function SceneHierarchy() {
       const targetNode = sceneGraph.nodes[targetEntityId];
       newParentId = targetNode?.parentId ?? null;
 
-      // Calculate insert index
+      // Calculate insert index using a Map for O(1) lookup instead of O(N) indexOf.
       const siblings = newParentId
         ? sceneGraph.nodes[newParentId]?.children ?? []
         : sceneGraph.rootIds;
-      const targetIndex = siblings.indexOf(targetEntityId);
+      const siblingIndexMap = new Map(siblings.map((id, i) => [id, i]));
+      const targetIndex = siblingIndexMap.get(targetEntityId) ?? -1;
       insertIndex = zone === 'before' ? targetIndex : targetIndex + 1;
     }
 

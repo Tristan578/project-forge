@@ -237,41 +237,59 @@ function ScoreBadge({ score }: { score: number }) {
 // Main Panel
 // ---------------------------------------------------------------------------
 
+/**
+ * Selector that produces a stable string key encoding only the data that pacing
+ * analysis uses: entity order, names, and first component types. Zustand will
+ * re-render only when this string changes — not on transform or visibility
+ * updates (PF-873).
+ *
+ * Exported for unit testing only.
+ */
+export function selectPacingKey(s: { sceneGraph: { nodes: Record<string, { name: string; components: string[]; visible: boolean }>; rootIds: string[] } }): string {
+  const { nodes, rootIds } = s.sceneGraph;
+  const allIds = Object.keys(nodes);
+  if (allIds.length === 0) return '';
+
+  const rootIdSet = new Set(rootIds);
+  const ordered = [
+    ...rootIds,
+    ...allIds.filter((id) => !rootIdSet.has(id)),
+  ];
+  // Encode as \x01-separated "id\x02name\x02component" entries. Using control
+  // characters as delimiters avoids collisions with entity names or component
+  // types that may contain `:` or `|`.
+  return ordered
+    .map((id) => {
+      const node = nodes[id];
+      if (!node) return null;
+      return `${id}\x02${node.name}\x02${node.components[0] ?? 'generic'}`;
+    })
+    .filter(Boolean)
+    .join('\x01');
+}
+
 export function PacingAnalyzerPanel() {
-  const nodes = useEditorStore((s) => s.sceneGraph.nodes);
-  const rootIds = useEditorStore((s) => s.sceneGraph.rootIds);
+  // Subscribe only to the pacing-relevant identity key (PF-873).
+  // This avoids re-running full analysis on transform or visibility changes.
+  const pacingKey = useEditorStore(selectPacingKey);
   const [selectedTemplate, setSelectedTemplate] = useState<PacingTemplateId | ''>('');
 
-  // Convert scene graph entities to descriptors.
-  // Iterate over rootIds (plus all nodes) so that transform-only updates
-  // (which mutate node data but don't change rootIds) do NOT trigger a
-  // recompute of the entity list.
+  // Rebuild entity descriptor list only when the pacing key changes.
   const entities: SceneEntityDescriptor[] = useMemo(() => {
-    const allIds = Object.keys(nodes);
-    if (allIds.length === 0) return [];
+    if (!pacingKey) return [];
 
-    // Distribute entities evenly across 0–1 based on their order.
-    // Use rootIds to define ordering for root-level entities; remaining
-    // children follow in insertion order.
-    const rootIdSet = new Set(rootIds);
-    const ordered = [
-      ...rootIds,
-      ...allIds.filter((id) => !rootIdSet.has(id)),
-    ];
-    return ordered
-      .map((id, idx) => {
-        const node = nodes[id];
-        if (!node) return null;
-        return {
-          id,
-          name: node.name,
-          type: node.components[0] ?? 'generic',
-          position: ordered.length > 1 ? idx / (ordered.length - 1) : 0.5,
-          tags: extractTags(node.name, node.components[0]),
-        };
-      })
-      .filter((e): e is SceneEntityDescriptor => e !== null);
-  }, [rootIds, nodes]);
+    const entries = pacingKey.split('\x01');
+    return entries.map((entry, idx) => {
+      const [id, name, type] = entry.split('\x02');
+      return {
+        id,
+        name,
+        type,
+        position: entries.length > 1 ? idx / (entries.length - 1) : 0.5,
+        tags: extractTags(name, type),
+      };
+    });
+  }, [pacingKey]);
 
   const analysis: PacingAnalysis | null = useMemo(() => {
     if (entities.length === 0) return null;
