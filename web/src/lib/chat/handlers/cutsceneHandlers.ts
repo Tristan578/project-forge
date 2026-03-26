@@ -176,7 +176,7 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
     };
   },
 
-  delete_cutscene: async (args, _ctx) => {
+  delete_cutscene: async (args, ctx) => {
     const p = parseArgs(
       z.object({
         cutsceneId: z.string().min(1),
@@ -192,11 +192,16 @@ export const cutsceneHandlers: Record<string, ToolHandler> = {
       return { success: false, error: `Cutscene "${p.data.cutsceneId}" not found` };
     }
 
-    // Stop the active player if the deleted cutscene is currently playing
+    // Stop the active player if the deleted cutscene is currently playing.
+    // Must dispatch 'stop' to the engine explicitly — same pattern as
+    // stop_cutscene. Setting activePlayer = null before player.stop() prevents
+    // the onStop callback from double-dispatching, so we dispatch here.
     if (activePlayer && state.activeCutsceneId === p.data.cutsceneId) {
       const player = activePlayer;
       activePlayer = null;
       player.stop();
+      state.setActiveCutscene(null);
+      ctx.dispatchCommand('stop', {});
     }
 
     state.deleteCutscene(p.data.cutsceneId);
