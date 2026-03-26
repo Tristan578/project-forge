@@ -15,8 +15,16 @@ INPUT=$(cat)
 # If taskboard API isn't available, warn but don't block
 if ! tb_api_available; then
     echo "[TASKBOARD] Server not reachable. Start it before doing development work."
-    echo "  taskboard start --port 3010 --db .claude/taskboard.db"
+    echo "  taskboard start --port 3010    # NO --db flag — use OS default"
     exit 0
+fi
+
+# Health check: verify board has data (lesson #56)
+BOARD_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
+if [ "$BOARD_COUNT" = "0" ]; then
+    echo "[TASKBOARD WARNING] Board has 0 tickets — wrong DB path or sync needed."
+    echo "  Kill and restart: pkill taskboard && taskboard start --port 3010"
+    echo "  Then sync: python3 .claude/hooks/github_project_sync.py pull"
 fi
 
 # Check for stale in-progress tickets

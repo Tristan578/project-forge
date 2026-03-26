@@ -54,15 +54,30 @@ if ! tb_api_available; then
 ╠══════════════════════════════════════════════════════════════╣
 ║  Could not auto-start the taskboard server.                  ║
 ║                                                              ║
-║  Start manually:                                             ║
+║  Start manually (NO --db flag — use OS default):             ║
 ║    cd project-forge                                          ║
-║    taskboard start --port 3010 --db .claude/taskboard.db     ║
+║    taskboard start --port 3010                               ║
 ║                                                              ║
 ║  ALL work MUST be tracked. You CANNOT proceed without it.    ║
 ╚══════════════════════════════════════════════════════════════╝
 EOF
         exit 0
     fi
+fi
+
+# ── HEALTH CHECK: Verify board has data (lesson #56) ────────────────────
+# An empty board means wrong DB path. This catches it immediately.
+HEALTH_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
+if [ "$HEALTH_COUNT" = "0" ]; then
+    echo ""
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║  WARNING: TASKBOARD HAS 0 TICKETS                          ║"
+    echo "╠══════════════════════════════════════════════════════════════╣"
+    echo "║  The board is empty. This usually means the wrong DB path   ║"
+    echo "║  or a sync is needed from the GitHub Project.               ║"
+    echo "║                                                              ║"
+    echo "║  Attempting GitHub sync to populate the board...             ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
 fi
 
 # ── Step 3: Pull remote changes from GitHub Project ───────────────────────

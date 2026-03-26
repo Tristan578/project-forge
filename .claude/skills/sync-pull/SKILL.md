@@ -46,7 +46,7 @@ This runs automatically via the **SessionStart hook** when a Claude Code session
 ## Prerequisites
 
 - `gh` CLI authenticated (`gh auth status`)
-- Taskboard API running (`taskboard start --port 3010 --db .claude/taskboard.db`)
+- Taskboard API running (`taskboard start --port 3010` — no `--db` flag, uses OS default)
 - GitHub Project "SpawnForge" (#2) exists with Todo/In Progress/Done columns
 
 ## Conflict Resolution

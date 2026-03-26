@@ -262,7 +262,7 @@ if [ "$MODE" = "onboard" ]; then
   if curl -s http://localhost:3010/api/health > /dev/null 2>&1; then
     pass "Taskboard server running at :3010"
   else
-    warn "Taskboard not running (run: taskboard start --port 3010 --db .claude/taskboard.db)"
+    warn "Taskboard not running (run: taskboard start --port 3010)"
   fi
 fi
 

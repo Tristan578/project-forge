@@ -72,8 +72,8 @@ tb_auto_start() {
             # If ticket count is 0, the DB path is wrong (lesson #56).
             TICKET_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
             if [ "$TICKET_COUNT" = "0" ]; then
-                echo "[TASKBOARD WARNING] Board has 0 tickets — possible wrong DB path. Expected 100+." >&2
-                echo "[TASKBOARD WARNING] Check: is --db flag being passed? OS default should be used." >&2
+                echo "[TASKBOARD WARNING] Board has 0 tickets — possible wrong DB path or sync needed." >&2
+                echo "[TASKBOARD WARNING] Try: python3 .claude/hooks/github_project_sync.py pull" >&2
             fi
             return 0
         fi
