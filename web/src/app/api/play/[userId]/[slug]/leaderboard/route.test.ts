@@ -1,6 +1,6 @@
 vi.mock('server-only', () => ({}));
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db/client';
 
@@ -217,6 +217,14 @@ describe('GET /api/play/[userId]/[slug]/leaderboard', () => {
 describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  // pruneLeaderboard is fire-and-forget inside the route. Flush the microtask
+  // queue after each test so the async chain completes before vi.clearAllMocks()
+  // runs for the next test. Without this, the pruning continuation can consume
+  // mock calls from the subsequent test's getDb mock sequence, causing 500s.
+  afterEach(async () => {
+    await new Promise<void>(resolve => setImmediate(resolve));
   });
 
   function makePostDb(board = BOARD_DESC, recentSubmission: unknown = undefined) {
