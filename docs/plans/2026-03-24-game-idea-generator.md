@@ -48,7 +48,7 @@ An AI-powered idea generator that produces structured game concepts with system 
 - Mechanics database is static (bundled, not fetched) — fast, no network dependency
 - Idea generation uses minimal tokens (~300 per idea) to keep costs low
 - `start_from_idea` reuses existing `create_scene` compound action — no new engine commands
-- No user data collection beyond anonymized genre frequencies from public games
+- No user data collection beyond anonymized system-composition frequencies from public games
 
 ## Acceptance Criteria
 
