@@ -399,7 +399,7 @@ describe('refundTokens', () => {
   it('refunds monthly tokens for monthly source', async () => {
     const { refundTokens } = await import('../service');
 
-    // 1st where: select().from(tokenUsage).where() -> chainable (needs .limit)
+    // 1st where: select usage record
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-1',
@@ -409,7 +409,11 @@ describe('refundTokens', () => {
       provider: 'anthropic',
     }]);
 
-    // 2nd where: update().set().where() -> awaitable directly
+    // 2nd where: idempotency check (no existing refund)
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([]);
+
+    // 3rd where: update().set().where() -> awaitable directly
     mockWhere.mockResolvedValueOnce([]);
 
     // insert refund log: insert().values() -> no returning
@@ -421,10 +425,34 @@ describe('refundTokens', () => {
     expect(mockInsert).toHaveBeenCalled();
   });
 
+  it('is idempotent — skips if already refunded', async () => {
+    const { refundTokens } = await import('../service');
+
+    // 1st where: select usage record
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-dup',
+      userId: 'user-1',
+      tokens: 20,
+      source: 'addon',
+      provider: 'anthropic',
+    }]);
+
+    // 2nd where: idempotency check — existing refund found
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{ id: 'refund-exists' }]);
+
+    await refundTokens('user-1', 'usage-dup');
+
+    // Should NOT update or insert — already refunded
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockInsert).not.toHaveBeenCalled();
+  });
+
   it('refunds addon tokens for addon source', async () => {
     const { refundTokens } = await import('../service');
 
-    // 1st where: select chain
+    // 1st where: select usage record
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-2',
@@ -434,7 +462,11 @@ describe('refundTokens', () => {
       provider: null,
     }]);
 
-    // 2nd where: update chain
+    // 2nd where: idempotency check (no existing refund)
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([]);
+
+    // 3rd where: update chain
     mockWhere.mockResolvedValueOnce([]);
 
     // insert refund log
@@ -448,7 +480,7 @@ describe('refundTokens', () => {
   it('refunds to addon for mixed source', async () => {
     const { refundTokens } = await import('../service');
 
-    // 1st where: select chain
+    // 1st where: select usage record
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-3',
@@ -458,7 +490,11 @@ describe('refundTokens', () => {
       provider: 'meshy',
     }]);
 
-    // 2nd where: update chain
+    // 2nd where: idempotency check (no existing refund)
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([]);
+
+    // 3rd where: update chain
     mockWhere.mockResolvedValueOnce([]);
 
     // insert refund log

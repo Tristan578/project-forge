@@ -181,6 +181,24 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
 
   if (!record) return;
 
+  // Idempotency: check if this usageId was already refunded.
+  // The refund log stores { refundedUsageId } in metadata — if a matching
+  // refund record exists, this is a duplicate call (e.g., server + client
+  // both triggering refund for the same failed job). Skip silently.
+  const [existingRefund] = await db
+    .select({ id: tokenUsage.id })
+    .from(tokenUsage)
+    .where(
+      and(
+        eq(tokenUsage.userId, userId),
+        eq(tokenUsage.operation, 'refund'),
+        sql`${tokenUsage.metadata}->>'refundedUsageId' = ${usageId}`,
+      )
+    )
+    .limit(1);
+
+  if (existingRefund) return; // Already refunded — idempotent no-op
+
   // Reverse the deduction based on source
   if (record.source === 'monthly') {
     await db
