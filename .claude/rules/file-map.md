@@ -97,7 +97,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 
 ### Libraries (`lib/`)
 - `chat/executor.ts` — Handler registry dispatcher, delegates to `chat/handlers/` (all handlers fully migrated)
-- `chat/handlers/` — Domain tool handlers (transform, material, query + types/helpers)
+- `chat/handlers/` — 29 domain tool handler files (transform, material, entity, physics, audio, animation, sprite, shader, scene, script, query, export, asset, compound, generation, gameplay, economy, dialogue, cutscene, localization, idea, world, uiBuilder, pixelArt, editMode, performance, security, leaderboard + types/helpers)
 - `chat/context.ts` — Scene context for AI
 - `scripting/` — Web Worker sandbox, forge.* API types, templates
 - `audio/` — Web Audio API manager (spatial, per-entity nodes)
