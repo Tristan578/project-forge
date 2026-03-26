@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/auth/safe-auth';
 import type { Metadata } from 'next';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,7 @@ export const metadata: Metadata = {
 };
 
 export default async function Home() {
-  const { userId } = await auth();
+  const { userId } = await safeAuth();
   if (userId) {
     redirect('/dashboard');
   }
