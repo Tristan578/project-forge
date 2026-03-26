@@ -163,6 +163,7 @@ function makeNewPublicationDb(options: {
     insert: vi.fn()
       .mockReturnValueOnce(mockInsert()) // publication insert
       .mockReturnValueOnce(mockInsertTags()), // tags insert (if tags exist)
+    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
 }
 

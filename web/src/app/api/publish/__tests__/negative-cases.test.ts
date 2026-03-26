@@ -117,6 +117,7 @@ function makeNewPublicationDb() {
     insert: vi.fn()
       .mockReturnValueOnce(mockInsertPublication)
       .mockReturnValueOnce(mockInsertTags),
+    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
 }
 
