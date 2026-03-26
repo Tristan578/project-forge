@@ -228,11 +228,11 @@ export function SpriteSheetImportDialog({ isOpen, onClose }: SpriteSheetImportDi
   const clipCount = Object.keys(clips).length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" role="dialog" aria-modal="true" aria-labelledby="sprite-import-dialog-title">
       <div className="w-full max-w-2xl rounded-lg bg-zinc-900 shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">
-          <h2 className="text-base font-semibold text-zinc-100">Import Sprite Sheet</h2>
+          <h2 id="sprite-import-dialog-title" className="text-base font-semibold text-zinc-100">Import Sprite Sheet</h2>
           <button
             onClick={onClose}
             className="rounded p-1 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200"

@@ -2,13 +2,13 @@
 
 Manual verification checklist for user-facing features. Run these after major changes to ensure end-to-end functionality.
 
-> **Automated tests:** ~4700+ unit tests (`cd web && npx vitest run`), 81 E2E tests (`cd web && npx playwright test`), 25 MCP tests (`cd mcp-server && npx vitest run`)
+> **Automated tests:** 13,600+ unit tests (`cd web && npx vitest run`), 81 E2E tests (`cd web && npx playwright test`), 25 MCP tests (`cd mcp-server && npx vitest run`)
 
 ## Prerequisites
 
 - WASM engine built (`./build_wasm.sh` or `.\build_wasm.ps1`)
 - Dev server running (`cd web && npm run dev`)
-- Open `http://localhost:3000/dev` (bypasses auth)
+- Open `http://spawnforge.localhost:1355/dev` (bypasses auth). Fallback: `http://localhost:3000/dev`
 
 ---
 

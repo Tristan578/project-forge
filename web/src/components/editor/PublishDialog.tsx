@@ -87,10 +87,10 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" role="dialog" aria-modal="true" aria-labelledby="publish-dialog-title">
       <div className="w-full max-w-md rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-lg font-semibold text-zinc-200">
+          <h2 id="publish-dialog-title" className="flex items-center gap-2 text-lg font-semibold text-zinc-200">
             <Globe size={20} />
             Publish Game
           </h2>
