@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import {
   buildTranslationPrompt,
   parseTranslationResponse,
@@ -31,6 +31,10 @@ export async function POST(request: NextRequest) {
   // 1. Authenticate
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
+  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
+  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
 
   // 2. Rate limit — 5 requests / 10 min per user (translation is expensive)
   const rl = await distributedRateLimit(`gen-localize:${authResult.ctx.user.id}`, 5, 600);

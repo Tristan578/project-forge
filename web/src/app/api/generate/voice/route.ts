@@ -7,7 +7,7 @@ import { getTokenCost } from '@/lib/tokens/pricing';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 
@@ -15,6 +15,10 @@ export async function POST(request: NextRequest) {
   // 1. Authenticate
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
+  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
+  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
 
   // 1b. Rate limit: 10 generation requests per 5 minutes per user (distributed)
   const rl = await distributedRateLimit(`gen-voice:${authResult.ctx.user.id}`, 10, 300);

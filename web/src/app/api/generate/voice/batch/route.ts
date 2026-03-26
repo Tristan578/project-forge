@@ -5,7 +5,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { ElevenLabsClient } from '@/lib/generate/elevenlabsClient';
 import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
@@ -26,6 +26,10 @@ interface VoiceSettings {
 export async function POST(request: NextRequest) {
   const authResult = await authenticateRequest();
   if (!authResult.ok) return authResult.response;
+
+  // Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
+  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
+  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
 
   // Rate limit: 5 batch requests per 5 minutes per user
   const rl = await distributedRateLimit(`gen-voice-batch:${authResult.ctx.user.id}`, 5, 300);
