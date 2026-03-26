@@ -46,7 +46,7 @@ powershell.exe -File ".\build_wasm.ps1"
 ```
 
 ```bash
-cd web && npm run dev                    # Dev server (--webpack, NOT Turbopack)
+cd web && npm run dev                    # Dev server
 cd web && npm run build                  # Production build
 cd web && npx eslint --max-warnings 0    # Lint (ZERO warnings enforced)
 ```
@@ -63,6 +63,8 @@ python .claude/skills/arch-validator/check_arch.py   # Arch validator
 
 - Do NOT use native `cargo check`/`cargo build` without `--target wasm32-unknown-unknown`
 - Local testing without DB: use `http://spawnforge.localhost:1355/dev` (bypasses auth). Fallback: `http://localhost:3000/dev`
+- **neon-http transactions:** `db.transaction()` MUST NOT be used — throws "No transactions support in neon-http driver". Use `getNeonSql()` → `neonSql.transaction([...statements])`. INSERT...SELECT must run BEFORE any UPDATE it reads from (PostgreSQL sees prior statements' effects within a transaction).
+- **Server Component auth:** Never call `auth()` from `@clerk/nextjs/server` directly in page files. Use `safeAuth()` from `@/lib/auth/safe-auth.ts` — returns `{ userId: null }` when Clerk is not configured (CI/E2E).
 
 ## Cargo Features
 
