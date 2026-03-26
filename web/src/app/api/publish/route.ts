@@ -172,7 +172,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ publication: { ...updated, url: gameUrl } });
   }
 
-  // Create new publication
+  // Create new publication — use onConflictDoUpdate to handle concurrent
+  // publishes with the same slug atomically (PF-212: TOCTOU fix).
+  // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
   const [publication] = await db.insert(publishedGames)
     .values({
       userId: user.id,
@@ -183,6 +185,17 @@ export async function POST(request: NextRequest) {
       status: 'published',
       cdnUrl: gameUrl,
       thumbnail,
+    })
+    .onConflictDoUpdate({
+      target: [publishedGames.userId, publishedGames.slug],
+      set: {
+        title: titleResult.value,
+        description: descResult.value ?? null,
+        status: 'published',
+        cdnUrl: gameUrl,
+        thumbnail,
+        updatedAt: new Date(),
+      },
     })
     .returning();
 
