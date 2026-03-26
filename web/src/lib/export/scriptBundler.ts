@@ -87,7 +87,7 @@ export function bundleScripts(
 
   // Register entity scripts (JSON-encoded to prevent closure breakout)
 ${enabledScripts.map(([entityId, script]) => `
-  scripts['${entityId}'] = (function(forge) {
+  scripts[${JSON.stringify(entityId)}] = (function(forge) {
     const src = ${JSON.stringify(script.source)};
     const fn = new Function('forge', src + '; return { onStart: typeof onStart === "function" ? onStart : null, onUpdate: typeof onUpdate === "function" ? onUpdate : null, onDestroy: typeof onDestroy === "function" ? onDestroy : null };');
     return fn(forge);
