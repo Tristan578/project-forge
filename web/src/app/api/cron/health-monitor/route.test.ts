@@ -29,13 +29,13 @@ describe('GET /api/cron/health-monitor', () => {
     vi.clearAllMocks();
     process.env = { ...originalEnv, CRON_SECRET };
     vi.mocked(runAllHealthChecks).mockResolvedValue({
-      overall: 'ok',
+      overall: 'healthy',
       timestamp: new Date().toISOString(),
       environment: 'test',
       version: '1.0.0',
       services: [
-        { name: 'Database (Neon)', status: 'healthy', latencyMs: 10 },
-        { name: 'Clerk', status: 'healthy', latencyMs: 20 },
+        { name: 'Database (Neon)', status: 'healthy', latencyMs: 10, lastChecked: new Date().toISOString() },
+        { name: 'Clerk', status: 'healthy', latencyMs: 20, lastChecked: new Date().toISOString() },
       ],
     });
     vi.mocked(computeCriticalStatus).mockReturnValue('ok');
@@ -66,7 +66,7 @@ describe('GET /api/cron/health-monitor', () => {
     const data = await res.json();
 
     expect(res.status).toBe(200);
-    expect(data.overall).toBe('ok');
+    expect(data.overall).toBe('healthy');
     expect(data.failureCount).toBe(0);
   });
 
@@ -77,8 +77,8 @@ describe('GET /api/cron/health-monitor', () => {
       environment: 'test',
       version: '1.0.0',
       services: [
-        { name: 'Database (Neon)', status: 'healthy', latencyMs: 10 },
-        { name: 'Upstash Redis', status: 'degraded', latencyMs: 500, error: 'Slow' },
+        { name: 'Database (Neon)', status: 'healthy', latencyMs: 10, lastChecked: new Date().toISOString() },
+        { name: 'Upstash Redis', status: 'degraded', latencyMs: 500, lastChecked: new Date().toISOString(), error: 'Slow' },
       ],
     });
     vi.mocked(computeCriticalStatus).mockReturnValue('ok');
@@ -93,13 +93,13 @@ describe('GET /api/cron/health-monitor', () => {
 
   it('still returns 200 even when services fail (Vercel cron requirement)', async () => {
     vi.mocked(runAllHealthChecks).mockResolvedValue({
-      overall: 'error',
+      overall: 'down',
       timestamp: new Date().toISOString(),
       environment: 'test',
       version: '1.0.0',
       services: [
-        { name: 'Database (Neon)', status: 'down', latencyMs: 0, error: 'Connection refused' },
-        { name: 'Clerk', status: 'down', latencyMs: 0, error: 'Timeout' },
+        { name: 'Database (Neon)', status: 'down', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'Connection refused' },
+        { name: 'Clerk', status: 'down', latencyMs: 0, lastChecked: new Date().toISOString(), error: 'Timeout' },
       ],
     });
     vi.mocked(computeCriticalStatus).mockReturnValue('down');
