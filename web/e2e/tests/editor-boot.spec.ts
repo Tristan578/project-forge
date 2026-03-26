@@ -24,11 +24,9 @@ test.describe('Editor Boot @smoke', () => {
   test('editor layout container is present after hydration', async ({ editor, page }) => {
     await editor.loadPage();
 
-    // The dockview root element is the root of the editor layout.
-    // Its presence confirms EditorLayout mounted and WorkspaceProvider rendered
-    // the dockview workspace successfully. The dockview library injects the
-    // class "dv-dockview" on its root container element.
-    const container = page.locator('.dv-dockview').first();
+    // The dockview container is the root of the editor layout.
+    // Its presence confirms EditorLayout mounted and rendered successfully.
+    const container = page.locator('.dv-dockview-container').first();
     await expect(container).toBeVisible({ timeout: 10_000 });
   });
 
@@ -45,18 +43,11 @@ test.describe('Editor Boot @smoke', () => {
 
     // Filter out known non-fatal browser noise (e.g. extension injections).
     // We only fail on errors that originate from the app itself.
-    //
-    // CSP violations for Vercel Analytics / Speed Insights scripts are excluded:
-    // the app's CSP intentionally does not whitelist va.vercel-scripts.com —
-    // those are third-party telemetry scripts that inject only in Vercel
-    // preview/production deployments. Blocking them is correct and has no
-    // effect on editor functionality.
     const appErrors = consoleErrors.filter(
       (msg) =>
         !msg.includes('favicon') &&
         !msg.includes('chrome-extension') &&
-        !msg.includes('moz-extension') &&
-        !msg.includes('Content Security Policy'),
+        !msg.includes('moz-extension'),
     );
 
     expect(appErrors, `Console errors during boot: ${appErrors.join('\n')}`).toHaveLength(0);
