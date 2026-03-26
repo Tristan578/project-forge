@@ -1,5 +1,6 @@
 import type { ScriptData } from '@/stores/editorStore';
 import { injectLoopGuards } from '@/lib/scripting/loopGuards';
+import { SHADOWED_GLOBALS } from '@/lib/scripting/sandboxGlobals';
 
 interface BundledScripts {
   /** The complete JS bundle as a string */
@@ -98,8 +99,8 @@ ${enabledScripts.map(([entityId, script]) => {
     return `
   scripts[${JSON.stringify(entityId)}] = (function(forge) {
     ${resetFn}
-    var fn = new Function('forge', '__loopLimit', '__resetGuards', ${JSON.stringify(guardedSource)} + '; return { onStart: typeof onStart === "function" ? function(){__resetGuards();onStart();} : null, onUpdate: typeof onUpdate === "function" ? function(dt){__resetGuards();onUpdate(dt);} : null, onDestroy: typeof onDestroy === "function" ? function(){__resetGuards();onDestroy();} : null };');
-    return fn(forge, __loopLimit, __resetGuards);
+    var fn = new Function('forge', '__loopLimit', '__resetGuards', ${[...SHADOWED_GLOBALS].map(g => JSON.stringify(g)).join(', ')}, ${JSON.stringify(guardedSource)} + '; return { onStart: typeof onStart === "function" ? function(){__resetGuards();onStart();} : null, onUpdate: typeof onUpdate === "function" ? function(dt){__resetGuards();onUpdate(dt);} : null, onDestroy: typeof onDestroy === "function" ? function(){__resetGuards();onDestroy();} : null };');
+    return fn(forge, __loopLimit, __resetGuards, ${[...SHADOWED_GLOBALS].map(() => 'undefined').join(', ')});
   })(forge);`;
   }).join('\n')}
 

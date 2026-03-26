@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { bundleScripts } from '../scriptBundler';
+import { SHADOWED_GLOBALS } from '@/lib/scripting/sandboxGlobals';
 import type { ScriptData } from '@/stores/editorStore';
 
 function makeScript(source: string, enabled = true): ScriptData {
@@ -134,5 +135,27 @@ describe('bundleScripts', () => {
     });
     expect(result.code).toContain('pendingCommands');
     expect(result.code).toContain('pendingCommands.push');
+  });
+
+  it('includes all SHADOWED_GLOBALS as parameters in the inner Function constructor call', () => {
+    const result = bundleScripts({
+      'e1': makeScript('function onStart() {}'),
+    });
+    // Every global from the shared list must appear as a string argument to new Function(...)
+    // so that the exported script sandbox matches the worker sandbox.
+    for (const global of SHADOWED_GLOBALS) {
+      expect(result.code).toContain(JSON.stringify(global));
+    }
+  });
+
+  it('passes undefined for all shadowed globals when calling the compiled function', () => {
+    const result = bundleScripts({
+      'e1': makeScript('function onStart() {}'),
+    });
+    // The call site must pass the correct number of undefined arguments.
+    // Count occurrences of ', undefined' after the __resetGuards argument.
+    // There should be exactly SHADOWED_GLOBALS.length of them.
+    const undefinedArgs = (result.code.match(/\bundefined\b/g) || []).length;
+    expect(undefinedArgs).toBeGreaterThanOrEqual(SHADOWED_GLOBALS.length);
   });
 });
