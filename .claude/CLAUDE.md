@@ -287,6 +287,7 @@ Loop continues until all 4 pass clean. No shortcuts.
 | `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows relevant anti-patterns before action |
 | `pre-push-quality-gate.sh` | PreToolUse (Bash: git push) | Runs lint+tsc on changed files before push |
 | `verify-branch.sh` | PreToolUse (Edit/Write) | Prevents edits on wrong branch |
+| `check-db-transaction.sh` | PreToolUse (Edit/Write) | Warns if db.transaction() used (neon-http crashes) |
 | `post-edit-lint.sh` | PostToolUse (Edit/Write) | Auto-lint after file changes |
 | `check-arch.sh` | PostToolUse (Edit/Write) | Architecture boundary check |
 | `post-commit-clean.sh` | PostToolUse (Bash) | Cleanup after git commits |
