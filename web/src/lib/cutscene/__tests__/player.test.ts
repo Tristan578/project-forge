@@ -142,9 +142,19 @@ describe('CutscenePlayer', () => {
     expect(() => player.play()).not.toThrow();
   });
 
-  it('stop calls onStop', () => {
+  it('stop calls onStop when playback was active', () => {
+    const cs = {
+      id: 'cs1', name: 'Test', duration: 10, tracks: [], createdAt: 0, updatedAt: 0,
+    };
+    player.load(cs);
+    player.play();
     player.stop();
     expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it('stop does not call onStop when nothing was playing', () => {
+    player.stop();
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it('stop resets playback time in store', () => {
