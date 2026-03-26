@@ -59,9 +59,12 @@ export function generateManifest(options: PwaOptions): string {
 /**
  * Generate service worker for offline caching
  */
-export function generateServiceWorker(): string {
+export function generateServiceWorker(version?: string): string {
+  // Use a version-specific cache name so republished games bust the old cache (PF-208).
+  // Falls back to a timestamp if no version is provided.
+  const cacheVersion = version ?? Date.now().toString(36);
   return `// SpawnForge Game - Service Worker
-const CACHE_NAME = 'forge-game-v1';
+const CACHE_NAME = 'forge-game-${cacheVersion}';
 const urlsToCache = [
   '.',
   './index.html',

@@ -1,4 +1,5 @@
 import type { ScriptData } from '@/stores/editorStore';
+import { injectLoopGuards } from '@/lib/scripting/loopGuards';
 
 interface BundledScripts {
   /** The complete JS bundle as a string */
@@ -88,7 +89,7 @@ export function bundleScripts(
   // Register entity scripts (JSON-encoded to prevent closure breakout)
 ${enabledScripts.map(([entityId, script]) => `
   scripts[${JSON.stringify(entityId)}] = (function(forge) {
-    const src = ${JSON.stringify(script.source)};
+    const src = ${JSON.stringify(injectLoopGuards(script.source))};
     const fn = new Function('forge', src + '; return { onStart: typeof onStart === "function" ? onStart : null, onUpdate: typeof onUpdate === "function" ? onUpdate : null, onDestroy: typeof onDestroy === "function" ? onDestroy : null };');
     return fn(forge);
   })(forge);
