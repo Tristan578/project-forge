@@ -40,12 +40,15 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 
 ### Current Tiers (Validated)
 
+<!-- NOTE: The code tier names (starter/hobbyist/creator/pro with 50/300/1000/3000 tokens)
+     differ from the marketing names below. Reconcile before launch. -->
+
 | Tier | Price | Token Budget | Key Features | Target Persona |
 |------|-------|-------------|--------------|----------------|
-| **Free** | $0 | 50 AI tokens/mo | Editor, templates, export (watermark) | Trial users, students |
-| **Starter** | $29/mo | 500 tokens/mo | No watermark, BYOK AI keys, cloud save | Hobbyists, jam participants |
-| **Creator** | $79/mo | 2,000 tokens/mo | Platform AI (Claude, Meshy, etc.), publish | Indie developers |
-| **Pro** | $199/mo | 5,000 tokens/mo | Priority generation, collaboration (future) | Teams, content creators |
+| **Free (starter)** | $0 | 50 AI tokens/mo | Editor, templates, export (watermark) | Trial users, students |
+| **Hobbyist** | $29/mo | 300 tokens/mo | No watermark, BYOK AI keys, cloud save | Hobbyists, jam participants |
+| **Creator** | $79/mo | 1,000 tokens/mo | Platform AI (Claude, Meshy, etc.), publish | Indie developers |
+| **Pro** | $199/mo | 3,000 tokens/mo | Priority generation, collaboration (future) | Teams, content creators |
 
 ### Revenue Model Analysis
 
