@@ -123,8 +123,10 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: web
-        # Uses pool: 'forks' from vitest.config.ts (threads mode breaks vi.mock/Proxy).
-        # Coverage thresholds enforced via vitest.config.ts (statements/branches/functions/lines).
+        # Uses vitest.config.ts which enforces coverage thresholds (70/60/65/72).
+        # NOTE: vitest.workspace.ts exists for local dev (correct node/jsdom
+        # environments) but workspace mode does not enforce root-level coverage
+        # thresholds — so CI uses the standalone config instead.
         # Timeout safety net: vitest hangs after test completion due to jsdom/coverage
         # open handles (known issue vitest#3077). Exit 124 = timeout killed a hung
         # process after tests already completed successfully — treat as warning, not failure.

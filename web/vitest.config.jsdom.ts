@@ -18,6 +18,17 @@ export default defineConfig({
       'src/hooks/**/*.test.tsx',
     ],
     setupFiles: ['./vitest.setup.ts'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/components/**/*.ts', 'src/components/**/*.tsx', 'src/hooks/**/*.ts', 'src/hooks/**/*.tsx'],
+      exclude: [
+        'src/**/*.test.ts',
+        'src/**/*.test.tsx',
+        'src/**/*.spec.ts',
+        'src/**/__tests__/**',
+        'src/**/*.d.ts',
+      ],
+    },
   },
   resolve: {
     alias: {
