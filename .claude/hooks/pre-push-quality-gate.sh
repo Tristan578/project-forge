@@ -49,10 +49,17 @@ ERRORS=""
 if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
   TSC_BIN="$WEB_DIR/node_modules/.bin/tsc"
   if [ ! -x "$TSC_BIN" ]; then exit 0; fi
-  TSC_OUTPUT=$("$TSC_BIN" --noEmit 2>&1) || {
+  # Run in subshell to handle Node 25.x segfaults gracefully (lesson #6).
+  # A SIGSEGV exits 139 which set -e would treat as a script failure.
+  TSC_OUTPUT=$(set +e; "$TSC_BIN" --noEmit 2>&1; echo "EXIT:$?") || true
+  TSC_EXIT=$(echo "$TSC_OUTPUT" | grep -o 'EXIT:[0-9]*' | cut -d: -f2)
+  TSC_OUTPUT=$(echo "$TSC_OUTPUT" | grep -v 'EXIT:')
+  if [ "$TSC_EXIT" = "139" ] || [ "$TSC_EXIT" = "134" ] || [ "$TSC_EXIT" = "136" ]; then
+    echo "[pre-push] WARNING: tsc crashed (signal $(( TSC_EXIT - 128 )), likely Node 25.x V8 bug). Allowing push — CI will catch real errors." >&2
+  elif [ "$TSC_EXIT" != "0" ] && [ -n "$TSC_EXIT" ]; then
     echo "$TSC_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}TypeScript errors found. "
-  }
+  fi
 fi
 
 # 2. ESLint on changed files only (fast, ~2-3s per file)
