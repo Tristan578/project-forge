@@ -10,6 +10,9 @@ vi.mock('@/lib/billing/subscription-lifecycle');
 vi.mock('@/lib/billing/webhookIdempotency');
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn().mockReturnValue({}),
+  getNeonSql: vi.fn().mockReturnValue(
+    Object.assign(vi.fn(), { transaction: vi.fn().mockResolvedValue([]) }),
+  ),
 }));
 vi.mock('@/lib/tokens/service');
 vi.mock('@/lib/auth/user-service');
