@@ -61,18 +61,6 @@ function makeSelectChain(data: unknown[] = []): Record<string, any> {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeInsertChain(data: unknown[] = []): Record<string, any> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const chain: Record<string, any> = {};
-  for (const m of ['values', 'returning']) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  chain.then = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    Promise.resolve(data).then(resolve, reject);
-  return chain;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function makeDeleteChain(): Record<string, any> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain: Record<string, any> = {};
