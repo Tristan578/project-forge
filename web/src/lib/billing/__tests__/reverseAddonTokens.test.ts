@@ -28,8 +28,21 @@ const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
 
 const mockDb = { insert: mockInsert, update: mockUpdate, select: mockSelect };
 
-vi.mock('@/lib/db/client', () => ({ getDb: vi.fn(() => mockDb) }));
-vi.mock('@/lib/auth/user-service', () => ({ updateUserTier: vi.fn().mockResolvedValue(undefined) }));
+// Neon SQL mock for neonSql.transaction()
+interface MockStatement { _type: 'neon_statement'; values: unknown[] }
+const mockNeonTransaction = vi.fn().mockResolvedValue([]);
+const mockNeonSql = Object.assign(
+  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): MockStatement => ({
+    _type: 'neon_statement',
+    values: _values,
+  })),
+  { transaction: mockNeonTransaction },
+);
+
+vi.mock('@/lib/db/client', () => ({
+  getDb: vi.fn(() => mockDb),
+  getNeonSql: vi.fn(() => mockNeonSql),
+}));
 vi.mock('@/lib/tokens/pricing', () => ({
   TIER_MONTHLY_TOKENS: { starter: 10000, hobbyist: 50000, creator: 150000, pro: 500000 },
 }));
@@ -65,40 +78,41 @@ describe('reverseAddonTokens (PF-734)', () => {
 
     it('deducts tokens based on purchase token count, not user balance', async () => {
       // Select 1: tokenPurchases lookup -> finds purchase (5000 tokens, 4900 cents)
-      // Select 2: users.addonTokens -> user has 20000 (from multiple purchases)
-      // Select 3: getTotalBalance
+      // Select 2: users state -> user has 20000 addon tokens (from multiple purchases)
       configureSelectSequence([
         [purchase],
-        [{ addonTokens: 20000 }],
-        [{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 20000, earnedCredits: 0 }],
+        [{ addonTokens: 20000, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       // Full refund of 4900 cents -> should deduct 5000 tokens (the purchase amount)
       // NOT 20000 (the user's total balance)
       await reverseAddonTokens('user-1', 'ch_abc', 4900, 4900, 'pi_abc');
 
-      // Should have updated tokenPurchases.refundedCents
-      expect(mockUpdate).toHaveBeenCalled();
-      // Should have inserted credit transaction
-      expect(mockInsert).toHaveBeenCalled();
-      const txValues = mockInsertValues.mock.calls[0][0];
-      expect(txValues.amount).toBe(-5000);
-      expect(txValues.source).toBe('charge_refunded:ch_abc');
+      // All writes go through neonSql.transaction now (PF-77)
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+      // Check deduction amount in INSERT statement (-5000)
+      const allCalls = mockNeonSql.mock.calls;
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
+      const insertValues = insertCall.slice(1).flat();
+      expect(insertValues).toContain(-5000);
+      expect(insertValues).toContain('charge_refunded:ch_abc');
     });
 
     it('handles partial refund correctly', async () => {
       // 50% refund of a 4900 cent charge with 5000 tokens
       configureSelectSequence([
         [purchase],
-        [{ addonTokens: 20000 }],
-        [{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 20000, earnedCredits: 0 }],
+        [{ addonTokens: 20000, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 2450, 4900, 'pi_abc');
 
-      const txValues = mockInsertValues.mock.calls[0][0];
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+      const allCalls = mockNeonSql.mock.calls;
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
+      const insertValues = insertCall.slice(1).flat();
       // 2450/4900 = 0.5, floor(5000 * 0.5) = 2500
-      expect(txValues.amount).toBe(-2500);
+      expect(insertValues).toContain(-2500);
     });
 
     it('skips processing when refundedCents already covers the refund (idempotency)', async () => {
@@ -118,31 +132,35 @@ describe('reverseAddonTokens (PF-734)', () => {
       const partiallyRefunded = { ...purchase, refundedCents: 2450 };
       configureSelectSequence([
         [partiallyRefunded],
-        [{ addonTokens: 17500 }], // user balance after first deduction
-        [{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 17500, earnedCredits: 0 }],
+        [{ addonTokens: 17500, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       // Stripe sends cumulative: 4900 total refunded (was 2450, now 4900)
       await reverseAddonTokens('user-1', 'ch_abc', 4900, 4900, 'pi_abc');
 
-      const txValues = mockInsertValues.mock.calls[0][0];
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+      const allCalls = mockNeonSql.mock.calls;
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
+      const insertValues = insertCall.slice(1).flat();
       // New increment: 4900 - 2450 = 2450 cents
       // 2450/4900 (amountCents) * 5000 tokens = 2500
-      expect(txValues.amount).toBe(-2500);
+      expect(insertValues).toContain(-2500);
     });
 
     it('clamps deduction to user addon balance', async () => {
       // User only has 100 addon tokens left but purchase was 5000
       configureSelectSequence([
         [purchase],
-        [{ addonTokens: 100 }],
-        [{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 100, earnedCredits: 0 }],
+        [{ addonTokens: 100, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 4900, 4900, 'pi_abc');
 
-      const txValues = mockInsertValues.mock.calls[0][0];
-      expect(txValues.amount).toBe(-100); // clamped to available balance
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+      const allCalls = mockNeonSql.mock.calls;
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
+      const insertValues = insertCall.slice(1).flat();
+      expect(insertValues).toContain(-100); // clamped to available balance
     });
 
     it('skips when user not found after purchase lookup', async () => {
@@ -153,7 +171,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       await reverseAddonTokens('user-1', 'ch_abc', 4900, 4900, 'pi_abc');
 
-      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
     });
 
     it('skips when token deduction rounds to 0', async () => {
@@ -169,7 +187,7 @@ describe('reverseAddonTokens (PF-734)', () => {
       await reverseAddonTokens('user-1', 'ch_abc', 1, 4900, 'pi_abc');
 
       // Should not proceed to user lookup since tokensToDeduct = 0
-      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
     });
 
     it('falls through to fallback when purchase not found', async () => {
@@ -177,15 +195,17 @@ describe('reverseAddonTokens (PF-734)', () => {
       configureSelectSequence([
         [], // no purchase found
         [], // no existing refund transaction (idempotency check)
-        [{ addonTokens: 1000 }], // user lookup
-        [{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 1000, earnedCredits: 0 }],
+        [{ addonTokens: 1000, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 500, 1000, 'pi_abc');
 
-      const txValues = mockInsertValues.mock.calls[0][0];
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+      const allCalls = mockNeonSql.mock.calls;
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
+      const insertValues = insertCall.slice(1).flat();
       // Fallback: 500/1000 * 1000 (user balance) = 500
-      expect(txValues.amount).toBe(-500);
+      expect(insertValues).toContain(-500);
     });
   });
 
@@ -194,14 +214,16 @@ describe('reverseAddonTokens (PF-734)', () => {
       // No paymentIntentId, goes straight to fallback
       configureSelectSequence([
         [], // no existing refund (idempotency)
-        [{ addonTokens: 1000 }],
-        [{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 1000, earnedCredits: 0 }],
+        [{ addonTokens: 1000, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 500, 1000);
 
-      const txValues = mockInsertValues.mock.calls[0][0];
-      expect(txValues.amount).toBe(-500);
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+      const allCalls = mockNeonSql.mock.calls;
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
+      const insertValues = insertCall.slice(1).flat();
+      expect(insertValues).toContain(-500);
     });
 
     it('skips when a refund transaction already exists (idempotency)', async () => {
@@ -212,9 +234,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       await reverseAddonTokens('user-1', 'ch_abc', 500, 1000);
 
-      // Should not update or insert anything
-      expect(mockUpdate).not.toHaveBeenCalled();
-      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
     });
 
     it('skips when user not found in fallback path', async () => {
@@ -225,34 +245,34 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       await reverseAddonTokens('user-1', 'ch_abc', 500, 1000);
 
-      expect(mockUpdate).not.toHaveBeenCalled();
-      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
     });
 
     it('skips when deduction rounds to 0 in fallback', async () => {
       configureSelectSequence([
         [], // no existing refund
-        [{ addonTokens: 10 }],
+        [{ addonTokens: 10, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       // 1/10000 * 10 = 0.001 -> floor = 0
       await reverseAddonTokens('user-1', 'ch_abc', 1, 10000);
 
-      expect(mockUpdate).not.toHaveBeenCalled();
-      expect(mockInsert).not.toHaveBeenCalled();
+      expect(mockNeonTransaction).not.toHaveBeenCalled();
     });
 
     it('clamps refund ratio to 1 when refund exceeds total', async () => {
       configureSelectSequence([
         [], // no existing refund
-        [{ addonTokens: 1000 }],
-        [{ monthlyTokens: 0, monthlyTokensUsed: 0, addonTokens: 1000, earnedCredits: 0 }],
+        [{ addonTokens: 1000, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }],
       ]);
 
       await reverseAddonTokens('user-1', 'ch_abc', 2000, 1000);
 
-      const txValues = mockInsertValues.mock.calls[0][0];
-      expect(txValues.amount).toBe(-1000);
+      expect(mockNeonTransaction).toHaveBeenCalledOnce();
+      const allCalls = mockNeonSql.mock.calls;
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
+      const insertValues = insertCall.slice(1).flat();
+      expect(insertValues).toContain(-1000);
     });
   });
 });

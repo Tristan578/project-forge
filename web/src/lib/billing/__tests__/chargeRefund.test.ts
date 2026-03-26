@@ -16,8 +16,21 @@ const mockSelect = vi.fn().mockReturnValue({ from: mockSelectFrom });
 
 const mockDb = { insert: mockInsert, update: mockUpdate, select: mockSelect };
 
-vi.mock('@/lib/db/client', () => ({ getDb: vi.fn(() => mockDb) }));
-vi.mock('@/lib/auth/user-service', () => ({ updateUserTier: vi.fn().mockResolvedValue(undefined) }));
+// Neon SQL mock for neonSql.transaction()
+interface MockStatement { _type: 'neon_statement'; values: unknown[] }
+const mockNeonTransaction = vi.fn().mockResolvedValue([]);
+const mockNeonSql = Object.assign(
+  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): MockStatement => ({
+    _type: 'neon_statement',
+    values: _values,
+  })),
+  { transaction: mockNeonTransaction },
+);
+
+vi.mock('@/lib/db/client', () => ({
+  getDb: vi.fn(() => mockDb),
+  getNeonSql: vi.fn(() => mockNeonSql),
+}));
 vi.mock('@/lib/tokens/pricing', () => ({
   TIER_MONTHLY_TOKENS: { starter: 10000, hobbyist: 50000, creator: 150000, pro: 500000 },
 }));
@@ -90,43 +103,39 @@ describe('handleChargeRefunded (PF-526)', () => {
   it('deducts proportional tokens for partial refund', async () => {
     // Select 1: findUserByStripeCustomer
     // Select 2: fallback idempotency check (no existing refund)
-    // Select 3: reverseAddonTokens reads addonTokens
-    // Select 4: getTotalBalance
+    // Select 3: reverseAddonTokens reads user state (addonTokens + balance fields)
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ addonTokens: 5000 }])
-      .mockResolvedValueOnce([mockUserRecord]);
+      .mockResolvedValueOnce([{ addonTokens: 5000, monthlyTokens: 1000, monthlyTokensUsed: 200, earnedCredits: 0 }]);
 
     await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
 
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).toHaveBeenCalled();
+    // Writes go through neonSql.transaction now (PF-77)
+    expect(mockNeonTransaction).toHaveBeenCalledOnce();
   });
 
   it('deducts all tokens for full refund', async () => {
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ addonTokens: 5000 }])
-      .mockResolvedValueOnce([mockUserRecord]);
+      .mockResolvedValueOnce([{ addonTokens: 5000, monthlyTokens: 1000, monthlyTokensUsed: 200, earnedCredits: 0 }]);
 
     await handleChargeRefunded('cus_abc', 'ch_abc', 4900, 4900);
 
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).toHaveBeenCalled();
+    expect(mockNeonTransaction).toHaveBeenCalledOnce();
   });
 
   it('skips deduction when user has zero addon tokens', async () => {
     mockSelectLimit
       .mockResolvedValueOnce([mockUserRecord])
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ addonTokens: 0 }]);
+      .mockResolvedValueOnce([{ addonTokens: 0, monthlyTokens: 0, monthlyTokensUsed: 0, earnedCredits: 0 }]);
 
     await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
 
-    // No update because tokensToDeduct is 0
-    expect(mockUpdate).not.toHaveBeenCalled();
+    // No transaction because tokensToDeduct is 0
+    expect(mockNeonTransaction).not.toHaveBeenCalled();
   });
 
   it('skips deduction when reverseAddonTokens user not found', async () => {
@@ -137,7 +146,6 @@ describe('handleChargeRefunded (PF-526)', () => {
 
     await handleChargeRefunded('cus_abc', 'ch_abc', 2450, 4900);
 
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockNeonTransaction).not.toHaveBeenCalled();
   });
 });
