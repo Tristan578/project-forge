@@ -52,9 +52,9 @@ describe('validateEnv', () => {
     it('passes when all required vars are set', async () => {
       (process.env as Record<string, string>).NODE_ENV = 'production';
       process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
+      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
       process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
       process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
       process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
@@ -71,9 +71,9 @@ describe('validateEnv', () => {
     it('reports warnings for missing optional vars', async () => {
       (process.env as Record<string, string>).NODE_ENV = 'production';
       process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
+      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
       process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
       process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
       process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
@@ -96,9 +96,9 @@ describe('validateEnv', () => {
     it('does not warn for optional vars that are set', async () => {
       (process.env as Record<string, string>).NODE_ENV = 'production';
       process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
+      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
       process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
       process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
       process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
@@ -123,9 +123,9 @@ describe('validateEnv', () => {
     it('logs error to console when required vars are missing', async () => {
       (process.env as Record<string, string>).NODE_ENV = 'production';
       delete process.env.DATABASE_URL;
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
-      process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
+      process.env.STRIPE_SECRET_KEY = 'sk_live_xxx';
       process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
       process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
       process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
@@ -145,8 +145,8 @@ describe('validateEnv', () => {
     it('reports partial missing — only missing vars appear', async () => {
       (process.env as Record<string, string>).NODE_ENV = 'production';
       process.env.DATABASE_URL = 'postgresql://test';
-      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_xxx';
-      process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
       delete process.env.STRIPE_SECRET_KEY;
       delete process.env.STRIPE_WEBHOOK_SECRET;
       process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
@@ -159,6 +159,61 @@ describe('validateEnv', () => {
 
       expect(result.valid).toBe(false);
       expect(result.missing).toEqual(['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET']);
+    });
+  });
+
+  describe('Clerk key format validation', () => {
+    it('flags pk_test_ Clerk key as invalid in production', async () => {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      process.env.DATABASE_URL = 'postgresql://test';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_test_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
+      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
+      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
+      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
+      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.valid).toBe(false);
+      expect(result.missing).toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+    });
+
+    it('warns on sk_test_ Clerk secret key in production', async () => {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      process.env.DATABASE_URL = 'postgresql://test';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_test_xxx';
+      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
+      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
+      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
+      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.warnings.some((w) => w.includes('sk_test_'))).toBe(true);
+    });
+
+    it('accepts pk_live_ and sk_live_ keys in production', async () => {
+      (process.env as Record<string, string>).NODE_ENV = 'production';
+      process.env.DATABASE_URL = 'postgresql://test';
+      process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY = 'pk_live_xxx';
+      process.env.CLERK_SECRET_KEY = 'sk_live_xxx';
+      process.env.STRIPE_SECRET_KEY = 'sk_test_stripe';
+      process.env.STRIPE_WEBHOOK_SECRET = 'whsec_xxx';
+      process.env.UPSTASH_REDIS_REST_URL = 'https://redis.upstash.io';
+      process.env.UPSTASH_REDIS_REST_TOKEN = 'test-token';
+      process.env.ENCRYPTION_MASTER_KEY = 'a'.repeat(64);
+
+      const { validateEnvironment } = await import('../validateEnv');
+      const result = validateEnvironment();
+
+      expect(result.valid).toBe(true);
+      expect(result.missing).not.toContain('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
     });
   });
 
