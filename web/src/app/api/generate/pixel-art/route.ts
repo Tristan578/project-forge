@@ -150,7 +150,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         status,
         jobId,
-        usageId,
+        // usageId intentionally omitted — server handles refund on failure.
         provider: resolvedProvider,
         tokenCost,
         palette: paletteData?.name ?? palette,

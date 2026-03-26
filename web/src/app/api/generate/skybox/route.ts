@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
         provider: 'meshy',
         status: 'pending',
         estimatedSeconds: 90,
-        usageId,
+        // usageId intentionally omitted — server handles refund on failure.
       },
       { status: 201 }
     );
