@@ -454,8 +454,21 @@ function generateNodeCode(node: BehaviorNode, level: number = 1): string {
   }
 }
 
+/** Collect all node IDs in a tree, throwing on duplicates (PF-307). */
+function validateNodeIdUniqueness(node: BehaviorNode, seen = new Set<string>()): void {
+  if (seen.has(node.id)) {
+    throw new Error(`Duplicate behavior tree node ID: "${node.id}". Each node must have a unique ID.`);
+  }
+  seen.add(node.id);
+  for (const child of node.children ?? []) {
+    validateNodeIdUniqueness(child, seen);
+  }
+}
+
 /** Convert a BehaviorTree to an executable TypeScript script for SpawnForge */
 export function behaviorTreeToScript(tree: BehaviorTree): string {
+  validateNodeIdUniqueness(tree.root);
+
   // Generate variable declarations — include defaults for all action-referenced
   // variables to prevent ReferenceError when actions reference variables from
   // presets other than the one selected.
