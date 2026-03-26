@@ -13,6 +13,7 @@ permissions:
 jobs:
   require-work-item:
     name: Require Linked Work Item
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
