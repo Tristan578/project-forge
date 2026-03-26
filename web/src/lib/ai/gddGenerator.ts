@@ -22,6 +22,7 @@ export interface GDDSection {
 
 export interface GameDesignDocument {
   title: string;
+  /** @deprecated Will be replaced by systems[] in OrchestratorGDD (Phase 2A). */
   genre: string;
   summary: string;
   sections: GDDSection[];
@@ -117,9 +118,10 @@ Rules:
 - Respond with ONLY valid JSON. No markdown, no explanation, no code fences.`;
 
 // ---------------------------------------------------------------------------
-// Genre detection
+// Genre detection (DEPRECATED — see systems-based decomposition in Phase 2A)
 // ---------------------------------------------------------------------------
 
+/** @deprecated Part of genre-based GDD generation. Will be removed with detectGenre(). */
 const GENRE_KEYWORDS: Record<string, string[]> = {
   Platformer: ['platformer', 'jump', 'jumping', 'platform', 'side-scroller', 'sidescroller', 'mario'],
   RPG: ['rpg', 'role-playing', 'roleplay', 'quest', 'leveling', 'level up', 'xp', 'experience points'],
@@ -137,6 +139,12 @@ const GENRE_KEYWORDS: Record<string, string[]> = {
 /**
  * Detect probable genre from user prompt text.
  * Returns best-matching genre or 'Action' as fallback.
+ *
+ * @deprecated Use the systems-based decomposition in `game-creation/decomposer.ts`
+ * instead. Genre detection creates artificial ceilings — games are compositions
+ * of systems (movement, input, camera, etc.), not genre categories. This function
+ * will be removed when the Game Creation Orchestrator (Phase 2A) ships.
+ * See: specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md
  */
 export function detectGenre(prompt: string): string {
   const lower = prompt.toLowerCase();
