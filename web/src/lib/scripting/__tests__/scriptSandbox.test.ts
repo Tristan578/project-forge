@@ -21,6 +21,7 @@ const SHADOWED_GLOBALS = [
   'indexedDB', 'caches', 'navigator', 'location',
   'EventSource', 'BroadcastChannel',
   'self', 'globalThis',
+  'Reflect', 'Proxy',
 ] as const;
 
 /**
@@ -146,7 +147,7 @@ describe('Script Sandbox Security', () => {
       result.onStart();
     });
 
-    it('should shadow all 12 dangerous globals', () => {
+    it('should shadow all 14 dangerous globals', () => {
       // Build a script that checks typeof for all shadowed globals
       const checks = SHADOWED_GLOBALS.map(
         g => `results['${g}'] = typeof ${g};`

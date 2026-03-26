@@ -25,6 +25,7 @@ const SHADOWED_GLOBALS = [
   'indexedDB', 'caches', 'navigator', 'location',
   'EventSource', 'BroadcastChannel',
   'self', 'globalThis',
+  'Reflect', 'Proxy',
 ] as const;
 
 interface ScriptHooks {
@@ -251,7 +252,57 @@ describe('Script Sandbox Security: Global Shadowing (compile-time)', () => {
     expect(types).toEqual(['undefined']);
   });
 
-  it('all 12 shadowed globals are undefined inside a single script', () => {
+  it('accessing Reflect inside sandbox is undefined', () => {
+    const types: string[] = [];
+    const result = compileSandboxed(`
+      function onStart() { forge.report(typeof Reflect); }
+    `, { report: (t: string) => types.push(t) });
+    result.onStart!();
+    expect(types).toEqual(['undefined']);
+  });
+
+  it('accessing Proxy inside sandbox is undefined', () => {
+    const types: string[] = [];
+    const result = compileSandboxed(`
+      function onStart() { forge.report(typeof Proxy); }
+    `, { report: (t: string) => types.push(t) });
+    result.onStart!();
+    expect(types).toEqual(['undefined']);
+  });
+
+  it('Reflect.construct(Function) exploit is blocked by Reflect shadowing', () => {
+    const errors: string[] = [];
+    const result = compileSandboxed(`
+      function onStart() {
+        try {
+          Reflect.construct(Function, ['return fetch'])();
+          forge.report('ESCAPED');
+        } catch (e) {
+          forge.report('BLOCKED: ' + e.constructor.name);
+        }
+      }
+    `, { report: (t: string) => errors.push(t) });
+    result.onStart!();
+    expect(errors[0]).toMatch(/BLOCKED/);
+  });
+
+  it('Proxy-based globalThis leak is blocked by Proxy shadowing', () => {
+    const errors: string[] = [];
+    const result = compileSandboxed(`
+      function onStart() {
+        try {
+          const leaked = new Proxy({}, { get: (_, key) => globalThis[key] });
+          forge.report('ESCAPED');
+        } catch (e) {
+          forge.report('BLOCKED: ' + e.constructor.name);
+        }
+      }
+    `, { report: (t: string) => errors.push(t) });
+    result.onStart!();
+    expect(errors[0]).toMatch(/BLOCKED/);
+  });
+
+  it('all 14 shadowed globals are undefined inside a single script', () => {
     const typesMap: Record<string, string> = {};
     const checksSource = SHADOWED_GLOBALS
       .map(g => `forge.report('${g}', typeof ${g});`)
@@ -268,8 +319,8 @@ describe('Script Sandbox Security: Global Shadowing (compile-time)', () => {
     }
   });
 
-  it('shadowed globals list has exactly 12 entries', () => {
-    expect(SHADOWED_GLOBALS).toHaveLength(12);
+  it('shadowed globals list has exactly 14 entries', () => {
+    expect(SHADOWED_GLOBALS).toHaveLength(14);
   });
 });
 
