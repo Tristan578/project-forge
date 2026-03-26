@@ -126,6 +126,6 @@ describe('POST /api/generate/music', () => {
     expect(data.provider).toBe('suno');
     expect(data.status).toBe('pending');
     expect(data.estimatedSeconds).toBe(60);
-    expect(data.usageId).toBe('usage-1');
+    expect(data.usageId).toBeUndefined(); // usageId removed to prevent double refund
   });
 });

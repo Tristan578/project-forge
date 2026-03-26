@@ -128,6 +128,6 @@ describe('POST /api/generate/model', () => {
     expect(data.jobId).toBe('task-1');
     expect(data.provider).toBe('meshy');
     expect(data.status).toBe('pending');
-    expect(data.usageId).toBe('usage-1');
+    expect(data.usageId).toBeUndefined(); // usageId removed to prevent double refund
   });
 });
