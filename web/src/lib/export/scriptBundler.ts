@@ -89,8 +89,9 @@ export function bundleScripts(
 ${enabledScripts.map(([entityId, script]) => `
   scripts['${entityId}'] = (function(forge) {
     const src = ${JSON.stringify(script.source)};
-    const fn = new Function('forge', src + '; return { onStart: typeof onStart === "function" ? onStart : null, onUpdate: typeof onUpdate === "function" ? onUpdate : null, onDestroy: typeof onDestroy === "function" ? onDestroy : null };');
-    return fn(forge);
+    const SHADOWED = ['fetch','XMLHttpRequest','WebSocket','importScripts','indexedDB','caches','navigator','location','EventSource','BroadcastChannel','self','globalThis','Function','eval','Reflect','Proxy'];
+    const fn = new Function('forge', ...SHADOWED, src + '; return { onStart: typeof onStart === "function" ? onStart : null, onUpdate: typeof onUpdate === "function" ? onUpdate : null, onDestroy: typeof onDestroy === "function" ? onDestroy : null };');
+    return fn(forge, ...SHADOWED.map(function() { return undefined; }));
   })(forge);
 `).join('\n')}
 

@@ -909,11 +909,16 @@ function buildForgeApi(scriptEntityId: string) {
 // Network/storage APIs are shadowed for defence-in-depth even though the
 // worker has no DOM.
 const SHADOWED_GLOBALS = [
+  // Network / storage — defence-in-depth (worker has no DOM)
   'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
   'indexedDB', 'caches', 'navigator', 'location',
   'EventSource', 'BroadcastChannel',
+  // Global scope access
   'self', 'globalThis',
+  // Code execution
   'Function', 'eval',
+  // Prototype chain / metaprogramming escape vectors (PF-2)
+  'Reflect', 'Proxy',
 ] as const;
 
 // ─── Resource Limits ────────────────────────────────────────────
