@@ -34,6 +34,9 @@ function isUpstashConfigured(): boolean {
  *
  * All steps run in a single pipelined request for atomicity.
  */
+/** Prefix must match the @upstash/ratelimit prefix used by rateLimit.ts */
+const REDIS_KEY_PREFIX = '@spawnforge/ratelimit';
+
 async function upstashSlidingWindow(
   key: string,
   limit: number,
@@ -41,20 +44,23 @@ async function upstashSlidingWindow(
 ): Promise<DistributedRateLimitResult> {
   const url = process.env.UPSTASH_REDIS_REST_URL!;
   const token = process.env.UPSTASH_REDIS_REST_TOKEN!;
+  const prefixedKey = `${REDIS_KEY_PREFIX}:${key}`;
   const now = Date.now();
   const windowMs = windowSeconds * 1000;
   const windowStart = now - windowMs;
   const resetAt = now + windowMs;
-  const member = now.toString();
+  // Append random suffix to prevent ZADD member collisions when multiple
+  // requests arrive in the same millisecond (each member must be unique).
+  const member = `${now}:${Math.random().toString(36).slice(2, 8)}`;
 
   // Pipeline: ZREMRANGEBYSCORE, ZADD, ZCARD, EXPIRE
   // We issue these as a pipeline (array of commands) for a single round-trip.
   // ZADD score must be a number (not a string) for the Redis sorted set to order correctly.
   const pipeline = [
-    ['ZREMRANGEBYSCORE', key, '-inf', windowStart],
-    ['ZADD', key, now, member],
-    ['ZCARD', key],
-    ['EXPIRE', key, windowSeconds],
+    ['ZREMRANGEBYSCORE', prefixedKey, '-inf', windowStart],
+    ['ZADD', prefixedKey, now, member],
+    ['ZCARD', prefixedKey],
+    ['EXPIRE', prefixedKey, windowSeconds],
   ];
 
   const response = await fetch(`${url}/pipeline`, {
@@ -88,7 +94,7 @@ async function upstashSlidingWindow(
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify([luaScript, 1, key, member]),
+      body: JSON.stringify([luaScript, 1, prefixedKey, member]),
     }).catch(() => {
       // Best-effort cleanup; don't throw on failure
     });

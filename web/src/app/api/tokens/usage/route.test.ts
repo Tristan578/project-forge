@@ -1,11 +1,20 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextRequest } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getUsageHistory } from '@/lib/tokens/service';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/tokens/service');
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
+  rateLimitResponse: vi.fn(),
+  getClientIp: vi.fn().mockReturnValue('127.0.0.1'),
+}));
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
+}));
 
 describe('GET /api/tokens/usage', () => {
   beforeEach(() => {
@@ -24,7 +33,7 @@ describe('GET /api/tokens/usage', () => {
     });
 
     const { GET } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/usage');
+    const req = new NextRequest('http://localhost:3000/api/tokens/usage');
     const res = await GET(req);
 
     expect(res.status).toBe(401);
@@ -36,7 +45,7 @@ describe('GET /api/tokens/usage', () => {
     ] as never);
 
     const { GET } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/usage');
+    const req = new NextRequest('http://localhost:3000/api/tokens/usage');
     const res = await GET(req);
     const body = await res.json();
 
@@ -49,7 +58,7 @@ describe('GET /api/tokens/usage', () => {
     vi.mocked(getUsageHistory).mockResolvedValue([] as never);
 
     const { GET } = await import('./route');
-    const req = new Request('http://localhost:3000/api/tokens/usage?days=365');
+    const req = new NextRequest('http://localhost:3000/api/tokens/usage?days=365');
     const res = await GET(req);
 
     expect(res.status).toBe(200);

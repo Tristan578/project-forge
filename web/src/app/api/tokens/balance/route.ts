@@ -1,19 +1,18 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getTokenBalance } from '@/lib/tokens/service';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  const userId = authResult.ctx.user.id;
-  const rl = await rateLimit(`user:tokens-balance:${userId}`, 30, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `user:tokens-balance:${id}`, max: 30, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   try {
-    const balance = await getTokenBalance(userId);
+    const balance = await getTokenBalance(mid.userId!);
     return NextResponse.json(balance);
   } catch (error) {
     captureException(error, { route: '/api/tokens/balance', method: 'GET' });

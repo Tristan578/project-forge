@@ -140,14 +140,16 @@ describe('distributedRateLimit — Upstash path', () => {
     await distributedRateLimit('pipeline-key', 5, 30);
 
     const callBody = JSON.parse(mockFetch.mock.calls[0][1].body as string) as string[][];
+    // Keys are prefixed with @spawnforge/ratelimit: to match the @upstash/ratelimit prefix
+    const prefixed = '@spawnforge/ratelimit:pipeline-key';
     expect(callBody[0][0]).toBe('ZREMRANGEBYSCORE');
-    expect(callBody[0][1]).toBe('pipeline-key');
+    expect(callBody[0][1]).toBe(prefixed);
     expect(callBody[1][0]).toBe('ZADD');
-    expect(callBody[1][1]).toBe('pipeline-key');
+    expect(callBody[1][1]).toBe(prefixed);
     expect(callBody[2][0]).toBe('ZCARD');
-    expect(callBody[2][1]).toBe('pipeline-key');
+    expect(callBody[2][1]).toBe(prefixed);
     expect(callBody[3][0]).toBe('EXPIRE');
-    expect(callBody[3][1]).toBe('pipeline-key');
+    expect(callBody[3][1]).toBe(prefixed);
     // windowSeconds must be a number (not a string) — Redis sorted-set scores require numeric values
     expect(callBody[3][2]).toBe(30); // windowSeconds as number
   });
@@ -208,7 +210,7 @@ describe('distributedRateLimit — Upstash path', () => {
     expect(typeof evalBody[0]).toBe('string'); // Lua script
     expect(evalBody[0]).toContain('ZREM');     // script performs ZREM
     expect(evalBody[1]).toBe(1);               // numkeys = 1
-    expect(evalBody[2]).toBe('cleanup-key');   // KEYS[1]
+    expect(evalBody[2]).toBe('@spawnforge/ratelimit:cleanup-key');   // KEYS[1]
   });
 
   it('does not throw if Lua EVAL cleanup fails', async () => {
