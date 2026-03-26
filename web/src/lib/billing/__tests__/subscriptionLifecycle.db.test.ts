@@ -58,7 +58,7 @@ interface MockStatement {
   values: unknown[];
 }
 
-const mockNeonTransaction = vi.fn<[MockStatement[]], Promise<unknown[]>>().mockResolvedValue([]);
+const mockNeonTransaction = vi.fn().mockResolvedValue([]);
 
 const mockNeonSql = Object.assign(
   vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): MockStatement => ({

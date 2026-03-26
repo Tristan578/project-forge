@@ -18,7 +18,7 @@ const mockDb = { insert: mockInsert, update: mockUpdate, select: mockSelect };
 
 // Neon SQL mock for neonSql.transaction()
 interface MockStatement { _type: 'neon_statement'; values: unknown[] }
-const mockNeonTransaction = vi.fn<[MockStatement[]], Promise<unknown[]>>().mockResolvedValue([]);
+const mockNeonTransaction = vi.fn().mockResolvedValue([]);
 const mockNeonSql = Object.assign(
   vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): MockStatement => ({
     _type: 'neon_statement',
