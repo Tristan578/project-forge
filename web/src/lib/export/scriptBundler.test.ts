@@ -74,7 +74,7 @@ describe('scriptBundler', () => {
         },
       };
       const result = bundleScripts(scripts);
-      expect(result.code).toContain("scripts['entity1']");
+      expect(result.code).toContain('scripts["entity1"]');
       expect(result.code).toContain('(function(forge)');
       // Script source is JSON-encoded for security
       expect(result.code).toContain(JSON.stringify('console.log("test")'));
@@ -118,7 +118,7 @@ describe('scriptBundler', () => {
       };
       const result = bundleScripts(scripts);
       expect(result.count).toBe(1);
-      expect(result.code).toContain("scripts['entity1']");
+      expect(result.code).toContain('scripts["entity1"]');
     });
 
     it('bundles multiple scripts correctly', () => {
@@ -136,8 +136,8 @@ describe('scriptBundler', () => {
       };
       const result = bundleScripts(scripts);
       expect(result.count).toBe(2);
-      expect(result.code).toContain("scripts['entity1']");
-      expect(result.code).toContain("scripts['entity2']");
+      expect(result.code).toContain('scripts["entity1"]');
+      expect(result.code).toContain('scripts["entity2"]');
       // Scripts are JSON-encoded for security
       expect(result.code).toContain(JSON.stringify('function onStart() { console.log("1"); }'));
       expect(result.code).toContain(JSON.stringify('function onUpdate(dt) { console.log("2"); }'));
