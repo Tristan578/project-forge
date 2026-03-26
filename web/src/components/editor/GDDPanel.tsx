@@ -5,12 +5,12 @@ import { FileText, ChevronDown, ChevronRight, Download, Loader2, Wand2 } from 'l
 import {
   generateGDD,
   gddToMarkdown,
-  detectGenre,
   estimateScope,
   type GameDesignDocument,
   type GDDSection,
   type GDDGenerateOptions,
 } from '@/lib/ai/gddGenerator';
+import { decomposeIntoSystems, getSystemLabel } from '@/lib/ai/systemDecomposer';
 
 // ---------------------------------------------------------------------------
 // Collapsible Section
@@ -150,7 +150,8 @@ export function GDDPanel() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const detectedGenre = prompt.trim() ? detectGenre(prompt) : null;
+  const decomposition = prompt.trim() ? decomposeIntoSystems(prompt) : null;
+  const systemLabel = decomposition ? getSystemLabel(decomposition) : null;
   const detectedScope = prompt.trim() ? estimateScope(prompt) : null;
 
   const handleGenerate = useCallback(async () => {
@@ -224,8 +225,8 @@ export function GDDPanel() {
           />
           {prompt.trim() && (
             <div className="mt-1 flex gap-2 text-[10px] text-zinc-400">
-              {detectedGenre && !genre && (
-                <span>Detected genre: <span className="text-zinc-400">{detectedGenre}</span></span>
+              {systemLabel && !genre && (
+                <span>Systems: <span className="text-zinc-400">{systemLabel}</span></span>
               )}
               {detectedScope && !scope && (
                 <span>Est. scope: <span className="text-zinc-400">{detectedScope}</span></span>
