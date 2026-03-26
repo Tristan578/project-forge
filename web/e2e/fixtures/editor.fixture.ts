@@ -42,7 +42,7 @@ export class EditorPage {
       { timeout: 45_000 }
     );
     // Wait for the editor layout container to be visible (canonical way to know hydration + layout is stable)
-    await this.page.locator('.dv-dockview-container').first().waitFor({ state: 'visible', timeout: 5000 });
+    await this.page.locator('.dv-dockview').first().waitFor({ state: 'visible', timeout: 5000 });
   }
 
   /** Navigate to /dev without waiting for WASM (for @ui tests in CI) */
