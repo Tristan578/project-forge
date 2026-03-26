@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { gameRatings } from '@/lib/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -38,27 +38,19 @@ export async function POST(
       );
     }
 
-    // Check if already rated
-    const existing = await db
-      .select()
-      .from(gameRatings)
-      .where(and(eq(gameRatings.gameId, gameId), eq(gameRatings.userId, authResult.ctx.user.id)))
-      .limit(1);
-
-    if (existing.length > 0) {
-      // Update existing rating
-      await db
-        .update(gameRatings)
-        .set({ rating, updatedAt: new Date() })
-        .where(and(eq(gameRatings.gameId, gameId), eq(gameRatings.userId, authResult.ctx.user.id)));
-    } else {
-      // Insert new rating
-      await db.insert(gameRatings).values({
+    // Atomic upsert — eliminates TOCTOU race where concurrent requests
+    // both pass the "already rated?" check and both INSERT duplicates.
+    // Uses unique index uq_game_ratings_user_game(gameId, userId).
+    await db.insert(gameRatings)
+      .values({
         gameId,
         userId: authResult.ctx.user.id,
         rating,
+      })
+      .onConflictDoUpdate({
+        target: [gameRatings.gameId, gameRatings.userId],
+        set: { rating, updatedAt: new Date() },
       });
-    }
 
     // Get new average and count
     const stats = await db
