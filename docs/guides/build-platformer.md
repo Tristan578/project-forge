@@ -1,9 +1,9 @@
-# Build a Platformer
+# Build a Side-Scrolling Game
 
-A step-by-step tutorial to create a 2D-style platformer with physics.
+A step-by-step tutorial that combines **movement**, **camera**, **challenge**, and **feedback** systems into a side-scrolling game with physics.
 
 ## What You'll Build
-A side-scrolling platformer where a character jumps between platforms, avoids obstacles, and collects items.
+A side-scrolling game where a character jumps between platforms, avoids obstacles, and collects items. This tutorial walks through the systems that make up a classic platformer: horizontal movement + jump (Movement), side-view tracking (Camera), physics platforms + hazards (Challenge), and coin collection + score (Feedback).
 
 ## Step 1: Set Up the Camera
 
@@ -108,7 +108,7 @@ function onUpdate(dt: number) {
 
 ## Step 9: Test & Export
 
-Press **Play** and test your platformer. Export when ready.
+Press **Play** and test your game. Export when ready.
 
 ## Related
 - [Physics](../features/physics.md) — physics configuration

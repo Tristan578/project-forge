@@ -46,7 +46,7 @@ Detailed guides for every editor capability:
 - [Dialogue System](./features/dialogue-system.md) — dialogue trees, branching conversations, conditions & actions
 - [Game Cameras](./features/game-cameras.md) — 6 camera modes (third-person, first-person, side-scroller, top-down, fixed, orbital)
 - [Scene Transitions](./features/scene-transitions.md) — fade, wipe, instant transitions between scenes
-- [Game Templates](./features/game-templates.md) — 11 starter templates (5 3D + 6 2D) for quick prototyping
+- [Game Templates](./features/game-templates.md) — 11 starter system bundles (5 3D + 6 2D) for quick prototyping
 - [Physics Joints](./features/physics-joints.md) — fixed, revolute, spherical, prismatic, rope, spring joints
 
 ### Advanced
@@ -78,8 +78,8 @@ Detailed guides for every editor capability:
 
 End-to-end game building guides:
 
-- [Build an FPS Game](./guides/build-fps-game.md) — first-person shooter tutorial
-- [Build a Platformer](./guides/build-platformer.md) — side-scrolling platformer tutorial
+- [Build an FPS Game](./guides/build-fps-game.md) — first-person movement + camera + physics systems tutorial
+- [Build a Platformer](./guides/build-platformer.md) — side-scrolling movement + jump + collectible systems tutorial
 - [AI Workflow](./guides/ai-workflow.md) — using MCP/AI to build games
 - [MCP Server Setup](./guides/mcp-server-setup.md) — connect external AI agents via the MCP server
 

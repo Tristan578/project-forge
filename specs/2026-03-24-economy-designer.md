@@ -11,7 +11,7 @@ Game economy design requires expertise in progression curves, inflation preventi
 balancing. Most creators set item prices by gut feeling, leading to economies where players are
 either stuck (poverty) or overpowered (inflation).
 
-The existing `economyDesigner.ts` has a rich type system, 5 genre presets, a validation engine
+The existing `economyDesigner.ts` has a rich type system, 5 system-archetype presets (named after common game patterns like RPG or roguelike, but usable for any system composition), a validation engine
 (`validateBalance()`), and script generation (`economyToScript()`). But the AI integration is a
 stub -- `generateEconomy()` just does keyword matching to select a preset. Creators cannot describe
 their game mechanics in natural language and get a custom economy.
@@ -107,7 +107,7 @@ Return valid JSON matching the GameEconomy schema.
 User prompt:
 ```
 Game description: {user input}
-Genre: {from GDD if available}
+System profile: {from GDD systems if available, e.g., "progression:levels + challenge:combat + feedback:collectibles"}
 Target play hours: {estimated session length}
 Monetization: {none | cosmetic-only | premium-currency}
 {if retry: "Previous attempt had these issues: {BalanceIssue[].message}. Fix them."}
@@ -131,7 +131,7 @@ Monetization: {none | cosmetic-only | premium-currency}
 
 - Given "RPG with gold, potions, weapons", When economy designed, Then currencies + shop + loot + progression generated
 - Given AI generates economy with negative prices, When validated, Then self-healing re-prompt fixes them
-- Given all AI retries fail, When fallback triggered, Then closest genre preset returned with warning
+- Given all AI retries fail, When fallback triggered, Then closest archetype preset returned with warning
 - Given economy applied, When user clicks "Generate Script", Then valid JS script produced
 - Given MCP tool `design_economy`, When called, Then returns GameEconomy + BalanceReport
 

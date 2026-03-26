@@ -37,7 +37,7 @@ Game events → setIntensity() → real-time mix changes
 
 1. **MusicComposer** service orchestrates stem generation.
    - File: `web/src/lib/audio/musicComposer.ts`
-   - Takes: mood string, BPM, key, genre tags.
+   - Takes: mood string, BPM, key, style tags (e.g., "orchestral", "chiptune", "ambient" -- descriptive labels, not genre constraints).
    - Calls music generation API (configurable provider: Suno, Udio, or local).
    - Returns 4 stems as `AudioBuffer` objects, all time-aligned to the same BPM/bar count.
    - Caches generated stems in IndexedDB by prompt hash.

@@ -69,7 +69,7 @@ Generates a background music loop from a description. Powered by Suno.
 
 | Option | Description |
 |---|---|
-| Prompt | Description of the music mood and genre |
+| Prompt | Description of the music mood and style |
 | Duration | Length in seconds (15-120) |
 | Instrumental | Generate without vocals (recommended for game music) |
 | Attach to Entity | Automatically attach the track to the currently selected entity |

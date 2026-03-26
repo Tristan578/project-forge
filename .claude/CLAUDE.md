@@ -192,7 +192,7 @@ Key rules:
 53 core phases shipped, 2 removed (Collaboration PF-142, Multiplayer PF-141). Key capabilities:
 
 - **Engine**: 3D + 2D rendering (WebGPU/WebGL2), physics (Rapier 3D+2D), skeletal animation, particles (Hanabi GPU), LOD, post-processing, CSG booleans, procedural terrain/mesh
-- **Editor**: Material library (56 presets), visual scripting (73 node types), dialogue system, keyframe animation, in-game UI builder, tilemap editor, prefabs, multi-scene, game templates
+- **Editor**: Material library (56 presets), visual scripting (73 node types), dialogue system, keyframe animation, in-game UI builder, tilemap editor, prefabs, multi-scene, starter system bundles (11 prepackaged system configurations with friendly genre labels)
 - **AI**: 350 MCP commands (41 categories), compound AI actions, 5 asset generation providers, AI chat with streaming/approval/undo
 - **Platform**: Stripe payments (4 tiers), cloud publishing, mobile PWA, 53 E2E spec files, 13,600+ unit tests
 - **Removed**: Editor Collaboration (PF-142) and Multiplayer Networking (PF-141) — stubs removed, will rebuild when networking backend is ready

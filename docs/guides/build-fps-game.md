@@ -1,9 +1,9 @@
-# Build an FPS Game
+# Build a First-Person Game
 
-A step-by-step tutorial to create a first-person shooter from scratch.
+A step-by-step tutorial that combines **movement**, **input**, **camera**, **physics**, and **feedback** systems into a first-person game.
 
 ## What You'll Build
-A simple FPS where the player moves through a level, collects items, and shoots targets.
+A first-person game where the player moves through a level, collects items, and interacts with targets. This tutorial walks through the systems: WASD + jump (Movement), mouse-look (Input), first-person view (Camera), rigid bodies + colliders (Physics), and collectibles + score (Feedback).
 
 ## Step 1: Set Up the Level
 

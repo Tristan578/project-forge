@@ -10,7 +10,7 @@
 ### Primary Wedge: Zero-Friction Game Creation
 The #1 barrier to game development is setup friction. Unity requires 2-5GB download + project configuration. Unreal requires 40GB+ and a gaming PC. SpawnForge requires: open a browser tab.
 
-**Entry hook:** "Make your first game in 60 seconds" — AI generates a playable template, user customizes with natural language. No sign-up required for the first session (localStorage-only).
+**Entry hook:** "Describe your game and play it in 60 seconds" — the AI executes compound actions to assemble a playable game from your description. No genre selection, no template constraints — just describe what you want. The planned Game Creation Orchestrator will decompose ideas into composable systems (movement, camera, challenge, feedback, etc.) and coordinate specialist agents for even faster creation. No sign-up required for the first session (localStorage-only).
 
 ### Target Segments (Priority Order)
 
@@ -19,7 +19,7 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 | **Game jam participants** | 500K+ annually | "Prototype in minutes, not hours" | Free → Starter ($29/mo) for export | Medium |
 | **CS/game design students** | 2M+ globally | "Learn game dev without Unity overhead" | Free → Educational tier (discounted) | Low (but viral) |
 | **Indie developers** | 300K+ active | "Professional tools, zero install" | Starter → Creator ($79/mo) for AI gen | High |
-| **Content creators/streamers** | 100K+ | "Build games live on stream" | Creator → Studio ($199/mo) for collab | Very High |
+| **Content creators/streamers** | 100K+ | "Build games live on stream" | Creator → Pro ($199/mo) for collab | Very High |
 | **Educators** | 50K+ | "Teach game design in any browser" | Institutional licensing | Very High |
 
 ### Distribution Channels
@@ -40,12 +40,15 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 
 ### Current Tiers (Validated)
 
+<!-- NOTE: The code tier names (starter/hobbyist/creator/pro with 50/300/1000/3000 tokens)
+     differ from the marketing names below. Reconcile before launch. -->
+
 | Tier | Price | Token Budget | Key Features | Target Persona |
 |------|-------|-------------|--------------|----------------|
-| **Free** | $0 | 50 AI tokens/mo | Editor, templates, export (watermark) | Trial users, students |
-| **Starter** | $29/mo | 500 tokens/mo | No watermark, BYOK AI keys, cloud save | Hobbyists, jam participants |
-| **Creator** | $79/mo | 2,000 tokens/mo | Platform AI (Claude, Meshy, etc.), publish | Indie developers |
-| **Studio** | $199/mo | 5,000 tokens/mo | Priority generation, collaboration (future) | Teams, content creators |
+| **Free (starter)** | $0 | 50 AI tokens/mo | Editor, templates, export (watermark) | Trial users, students |
+| **Hobbyist** | $29/mo | 300 tokens/mo | No watermark, BYOK AI keys, cloud save | Hobbyists, jam participants |
+| **Creator** | $79/mo | 1,000 tokens/mo | Platform AI (Claude, Meshy, etc.), publish | Indie developers |
+| **Pro** | $199/mo | 3,000 tokens/mo | Priority generation, collaboration (future) | Teams, content creators |
 
 ### Revenue Model Analysis
 
@@ -76,7 +79,7 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 | Moat Type | SpawnForge Asset | Time to Replicate |
 |-----------|-----------------|-------------------|
 | **Engine depth** | Bevy/WASM with WebGPU, Rapier physics, skeletal animation | 12-18 months |
-| **AI command surface** | 322+ MCP commands across 37 categories | 6-12 months |
+| **AI command surface** | 350+ MCP commands across 41 categories | 6-12 months |
 | **Multi-provider integration** | 5 AI providers (Meshy, ElevenLabs, Suno, DALL-E, Replicate) | 3-6 months |
 | **Export pipeline** | Standalone HTML5 + cloud publish | 3-6 months |
 | **Community content** | Templates, scripts, asset library | 6-12 months (network effect) |
@@ -96,13 +99,13 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 ## 4. Retention Strategy
 
 ### Week 1: Activation
-- **Day 0:** AI generates first game from template in <60s
+- **Day 0:** AI builds first game from a description in <60s
 - **Day 1:** Email: "Your game is live at spawnforge.ai/play/..." (publish nudge)
 - **Day 3:** Email: "Try these 3 modifications to your game" (engagement)
 - **Day 7:** Email: "Upgrade to Starter — export without watermark" (conversion)
 
 ### Month 1: Habit Formation
-- **Weekly challenges:** "Build a puzzle game this week" (community + templates)
+- **Weekly challenges:** "Build a game with these systems this week" (community + starter bundles)
 - **Achievement system:** Badges for first publish, first AI generation, first script
 - **Community gallery:** Feature top games on homepage (social proof)
 
@@ -163,7 +166,7 @@ SpawnForge eliminates every barrier: zero install (browser tab), AI-assisted cre
 - $5B+ creator economy in gaming
 
 ### Traction (Target for Seed)
-- 9,500+ unit tests, 322 MCP commands, 11 game templates
+- 13,600+ unit tests, 350 MCP commands, 11 starter system bundles
 - Full export pipeline (HTML5 + cloud publish)
 - Multi-provider AI integration (5 providers)
 - Subscription billing live (Stripe)

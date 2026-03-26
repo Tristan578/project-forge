@@ -1,14 +1,16 @@
 # SpawnForge Vision Roadmap: Prompt → Complete Game
 
+> **Disclaimer:** This document describes planned and in-development capabilities, not shipped features. The phased roadmap below represents our target vision. Individual capabilities will ship incrementally as tickets are completed. For current shipped features, see [README.md](../README.md).
+
 > Created: 2026-03-16 | 20 capabilities across 4 tiers
-> Goal: A single prompt produces a complete, playable, balanced, accessible game
+> Goal: A single prompt will produce a complete, playable, balanced, accessible game
 
 ---
 
 ## Implementation Phases (by feasibility + impact)
 
 ### Phase V1: Foundation (Weeks 1-4) — "Make it work"
-*Build on existing infrastructure. Incremental, not infrastructure-heavy.*
+*Build on existing infrastructure. Incremental, not infrastructure-heavy. Core principle: systems, not genres — the AI decomposes any game description into composable systems (movement, camera, challenge, feedback, etc.) rather than matching to genre templates.*
 
 | # | Ticket | Effort | Dependencies | Can Start Now? |
 |---|--------|--------|-------------|---------------|
@@ -18,7 +20,7 @@
 | 4 | **PF-545** Behavior Tree DSL | 1 week | None — compiles to existing script API | **YES** |
 | 5 | **PF-558** Auto-Tutorial Generator | 3 days | PF-541 (GDD) | After PF-541 |
 
-**Phase V1 outcome:** "Make a platformer" → AI creates GDD, generates level, wires sound/juice, adds enemy AI, creates tutorial. Playable in 2-3 AI turns.
+**Phase V1 outcome:** "Describe any game" → AI decomposes the idea into systems (movement, camera, challenge, feedback, etc.), creates a GDD, generates the level, wires sound/juice, adds enemy AI, creates a tutorial. Playable in 2-3 AI turns.
 
 ### Phase V2: Quality (Weeks 5-8) — "Make it good"
 *AI understanding and feedback loops.*
@@ -31,7 +33,7 @@
 | 9 | **PF-544** Gameplay Bot | 2 weeks | Physics + pathfinding | A* on tilemap, exploration AI |
 | 10 | **PF-550** Auto-Rigging | 2 weeks | Skeleton2D exists | Needs Mixamo API or custom WASM |
 
-**Phase V2 outcome:** "Make a roguelike" → procedurally generated dungeons, consistent art style, enemy AI with behavior trees, story connecting levels, auto-rigged characters.
+**Phase V2 outcome:** Describe a roguelike (or any genre blend) → AI decomposes into systems: procedural world generation, consistent art style, enemy AI with behavior trees, narrative progression connecting levels, auto-rigged characters.
 
 ### Phase V3: Polish (Weeks 9-12) — "Make it complete"
 *Accessibility, localization, difficulty.*
@@ -91,30 +93,30 @@ PF-557 UGC ──→ PF-555 Remix
 
 **Input:** "Make a fantasy roguelike with dark theme, 3 enemy types, a shopkeeper, adaptive music, and a story about breaking a curse"
 
-**What happens with all 20 capabilities:**
+**What will happen with all 20 capabilities:**
 
-1. **PF-541** generates GDD: mechanics, entities, assets, progression
-2. **PF-546** establishes dark fantasy palette + style reference
-3. **PF-548** generates 5-level procedural dungeon with difficulty scaling
-4. **PF-550** auto-rigs 3D character + 3 enemy models from Meshy
-5. **PF-545** compiles enemy behaviors: "skeleton patrols, attacks <5m, flees <20% HP"
-6. **PF-549** generates story arc: mentor → quest → betrayal → choice → resolution
-7. **PF-547** wires juice: screenshake on hit, sparkles on loot, slowmo on boss kill
-8. **PF-543** tunes physics to "fast Dark Souls" feel
-9. **PF-558** generates tutorial level teaching move, attack, dodge, collect
-10. **PF-559** adds colorblind mode, subtitles, difficulty options
-11. **PF-561** localizes to 10 languages
-12. **PF-544** bot playtests: "Boss HP too high, level 3 has unreachable chest"
-13. AI fixes issues, publishes game
-14. **PF-552** adapts difficulty per player at runtime
-15. **PF-551** tracks: "60% completion, level 4 is dropout point"
-16. **PF-553** creator says "fix level 4" → AI redesigns + republishes
-17. **PF-555** players remix the game with their own dungeons
-18. **PF-557** players create and share custom levels
-19. **PF-560** platform learns: dark fantasy roguelikes with these physics feel best
-20. Next dark fantasy roguelike is even better
+1. **PF-541** will generate GDD: mechanics, entities, assets, progression
+2. **PF-546** will establish dark fantasy palette + style reference
+3. **PF-548** will generate 5-level procedural dungeon with difficulty scaling
+4. **PF-550** will auto-rig 3D character + 3 enemy models from Meshy
+5. **PF-545** will compile enemy behaviors: "skeleton patrols, attacks <5m, flees <20% HP"
+6. **PF-549** will generate story arc: mentor → quest → betrayal → choice → resolution
+7. **PF-547** will wire juice: screenshake on hit, sparkles on loot, slowmo on boss kill
+8. **PF-543** will tune physics to "fast Dark Souls" feel
+9. **PF-558** will generate tutorial level teaching move, attack, dodge, collect
+10. **PF-559** will add colorblind mode, subtitles, difficulty options
+11. **PF-561** will localize to 10 languages
+12. **PF-544** bot will playtest: "Boss HP too high, level 3 has unreachable chest"
+13. AI will fix issues and publish game
+14. **PF-552** will adapt difficulty per player at runtime
+15. **PF-551** will track: "60% completion, level 4 is dropout point"
+16. **PF-553** creator says "fix level 4" → AI will redesign + republish
+17. **PF-555** players will remix the game with their own dungeons
+18. **PF-557** players will create and share custom levels
+19. **PF-560** platform will learn: dark fantasy roguelikes with these physics feel best
+20. Next dark fantasy roguelike will be even better
 
-**Result:** A polished, accessible, localized, balanced, living game — from one sentence.
+**Target result:** A polished, accessible, localized, balanced, living game — from one sentence.
 
 ---
 
@@ -172,46 +174,46 @@ PF-557 UGC ──→ PF-555 Remix
 
 **Prompt:** "Make a fantasy roguelike with dark theme, 3 enemy types, a shopkeeper, adaptive music, and a story about breaking a curse"
 
-**With all 43 capabilities, here's what happens:**
+**With all 43 capabilities, here is what will happen:**
 
 ```
-0:00  PF-573 Game Idea refines concept → "Dark Souls meets Binding of Isaac"
-0:01  PF-541 GDD generates structured design document
-0:02  PF-575 AI Studio dispatches 6 specialist agents:
+0:00  PF-573 Game Idea will refine concept → "Dark Souls meets Binding of Isaac"
+0:01  PF-541 GDD will generate structured design document
+0:02  PF-575 AI Studio will dispatch 6 specialist agents:
         Art Director → dark fantasy palette (PF-546)
         Level Designer → 5 procedural dungeon floors (PF-548)
         Sound Designer → adaptive combat music (PF-581) + SFX (PF-547)
         Narrative Designer → curse-breaking story arc (PF-549) + 3 quests (PF-569)
         Character Designer → auto-rigged hero + 3 enemies (PF-550)
         World Builder → lore + faction setup (PF-567)
-0:05  All agents sync → Producer resolves dependencies
-0:06  PF-558 Tutorial level generated teaching controls
-0:07  PF-565 Smart camera configured for top-down combat
-0:08  PF-543 Physics tuned to "fast Dark Souls" feel
-0:09  PF-566 Economy balanced: gold, potions, weapon upgrades
-0:10  PF-568 Auto-save system wired to checkpoints
-0:11  PF-547 Juice wired: screenshake on hit, sparkles on loot
-0:12  PF-544 Gameplay bot plays → "Boss 3 HP too high by 25%"
-0:13  PF-562 AI reviewer: "7/10 — needs more enemy variety"
-0:14  PF-572 Emotional pacing: "Level 2 has flat tension — add ambush"
-0:15  AI fixes all three issues automatically
-0:16  PF-559 Accessibility added: colorblind mode, subtitles, motor options
-0:17  PF-561 Localized to 10 languages
-0:18  PF-578 Auto-trailer generated: 30s gameplay video
-0:19  Published with analytics (PF-551), social features (PF-571)
-0:20  PF-552 DDA adapts to each player's skill at runtime
-0:21  PF-580 NPCs learn from player behavior across sessions
-0:22  PF-582 Live narrative responds to unexpected player choices
+0:05  All agents will sync → Producer will resolve dependencies
+0:06  PF-558 Tutorial level will be generated teaching controls
+0:07  PF-565 Smart camera will be configured for top-down combat
+0:08  PF-543 Physics will be tuned to "fast Dark Souls" feel
+0:09  PF-566 Economy will be balanced: gold, potions, weapon upgrades
+0:10  PF-568 Auto-save system will be wired to checkpoints
+0:11  PF-547 Juice will be wired: screenshake on hit, sparkles on loot
+0:12  PF-544 Gameplay bot will play → "Boss 3 HP too high by 25%"
+0:13  PF-562 AI reviewer will report: "7/10 — needs more enemy variety"
+0:14  PF-572 Emotional pacing will flag: "Level 2 has flat tension — add ambush"
+0:15  AI will fix all three issues automatically
+0:16  PF-559 Accessibility will be added: colorblind mode, subtitles, motor options
+0:17  PF-561 Will be localized to 10 languages
+0:18  PF-578 Auto-trailer will be generated: 30s gameplay video
+0:19  Will be published with analytics (PF-551), social features (PF-571)
+0:20  PF-552 DDA will adapt to each player's skill at runtime
+0:21  PF-580 NPCs will learn from player behavior across sessions
+0:22  PF-582 Live narrative will respond to unexpected player choices
 
 Post-publish:
-  PF-553 Analytics → AI auto-fixes dropout points
-  PF-555 Players remix with their own dungeons
-  PF-557 Players create and share custom levels
-  PF-574 Creator earns revenue via rewarded ads
-  PF-560 Platform learns: dark roguelikes work best with these physics
-  PF-584 Creator connects their game to other SpawnForge worlds
+  PF-553 Analytics → AI will auto-fix dropout points
+  PF-555 Players will remix with their own dungeons
+  PF-557 Players will create and share custom levels
+  PF-574 Creator will earn revenue via rewarded ads
+  PF-560 Platform will learn: dark roguelikes work best with these physics
+  PF-584 Creator will connect their game to other SpawnForge worlds
 ```
 
-**Total time: ~20 minutes from prompt to published, polished, accessible, localized, balanced game.**
+**Target time: ~20 minutes from prompt to published, polished, accessible, localized, balanced game.**
 
 That's the art of the possible.
