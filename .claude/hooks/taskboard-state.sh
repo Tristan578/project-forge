@@ -10,7 +10,8 @@
 _TB_HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 
-TB_DB="$_TB_PROJECT_ROOT/.claude/taskboard.db"
+# Use the OS default database path — NOT .claude/taskboard.db (which creates an empty local copy)
+TB_DB="$HOME/Library/Application Support/taskboard/taskboard.db"
 TB_API="http://localhost:3010/api"
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
 export PROJECT_ID="01KK974VMNC16ZAW7MW1NH3T3M"
@@ -55,17 +56,25 @@ tb_auto_start() {
     if [ -z "$TB_BIN" ]; then
         return 1  # no binary
     fi
-    if [ ! -f "$TB_DB" ]; then
-        return 1  # no database
-    fi
+    # Note: don't check for DB file existence — the binary creates it on first start.
+    # The OS default path is used (no --db flag), so the binary manages the DB location.
 
     # Start in background — the binary daemonizes by default
-    (cd "$_TB_PROJECT_ROOT" && "$TB_BIN" start --port 3010 --db .claude/taskboard.db) >/dev/null 2>&1
+    # Start WITHOUT --db flag to use the OS default path (~/Library/Application Support/taskboard/)
+    # Do NOT use --db .claude/taskboard.db — that creates an empty local copy
+    (cd "$_TB_PROJECT_ROOT" && "$TB_BIN" start --port 3010) >/dev/null 2>&1
 
     # Wait up to 5 seconds for it to come up
     for i in 1 2 3 4 5; do
         sleep 1
         if tb_api_available; then
+            # HEALTH CHECK: verify the board actually has data.
+            # If ticket count is 0, the DB path is wrong (lesson #56).
+            TICKET_COUNT=$(curl -s --connect-timeout 2 "$TB_API/board" 2>/dev/null | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('tickets',[])))" 2>/dev/null || echo "0")
+            if [ "$TICKET_COUNT" = "0" ]; then
+                echo "[TASKBOARD WARNING] Board has 0 tickets — possible wrong DB path. Expected 100+." >&2
+                echo "[TASKBOARD WARNING] Check: is --db flag being passed? OS default should be used." >&2
+            fi
             return 0
         fi
     done
