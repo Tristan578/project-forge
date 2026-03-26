@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { moderateContent } from '@/lib/moderation/contentFilter';
@@ -189,11 +189,13 @@ export async function POST(request: NextRequest) {
     .onConflictDoUpdate({
       target: [publishedGames.userId, publishedGames.slug],
       set: {
+        projectId: projectIdResult.value,
         title: titleResult.value,
         description: descResult.value ?? null,
         status: 'published',
         cdnUrl: gameUrl,
         thumbnail,
+        version: sql`${publishedGames.version} + 1`,
         updatedAt: new Date(),
       },
     })
