@@ -86,13 +86,13 @@ export function GeneratePixelArtDialog({ isOpen, onClose }: Props) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-modal="true" aria-labelledby="pixel-art-dialog-title">
       <div className="bg-zinc-900 border border-zinc-700 rounded-lg w-[480px] max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-zinc-700">
           <div className="flex items-center gap-2">
             <Wand2 size={18} className="text-blue-400" />
-            <h2 className="text-sm font-semibold text-zinc-100">Generate Pixel Art</h2>
+            <h2 id="pixel-art-dialog-title" className="text-sm font-semibold text-zinc-100">Generate Pixel Art</h2>
           </div>
           <button onClick={onClose} aria-label="Close" className="text-zinc-400 hover:text-zinc-200">
             <X size={16} />
