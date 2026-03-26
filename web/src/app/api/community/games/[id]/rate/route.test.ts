@@ -15,6 +15,9 @@ vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
   gameRatings: { gameId: 'gameId', userId: 'userId', id: 'id', rating: 'rating' },
 }));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
 
 describe('POST /api/community/games/[id]/rate', () => {
   beforeEach(() => {
@@ -89,22 +92,17 @@ describe('POST /api/community/games/[id]/rate', () => {
   });
 
   it('should create a new rating and return stats', async () => {
-    const existingChain = {
-      from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(),
-      limit: vi.fn().mockResolvedValue([]),
-    };
     const statsChain = {
       from: vi.fn().mockReturnThis(),
       where: vi.fn().mockResolvedValue([{ avgRating: 4.5, ratingCount: 1 }]),
     };
 
     const mockDb = {
-      select: vi.fn()
-        .mockReturnValueOnce(existingChain)
-        .mockReturnValueOnce(statsChain),
+      select: vi.fn().mockReturnValue(statsChain),
       insert: vi.fn().mockReturnValue({
-        values: vi.fn().mockResolvedValue(undefined),
+        values: vi.fn().mockReturnValue({
+          onConflictDoUpdate: vi.fn().mockResolvedValue(undefined),
+        }),
       }),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
