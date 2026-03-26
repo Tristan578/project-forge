@@ -23,28 +23,26 @@ export async function POST(
 
     const { id: gameId } = await params;
 
-    // Check if already liked
-    const existing = await db
-      .select()
-      .from(gameLikes)
-      .where(and(eq(gameLikes.gameId, gameId), eq(gameLikes.userId, authResult.ctx.user.id)))
-      .limit(1);
+    // Atomic upsert — eliminates TOCTOU race where concurrent likes both
+    // pass the existence check. Uses unique index uq_game_likes_user_game.
+    const inserted = await db.insert(gameLikes)
+      .values({
+        gameId,
+        userId: authResult.ctx.user.id,
+      })
+      .onConflictDoNothing({
+        target: [gameLikes.gameId, gameLikes.userId],
+      })
+      .returning({ id: gameLikes.id });
 
-    if (existing.length > 0) {
-      // Already liked, return current count
+    if (inserted.length === 0) {
+      // Already liked — return current count
       const count = await db
         .select({ count: sql<number>`COUNT(*)` })
         .from(gameLikes)
         .where(eq(gameLikes.gameId, gameId));
-
       return NextResponse.json({ liked: true, likeCount: Number(count[0].count) });
     }
-
-    // Add like
-    await db.insert(gameLikes).values({
-      gameId,
-      userId: authResult.ctx.user.id,
-    });
 
     // Get new count
     const count = await db
