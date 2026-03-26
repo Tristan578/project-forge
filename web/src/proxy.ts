@@ -102,14 +102,16 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { clerkMiddleware, createRouteMatcher } = require('@clerk/nextjs/server');
 
-  const isPublicRoute = createRouteMatcher([
+  // /dev route bypasses auth for local development only.
+  // In production, /dev requires authentication like any other editor route
+  // to prevent unauthenticated access to the full editor UI (#7915).
+  const publicRoutes = [
     '/',
     '/sign-in(.*)',
     '/sign-up(.*)',
     '/api/auth/webhook(.*)',
     '/api/stripe/webhook(.*)',
     '/pricing',
-    '/dev(.*)',
     '/play(.*)',
     '/terms(.*)',
     '/privacy(.*)',
@@ -119,7 +121,11 @@ function buildProxy(): (req: NextRequest) => NextResponse | Promise<NextResponse
     '/api-docs(.*)',
     '/api/openapi(.*)',
     '/api/sentry(.*)',
-  ]);
+  ];
+  if (process.env.NODE_ENV !== 'production') {
+    publicRoutes.push('/dev(.*)');
+  }
+  const isPublicRoute = createRouteMatcher(publicRoutes);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return clerkMiddleware(async (auth: any, req: NextRequest) => {
