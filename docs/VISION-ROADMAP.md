@@ -8,7 +8,7 @@
 ## Implementation Phases (by feasibility + impact)
 
 ### Phase V1: Foundation (Weeks 1-4) — "Make it work"
-*Build on existing infrastructure. Incremental, not infrastructure-heavy.*
+*Build on existing infrastructure. Incremental, not infrastructure-heavy. Core principle: systems, not genres — the AI decomposes any game description into composable systems (movement, camera, challenge, feedback, etc.) rather than matching to genre templates.*
 
 | # | Ticket | Effort | Dependencies | Can Start Now? |
 |---|--------|--------|-------------|---------------|
@@ -18,7 +18,7 @@
 | 4 | **PF-545** Behavior Tree DSL | 1 week | None — compiles to existing script API | **YES** |
 | 5 | **PF-558** Auto-Tutorial Generator | 3 days | PF-541 (GDD) | After PF-541 |
 
-**Phase V1 outcome:** "Make a platformer" → AI creates GDD, generates level, wires sound/juice, adds enemy AI, creates tutorial. Playable in 2-3 AI turns.
+**Phase V1 outcome:** "Describe any game" → AI decomposes the idea into systems (movement, camera, challenge, feedback, etc.), creates a GDD, generates the level, wires sound/juice, adds enemy AI, creates a tutorial. Playable in 2-3 AI turns.
 
 ### Phase V2: Quality (Weeks 5-8) — "Make it good"
 *AI understanding and feedback loops.*
@@ -31,7 +31,7 @@
 | 9 | **PF-544** Gameplay Bot | 2 weeks | Physics + pathfinding | A* on tilemap, exploration AI |
 | 10 | **PF-550** Auto-Rigging | 2 weeks | Skeleton2D exists | Needs Mixamo API or custom WASM |
 
-**Phase V2 outcome:** "Make a roguelike" → procedurally generated dungeons, consistent art style, enemy AI with behavior trees, story connecting levels, auto-rigged characters.
+**Phase V2 outcome:** Describe a roguelike (or any genre blend) → AI decomposes into systems: procedural world generation, consistent art style, enemy AI with behavior trees, narrative progression connecting levels, auto-rigged characters.
 
 ### Phase V3: Polish (Weeks 9-12) — "Make it complete"
 *Accessibility, localization, difficulty.*
