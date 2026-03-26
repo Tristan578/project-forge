@@ -19,7 +19,7 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 | **Game jam participants** | 500K+ annually | "Prototype in minutes, not hours" | Free → Starter ($29/mo) for export | Medium |
 | **CS/game design students** | 2M+ globally | "Learn game dev without Unity overhead" | Free → Educational tier (discounted) | Low (but viral) |
 | **Indie developers** | 300K+ active | "Professional tools, zero install" | Starter → Creator ($79/mo) for AI gen | High |
-| **Content creators/streamers** | 100K+ | "Build games live on stream" | Creator → Studio ($199/mo) for collab | Very High |
+| **Content creators/streamers** | 100K+ | "Build games live on stream" | Creator → Pro ($199/mo) for collab | Very High |
 | **Educators** | 50K+ | "Teach game design in any browser" | Institutional licensing | Very High |
 
 ### Distribution Channels
@@ -45,7 +45,7 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 | **Free** | $0 | 50 AI tokens/mo | Editor, templates, export (watermark) | Trial users, students |
 | **Starter** | $29/mo | 500 tokens/mo | No watermark, BYOK AI keys, cloud save | Hobbyists, jam participants |
 | **Creator** | $79/mo | 2,000 tokens/mo | Platform AI (Claude, Meshy, etc.), publish | Indie developers |
-| **Studio** | $199/mo | 5,000 tokens/mo | Priority generation, collaboration (future) | Teams, content creators |
+| **Pro** | $199/mo | 5,000 tokens/mo | Priority generation, collaboration (future) | Teams, content creators |
 
 ### Revenue Model Analysis
 
@@ -76,7 +76,7 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 | Moat Type | SpawnForge Asset | Time to Replicate |
 |-----------|-----------------|-------------------|
 | **Engine depth** | Bevy/WASM with WebGPU, Rapier physics, skeletal animation | 12-18 months |
-| **AI command surface** | 322+ MCP commands across 37 categories | 6-12 months |
+| **AI command surface** | 350+ MCP commands across 41 categories | 6-12 months |
 | **Multi-provider integration** | 5 AI providers (Meshy, ElevenLabs, Suno, DALL-E, Replicate) | 3-6 months |
 | **Export pipeline** | Standalone HTML5 + cloud publish | 3-6 months |
 | **Community content** | Templates, scripts, asset library | 6-12 months (network effect) |
@@ -163,7 +163,7 @@ SpawnForge eliminates every barrier: zero install (browser tab), AI-assisted cre
 - $5B+ creator economy in gaming
 
 ### Traction (Target for Seed)
-- 9,500+ unit tests, 322 MCP commands, 11 starter system bundles
+- 13,600+ unit tests, 350 MCP commands, 11 starter system bundles
 - Full export pipeline (HTML5 + cloud publish)
 - Multi-provider AI integration (5 providers)
 - Subscription billing live (Stripe)

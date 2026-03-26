@@ -19,7 +19,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
 - **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
-- **MCP Server** — 322 commands across 37 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 350 commands across 41 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand
@@ -178,7 +178,7 @@ project-forge/
 │   ├── public/              # Static assets + WASM binaries (generated)
 │   └── package.json
 ├── mcp-server/              # MCP command manifest + tools
-│   ├── manifest/commands.json  # 322 commands across 37 categories
+│   ├── manifest/commands.json  # 350 commands across 41 categories
 │   └── src/
 ├── docs/                    # User-facing documentation (human + AI readable)
 │   ├── getting-started/     # Installation, first scene, editor overview
@@ -203,7 +203,7 @@ project-forge/
 | `cd web && npm run build` | Production build |
 | `cd web && npm run lint` | Run ESLint |
 | `cd web && npx tsc --noEmit` | TypeScript type checking |
-| `cd web && npx vitest run` | Run web tests (~4700+ tests) |
+| `cd web && npx vitest run` | Run web tests (~13,600+ tests) |
 | `cd mcp-server && npx vitest run` | Run MCP server tests |
 
 ### Key conventions

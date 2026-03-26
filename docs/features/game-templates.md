@@ -10,6 +10,8 @@ Bundles load directly into the editor as a normal scene, so every element is edi
 
 > **Key principle: Systems, not genres.** A "platformer" is really `movement:walk+jump` + `camera:side-scroll` + `challenge:physics` + `progression:levels`. The engine treats all system combinations equally, so you are never limited to predefined genre categories.
 
+> **Naming note:** In the codebase, the UI component is still named `TemplateGallery` — the "Starter System Bundles" concept name describes the design philosophy, while the component name reflects its implementation.
+
 ## Using Starter Bundles in the Editor
 
 1. Click the **New Scene** button in the toolbar (or press **Ctrl+Shift+N**).

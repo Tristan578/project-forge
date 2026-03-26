@@ -91,7 +91,7 @@ SpawnForge is built around the "Canva for games" concept: the belief that game c
 
 **Indie developers and students** benefit from the full engine depth, TypeScript scripting, export pipeline, and MCP automation surface — a real tool that scales with their ambitions.
 
-**Professionals and studios** benefit from the MCP command surface for AI-assisted workflows, the multi-scene level system, skeletal animation, LOD, post-processing, and the collaboration-ready architecture — capabilities on par with desktop tools, accessible from any machine.
+**Professionals and studios** benefit from the MCP command surface for AI-assisted workflows, the multi-scene level system, skeletal animation, LOD, and post-processing — capabilities on par with desktop tools, accessible from any machine.
 
 ---
 
