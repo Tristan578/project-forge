@@ -300,9 +300,10 @@ describe('Export Pipeline Integration', () => {
 
       const bundle = bundleScripts(scripts);
 
-      // The source should be JSON-stringified in the output (as a const string literal)
-      expect(bundle.code).toContain('const src = "function onStart()');
-      // Script wrapping uses Function constructor to prevent closure breakout
+      // The source is JSON-stringified and passed directly to the Function constructor
+      // (injectLoopGuards may transform the source, so we check the JSON-encoded prefix)
+      expect(bundle.code).toContain('"function onStart()');
+      // Script wrapping uses the Function constructor to prevent closure breakout
       expect(bundle.code).toContain("new Function('forge'");
     });
   });
