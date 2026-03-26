@@ -148,12 +148,18 @@ export class AgentViewport extends EditorPage {
           }
         }
 
+        const validModes = ['edit', 'play', 'paused'] as const;
+        type EngineMode = typeof validModes[number];
+        const safeMode: EngineMode = validModes.includes(engineMode as EngineMode)
+          ? (engineMode as EngineMode)
+          : 'edit';
+
         return {
           entityCount: Object.keys(nodes).length,
           rootIds,
           nodes,
           selectedIds,
-          engineMode,
+          engineMode: safeMode,
           sceneName,
         };
       });
@@ -343,12 +349,15 @@ export class AgentViewport extends EditorPage {
   }
 
   /**
-   * Select an entity by dispatching `select_entity`.
+   * Select an entity by dispatching `select_entity` via the engine command.
+   *
+   * Note: This sends a JSON command to the engine. For clicking an entity in
+   * the hierarchy UI by name, use `EditorPage.selectEntity(name)` instead.
    *
    * @param entityId - Entity ID to select.
    * @returns CommandResult
    */
-  async selectEntity(entityId: string): Promise<CommandResult> {
+  async dispatchSelectEntity(entityId: string): Promise<CommandResult> {
     return this.sendCommand('select_entity', { entityId });
   }
 
