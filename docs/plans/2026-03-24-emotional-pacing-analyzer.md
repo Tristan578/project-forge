@@ -34,7 +34,7 @@ An AI-powered analysis tool that reads the game's scene graph, scripts, dialogue
 
 ### Phase 3: Comparative Analysis
 
-- Compare pacing curves against genre templates (platformer = frequent peaks, puzzle = gradual rise, horror = sustained tension with sharp drops)
+- Compare pacing curves against system-composition archetypes (movement-heavy games = frequent peaks, logic-heavy games = gradual rise, tension-driven games = sustained tension with sharp drops). Genre labels like "platformer" or "horror" are shorthand for these system profiles, not hard constraints
 - "Pacing score" — 0-100 rating based on variance, climax placement, resolution presence
 
 ## Constraints
