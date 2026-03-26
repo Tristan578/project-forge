@@ -1100,22 +1100,49 @@ def pull():
             skipped += 1
             continue
 
-        # HARD FILTER: Only import if metadata confirms this is a SpawnForge ticket
-        if not parsed:
-            filtered += 1
-            continue
-
-        sync_repo = parsed.get("syncRepo", "")
-        if sync_repo and sync_repo != target_repo:
-            filtered += 1
-            continue
-
-        # If syncRepo matches, allow. Otherwise, projectId MUST match local PF project.
-        meta_project = parsed.get("projectId", "")
-        if not sync_repo:
-            if not meta_project or meta_project != project_id:
+        # IMPORT FILTER: Accept tickets that are either:
+        # (a) Have SPAWNFORGE_METADATA in body with matching syncRepo/projectId, OR
+        # (b) Are Issues with PF- prefix in title (SpawnForge convention)
+        # This fallback (b) is needed because tickets created via `gh issue create`
+        # don't have sync metadata. Without it, the sync skips all 348+ tickets.
+        if parsed:
+            sync_repo = parsed.get("syncRepo", "")
+            if sync_repo and sync_repo != target_repo:
                 filtered += 1
                 continue
+            meta_project = parsed.get("projectId", "")
+            if not sync_repo and not meta_project:
+                # No syncRepo and no projectId in metadata.
+                # For v1 (old taskboard format) with PF- title, accept it — it's ours.
+                # For v2+ without projectId, reject.
+                version = parsed.get("version", 0)
+                if version <= 1 and title.startswith("PF-"):
+                    # Old format — accept as SpawnForge ticket, fill in missing fields
+                    parsed["syncRepo"] = target_repo
+                    parsed["projectId"] = str(project_id)
+                else:
+                    filtered += 1
+                    continue
+            elif meta_project and meta_project != project_id:
+                filtered += 1
+                continue
+        elif title.startswith("PF-") and content_type in ("Issue", "DraftIssue"):
+            # Fallback: PF-prefixed issue without metadata — create synthetic parsed data
+            # Extract priority from title prefix patterns like [urgent], [high]
+            priority_match = re.search(r'\[(urgent|high|medium|low)\]', title, re.IGNORECASE)
+            fallback_priority = priority_match.group(1).lower() if priority_match else "medium"
+            parsed = {
+                "version": 0,
+                "priority": fallback_priority,
+                "description": body or "",
+                "syncRepo": target_repo,
+                "projectId": str(project_id),
+                "teamId": "",
+                "subtasks": [],
+            }
+        else:
+            filtered += 1
+            continue
 
         # Check for re-link by ticketId in metadata
         if parsed.get("ticketId"):
