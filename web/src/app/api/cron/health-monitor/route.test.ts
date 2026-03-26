@@ -38,7 +38,7 @@ describe('GET /api/cron/health-monitor', () => {
         { name: 'Clerk', status: 'healthy', latencyMs: 20, lastChecked: new Date().toISOString() },
       ],
     });
-    vi.mocked(computeCriticalStatus).mockReturnValue('ok');
+    vi.mocked(computeCriticalStatus).mockReturnValue('healthy');
   });
 
   afterEach(() => {
@@ -81,7 +81,7 @@ describe('GET /api/cron/health-monitor', () => {
         { name: 'Upstash Redis', status: 'degraded', latencyMs: 500, lastChecked: new Date().toISOString(), error: 'Slow' },
       ],
     });
-    vi.mocked(computeCriticalStatus).mockReturnValue('ok');
+    vi.mocked(computeCriticalStatus).mockReturnValue('healthy');
 
     const res = await GET(makeReq(`Bearer ${CRON_SECRET}`));
     const data = await res.json();
