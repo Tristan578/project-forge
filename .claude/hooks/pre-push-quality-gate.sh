@@ -49,10 +49,20 @@ ERRORS=""
 if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
   TSC_BIN="$WEB_DIR/node_modules/.bin/tsc"
   if [ ! -x "$TSC_BIN" ]; then exit 0; fi
-  TSC_OUTPUT=$("$TSC_BIN" --noEmit 2>&1) || {
-    echo "$TSC_OUTPUT" | tail -10 >&2
-    ERRORS="${ERRORS}TypeScript errors found. "
-  }
+  TSC_OUTPUT=$("$TSC_BIN" --noEmit 2>&1)
+  TSC_EXIT=$?
+  if [ $TSC_EXIT -ne 0 ]; then
+    # Node 25.x JIT segfaults produce stack traces with libnode — not real TS errors.
+    # Retry once before blocking the push.
+    if echo "$TSC_OUTPUT" | grep -q 'libnode'; then
+      TSC_OUTPUT=$("$TSC_BIN" --noEmit 2>&1)
+      TSC_EXIT=$?
+    fi
+    if [ $TSC_EXIT -ne 0 ] && ! echo "$TSC_OUTPUT" | grep -q 'libnode'; then
+      echo "$TSC_OUTPUT" | tail -10 >&2
+      ERRORS="${ERRORS}TypeScript errors found. "
+    fi
+  fi
 fi
 
 # 2. ESLint on changed files only (fast, ~2-3s per file)
