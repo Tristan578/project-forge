@@ -351,9 +351,9 @@ describe('handleSubscriptionDeleted', () => {
     mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 1000, monthlyTokensUsed: 400, addonTokens: 200, earnedCredits: 0 });
     await handleSubscriptionDeleted('cus_abc123', 'sub_xyz');
 
-    // INSERT...SELECT: amount and balanceAfter computed in SQL at execution time
+    // INSERT runs BEFORE UPDATE so it reads pre-cancellation state
     const allCalls = mockNeonSql.mock.calls;
-    const insertCall = allCalls[allCalls.length - 1];
+    const insertCall = allCalls[0]; // first call is the INSERT
     const insertValues = insertCall.slice(1).flat();
     expect(insertValues).toContain('cancellation:creator->starter');
     expect(insertValues).toContain(50); // starter allocation (for balance calc)
@@ -405,12 +405,12 @@ describe('handleInvoicePaid', () => {
     mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 100, earnedCredits: 0, stripeSubscriptionId: 'sub_xyz' });
     await handleInvoicePaid('cus_abc123', 'inv_123', 'sub_xyz');
 
-    // With rollover: 4 statements (UPDATE addon, INSERT rollover, UPDATE monthly, INSERT grant)
+    // With rollover: 4 statements (INSERT rollover, UPDATE addon, UPDATE monthly, INSERT grant)
     expect(transactionStatementCount()).toBe(4);
 
-    // Check rollover INSERT...SELECT has correct source
+    // Check rollover INSERT...SELECT has correct source (runs BEFORE addon UPDATE)
     const allCalls = mockNeonSql.mock.calls;
-    const rolloverInsertValues = allCalls[1].slice(1).flat();
+    const rolloverInsertValues = allCalls[0].slice(1).flat();
     expect(rolloverInsertValues).toContain('renewal_rollover:creator');
 
     // Check grant INSERT...SELECT has correct source and allocation
@@ -424,7 +424,7 @@ describe('handleInvoicePaid', () => {
     mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 2000, monthlyTokensUsed: 500, addonTokens: 0, stripeSubscriptionId: 'sub_xyz' });
     await handleInvoicePaid('cus_abc123', 'inv_123', 'sub_xyz');
 
-    const rolloverInsertValues = mockNeonSql.mock.calls[1].slice(1).flat();
+    const rolloverInsertValues = mockNeonSql.mock.calls[0].slice(1).flat();
     expect(rolloverInsertValues).toContain(1000); // capped at creator allocation
   });
 

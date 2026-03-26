@@ -208,7 +208,17 @@ export async function handleSubscriptionDeleted(
   const starterAllocation = TIER_MONTHLY_TOKENS['starter'];
   const now = new Date().toISOString();
 
+  // INSERT before UPDATE: the audit record must read pre-cancellation state
+  // (remaining tokens, addon balance) before the UPDATE resets them.
   await neonSql.transaction([
+    neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      SELECT ${user.id}, 'adjustment',
+             -GREATEST(0, monthly_tokens - monthly_tokens_used),
+             ${starterAllocation} + addon_tokens + earned_credits,
+             ${`cancellation:${previousTier}->starter`}, ${subscriptionId}
+      FROM users WHERE id = ${user.id}
+    `,
     neonSql`
       UPDATE users
       SET tier                   = 'starter',
@@ -217,14 +227,6 @@ export async function handleSubscriptionDeleted(
           monthly_tokens_used    = 0,
           updated_at             = ${now}
       WHERE id = ${user.id}
-    `,
-    neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      SELECT ${user.id}, 'adjustment',
-             -GREATEST(0, monthly_tokens - monthly_tokens_used),
-             ${starterAllocation} + addon_tokens + earned_credits,
-             ${`cancellation:${previousTier}->starter`}, ${subscriptionId}
-      FROM users WHERE id = ${user.id}
     `,
   ]);
 }
@@ -267,21 +269,23 @@ export async function handleInvoicePaid(
   const statements: ReturnType<typeof neonSql>[] = [];
 
   if (hasRollover) {
-    // Rollover: LEAST(remaining, allocation) computed in SQL at execution time
+    // INSERT before UPDATE: audit record must read addon_tokens BEFORE the
+    // rollover is added, otherwise balance_after double-counts the rollover.
+    statements.push(neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      SELECT ${user.id}, 'rollover',
+             LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
+             GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits
+               + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
+             ${`renewal_rollover:${tier}`}, ${invoiceId}
+      FROM users WHERE id = ${user.id}
+    `);
+
     statements.push(neonSql`
       UPDATE users
       SET addon_tokens = addon_tokens + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
           updated_at   = ${now}
       WHERE id = ${user.id}
-    `);
-
-    statements.push(neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      SELECT ${user.id}, 'rollover',
-             LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
-             GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits,
-             ${`renewal_rollover:${tier}`}, ${invoiceId}
-      FROM users WHERE id = ${user.id}
     `);
   }
 
