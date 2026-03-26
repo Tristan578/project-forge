@@ -29,6 +29,11 @@
             "type": "command",
             "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/on-stop.sh\"",
             "timeout": 5000
+          },
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/lessons-learned-reminder.sh\"",
+            "timeout": 3000
           }
         ]
       }

@@ -239,6 +239,11 @@ When adding a **new ECS component**, update these domain-scoped files:
 
 ## Agent Skills
 
+### Review Protocol
+All specs and PRs go through 4 antagonistic reviewers: Architect, Security, UX, DX.
+Verdict is PASS or FAIL only — any issue at any severity is a FAIL.
+Loop continues until all 4 pass clean. No shortcuts.
+
 ### Orchestration
 - `/planner` — Architect flow, creates specs in `specs/`
 - `/builder` — Implements specs into code, dispatches to domain skills

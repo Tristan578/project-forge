@@ -67,9 +67,17 @@ cd web && npx playwright test
   - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
   - `web/vitest.config.ts` — standalone config (jsdom) used when running without workspace
 - Playwright config: `web/playwright.config.ts`, 4 shards in CI
+- Agent viewport tests: `cd web && npx playwright test --config playwright.agent.config.ts`
 
 ## Taskboard
 
 - API: http://localhost:3010/api
 - Project ID: 01KK974VMNC16ZAW7MW1NH3T3M
 - Always create a ticket before starting work
+
+## Working Principles
+
+- **Reviews are PASS or FAIL** — no "pass with issues." Any issue at any severity blocks.
+- **Boy Scout Rule** — fix every bug you find, regardless of whose fault it is. No known issues left behind.
+- **Systems, not genres** — games are compositions of systems (movement, input, camera, etc.), not genre categories. See `specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md`.
+- **Lessons learned are enforced via hooks** — `inject-lessons-learned.sh` fires on every Edit/Write/Bash, showing relevant anti-patterns before action.
