@@ -68,6 +68,16 @@
             "timeout": 5000
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$(git rev-parse --show-toplevel)/.claude/hooks/check-db-transaction.sh\"",
+            "timeout": 3000
+          }
+        ]
       }
     ],
     "PostToolUse": [
