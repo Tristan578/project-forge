@@ -12,7 +12,7 @@ with relationships, regions with biomes, a history timeline, and discoverable lo
 consistent. Without this, game worlds feel shallow and disconnected.
 
 The existing `worldBuilder.ts` has a complete type system (`GameWorld`, `Faction`, `Region`,
-`TimelineEvent`, `LoreEntry`, `WorldRule`), 4 genre presets, and a prompt builder. But it lacks:
+`TimelineEvent`, `LoreEntry`, `WorldRule`), 4 setting presets (medieval fantasy, sci-fi, post-apocalyptic, mythological), and a prompt builder. But it lacks:
 1. A chat handler so creators can say "build me a sci-fi world with 4 factions"
 2. Validation for internal consistency (faction relationships symmetric, regions connected, lore
    references real timeline events)
@@ -46,7 +46,7 @@ Auto-feed generated factions into NPC behavior trees and narrative arcs.
 
 Register handler for tool name `build_world`:
 - Accepts premise string (e.g., "sci-fi world with 4 factions fighting over energy crystals")
-- Optionally accepts genre, faction count, region count constraints
+- Optionally accepts setting (e.g., "fantasy", "sci-fi"), faction count, region count constraints
 - Builds structured prompt requesting `GameWorld` JSON
 - Calls AI via `client.ts`, validates response against `GameWorld` schema
 - Runs `validateWorldConsistency()` (new) on output
@@ -71,14 +71,14 @@ Returns severity-scored issues list, similar to `BalanceReport` in economy desig
 #### 3. MCP Command (`mcp-server/manifest/commands.json`)
 
 Add `build_world` command:
-- Parameters: `premise` (required string), `genre` (optional), `factionCount` (optional int 1-10),
+- Parameters: `premise` (required string), `setting` (optional string, e.g., "fantasy", "sci-fi"), `factionCount` (optional int 1-10),
   `regionCount` (optional int 1-20)
 - Returns: `GameWorld` JSON, `ConsistencyReport`
 
 #### 4. World Overview Panel (`web/src/components/editor/WorldPanel.tsx` -- NEW)
 
 Displays generated world:
-- World name, genre, era header
+- World name, setting, era header
 - Faction cards with relationship matrix (color-coded: green=ally, red=enemy, gray=neutral)
 - Region list with biome tags and connection graph (simple node-link diagram)
 - Timeline as vertical list, chronologically ordered
@@ -115,7 +115,7 @@ Return valid JSON matching the GameWorld schema.
 User prompt:
 ```
 Premise: {user input}
-Genre: {specified or inferred}
+Setting: {specified or inferred, e.g., "fantasy", "sci-fi", "post-apocalyptic"}
 Faction count: {1-10, default 3}
 Region count: {1-20, default 5}
 Tone: {epic | dark | lighthearted | mysterious}
@@ -129,20 +129,20 @@ Tone: {epic | dark | lighthearted | mysterious}
 - Consistency validator catches asymmetric faction relationships
 - Consistency validator catches disconnected regions
 - Self-healing loop: inconsistent world -> re-prompt -> consistent world
-- Fallback to genre preset if all retries fail
+- Fallback to setting preset if all retries fail
 - Single-faction world: relationships object is empty (valid edge case)
 - 10-faction world: relationship matrix has 90 entries (n*(n-1))
 
 **Integration tests** (`web/src/lib/chat/handlers/__tests__/worldHandlers.test.ts` -- NEW):
 - Chat "build a fantasy world with 3 factions" -> GameWorld with 3 factions
-- Genre constraint respected in output
+- Setting constraint respected in output
 - World data persisted in project metadata
 
 ## Acceptance Criteria
 
 - Given "3 factions at war over crystals", When world generated, Then 3 factions with mutual enemy relationships
 - Given asymmetric relationships in AI output, When validated, Then self-healing fixes them
-- Given all retries fail, When fallback triggered, Then closest genre preset returned with warning
+- Given all retries fail, When fallback triggered, Then closest setting preset returned with warning
 - Given world generated, When user views WorldPanel, Then factions, regions, timeline, lore all displayed
 - Given MCP tool `build_world`, When called with premise, Then returns GameWorld + ConsistencyReport
 - Given 1-faction world requested, When generated, Then world valid with no relationship errors
