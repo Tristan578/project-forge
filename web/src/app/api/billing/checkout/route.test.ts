@@ -1,6 +1,10 @@
 vi.mock('server-only', () => ({}));
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextRequest } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
+import { makeUser } from '@/test/utils/apiTestUtils';
+import { getDb } from '@/lib/db/client';
 
 vi.hoisted(() => {
   process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
@@ -10,18 +14,14 @@ vi.hoisted(() => {
   process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
 });
 
-import { POST } from './route';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit } from '@/lib/rateLimit';
-import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
-import { getDb } from '@/lib/db/client';
-
-vi.mock('@/lib/auth/api-auth');
-vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(),
-  rateLimitResponse: vi.fn().mockReturnValue(new Response('Rate Limited', { status: 429 })),
-}));
+vi.mock('@/lib/api/middleware');
 vi.mock('@/lib/db/client');
+vi.mock('@/lib/logging/logger', () => ({
+  logger: { child: vi.fn().mockReturnValue({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
+}));
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+}));
 
 // Mock Stripe
 const { mockCustomerCreate, mockCheckoutCreate } = vi.hoisted(() => ({
@@ -38,9 +38,29 @@ vi.mock('stripe', () => {
   };
 });
 
-describe('POST /api/billing/checkout', () => {
-  const env = process.env;
+function makeReq(body?: unknown) {
+  const url = 'http://localhost:3000/api/billing/checkout';
+  if (body !== undefined) {
+    return new NextRequest(url, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  return new NextRequest(url, { method: 'POST' });
+}
 
+function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>) {
+  const user = makeUser(overrides);
+  vi.mocked(withApiMiddleware).mockResolvedValue({
+    error: undefined,
+    userId: user.id,
+    authContext: { clerkId: 'clerk123', user } as never,
+  });
+  return user;
+}
+
+describe('POST /api/billing/checkout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
@@ -48,74 +68,72 @@ describe('POST /api/billing/checkout', () => {
     process.env.STRIPE_PRICE_CREATOR = 'price_creator_mock';
     process.env.STRIPE_PRICE_STUDIO = 'price_studio_mock';
     process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';
-    
-    vi.mocked(rateLimit).mockResolvedValue({
-      allowed: true,
-      remaining: 4,
-      resetAt: Date.now() + 60000,
-    });
 
-    const mockDb = { update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(), where: vi.fn().mockResolvedValue(true) };
+    const mockDb = {
+      update: vi.fn().mockReturnThis(),
+      set: vi.fn().mockReturnThis(),
+      where: vi.fn().mockResolvedValue(true),
+    };
     vi.mocked(getDb).mockReturnValue(mockDb as unknown as ReturnType<typeof getDb>);
   });
 
-  afterEach(() => {
-    process.env = env;
-  });
-
   it('returns 401 if unauthenticated', async () => {
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false,
-      response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
+    const mockResponse = new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: mockResponse as never,
+      userId: null,
+      authContext: null,
     });
 
-    const req = new Request('http://localhost/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier: 'creator' }) });
-    const res = await POST(req);
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'creator' }));
 
     expect(res.status).toBe(401);
   });
 
   it('returns 429 if rate limited', async () => {
-    const user = makeUser();
-    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    const rlResponse = new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 });
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: rlResponse as never,
+      userId: null,
+      authContext: null,
+    });
 
-    const req = new Request('http://localhost/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier: 'creator' }) });
-    const res = await POST(req);
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'creator' }));
+
     expect(res.status).toBe(429);
   });
 
   it('returns 400 for invalid tier', async () => {
-    const user = makeUser();
-    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    mockMiddlewareSuccess();
 
-    const req = new Request('http://localhost/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier: 'invalid_tier' }) });
-    const res = await POST(req);
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'invalid_tier' }));
     const data = await res.json();
-    
+
     expect(res.status).toBe(400);
     expect(data.error).toContain('Invalid tier');
   });
 
   it('creates Stripe customer if none exists and starts checkout', async () => {
-    const user = makeUser({ stripeCustomerId: null });
-    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'clerk123', user } });
-    
+    const user = mockMiddlewareSuccess({ stripeCustomerId: null });
+
     mockCustomerCreate.mockResolvedValue({ id: 'cus_new123' });
     mockCheckoutCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/mock' });
 
-    const req = new Request('http://localhost/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier: 'creator' }) });
-    const res = await POST(req);
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'creator' }));
     const data = await res.json();
-    
+
     expect(res.status).toBe(200);
     expect(data.url).toBe('https://checkout.stripe.com/c/pay/mock');
-    
+
     expect(mockCustomerCreate).toHaveBeenCalledWith({
       email: user.email,
       metadata: { userId: user.id, clerkId: 'clerk123' },
     });
-    
+
     expect(mockCheckoutCreate).toHaveBeenCalledWith(expect.objectContaining({
       customer: 'cus_new123',
       line_items: [{ price: 'price_creator_mock', quantity: 1 }],
@@ -124,18 +142,17 @@ describe('POST /api/billing/checkout', () => {
   });
 
   it('uses existing Stripe customer for checkout', async () => {
-    const user = makeUser({ stripeCustomerId: 'cus_existing' });
-    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: 'clerk123', user } });
-    
+    mockMiddlewareSuccess({ stripeCustomerId: 'cus_existing' });
+
     mockCheckoutCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/mock2' });
 
-    const req = new Request('http://localhost/api/billing/checkout', { method: 'POST', body: JSON.stringify({ tier: 'pro' }) });
-    const res = await POST(req);
+    const { POST } = await import('./route');
+    const res = await POST(makeReq({ tier: 'pro' }));
     const data = await res.json();
-    
+
     expect(res.status).toBe(200);
     expect(data.url).toBe('https://checkout.stripe.com/c/pay/mock2');
-    
+
     expect(mockCustomerCreate).not.toHaveBeenCalled();
     expect(mockCheckoutCreate).toHaveBeenCalledWith(expect.objectContaining({
       customer: 'cus_existing',

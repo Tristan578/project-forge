@@ -13,12 +13,14 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 
 function makeReq(method = 'GET', body?: string) {
   const url = 'http://localhost:3000/api/projects';
-  const opts: RequestInit = { method };
   if (body) {
-    opts.body = body;
-    opts.headers = { 'Content-Type': 'application/json' };
+    return new NextRequest(url, {
+      method,
+      body,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
-  return new NextRequest(url, opts);
+  return new NextRequest(url, { method });
 }
 
 function mockMiddlewareSuccess(userId = 'user_1', tier = 'creator' as const) {
