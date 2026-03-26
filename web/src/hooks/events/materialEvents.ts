@@ -3,7 +3,7 @@
  */
 
 import { useEditorStore, type MaterialData, type EnvironmentData, type PostProcessingData } from '@/stores/editorStore';
-import type { SetFn, GetFn } from './types';
+import { castPayload, type SetFn, type GetFn } from './types';
 
 export function handleMaterialEvent(
   type: string,
@@ -13,82 +13,82 @@ export function handleMaterialEvent(
 ): boolean {
   switch (type) {
     case 'MATERIAL_CHANGED': {
-      const payload = data as unknown as MaterialData & { entityId: string };
+      const payload = castPayload<MaterialData & { entityId: string }>(data);
       const { entityId: _matId, ...matData } = payload;
       useEditorStore.getState().setPrimaryMaterial(matData as MaterialData);
       return true;
     }
 
     case 'LIGHT_CHANGED': {
-      const payload = data as unknown as import('@/stores/editorStore').LightData & { entityId: string };
+      const payload = castPayload<import('@/stores/editorStore').LightData & { entityId: string }>(data);
       const { entityId: _lightId, ...lightData } = payload;
       useEditorStore.getState().setPrimaryLight(lightData as import('@/stores/editorStore').LightData);
       return true;
     }
 
     case 'AMBIENT_LIGHT_CHANGED': {
-      const payload = data as unknown as import('@/stores/editorStore').AmbientLightData;
+      const payload = castPayload<import('@/stores/editorStore').AmbientLightData>(data);
       useEditorStore.getState().setAmbientLight(payload);
       useEditorStore.getState().setSceneLightAmbient(payload.color, payload.brightness);
       return true;
     }
 
     case 'ENVIRONMENT_CHANGED': {
-      const payload = data as unknown as EnvironmentData;
+      const payload = castPayload<EnvironmentData>(data);
       useEditorStore.getState().setEnvironment(payload);
       return true;
     }
 
     case 'POST_PROCESSING_CHANGED': {
-      const payload = data as unknown as PostProcessingData;
+      const payload = castPayload<PostProcessingData>(data);
       useEditorStore.getState().setPostProcessing(payload);
       return true;
     }
 
     case 'SHADER_CHANGED': {
-      const payload = data as unknown as { entityId: string; data: import('@/stores/editorStore').ShaderEffectData | null };
+      const payload = castPayload<{ entityId: string; data: import('@/stores/editorStore').ShaderEffectData | null }>(data);
       useEditorStore.getState().setPrimaryShaderEffect(payload.data || null);
       return true;
     }
 
     case 'CSG_COMPLETED': {
-      const payload = data as unknown as { entityId: string; name: string; operation: string };
+      const payload = castPayload<{ entityId: string; name: string; operation: string }>(data);
       console.log(`CSG ${payload.operation} completed: ${payload.name} (${payload.entityId})`);
       return true;
     }
 
     case 'CSG_ERROR': {
-      const payload = data as unknown as { message: string };
+      const payload = castPayload<{ message: string }>(data);
       console.error(`CSG error: ${payload.message}`);
       return true;
     }
 
     case 'PROCEDURAL_MESH_CREATED': {
-      const payload = data as unknown as { entityId: string; name: string; operation: string };
+      const payload = castPayload<{ entityId: string; name: string; operation: string }>(data);
       console.log(`Procedural mesh ${payload.operation} completed: ${payload.name} (${payload.entityId})`);
       return true;
     }
 
     case 'PROCEDURAL_MESH_ERROR': {
-      const payload = data as unknown as { message: string };
+      const payload = castPayload<{ message: string }>(data);
       console.error(`Procedural mesh error: ${payload.message}`);
       return true;
     }
 
     case 'ARRAY_COMPLETED': {
-      const payload = data as unknown as { count: number };
+      const payload = castPayload<{ count: number }>(data);
       console.log(`Array completed: ${payload.count} entities created`);
       return true;
     }
 
     case 'TERRAIN_CHANGED': {
-      const payload = data as unknown as { entityId: string; terrainData: import('@/stores/editorStore').TerrainDataState };
+      const payload = castPayload<{ entityId: string; terrainData: import('@/stores/editorStore').TerrainDataState }>(data);
       useEditorStore.getState().setTerrainData(payload.entityId, payload.terrainData);
       return true;
     }
 
     case 'QUALITY_CHANGED': {
-      const payload = data as unknown as {
+      const payload = castPayload<{
         preset: string;
         msaaSamples: number;
         shadowsEnabled: boolean;
@@ -97,7 +97,7 @@ export function handleMaterialEvent(
         chromaticAberrationEnabled: boolean;
         sharpeningEnabled: boolean;
         particleDensityScale: number;
-      };
+      }>(data);
       useEditorStore.getState().setQualityFromEngine(payload);
       return true;
     }
@@ -108,7 +108,7 @@ export function handleMaterialEvent(
     }
 
     case 'CUSTOM_WGSL_SOURCE_CHANGED': {
-      const payload = data as unknown as import('@/stores/slices/types').CustomWgslSource;
+      const payload = castPayload<import('@/stores/slices/types').CustomWgslSource>(data);
       useEditorStore.getState().setCustomWgslSource(payload);
       return true;
     }
