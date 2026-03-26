@@ -33,13 +33,12 @@ export default defineConfig({
         'src/app/**/layout.tsx',
         'src/app/**/page.tsx',
       ],
-      // Ratcheted up per sprint — see docs/coverage-plan.md
-      // Tier-1 target: 55/45/50/55
+      // Ratcheted up per sprint — must match vitest.config.ts thresholds
       thresholds: {
-        statements: 55,
-        branches: 45,
-        functions: 50,
-        lines: 55,
+        statements: 70,
+        branches: 60,
+        functions: 65,
+        lines: 72,
       },
     },
   },
