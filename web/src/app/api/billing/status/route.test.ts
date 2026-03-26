@@ -62,7 +62,7 @@ describe('GET /api/billing/status', () => {
 
   it('returns current tier and billing status for authenticated user', async () => {
     const cycleStart = new Date('2026-03-01T12:00:00Z');
-    const user = mockMiddlewareSuccess({
+    mockMiddlewareSuccess({
       tier: 'pro',
       stripeCustomerId: 'cus_123',
       stripeSubscriptionId: 'sub_123',
