@@ -167,12 +167,14 @@ export function decomposeIntoSystems(prompt: string): SystemDecomposition {
   // Sort by number of matched keywords (most confident first)
   detected.sort((a, b) => b.matchedKeywords.length - a.matchedKeywords.length);
 
-  // Every game needs input and camera — add defaults if not detected
+  // Every game needs input and camera — add defaults if not detected.
+  // Defaults use 'secondary' priority so getSystemLabel() correctly falls
+  // back to "custom game" for vague prompts (only explicit matches are 'core').
   if (!detected.some(d => d.category === 'input')) {
-    detected.push({ category: 'input', type: 'keyboard', priority: 'core', matchedKeywords: [] });
+    detected.push({ category: 'input', type: 'keyboard', priority: 'secondary', matchedKeywords: [] });
   }
   if (!detected.some(d => d.category === 'camera')) {
-    detected.push({ category: 'camera', type: 'follow', priority: 'core', matchedKeywords: [] });
+    detected.push({ category: 'camera', type: 'follow', priority: 'secondary', matchedKeywords: [] });
   }
 
   const systemNames = detected.map(d => `${d.category}:${d.type}`);
