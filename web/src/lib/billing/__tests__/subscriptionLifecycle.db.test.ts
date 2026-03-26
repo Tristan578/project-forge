@@ -201,21 +201,18 @@ describe('handleSubscriptionCreated', () => {
     mockUser = makeUser({ tier: 'hobbyist' as Tier, addonTokens: 100, earnedCredits: 50 });
     await handleSubscriptionCreated('cus_abc123', 'sub_new', 'hobbyist');
 
-    // The neonSql tagged template calls capture interpolated values.
-    // Call 0 = UPDATE users, Call 1 = INSERT credit_transactions
+    // Call 0 = UPDATE users, Call 1 = INSERT...SELECT credit_transactions
     const updateValues = neonCallValues(0);
     expect(updateValues).toContain('hobbyist'); // tier
     expect(updateValues).toContain(300); // allocation (hobbyist)
     expect(updateValues).toContain('sub_new'); // subscriptionId
     expect(updateValues).toContain('user-uuid-1'); // userId
 
+    // INSERT...SELECT: balanceAfter computed in SQL (allocation + addon_tokens + earned_credits)
+    // Interpolated values: userId, amount(allocation), allocation(for balance calc), source, referenceId, userId(WHERE)
     const insertValues = neonCallValues(1);
     expect(insertValues).toContain('user-uuid-1');
-    // 'monthly_grant' is a string literal in the template, not interpolated
-    // Interpolated values: userId, amount, balanceAfter, source, referenceId
     expect(insertValues).toContain(300); // amount = allocation
-    // balanceAfter = allocation(300) + addonTokens(100) + earnedCredits(50)
-    expect(insertValues).toContain(450);
     expect(insertValues).toContain('subscription_created:hobbyist');
     expect(insertValues).toContain('sub_new');
   });
@@ -263,19 +260,17 @@ describe('handleSubscriptionUpdated — upgrade', () => {
   });
 
   it('grants token difference immediately on upgrade (creator→pro)', async () => {
-    // creator=1000, pro=3000; difference=2000; remaining=400
+    // creator=1000, pro=3000; difference=2000
     mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 50, earnedCredits: 10 });
     await handleSubscriptionUpdated('cus_abc123', 'sub_xyz', 'pro', 'active');
 
-    // Find the INSERT call — it's the last neonSql call before transaction
+    // INSERT...SELECT: balanceAfter computed in SQL, not interpolated
     const allCalls = mockNeonSql.mock.calls;
     const insertCall = allCalls[allCalls.length - 1];
     const insertValues = insertCall.slice(1).flat();
-    // 'adjustment' is a SQL literal, not interpolated — check interpolated values
     expect(insertValues).toContain(2000); // difference = 3000 - 1000
     expect(insertValues).toContain('upgrade:creator->pro');
-    // balanceAfter = (400+2000) + 50 + 10 = 2460
-    expect(insertValues).toContain(2460);
+    // balanceAfter is computed in SQL via GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits
   });
 
   it('grants token difference on starter→hobbyist upgrade', async () => {
@@ -356,24 +351,21 @@ describe('handleSubscriptionDeleted', () => {
     mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 1000, monthlyTokensUsed: 400, addonTokens: 200, earnedCredits: 0 });
     await handleSubscriptionDeleted('cus_abc123', 'sub_xyz');
 
+    // INSERT...SELECT: amount and balanceAfter computed in SQL at execution time
     const allCalls = mockNeonSql.mock.calls;
     const insertCall = allCalls[allCalls.length - 1];
     const insertValues = insertCall.slice(1).flat();
-    expect(insertValues).toContain(-600); // -(1000 - 400)
     expect(insertValues).toContain('cancellation:creator->starter');
-    // balanceAfter = 50 (starter) + 200 (addon) + 0 (earned) = 250
-    expect(insertValues).toContain(250);
+    expect(insertValues).toContain(50); // starter allocation (for balance calc)
   });
 
-  it('records zero adjustment when all monthly tokens were already spent', async () => {
+  it('records adjustment when all monthly tokens were already spent', async () => {
     mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 1000, monthlyTokensUsed: 1000 });
     await handleSubscriptionDeleted('cus_abc123', 'sub_xyz');
 
-    const allCalls = mockNeonSql.mock.calls;
-    const insertCall = allCalls[allCalls.length - 1];
-    const insertValues = insertCall.slice(1).flat();
-    // -Math.max(0, 0) = -0 in JS
-    expect(Math.abs(insertValues.find((v): v is number => typeof v === 'number' && v <= 0) ?? NaN)).toBe(0);
+    // INSERT...SELECT: -GREATEST(0, monthly_tokens - monthly_tokens_used) computed in SQL
+    expect(mockNeonTransaction).toHaveBeenCalledOnce();
+    expect(transactionStatementCount()).toBe(2);
   });
 });
 
@@ -413,17 +405,18 @@ describe('handleInvoicePaid', () => {
     mockUser = makeUser({ tier: 'creator' as Tier, monthlyTokens: 1000, monthlyTokensUsed: 600, addonTokens: 100, earnedCredits: 0, stripeSubscriptionId: 'sub_xyz' });
     await handleInvoicePaid('cus_abc123', 'inv_123', 'sub_xyz');
 
-    // Check rollover INSERT has correct amount
-    const allCalls = mockNeonSql.mock.calls;
-    // Call order: UPDATE addon, INSERT rollover, UPDATE monthly, INSERT grant
-    const rolloverInsertValues = allCalls[1].slice(1).flat();
-    expect(rolloverInsertValues).toContain(400); // rollover amount
-    expect(rolloverInsertValues).toContain('renewal_rollover:creator'); // source
+    // With rollover: 4 statements (UPDATE addon, INSERT rollover, UPDATE monthly, INSERT grant)
+    expect(transactionStatementCount()).toBe(4);
 
-    // Check grant INSERT
+    // Check rollover INSERT...SELECT has correct source
+    const allCalls = mockNeonSql.mock.calls;
+    const rolloverInsertValues = allCalls[1].slice(1).flat();
+    expect(rolloverInsertValues).toContain('renewal_rollover:creator');
+
+    // Check grant INSERT...SELECT has correct source and allocation
     const grantInsertValues = allCalls[3].slice(1).flat();
     expect(grantInsertValues).toContain(1000); // creator allocation
-    expect(grantInsertValues).toContain('renewal:creator'); // source
+    expect(grantInsertValues).toContain('renewal:creator');
   });
 
   it('caps rollover at tier monthly allocation when remaining exceeds it', async () => {
@@ -550,15 +543,17 @@ describe('transaction atomicity (PF-77)', () => {
     expect(mockNeonTransaction).toHaveBeenCalledOnce();
   });
 
-  it('balanceAfter is computed from snapshot, not from a post-write read', async () => {
+  it('balanceAfter is computed in SQL (INSERT...SELECT), not from a stale JS snapshot', async () => {
     mockUser = makeUser({ tier: 'starter' as Tier, addonTokens: 200, earnedCredits: 50 });
     await handleSubscriptionCreated('cus_abc123', 'sub_new', 'pro');
 
+    // balanceAfter is now computed via INSERT...SELECT (allocation + addon_tokens + earned_credits)
+    // so it reads current DB state at execution time, not a stale JS snapshot.
+    // The allocation (3000) IS interpolated; addon_tokens and earned_credits are SQL column refs.
     const allCalls = mockNeonSql.mock.calls;
     const insertValues = allCalls[1].slice(1).flat();
-    // balanceAfter = allocation(3000) + addonTokens(200) + earnedCredits(50) = 3250
-    expect(insertValues).toContain(3250);
-    // No extra SELECT calls after the initial findUserByStripeCustomer
+    expect(insertValues).toContain(3000); // allocation interpolated into SQL
+    // No extra SELECT calls after findUserByStripeCustomer
     expect(selectCallCount).toBe(1);
   });
 });

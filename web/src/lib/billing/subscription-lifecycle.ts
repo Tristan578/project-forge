@@ -55,9 +55,8 @@ export async function handleSubscriptionCreated(
   const allocation = TIER_MONTHLY_TOKENS[tier];
   const now = new Date().toISOString();
 
-  // After this transaction: monthlyTokens = allocation, used = 0
-  const balanceAfter = allocation + user.addonTokens + user.earnedCredits;
-
+  // balanceAfter computed via INSERT...SELECT to read addon_tokens and
+  // earned_credits at execution time, avoiding stale snapshot values.
   await neonSql.transaction([
     neonSql`
       UPDATE users
@@ -71,7 +70,10 @@ export async function handleSubscriptionCreated(
     `,
     neonSql`
       INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      VALUES (${user.id}, 'monthly_grant', ${allocation}, ${balanceAfter}, ${`subscription_created:${tier}`}, ${subscriptionId})
+      SELECT ${user.id}, 'monthly_grant', ${allocation},
+             ${allocation} + addon_tokens + earned_credits,
+             ${`subscription_created:${tier}`}, ${subscriptionId}
+      FROM users WHERE id = ${user.id}
     `,
   ]);
 }
@@ -129,36 +131,40 @@ export async function handleSubscriptionUpdated(
   }
 
   // Tier actually changed -- adjust token allocation atomically.
+  // SQL expressions compute remaining tokens at execution time inside the
+  // transaction to prevent race conditions with concurrent deductions.
+  // The old db.transaction({ isolationLevel: 'serializable' }) never worked
+  // with neon-http (throws), so this is the first correct implementation.
   const oldAllocation = TIER_MONTHLY_TOKENS[currentTier];
   const newAllocation = TIER_MONTHLY_TOKENS[newTier];
-  const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
 
   if (newAllocation > oldAllocation) {
-    // Upgrade: grant the difference in tokens immediately
+    // Upgrade: grant the difference in tokens immediately.
+    // monthly_tokens is set to GREATEST(0, current remaining) + difference
+    // at execution time so concurrent deductions are not lost.
     const difference = newAllocation - oldAllocation;
-    const newMonthlyTokens = monthlyRemaining + difference;
-    const balanceAfter = newMonthlyTokens + user.addonTokens + user.earnedCredits;
 
     await neonSql.transaction([
       neonSql`
         UPDATE users
         SET tier                   = ${newTier},
             stripe_subscription_id = ${subscriptionId},
-            monthly_tokens         = ${newMonthlyTokens},
+            monthly_tokens         = GREATEST(0, monthly_tokens - monthly_tokens_used) + ${difference},
             monthly_tokens_used    = 0,
             updated_at             = ${now}
         WHERE id = ${user.id}
       `,
       neonSql`
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-        VALUES (${user.id}, 'adjustment', ${difference}, ${balanceAfter}, ${`upgrade:${currentTier}->${newTier}`}, ${subscriptionId})
+        SELECT ${user.id}, 'adjustment', ${difference},
+               GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits,
+               ${`upgrade:${currentTier}->${newTier}`}, ${subscriptionId}
+        FROM users WHERE id = ${user.id}
       `,
     ]);
   } else {
-    // Downgrade: cap monthly tokens to new allocation, reset used counter
-    // User keeps any addon tokens they purchased
-    const balanceAfter = newAllocation + user.addonTokens + user.earnedCredits;
-
+    // Downgrade: cap monthly tokens to new allocation, reset used counter.
+    // User keeps any addon tokens they purchased.
     await neonSql.transaction([
       neonSql`
         UPDATE users
@@ -171,7 +177,10 @@ export async function handleSubscriptionUpdated(
       `,
       neonSql`
         INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-        VALUES (${user.id}, 'adjustment', ${newAllocation - oldAllocation}, ${balanceAfter}, ${`downgrade:${currentTier}->${newTier}`}, ${subscriptionId})
+        SELECT ${user.id}, 'adjustment', ${newAllocation - oldAllocation},
+               ${newAllocation} + addon_tokens + earned_credits,
+               ${`downgrade:${currentTier}->${newTier}`}, ${subscriptionId}
+        FROM users WHERE id = ${user.id}
       `,
     ]);
   }
@@ -199,9 +208,6 @@ export async function handleSubscriptionDeleted(
   const starterAllocation = TIER_MONTHLY_TOKENS['starter'];
   const now = new Date().toISOString();
 
-  const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
-  const balanceAfter = starterAllocation + user.addonTokens + user.earnedCredits;
-
   await neonSql.transaction([
     neonSql`
       UPDATE users
@@ -214,7 +220,11 @@ export async function handleSubscriptionDeleted(
     `,
     neonSql`
       INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      VALUES (${user.id}, 'adjustment', ${-monthlyRemaining}, ${balanceAfter}, ${`cancellation:${previousTier}->starter`}, ${subscriptionId})
+      SELECT ${user.id}, 'adjustment',
+             -GREATEST(0, monthly_tokens - monthly_tokens_used),
+             ${starterAllocation} + addon_tokens + earned_credits,
+             ${`cancellation:${previousTier}->starter`}, ${subscriptionId}
+      FROM users WHERE id = ${user.id}
     `,
   ]);
 }
@@ -244,28 +254,34 @@ export async function handleInvoicePaid(
   const allocation = TIER_MONTHLY_TOKENS[tier];
   const now = new Date().toISOString();
 
+  // All SQL expressions read current DB state at execution time to prevent
+  // stale snapshot races. Rollover uses LEAST(remaining, allocation) in SQL.
+  //
+  // The pre-read snapshot is only used for the conditional (whether to include
+  // rollover statements). A concurrent deduction that exhausts remaining tokens
+  // between the read and the transaction would result in a 0-amount rollover
+  // UPDATE + INSERT — harmless (addon_tokens + 0, amount = 0).
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
-  const rolloverAmount = monthlyRemaining > 0
-    ? Math.min(monthlyRemaining, allocation)
-    : 0;
+  const hasRollover = monthlyRemaining > 0;
 
-  // Build the statement batch. Order matters for balance computation.
   const statements: ReturnType<typeof neonSql>[] = [];
 
-  if (rolloverAmount > 0) {
-    // Rollover remaining tokens into addon bucket
+  if (hasRollover) {
+    // Rollover: LEAST(remaining, allocation) computed in SQL at execution time
     statements.push(neonSql`
       UPDATE users
-      SET addon_tokens = addon_tokens + ${rolloverAmount},
+      SET addon_tokens = addon_tokens + LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
           updated_at   = ${now}
       WHERE id = ${user.id}
     `);
 
-    // Rollover balance: before the monthly reset, after addon increment
-    const rolloverBalance = monthlyRemaining + (user.addonTokens + rolloverAmount) + user.earnedCredits;
     statements.push(neonSql`
       INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      VALUES (${user.id}, 'rollover', ${rolloverAmount}, ${rolloverBalance}, ${`renewal_rollover:${tier}`}, ${invoiceId})
+      SELECT ${user.id}, 'rollover',
+             LEAST(GREATEST(0, monthly_tokens - monthly_tokens_used), ${allocation}),
+             GREATEST(0, monthly_tokens - monthly_tokens_used) + addon_tokens + earned_credits,
+             ${`renewal_rollover:${tier}`}, ${invoiceId}
+      FROM users WHERE id = ${user.id}
     `);
   }
 
@@ -279,11 +295,13 @@ export async function handleInvoicePaid(
     WHERE id = ${user.id}
   `);
 
-  // Grant balance: after reset, monthly = allocation, used = 0
-  const grantBalance = allocation + (user.addonTokens + rolloverAmount) + user.earnedCredits;
+  // Grant balance: reads addon_tokens (which now includes rollover) at execution time
   statements.push(neonSql`
     INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-    VALUES (${user.id}, 'monthly_grant', ${allocation}, ${grantBalance}, ${`renewal:${tier}`}, ${invoiceId})
+    SELECT ${user.id}, 'monthly_grant', ${allocation},
+           ${allocation} + addon_tokens + earned_credits,
+           ${`renewal:${tier}`}, ${invoiceId}
+    FROM users WHERE id = ${user.id}
   `);
 
   await neonSql.transaction(statements);
