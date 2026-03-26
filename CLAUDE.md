@@ -62,7 +62,10 @@ cd web && npx playwright test
 
 - Store slices: Use `sliceTestTemplate.ts` pattern with `createSliceStore()` and `createMockDispatch()`
 - Script worker tests: Stub `self` with mock `postMessage`, use `vi.resetModules()` + dynamic import
-- Vitest config: `web/vitest.config.ts`, environment: node
+- Vitest workspace: `web/vitest.workspace.ts` splits tests into two configs:
+  - `web/vitest.config.node.ts` (environment: node) — lib, stores, API routes
+  - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
+  - `web/vitest.config.ts` — standalone config (jsdom) used when running without workspace
 - Playwright config: `web/playwright.config.ts`, 4 shards in CI
 
 ## Taskboard

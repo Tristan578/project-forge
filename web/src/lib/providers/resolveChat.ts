@@ -322,7 +322,7 @@ export async function resolveChat(
   if (!route) {
     return {
       ok: false,
-      error: 'No chat backend is configured. Set AI_GATEWAY_API_KEY, OPENROUTER_API_KEY, GITHUB_MODELS_PAT, or PLATFORM_ANTHROPIC_KEY.',
+      error: 'No chat backend is configured. Set AI_GATEWAY_API_KEY, OPENROUTER_API_KEY, GITHUB_MODELS_PAT, or ANTHROPIC_API_KEY.',
     };
   }
 

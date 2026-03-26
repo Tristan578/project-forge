@@ -33,7 +33,7 @@ function clearAllProviderEnv(): void {
   const keys = [
     'AI_GATEWAY_API_KEY', 'VERCEL', 'VERCEL_ENV',
     'OPENROUTER_API_KEY', 'GITHUB_MODELS_PAT',
-    'PLATFORM_ANTHROPIC_KEY', 'PLATFORM_OPENAI_KEY',
+    'ANTHROPIC_API_KEY', 'PLATFORM_OPENAI_KEY',
     'PLATFORM_MESHY_KEY', 'PLATFORM_HYPER3D_KEY',
     'PLATFORM_ELEVENLABS_KEY', 'PLATFORM_SUNO_KEY',
     'PLATFORM_REPLICATE_KEY', 'PLATFORM_REMOVEBG_KEY',
@@ -87,8 +87,8 @@ describe('resolveChatRoute', () => {
     expect(route!.backendId).toBe('vercel-gateway');
   });
 
-  it('returns a route with direct backendId when only PLATFORM_ANTHROPIC_KEY is set', async () => {
-    setEnv({ PLATFORM_ANTHROPIC_KEY: 'sk-platform' });
+  it('returns a route with direct backendId when only ANTHROPIC_API_KEY is set', async () => {
+    setEnv({ ANTHROPIC_API_KEY: 'sk-platform' });
     const { resolveChatRoute } = await import('@/lib/providers/resolveChat');
     const route = resolveChatRoute();
     expect(route).not.toBeNull();
@@ -143,7 +143,7 @@ describe('resolveChat — Anthropic direct path', () => {
   });
 
   it('returns ok:true with backendId direct when only platform key is set', async () => {
-    setEnv({ PLATFORM_ANTHROPIC_KEY: 'sk-platform' });
+    setEnv({ ANTHROPIC_API_KEY: 'sk-platform' });
 
     // Mock Anthropic SDK to yield a minimal streaming sequence
     vi.doMock('@anthropic-ai/sdk', () => {
@@ -195,7 +195,7 @@ describe('resolveChat — Anthropic direct path', () => {
   });
 
   it('emits thinking events when thinking mode is enabled', async () => {
-    setEnv({ PLATFORM_ANTHROPIC_KEY: 'sk-platform' });
+    setEnv({ ANTHROPIC_API_KEY: 'sk-platform' });
 
     vi.doMock('@anthropic-ai/sdk', () => {
       async function* fakeStream() {
@@ -230,7 +230,7 @@ describe('resolveChat — Anthropic direct path', () => {
   });
 
   it('emits tool_start and tool_input_delta for tool use blocks', async () => {
-    setEnv({ PLATFORM_ANTHROPIC_KEY: 'sk-platform' });
+    setEnv({ ANTHROPIC_API_KEY: 'sk-platform' });
 
     vi.doMock('@anthropic-ai/sdk', () => {
       async function* fakeStream() {

@@ -11,7 +11,7 @@ const envBackup = { ...process.env };
 
 function clearDirectEnv(): void {
   const keys = [
-    'PLATFORM_ANTHROPIC_KEY',
+    'ANTHROPIC_API_KEY',
     'PLATFORM_OPENAI_KEY',
     'PLATFORM_MESHY_KEY',
     'PLATFORM_HYPER3D_KEY',
@@ -41,8 +41,8 @@ describe('directBackend', () => {
       expect(directBackend.isConfigured()).toBe(false);
     });
 
-    it('returns true when only PLATFORM_ANTHROPIC_KEY is set', async () => {
-      process.env.PLATFORM_ANTHROPIC_KEY = 'sk-ant-test';
+    it('returns true when only ANTHROPIC_API_KEY is set', async () => {
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
       const { directBackend } = await import('@/lib/providers/backends/direct');
       expect(directBackend.isConfigured()).toBe(true);
     });
@@ -60,7 +60,7 @@ describe('directBackend', () => {
     });
 
     it('returns true when multiple platform keys are set', async () => {
-      process.env.PLATFORM_ANTHROPIC_KEY = 'sk-ant-test';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
       process.env.PLATFORM_OPENAI_KEY = 'sk-oai-test';
       const { directBackend } = await import('@/lib/providers/backends/direct');
       expect(directBackend.isConfigured()).toBe(true);
@@ -69,7 +69,7 @@ describe('directBackend', () => {
 
   describe('getApiKey', () => {
     it('returns Anthropic key as primary key', async () => {
-      process.env.PLATFORM_ANTHROPIC_KEY = 'sk-ant-primary';
+      process.env.ANTHROPIC_API_KEY = 'sk-ant-primary';
       const { directBackend } = await import('@/lib/providers/backends/direct');
       expect(directBackend.getApiKey()).toBe('sk-ant-primary');
     });
@@ -134,8 +134,8 @@ describe('getDirectProviderKey', () => {
     process.env = { ...envBackup };
   });
 
-  it('returns key for anthropic when PLATFORM_ANTHROPIC_KEY is set', async () => {
-    process.env.PLATFORM_ANTHROPIC_KEY = 'sk-ant-123';
+  it('returns key for anthropic when ANTHROPIC_API_KEY is set', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-123';
     const { getDirectProviderKey } = await import('@/lib/providers/backends/direct');
     expect(getDirectProviderKey('anthropic')).toBe('sk-ant-123');
   });
@@ -209,7 +209,7 @@ describe('isDirectProviderConfigured', () => {
   });
 
   it('returns true when provider key is set', async () => {
-    process.env.PLATFORM_ANTHROPIC_KEY = 'sk-test';
+    process.env.ANTHROPIC_API_KEY = 'sk-test';
     const { isDirectProviderConfigured } = await import('@/lib/providers/backends/direct');
     expect(isDirectProviderConfigured('anthropic')).toBe(true);
   });
@@ -234,8 +234,8 @@ describe('resolveDirectKey', () => {
     process.env = { ...envBackup };
   });
 
-  it('resolves chat capability to PLATFORM_ANTHROPIC_KEY', async () => {
-    process.env.PLATFORM_ANTHROPIC_KEY = 'sk-chat';
+  it('resolves chat capability to ANTHROPIC_API_KEY', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-chat';
     const { resolveDirectKey } = await import('@/lib/providers/backends/direct');
     expect(resolveDirectKey('chat')).toBe('sk-chat');
   });
