@@ -601,6 +601,23 @@ def gh_run(args, timeout=30, check=True):
 
 
 def gh_get_project_items(config):
+    # Check GraphQL rate limit before making expensive project query.
+    # Each item costs ~1 token. With 800+ items, this call costs ~1000 tokens.
+    # If budget is too low, skip the fetch entirely.
+    try:
+        rate_check = subprocess.run(
+            ["gh", "api", "rate_limit", "--jq", ".resources.graphql.remaining"],
+            capture_output=True, text=True, timeout=10,
+        )
+        remaining = int(rate_check.stdout.strip()) if rate_check.returncode == 0 else 5000
+        if remaining < 1500:
+            raise RuntimeError(
+                f"GraphQL rate limit too low ({remaining}/5000). "
+                f"Need ~1000 tokens for project sync. Skipping to preserve budget for PR ops."
+            )
+    except (ValueError, subprocess.TimeoutExpired):
+        pass  # If rate check fails, proceed with the sync
+
     output = gh_run([
         "gh", "project", "item-list", str(config["projectNumber"]),
         "--owner", config["owner"], "--format", "json", "--limit", "1000",
