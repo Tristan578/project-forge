@@ -96,8 +96,7 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `useVirtualList.ts` — Lightweight virtual scrolling hook
 
 ### Libraries (`lib/`)
-- `chat/executor.ts` — Handler registry dispatcher (~49 lines), delegates to `chat/handlers/`
-- `chat/executor.legacy.ts` — Legacy fallback (unmigrated handlers)
+- `chat/executor.ts` — Handler registry dispatcher, delegates to `chat/handlers/` (all handlers fully migrated)
 - `chat/handlers/` — Domain tool handlers (transform, material, query + types/helpers)
 - `chat/context.ts` — Scene context for AI
 - `scripting/` — Web Worker sandbox, forge.* API types, templates

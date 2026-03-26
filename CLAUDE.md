@@ -59,7 +59,7 @@ cd web && npm run db:push   # Push schema to Neon (dev only)
 cd web && npm run db:studio # Visual DB browser
 ```
 
-Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`. See `.env.example` for full list.
+Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`. See `web/.env.example` for full list.
 
 ## MCP Servers (`.mcp.json`)
 
@@ -96,7 +96,7 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
   - `web/vitest.config.node.ts` (environment: node) — lib, stores, API routes
   - `web/vitest.config.jsdom.ts` (environment: jsdom) — components, hooks
   - `web/vitest.config.ts` — standalone config (jsdom) used when running without workspace
-- Playwright config: `web/playwright.config.ts`, 4 shards in CI
+- Playwright config: `web/playwright.config.ts`, 2 workers in CI
 - Agent viewport tests: `cd web && npx playwright test --config playwright.agent.config.ts`
 
 ## Taskboard
@@ -118,3 +118,7 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 - **`vercel build` in CI** — uses `child_process.spawn('npm')` which can't find npm on GHA runners. Use `vercel deploy` (remote build) instead of `vercel build` + `deploy --prebuilt`.
 - **Artifact versions** — `upload-artifact` and `download-artifact` MUST use the same major version (`@v4`). Never upgrade one without the other.
 - **Reusable workflow permissions** — `quality-gates.yml` must use `permissions: contents: read`. Never `write` — it causes `startup_failure` on every CI run.
+- **panelRegistry insertion** — the #1 agent bug (21 instances). Read 10 lines before AND after the insertion point. New panels get nested inside the preceding entry's object literal if the closing `},` is swallowed. Run `npx vitest run src/lib/workspace/__tests__/panelRegistry.test.ts` after editing.
+- **Missing `await` on rate limiting** — `rateLimitPublicRoute()` is async. Without `await`, you get a Promise (truthy), silently bypassing rate limits on every request.
+- **`||` vs `??` for defaults** — `||` treats `0` as falsy. `Number(undefined)` is `NaN`, not caught by `??`. Use `Number.isFinite()` for parsed numbers.
+- **Full vitest in worktrees kills M2** — never run the full suite when only a few files changed. Use `npx vitest run <specific-file>` or `npm run test:changed`.

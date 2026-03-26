@@ -189,12 +189,12 @@ Key rules:
 
 ## Phase Roadmap
 
-All 55 core phases are DONE. Key capabilities shipped:
+53 core phases shipped, 2 removed (Collaboration PF-142, Multiplayer PF-141). Key capabilities:
 
 - **Engine**: 3D + 2D rendering (WebGPU/WebGL2), physics (Rapier 3D+2D), skeletal animation, particles (Hanabi GPU), LOD, post-processing, CSG booleans, procedural terrain/mesh
 - **Editor**: Material library (56 presets), visual scripting (73 node types), dialogue system, keyframe animation, in-game UI builder, tilemap editor, prefabs, multi-scene, game templates
-- **AI**: 345 MCP commands (40 categories), compound AI actions, 5 asset generation providers, AI chat with streaming/approval/undo
-- **Platform**: Stripe payments (4 tiers), cloud publishing, mobile PWA, E2E tests (81 specs), 13,600+ unit tests
+- **AI**: 350 MCP commands (41 categories), compound AI actions, 5 asset generation providers, AI chat with streaming/approval/undo
+- **Platform**: Stripe payments (4 tiers), cloud publishing, mobile PWA, 53 E2E spec files, 13,600+ unit tests
 - **Removed**: Editor Collaboration (PF-142) and Multiplayer Networking (PF-141) — stubs removed, will rebuild when networking backend is ready
 
 ## New Component / Command Checklist
@@ -264,23 +264,15 @@ Loop continues until all 4 pass clean. No shortcuts.
 | `docs-maintainer` | Documentation updates, README, CLAUDE.md |
 | `rust-engine` | Bevy ECS, bridge, WASM, engine/ code |
 
-### Domain Skills
-- `/rust-engine` — Bevy 0.18 ECS, commands, bridge, WASM patterns
-- `/frontend` — React 19, Next.js 16, Zustand 5, Tailwind 4 patterns
-- `/mcp-commands` — MCP manifest, chat handlers, AI parity
-- `/testing` — Test patterns, coverage targets, anti-patterns (knowledge)
-- `/test` — Execute test suites: lint, tsc, vitest, playwright, mcp (action)
-- `/troubleshoot` — Diagnose failures: WASM build, CI, dev server, production, E2E, engine panics, services
-- `/docs` — Documentation types, freshness rules, writing standards
-- `/design` — Architecture decisions, performance budgets, spec format
-- `/infra-services` — Vercel, R2, Neon, Upstash, Clerk, Stripe, Sentry, PostHog, GitHub Actions
-- `/kanban` — Taskboard management
-- `/babysit-prs` — Monitor and fix open PRs
-- `/pr-code-review` — SpawnForge-specific PR review with 11-category checklist
-- `/build` — WASM engine build (WebGL2 + WebGPU)
-- `/multiplayer-readiness` — Flag changes that make future multiplayer harder
-- `/db-migrate` — Drizzle migration workflow with FK cascade validation
-- `/viewport` — Agent-browser visual verification of the editor viewport
+### Skills (33 total in `.claude/skills/`)
+
+**Orchestration:** `/planner`, `/builder`, `/cycle`, `/developer-experience`
+**Engine:** `/rust-engine`, `/build`, `/arch-validator`
+**Web:** `/frontend`, `/mcp-commands`, `/next-best-practices`, `/vercel-react-best-practices`, `/web-accessibility`, `/web-design-guidelines`, `/game-ui-design`
+**Testing:** `/testing` (knowledge), `/test` (action), `/vitest`, `/playwright-best-practices`
+**Infrastructure:** `/infra-services`, `/troubleshoot`, `/kanban`, `/babysit-prs`, `/pr-code-review`, `/pr-green-machine`
+**Features:** `/game-engine`, `/multiplayer-readiness`, `/db-migrate`, `/viewport`
+**Workflow:** `/design`, `/architect-flow`, `/docs`, `/sync-push`, `/sync-pull`
 
 ### MCP Servers (`.mcp.json`)
 - `context7` — live library documentation for all dependencies
@@ -290,14 +282,21 @@ Loop continues until all 4 pass clean. No shortcuts.
 | Hook | Event | Purpose |
 |------|-------|---------|
 | `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows relevant anti-patterns before action |
+| `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows relevant anti-patterns before action |
 | `pre-push-quality-gate.sh` | PreToolUse (Bash: git push) | Runs lint+tsc on changed files before push |
 | `verify-branch.sh` | PreToolUse (Edit/Write) | Prevents edits on wrong branch |
 | `post-edit-lint.sh` | PostToolUse (Edit/Write) | Auto-lint after file changes |
 | `check-arch.sh` | PostToolUse (Edit/Write) | Architecture boundary check |
-| `lessons-learned-reminder.sh` | Stop | Prompts agent to log lessons every 15 responses |
+| `post-commit-clean.sh` | PostToolUse (Bash) | Cleanup after git commits |
+| `post-merge-doc-check.sh` | PostToolUse (Bash) | Doc freshness check after merges |
 | `on-session-start.sh` | SessionStart | Taskboard state + sync |
 | `on-prompt-submit.sh` | UserPromptSubmit | Taskboard context injection |
-| `worktree-safety-commit.sh` | Stop | Auto-commit uncommitted worktree work |
+| `on-stop.sh` | Stop | Worktree safety commit + GitHub sync |
+| `lessons-learned-reminder.sh` | Stop | Prompts agent to log lessons every 15 responses |
+| `worktree-safety-commit.sh` | (called by on-stop.sh) | Auto-commit uncommitted worktree work |
+| `sync-to-github.sh` | (called by on-stop.sh) | Background sync to GitHub |
+| `sync-from-github.sh` | (not registered) | Manual GitHub → local sync |
+| `taskboard-state.sh` | (not registered) | Manual taskboard state dump |
 
 ### Approved Specs (in progress)
 - `specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md` — Game Creation Orchestrator (systems-not-genres, 4x reviewer PASS)
