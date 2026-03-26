@@ -434,15 +434,21 @@ export async function reverseAddonTokens(
 
       const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
       const now = new Date().toISOString();
-      const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
-      const balanceAfter = monthlyRemaining + (user.addonTokens - clampedDeduction) + user.earnedCredits;
 
-      // Atomically update purchase tracking + deduct tokens + audit (PF-77)
+      // INSERT before UPDATE so balance_after reads pre-deduction state.
+      // balance_after = monthly_remaining + (addon_tokens - deduction) + earned_credits
       const statements: ReturnType<typeof neonSql>[] = [
         neonSql`
           UPDATE token_purchases
           SET refunded_cents = ${amountRefunded}
           WHERE id = ${purchase.id}
+        `,
+        neonSql`
+          INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+          SELECT ${userId}, 'adjustment', ${-clampedDeduction},
+                 GREATEST(0, monthly_tokens - monthly_tokens_used) + GREATEST(0, addon_tokens - ${clampedDeduction}) + earned_credits,
+                 ${`charge_refunded:${chargeId}`}, ${chargeId}
+          FROM users WHERE id = ${userId}
         `,
       ];
 
@@ -454,11 +460,6 @@ export async function reverseAddonTokens(
           WHERE id = ${userId}
         `);
       }
-
-      statements.push(neonSql`
-        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-        VALUES (${userId}, 'adjustment', ${-clampedDeduction}, ${balanceAfter}, ${`charge_refunded:${chargeId}`}, ${chargeId})
-      `);
 
       await neonSql.transaction(statements);
       return;
@@ -501,20 +502,21 @@ export async function reverseAddonTokens(
 
   const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
   const now = new Date().toISOString();
-  const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
-  const balanceAfter = monthlyRemaining + (user.addonTokens - clampedDeduction) + user.earnedCredits;
 
-  // Atomically deduct tokens + record audit (PF-77)
+  // INSERT before UPDATE: balance_after reads pre-deduction addon_tokens via INSERT...SELECT
   await neonSql.transaction([
+    neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      SELECT ${userId}, 'adjustment', ${-clampedDeduction},
+             GREATEST(0, monthly_tokens - monthly_tokens_used) + GREATEST(0, addon_tokens - ${clampedDeduction}) + earned_credits,
+             ${`charge_refunded:${chargeId}`}, ${chargeId}
+      FROM users WHERE id = ${userId}
+    `,
     neonSql`
       UPDATE users
       SET addon_tokens = GREATEST(0, addon_tokens - ${clampedDeduction}),
           updated_at   = ${now}
       WHERE id = ${userId}
-    `,
-    neonSql`
-      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
-      VALUES (${userId}, 'adjustment', ${-clampedDeduction}, ${balanceAfter}, ${`charge_refunded:${chargeId}`}, ${chargeId})
     `,
   ]);
 }

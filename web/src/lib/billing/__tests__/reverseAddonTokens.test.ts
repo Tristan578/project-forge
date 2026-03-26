@@ -92,7 +92,7 @@ describe('reverseAddonTokens (PF-734)', () => {
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       // Check deduction amount in INSERT statement (-5000)
       const allCalls = mockNeonSql.mock.calls;
-      const insertCall = allCalls[allCalls.length - 1];
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
       const insertValues = insertCall.slice(1).flat();
       expect(insertValues).toContain(-5000);
       expect(insertValues).toContain('charge_refunded:ch_abc');
@@ -109,7 +109,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const allCalls = mockNeonSql.mock.calls;
-      const insertCall = allCalls[allCalls.length - 1];
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
       const insertValues = insertCall.slice(1).flat();
       // 2450/4900 = 0.5, floor(5000 * 0.5) = 2500
       expect(insertValues).toContain(-2500);
@@ -140,7 +140,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const allCalls = mockNeonSql.mock.calls;
-      const insertCall = allCalls[allCalls.length - 1];
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
       const insertValues = insertCall.slice(1).flat();
       // New increment: 4900 - 2450 = 2450 cents
       // 2450/4900 (amountCents) * 5000 tokens = 2500
@@ -158,7 +158,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const allCalls = mockNeonSql.mock.calls;
-      const insertCall = allCalls[allCalls.length - 1];
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
       const insertValues = insertCall.slice(1).flat();
       expect(insertValues).toContain(-100); // clamped to available balance
     });
@@ -202,7 +202,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const allCalls = mockNeonSql.mock.calls;
-      const insertCall = allCalls[allCalls.length - 1];
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
       const insertValues = insertCall.slice(1).flat();
       // Fallback: 500/1000 * 1000 (user balance) = 500
       expect(insertValues).toContain(-500);
@@ -221,7 +221,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const allCalls = mockNeonSql.mock.calls;
-      const insertCall = allCalls[allCalls.length - 1];
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
       const insertValues = insertCall.slice(1).flat();
       expect(insertValues).toContain(-500);
     });
@@ -270,7 +270,7 @@ describe('reverseAddonTokens (PF-734)', () => {
 
       expect(mockNeonTransaction).toHaveBeenCalledOnce();
       const allCalls = mockNeonSql.mock.calls;
-      const insertCall = allCalls[allCalls.length - 1];
+      const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[allCalls.length - 1];
       const insertValues = insertCall.slice(1).flat();
       expect(insertValues).toContain(-1000);
     });

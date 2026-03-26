@@ -181,7 +181,7 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
 
     // Check the INSERT statement values include the deduction amount
     const allCalls = mockNeonSql.mock.calls;
-    const insertCall = allCalls[allCalls.length - 1];
+    const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[0];
     const insertValues = insertCall.slice(1).flat();
     expect(insertValues).toContain(-500); // deduction
     expect(insertValues).toContain('charge_refunded:ch_partial');
@@ -195,7 +195,7 @@ describe('reverseAddonTokens (fallback path, no paymentIntentId)', () => {
     expect(mockNeonTransaction).toHaveBeenCalledOnce();
 
     const allCalls = mockNeonSql.mock.calls;
-    const insertCall = allCalls[allCalls.length - 1];
+    const insertCall = allCalls.find((c) => c.slice(1).flat().some((v) => typeof v === 'number' && v < 0)) ?? allCalls[0];
     const insertValues = insertCall.slice(1).flat();
     expect(insertValues).toContain(-1000);
   });
