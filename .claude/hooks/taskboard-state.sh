@@ -12,7 +12,12 @@ _TB_PROJECT_ROOT="$(cd "$_TB_HOOKS_DIR/../.." && pwd)"
 
 # Use the OS default database path — NOT .claude/taskboard.db (which creates an empty local copy)
 TB_DB="$HOME/Library/Application Support/taskboard/taskboard.db"
-TB_API="http://localhost:3010/api"
+# Try Portless URL first, fall back to direct port
+if curl -s --connect-timeout 1 "http://taskboard.localhost:1355/api/board" > /dev/null 2>&1; then
+    TB_API="http://taskboard.localhost:1355/api"
+else
+    TB_API="http://localhost:3010/api"
+fi
 TB_STATE_FILE="$_TB_HOOKS_DIR/.taskboard-active-ticket"
 export PROJECT_ID="01KK974VMNC16ZAW7MW1NH3T3M"
 export TEAM_ENGINEERING_ID="01KK9751NZ4HM7VQM0AQ5WGME3"

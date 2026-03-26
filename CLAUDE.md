@@ -101,7 +101,7 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 
 ## Taskboard
 
-- API: http://localhost:3010/api
+- API: http://taskboard.localhost:1355/api (fallback: http://localhost:3010/api)
 - Project ID: 01KK974VMNC16ZAW7MW1NH3T3M
 - Always create a ticket before starting work
 

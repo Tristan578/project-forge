@@ -33,7 +33,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).parent
-TB_API = "http://localhost:3010/api"
+# Try Portless URL first, fall back to direct port
+import urllib.request
+try:
+    urllib.request.urlopen("http://taskboard.localhost:1355/api/board", timeout=1)
+    TB_API = "http://taskboard.localhost:1355/api"
+except Exception:
+    TB_API = "http://localhost:3010/api"
 
 
 # ---------------------------------------------------------------------------

@@ -145,7 +145,7 @@ Labels: [bug/feature/refactor/test/docs]
 | `list_tickets` | Filter tickets by status/project |
 
 ### Web UI
-Taskboard web UI: `http://localhost:3010` (start with: `taskboard start --port 3010`)
+Taskboard web UI: `http://taskboard.localhost:1355` (fallback: `http://localhost:3010`). Start with: `taskboard start --port 3010`
 
 **Do NOT pass `--db .claude/taskboard.db`** — let the taskboard use its default OS path.
 
@@ -163,7 +163,7 @@ Taskboard web UI: `http://localhost:3010` (start with: `taskboard start --port 3
 
 #### Before Dispatching Any Agent (Orchestrator Checklist)
 
-1. Ensure taskboard is running: `curl -s http://localhost:3010/api/board > /dev/null || taskboard start --port 3010 &`
+1. Ensure taskboard is running: `curl -s http://taskboard.localhost:1355/api/board > /dev/null || taskboard start --port 3010 &`
 2. Move the ticket to `in_progress` (orchestrator does this, not the agent)
 3. Run sync-push: `python3 .claude/hooks/github_project_sync.py push`
 4. Find the GitHub issue number: `gh issue list --search "PF-XXX in:title" --limit 1`
