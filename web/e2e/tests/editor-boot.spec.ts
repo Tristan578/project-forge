@@ -24,9 +24,11 @@ test.describe('Editor Boot @smoke', () => {
   test('editor layout container is present after hydration', async ({ editor, page }) => {
     await editor.loadPage();
 
-    // The dockview container is the root of the editor layout.
-    // Its presence confirms EditorLayout mounted and rendered successfully.
-    const container = page.locator('.dv-dockview-container').first();
+    // The dockview root element is the root of the editor layout.
+    // Its presence confirms EditorLayout mounted and WorkspaceProvider rendered
+    // the dockview workspace successfully. The dockview library injects the
+    // class "dv-dockview" on its root container element.
+    const container = page.locator('.dv-dockview').first();
     await expect(container).toBeVisible({ timeout: 10_000 });
   });
 
