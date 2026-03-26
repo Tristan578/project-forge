@@ -44,3 +44,6 @@ next-env.d.ts
 # clerk configuration (can include secrets)
 /.clerk/
 .env*.local
+
+# agent viewport test results (may contain screenshots, canvas captures)
+/e2e/agent-results/
