@@ -36,6 +36,7 @@ import { ideaHandlers } from './handlers/ideaHandlers';
 import { worldHandlers } from './handlers/worldHandlers';
 import { localizationHandlers } from './handlers/localizationHandlers';
 import { economyHandlers } from './handlers/economyHandlers';
+import { cutsceneHandlers } from './handlers/cutsceneHandlers';
 
 /**
  * Merged handler registry.
@@ -69,6 +70,7 @@ const handlerRegistry: Record<string, (args: Record<string, unknown>, ctx: ToolC
   ...worldHandlers,
   ...localizationHandlers,
   ...economyHandlers,
+  ...cutsceneHandlers,
 };
 
 /**
