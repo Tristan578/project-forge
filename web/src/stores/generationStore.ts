@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import { useGenerationHistoryStore } from './generationHistoryStore';
 import { trackEvent, AnalyticsEvent } from '@/lib/analytics/posthog';
 import { trackAIAssetGenerated } from '@/lib/analytics/events';
+import { captureException } from '@/lib/monitoring/sentry-client';
 
 export type GenerationType = 'model' | 'texture' | 'sfx' | 'voice' | 'skybox' | 'music' | 'sprite' | 'sprite_sheet' | 'tileset' | 'pixel-art';
 export type GenerationStatus = 'pending' | 'processing' | 'downloading' | 'completed' | 'failed';
@@ -102,8 +103,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
           });
         }
       })
-      .catch(() => {
-        // DB persistence failed — job still works in memory
+      .catch((err) => {
+        captureException(err, { context: 'generationStore.addJob', jobId: job.id });
       });
   },
 
@@ -144,8 +145,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
             errorMessage: updates.error,
             imported: updates.status === 'completed',
           }),
-        }).catch(() => {
-          // DB sync failed — non-critical
+        }).catch((err) => {
+          captureException(err, { context: 'generationStore.updateJob', dbId });
         });
       }
 
@@ -216,7 +217,8 @@ export const useGenerationStore = create<GenerationState>((set, get) => ({
         jobs: { ...hydratedJobs, ...state.jobs },
         hydrated: true,
       }));
-    } catch {
+    } catch (err) {
+      captureException(err, { context: 'generationStore.hydrateFromServer' });
       set({ hydrated: true });
     }
   },
