@@ -2,6 +2,7 @@
 
 import { CheckCircle2 } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 const recentFeatures = [
   {
@@ -32,11 +33,12 @@ const recentFeatures = [
 
 export function WhatsNewModal() {
   const { showWhatsNew, dismissWhatsNew } = useOnboardingStore();
+  const dialogRef = useDialogA11y(dismissWhatsNew);
 
   if (!showWhatsNew) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="whats-new-title">
+    <div ref={dialogRef} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="whats-new-title">
       <div className="bg-zinc-900 rounded-lg shadow-2xl max-w-lg w-full">
         <div className="p-6 border-b border-zinc-800">
           <h2 id="whats-new-title" className="text-2xl font-bold text-zinc-100">What&apos;s New</h2>
