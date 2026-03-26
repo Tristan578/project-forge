@@ -123,15 +123,16 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: web
-        # PF-353: Uses vitest.workspace.ts so lib/stores/API tests run under
-        # node environment and component/hook tests run under jsdom.
-        # Coverage thresholds enforced per-project in vitest.config.node.ts.
+        # Uses vitest.config.ts which enforces coverage thresholds (70/60/65/72).
+        # NOTE: vitest.workspace.ts exists for local dev (correct node/jsdom
+        # environments) but workspace mode does not enforce root-level coverage
+        # thresholds — so CI uses the standalone config instead.
         # Timeout safety net: vitest hangs after test completion due to jsdom/coverage
         # open handles (known issue vitest#3077). Exit 124 = timeout killed a hung
         # process after tests already completed successfully — treat as warning, not failure.
         run: |
           set +e
-          timeout 600 npx vitest run --workspace vitest.workspace.ts --coverage 2>&1 | tee /tmp/vitest-output.txt
+          timeout 600 npx vitest run --coverage 2>&1 | tee /tmp/vitest-output.txt
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
           if [ $EXIT_CODE -eq 124 ]; then
