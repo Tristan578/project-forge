@@ -23,10 +23,12 @@ The orchestrator (main Claude session) owns ALL ticket lifecycle transitions. Su
 
 ### Before dispatching any agent (orchestrator steps)
 
-1. Ensure taskboard is running:
+1. Ensure taskboard is running and has data:
    ```bash
-   curl -s http://localhost:3010/api/board > /dev/null || taskboard start --port 3010 &
-   sleep 2  # Wait for startup
+   curl -s http://taskboard.localhost:1355/api/board > /dev/null || taskboard start --port 3010 &
+   sleep 2  # Wait for startup — NO --db flag, uses OS default
+   # Verify board has tickets (0 = wrong DB path)
+   curl -s http://taskboard.localhost:1355/api/board | python3 -c "import json,sys; c=len(json.load(sys.stdin).get('tickets',[])); print(f'{c} tickets')"
    ```
 2. Move the ticket to `in_progress` (orchestrator does this, not the subagent)
 3. Run sync-push: `python3 .claude/hooks/github_project_sync.py push`
@@ -44,7 +46,7 @@ The orchestrator (main Claude session) owns ALL ticket lifecycle transitions. Su
 
 - Move field is `status`, NOT `column`: `{"status":"in_progress"}`
 - Create field is `projectId`, NOT `project`
-- Taskboard base URL: `http://localhost:3010/api`
+- Taskboard base URL: `http://taskboard.localhost:1355/api` (fallback: `http://localhost:3010/api`)
 
 ## 1. Local Development
 

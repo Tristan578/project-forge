@@ -19,11 +19,17 @@ You manage project work via the **taskboard MCP server** (22 tools). The taskboa
 
 If the taskboard is not running when needed:
 ```bash
-taskboard start --port 3010 &
-sleep 2  # Wait for startup
+taskboard start --port 3010 &    # NO --db flag — uses OS default path
+sleep 2
+# Verify board has data — 0 tickets means wrong DB path
+curl -s http://taskboard.localhost:1355/api/board | python3 -c "import json,sys; c=len(json.load(sys.stdin).get('tickets',[])); print(f'{c} tickets'); exit(0 if c > 0 else 1)"
+# If 0 tickets, sync from GitHub:
+python3 .claude/hooks/github_project_sync.py pull
 ```
 
-**Web UI:** http://localhost:3010
+**CRITICAL:** NEVER pass `--db .claude/taskboard.db` — it creates an empty local copy. The OS default (`~/Library/Application Support/taskboard/`) is the source of truth.
+
+**Web UI:** http://taskboard.localhost:1355 (fallback: http://localhost:3010)
 **Project:** Project Forge (prefix: PF, ID: `01KK974VMNC16ZAW7MW1NH3T3M`)
 
 ## MCP Tools Available
@@ -169,22 +175,22 @@ Use MCP tool: batch_create_subtasks
   subtasks: ["Step 1: ...", "Step 2: ...", "Step 3: ..."]
 ```
 
-## REST API Fallback (for subagents without MCP access)
+## REST API (primary access method)
 
-When MCP tools are unavailable (e.g., in worktree subagents), use the REST API directly.
-**Base URL:** `http://localhost:3010/api`
+The taskboard is accessed via REST API. Use the Portless URL when available, direct port as fallback.
+**Base URL:** `http://taskboard.localhost:1355/api` (fallback: `http://taskboard.localhost:1355/api`)
 
 ### CRITICAL: Field name is `status`, NOT `column`
 
 ```bash
 # Move ticket — field is "status", NOT "column"
-curl -s -X POST "http://localhost:3010/api/tickets/<TICKET_ID>/move" \
+curl -s -X POST "http://taskboard.localhost:1355/api/tickets/<TICKET_ID>/move" \
   -H 'Content-Type: application/json' \
   -d '{"status":"in_progress"}'   # ✅ CORRECT
   # -d '{"column":"in_progress"}' # ❌ WRONG — silently fails
 
 # Create ticket
-curl -s -X POST "http://localhost:3010/api/tickets" \
+curl -s -X POST "http://taskboard.localhost:1355/api/tickets" \
   -H 'Content-Type: application/json' \
   -d '{
     "title": "...",
@@ -195,18 +201,18 @@ curl -s -X POST "http://localhost:3010/api/tickets" \
   }'
 
 # Get ticket
-curl -s "http://localhost:3010/api/tickets/<TICKET_ID>"
+curl -s "http://taskboard.localhost:1355/api/tickets/<TICKET_ID>"
 
 # Get board
-curl -s "http://localhost:3010/api/board"
+curl -s "http://taskboard.localhost:1355/api/board"
 
 # Create subtask
-curl -s -X POST "http://localhost:3010/api/tickets/<TICKET_ID>/subtasks" \
+curl -s -X POST "http://taskboard.localhost:1355/api/tickets/<TICKET_ID>/subtasks" \
   -H 'Content-Type: application/json' \
   -d '{"title": "Step 1: ..."}'
 
 # Toggle subtask
-curl -s -X POST "http://localhost:3010/api/subtasks/<SUBTASK_ID>/toggle"
+curl -s -X POST "http://taskboard.localhost:1355/api/subtasks/<SUBTASK_ID>/toggle"
 ```
 
 ### API Field Reference
