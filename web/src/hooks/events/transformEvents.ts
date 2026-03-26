@@ -58,6 +58,7 @@ export function handleTransformEvent(
       useEditorStore.getState().onLightNodeAdded(node);
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
+      invalidateSceneCache(); // PF-319: AI must see new entities
       return true;
     }
 
@@ -70,6 +71,7 @@ export function handleTransformEvent(
       }
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
+      invalidateSceneCache(); // PF-319: AI must not see deleted entities
       return true;
     }
 
@@ -79,6 +81,7 @@ export function handleTransformEvent(
       useEditorStore.getState().updateNode(entityId, changes);
       useEditorStore.setState({ sceneModified: true });
       scheduleAutoSave();
+      invalidateSceneCache(); // PF-319: AI must see renamed/modified entities
       return true;
     }
 
@@ -172,6 +175,7 @@ export function handleTransformEvent(
         physicsEnabled: false,
         primaryAnimation: null,
       });
+      invalidateSceneCache(); // PF-319: new scene = completely new context
       return true;
     }
 
