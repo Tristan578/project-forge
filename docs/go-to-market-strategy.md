@@ -10,7 +10,7 @@
 ### Primary Wedge: Zero-Friction Game Creation
 The #1 barrier to game development is setup friction. Unity requires 2-5GB download + project configuration. Unreal requires 40GB+ and a gaming PC. SpawnForge requires: open a browser tab.
 
-**Entry hook:** "Make your first game in 60 seconds" — AI generates a playable template, user customizes with natural language. No sign-up required for the first session (localStorage-only).
+**Entry hook:** "Describe your game and play it in 60 seconds" — AI decomposes your idea into composable systems (movement, camera, challenge, feedback, etc.) and assembles a playable game. No genre selection, no template constraints — just describe what you want. No sign-up required for the first session (localStorage-only).
 
 ### Target Segments (Priority Order)
 
@@ -96,13 +96,13 @@ The #1 barrier to game development is setup friction. Unity requires 2-5GB downl
 ## 4. Retention Strategy
 
 ### Week 1: Activation
-- **Day 0:** AI generates first game from template in <60s
+- **Day 0:** AI builds first game from a description in <60s
 - **Day 1:** Email: "Your game is live at spawnforge.ai/play/..." (publish nudge)
 - **Day 3:** Email: "Try these 3 modifications to your game" (engagement)
 - **Day 7:** Email: "Upgrade to Starter — export without watermark" (conversion)
 
 ### Month 1: Habit Formation
-- **Weekly challenges:** "Build a puzzle game this week" (community + templates)
+- **Weekly challenges:** "Build a game with these systems this week" (community + starter bundles)
 - **Achievement system:** Badges for first publish, first AI generation, first script
 - **Community gallery:** Feature top games on homepage (social proof)
 
@@ -163,7 +163,7 @@ SpawnForge eliminates every barrier: zero install (browser tab), AI-assisted cre
 - $5B+ creator economy in gaming
 
 ### Traction (Target for Seed)
-- 9,500+ unit tests, 322 MCP commands, 11 game templates
+- 9,500+ unit tests, 322 MCP commands, 11 starter system bundles
 - Full export pipeline (HTML5 + cloud publish)
 - Multi-provider AI integration (5 providers)
 - Subscription billing live (Stripe)
