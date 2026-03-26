@@ -493,7 +493,13 @@ export function parseWorldResponse(raw: string): GameWorld {
     cleaned = cleaned.replace(/\n?```\s*$/, '');
   }
 
-  const parsed = JSON.parse(cleaned);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let parsed: any;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch {
+    throw new Error(`Failed to parse world builder response as JSON: ${cleaned.slice(0, 200)}`);
+  }
 
   // Validate required fields
   if (typeof parsed.name !== 'string' || !parsed.name) {

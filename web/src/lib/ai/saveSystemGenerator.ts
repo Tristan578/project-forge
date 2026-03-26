@@ -322,7 +322,8 @@ function loadFromSlot(slot) {
   const stored = localStorage.getItem(SAVE_KEY_PREFIX + slot);
   if (!stored) return false;
   ${useCompression ? "const raw = atob(stored);" : "const raw = stored;"}
-  const data = JSON.parse(raw);
+  let data;
+  try { data = JSON.parse(raw); } catch { forge.warn('Corrupted save data in slot ' + slot); return false; }
   for (const field of PERSISTED_FIELDS) {
     if (data[field.path] !== undefined) {
       if (field.type === 'position' && Array.isArray(data[field.path])) {
@@ -349,8 +350,10 @@ function listSaves() {
     const stored = localStorage.getItem(SAVE_KEY_PREFIX + i);
     if (stored) {
       ${useCompression ? "const raw = atob(stored);" : "const raw = stored;"}
-      const data = JSON.parse(raw);
-      saves.push({ slot: i, timestamp: data._timestamp, checkpoint: data._checkpoint });
+      try {
+        const data = JSON.parse(raw);
+        saves.push({ slot: i, timestamp: data._timestamp, checkpoint: data._checkpoint });
+      } catch { /* skip corrupted slot */ }
     }
   }
   return saves;
