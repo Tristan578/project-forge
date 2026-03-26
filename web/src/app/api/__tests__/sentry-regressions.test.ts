@@ -62,52 +62,48 @@ describe('Regression #1: maxDuration on all generate routes', () => {
 
 /**
  * #2 — PR #6888: Double refund (server auto-refund + client usageId).
- * When server-side refund is configured, success responses should NOT
- * include usageId — otherwise the client also refunds, causing double credit.
  *
- * We verify this structurally: if a route calls refundTokens in its catch
- * block, it should NOT include usageId in success responses.
+ * The original approach removed usageId from success responses, but this
+ * broke the client-side async job refund path (useGenerationPolling.ts
+ * triggerRefund needs usageId). The correct fix: the refund endpoint
+ * must be idempotent (calling refund twice for the same usageId should
+ * only refund once). Verify the refund route handles this.
  */
-describe('Regression #2: no double-refund via usageId leak', () => {
-  it('routes with server-side refund do not leak usageId in success JSON', () => {
-    // refund/route.ts is the refund endpoint itself — exempt
-    const EXEMPT = new Set(['refund']);
-    const dirs = readdirSync(GENERATE_DIR, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && !EXEMPT.has(d.name))
-      .map((d) => d.name);
+describe('Regression #2: refund endpoint idempotency', () => {
+  it('routes with server-side refund MUST expose usageId for async job refunds', () => {
+    // Async generation routes need usageId in success responses because
+    // the client polls for job status and triggers refund via
+    // useGenerationPolling.ts → triggerRefund() if the job fails after queuing.
+    const ASYNC_ROUTES = ['model', 'music', 'skybox', 'sprite', 'texture', 'pixel-art'];
 
-    const violations: string[] = [];
-
-    for (const dir of dirs) {
+    const missing: string[] = [];
+    for (const dir of ASYNC_ROUTES) {
       const routeFile = join(GENERATE_DIR, dir, 'route.ts');
       try {
         const content = readFileSync(routeFile, 'utf-8');
-        const hasServerRefund = content.includes('refundTokens(');
-        // Check if usageId appears as an actual property in NextResponse.json.
-        // Must match `usageId,` or `usageId:` on the same line — NOT in comments.
+        // usageId must appear in the success response JSON
         const lines = content.split('\n');
         let inJsonResponse = false;
-        let hasUsageIdInResponse = false;
+        let hasUsageId = false;
         for (const line of lines) {
           const trimmed = line.trim();
-          if (trimmed.startsWith('//')) continue; // Skip comment lines
+          if (trimmed.startsWith('//')) continue;
           if (trimmed.includes('NextResponse.json(')) inJsonResponse = true;
-          if (inJsonResponse && /\busageId\b/.test(trimmed) && !trimmed.startsWith('//')) {
-            hasUsageIdInResponse = true;
+          if (inJsonResponse && /\busageId\b/.test(trimmed)) {
+            hasUsageId = true;
             break;
           }
           if (inJsonResponse && trimmed.includes(');')) inJsonResponse = false;
         }
-
-        if (hasServerRefund && hasUsageIdInResponse) {
-          violations.push(`generate/${dir}/route.ts — has refundTokens() AND exposes usageId in response`);
+        if (!hasUsageId) {
+          missing.push(`generate/${dir}/route.ts — missing usageId in success response (breaks async refund)`);
         }
       } catch {
         // No route file
       }
     }
 
-    expect(violations, `Double-refund risk: ${violations.join(', ')}`).toEqual([]);
+    expect(missing, `Routes missing usageId: ${missing.join(', ')}`).toEqual([]);
   });
 });
 

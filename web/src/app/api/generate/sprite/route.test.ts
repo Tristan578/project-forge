@@ -114,6 +114,6 @@ describe('POST /api/generate/sprite', () => {
     const data = await res.json();
     expect(data.jobId).toBe('task-1');
     expect(data.status).toBe('pending');
-    expect(data.usageId).toBeUndefined(); // usageId removed to prevent double refund
+    expect(data.usageId).toBeDefined();
   });
 });

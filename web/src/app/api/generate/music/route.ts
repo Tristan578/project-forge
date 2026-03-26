@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
         provider: 'suno',
         status: 'pending',
         estimatedSeconds: 60,
-        // usageId intentionally omitted — server handles refund on failure.
+        usageId,
       },
       { status: 201 }
     );

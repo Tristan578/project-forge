@@ -233,13 +233,13 @@ describe('POST /api/generate/model', () => {
       expect(body.estimatedSeconds).toBe(120);
     });
 
-    it('does not expose usageId in success response (prevents double refund)', async () => {
+    it('includes usageId for client-side async refund path', async () => {
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'potion', mode: 'text-to-3d' }));
       const body = await res.json();
 
-      // usageId removed from success responses to prevent client double-refund
-      expect(body.usageId).toBeUndefined();
+      // usageId required by useGenerationPolling triggerRefund on async failures
+      expect(body.usageId).toBe('usage_123');
     });
   });
 
