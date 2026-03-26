@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 vi.mock('server-only', () => ({}));
 
@@ -70,7 +70,7 @@ function makeRequest(body: Record<string, unknown>): NextRequest {
 
 const testHandler = createGenerationHandler({
   route: '/api/generate/test',
-  provider: 'test-provider',
+  provider: 'elevenlabs',
   operation: 'test_generation',
   rateLimitKey: 'gen-test',
   validate: (body) => {
@@ -81,7 +81,7 @@ const testHandler = createGenerationHandler({
     return { ok: true, params: { prompt } };
   },
   execute: async (params) => {
-    return { result: `Generated from: ${params.prompt}`, provider: 'test-provider' };
+    return { result: `Generated from: ${params.prompt}`, provider: 'elevenlabs' as const };
   },
 });
 
@@ -90,7 +90,8 @@ describe('createGenerationHandler', () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({
       ok: true,
-      ctx: { user: { id: 'user-1', tier: 'pro' }, clerkId: 'clerk-1' },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ctx: { user: { id: 'user-1', tier: 'pro' } as any, clerkId: 'clerk-1' },
     });
     mockRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
     mockResolve.mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
@@ -100,7 +101,7 @@ describe('createGenerationHandler', () => {
   it('returns 401 when unauthenticated', async () => {
     mockAuth.mockResolvedValue({
       ok: false,
-      response: new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 }),
+      response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
     });
     const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
     expect(res.status).toBe(401);
@@ -130,7 +131,7 @@ describe('createGenerationHandler', () => {
   });
 
   it('returns 422 when content safety rejects prompt', async () => {
-    mockSanitize.mockReturnValue({ safe: false, reason: 'Unsafe content', filtered: null });
+    mockSanitize.mockReturnValue({ safe: false, reason: 'Unsafe content', filtered: undefined });
     const res = await testHandler(makeRequest({ prompt: 'bad prompt here' }));
     expect(res.status).toBe(422);
     const data = await res.json();
@@ -139,7 +140,7 @@ describe('createGenerationHandler', () => {
 
   it('returns 402 when no API key available', async () => {
     const { ApiKeyError } = await import('@/lib/keys/resolver');
-    mockResolve.mockRejectedValue(new ApiKeyError('NO_KEY', 'No API key'));
+    mockResolve.mockRejectedValue(new ApiKeyError('NO_KEY_CONFIGURED', 'No API key'));
     const res = await testHandler(makeRequest({ prompt: 'test prompt' }));
     expect(res.status).toBe(402);
   });
@@ -149,13 +150,13 @@ describe('createGenerationHandler', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.result).toContain('Generated from:');
-    expect(data.provider).toBe('test-provider');
+    expect(data.provider).toBe('elevenlabs');
   });
 
   it('refunds tokens and returns 500 on provider failure', async () => {
     const failHandler = createGenerationHandler({
       route: '/api/generate/test',
-      provider: 'test-provider',
+      provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
       validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
@@ -172,7 +173,7 @@ describe('createGenerationHandler', () => {
     mockResolve.mockResolvedValue({ type: 'byok', key: 'user-key', metered: false });
     const failHandler = createGenerationHandler({
       route: '/api/generate/test',
-      provider: 'test-provider',
+      provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
       validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
@@ -188,7 +189,7 @@ describe('createGenerationHandler', () => {
     const executeSpy = vi.fn().mockResolvedValue({ ok: true });
     const handler = createGenerationHandler({
       route: '/api/generate/test',
-      provider: 'test-provider',
+      provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
       validate: (body) => ({ ok: true, params: { prompt: body.prompt as string } }),
@@ -206,7 +207,7 @@ describe('createGenerationHandler', () => {
   it('skips content safety when configured', async () => {
     const handler = createGenerationHandler({
       route: '/api/generate/test',
-      provider: 'test-provider',
+      provider: 'elevenlabs',
       operation: 'test_generation',
       rateLimitKey: 'gen-test',
       skipContentSafety: true,

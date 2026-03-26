@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import type { Provider } from '@/lib/db/schema';
 import { getTokenCost } from '@/lib/tokens/pricing';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { rateLimitResponse } from '@/lib/rateLimit';
@@ -37,7 +38,7 @@ export interface GenerationHandlerConfig<TParams, TResult> {
   route: string;
 
   /** Provider name for API key resolution (e.g. 'elevenlabs', 'replicate') */
-  provider: string;
+  provider: Provider;
 
   /** Token operation name for pricing lookup (e.g. 'sfx_generation') */
   operation: string;
@@ -160,7 +161,7 @@ export function createGenerationHandler<TParams, TResult>(
     let usageId: string | undefined;
 
     try {
-      const resolved = await resolveApiKey(userId, provider, tokenCost, operation, params);
+      const resolved = await resolveApiKey(userId, provider, tokenCost, operation, params as Record<string, unknown>);
       apiKey = resolved.key;
       usageId = resolved.usageId;
     } catch (err) {
