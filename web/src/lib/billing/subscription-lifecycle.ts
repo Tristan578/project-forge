@@ -12,15 +12,11 @@
  * produce audit records in the credit_transactions table.
  */
 
-import { and, eq, sql } from 'drizzle-orm';
-import { getDb } from '@/lib/db/client';
+import { and, eq } from 'drizzle-orm';
+import { getDb, getNeonSql } from '@/lib/db/client';
 import { users, creditTransactions, tokenPurchases } from '@/lib/db/schema';
 import type { Tier } from '@/lib/db/schema';
 import { TIER_MONTHLY_TOKENS } from '@/lib/tokens/pricing';
-import { updateUserTier } from '@/lib/auth/user-service';
-
-/** Minimal query interface shared by both db and transaction handles. */
-type Queryable = Pick<ReturnType<typeof getDb>, 'select'>;
 
 /**
  * Helper: look up a user by their Stripe customer ID.
@@ -42,6 +38,10 @@ export async function findUserByStripeCustomer(customerId: string) {
  * - Sets the user's tier and subscription ID
  * - Grants initial monthly token allocation
  * - Records a credit transaction
+ *
+ * All mutations are wrapped in a single neon sql.transaction() for
+ * atomicity (PF-77). Balance is computed from the snapshot + planned
+ * mutations since neon-http transactions don't support interactive SELECTs.
  */
 export async function handleSubscriptionCreated(
   customerId: string,
@@ -51,32 +51,29 @@ export async function handleSubscriptionCreated(
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
 
-  const db = getDb();
+  const neonSql = getNeonSql();
   const allocation = TIER_MONTHLY_TOKENS[tier];
+  const now = new Date().toISOString();
 
-  await updateUserTier(user.id, tier);
+  // After this transaction: monthlyTokens = allocation, used = 0
+  const balanceAfter = allocation + user.addonTokens + user.earnedCredits;
 
-  await db
-    .update(users)
-    .set({
-      stripeSubscriptionId: subscriptionId,
-      monthlyTokens: allocation,
-      monthlyTokensUsed: 0,
-      billingCycleStart: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, user.id));
-
-  // Audit trail
-  const balance = await getTotalBalance(user.id);
-  await db.insert(creditTransactions).values({
-    userId: user.id,
-    transactionType: 'monthly_grant',
-    amount: allocation,
-    balanceAfter: balance,
-    source: `subscription_created:${tier}`,
-    referenceId: subscriptionId,
-  });
+  await neonSql.transaction([
+    neonSql`
+      UPDATE users
+      SET tier                   = ${tier},
+          stripe_subscription_id = ${subscriptionId},
+          monthly_tokens         = ${allocation},
+          monthly_tokens_used    = 0,
+          billing_cycle_start    = ${now},
+          updated_at             = ${now}
+      WHERE id = ${user.id}
+    `,
+    neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      VALUES (${user.id}, 'monthly_grant', ${allocation}, ${balanceAfter}, ${`subscription_created:${tier}`}, ${subscriptionId})
+    `,
+  ]);
 }
 
 /**
@@ -87,6 +84,10 @@ export async function handleSubscriptionCreated(
  * - On upgrade: grants the difference in token allocation immediately
  * - On downgrade: caps tokens to the new tier's allocation
  * - On status change only (same tier): no token change
+ *
+ * PF-77: Replaced broken db.transaction() (neon-http doesn't support it)
+ * with neonSql.transaction(). All conditional logic is computed before
+ * the transaction; only DML statements go inside.
  */
 export async function handleSubscriptionUpdated(
   customerId: string,
@@ -97,94 +98,83 @@ export async function handleSubscriptionUpdated(
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
 
-  const db = getDb();
+  const neonSql = getNeonSql();
+  const now = new Date().toISOString();
   const currentTier = user.tier as Tier;
   const tierChanged = currentTier !== newTier;
 
-  // Always update the subscription ID and status-related fields
-  await db
-    .update(users)
-    .set({
-      stripeSubscriptionId: subscriptionId,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, user.id));
-
-  // If subscription is past_due or unpaid, we do NOT change tier or tokens
+  // If subscription is past_due or unpaid, only update the subscription ID
   // -- let the invoice.payment_failed handler deal with grace period
   if (subscriptionStatus === 'past_due' || subscriptionStatus === 'unpaid') {
+    await neonSql`
+      UPDATE users
+      SET stripe_subscription_id = ${subscriptionId},
+          updated_at             = ${now}
+      WHERE id = ${user.id}
+    `;
     return;
   }
 
   if (!tierChanged) {
-    // No tier change -- update tier in case it was out of sync, but don't
-    // reset tokens. This handles status changes like active -> trialing, etc.
-    await updateUserTier(user.id, newTier);
+    // No tier change -- update tier + subscription ID in case out of sync,
+    // but don't reset tokens. Handles status changes like active -> trialing.
+    await neonSql`
+      UPDATE users
+      SET tier                   = ${newTier},
+          stripe_subscription_id = ${subscriptionId},
+          updated_at             = ${now}
+      WHERE id = ${user.id}
+    `;
     return;
   }
 
-  // Tier actually changed -- adjust token allocation.
-  // PF-513: updateUserTier moved inside transaction.
-  // PF-514: getTotalBalance uses tx instead of global db.
-  // PF-521: serializable isolation prevents interleaving with concurrent deductions.
+  // Tier actually changed -- adjust token allocation atomically.
   const oldAllocation = TIER_MONTHLY_TOKENS[currentTier];
   const newAllocation = TIER_MONTHLY_TOKENS[newTier];
+  const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
 
-  await db.transaction(async (tx) => {
-    // PF-513: tier update inside transaction so it rolls back on failure
-    await tx
-      .update(users)
-      .set({ tier: newTier, updatedAt: new Date() })
-      .where(eq(users.id, user.id));
+  if (newAllocation > oldAllocation) {
+    // Upgrade: grant the difference in tokens immediately
+    const difference = newAllocation - oldAllocation;
+    const newMonthlyTokens = monthlyRemaining + difference;
+    const balanceAfter = newMonthlyTokens + user.addonTokens + user.earnedCredits;
 
-    if (newAllocation > oldAllocation) {
-      // Upgrade: grant the difference in tokens immediately
-      const difference = newAllocation - oldAllocation;
-      const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
+    await neonSql.transaction([
+      neonSql`
+        UPDATE users
+        SET tier                   = ${newTier},
+            stripe_subscription_id = ${subscriptionId},
+            monthly_tokens         = ${newMonthlyTokens},
+            monthly_tokens_used    = 0,
+            updated_at             = ${now}
+        WHERE id = ${user.id}
+      `,
+      neonSql`
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+        VALUES (${user.id}, 'adjustment', ${difference}, ${balanceAfter}, ${`upgrade:${currentTier}->${newTier}`}, ${subscriptionId})
+      `,
+    ]);
+  } else {
+    // Downgrade: cap monthly tokens to new allocation, reset used counter
+    // User keeps any addon tokens they purchased
+    const balanceAfter = newAllocation + user.addonTokens + user.earnedCredits;
 
-      await tx
-        .update(users)
-        .set({
-          monthlyTokens: monthlyRemaining + difference,
-          monthlyTokensUsed: 0,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, user.id));
-
-      // PF-514: read balance through tx, not global db
-      const balance = await getTotalBalance(user.id, tx);
-      await tx.insert(creditTransactions).values({
-        userId: user.id,
-        transactionType: 'adjustment',
-        amount: difference,
-        balanceAfter: balance,
-        source: `upgrade:${currentTier}->${newTier}`,
-        referenceId: subscriptionId,
-      });
-    } else {
-      // Downgrade: cap monthly tokens to new allocation, reset used counter
-      // User keeps any addon tokens they purchased
-      await tx
-        .update(users)
-        .set({
-          monthlyTokens: newAllocation,
-          monthlyTokensUsed: 0,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, user.id));
-
-      // PF-514: read balance through tx, not global db
-      const balance = await getTotalBalance(user.id, tx);
-      await tx.insert(creditTransactions).values({
-        userId: user.id,
-        transactionType: 'adjustment',
-        amount: newAllocation - oldAllocation, // negative for downgrade
-        balanceAfter: balance,
-        source: `downgrade:${currentTier}->${newTier}`,
-        referenceId: subscriptionId,
-      });
-    }
-  }, { isolationLevel: 'serializable' });
+    await neonSql.transaction([
+      neonSql`
+        UPDATE users
+        SET tier                   = ${newTier},
+            stripe_subscription_id = ${subscriptionId},
+            monthly_tokens         = ${newAllocation},
+            monthly_tokens_used    = 0,
+            updated_at             = ${now}
+        WHERE id = ${user.id}
+      `,
+      neonSql`
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+        VALUES (${user.id}, 'adjustment', ${newAllocation - oldAllocation}, ${balanceAfter}, ${`downgrade:${currentTier}->${newTier}`}, ${subscriptionId})
+      `,
+    ]);
+  }
 }
 
 /**
@@ -194,6 +184,8 @@ export async function handleSubscriptionUpdated(
  * - Zeros out monthly tokens (addon tokens are preserved)
  * - Clears subscription ID
  * - Records an audit transaction
+ *
+ * All mutations atomic via neon sql.transaction() (PF-77).
  */
 export async function handleSubscriptionDeleted(
   customerId: string,
@@ -202,35 +194,36 @@ export async function handleSubscriptionDeleted(
   const user = await findUserByStripeCustomer(customerId);
   if (!user) return;
 
-  const db = getDb();
+  const neonSql = getNeonSql();
   const previousTier = user.tier as Tier;
   const starterAllocation = TIER_MONTHLY_TOKENS['starter'];
+  const now = new Date().toISOString();
 
-  await updateUserTier(user.id, 'starter');
+  const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
+  const balanceAfter = starterAllocation + user.addonTokens + user.earnedCredits;
 
-  await db
-    .update(users)
-    .set({
-      stripeSubscriptionId: null,
-      monthlyTokens: starterAllocation,
-      monthlyTokensUsed: 0,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, user.id));
-
-  const balance = await getTotalBalance(user.id);
-  await db.insert(creditTransactions).values({
-    userId: user.id,
-    transactionType: 'adjustment',
-    amount: -Math.max(0, user.monthlyTokens - user.monthlyTokensUsed),
-    balanceAfter: balance,
-    source: `cancellation:${previousTier}->starter`,
-    referenceId: subscriptionId,
-  });
+  await neonSql.transaction([
+    neonSql`
+      UPDATE users
+      SET tier                   = 'starter',
+          stripe_subscription_id = NULL,
+          monthly_tokens         = ${starterAllocation},
+          monthly_tokens_used    = 0,
+          updated_at             = ${now}
+      WHERE id = ${user.id}
+    `,
+    neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      VALUES (${user.id}, 'adjustment', ${-monthlyRemaining}, ${balanceAfter}, ${`cancellation:${previousTier}->starter`}, ${subscriptionId})
+    `,
+  ]);
 }
 
 /**
  * Handle a successful invoice payment (monthly renewal).
+ *
+ * All mutations (rollover + reset + grant) are atomic via
+ * neon sql.transaction() (PF-77).
  */
 export async function handleInvoicePaid(
   customerId: string,
@@ -246,54 +239,54 @@ export async function handleInvoicePaid(
     return;
   }
 
-  const db = getDb();
+  const neonSql = getNeonSql();
   const tier = user.tier as Tier;
   const allocation = TIER_MONTHLY_TOKENS[tier];
+  const now = new Date().toISOString();
 
   const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
-  if (monthlyRemaining > 0) {
-    const rolloverAmount = Math.min(monthlyRemaining, allocation);
+  const rolloverAmount = monthlyRemaining > 0
+    ? Math.min(monthlyRemaining, allocation)
+    : 0;
 
-    await db
-      .update(users)
-      .set({
-        addonTokens: sql`${users.addonTokens} + ${rolloverAmount}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, user.id));
+  // Build the statement batch. Order matters for balance computation.
+  const statements: ReturnType<typeof neonSql>[] = [];
 
-    if (rolloverAmount > 0) {
-      const rolloverBalance = await getTotalBalance(user.id);
-      await db.insert(creditTransactions).values({
-        userId: user.id,
-        transactionType: 'rollover',
-        amount: rolloverAmount,
-        balanceAfter: rolloverBalance,
-        source: `renewal_rollover:${tier}`,
-        referenceId: invoiceId,
-      });
-    }
+  if (rolloverAmount > 0) {
+    // Rollover remaining tokens into addon bucket
+    statements.push(neonSql`
+      UPDATE users
+      SET addon_tokens = addon_tokens + ${rolloverAmount},
+          updated_at   = ${now}
+      WHERE id = ${user.id}
+    `);
+
+    // Rollover balance: before the monthly reset, after addon increment
+    const rolloverBalance = monthlyRemaining + (user.addonTokens + rolloverAmount) + user.earnedCredits;
+    statements.push(neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      VALUES (${user.id}, 'rollover', ${rolloverAmount}, ${rolloverBalance}, ${`renewal_rollover:${tier}`}, ${invoiceId})
+    `);
   }
 
-  await db
-    .update(users)
-    .set({
-      monthlyTokens: allocation,
-      monthlyTokensUsed: 0,
-      billingCycleStart: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, user.id));
+  // Reset monthly tokens for the new billing cycle
+  statements.push(neonSql`
+    UPDATE users
+    SET monthly_tokens      = ${allocation},
+        monthly_tokens_used = 0,
+        billing_cycle_start = ${now},
+        updated_at          = ${now}
+    WHERE id = ${user.id}
+  `);
 
-  const balance = await getTotalBalance(user.id);
-  await db.insert(creditTransactions).values({
-    userId: user.id,
-    transactionType: 'monthly_grant',
-    amount: allocation,
-    balanceAfter: balance,
-    source: `renewal:${tier}`,
-    referenceId: invoiceId,
-  });
+  // Grant balance: after reset, monthly = allocation, used = 0
+  const grantBalance = allocation + (user.addonTokens + rolloverAmount) + user.earnedCredits;
+  statements.push(neonSql`
+    INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+    VALUES (${user.id}, 'monthly_grant', ${allocation}, ${grantBalance}, ${`renewal:${tier}`}, ${invoiceId})
+  `);
+
+  await neonSql.transaction(statements);
 }
 
 /**
@@ -376,6 +369,7 @@ export async function reverseAddonTokens(
   paymentIntentId?: string | null
 ): Promise<void> {
   const db = getDb();
+  const neonSql = getNeonSql();
 
   // --- Try to find the original token purchase for precise reversal ---
   if (paymentIntentId) {
@@ -403,41 +397,48 @@ export async function reverseAddonTokens(
 
       if (tokensToDeduct <= 0) return;
 
-      // Read current addon balance to clamp
+      // Read current user state for clamping and balance computation
       const [user] = await db
-        .select({ addonTokens: users.addonTokens })
+        .select({
+          addonTokens: users.addonTokens,
+          monthlyTokens: users.monthlyTokens,
+          monthlyTokensUsed: users.monthlyTokensUsed,
+          earnedCredits: users.earnedCredits,
+        })
         .from(users)
         .where(eq(users.id, userId))
         .limit(1);
       if (!user) return;
 
       const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
+      const now = new Date().toISOString();
+      const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
+      const balanceAfter = monthlyRemaining + (user.addonTokens - clampedDeduction) + user.earnedCredits;
 
-      // Update refundedCents on the purchase for idempotency tracking
-      await db
-        .update(tokenPurchases)
-        .set({ refundedCents: amountRefunded })
-        .where(eq(tokenPurchases.id, purchase.id));
+      // Atomically update purchase tracking + deduct tokens + audit (PF-77)
+      const statements: ReturnType<typeof neonSql>[] = [
+        neonSql`
+          UPDATE token_purchases
+          SET refunded_cents = ${amountRefunded}
+          WHERE id = ${purchase.id}
+        `,
+      ];
 
       if (clampedDeduction > 0) {
-        await db
-          .update(users)
-          .set({
-            addonTokens: sql`GREATEST(0, ${users.addonTokens} - ${clampedDeduction})`,
-            updatedAt: new Date(),
-          })
-          .where(eq(users.id, userId));
+        statements.push(neonSql`
+          UPDATE users
+          SET addon_tokens = GREATEST(0, addon_tokens - ${clampedDeduction}),
+              updated_at   = ${now}
+          WHERE id = ${userId}
+        `);
       }
 
-      const balance = await getTotalBalance(userId);
-      await db.insert(creditTransactions).values({
-        userId,
-        transactionType: 'adjustment',
-        amount: -clampedDeduction,
-        balanceAfter: balance,
-        source: `charge_refunded:${chargeId}`,
-        referenceId: chargeId,
-      });
+      statements.push(neonSql`
+        INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+        VALUES (${userId}, 'adjustment', ${-clampedDeduction}, ${balanceAfter}, ${`charge_refunded:${chargeId}`}, ${chargeId})
+      `);
+
+      await neonSql.transaction(statements);
       return;
     }
   }
@@ -459,7 +460,12 @@ export async function reverseAddonTokens(
   if (existingRefund) return; // Already processed this charge
 
   const [user] = await db
-    .select({ addonTokens: users.addonTokens })
+    .select({
+      addonTokens: users.addonTokens,
+      monthlyTokens: users.monthlyTokens,
+      monthlyTokensUsed: users.monthlyTokensUsed,
+      earnedCredits: users.earnedCredits,
+    })
     .from(users)
     .where(eq(users.id, userId))
     .limit(1);
@@ -472,35 +478,33 @@ export async function reverseAddonTokens(
   if (tokensToDeduct <= 0) return;
 
   const clampedDeduction = Math.min(tokensToDeduct, user.addonTokens);
+  const now = new Date().toISOString();
+  const monthlyRemaining = Math.max(0, user.monthlyTokens - user.monthlyTokensUsed);
+  const balanceAfter = monthlyRemaining + (user.addonTokens - clampedDeduction) + user.earnedCredits;
 
-  await db
-    .update(users)
-    .set({
-      addonTokens: sql`GREATEST(0, ${users.addonTokens} - ${clampedDeduction})`,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
-
-  const balance = await getTotalBalance(userId);
-  await db.insert(creditTransactions).values({
-    userId,
-    transactionType: 'adjustment',
-    amount: -clampedDeduction,
-    balanceAfter: balance,
-    source: `charge_refunded:${chargeId}`,
-    referenceId: chargeId,
-  });
+  // Atomically deduct tokens + record audit (PF-77)
+  await neonSql.transaction([
+    neonSql`
+      UPDATE users
+      SET addon_tokens = GREATEST(0, addon_tokens - ${clampedDeduction}),
+          updated_at   = ${now}
+      WHERE id = ${userId}
+    `,
+    neonSql`
+      INSERT INTO credit_transactions (user_id, transaction_type, amount, balance_after, source, reference_id)
+      VALUES (${userId}, 'adjustment', ${-clampedDeduction}, ${balanceAfter}, ${`charge_refunded:${chargeId}`}, ${chargeId})
+    `,
+  ]);
 }
 
 /**
  * Get the total token balance for a user (monthly remaining + addon + earned).
  *
- * Accepts an optional transaction handle so callers inside a transaction
- * read from the same snapshot (PF-514).
+ * Used by handleInvoicePaymentFailed which doesn't need transactional writes.
  */
-async function getTotalBalance(userId: string, queryable?: Queryable): Promise<number> {
-  const conn = queryable ?? getDb();
-  const [user] = await conn
+async function getTotalBalance(userId: string): Promise<number> {
+  const db = getDb();
+  const [user] = await db
     .select({
       monthlyTokens: users.monthlyTokens,
       monthlyTokensUsed: users.monthlyTokensUsed,
