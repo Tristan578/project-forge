@@ -8,6 +8,8 @@ import { MeshyClient } from '@/lib/generate/meshyClient';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { withApiMiddleware } from '@/lib/api/middleware';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
+import { rateLimitResponse } from '@/lib/rateLimit';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate + rate-limit (distributed, 10 req / 5 min per user)
@@ -18,6 +20,10 @@ export async function POST(request: NextRequest) {
   });
   if (mid.error) return mid.error;
   const authResult = { ctx: mid.authContext! };
+
+  // 1b. Aggregate rate limit across ALL generation routes (30 req / 15 min per user)
+  const aggRl = await aggregateGenerationRateLimit(authResult.ctx.user.id);
+  if (!aggRl.allowed) return rateLimitResponse(aggRl.remaining, aggRl.resetAt);
 
   // 2. Parse request
   let body: {

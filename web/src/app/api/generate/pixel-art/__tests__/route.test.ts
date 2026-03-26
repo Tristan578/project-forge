@@ -16,6 +16,7 @@ vi.mock('@/lib/rateLimit', () => ({
 }));
 vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: vi.fn(),
+  aggregateGenerationRateLimit: vi.fn(),
 }));
 vi.mock('@/lib/keys/resolver', () => ({
   resolveApiKey: vi.fn(),
@@ -45,7 +46,7 @@ vi.mock('@/lib/monitoring/sentry-server', () => ({
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { resolveApiKey } from '@/lib/keys/resolver';
 import { refundTokens } from '@/lib/tokens/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
@@ -54,6 +55,7 @@ import { NextResponse } from 'next/server';
 const mockAuth = authenticateRequest as ReturnType<typeof vi.fn>;
 const mockRateLimitResponse = rateLimitResponse as ReturnType<typeof vi.fn>;
 const mockDistributedRateLimit = distributedRateLimit as ReturnType<typeof vi.fn>;
+const mockAggregateRateLimit = aggregateGenerationRateLimit as ReturnType<typeof vi.fn>;
 const mockResolveKey = resolveApiKey as ReturnType<typeof vi.fn>;
 const mockRefundTokens = refundTokens as ReturnType<typeof vi.fn>;
 const mockCaptureException = captureException as ReturnType<typeof vi.fn>;
@@ -84,6 +86,7 @@ describe('POST /api/generate/pixel-art', () => {
       ctx: { user: { id: 'user-123', tier: 'pro' }, clerkId: 'clerk-123' },
     });
     mockDistributedRateLimit.mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 });
+    mockAggregateRateLimit.mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 900000 });
     mockRateLimitResponse.mockReturnValue(
       NextResponse.json({ error: 'Too many requests' }, { status: 429 })
     );

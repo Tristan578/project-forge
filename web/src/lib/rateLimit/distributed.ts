@@ -129,3 +129,17 @@ export async function distributedRateLimit(
     return result;
   }
 }
+
+/**
+ * Aggregate rate limit across all /api/generate/* routes.
+ * 30 requests per user per 15 minutes. Prevents token exhaustion
+ * via batch orchestration or rapid-fire generation requests.
+ *
+ * Call this BEFORE the per-route rate limit in each generation endpoint.
+ * If the aggregate limit is exceeded, return a 429 immediately.
+ */
+export async function aggregateGenerationRateLimit(
+  userId: string,
+): Promise<DistributedRateLimitResult> {
+  return distributedRateLimit(`gen-all:${userId}`, 30, 900);
+}

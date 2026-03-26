@@ -53,6 +53,7 @@ vi.mock('@/lib/db/client', () => ({
 
 vi.mock('@/lib/rateLimit/distributed', () => ({
   distributedRateLimit: (...args: unknown[]) => mockDistributedRateLimit(...args),
+  aggregateGenerationRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 900000 }),
 }));
 
 vi.mock('@/lib/rateLimit', () => ({
