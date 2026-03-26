@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server';
+import { safeAuth } from '@/lib/auth/safe-auth';
 import { redirect } from 'next/navigation';
 import { Suspense } from 'react';
 
@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 import { SettingsPage } from '@/components/settings/SettingsPage';
 
 export default async function SettingsRoute() {
-  const { userId } = await auth();
+  const { userId } = await safeAuth();
   if (!userId) redirect('/sign-in');
 
   return (
