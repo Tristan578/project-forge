@@ -337,7 +337,7 @@ export function SceneNode({
           }`}
           onClick={handleExpandClick}
           aria-label={isExpanded ? `Collapse ${node.name}` : `Expand ${node.name}`}
-          tabIndex={-1}
+          tabIndex={hasChildren ? 0 : -1}
         >
           {isExpanded ? (
             <ChevronDown className="w-3 h-3" />
@@ -353,7 +353,7 @@ export function SceneNode({
           title={node.visible ? 'Hide entity' : 'Show entity'}
           aria-label={node.visible ? `Hide ${node.name}` : `Show ${node.name}`}
           aria-pressed={!node.visible}
-          tabIndex={-1}
+          tabIndex={0}
         >
           {node.visible ? (
             <Eye className="w-3 h-3" />

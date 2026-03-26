@@ -7,6 +7,7 @@
 
 import { useState, useCallback } from 'react';
 import { Play, Pause, Save, Upload } from 'lucide-react';
+import { toast } from 'sonner';
 import { useEditorStore } from '@/stores/editorStore';
 
 interface StemConfig {
@@ -63,7 +64,7 @@ export default function AdaptiveMusicInspector() {
 
   const handleCreateSnapshot = useCallback(() => {
     if (!snapshotName.trim()) {
-      alert('Please enter a snapshot name');
+      toast.error('Please enter a snapshot name');
       return;
     }
     // Capture current bus state from the editor store

@@ -1,6 +1,6 @@
 import { eq, sql, and, gte } from 'drizzle-orm';
-import { getDb } from '../db/client';
-import { users, tokenUsage, tokenPurchases } from '../db/schema';
+import { getDb, getNeonSql } from '../db/client';
+import { users, tokenUsage } from '../db/schema';
 import type { TokenPackage } from './pricing';
 import { TOKEN_PACKAGES, TIER_MONTHLY_TOKENS } from './pricing';
 
@@ -284,30 +284,32 @@ export async function refundTokenAmount(
   });
 }
 
-/** Credit tokens from an add-on purchase */
+/** Credit tokens from an add-on purchase (atomic: balance update + purchase record) */
 export async function creditAddonTokens(
   userId: string,
   pkg: TokenPackage,
   stripePaymentIntent: string
 ): Promise<void> {
-  const db = getDb();
+  const neonSql = getNeonSql();
   const pkgInfo = TOKEN_PACKAGES[pkg];
+  const now = new Date().toISOString();
 
-  await db
-    .update(users)
-    .set({
-      addonTokens: sql`${users.addonTokens} + ${pkgInfo.tokens}`,
-      updatedAt: new Date(),
-    })
-    .where(eq(users.id, userId));
-
-  await db.insert(tokenPurchases).values({
-    userId,
-    stripePaymentIntent,
-    package: pkg,
-    tokens: pkgInfo.tokens,
-    amountCents: pkgInfo.priceCents,
-  });
+  // Use neon sql.transaction() to atomically:
+  //   1. Increment addon_tokens on the user row
+  //   2. Insert the purchase record
+  // If either statement fails, neither is committed (PF-977).
+  await neonSql.transaction([
+    neonSql`
+      UPDATE users
+      SET addon_tokens = addon_tokens + ${pkgInfo.tokens},
+          updated_at   = ${now}
+      WHERE id = ${userId}
+    `,
+    neonSql`
+      INSERT INTO token_purchases (user_id, stripe_payment_intent, package, tokens, amount_cents)
+      VALUES (${userId}, ${stripePaymentIntent}, ${pkg}, ${pkgInfo.tokens}, ${pkgInfo.priceCents})
+    `,
+  ]);
 }
 
 /** Reset monthly tokens on billing cycle renewal */

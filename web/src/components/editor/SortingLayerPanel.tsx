@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { Eye, EyeOff, Trash2, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import { useEditorStore } from '@/stores/editorStore';
 
 const DEFAULT_LAYERS = ['Background', 'Default', 'Foreground', 'UI'];
@@ -49,7 +50,7 @@ export function SortingLayerPanel() {
     const trimmed = newLayerName.trim();
     if (!trimmed) return;
     if (sortingLayers.some((l) => l.name === trimmed)) {
-      alert(`Layer "${trimmed}" already exists`);
+      toast.error(`Layer "${trimmed}" already exists`);
       return;
     }
     addSortingLayerAction(trimmed);

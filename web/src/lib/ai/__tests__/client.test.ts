@@ -2,31 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AIResponseCache } from '../promptCache';
 
 // ---------------------------------------------------------------------------
-// Mock aiResponseCache as a transparent pass-through so tests are not
-// affected by the module-level singleton caching responses across tests.
-// ---------------------------------------------------------------------------
-
-vi.mock('@/lib/ai/promptCache', () => {
-  const passthrough = {
-    computeKey: (_model: string, _sys: string, msg: string) => Promise.resolve(msg),
-    get: () => undefined,
-    dedup: (_key: string, fn: () => Promise<string>) => fn(),
-    set: () => undefined,
-    clear: () => undefined,
-    invalidate: () => undefined,
-    isInflight: () => false,
-    size: 0,
-    inflightCount: 0,
-  };
-  return {
-    PromptCache: vi.fn(),
-    AIResponseCache: vi.fn(),
-    promptCache: {},
-    aiResponseCache: passthrough,
-  };
-});
-
-// ---------------------------------------------------------------------------
 // Mock fetch globally before importing the module under test
 // ---------------------------------------------------------------------------
 
@@ -37,10 +12,13 @@ vi.stubGlobal('fetch', mockFetch);
 // Mock promptCache so tests can control the AIResponseCache instance.
 // We use a getter that always returns the current _testCache so we can swap
 // it to a fresh instance in beforeEach, preventing cache cross-contamination.
+//
+// A real AIResponseCache is used (not a passthrough) so that caching and
+// in-flight dedup tests exercise the actual behaviour.
 // ---------------------------------------------------------------------------
 
 let _testCache = new AIResponseCache();
-vi.mock('../promptCache', async (importOriginal) => {
+vi.mock('@/lib/ai/promptCache', async (importOriginal) => {
   const original = await importOriginal<typeof import('../promptCache')>();
   return {
     ...original,
@@ -316,12 +294,16 @@ describe('fetchAI response caching', () => {
   });
 
   it('returns cached result without calling fetch a second time for identical prompt', async () => {
-    // First call — fetch returns the real response
-    mockFetch.mockResolvedValue(
-      makeOkResponse([
-        'data: {"type":"text_delta","text":"cached answer"}\n',
-        'data: {"type":"done"}\n',
-      ]),
+    // Return a fresh Response each call — ReadableStream can only be read once.
+    // mockResolvedValue would return the SAME Response object, causing
+    // "ReadableStream is locked" when the second call tries to read it.
+    mockFetch.mockImplementation(() =>
+      Promise.resolve(
+        makeOkResponse([
+          'data: {"type":"text_delta","text":"cached answer"}\n',
+          'data: {"type":"done"}\n',
+        ]),
+      ),
     );
 
     // Import a fresh module instance so the cache starts empty

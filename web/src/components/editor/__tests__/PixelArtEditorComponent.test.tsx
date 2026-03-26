@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@/test/utils/componentTestUtils';
 import { PixelArtEditor } from '../PixelArtEditor';
 import { useEditorStore } from '@/stores/editorStore';
@@ -47,12 +47,16 @@ function setupStoreMock() {
   });
 }
 
-describe('PixelArtEditor', () => {
-  let createElementSpy: ReturnType<typeof vi.spyOn>;
+// Cache the real createElement once — used by the per-test spy.
+const origCreateElement = document.createElement.bind(document);
 
-  beforeAll(() => {
-    const origCreateElement = document.createElement.bind(document);
-    createElementSpy = vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: ElementCreationOptions) => {
+describe('PixelArtEditor', () => {
+  // Re-establish the canvas mock before EVERY test.
+  // The global vitest.setup.ts calls vi.restoreAllMocks() in afterEach,
+  // which wipes spies set in beforeAll. Using beforeEach ensures the mock
+  // survives the global teardown.
+  beforeEach(() => {
+    vi.spyOn(document, 'createElement').mockImplementation((tag: string, options?: ElementCreationOptions) => {
       const el = origCreateElement(tag, options);
       if (tag === 'canvas') {
         (el as HTMLCanvasElement).getContext = (() => mockCtx) as unknown as HTMLCanvasElement['getContext'];
@@ -60,14 +64,6 @@ describe('PixelArtEditor', () => {
       }
       return el;
     });
-  });
-
-  afterAll(() => {
-    createElementSpy.mockRestore();
-  });
-
-  beforeEach(() => {
-    vi.clearAllMocks();
     setupStoreMock();
   });
 

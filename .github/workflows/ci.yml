@@ -169,26 +169,19 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
-      - name: Build with Vercel
-        working-directory: web
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: |
-          # Ensure npm is discoverable by Vercel CLI's child processes
-          export PATH="$(dirname $(which npm)):$PATH"
-          vercel build --token="$VERCEL_TOKEN"
-
       - name: Deploy preview
         id: deploy
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
-          url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          # Deploy directly instead of build+deploy-prebuilt.
+          # vercel build uses child_process.spawn('npm') which fails on GHA
+          # runners because setup-node's PATH isn't inherited by spawned
+          # processes. vercel deploy builds remotely on Vercel infrastructure
+          # where npm is always available.
+          url=$(vercel deploy --token="$VERCEL_TOKEN")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Preview deployment: $url" >> "$GITHUB_STEP_SUMMARY"
 
