@@ -233,12 +233,13 @@ describe('POST /api/generate/model', () => {
       expect(body.estimatedSeconds).toBe(120);
     });
 
-    it('returns usageId from resolveApiKey', async () => {
+    it('does not expose usageId in success response (prevents double refund)', async () => {
       const { POST } = await import('../route');
       const res = await POST(makeRequest({ prompt: 'potion', mode: 'text-to-3d' }));
       const body = await res.json();
 
-      expect(body.usageId).toBe('usage_123');
+      // usageId removed from success responses to prevent client double-refund
+      expect(body.usageId).toBeUndefined();
     });
   });
 
