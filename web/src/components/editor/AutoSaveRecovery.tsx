@@ -106,12 +106,12 @@ export function AutoSaveRecovery() {
   const timeAgo = formatTimeAgo(entry.savedAt);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" role="dialog" aria-modal="true" aria-labelledby="autosave-recovery-title">
       <div className="mx-4 w-full max-w-md rounded-lg bg-zinc-800 p-6 shadow-xl">
         <div className="mb-4 flex items-start justify-between">
           <div className="flex items-center gap-3">
             <AlertTriangle className="h-6 w-6 shrink-0 text-amber-400" />
-            <h2 className="text-lg font-semibold text-white">
+            <h2 id="autosave-recovery-title" className="text-lg font-semibold text-white">
               Unsaved work recovered
             </h2>
           </div>
