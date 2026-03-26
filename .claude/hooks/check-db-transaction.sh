@@ -8,8 +8,8 @@
 
 FILE_PATH="${TOOL_INPUT_file_path:-}"
 
-# Only check TypeScript files in the server-side lib directory
-[[ "$FILE_PATH" == */web/src/lib/*.ts ]] || exit 0
+# Only check TypeScript files in the server-side lib directory (including subdirs)
+[[ "$FILE_PATH" == */web/src/lib/* && "$FILE_PATH" == *.ts ]] || exit 0
 [[ "$FILE_PATH" != *__tests__* ]] || exit 0
 [[ "$FILE_PATH" != *.test.* ]] || exit 0
 
