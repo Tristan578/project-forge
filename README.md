@@ -14,7 +14,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Features
 
 ### AI & Automation
-- **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want ("build a platformer level") and the AI spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
+- **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want in plain language and the AI decomposes your idea into systems (movement, camera, challenge, feedback, etc.), spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
 - **Compound AI Actions** — 8 high-level tools (`create_scene_from_description`, `setup_character`, `arrange_entities`, etc.) that batch dozens of operations into single AI calls
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
@@ -57,7 +57,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ### Editor
 - **Dockable Workspace** — Movable, resizable panels with preset layouts and persistent user customization
 - **3D/2D Scene Editor** — Transform gizmos, multi-select, snapping, scene hierarchy, and domain-specific inspector panels
-- **Game Templates** — 11 starter templates (5 3D + 6 2D): platformer, runner, shooter, puzzle, explorer, top-down RPG, shoot-em-up, fighting, metroidvania, 2D platformer, 2D puzzle
+- **Starter System Bundles** — 11 prepackaged system configurations (5 3D + 6 2D) with friendly names like Platformer, Runner, Shooter, Puzzle, and Explorer. Each bundle is a starting point, not a constraint — every system is independently editable, and you can describe any game type beyond these presets
 - **Game Cameras** — 6 camera modes (ThirdPerson, FirstPerson, SideScroller, TopDown, Fixed, Orbital) with auto-activation in Play mode
 - **Dialogue System** — Visual node editor with 5 node types (text, choice, condition, action, end), typewriter display, branching, and `forge.dialogue` script API
 - **Scene Transitions** — Fade, wipe, and instant transitions between scenes with `forge.scene.load` API
