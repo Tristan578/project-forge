@@ -195,19 +195,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          # Full clone required: fetch-depth: 2 caused silent git diff failures
+          # on squash merges and rapid pushes where github.event.before was not
+          # present in the shallow clone. Empty CHANGED output left both flags
+          # false, causing every deploy to be skipped.
+          fetch-depth: 0
 
       - name: Detect changed paths
         id: filter
         env:
           BEFORE_SHA: ${{ github.event.before }}
         run: |
-          # Use push event's before SHA for accurate diff (handles squash merges)
           BEFORE="$BEFORE_SHA"
           if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             BEFORE="HEAD~1"
           fi
-          CHANGED=$(git diff --name-only "$BEFORE" HEAD)
+          CHANGED=$(git diff --name-only "$BEFORE" HEAD 2>/dev/null || true)
+
+          # Fallback: empty diff (first push, force-push, or unreachable SHA)
+          # Default web=true so the deploy pipeline is not silently skipped.
+          if [ -z "$CHANGED" ]; then
+            echo "::warning::git diff returned empty output -- defaulting web=true engine=false"
+            echo "engine=false" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           if echo "$CHANGED" | grep -q '^engine/'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
@@ -475,15 +487,16 @@ jobs:
     name: Deploy to Staging
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [check-changes, lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
+    # check-changes is intentionally NOT in needs -- path detection only gates
+    # build-wasm (slow). Every push to main that passes quality gates must deploy.
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
       github.event.inputs.promote_to_production != 'true' &&
-      (needs.check-changes.outputs.web-changed == 'true' || needs.check-changes.outputs.engine-changed == 'true' || github.event_name == 'workflow_dispatch') &&
-      (needs.lint.result == 'success' || needs.lint.result == 'skipped') &&
-      (needs.typecheck.result == 'success' || needs.typecheck.result == 'skipped') &&
-      (needs.test-web.result == 'success' || needs.test-web.result == 'skipped') &&
+      needs.lint.result == 'success' &&
+      needs.typecheck.result == 'success' &&
+      needs.test-web.result == 'success' &&
       (needs.test-mcp.result == 'success' || needs.test-mcp.result == 'skipped') &&
       (needs.security.result == 'success' || needs.security.result == 'skipped') &&
       (needs.build-wasm.result == 'success' || needs.build-wasm.result == 'skipped') &&
@@ -570,7 +583,9 @@ jobs:
     name: Deploy to Production
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [check-changes, lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
+    # check-changes not needed: production only runs after deploy-staging succeeds
+    # (which already requires quality gates to pass).
+    needs: [lint, typecheck, test-web, test-mcp, build-wasm, e2e, security, upload-wasm-cdn, deploy-staging]
     if: |
       always() &&
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
@@ -691,6 +706,21 @@ jobs:
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
+
+      - name: Install Playwright for smoke tests
+        if: ${{ success() }}
+        working-directory: web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run production smoke tests
+        if: ${{ success() }}
+        id: smoke-tests
+        working-directory: web
+        env:
+          PRODUCTION_URL: https://www.spawnforge.ai
+        run: npx playwright test e2e/tests/production-smoke.spec.ts --project=chromium
 
       - name: Rollback production on health check failure
         if: ${{ failure() && steps.health-check-production.outcome == 'failure' && steps.prev-deploy.outputs.prev_url != '' }}
