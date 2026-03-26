@@ -61,7 +61,7 @@ async function walkAndExtract(
         // Replace with relative path
         record[key] = extracted.relativePath;
       }
-    } else if (typeof value === 'object') {
+    } else if (value !== null && typeof value === 'object') {
       // Recurse
       await walkAndExtract(value, assets, seenHashes);
     }

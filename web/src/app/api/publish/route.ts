@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, projects, gameTags } from '@/lib/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { moderateContent } from '@/lib/moderation/contentFilter';
@@ -172,7 +172,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ publication: { ...updated, url: gameUrl } });
   }
 
-  // Create new publication
+  // Create new publication — use onConflictDoUpdate to handle concurrent
+  // publishes with the same slug atomically (PF-212: TOCTOU fix).
+  // The unique index uq_published_games_slug(userId, slug) prevents duplicates.
   const [publication] = await db.insert(publishedGames)
     .values({
       userId: user.id,
@@ -184,9 +186,24 @@ export async function POST(request: NextRequest) {
       cdnUrl: gameUrl,
       thumbnail,
     })
+    .onConflictDoUpdate({
+      target: [publishedGames.userId, publishedGames.slug],
+      set: {
+        projectId: projectIdResult.value,
+        title: titleResult.value,
+        description: descResult.value ?? null,
+        status: 'published',
+        cdnUrl: gameUrl,
+        thumbnail,
+        version: sql`${publishedGames.version} + 1`,
+        updatedAt: new Date(),
+      },
+    })
     .returning();
 
-  // Insert tags
+  // Replace tags atomically — delete old tags first to prevent duplicates
+  // on concurrent publishes hitting the ON CONFLICT DO UPDATE path.
+  await db.delete(gameTags).where(eq(gameTags.gameId, publication.id));
   if (validTags.length > 0) {
     await db.insert(gameTags).values(
       validTags.map((tag) => ({ gameId: publication.id, tag }))

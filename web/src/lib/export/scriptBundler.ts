@@ -1,4 +1,5 @@
 import type { ScriptData } from '@/stores/editorStore';
+import { injectLoopGuards } from '@/lib/scripting/loopGuards';
 
 interface BundledScripts {
   /** The complete JS bundle as a string */
@@ -27,6 +28,10 @@ export function bundleScripts(
 (function() {
   const scripts = {};
   const scriptState = {};
+
+  // Loop guard limit for exported scripts (PF-210).
+  // injectLoopGuards inserts checks that reference __loopLimit.
+  const __loopLimit = 100000;
 
   // Minimal forge API (commands are queued and sent to WASM each frame)
   const pendingCommands = [];
@@ -86,13 +91,17 @@ export function bundleScripts(
   };
 
   // Register entity scripts (JSON-encoded to prevent closure breakout)
-${enabledScripts.map(([entityId, script]) => `
+${enabledScripts.map(([entityId, script]) => {
+    const { source: guardedSource, guardVarNames } = injectLoopGuards(script.source);
+    const resetBody = guardVarNames.length > 0 ? guardVarNames.map(v => v + '=0').join(';') : '';
+    const resetFn = `function __resetGuards(){${resetBody}}`;
+    return `
   scripts[${JSON.stringify(entityId)}] = (function(forge) {
-    const src = ${JSON.stringify(script.source)};
-    const fn = new Function('forge', src + '; return { onStart: typeof onStart === "function" ? onStart : null, onUpdate: typeof onUpdate === "function" ? onUpdate : null, onDestroy: typeof onDestroy === "function" ? onDestroy : null };');
-    return fn(forge);
-  })(forge);
-`).join('\n')}
+    ${resetFn}
+    var fn = new Function('forge', '__loopLimit', '__resetGuards', ${JSON.stringify(guardedSource)} + '; return { onStart: typeof onStart === "function" ? function(){__resetGuards();onStart();} : null, onUpdate: typeof onUpdate === "function" ? function(dt){__resetGuards();onUpdate(dt);} : null, onDestroy: typeof onDestroy === "function" ? function(){__resetGuards();onDestroy();} : null };');
+    return fn(forge, __loopLimit, __resetGuards);
+  })(forge);`;
+  }).join('\n')}
 
   // Lifecycle management
   window.__forgeScriptStart = function() {

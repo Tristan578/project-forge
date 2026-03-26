@@ -49,6 +49,9 @@ on:
       coverage-ratchet-result:
         description: 'Outcome of the coverage-ratchet job'
         value: ${{ jobs.coverage-ratchet.result }}
+      editor-boot-result:
+        description: 'Outcome of the editor-boot job (informational — not a required check)'
+        value: ${{ jobs.editor-boot.result }}
 
 permissions:
   contents: read
@@ -332,6 +335,53 @@ jobs:
             engine/pkg-webgl2-runtime/
             engine/pkg-webgpu-runtime/
           retention-days: 7
+
+  editor-boot:
+    name: Editor Boot Gate
+    # Only run when web files change — this job is irrelevant for pure engine or MCP changes.
+    if: inputs.web-changed || inputs.ci-changed
+    runs-on: ubuntu-latest
+    # 15-minute budget: npm ci (~60s) + Playwright install (~60s) + dev server start + webpack
+    # cold-compile of EditorLayout (~90s on GitHub-hosted runners) + 4 tests (~60s).
+    # The original 5-minute estimate was too optimistic for cold webpack compilation.
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Create WASM stubs
+        # The dev server will attempt to load engine-pkg-* files. Without real WASM
+        # we create empty stub directories so the static file requests return 404
+        # rather than crashing Next.js's public asset resolution. The editor boot
+        # test uses __SKIP_ENGINE so the WASM is never actually executed.
+        run: |
+          for variant in engine-pkg-webgl2 engine-pkg-webgpu engine-pkg-webgl2-runtime engine-pkg-webgpu-runtime; do
+            mkdir -p "web/public/$variant"
+          done
+
+      - name: Install Playwright browsers
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run editor boot smoke test
+        working-directory: web
+        env:
+          # Skip telemetry and reduce noise during CI dev server startup.
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: |
+          npx playwright test --grep "@smoke" --project=chromium \
+            e2e/tests/editor-boot.spec.ts
 
   security:
     name: Rust Security Audit

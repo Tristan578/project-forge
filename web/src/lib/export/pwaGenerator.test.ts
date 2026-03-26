@@ -600,9 +600,14 @@ describe('pwaGenerator', () => {
       expect(sw).toContain('icon-512.png');
     });
 
-    it('cache name is forge-game-v1', () => {
+    it('cache name uses provided version', () => {
+      const sw = generateServiceWorker('v2');
+      expect(sw).toContain("'forge-game-v2'");
+    });
+
+    it('cache name uses timestamp fallback when no version provided', () => {
       const sw = generateServiceWorker();
-      expect(sw).toContain("'forge-game-v1'");
+      expect(sw).toMatch(/CACHE_NAME = 'forge-game-[a-z0-9]+'/);
     });
 
     it('includes offline fallback response with 503 status', () => {

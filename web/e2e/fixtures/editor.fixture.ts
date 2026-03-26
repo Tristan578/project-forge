@@ -85,14 +85,16 @@ export class EditorPage {
     await this.page.waitForLoadState('domcontentloaded');
     // Wait for React hydration — ensures all event handlers (keyboard shortcuts,
     // button clicks) are attached. This fires after EditorLayout mounts.
-    // On cold dev-server starts (CI), the first page load may trigger webpack
-    // chunk compilation. If the dynamic import of EditorLayout hasn't resolved
-    // within 20s, reload once to pick up the now-compiled chunks.
+    // On cold dev-server starts (CI), the first page load triggers webpack chunk
+    // compilation for the dynamically-imported EditorLayout bundle. GitHub-hosted
+    // runners typically take 60-90s for this cold compile. We give it 90s on first
+    // attempt; if that times out, reload once (chunks are now compiled) and wait
+    // a further 40s.
     try {
       await this.page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 20_000 }
+        { timeout: 90_000 }
       );
     } catch {
       // Reload — chunks should be compiled by now

@@ -1,8 +1,8 @@
 vi.mock('server-only', () => ({}));
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
-import { getDb } from '@/lib/db/client';
+import { getDb, getNeonSql } from '@/lib/db/client';
 
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/rateLimit', () => ({
@@ -53,18 +53,6 @@ function makeSelectChain(data: unknown[] = []): Record<string, any> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const chain: Record<string, any> = {};
   for (const m of ['from', 'where', 'limit', 'orderBy', 'select']) {
-    chain[m] = vi.fn().mockReturnValue(chain);
-  }
-  chain.then = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
-    Promise.resolve(data).then(resolve, reject);
-  return chain;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function makeInsertChain(data: unknown[] = []): Record<string, any> {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const chain: Record<string, any> = {};
-  for (const m of ['values', 'returning']) {
     chain[m] = vi.fn().mockReturnValue(chain);
   }
   chain.then = (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
@@ -214,23 +202,46 @@ describe('GET /api/play/[userId]/[slug]/leaderboard', () => {
 // POST tests
 // ---------------------------------------------------------------------------
 
+// Default neonSql mock result: a successful insert returning one row.
+const DEFAULT_NEON_INSERT_RESULT = [{
+  id: 'entry-1',
+  player_name: 'Alice',
+  score: 1500,
+  created_at: '2026-03-24T00:00:00Z',
+}];
+
+/**
+ * Create a mock tagged-template function that simulates neonSql`...`.
+ * The returned function ignores the SQL strings/values and resolves with
+ * `result`. Pass an empty array to simulate the duplicate-detection path
+ * (WHERE NOT EXISTS found a duplicate, so no row is inserted).
+ */
+function makeNeonSqlFn(result: unknown[] = DEFAULT_NEON_INSERT_RESULT) {
+  return vi.fn().mockResolvedValue(result);
+}
+
 describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  function makePostDb(board = BOARD_DESC, recentSubmission: unknown = undefined) {
+  // pruneLeaderboard is fire-and-forget inside the route. Flush the microtask
+  // queue after each test so the async chain completes before vi.clearAllMocks()
+  // runs for the next test. Without this, the pruning continuation can consume
+  // mock calls from the subsequent test's getDb mock sequence, causing 500s.
+  afterEach(async () => {
+    await new Promise<void>(resolve => setImmediate(resolve));
+  });
+
+  // The POST handler now uses getNeonSql() for the atomic CTE insert instead of
+  // a Drizzle insert chain. The select sequence is: user → game → board (3 selects
+  // via getDb), then neonSql for the CTE, then countChain for rank, then
+  // allEntriesChain for pruneLeaderboard.
+  function makePostDb(board = BOARD_DESC) {
     const userChain = makeSelectChain([{ id: 'u1' }]);
     const gameChain = makeSelectChain([PUBLISHED_GAME]);
     const boardChain = makeSelectChain([board]);
-    const recentChain = makeSelectChain(recentSubmission ? [recentSubmission] : []);
     const countChain = makeSelectChain([{ cnt: 0 }]);
-    const insertChain = makeInsertChain([{
-      id: 'entry-1',
-      playerName: 'Alice',
-      score: 1500,
-      createdAt: '2026-03-24T00:00:00Z',
-    }]);
     const allEntriesChain = makeSelectChain([]);
     const deleteChain = makeDeleteChain();
 
@@ -239,16 +250,15 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
         .mockReturnValueOnce(userChain)
         .mockReturnValueOnce(gameChain)
         .mockReturnValueOnce(boardChain)
-        .mockReturnValueOnce(recentChain)
         .mockReturnValueOnce(countChain)
         .mockReturnValueOnce(allEntriesChain),
-      insert: vi.fn().mockReturnValue(insertChain),
       delete: vi.fn().mockReturnValue(deleteChain),
     };
   }
 
   it('creates a leaderboard entry and returns rank', async () => {
     vi.mocked(getDb).mockReturnValue(makePostDb() as never);
+    vi.mocked(getNeonSql).mockReturnValue(makeNeonSqlFn() as never);
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost/api/play/clerk_1/mygame', {
@@ -363,9 +373,10 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
   });
 
   it('returns 429 when a duplicate submission is detected within 1 second', async () => {
-    vi.mocked(getDb).mockReturnValue(
-      makePostDb(BOARD_DESC, { id: 'old-entry' }) as never
-    );
+    // The atomic CTE returns an empty result set when a duplicate IP hash is found
+    // within the last second (WHERE NOT EXISTS prevents the INSERT).
+    vi.mocked(getDb).mockReturnValue(makePostDb() as never);
+    vi.mocked(getNeonSql).mockReturnValue(makeNeonSqlFn([]) as never);
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost/api/play/clerk_1/mygame', {
@@ -466,6 +477,7 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
 
   it('accepts optional metadata as a plain object', async () => {
     vi.mocked(getDb).mockReturnValue(makePostDb() as never);
+    vi.mocked(getNeonSql).mockReturnValue(makeNeonSqlFn() as never);
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost/api/play/clerk_1/mygame', {
@@ -480,6 +492,7 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
 
   it('ignores metadata when it is an array', async () => {
     vi.mocked(getDb).mockReturnValue(makePostDb() as never);
+    vi.mocked(getNeonSql).mockReturnValue(makeNeonSqlFn() as never);
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost/api/play/clerk_1/mygame', {
@@ -495,6 +508,7 @@ describe('POST /api/play/[userId]/[slug]/leaderboard', () => {
 
   it('rounds float scores to integer', async () => {
     vi.mocked(getDb).mockReturnValue(makePostDb() as never);
+    vi.mocked(getNeonSql).mockReturnValue(makeNeonSqlFn() as never);
 
     const { POST } = await import('./route');
     const req = new NextRequest('http://localhost/api/play/clerk_1/mygame', {

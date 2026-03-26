@@ -65,15 +65,16 @@ describe('POST /api/community/games/[id]/like', () => {
   });
 
   it('should add a new like and return count', async () => {
-    const existingChain = mockDbChain([]); // no existing like
     const countChain = mockDbChain([{ count: 1 }]);
 
     const mockDb = {
-      select: vi.fn()
-        .mockReturnValueOnce(existingChain)
-        .mockReturnValueOnce(countChain),
+      select: vi.fn().mockReturnValue(countChain),
       insert: vi.fn().mockReturnValue({
-        values: vi.fn().mockResolvedValue(undefined),
+        values: vi.fn().mockReturnValue({
+          onConflictDoNothing: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([{ id: 'new-like' }]),
+          }),
+        }),
       }),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
@@ -89,12 +90,16 @@ describe('POST /api/community/games/[id]/like', () => {
   });
 
   it('should return current count if already liked', async () => {
-    const existingChain = mockDbChain([{ id: 'like-1' }]);
     const countChain = mockDbChain([{ count: 5 }]);
     const mockDb = {
-      select: vi.fn()
-        .mockReturnValueOnce(existingChain)
-        .mockReturnValueOnce(countChain),
+      select: vi.fn().mockReturnValue(countChain),
+      insert: vi.fn().mockReturnValue({
+        values: vi.fn().mockReturnValue({
+          onConflictDoNothing: vi.fn().mockReturnValue({
+            returning: vi.fn().mockResolvedValue([]), // empty = already existed
+          }),
+        }),
+      }),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 

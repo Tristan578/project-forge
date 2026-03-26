@@ -28,6 +28,10 @@ vi.mock('@/lib/rateLimit', () => ({
   ),
 }));
 
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }),
+}));
+
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(),
 }));
@@ -42,6 +46,7 @@ vi.mock('@/lib/moderation/contentFilter', () => ({
 
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { getDb } from '@/lib/db/client';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 
@@ -91,14 +96,18 @@ function makeNewPublicationDb() {
     updatedAt: new Date(),
   };
 
-  const mockInsert = vi.fn().mockReturnValue({
+  // Route uses: db.insert().values().onConflictDoUpdate().returning()
+  const mockInsertPublication = {
     values: vi.fn().mockReturnValue({
-      returning: vi.fn().mockResolvedValue([pub]),
+      onConflictDoUpdate: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([pub]),
+      }),
     }),
-  });
-  const mockInsertTags = vi.fn().mockReturnValue({
+  };
+  // Tags insert: db.insert().values()
+  const mockInsertTags = {
     values: vi.fn().mockResolvedValue([]),
-  });
+  };
 
   return {
     select: vi.fn()
@@ -106,8 +115,9 @@ function makeNewPublicationDb() {
       .mockReturnValueOnce({ from: () => ({ where: () => ({ limit: () => Promise.resolve([]) }) }) }) // slug check
       .mockReturnValueOnce({ from: () => ({ where: () => ({ limit: () => Promise.resolve([{ id: 'proj-1', userId: 'user-pub' }]) }) }) }), // project
     insert: vi.fn()
-      .mockReturnValueOnce(mockInsert())
-      .mockReturnValueOnce(mockInsertTags()),
+      .mockReturnValueOnce(mockInsertPublication)
+      .mockReturnValueOnce(mockInsertTags),
+    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
 }
 
@@ -127,6 +137,7 @@ describe('POST /api/publish — negative cases', () => {
       ctx: { user: mockUser, clerkId: 'clerk_pub' },
     });
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+    vi.mocked(distributedRateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
     vi.mocked(moderateContent).mockReturnValue({ severity: 'pass', reasons: [], cleaned: '' });
 
     const mod = await import('../route');
@@ -279,7 +290,7 @@ describe('POST /api/publish — negative cases', () => {
   // -------------------------------------------------------------------------
   describe('rate limiting', () => {
     it('does not query DB when rate limited', async () => {
-      vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
+      vi.mocked(distributedRateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
       vi.mocked(rateLimitResponse).mockReturnValue(
         new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) as never,
       );
@@ -289,7 +300,7 @@ describe('POST /api/publish — negative cases', () => {
     });
 
     it('does not run content moderation when rate limited', async () => {
-      vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
+      vi.mocked(distributedRateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
       vi.mocked(rateLimitResponse).mockReturnValue(
         new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 }) as never,
       );

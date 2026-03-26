@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
-import { getDb } from '@/lib/db/client';
+import { getDb, getNeonSql } from '@/lib/db/client';
 import { publishedGames, users, leaderboards, leaderboardEntries } from '@/lib/db/schema';
 import { eq, and, desc, asc, gt, count, lt } from 'drizzle-orm';
 import { rateLimitPublicRoute, getClientIp } from '@/lib/rateLimit';
@@ -200,25 +200,6 @@ export async function POST(
     const ipHash = hashIp(getClientIp(req));
     const oneSecondAgo = new Date(Date.now() - 1000);
 
-    const [recentSubmission] = await db
-      .select({ id: leaderboardEntries.id })
-      .from(leaderboardEntries)
-      .where(
-        and(
-          eq(leaderboardEntries.leaderboardId, board.id),
-          eq(leaderboardEntries.ipHash, ipHash),
-          gt(leaderboardEntries.createdAt, oneSecondAgo)
-        )
-      )
-      .limit(1);
-
-    if (recentSubmission) {
-      return NextResponse.json(
-        { error: 'Duplicate submission — please wait before submitting again' },
-        { status: 429 }
-      );
-    }
-
     // Validate metadata is a plain object if provided
     const metadata =
       body.metadata !== undefined &&
@@ -228,22 +209,37 @@ export async function POST(
         ? (body.metadata as Record<string, unknown>)
         : null;
 
-    // Insert the new entry
-    const [entry] = await db
-      .insert(leaderboardEntries)
-      .values({
-        leaderboardId: board.id,
-        playerName,
-        score: scoreInt,
-        metadata,
-        ipHash,
-      })
-      .returning({
-        id: leaderboardEntries.id,
-        playerName: leaderboardEntries.playerName,
-        score: leaderboardEntries.score,
-        createdAt: leaderboardEntries.createdAt,
-      });
+    // PF-213: Atomic dedup + insert using a single SQL statement.
+    // The CTE checks for recent submissions from the same IP and only
+    // inserts if none exist, eliminating the TOCTOU race condition.
+    const neonSql = getNeonSql();
+    const result = await neonSql`
+      WITH dedup AS (
+        SELECT id FROM leaderboard_entries
+        WHERE leaderboard_id = ${board.id}
+          AND ip_hash = ${ipHash}
+          AND created_at > ${oneSecondAgo.toISOString()}
+        LIMIT 1
+      )
+      INSERT INTO leaderboard_entries (leaderboard_id, player_name, score, metadata, ip_hash)
+      SELECT ${board.id}, ${playerName}, ${scoreInt}, ${metadata ? JSON.stringify(metadata) : null}::jsonb, ${ipHash}
+      WHERE NOT EXISTS (SELECT 1 FROM dedup)
+      RETURNING id, player_name, score, created_at
+    `;
+
+    if (result.length === 0) {
+      return NextResponse.json(
+        { error: 'Duplicate submission — please wait before submitting again' },
+        { status: 429 }
+      );
+    }
+
+    const entry = {
+      id: result[0].id as string,
+      playerName: result[0].player_name as string,
+      score: result[0].score as number,
+      createdAt: result[0].created_at as Date,
+    };
 
     // Compute rank: how many entries have a strictly better score?
     // For desc boards: better = higher score. For asc boards: better = lower score.

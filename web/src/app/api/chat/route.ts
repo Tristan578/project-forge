@@ -435,7 +435,11 @@ export async function POST(request: NextRequest) {
   // legitimate instructional phrasing like "you are now a game reviewer" or
   // "new instruction: focus on level design" (PF-968, PF-901).
   let effectiveSystemPrompt = SYSTEM_PROMPT;
-  if (typeof systemOverride === 'string' && systemOverride.length > 0) {
+  // Tier gate: systemOverride is only available to creator and pro tiers.
+  // Without this, any authenticated user (including free starter) can replace
+  // the system prompt and use the endpoint as an unrestricted AI proxy.
+  const canOverrideSystem = auth.ctx.user.tier === 'creator' || auth.ctx.user.tier === 'pro';
+  if (canOverrideSystem && typeof systemOverride === 'string' && systemOverride.length > 0) {
     // Strip control characters and enforce system-prompt length cap.
     // sanitizeSystemPrompt uses MAX_SYSTEM_PROMPT_LENGTH (10,000) — NOT the
     // 4,000-char user-message limit — so valid long system prompts are never

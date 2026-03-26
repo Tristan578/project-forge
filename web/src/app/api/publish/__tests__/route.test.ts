@@ -28,6 +28,10 @@ vi.mock('@/lib/rateLimit', () => ({
   ),
 }));
 
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 }),
+}));
+
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn(),
 }));
@@ -36,11 +40,18 @@ vi.mock('@/lib/moderation/contentFilter', () => ({
   moderateContent: vi.fn(() => ({ severity: 'pass', reasons: [], cleaned: '' })),
 }));
 
+vi.mock('@/lib/monitoring/sentry-server', () => ({
+  captureException: vi.fn(),
+  captureMessage: vi.fn(),
+  startSpan: vi.fn((_opts: unknown, cb: () => unknown) => cb()),
+}));
+
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { rateLimitResponse } from '@/lib/rateLimit';
+import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import { getDb } from '@/lib/db/client';
 import { moderateContent } from '@/lib/moderation/contentFilter';
 
@@ -118,7 +129,9 @@ function makeNewPublicationDb(options: {
 
   const mockInsert = vi.fn().mockReturnValue({
     values: vi.fn().mockReturnValue({
-      returning: vi.fn().mockResolvedValue([pub]),
+      onConflictDoUpdate: vi.fn().mockReturnValue({
+        returning: vi.fn().mockResolvedValue([pub]),
+      }),
     }),
   });
 
@@ -150,6 +163,7 @@ function makeNewPublicationDb(options: {
     insert: vi.fn()
       .mockReturnValueOnce(mockInsert()) // publication insert
       .mockReturnValueOnce(mockInsertTags()), // tags insert (if tags exist)
+    delete: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }),
   };
 }
 
@@ -171,7 +185,7 @@ describe('POST /api/publish', () => {
     });
 
     // Default: rate limit allows
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
+    vi.mocked(distributedRateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60_000 });
 
     // Default: content passes moderation
     vi.mocked(moderateContent).mockReturnValue({ severity: 'pass', reasons: [], cleaned: '' });
@@ -200,7 +214,7 @@ describe('POST /api/publish', () => {
   // -------------------------------------------------------------------------
   describe('rate limiting', () => {
     it('returns 429 when rate limited', async () => {
-      vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
+      vi.mocked(distributedRateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 30_000 });
       vi.mocked(rateLimitResponse).mockReturnValue(
         new Response(JSON.stringify({ error: 'Too many requests' }), { status: 429 }) as never,
       );
@@ -213,7 +227,7 @@ describe('POST /api/publish', () => {
       vi.mocked(getDb).mockReturnValue(makeNewPublicationDb() as never);
 
       await POST(makeRequest(validBody()));
-      expect(rateLimit).toHaveBeenCalledWith('publish:clerk_1', 10, 60_000);
+      expect(distributedRateLimit).toHaveBeenCalledWith('publish:clerk_1', 10, 60);
     });
   });
 

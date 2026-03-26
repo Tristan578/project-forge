@@ -269,9 +269,9 @@ describe('scriptBundler', () => {
       // The malicious payload should be neutralized (wrapped in string, not executable)
       expect(result.code).not.toMatch(/\}\s*;\s*alert\s*\(\s*["']XSS["']\s*\)\s*;\s*\/\//);
 
-      // Should use new Function() pattern
+      // Should use new Function() pattern with loop guards
       expect(result.code).toContain('new Function(');
-      expect(result.code).toContain('const src =');
+      expect(result.code).toContain('__resetGuards');
     });
   });
 });

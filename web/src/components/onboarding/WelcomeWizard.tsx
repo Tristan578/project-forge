@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { GraduationCap, Sparkles, Rocket } from 'lucide-react';
 import { useOnboardingStore } from '@/stores/onboardingStore';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface WelcomeWizardProps {
   onStartTutorial: () => void;
@@ -13,6 +14,7 @@ interface WelcomeWizardProps {
 export function WelcomeWizard({ onStartTutorial, onChooseTemplate, onSkip }: WelcomeWizardProps) {
   const { isNewUser, recordVisit } = useOnboardingStore();
   const [dontShowAgain, setDontShowAgain] = useState(false);
+  const dialogRef = useDialogA11y(onSkip);
 
   if (!isNewUser) return null;
 
@@ -24,10 +26,10 @@ export function WelcomeWizard({ onStartTutorial, onChooseTemplate, onSkip }: Wel
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+    <div ref={dialogRef} className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="welcome-wizard-title">
       <div className="bg-zinc-900 rounded-lg shadow-2xl max-w-2xl w-full p-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-zinc-100 mb-3">
+          <h1 id="welcome-wizard-title" className="text-3xl font-bold text-zinc-100 mb-3">
             Welcome to SpawnForge!
           </h1>
           <p className="text-zinc-400 text-lg">

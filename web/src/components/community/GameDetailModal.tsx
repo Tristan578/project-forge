@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { X, Play, Heart, GitFork, ExternalLink, Share2, Check } from 'lucide-react';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 import { StarRating } from './StarRating';
 import { CommentSection } from './CommentSection';
 import { useCommunityStore } from '@/stores/communityStore';
@@ -37,6 +38,7 @@ interface GameDetailModalProps {
 }
 
 export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
+  const dialogRef = useDialogA11y(onClose);
   const [game, setGame] = useState<GameDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -130,12 +132,12 @@ export function GameDetailModal({ gameId, onClose }: GameDetailModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+    <div ref={dialogRef} className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4" role="dialog" aria-modal="true" aria-labelledby="game-detail-title">
       <div className="bg-zinc-900 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="sticky top-0 bg-zinc-900 border-b border-zinc-800 p-4 flex justify-between items-start z-10">
           <div>
-            <h2 className="text-2xl font-bold text-zinc-100">{game.title}</h2>
+            <h2 id="game-detail-title" className="text-2xl font-bold text-zinc-100">{game.title}</h2>
             <p className="text-sm text-zinc-400">by {game.authorName}</p>
           </div>
           <button
