@@ -259,12 +259,16 @@ export class CutscenePlayer {
       if (item.keyframe.duration > 0) {
         // Duration-based keyframe: re-fire every frame while within the window
         // so that easing interpolation is applied continuously.
-        if (elapsed > item.keyframe.duration) continue;
+        // Once elapsed exceeds duration AND we've already dispatched progress=1.0,
+        // skip further processing. The `fired` flag ensures the final frame is
+        // always dispatched even when rAF skips past the exact end boundary.
+        if (elapsed > item.keyframe.duration && item.fired) continue;
         const progress = Math.min(elapsed / item.keyframe.duration, 1);
         const cmd = buildCommand(item.trackType, item.entityId, item.keyframe, progress);
         if (cmd) {
           this.options.dispatchCommand(cmd.command, cmd.payload);
         }
+        if (progress >= 1) item.fired = true;
       } else {
         // Instantaneous keyframe: fire once only to avoid duplicate commands.
         if (item.fired) continue;
