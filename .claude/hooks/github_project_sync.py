@@ -1124,10 +1124,15 @@ def pull():
                     filtered += 1
                     continue
             elif meta_project and meta_project != project_id:
-                filtered += 1
-                continue
-        elif title.startswith("PF-") and content_type in ("Issue", "DraftIssue"):
-            # Fallback: PF-prefixed issue without metadata — create synthetic parsed data
+                # Also accept the canonical project ID from config (the ID may have
+                # changed if the local DB was recreated, but the GitHub issues still
+                # reference the original ID)
+                canonical_id = config.get("localProjectId", "")
+                if meta_project != canonical_id:
+                    filtered += 1
+                    continue
+        elif title.startswith("PF-") and content_type in ("Issue", "DraftIssue", ""):
+            # Fallback: PF-prefixed issue/draft without metadata — create synthetic parsed data
             # Extract priority from title prefix patterns like [urgent], [high]
             priority_match = re.search(r'\[(urgent|high|medium|low)\]', title, re.IGNORECASE)
             fallback_priority = priority_match.group(1).lower() if priority_match else "medium"
