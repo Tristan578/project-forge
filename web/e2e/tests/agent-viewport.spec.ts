@@ -9,7 +9,8 @@
  * agent-demo.spec.ts which uses playwright.agent.config.ts (SwiftShader).
  */
 
-import { agentTest as test, expect } from '../fixtures/editor.fixture';
+import { agentTest as test } from '../fixtures/agent.fixture';
+import { expect } from '@playwright/test';
 import type { AgentViewport } from '../lib/agentViewport';
 
 test.describe('AgentViewport — bootPage (no engine)', () => {

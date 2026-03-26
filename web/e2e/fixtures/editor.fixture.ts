@@ -1,5 +1,4 @@
 import { test as base, expect, type Page } from '@playwright/test';
-import { AgentViewport } from '../lib/agentViewport';
 
 /**
  * Page Object Model for the Project Forge editor.
@@ -205,31 +204,6 @@ export const test = base.extend<{ editor: EditorPage }>({
     const editor = new EditorPage(page);
     // eslint-disable-next-line react-hooks/rules-of-hooks
     await use(editor);
-  },
-});
-
-/**
- * Extended test fixture that provides an `AgentViewport` instance.
- *
- * The `agentViewport` fixture does NOT automatically call `boot()` — the test
- * must call `av.boot()` or `av.bootPage()` explicitly to control whether the
- * WASM engine is loaded. This allows tests to register page listeners before
- * navigation (which is required for console error collection).
- *
- * ```ts
- * import { agentTest } from '../fixtures/editor.fixture';
- *
- * agentTest('my test', async ({ agentViewport: av }) => {
- *   await av.boot();
- *   const obs = await av.observe('initial');
- * });
- * ```
- */
-export const agentTest = base.extend<{ agentViewport: AgentViewport }>({
-  agentViewport: async ({ page }, use) => {
-    const av = new AgentViewport(page);
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    await use(av);
   },
 });
 

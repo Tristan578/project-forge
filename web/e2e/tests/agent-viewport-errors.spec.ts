@@ -5,7 +5,8 @@
  * All tests use bootPage() to avoid WASM dependency.
  */
 
-import { agentTest as test, expect } from '../fixtures/editor.fixture';
+import { agentTest as test } from '../fixtures/agent.fixture';
+import { expect } from '@playwright/test';
 
 test.describe('AgentViewport — error handling', () => {
   test('@ui sendCommand with unknown command returns structured result', async ({ agentViewport: av }) => {

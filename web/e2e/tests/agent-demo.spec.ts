@@ -15,7 +15,8 @@
  *   cd web && npx playwright test --config playwright.agent.config.ts
  */
 
-import { agentTest as test, expect } from '../fixtures/editor.fixture';
+import { agentTest as test } from '../fixtures/agent.fixture';
+import { expect } from '@playwright/test';
 import { formatObservation, formatVerificationResult } from '../lib';
 
 test.describe('AgentViewport — demo workflow', () => {
