@@ -908,12 +908,17 @@ function buildForgeApi(scriptEntityId: string) {
 // 'globalThis' and 'self' block direct global scope access.
 // Network/storage APIs are shadowed for defence-in-depth even though the
 // worker has no DOM.
+// Accepted risks (not shadowed):
+// - WeakRef/FinalizationRegistry: no network/storage access, timing-only concern
+// - Symbol.for(): creates realm-shared symbols but cannot escape the Worker scope
+// - SharedArrayBuffer: requires crossOriginIsolated which the Worker does not have
 const SHADOWED_GLOBALS = [
   'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
   'indexedDB', 'caches', 'navigator', 'location',
   'EventSource', 'BroadcastChannel',
   'self', 'globalThis',
   'Function', 'eval',
+  'Reflect', 'Proxy',
 ] as const;
 
 // ─── Resource Limits ────────────────────────────────────────────
