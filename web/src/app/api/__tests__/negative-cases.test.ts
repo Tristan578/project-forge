@@ -172,7 +172,8 @@ describe('GET /api/tokens/balance — negative cases', () => {
     });
 
     const { GET } = await import('@/app/api/tokens/balance/route');
-    const res = await GET();
+    const req = new NextRequest('http://localhost:3000/api/tokens/balance');
+    const res = await GET(req);
     expect(res.status).toBe(401);
   });
 
@@ -185,7 +186,8 @@ describe('GET /api/tokens/balance — negative cases', () => {
     mockGetTokenBalance.mockResolvedValue(fakeBalance);
 
     const { GET } = await import('@/app/api/tokens/balance/route');
-    const res = await GET();
+    const req = new NextRequest('http://localhost:3000/api/tokens/balance');
+    const res = await GET(req);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.total).toBe(100);

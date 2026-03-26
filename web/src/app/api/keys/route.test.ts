@@ -1,6 +1,7 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { NextRequest } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest, assertTier } from '@/lib/auth/api-auth';
 import { listConfiguredProviders } from '@/lib/keys/resolver';
@@ -8,6 +9,16 @@ import { makeUser, mockNextResponse } from '@/test/utils/apiTestUtils';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver');
+vi.mock('@/lib/rateLimit', () => ({
+  rateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
+  rateLimitResponse: vi.fn(),
+  getClientIp: vi.fn().mockReturnValue('127.0.0.1'),
+}));
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 60000 }),
+}));
+
+const req = new NextRequest('http://localhost:3000/api/keys');
 
 describe('GET /api/keys', () => {
   beforeEach(() => {
@@ -20,7 +31,7 @@ describe('GET /api/keys', () => {
       response: mockNextResponse({ error: 'Unauthorized' }, { status: 401 }),
     });
 
-    const res = await GET();
+    const res = await GET(req);
     expect(res.status).toBe(401);
   });
 
@@ -29,7 +40,7 @@ describe('GET /api/keys', () => {
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
     vi.mocked(assertTier).mockReturnValue(mockNextResponse({ error: 'Upgrade required' }, { status: 403 }));
 
-    const res = await GET();
+    const res = await GET(req);
     expect(res.status).toBe(403);
   });
 
@@ -43,9 +54,9 @@ describe('GET /api/keys', () => {
     ];
     vi.mocked(listConfiguredProviders).mockResolvedValue(mockProviders as Awaited<ReturnType<typeof listConfiguredProviders>>);
 
-    const res = await GET();
+    const res = await GET(req);
     const data = await res.json();
-    
+
     expect(res.status).toBe(200);
     expect(data.providers.length).toBe(1);
     expect(data.providers[0].provider).toBe('openai');
