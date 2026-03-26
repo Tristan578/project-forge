@@ -87,7 +87,7 @@ SpawnForge supports both 2D (sprite animation, tilemaps, 2D physics, 2D skeletal
 
 SpawnForge is built around the "Canva for games" concept: the belief that game creation should be as accessible as graphic design, while remaining powerful enough for professionals.
 
-**Beginners and hobbyists** benefit from the zero-install browser experience, natural-language AI commands, starter system bundles, drag-and-drop game components, and visual scripting — no prior engine knowledge required. Describe any game idea in plain language; the AI decomposes it into composable systems rather than forcing a genre selection.
+**Beginners and hobbyists** benefit from the zero-install browser experience, natural-language AI commands, starter system bundles, drag-and-drop game components, and visual scripting — no prior engine knowledge required. Describe any game idea in plain language; the AI executes compound actions to build it. The planned Game Creation Orchestrator will decompose ideas into composable systems rather than forcing a genre selection.
 
 **Indie developers and students** benefit from the full engine depth, TypeScript scripting, export pipeline, and MCP automation surface — a real tool that scales with their ambitions.
 
@@ -97,7 +97,7 @@ SpawnForge is built around the "Canva for games" concept: the belief that game c
 
 ## 5. Positioning Statement
 
-> SpawnForge is the only browser-native game creation platform that combines zero-install accessibility with the depth of a production game engine and an industry-leading AI command surface. Users describe any game they can imagine — the AI decomposes it into composable systems (movement, camera, challenge, feedback, etc.) and builds it. No genre constraints, no template limits. Where browser-based competitors offer shallow generation and desktop tools demand installation and configuration, SpawnForge delivers both the ease of Canva and the power of a real engine — all in a browser tab.
+> SpawnForge is the only browser-native game creation platform that combines zero-install accessibility with the depth of a production game engine and an industry-leading AI command surface. Users describe any game they can imagine — the AI executes compound actions to build it today, and the planned Game Creation Orchestrator will decompose descriptions into composable systems (movement, camera, challenge, feedback, etc.) and coordinate specialist agents. No genre constraints, no template limits. Where browser-based competitors offer shallow generation and desktop tools demand installation and configuration, SpawnForge delivers both the ease of Canva and the power of a real engine — all in a browser tab.
 
 ---
 

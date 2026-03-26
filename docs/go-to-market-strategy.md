@@ -10,7 +10,7 @@
 ### Primary Wedge: Zero-Friction Game Creation
 The #1 barrier to game development is setup friction. Unity requires 2-5GB download + project configuration. Unreal requires 40GB+ and a gaming PC. SpawnForge requires: open a browser tab.
 
-**Entry hook:** "Describe your game and play it in 60 seconds" — AI decomposes your idea into composable systems (movement, camera, challenge, feedback, etc.) and assembles a playable game. No genre selection, no template constraints — just describe what you want. No sign-up required for the first session (localStorage-only).
+**Entry hook:** "Describe your game and play it in 60 seconds" — the AI executes compound actions to assemble a playable game from your description. No genre selection, no template constraints — just describe what you want. The planned Game Creation Orchestrator will decompose ideas into composable systems (movement, camera, challenge, feedback, etc.) and coordinate specialist agents for even faster creation. No sign-up required for the first session (localStorage-only).
 
 ### Target Segments (Priority Order)
 

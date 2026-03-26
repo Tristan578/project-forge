@@ -14,7 +14,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 ## Features
 
 ### AI & Automation
-- **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want in plain language and the AI decomposes your idea into systems (movement, camera, challenge, feedback, etc.), spawns entities, configures materials, writes scripts, and iterates across multiple turns until the scene is complete
+- **AI Chat Assistant** — Built-in Claude-powered chat panel with agentic tool loop. Describe what you want in plain language and the AI executes compound actions to spawn entities, configure materials, write scripts, and iterate across multiple turns until the scene is complete. The upcoming Game Creation Orchestrator will decompose any game description into composable systems (movement, camera, challenge, feedback, etc.) and coordinate specialist agents to build them in parallel
 - **Compound AI Actions** — 8 high-level tools (`create_scene_from_description`, `setup_character`, `arrange_entities`, etc.) that batch dozens of operations into single AI calls
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
