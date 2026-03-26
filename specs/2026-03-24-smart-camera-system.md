@@ -3,16 +3,15 @@
 > **Status:** DRAFT
 > **Date:** 2026-03-24
 > **Ticket:** PF-565
-> **Scope:** AI-driven camera configuration based on game genre, scene analysis, and dramatic moments
+> **Scope:** AI-driven camera configuration based on game system composition, scene analysis, and dramatic moments
 
 ## Problem
 
 Creators manually configure camera settings (mode, FOV, follow distance, smoothing) without knowing
-what works well for their game genre. A platformer needs tight follow with look-ahead; an RPG needs
-wide orbit with slow pan; horror needs narrow FOV with lag. Getting this wrong makes games feel bad.
+what works well for their game's system composition. A side-scrolling movement game needs tight follow with look-ahead; an exploration game needs wide orbit with slow pan; a tension-driven game needs narrow FOV with lag. Getting this wrong makes games feel bad.
 
-The existing `smartCamera.ts` has genre presets and a heuristic scoring system, but lacks:
-1. AI-powered genre detection from GDD/scene context (currently keyword-matching only)
+The existing `smartCamera.ts` has system-archetype presets and a heuristic scoring system, but lacks:
+1. AI-powered system-composition detection from GDD/scene context (currently keyword-matching only)
 2. Auto-cinematic cuts triggered by dramatic gameplay moments
 3. A chat handler so creators can say "set up the camera for my horror game"
 
@@ -22,7 +21,7 @@ Wire the existing `smartCamera.ts` infrastructure to the AI chat pipeline and ad
 triggers. No Rust engine changes needed -- camera configuration uses existing `set_game_camera` and
 `set_active_game_camera` MCP commands.
 
-### Phase 1: AI-Powered Genre Detection (This Spec)
+### Phase 1: AI-Powered System Detection (This Spec)
 
 Replace the keyword-matching `generateEconomy()` stub in `smartCamera.ts` with an AI call that
 reads GDD + scene context and returns a `CameraPreset`.
@@ -44,8 +43,8 @@ camera animation sequences (zoom, DOF, shake).
 #### 1. AI Chat Handler (`web/src/lib/chat/handlers/cameraHandlers.ts` -- NEW)
 
 Register handler for tool name `configure_smart_camera`:
-- Reads GDD genre from `chatStore` or scene context from `editorStore`
-- Builds prompt: "Given this game genre and scene entities, select the best camera preset and
+- Reads GDD systems from `chatStore` or scene context from `editorStore`
+- Builds prompt: "Given this game's system composition and scene entities, select the best camera preset and
   explain why. Return JSON matching CameraPreset schema."
 - Calls AI via `web/src/lib/ai/client.ts` (existing streaming infrastructure)
 - Validates AI response against `CameraPreset` schema using `schemaValidator.ts`
@@ -56,7 +55,7 @@ Register handler for tool name `configure_smart_camera`:
 
 Replace the stub `detectOptimalCamera()` call path with:
 ```
-sceneContext + GDD genre
+sceneContext + GDD systems
   -> AI prompt (structured output)
   -> validate against CameraPreset schema
   -> fallback to heuristic detectOptimalCamera() if AI fails
@@ -68,8 +67,8 @@ single-action budget.
 #### 3. MCP Command (`mcp-server/manifest/commands.json`)
 
 Add `configure_smart_camera` command:
-- Parameters: `genre` (optional string), `entityId` (required, camera entity)
-- If genre omitted, AI infers from GDD + scene
+- Parameters: `hint` (optional string, e.g., "side-scrolling" or "first-person exploration"), `entityId` (required, camera entity)
+- If hint omitted, AI infers from GDD systems + scene analysis
 - Returns: camera preset applied, explanation string
 
 #### 4. Store Integration
@@ -86,9 +85,9 @@ The `set_game_camera` command already accepts all fields the presets produce.
 
 System prompt (cached per session via `promptCache.ts`):
 ```
-You are a game camera director. Given a game's genre, scene entities, and mood,
+You are a game camera director. Given a game's system composition, scene entities, and mood,
 select optimal camera settings. Return valid JSON matching this schema:
-{name, genre, mode, followDistance, followHeight, followSmoothing, fov, lookAhead,
+{name, mode, followDistance, followHeight, followSmoothing, fov, lookAhead,
 deadZone: {x, y}, shake: {enabled, trauma, decay}}
 
 Mode must be one of: follow, fixed, orbit, side_scroll, top_down, first_person.
@@ -96,7 +95,7 @@ Mode must be one of: follow, fixed, orbit, side_scroll, top_down, first_person.
 
 User prompt (per invocation):
 ```
-Game genre: {genre from GDD or user input}
+Game systems: {system composition from GDD or user description, e.g., "movement:walk+jump, camera:side-scroll, challenge:physics"}
 Scene entities: {top 20 entity names + component types}
 Project type: {2d | 3d}
 Current camera: {current mode + settings}
@@ -108,7 +107,7 @@ User request: {natural language, e.g. "make it feel more cinematic"}
 **Unit tests** (`web/src/lib/ai/__tests__/smartCamera.test.ts` -- EXISTS, extend):
 - AI response parsed into valid CameraPreset
 - Invalid AI response falls back to heuristic detection
-- Genre override parameter takes priority over AI inference
+- Hint override parameter takes priority over AI inference
 - Token budget respected (mock budget manager)
 
 **Integration tests** (`web/src/lib/chat/handlers/__tests__/cameraHandlers.test.ts` -- NEW):
@@ -118,10 +117,10 @@ User request: {natural language, e.g. "make it feel more cinematic"}
 
 ## Acceptance Criteria
 
-- Given a platformer game, When user says "configure camera", Then tight follow with look-ahead is applied
+- Given a side-scrolling movement game, When user says "configure camera", Then tight follow with look-ahead is applied
 - Given AI provider is down, When camera configured, Then heuristic fallback produces a valid preset
 - Given a camera preset is applied, When user undoes, Then previous camera settings are restored
-- Given MCP tool `configure_smart_camera`, When called with genre="horror", Then horror preset applied
+- Given MCP tool `configure_smart_camera`, When called with hint="tension-driven narrow FOV", Then tension/horror-style preset applied
 
 ## Constraints
 

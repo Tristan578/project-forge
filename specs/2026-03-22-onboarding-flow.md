@@ -95,9 +95,9 @@ Sign-in / /dev page load
 
 ### Template Selection (within OnboardingWizard)
 
-The 5 existing templates (platformer, runner, shooter, puzzle, explorer) plus "Blank Project" are displayed inline in step 2B. The current `TemplateGallery` component is refactored to accept an `inline` prop that removes the fixed overlay positioning so it can render inside the wizard.
+The 5 existing starter system bundles (platformer, runner, shooter, puzzle, explorer -- genre labels are friendly shorthand for their system compositions) plus "Blank Project" are displayed inline in step 2B. The current `TemplateGallery` component is refactored to accept an `inline` prop that removes the fixed overlay positioning so it can render inside the wizard.
 
-Additionally, the existing `QuickStartFlow` game type cards (platformer, shooter, puzzle, explorer) are merged into the template selection step. The separate "describe your game" textarea in QuickStartFlow step 2 is removed -- AI description is handled by the AI chat path instead.
+Additionally, the existing `QuickStartFlow` system-bundle cards (platformer, shooter, puzzle, explorer) are merged into the template selection step. The separate "describe your game" textarea in QuickStartFlow step 2 is removed -- AI description is handled by the AI chat path instead.
 
 ### Progressive Disclosure
 

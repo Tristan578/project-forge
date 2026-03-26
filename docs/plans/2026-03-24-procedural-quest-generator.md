@@ -16,7 +16,7 @@ Pure web-layer feature. No Rust/engine changes needed. Quests are data structure
 
 **Web Changes:**
 - `web/src/stores/questStore.ts` — Zustand store for quest trees. Types: `Quest`, `QuestObjective` (fetch, kill, explore, interact, escort), `QuestReward`, `QuestGraph`
-- `web/src/app/api/generate/quest/route.ts` — POST route. Accepts `{ prompt, genre, complexity }`. Calls AI provider (Claude via AI SDK) to produce structured quest JSON. Token-gated via `deductTokens()`
+- `web/src/app/api/generate/quest/route.ts` — POST route. Accepts `{ prompt, systemContext, complexity }`. Calls AI provider (Claude via AI SDK) to produce structured quest JSON. Token-gated via `deductTokens()`. The `systemContext` field describes the game's active systems (e.g., movement, challenge, progression) rather than a genre label
 - `web/src/lib/generate/questSchema.ts` — Zod schema for generated quest output (validates AI response)
 - `web/src/lib/chat/handlers/questHandlers.ts` — MCP handlers: `generate_quest`, `list_quests`, `get_quest`, `update_quest_objective`, `delete_quest`
 
