@@ -520,26 +520,7 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
-      - name: Download WASM artifacts
-        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: wasm-binaries
-          path: engine/
-
-      - name: Copy WASM to web/public (self-hosted fallback)
-        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
-        run: |
-          mkdir -p web/public/engine-pkg-webgl2
-          mkdir -p web/public/engine-pkg-webgpu
-          mkdir -p web/public/engine-pkg-webgl2-runtime
-          mkdir -p web/public/engine-pkg-webgpu-runtime
-          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
-          cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
-          cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
-          cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
-
-      - name: Pull Vercel environment (staging)
+      - name: Link Vercel project (staging)
         working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
@@ -547,23 +528,17 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
-      - name: Build with Vercel
-        working-directory: web
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel build --token="$VERCEL_TOKEN"
-
-      - name: Deploy to staging
+      - name: Deploy to staging (remote build)
         id: deploy
         working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
+        # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
         run: |
-          url=$(vercel deploy --prebuilt --token="$VERCEL_TOKEN")
+          url=$(vercel deploy --token="$VERCEL_TOKEN")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to staging: $url"
 
@@ -619,25 +594,6 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
-      - name: Download WASM artifacts
-        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: wasm-binaries
-          path: engine/
-
-      - name: Copy WASM to web/public (self-hosted fallback)
-        if: ${{ vars.R2_CDN_ENABLED != 'true' }}
-        run: |
-          mkdir -p web/public/engine-pkg-webgl2
-          mkdir -p web/public/engine-pkg-webgpu
-          mkdir -p web/public/engine-pkg-webgl2-runtime
-          mkdir -p web/public/engine-pkg-webgpu-runtime
-          cp engine/pkg-webgl2/* web/public/engine-pkg-webgl2/
-          cp engine/pkg-webgpu/* web/public/engine-pkg-webgpu/
-          cp engine/pkg-webgl2-runtime/* web/public/engine-pkg-webgl2-runtime/ 2>/dev/null || true
-          cp engine/pkg-webgpu-runtime/* web/public/engine-pkg-webgpu-runtime/ 2>/dev/null || true
-
       - name: Capture current production URL (last-known-good)
         id: prev-deploy
         env:
@@ -669,6 +625,10 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
 
+      - name: Install dependencies for migrations
+        working-directory: web
+        run: npm ci
+
       - name: Run database migrations
         # Migrations must run before the new code is deployed so any schema
         # changes are in place when the first request hits the new runtime.
@@ -678,23 +638,17 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run db:migrate
 
-      - name: Build with Vercel
-        working-directory: web
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel build --prod --token="$VERCEL_TOKEN"
-
-      - name: Deploy to production
+      - name: Deploy to production (remote build)
         id: deploy
         working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        # Remote build avoids `spawn npm ENOENT` bug with `vercel build` on GHA runners.
+        # WASM files are served from R2 CDN (engine.spawnforge.ai), not bundled in the deploy.
         run: |
-          url=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          url=$(vercel deploy --prod --token="$VERCEL_TOKEN")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           echo "Deployed to production: $url"
 
@@ -722,8 +676,8 @@ jobs:
           PRODUCTION_URL: https://www.spawnforge.ai
         run: npx playwright test e2e/tests/production-smoke.spec.ts --project=chromium
 
-      - name: Rollback production on health check failure
-        if: ${{ failure() && steps.health-check-production.outcome == 'failure' && steps.prev-deploy.outputs.prev_url != '' }}
+      - name: Rollback production on health check or smoke test failure
+        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' }}
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -735,7 +689,7 @@ jobs:
           echo "Rollback complete. Production restored to: $PREV_URL"
 
       - name: Notify Slack of automatic rollback
-        if: ${{ failure() && steps.health-check-production.outcome == 'failure' && steps.prev-deploy.outputs.prev_url != '' && vars.SLACK_WEBHOOK_INCIDENTS != '' }}
+        if: ${{ failure() && (steps.health-check-production.outcome == 'failure' || steps.smoke-tests.outcome == 'failure') && steps.prev-deploy.outputs.prev_url != '' && vars.SLACK_WEBHOOK_INCIDENTS != '' }}
         env:
           SLACK_WEBHOOK: ${{ vars.SLACK_WEBHOOK_INCIDENTS }}
           PREV_URL: ${{ steps.prev-deploy.outputs.prev_url }}
