@@ -31,12 +31,16 @@ const REQUIRED_VARS: RequiredVar[] = [
   { key: 'STRIPE_WEBHOOK_SECRET', description: 'Stripe webhook verification secret' },
   { key: 'UPSTASH_REDIS_REST_URL', description: 'Upstash Redis URL for distributed rate limiting' },
   { key: 'UPSTASH_REDIS_REST_TOKEN', description: 'Upstash Redis token for distributed rate limiting' },
-  { key: 'ANTHROPIC_API_KEY', description: 'Anthropic API key for AI chat and generation features' },
   { key: 'ENCRYPTION_MASTER_KEY', description: '64-hex-char master key for BYOK AES-256-GCM encryption' },
 ];
 
 /** Optional environment variables — app works without these, using defaults. */
 const OPTIONAL_VARS: OptionalVar[] = [
+  {
+    key: 'ANTHROPIC_API_KEY',
+    description: 'Anthropic API key for direct AI calls (AI Gateway OIDC is preferred)',
+    defaultValue: '',
+  },
   {
     key: 'NEXT_PUBLIC_APP_URL',
     description: 'Application URL for redirects',
