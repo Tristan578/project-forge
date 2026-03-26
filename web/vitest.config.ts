@@ -10,7 +10,12 @@ export default defineConfig({
     teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,
-    include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    include: [
+      'src/**/*.test.ts',
+      'src/**/*.test.tsx',
+      // Pure-function unit tests for e2e lib utilities (no browser required)
+      'e2e/lib/__tests__/**/*.test.ts',
+    ],
     setupFiles: ['./vitest.setup.ts'],
     coverage: {
       provider: 'v8',

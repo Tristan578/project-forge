@@ -483,6 +483,19 @@ export function EditorLayout() {
     if (process.env.NODE_ENV !== 'production') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__EDITOR_STORE = useEditorStore;
+      // Expose command dispatcher for agent viewport integration (E2E/dev only).
+      // SECURITY: This is gated behind NODE_ENV !== 'production' so it is never
+      // accessible in production builds. A2: TypeScript global declaration is in
+      // web/src/types/forge-globals.d.ts.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).__FORGE_DISPATCH = (cmd: string, payload: Record<string, unknown>) => {
+        const dispatcher = getCommandDispatcher();
+        if (dispatcher) {
+          dispatcher(cmd, payload);
+          return true;
+        }
+        return false;
+      };
     }
   }, []);
 
