@@ -201,7 +201,9 @@ export async function POST(request: NextRequest) {
     })
     .returning();
 
-  // Insert tags
+  // Replace tags atomically — delete old tags first to prevent duplicates
+  // on concurrent publishes hitting the ON CONFLICT DO UPDATE path.
+  await db.delete(gameTags).where(eq(gameTags.gameId, publication.id));
   if (validTags.length > 0) {
     await db.insert(gameTags).values(
       validTags.map((tag) => ({ gameId: publication.id, tag }))
