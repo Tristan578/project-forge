@@ -105,6 +105,22 @@ export function validateEnvironment(): EnvValidationResult {
     }
   }
 
+  // Clerk key format validation: test keys in production cause silent auth
+  // failures (x-clerk-auth-reason: dev-browser-missing) that redirect ALL
+  // pages to /sign-in, including public routes (#7912, #7914).
+  const clerkPk = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+  if (clerkPk && clerkPk.startsWith('pk_test_')) {
+    const msg = 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is a TEST key (pk_test_*) in production. This will break auth for all visitors. Use pk_live_* for production.';
+    missing.push('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY');
+    console.error(`[validateEnvironment] CRITICAL: ${msg}`);
+  }
+  const clerkSk = process.env.CLERK_SECRET_KEY;
+  if (clerkSk && clerkSk.startsWith('sk_test_')) {
+    const msg = 'CLERK_SECRET_KEY is a TEST key (sk_test_*) in production. Use sk_live_* for production.';
+    warnings.push(msg);
+    console.warn(`[validateEnvironment] WARNING: ${msg}`);
+  }
+
   for (const v of OPTIONAL_VARS) {
     if (!process.env[v.key]) {
       warnings.push(`${v.key} not set — using default: ${v.defaultValue || '(empty)'}`);
