@@ -250,6 +250,20 @@ Loop continues until all 4 pass clean. No shortcuts.
 - `/cycle` — Plan -> Build -> Verify -> Update Context loop
 - `/developer-experience` — DX audits, DoQ/DoD enforcement, cross-IDE consistency
 
+### Agents (`.claude/agents/`)
+| Agent | Trigger |
+|-------|---------|
+| `builder` | Implementation tasks, coding |
+| `validator` | QA gate, full validation suite |
+| `planner` | Architecture, spec creation |
+| `dx-guardian` | DX audits, cross-IDE consistency |
+| `security-reviewer` | Auth, injection, encryption, dependency audits |
+| `test-writer` | Vitest + RTL tests, coverage gaps |
+| `infra-devops` | Deploy, CI/CD, monitoring, Vercel, Cloudflare, Neon, Upstash, Sentry |
+| `code-reviewer` | PR review, code audits, regression checks |
+| `docs-maintainer` | Documentation updates, README, CLAUDE.md |
+| `rust-engine` | Bevy ECS, bridge, WASM, engine/ code |
+
 ### Domain Skills
 - `/rust-engine` — Bevy 0.18 ECS, commands, bridge, WASM patterns
 - `/frontend` — React 19, Next.js 16, Zustand 5, Tailwind 4 patterns
@@ -265,6 +279,28 @@ Loop continues until all 4 pass clean. No shortcuts.
 - `/pr-code-review` — SpawnForge-specific PR review with 11-category checklist
 - `/build` — WASM engine build (WebGL2 + WebGPU)
 - `/multiplayer-readiness` — Flag changes that make future multiplayer harder
+- `/db-migrate` — Drizzle migration workflow with FK cascade validation
+- `/viewport` — Agent-browser visual verification of the editor viewport
+
+### MCP Servers (`.mcp.json`)
+- `context7` — live library documentation for all dependencies
+- `neon` — direct Neon Postgres queries (needs `NEON_API_KEY`)
+
+### Hooks (`.claude/hooks/`)
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `inject-lessons-learned.sh` | PreToolUse (Edit/Write/Bash) | Shows relevant anti-patterns before action |
+| `pre-push-quality-gate.sh` | PreToolUse (Bash: git push) | Runs lint+tsc on changed files before push |
+| `verify-branch.sh` | PreToolUse (Edit/Write) | Prevents edits on wrong branch |
+| `post-edit-lint.sh` | PostToolUse (Edit/Write) | Auto-lint after file changes |
+| `check-arch.sh` | PostToolUse (Edit/Write) | Architecture boundary check |
+| `lessons-learned-reminder.sh` | Stop | Prompts agent to log lessons every 15 responses |
+| `on-session-start.sh` | SessionStart | Taskboard state + sync |
+| `on-prompt-submit.sh` | UserPromptSubmit | Taskboard context injection |
+| `worktree-safety-commit.sh` | Stop | Auto-commit uncommitted worktree work |
+
+### Approved Specs (in progress)
+- `specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md` — Game Creation Orchestrator (systems-not-genres, 4x reviewer PASS)
 
 ### Validation Tools (`.claude/tools/`)
 - `validate-rust.sh` — Architecture boundaries, bridge isolation, unsafe audit

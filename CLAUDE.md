@@ -51,6 +51,36 @@ cd mcp-server && npx vitest run
 cd web && npx playwright test
 ```
 
+## Environment Setup
+
+```bash
+vercel env pull          # Pull env vars to .env.local (Neon, Upstash, Clerk, Stripe, Sentry, PostHog)
+cd web && npm run db:push   # Push schema to Neon (dev only)
+cd web && npm run db:studio # Visual DB browser
+```
+
+Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_KEY`, `UPSTASH_REDIS_REST_URL`. See `.env.example` for full list.
+
+## MCP Servers (`.mcp.json`)
+
+- **context7** — live library documentation lookup for all 30+ dependencies
+- **neon** — direct DB queries during debugging (needs `NEON_API_KEY`)
+
+## Agents (`.claude/agents/`)
+
+| Agent | Purpose |
+|-------|---------|
+| `builder` | Implementation, coding |
+| `validator` | QA gate, full validation suite |
+| `planner` | Architecture, spec creation |
+| `dx-guardian` | DX audits, cross-IDE consistency |
+| `security-reviewer` | Auth, injection, encryption audits |
+| `test-writer` | Vitest + RTL tests, coverage gaps |
+| `infra-devops` | Deploy, CI/CD, monitoring, services |
+| `code-reviewer` | PR review, regression checks |
+| `docs-maintainer` | Documentation, README, CLAUDE.md |
+| `rust-engine` | Bevy ECS, bridge, WASM, engine/ code |
+
 ## Key Architecture Rules
 
 - **Bridge isolation**: Only `engine/src/bridge/` may import web_sys/js_sys/wasm_bindgen. `core/` is pure Rust.
@@ -81,3 +111,10 @@ cd web && npx playwright test
 - **Boy Scout Rule** — fix every bug you find, regardless of whose fault it is. No known issues left behind.
 - **Systems, not genres** — games are compositions of systems (movement, input, camera, etc.), not genre categories. See `specs/2026-03-25-game-creation-orchestrator-phase2a-v4.md`.
 - **Lessons learned are enforced via hooks** — `inject-lessons-learned.sh` fires on every Edit/Write/Bash, showing relevant anti-patterns before action.
+
+## Gotchas
+
+- **Node 25.x segfaults** — intermittent V8 JIT crashes in hooks/scripts. If a hook crashes with a stack trace in `libnode`, it's a Node runtime bug, not code. Investigate and fix (Boy Scout Rule) — don't bypass with `--no-verify`.
+- **`vercel build` in CI** — uses `child_process.spawn('npm')` which can't find npm on GHA runners. Use `vercel deploy` (remote build) instead of `vercel build` + `deploy --prebuilt`.
+- **Artifact versions** — `upload-artifact` and `download-artifact` MUST use the same major version (`@v4`). Never upgrade one without the other.
+- **Reusable workflow permissions** — `quality-gates.yml` must use `permissions: contents: read`. Never `write` — it causes `startup_failure` on every CI run.
