@@ -3,7 +3,7 @@
  */
 
 import { useEditorStore, type ScriptData, type AudioBusDef, type ReverbZoneData, type ReverbShape, type InputBinding, type InputPreset, type AssetMetadata } from '@/stores/editorStore';
-import type { SetFn, GetFn } from './types';
+import { castPayload, type SetFn, type GetFn } from './types';
 
 export function handleAudioEvent(
   type: string,
@@ -13,14 +13,14 @@ export function handleAudioEvent(
 ): boolean {
   switch (type) {
     case 'SCRIPT_CHANGED': {
-      const payload = data as unknown as { entityId: string; source: string; enabled: boolean; template: string | null };
+      const payload = castPayload<{ entityId: string; source: string; enabled: boolean; template: string | null }>(data);
       const script: ScriptData = { source: payload.source, enabled: payload.enabled, template: payload.template };
       useEditorStore.getState().setEntityScript(payload.entityId, script);
       return true;
     }
 
     case 'AUDIO_CHANGED': {
-      const payload = data as unknown as {
+      const payload = castPayload<{
         entityId: string;
         assetId?: string | null;
         volume?: number;
@@ -32,7 +32,7 @@ export function handleAudioEvent(
         rolloffFactor?: number;
         autoplay?: boolean;
         bus?: string;
-      };
+      }>(data);
       const { entityId, ...audioData } = payload;
       // If assetId is defined (even if null), it means audio exists
       if (audioData.assetId !== undefined) {
@@ -56,7 +56,7 @@ export function handleAudioEvent(
     }
 
     case 'REVERB_ZONE_CHANGED': {
-      const payload = data as unknown as {
+      const payload = castPayload<{
         entityId: string;
         enabled: boolean;
         shape: {
@@ -70,7 +70,7 @@ export function handleAudioEvent(
         preDelay: number;
         blendRadius: number;
         priority: number;
-      };
+      }>(data);
       const { entityId, enabled, shape, ...zoneData } = payload;
       const reverbShape: ReverbShape = shape.type === 'sphere'
         ? { type: 'sphere', radius: shape.radius ?? 5 }
@@ -89,13 +89,13 @@ export function handleAudioEvent(
     }
 
     case 'REVERB_ZONE_REMOVED': {
-      const payload = data as unknown as { entityId: string };
+      const payload = castPayload<{ entityId: string }>(data);
       useEditorStore.getState().removeReverbZone(payload.entityId);
       return true;
     }
 
     case 'AUDIO_BUSES_CHANGED': {
-      const payload = data as unknown as { buses: AudioBusDef[] };
+      const payload = castPayload<{ buses: AudioBusDef[] }>(data);
       useEditorStore.getState().setAudioBuses(payload.buses);
       // Sync to Web Audio API
       import('@/lib/audio/audioManager').then(({ audioManager }) => {
@@ -105,7 +105,7 @@ export function handleAudioEvent(
     }
 
     case 'AUDIO_PLAYBACK': {
-      const payload = data as unknown as { entityId: string; action: 'play' | 'stop' | 'pause' | 'resume' };
+      const payload = castPayload<{ entityId: string; action: 'play' | 'stop' | 'pause' | 'resume' }>(data);
       // Import audioManager and route playback
       import('@/lib/audio/audioManager').then(({ audioManager }) => {
         if (payload.action === 'play') audioManager.play(payload.entityId);
@@ -117,7 +117,7 @@ export function handleAudioEvent(
     }
 
     case 'INPUT_BINDINGS_CHANGED': {
-      const payload = data as unknown as {
+      const payload = castPayload<{
         actions: Record<string, {
           name: string;
           actionType: { type: string; positive?: { type: string; value: string }[]; negative?: { type: string; value: string }[] };
@@ -125,7 +125,7 @@ export function handleAudioEvent(
           deadZone: number;
         }>;
         preset: string | null;
-      };
+      }>(data);
       // Convert Rust InputMap format to flat InputBinding array
       const bindings: InputBinding[] = Object.values(payload.actions).map((action) => {
         const isAxis = action.actionType.type === 'Axis';
@@ -144,7 +144,7 @@ export function handleAudioEvent(
     }
 
     case 'ASSET_IMPORTED': {
-      const payload = data as unknown as { assetId: string; name: string; kind: string; fileSize: number };
+      const payload = castPayload<{ assetId: string; name: string; kind: string; fileSize: number }>(data);
       useEditorStore.getState().addAssetToRegistry({
         id: payload.assetId,
         name: payload.name,
@@ -156,13 +156,13 @@ export function handleAudioEvent(
     }
 
     case 'ASSET_DELETED': {
-      const payload = data as unknown as { assetId: string };
+      const payload = castPayload<{ assetId: string }>(data);
       useEditorStore.getState().removeAssetFromRegistry(payload.assetId);
       return true;
     }
 
     case 'ASSET_LIST': {
-      const payload = data as unknown as { assets: Record<string, AssetMetadata> };
+      const payload = castPayload<{ assets: Record<string, AssetMetadata> }>(data);
       useEditorStore.getState().setAssetRegistry(payload.assets);
       return true;
     }

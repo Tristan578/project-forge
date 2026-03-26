@@ -3,7 +3,7 @@
  */
 
 import { useEditorStore, type GameCameraData, firePlayTick } from '@/stores/editorStore';
-import type { SetFn, GetFn } from './types';
+import { castPayload, type SetFn, type GetFn } from './types';
 
 export function handleGameEvent(
   type: string,
@@ -13,7 +13,7 @@ export function handleGameEvent(
 ): boolean {
   switch (type) {
     case 'GAME_COMPONENT_CHANGED': {
-      const payload = data as unknown as { entityId: string; components: import('@/stores/editorStore').GameComponentData[] };
+      const payload = castPayload<{ entityId: string; components: import('@/stores/editorStore').GameComponentData[] }>(data);
       const state = useEditorStore.getState();
       // Update allGameComponents
       const newAll = { ...state.allGameComponents, [payload.entityId]: payload.components };
@@ -24,7 +24,7 @@ export function handleGameEvent(
     }
 
     case 'GAME_CAMERA_CHANGED': {
-      const payload = data as unknown as { entityId: string; mode: string; targetEntity: string | null };
+      const payload = castPayload<{ entityId: string; mode: string; targetEntity: string | null }>(data);
       const gameCameraData: GameCameraData = {
         mode: payload.mode as GameCameraData['mode'],
         targetEntity: payload.targetEntity || null,
@@ -34,17 +34,17 @@ export function handleGameEvent(
     }
 
     case 'ACTIVE_GAME_CAMERA_CHANGED': {
-      const payload = data as unknown as { entityId: string | null };
+      const payload = castPayload<{ entityId: string | null }>(data);
       useEditorStore.getState().setActiveGameCameraId(payload.entityId);
       return true;
     }
 
     case 'PLAY_TICK': {
-      const payload = data as unknown as {
+      const payload = castPayload<{
         entities: Record<string, { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }>;
         entityInfos: Record<string, { name: string; type: string; colliderRadius: number }>;
         inputState: { pressed: Record<string, boolean>; justPressed: Record<string, boolean>; justReleased: Record<string, boolean>; axes: Record<string, number> };
-      };
+      }>(data);
       firePlayTick(payload);
       return true;
     }

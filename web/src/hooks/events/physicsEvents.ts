@@ -5,7 +5,7 @@
 import { useEditorStore, type PhysicsData, type JointData } from '@/stores/editorStore';
 import { getScriptCollisionCallback } from '@/lib/scripting/useScriptRunner';
 import { audioManager } from '@/lib/audio/audioManager';
-import type { SetFn, GetFn } from './types';
+import { castPayload, type SetFn, type GetFn } from './types';
 
 /** Prefix used to identify audio occlusion raycast requests. */
 const OCCLUSION_RAYCAST_PREFIX = 'audio_occlusion:';
@@ -18,46 +18,46 @@ export function handlePhysicsEvent(
 ): boolean {
   switch (type) {
     case 'PHYSICS_CHANGED': {
-      const payload = data as unknown as PhysicsData & { entityId: string; enabled: boolean };
+      const payload = castPayload<PhysicsData & { entityId: string; enabled: boolean }>(data);
       const { entityId: _physId, enabled, ...physData } = payload;
       useEditorStore.getState().setPrimaryPhysics(physData as PhysicsData, enabled);
       return true;
     }
 
     case 'JOINT_CHANGED': {
-      const payload = data as unknown as JointData | null;
+      const payload = castPayload<JointData | null>(data);
       useEditorStore.getState().setPrimaryJoint(payload);
       return true;
     }
 
     case 'DEBUG_PHYSICS_CHANGED': {
-      const payload = data as unknown as { enabled: boolean };
+      const payload = castPayload<{ enabled: boolean }>(data);
       useEditorStore.getState().setDebugPhysics(payload.enabled);
       return true;
     }
 
     case 'PHYSICS2D_UPDATED': {
-      const payload = data as unknown as import('@/stores/editorStore').Physics2dData & { entityId: string; enabled: boolean };
+      const payload = castPayload<import('@/stores/editorStore').Physics2dData & { entityId: string; enabled: boolean }>(data);
       const { entityId, enabled, ...physData } = payload;
       useEditorStore.getState().setPhysics2d(entityId, physData, enabled);
       return true;
     }
 
     case 'JOINT2D_UPDATED': {
-      const payload = data as unknown as import('@/stores/editorStore').Joint2dData & { entityId: string };
+      const payload = castPayload<import('@/stores/editorStore').Joint2dData & { entityId: string }>(data);
       const { entityId, ...jointData } = payload;
       useEditorStore.getState().setJoint2d(entityId, jointData);
       return true;
     }
 
     case 'PHYSICS2D_REMOVED': {
-      const payload = data as unknown as { entityId: string };
+      const payload = castPayload<{ entityId: string }>(data);
       useEditorStore.getState().removePhysics2d(payload.entityId);
       return true;
     }
 
     case 'COLLISION_EVENT': {
-      const payload = data as unknown as { entityA: string; entityB: string; started: boolean };
+      const payload = castPayload<{ entityA: string; entityB: string; started: boolean }>(data);
       const collisionCb = getScriptCollisionCallback();
       if (collisionCb) {
         collisionCb(payload);
@@ -66,7 +66,7 @@ export function handlePhysicsEvent(
     }
 
     case 'RAYCAST_RESULT': {
-      const payload = data as unknown as { requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number };
+      const payload = castPayload<{ requestId: string; hitEntity: string | null; point: [number, number, number]; distance: number }>(data);
       // Handle audio occlusion raycasts
       if (payload.requestId.startsWith(OCCLUSION_RAYCAST_PREFIX)) {
         // requestId format: "audio_occlusion:<entityId>:<totalDistance>"

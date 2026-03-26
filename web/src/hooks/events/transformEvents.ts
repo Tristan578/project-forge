@@ -7,7 +7,7 @@ import { saveAutoSave } from '@/lib/sceneFile';
 import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import type { SceneNode } from '@/stores/slices/types';
-import type { SetFn, GetFn } from './types';
+import { castPayload, type SetFn, type GetFn } from './types';
 
 const TRANSFORM_DEBOUNCE_MS = 2000;
 
@@ -31,7 +31,7 @@ export function handleTransformEvent(
 ): boolean {
   switch (type) {
     case 'SELECTION_CHANGED': {
-      const payload = data as unknown as { selectedIds: string[]; primaryId: string | null; primaryName: string | null };
+      const payload = castPayload<{ selectedIds: string[]; primaryId: string | null; primaryName: string | null }>(data);
       useEditorStore.getState().setSelection(
         payload.selectedIds,
         payload.primaryId,
@@ -41,7 +41,7 @@ export function handleTransformEvent(
     }
 
     case 'SCENE_GRAPH_UPDATE': {
-      const payload = data as unknown as SceneGraph;
+      const payload = castPayload<SceneGraph>(data);
       useEditorStore.getState().setFullGraph(payload);
       useEditorStore.getState().recomputeLightState(payload);
       // Mark scene as modified and trigger debounced auto-save
@@ -53,7 +53,7 @@ export function handleTransformEvent(
     }
 
     case 'SCENE_NODE_ADDED': {
-      const node = data as unknown as SceneNode;
+      const node = castPayload<SceneNode>(data);
       useEditorStore.getState().addNode(node);
       useEditorStore.getState().onLightNodeAdded(node);
       useEditorStore.setState({ sceneModified: true });
@@ -62,7 +62,7 @@ export function handleTransformEvent(
     }
 
     case 'SCENE_NODE_REMOVED': {
-      const payload = data as unknown as { entityId: string };
+      const payload = castPayload<{ entityId: string }>(data);
       const removedNode = useEditorStore.getState().sceneGraph.nodes[payload.entityId];
       useEditorStore.getState().removeNode(payload.entityId);
       if (removedNode) {
@@ -74,7 +74,7 @@ export function handleTransformEvent(
     }
 
     case 'SCENE_NODE_UPDATED': {
-      const payload = data as unknown as { entityId: string } & Partial<SceneNode>;
+      const payload = castPayload<{ entityId: string } & Partial<SceneNode>>(data);
       const { entityId, ...changes } = payload;
       useEditorStore.getState().updateNode(entityId, changes);
       useEditorStore.setState({ sceneModified: true });
@@ -83,13 +83,13 @@ export function handleTransformEvent(
     }
 
     case 'TRANSFORM_CHANGED': {
-      const payload = data as unknown as TransformData;
+      const payload = castPayload<TransformData>(data);
       useEditorStore.getState().setPrimaryTransform(payload);
       return true;
     }
 
     case 'HISTORY_CHANGED': {
-      const payload = data as unknown as { canUndo: boolean; canRedo: boolean; undoDescription: string | null; redoDescription: string | null };
+      const payload = castPayload<{ canUndo: boolean; canRedo: boolean; undoDescription: string | null; redoDescription: string | null }>(data);
       useEditorStore.getState().setHistoryState(
         payload.canUndo,
         payload.canRedo,
@@ -100,26 +100,26 @@ export function handleTransformEvent(
     }
 
     case 'SNAP_SETTINGS_CHANGED': {
-      const payload = data as unknown as SnapSettings;
+      const payload = castPayload<SnapSettings>(data);
       useEditorStore.getState().setSnapSettings(payload);
       return true;
     }
 
     case 'VIEW_PRESET_CHANGED': {
-      const payload = data as unknown as { preset: CameraPreset; displayName: string | null };
+      const payload = castPayload<{ preset: CameraPreset; displayName: string | null }>(data);
       useEditorStore.getState().setCurrentCameraPreset(payload.preset);
       return true;
     }
 
     case 'COORDINATE_MODE_CHANGED': {
-      const payload = data as unknown as { mode: CoordinateMode; displayName: string };
+      const payload = castPayload<{ mode: CoordinateMode; displayName: string }>(data);
       // Update store without sending command back (avoids infinite loop)
       useEditorStore.setState({ coordinateMode: payload.mode });
       return true;
     }
 
     case 'REPARENT_RESULT': {
-      const payload = data as unknown as { success: boolean; entityId: string; error?: string };
+      const payload = castPayload<{ success: boolean; entityId: string; error?: string }>(data);
       if (!payload.success) {
         console.error(
           `Failed to reparent entity ${payload.entityId}: ${payload.error}`
@@ -129,13 +129,13 @@ export function handleTransformEvent(
     }
 
     case 'ENGINE_MODE_CHANGED': {
-      const payload = data as unknown as { mode: EngineMode };
+      const payload = castPayload<{ mode: EngineMode }>(data);
       useEditorStore.setState({ engineMode: payload.mode });
       return true;
     }
 
     case 'SCENE_EXPORTED': {
-      const payload = data as unknown as { json: string; name: string };
+      const payload = castPayload<{ json: string; name: string }>(data);
       const { json, name } = payload;
       const state = useEditorStore.getState();
 
@@ -162,7 +162,7 @@ export function handleTransformEvent(
     }
 
     case 'SCENE_LOADED': {
-      const payload = data as unknown as { name: string };
+      const payload = castPayload<{ name: string }>(data);
       useEditorStore.setState({
         sceneName: payload.name,
         sceneModified: false,
