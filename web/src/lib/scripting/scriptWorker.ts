@@ -908,18 +908,9 @@ function buildForgeApi(scriptEntityId: string) {
 // 'globalThis' and 'self' block direct global scope access.
 // Network/storage APIs are shadowed for defence-in-depth even though the
 // worker has no DOM.
-const SHADOWED_GLOBALS = [
-  // Network / storage — defence-in-depth (worker has no DOM)
-  'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
-  'indexedDB', 'caches', 'navigator', 'location',
-  'EventSource', 'BroadcastChannel',
-  // Global scope access
-  'self', 'globalThis',
-  // Code execution
-  'Function', 'eval',
-  // Prototype chain / metaprogramming escape vectors (PF-2)
-  'Reflect', 'Proxy',
-] as const;
+// Imported from shared module — single source of truth for all sandbox consumers.
+// See sandboxGlobals.ts for the security model documentation.
+import { SHADOWED_GLOBALS } from './sandboxGlobals';
 
 // ─── Resource Limits ────────────────────────────────────────────
 // These constants cap per-frame execution time and heap growth.

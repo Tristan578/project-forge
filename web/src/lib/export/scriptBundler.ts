@@ -1,4 +1,5 @@
 import type { ScriptData } from '@/stores/editorStore';
+import { SHADOWED_GLOBALS } from '@/lib/scripting/sandboxGlobals';
 
 interface BundledScripts {
   /** The complete JS bundle as a string */
@@ -89,7 +90,7 @@ export function bundleScripts(
 ${enabledScripts.map(([entityId, script]) => `
   scripts['${entityId}'] = (function(forge) {
     const src = ${JSON.stringify(script.source)};
-    const SHADOWED = ['fetch','XMLHttpRequest','WebSocket','importScripts','indexedDB','caches','navigator','location','EventSource','BroadcastChannel','self','globalThis','Function','eval','Reflect','Proxy'];
+    const SHADOWED = ${JSON.stringify([...SHADOWED_GLOBALS])};
     const fn = new Function('forge', ...SHADOWED, src + '; return { onStart: typeof onStart === "function" ? onStart : null, onUpdate: typeof onUpdate === "function" ? onUpdate : null, onDestroy: typeof onDestroy === "function" ? onDestroy : null };');
     return fn(forge, ...SHADOWED.map(function() { return undefined; }));
   })(forge);

@@ -16,14 +16,8 @@ import { describe, it, expect } from 'vitest';
 // Replicate sandbox primitives from scriptWorker.ts for testing
 // ---------------------------------------------------------------------------
 
-const SHADOWED_GLOBALS = [
-  'fetch', 'XMLHttpRequest', 'WebSocket', 'importScripts',
-  'indexedDB', 'caches', 'navigator', 'location',
-  'EventSource', 'BroadcastChannel',
-  'self', 'globalThis',
-  'Function', 'eval',
-  'Reflect', 'Proxy',
-] as const;
+// Single source of truth — imported from shared module
+import { SHADOWED_GLOBALS } from '../sandboxGlobals';
 
 /**
  * Replicates the compileScript() Function constructor pattern.
@@ -167,55 +161,49 @@ describe('Script Sandbox Security', () => {
       // All globals should report 'undefined' inside the sandbox
     });
 
-    it('should block Reflect-based global access (PF-2)', () => {
+    it('should shadow Reflect inside sandbox (PF-2)', () => {
+      const carrier = { result: 'unknown' };
       const result = compileSandboxed(`
-        let escaped = false;
-        function onStart() {
-          try {
-            // Attempt to use Reflect to access shadowed globals
-            if (typeof Reflect !== 'undefined') {
-              escaped = true;
-            }
-          } catch { /* expected */ }
-        }
-        function getEscaped() { return escaped; }
-      `);
+        function onStart() { forge._carrier.result = typeof Reflect; }
+      `, { _carrier: carrier });
       result.onStart();
-      // Reflect should be undefined inside sandbox
+      expect(carrier.result).toBe('undefined');
     });
 
-    it('should block Proxy-based property interception (PF-2)', () => {
+    it('should shadow Proxy inside sandbox (PF-2)', () => {
+      const carrier = { result: 'unknown' };
       const result = compileSandboxed(`
-        let escaped = false;
-        function onStart() {
-          try {
-            if (typeof Proxy !== 'undefined') {
-              escaped = true;
-            }
-          } catch { /* expected */ }
-        }
-        function getEscaped() { return escaped; }
-      `);
+        function onStart() { forge._carrier.result = typeof Proxy; }
+      `, { _carrier: carrier });
       result.onStart();
-      // Proxy should be undefined inside sandbox
+      expect(carrier.result).toBe('undefined');
     });
 
-    it('should block prototype chain escape via constructor.constructor (PF-2)', () => {
-      // (0).constructor.constructor is Function — which is shadowed
+    it('should shadow window inside sandbox (PF-2)', () => {
+      const carrier = { result: 'unknown' };
       const result = compileSandboxed(`
-        let escaped = false;
+        function onStart() { forge._carrier.result = typeof window; }
+      `, { _carrier: carrier });
+      result.onStart();
+      expect(carrier.result).toBe('undefined');
+    });
+
+    it('documents constructor.constructor limitation (PF-2)', () => {
+      // KNOWN LIMITATION: (0).constructor.constructor reaches the real Function
+      // constructor via prototype chain — parameter shadowing cannot prevent this.
+      // Real security boundary: Worker isolation (editor) / CSP (exported games).
+      const carrier = { canGetFunction: false };
+      const result = compileSandboxed(`
         function onStart() {
           try {
             const F = (0).constructor.constructor;
-            if (typeof F === 'function') {
-              // F should be undefined because Function is shadowed
-              escaped = true;
-            }
-          } catch { /* expected - Function is undefined */ }
+            forge._carrier.canGetFunction = typeof F === 'function';
+          } catch { forge._carrier.canGetFunction = false; }
         }
-      `);
-      // Should not throw — error is caught internally
+      `, { _carrier: carrier });
       result.onStart();
+      // constructor.constructor CAN reach Function — this is a known limitation
+      expect(carrier.canGetFunction).toBe(true);
     });
 
     it('should still provide forge API access', () => {
