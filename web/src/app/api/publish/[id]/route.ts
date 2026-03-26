@@ -1,27 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-  const { user } = authResult.ctx;
-
-  const rl = await rateLimit(`user:publish-delete:${user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const mid = await withApiMiddleware(request, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (userId) => `user:publish-delete:${userId}`, max: 10, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   const { id } = await params;
   const db = getDb();
 
   await db.update(publishedGames)
     .set({ status: 'unpublished', updatedAt: new Date() })
-    .where(and(eq(publishedGames.id, id), eq(publishedGames.userId, user.id)));
+    .where(and(eq(publishedGames.id, id), eq(publishedGames.userId, mid.userId!)));
 
   return NextResponse.json({ success: true });
 }
