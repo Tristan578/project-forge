@@ -178,6 +178,37 @@ export async function exportAsZip(
     });
   }
 
+  // Add PWA files for installable game exports
+  if (options.format === 'pwa') {
+    const { generateManifest, generateServiceWorker, generatePlaceholderIcons } = await import('./pwaGenerator');
+    entries.push({
+      path: 'manifest.json',
+      content: generateManifest({
+        title: options.title,
+        backgroundColor: options.bgColor,
+        themeColor: options.bgColor,
+      }),
+    });
+    entries.push({
+      path: 'sw.js',
+      content: generateServiceWorker(),
+    });
+    // Placeholder icons — data URLs converted to Blobs for the zip
+    try {
+      const icons = await generatePlaceholderIcons(options.title);
+      for (const [name, dataUrl] of Object.entries(icons) as [string, string][]) {
+        const size = name === 'icon192' ? 192 : 512;
+        const response = await fetch(dataUrl);
+        entries.push({
+          path: `icons/icon-${size}x${size}.png`,
+          content: await response.blob(),
+        });
+      }
+    } catch {
+      // Canvas not available (SSR/test) — skip icons
+    }
+  }
+
   // Add .itch.toml for itch.io compatibility (always include for ZIP/PWA/embed)
   if (options.format !== 'single-html') {
     entries.push({
