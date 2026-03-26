@@ -490,6 +490,42 @@ describe('behaviorTree', () => {
       const script = behaviorTreeToScript(tree);
       expect(script).toContain('let pos = {"x":1,"y":2,"z":3}');
     });
+
+    it('throws on duplicate node IDs (PF-307)', () => {
+      const tree: BehaviorTree = {
+        name: 'Duplicate',
+        description: 'Tree with duplicate IDs',
+        root: {
+          id: 'seq1',
+          type: 'sequence',
+          name: 'main',
+          children: [
+            { id: 'action1', type: 'action', name: 'idle' },
+            { id: 'action1', type: 'action', name: 'walk' }, // duplicate
+          ],
+        },
+        variables: [],
+      };
+      expect(() => behaviorTreeToScript(tree)).toThrow('Duplicate behavior tree node ID: "action1"');
+    });
+
+    it('succeeds with unique node IDs', () => {
+      const tree: BehaviorTree = {
+        name: 'Unique',
+        description: 'Tree with unique IDs',
+        root: {
+          id: 'seq1',
+          type: 'sequence',
+          name: 'main',
+          children: [
+            { id: 'action1', type: 'action', name: 'idle' },
+            { id: 'action2', type: 'action', name: 'walk' },
+          ],
+        },
+        variables: [],
+      };
+      expect(() => behaviorTreeToScript(tree)).not.toThrow();
+    });
   });
 
   // ---- AI Response Parsing ----
