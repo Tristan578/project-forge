@@ -1,20 +1,23 @@
-import { NextResponse } from 'next/server';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { listProjects, createProject } from '@/lib/projects/service';
 import { captureException } from '@/lib/monitoring/sentry-server';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { parseJsonBody, requireString, requireObject } from '@/lib/apiValidation';
 
 /**
  * GET /api/projects
  * List all projects for the authenticated user.
  */
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `projects-list:${id}`, max: 60, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   try {
-    const projectsList = await listProjects(authResult.ctx.user.id);
+    const projectsList = await listProjects(mid.userId!);
     return NextResponse.json(projectsList);
   } catch (error) {
     captureException(error, { route: '/api/projects', method: 'GET' });
@@ -27,13 +30,13 @@ export async function GET() {
  * Create a new project.
  * Body: { name: string, sceneData: object }
  */
-export async function POST(req: Request) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
-
-  // Rate limit: 10 project creation requests per minute per user
-  const rl = await rateLimit(`projects-create:${authResult.ctx.user.id}`, 10, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `projects-create:${id}`, max: 10, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
   const parsed = await parseJsonBody(req);
   if (!parsed.ok) return parsed.response;
@@ -45,7 +48,7 @@ export async function POST(req: Request) {
   if (!sceneResult.ok) return sceneResult.response;
 
   try {
-    const project = await createProject(authResult.ctx.user.id, nameResult.value, sceneResult.value);
+    const project = await createProject(mid.userId!, nameResult.value, sceneResult.value);
     return NextResponse.json({ id: project.id, name: project.name }, { status: 201 });
   } catch (error) {
     const err = error as Error & { limit?: number };
