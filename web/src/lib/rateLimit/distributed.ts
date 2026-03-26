@@ -49,7 +49,9 @@ async function upstashSlidingWindow(
   const windowMs = windowSeconds * 1000;
   const windowStart = now - windowMs;
   const resetAt = now + windowMs;
-  const member = now.toString();
+  // Append random suffix to prevent ZADD member collisions when multiple
+  // requests arrive in the same millisecond (each member must be unique).
+  const member = `${now}:${Math.random().toString(36).slice(2, 8)}`;
 
   // Pipeline: ZREMRANGEBYSCORE, ZADD, ZCARD, EXPIRE
   // We issue these as a pipeline (array of commands) for a single round-trip.
