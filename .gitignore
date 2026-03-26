@@ -118,3 +118,8 @@ autoforge/node_modules/
 *.pid.lock
 .cache/
 .claude/hooks/__pycache__/
+
+# Taskboard DB files — use OS default path, never commit
+.claude/taskboard.db
+.claude/taskboard.db-shm
+.claude/taskboard.db-wal
