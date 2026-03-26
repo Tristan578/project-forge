@@ -136,14 +136,30 @@ export async function POST(
     }
 
     // Update seller balance atomically — use SQL expression to avoid lost
-    // updates under concurrent purchases (PF-974). Never read-then-write
-    // for credit accumulation; always use += at the DB level.
-    await db
+    // updates under concurrent purchases (PF-974). RETURNING gives us the
+    // actual post-update balance for the audit log, not a stale in-memory value.
+    const [sellerUpdate] = await db
       .update(users)
       .set({
         earnedCredits: sql`${users.earnedCredits} + ${sellerEarnings}`,
       })
-      .where(eq(users.id, seller.id));
+      .where(eq(users.id, seller.id))
+      .returning({ earnedCredits: users.earnedCredits });
+
+    // Read buyer's actual post-deduction balance from DB for accurate audit log.
+    const [buyerBalance] = await db
+      .select({
+        earnedCredits: users.earnedCredits,
+        addonTokens: users.addonTokens,
+        monthlyTokens: users.monthlyTokens,
+        monthlyTokensUsed: users.monthlyTokensUsed,
+      })
+      .from(users)
+      .where(eq(users.id, user.id))
+      .limit(1);
+    const buyerBalanceAfter = buyerBalance
+      ? buyerBalance.earnedCredits + buyerBalance.addonTokens + (buyerBalance.monthlyTokens - buyerBalance.monthlyTokensUsed)
+      : totalBalance - price;
 
     // Record purchase
     await db.insert(assetPurchases).values({
@@ -153,28 +169,28 @@ export async function POST(
       license: asset.license,
     });
 
-    // Increment download count
+    // Increment download count atomically
     await db
       .update(marketplaceAssets)
-      .set({ downloadCount: asset.downloadCount + 1 })
+      .set({ downloadCount: sql`${marketplaceAssets.downloadCount} + 1` })
       .where(eq(marketplaceAssets.id, assetId));
 
-    // Record buyer transaction
+    // Record buyer transaction with actual post-update balance
     await db.insert(creditTransactions).values({
       userId: user.id,
       transactionType: 'deduction',
       amount: -price,
-      balanceAfter: totalBalance - price,
+      balanceAfter: buyerBalanceAfter,
       source: 'marketplace_purchase',
       referenceId: assetId,
     });
 
-    // Record seller transaction
+    // Record seller transaction with actual post-update balance from RETURNING
     await db.insert(creditTransactions).values({
       userId: seller.id,
       transactionType: 'earned',
       amount: sellerEarnings,
-      balanceAfter: seller.earnedCredits + sellerEarnings,
+      balanceAfter: sellerUpdate?.earnedCredits ?? (seller.earnedCredits + sellerEarnings),
       source: 'marketplace_sale',
       referenceId: assetId,
     });
