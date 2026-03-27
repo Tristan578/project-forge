@@ -14,7 +14,7 @@ export function AppearanceTab() {
         <select
           id="sf-theme-select"
           value={theme}
-          onChange={(e) => setTheme(e.target.value as ThemeName)}
+          onChange={(e) => setTheme(e.target.value as ThemeName) /* cast is safe: select options are always THEME_NAMES values; setTheme also validates with VALID_THEMES internally */}
           className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         >
           {THEME_NAMES.map((t) => (
