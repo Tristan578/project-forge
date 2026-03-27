@@ -173,6 +173,7 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
 
   const db = getDb();
 
+  // 1. Look up the original usage record
   const [record] = await db
     .select()
     .from(tokenUsage)
@@ -181,62 +182,37 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
 
   if (!record) return;
 
-  // Idempotency: check if this usageId was already refunded.
-  // The refund log stores { refundedUsageId } in metadata — if a matching
-  // refund record exists, this is a duplicate call (e.g., server + client
-  // both triggering refund for the same failed job). Skip silently.
-  const [existingRefund] = await db
-    .select({ id: tokenUsage.id })
-    .from(tokenUsage)
-    .where(
-      and(
-        eq(tokenUsage.userId, userId),
-        eq(tokenUsage.operation, 'refund'),
-        sql`${tokenUsage.metadata}->>'refundedUsageId' = ${usageId}`,
-      )
+  // 2. Atomic idempotent refund using neonSql.transaction().
+  // The refund log INSERT uses WHERE NOT EXISTS to atomically check-and-insert.
+  // If a refund log already exists for this usageId, the INSERT returns 0 rows
+  // and the balance UPDATE is skipped. This prevents the TOCTOU race where two
+  // concurrent refund calls both pass a SELECT check before either inserts.
+  const neonSql = getNeonSql();
+
+  // Atomic: insert refund log only if not already refunded, then update balance
+  const refundMetadata = JSON.stringify({ refundedUsageId: usageId });
+  const insertResult = await neonSql`
+    INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
+    SELECT ${userId}::uuid, 'refund', ${-record.tokens}, ${record.source}, ${record.provider}, ${refundMetadata}::jsonb
+    WHERE NOT EXISTS (
+      SELECT 1 FROM token_usage
+      WHERE user_id = ${userId}::uuid
+        AND operation = 'refund'
+        AND metadata->>'refundedUsageId' = ${usageId}
     )
-    .limit(1);
+    RETURNING id
+  `;
 
-  if (existingRefund) return; // Already refunded — idempotent no-op
+  // If INSERT returned 0 rows, this usageId was already refunded — skip balance update
+  if (!insertResult || insertResult.length === 0) return;
 
-  // Reverse the deduction based on source
+  // Credit the balance (only reaches here if refund log was freshly inserted)
   if (record.source === 'monthly') {
-    await db
-      .update(users)
-      .set({
-        monthlyTokensUsed: sql`GREATEST(0, ${users.monthlyTokensUsed} - ${record.tokens})`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
-  } else if (record.source === 'addon') {
-    await db
-      .update(users)
-      .set({
-        addonTokens: sql`${users.addonTokens} + ${record.tokens}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
-  } else if (record.source === 'mixed') {
-    // For mixed, we refund everything to addon for simplicity
-    // (monthly may have reset since the charge)
-    await db
-      .update(users)
-      .set({
-        addonTokens: sql`${users.addonTokens} + ${record.tokens}`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
+    await neonSql`UPDATE users SET monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${record.tokens}), updated_at = NOW() WHERE id = ${userId}::uuid`;
+  } else {
+    // addon and mixed both refund to addon_tokens
+    await neonSql`UPDATE users SET addon_tokens = addon_tokens + ${record.tokens}, updated_at = NOW() WHERE id = ${userId}::uuid`;
   }
-
-  // Log refund
-  await db.insert(tokenUsage).values({
-    userId,
-    operation: 'refund',
-    tokens: -record.tokens,
-    source: record.source,
-    provider: record.provider,
-    metadata: { refundedUsageId: usageId },
-  });
 }
 
 /**

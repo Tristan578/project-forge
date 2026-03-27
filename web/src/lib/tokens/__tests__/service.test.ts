@@ -399,110 +399,73 @@ describe('refundTokens', () => {
   it('refunds monthly tokens for monthly source', async () => {
     const { refundTokens } = await import('../service');
 
-    // 1st where: select usage record
+    // SELECT usage record via Drizzle
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
-      id: 'usage-1',
-      userId: 'user-1',
-      tokens: 30,
-      source: 'monthly',
-      provider: 'anthropic',
+      id: 'usage-1', userId: 'user-1', tokens: 30, source: 'monthly', provider: 'anthropic',
     }]);
 
-    // 2nd where: idempotency check (no existing refund)
-    mockWhere.mockReturnValueOnce(chainableWhere());
-    mockLimit.mockResolvedValueOnce([]);
-
-    // 3rd where: update().set().where() -> awaitable directly
-    mockWhere.mockResolvedValueOnce([]);
-
-    // insert refund log: insert().values() -> no returning
-    mockValues.mockReturnValueOnce(Promise.resolve());
+    // neonSql: 1st call = INSERT...WHERE NOT EXISTS (returns inserted row)
+    // neonSql: 2nd call = UPDATE balance
+    mockNeonSql
+      .mockResolvedValueOnce([{ id: 'refund-new' }])  // INSERT succeeded
+      .mockResolvedValueOnce([]);                       // UPDATE balance
 
     await refundTokens('user-1', 'usage-1');
 
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockInsert).toHaveBeenCalled();
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
-  it('is idempotent — skips if already refunded', async () => {
+  it('is idempotent — skips if already refunded (atomic)', async () => {
     const { refundTokens } = await import('../service');
 
-    // 1st where: select usage record
+    // SELECT usage record via Drizzle
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
-      id: 'usage-dup',
-      userId: 'user-1',
-      tokens: 20,
-      source: 'addon',
-      provider: 'anthropic',
+      id: 'usage-dup', userId: 'user-1', tokens: 20, source: 'addon', provider: 'anthropic',
     }]);
 
-    // 2nd where: idempotency check — existing refund found
-    mockWhere.mockReturnValueOnce(chainableWhere());
-    mockLimit.mockResolvedValueOnce([{ id: 'refund-exists' }]);
+    // neonSql: INSERT...WHERE NOT EXISTS returns [] (already refunded)
+    mockNeonSql.mockResolvedValueOnce([]);
 
     await refundTokens('user-1', 'usage-dup');
 
-    // Should NOT update or insert — already refunded
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockInsert).not.toHaveBeenCalled();
+    // Only 1 neonSql call (INSERT check) — balance UPDATE never reached
+    expect(mockNeonSql).toHaveBeenCalledTimes(1);
   });
 
   it('refunds addon tokens for addon source', async () => {
     const { refundTokens } = await import('../service');
 
-    // 1st where: select usage record
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
-      id: 'usage-2',
-      userId: 'user-1',
-      tokens: 50,
-      source: 'addon',
-      provider: null,
+      id: 'usage-2', userId: 'user-1', tokens: 50, source: 'addon', provider: null,
     }]);
 
-    // 2nd where: idempotency check (no existing refund)
-    mockWhere.mockReturnValueOnce(chainableWhere());
-    mockLimit.mockResolvedValueOnce([]);
-
-    // 3rd where: update chain
-    mockWhere.mockResolvedValueOnce([]);
-
-    // insert refund log
-    mockValues.mockReturnValueOnce(Promise.resolve());
+    mockNeonSql
+      .mockResolvedValueOnce([{ id: 'refund-new' }])
+      .mockResolvedValueOnce([]);
 
     await refundTokens('user-1', 'usage-2');
 
-    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 
   it('refunds to addon for mixed source', async () => {
     const { refundTokens } = await import('../service');
 
-    // 1st where: select usage record
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
-      id: 'usage-3',
-      userId: 'user-1',
-      tokens: 40,
-      source: 'mixed',
-      provider: 'meshy',
+      id: 'usage-3', userId: 'user-1', tokens: 40, source: 'mixed', provider: 'meshy',
     }]);
 
-    // 2nd where: idempotency check (no existing refund)
-    mockWhere.mockReturnValueOnce(chainableWhere());
-    mockLimit.mockResolvedValueOnce([]);
-
-    // 3rd where: update chain
-    mockWhere.mockResolvedValueOnce([]);
-
-    // insert refund log
-    mockValues.mockReturnValueOnce(Promise.resolve());
+    mockNeonSql
+      .mockResolvedValueOnce([{ id: 'refund-new' }])
+      .mockResolvedValueOnce([]);
 
     await refundTokens('user-1', 'usage-3');
 
-    expect(mockUpdate).toHaveBeenCalled();
+    expect(mockNeonSql).toHaveBeenCalledTimes(2);
   });
 });
 
