@@ -25,3 +25,8 @@ export { Input, type InputProps } from './primitives/Input';
 export { Badge, type BadgeProps } from './primitives/Badge';
 export { Card, type CardProps } from './primitives/Card';
 export { Label, type LabelProps } from './primitives/Label';
+export { Select, type SelectProps, type SelectOption } from './primitives/Select';
+export { Textarea, type TextareaProps } from './primitives/Textarea';
+export { Switch, type SwitchProps } from './primitives/Switch';
+export { Checkbox, type CheckboxProps } from './primitives/Checkbox';
+export { Separator, type SeparatorProps } from './primitives/Separator';
