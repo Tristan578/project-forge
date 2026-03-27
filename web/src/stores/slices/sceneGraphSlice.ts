@@ -239,14 +239,10 @@ export const createSceneGraphSlice: StateCreator<
 
     if (entityIds.length === 0) return;
 
-    // Clear selection optimistically
-    set({
-      selectedIds: new Set(),
-      primaryId: null,
-      primaryName: null,
-      primaryTransform: null,
-    });
-
+    // Do NOT clear selection optimistically here. The WASM engine emits
+    // SELECTION_CHANGED (with empty selection) after each entity is confirmed
+    // deleted. If deletion fails (invalid entity, undeletable, engine panic)
+    // the selection and scene graph remain intact — no ghost state.
     if (dispatchCommand) {
       dispatchCommand('delete_entities', { entityIds });
     }

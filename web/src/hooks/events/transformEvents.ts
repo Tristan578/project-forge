@@ -37,6 +37,14 @@ export function handleTransformEvent(
         payload.primaryId,
         payload.primaryName
       );
+      // When selection becomes empty the inspector must not show stale transform
+      // data for the previously-selected entity. This covers the delete flow:
+      // deleteSelectedEntities no longer clears state optimistically so we rely
+      // on the WASM engine's SELECTION_CHANGED event (emitted after confirmed
+      // deletion) to perform the cleanup.
+      if (payload.primaryId === null) {
+        useEditorStore.setState({ primaryTransform: null });
+      }
       return true;
     }
 

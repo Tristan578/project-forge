@@ -163,7 +163,10 @@ describe('sceneGraphSlice', () => {
       });
     });
 
-    it('should clear selection state after delete', () => {
+    it('should NOT clear selection state before WASM confirms deletion (regression for #7746)', () => {
+      // Previously deleteSelectedEntities cleared selection optimistically,
+      // which caused ghost state when WASM failed to delete the entity.
+      // Now state is only cleared when the WASM engine emits SELECTION_CHANGED.
       store.setState({
         selectedIds: new Set(['cube-1']),
         primaryId: 'cube-1',
@@ -172,10 +175,10 @@ describe('sceneGraphSlice', () => {
       });
       store.getState().deleteSelectedEntities();
 
-      expect(store.getState().selectedIds.size).toBe(0);
-      expect(store.getState().primaryId).toBeNull();
-      expect(store.getState().primaryName).toBeNull();
-      expect(store.getState().primaryTransform).toBeNull();
+      // Selection must remain intact until WASM confirms via SELECTION_CHANGED
+      expect(store.getState().selectedIds.has('cube-1')).toBe(true);
+      expect(store.getState().primaryId).toBe('cube-1');
+      expect(store.getState().primaryName).toBe('Cube');
     });
 
     it('should not dispatch when nothing is selected', () => {
