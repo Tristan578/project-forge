@@ -75,12 +75,11 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
     );
     expect(nodeName).toBe(entityName);
 
-    // Verify scene hierarchy panel shows the entity name
+    // Verify scene hierarchy panel shows the entity name.
+    // The hierarchy panel is React-rendered from store state — it renders
+    // immediately after store injection without requiring WASM.
     const hierarchyNode = page.getByText(entityName, { exact: false });
-    const count = await hierarchyNode.count();
-    if (count > 0) {
-      await expect(hierarchyNode.first()).toBeVisible();
-    }
+    await expect(hierarchyNode.first()).toBeVisible({ timeout: 5000 });
   });
 
   // -------------------------------------------------------------------------
@@ -186,13 +185,12 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       expect(nodePresent, `Entity ${entity.name} (${entity.id}) missing from sceneGraph`).toBe(true);
     }
 
-    // All node names must be queryable from the DOM
+    // All node names must be queryable from the DOM.
+    // The hierarchy panel is React-rendered from store state — each entity
+    // must appear in the DOM after its store injection.
     for (const entity of entities) {
       const domNode = page.getByText(entity.name, { exact: false });
-      const count = await domNode.count();
-      if (count > 0) {
-        await expect(domNode.first()).toBeVisible();
-      }
+      await expect(domNode.first()).toBeVisible({ timeout: 5000 });
     }
   });
 
@@ -202,8 +200,10 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
   test('injecting toolCalls into chat store renders ToolCallCard in panel', async ({ page, editor }) => {
     await editor.waitForEditorStore();
 
+    // Use __CHAT_STORE if available; fall back to __EDITOR_STORE which also
+    // exposes addMessage when chat state is unified with editor state.
     const injected = await injectStore(page, '__CHAT_STORE', `
-      const store = window.__CHAT_STORE;
+      const store = window.__CHAT_STORE ?? window.__EDITOR_STORE;
       const addMessage = store?.getState?.()?.addMessage;
       if (typeof addMessage === 'function') {
         addMessage({
@@ -237,11 +237,11 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
         await expect(toolLabel.first()).toBeVisible();
       }
 
-      // The chat overlay must be structurally present (not blank)
-      const chatOverlay = page.locator('.fixed.z-50').first();
-      await expect(chatOverlay).toBeVisible({ timeout: 5000 });
-      const divCount = await chatOverlay.locator('div').count();
-      expect(divCount).toBeGreaterThan(1);
+      // The chat overlay must be structurally present (not blank).
+      // The messages container has aria-label="Chat messages" — assert on that
+      // rather than a fragile CSS class selector.
+      const chatMessages = page.getByLabel('Chat messages');
+      await expect(chatMessages).toBeVisible({ timeout: 5000 });
     }
   });
 });
@@ -267,15 +267,13 @@ test.describe('AI → Entity Round-trip: Engine Pipeline @engine', () => {
       return Object.keys(store.getState().sceneGraph.nodes).length;
     });
 
-    // Dispatch the same command the AI chat handler issues
+    // Dispatch via spawnEntity — the store action that calls dispatchCommand('spawn_entity', ...)
+    // internally, exactly mirroring what the AI chat transform handler does.
     await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
       if (!store) throw new Error('Store unavailable');
-      store.getState().dispatchCommand('spawn_entity', {
-        entityType: 'cube',
-        name: 'AICube',
-      });
+      store.getState().spawnEntity('cube', 'AICube');
     });
 
     // Entity count must increase by at least 1
@@ -332,8 +330,10 @@ test.describe('AI → Entity Round-trip: Engine Pipeline @engine', () => {
     });
     expect(entityId).not.toBeNull();
 
-    // Directly call the store's updateMaterial action — mirrors what the
-    // engine event handler calls when it receives MATERIAL_UPDATED from Rust
+    // Call updateMaterial which internally calls dispatchCommand('update_material', {...})
+    // — this is exactly what the AI chat material handler does and exercises the full
+    // JS → WASM → engine event → store round-trip. dispatchCommand is a module-level
+    // singleton (not on store state) so updateMaterial is the correct call site.
     await page.evaluate((eid: string) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const store = (window as any).__EDITOR_STORE;
