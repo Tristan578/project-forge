@@ -61,13 +61,10 @@ export function useTheme(options?: UseThemeOptions) {
   }, []);
 
   const setEffectsEnabled = useCallback((enabled: boolean) => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      localStorage.setItem(STORAGE_KEY_EFFECTS, 'off');
-      setEffectsEnabledState(false);
-      return;
-    }
+    // Always persist the user's preference, even if reduced-motion overrides it at runtime
     localStorage.setItem(STORAGE_KEY_EFFECTS, enabled ? 'on' : 'off');
-    setEffectsEnabledState(enabled);
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    setEffectsEnabledState(reducedMotion ? false : enabled);
   }, []);
 
   return useMemo(() => ({
