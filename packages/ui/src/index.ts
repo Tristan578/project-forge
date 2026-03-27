@@ -48,3 +48,9 @@ export { ThemeAmbient } from './effects/ThemeAmbient';
 // Utilities
 export { validateCustomTheme, type ValidatedTheme } from './utils/themeValidator';
 export { applyThemeTokens } from './utils/applyThemeTokens';
+export {
+  saveCustomTheme,
+  loadCustomTheme,
+  deleteCustomTheme,
+  listCustomThemes,
+} from './utils/themeStorage';
