@@ -43,7 +43,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "despawn_entity",
@@ -62,7 +63,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "delete_entities",
@@ -84,7 +86,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "duplicate_entity",
@@ -103,7 +106,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_transform",
@@ -148,7 +152,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "rename_entity",
@@ -171,7 +176,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "reparent_entity",
@@ -198,7 +204,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_visibility",
@@ -220,7 +227,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "select_entity",
@@ -247,7 +255,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "select_entities",
@@ -276,7 +285,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "clear_selection",
@@ -287,7 +297,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "update_material",
@@ -451,7 +462,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "apply_material_preset",
@@ -533,7 +545,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_custom_shader",
@@ -620,7 +633,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_custom_shader",
@@ -639,7 +653,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "list_shaders",
@@ -650,7 +665,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_custom_wgsl_source",
@@ -673,7 +689,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "validate_wgsl",
@@ -692,7 +709,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "register_custom_shader",
@@ -728,7 +746,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "apply_custom_shader",
@@ -759,7 +778,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "remove_custom_shader_slot",
@@ -778,7 +798,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "update_light",
@@ -835,7 +856,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_ambient_light",
@@ -861,7 +883,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_environment",
@@ -908,7 +931,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_skybox",
@@ -947,7 +971,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_skybox",
@@ -958,7 +983,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_skybox",
@@ -982,7 +1008,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_custom_skybox",
@@ -1006,7 +1033,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_post_processing",
@@ -1268,7 +1296,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "rendering:write"
+      "requiredScope": "rendering:write",
+      "visibility": "internal"
     },
     {
       "name": "get_post_processing",
@@ -1279,7 +1308,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "rendering:read"
+      "requiredScope": "rendering:read",
+      "visibility": "internal"
     },
     {
       "name": "set_gizmo_mode",
@@ -1302,7 +1332,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_coordinate_mode",
@@ -1324,7 +1355,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_snap_settings",
@@ -1355,7 +1387,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "toggle_grid",
@@ -1366,7 +1399,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_camera_preset",
@@ -1391,7 +1425,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "focus_camera",
@@ -1407,7 +1442,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_camera_2d",
@@ -1449,7 +1485,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "undo",
@@ -1460,7 +1497,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "redo",
@@ -1471,7 +1509,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_scene_graph",
@@ -1482,7 +1521,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "get_entity_details",
@@ -1500,7 +1540,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "get_selection",
@@ -1511,7 +1552,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "get_camera_state",
@@ -1522,7 +1564,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "play",
@@ -1533,7 +1576,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "stop",
@@ -1544,7 +1588,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "pause",
@@ -1555,7 +1600,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "resume",
@@ -1566,7 +1612,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_mode",
@@ -1577,7 +1624,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_input_binding",
@@ -1630,7 +1678,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_input_binding",
@@ -1649,7 +1698,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_input_preset",
@@ -1674,7 +1724,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_input_bindings",
@@ -1685,7 +1736,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "get_input_state",
@@ -1696,7 +1748,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "update_physics",
@@ -1779,7 +1832,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "toggle_physics",
@@ -1803,7 +1857,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "toggle_debug_physics",
@@ -1814,7 +1869,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_physics",
@@ -1830,7 +1886,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "apply_force",
@@ -1876,7 +1933,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "raycast_query",
@@ -1918,7 +1976,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "export_scene",
@@ -1929,7 +1988,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "load_scene",
@@ -1948,7 +2008,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "new_scene",
@@ -1959,7 +2020,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_scene_name",
@@ -1970,7 +2032,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "import_gltf",
@@ -1994,7 +2057,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "load_texture",
@@ -2035,7 +2099,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_texture",
@@ -2066,7 +2131,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "place_asset",
@@ -2085,7 +2151,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "delete_asset",
@@ -2104,7 +2171,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "list_assets",
@@ -2115,7 +2183,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "create_script",
@@ -2146,7 +2215,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_script",
@@ -2174,7 +2244,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_script",
@@ -2193,7 +2264,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_script",
@@ -2212,7 +2284,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "list_script_templates",
@@ -2223,7 +2296,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "apply_script_template",
@@ -2253,7 +2327,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_audio",
@@ -2312,7 +2387,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_audio",
@@ -2331,7 +2407,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "play_audio",
@@ -2350,7 +2427,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "stop_audio",
@@ -2369,7 +2447,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "pause_audio",
@@ -2388,7 +2467,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_audio",
@@ -2407,7 +2487,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "import_audio",
@@ -2431,7 +2512,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_audio_bus",
@@ -2462,7 +2544,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_audio_bus",
@@ -2485,7 +2568,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "delete_audio_bus",
@@ -2504,7 +2588,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_audio_buses",
@@ -2515,7 +2600,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_bus_effects",
@@ -2568,7 +2654,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "audio_crossfade",
@@ -2598,7 +2685,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "audio_fade_in",
@@ -2623,7 +2711,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "audio_fade_out",
@@ -2648,7 +2737,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "audio_play_one_shot",
@@ -2692,7 +2782,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "audio_add_layer",
@@ -2735,7 +2826,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "audio_remove_layer",
@@ -2759,7 +2851,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_ducking_rule",
@@ -2799,7 +2892,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_reverb_zone",
@@ -2875,7 +2969,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_reverb_zone",
@@ -2894,7 +2989,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_music_intensity",
@@ -2915,7 +3011,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_music_stems",
@@ -2948,7 +3045,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_adaptive_music",
@@ -2981,7 +3079,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "transition_music_segment",
@@ -3004,7 +3103,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_audio_snapshot",
@@ -3023,7 +3123,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "apply_audio_snapshot",
@@ -3046,7 +3147,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_audio_occlusion",
@@ -3070,7 +3172,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_particle",
@@ -3172,7 +3275,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_particle",
@@ -3191,7 +3295,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "toggle_particle",
@@ -3215,7 +3320,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_particle_preset",
@@ -3250,7 +3356,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "play_particle",
@@ -3269,7 +3376,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "stop_particle",
@@ -3288,7 +3396,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "burst_particle",
@@ -3311,7 +3420,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_particle",
@@ -3330,7 +3440,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "play_animation",
@@ -3358,7 +3469,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "pause_animation",
@@ -3377,7 +3489,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "resume_animation",
@@ -3396,7 +3509,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "stop_animation",
@@ -3415,7 +3529,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "seek_animation",
@@ -3439,7 +3554,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_animation_speed",
@@ -3463,7 +3579,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_animation_loop",
@@ -3487,7 +3604,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_animation_state",
@@ -3506,7 +3624,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "list_animations",
@@ -3525,7 +3644,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_animation_blend_weight",
@@ -3556,7 +3676,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_clip_speed",
@@ -3585,7 +3706,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_animation_graph",
@@ -3604,7 +3726,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "export_game",
@@ -3633,7 +3756,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "get_export_status",
@@ -3644,7 +3768,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "export_project_zip",
@@ -3673,7 +3798,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "export_project_pwa",
@@ -3702,7 +3828,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_loading_screen",
@@ -3741,7 +3868,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_export_preset",
@@ -3768,7 +3896,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "csg_union",
@@ -3800,7 +3929,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "csg_subtract",
@@ -3832,7 +3962,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "csg_intersect",
@@ -3864,7 +3995,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "extrude_shape",
@@ -3930,7 +4062,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "lathe_shape",
@@ -3977,7 +4110,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "array_entity",
@@ -4045,7 +4179,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "combine_meshes",
@@ -4076,7 +4211,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "mesh_inset",
@@ -4099,7 +4235,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "mesh_bevel",
@@ -4126,7 +4263,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "mesh_loop_cut",
@@ -4149,7 +4287,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "mesh_delete",
@@ -4177,7 +4316,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "spawn_terrain",
@@ -4247,7 +4387,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_terrain",
@@ -4303,7 +4444,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "sculpt_terrain",
@@ -4342,7 +4484,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_terrain",
@@ -4361,7 +4504,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "search_docs",
@@ -4384,7 +4528,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "docs:read"
+      "requiredScope": "docs:read",
+      "visibility": "internal"
     },
     {
       "name": "get_doc",
@@ -4403,7 +4548,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "docs:read"
+      "requiredScope": "docs:read",
+      "visibility": "internal"
     },
     {
       "name": "list_doc_topics",
@@ -4415,7 +4561,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "docs:read"
+      "requiredScope": "docs:read",
+      "visibility": "internal"
     },
     {
       "name": "list_material_presets",
@@ -4442,7 +4589,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "save_material_to_library",
@@ -4461,7 +4609,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "delete_library_material",
@@ -4480,7 +4629,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "list_custom_materials",
@@ -4491,7 +4641,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_quality_preset",
@@ -4516,7 +4667,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_quality_settings",
@@ -4528,7 +4680,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "save_as_prefab",
@@ -4560,7 +4713,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "instantiate_prefab",
@@ -4590,7 +4744,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "list_prefabs",
@@ -4606,7 +4761,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "delete_prefab",
@@ -4625,7 +4781,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_prefab",
@@ -4644,7 +4801,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "create_scene",
@@ -4663,7 +4821,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "switch_scene",
@@ -4682,7 +4841,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "duplicate_scene",
@@ -4705,7 +4865,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "delete_scene",
@@ -4724,7 +4885,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "rename_scene",
@@ -4748,7 +4910,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_start_scene",
@@ -4767,7 +4930,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_joint",
@@ -4854,7 +5018,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_joint",
@@ -4946,7 +5111,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_joint",
@@ -4965,7 +5131,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_joint",
@@ -4981,7 +5148,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "list_scenes",
@@ -4992,7 +5160,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "load_scene_with_transition",
@@ -5031,7 +5200,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_default_transition",
@@ -5063,7 +5233,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "add_game_component",
@@ -5105,7 +5276,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_game_component",
@@ -5148,7 +5320,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_game_component",
@@ -5186,7 +5359,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_game_components",
@@ -5205,7 +5379,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "list_game_component_types",
@@ -5216,7 +5391,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_game_camera",
@@ -5288,7 +5464,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_active_game_camera",
@@ -5307,7 +5484,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "camera_shake",
@@ -5336,7 +5514,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_game_camera",
@@ -5355,7 +5534,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "generate_3d_model",
@@ -5404,7 +5584,8 @@
         ]
       },
       "tokenCost": 100,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_3d_from_image",
@@ -5439,7 +5620,8 @@
         ]
       },
       "tokenCost": 150,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_texture",
@@ -5498,7 +5680,8 @@
         ]
       },
       "tokenCost": 80,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_pbr_maps",
@@ -5537,7 +5720,8 @@
         ]
       },
       "tokenCost": 60,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_sfx",
@@ -5564,7 +5748,8 @@
         ]
       },
       "tokenCost": 50,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_voice",
@@ -5598,7 +5783,8 @@
         ]
       },
       "tokenCost": 40,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_skybox",
@@ -5627,7 +5813,8 @@
         ]
       },
       "tokenCost": 70,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_music",
@@ -5666,7 +5853,8 @@
         ]
       },
       "tokenCost": 100,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_sprite",
@@ -5723,7 +5911,8 @@
         ]
       },
       "tokenCost": 15,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_sprite_sheet",
@@ -5766,7 +5955,8 @@
         ]
       },
       "tokenCost": 60,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_character",
@@ -5810,7 +6000,8 @@
         ]
       },
       "tokenCost": 80,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_tileset",
@@ -5848,7 +6039,8 @@
         ]
       },
       "tokenCost": 50,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "remove_background",
@@ -5867,7 +6059,8 @@
         ]
       },
       "tokenCost": 5,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "apply_style_transfer",
@@ -5897,7 +6090,8 @@
         ]
       },
       "tokenCost": 10,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "set_project_style",
@@ -5922,7 +6116,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "get_sprite_generation_status",
@@ -5941,7 +6136,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "generation:read"
+      "requiredScope": "generation:read",
+      "visibility": "internal"
     },
     {
       "name": "get_generation_status",
@@ -5975,7 +6171,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "generate_pixel_art",
@@ -6044,7 +6241,8 @@
         ]
       },
       "tokenCost": 10,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "set_pixel_art_palette",
@@ -6070,7 +6268,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "quantize_sprite_colors",
@@ -6102,7 +6301,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "generation:write"
+      "requiredScope": "generation:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_game_ideas",
@@ -6146,7 +6346,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "get_idea_details",
@@ -6178,7 +6379,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "start_from_idea",
@@ -6225,7 +6427,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remix_idea",
@@ -6265,7 +6468,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "create_ui_screen",
@@ -6313,7 +6517,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "delete_ui_screen",
@@ -6332,7 +6537,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "list_ui_screens",
@@ -6343,7 +6549,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "ui:read"
+      "requiredScope": "ui:read",
+      "visibility": "internal"
     },
     {
       "name": "get_ui_screen",
@@ -6362,7 +6569,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:read"
+      "requiredScope": "ui:read",
+      "visibility": "internal"
     },
     {
       "name": "update_ui_screen",
@@ -6428,7 +6636,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "add_ui_widget",
@@ -6510,7 +6719,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "update_ui_widget",
@@ -6563,7 +6773,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "remove_ui_widget",
@@ -6587,7 +6798,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "set_ui_binding",
@@ -6631,7 +6843,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "remove_ui_binding",
@@ -6657,7 +6870,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "set_ui_theme",
@@ -6690,7 +6904,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "duplicate_ui_screen",
@@ -6713,7 +6928,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "duplicate_ui_widget",
@@ -6735,7 +6951,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "reorder_ui_widget",
@@ -6767,7 +6984,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:write"
+      "requiredScope": "ui:write",
+      "visibility": "internal"
     },
     {
       "name": "get_ui_widget",
@@ -6789,7 +7007,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "ui:read"
+      "requiredScope": "ui:read",
+      "visibility": "internal"
     },
     {
       "name": "create_scene_from_description",
@@ -7001,7 +7220,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_level_layout",
@@ -7213,7 +7433,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "configure_game_mechanics",
@@ -7331,7 +7552,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "setup_character",
@@ -7425,7 +7647,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "arrange_entities",
@@ -7517,7 +7740,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "apply_style",
@@ -7654,7 +7878,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "describe_scene",
@@ -7682,7 +7907,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "analyze_gameplay",
@@ -7705,7 +7931,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "list_templates",
@@ -7728,7 +7955,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "load_template",
@@ -7754,7 +7982,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_template_info",
@@ -7773,7 +8002,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "create_animation_clip",
@@ -7813,7 +8043,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "add_clip_keyframe",
@@ -7857,7 +8088,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_clip_keyframe",
@@ -7885,7 +8117,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_clip_keyframe",
@@ -7930,7 +8163,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_clip_property",
@@ -7965,7 +8199,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "preview_clip",
@@ -7996,7 +8231,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_animation_clip",
@@ -8014,7 +8250,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "remove_animation_clip",
@@ -8032,7 +8269,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_library_script",
@@ -8067,7 +8305,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_library_script",
@@ -8105,7 +8344,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "delete_library_script",
@@ -8124,7 +8364,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "list_library_scripts",
@@ -8140,7 +8381,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "attach_script_to_entity",
@@ -8164,7 +8406,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "detach_script_from_entity",
@@ -8183,7 +8426,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_visual_script",
@@ -8207,7 +8451,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_visual_script",
@@ -8226,7 +8471,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "compile_visual_script",
@@ -8245,7 +8491,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "add_visual_script_node",
@@ -8281,7 +8528,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "connect_visual_script_nodes",
@@ -8320,7 +8568,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_token_balance",
@@ -8331,7 +8580,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "get_token_pricing",
@@ -8342,7 +8592,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "query_play_state",
@@ -8353,7 +8604,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "create_dialogue_tree",
@@ -8376,7 +8628,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "add_dialogue_node",
@@ -8419,7 +8672,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_dialogue_choice",
@@ -8452,7 +8706,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_dialogue_tree",
@@ -8471,7 +8726,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_dialogue_tree",
@@ -8490,7 +8746,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_dialogue_node_voice",
@@ -8519,7 +8776,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "export_dialogue_tree",
@@ -8538,7 +8796,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "import_dialogue_tree",
@@ -8557,7 +8816,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "publish_game",
@@ -8585,7 +8845,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "unpublish_game",
@@ -8604,7 +8865,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "list_publications",
@@ -8615,7 +8877,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "get_publish_url",
@@ -8634,7 +8897,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "create_sprite",
@@ -8678,7 +8942,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_sprite_texture",
@@ -8702,7 +8967,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_sprite_tint",
@@ -8731,7 +8997,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_sprite_flip",
@@ -8758,7 +9025,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_sprite_sorting",
@@ -8785,7 +9053,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_sprite_anchor",
@@ -8820,7 +9089,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_sprite",
@@ -8839,7 +9109,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_sorting_layers",
@@ -8875,7 +9146,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_project_type",
@@ -8898,7 +9170,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_grid_2d",
@@ -8922,7 +9195,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "slice_sprite_sheet",
@@ -9011,7 +9285,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_sprite_anim_clip",
@@ -9055,7 +9330,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_sprite_animator",
@@ -9087,7 +9363,8 @@
         ]
       },
       "tokenCost": 1,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "play_sprite_animation",
@@ -9115,7 +9392,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_anim_state_machine",
@@ -9193,7 +9471,8 @@
         ]
       },
       "tokenCost": 2,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_anim_param",
@@ -9229,7 +9508,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_physics2d",
@@ -9314,7 +9594,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_physics2d",
@@ -9333,7 +9614,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_physics2d",
@@ -9352,7 +9634,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "set_gravity2d",
@@ -9376,7 +9659,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_debug_physics2d",
@@ -9395,7 +9679,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "apply_force2d",
@@ -9424,7 +9709,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "apply_impulse2d",
@@ -9453,7 +9739,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "raycast2d",
@@ -9491,7 +9778,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "create_tilemap",
@@ -9543,7 +9831,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "import_tileset",
@@ -9580,7 +9869,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "asset:write"
+      "requiredScope": "asset:write",
+      "visibility": "internal"
     },
     {
       "name": "set_tile",
@@ -9617,7 +9907,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "fill_tiles",
@@ -9664,7 +9955,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "clear_tiles",
@@ -9707,7 +9999,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "add_tilemap_layer",
@@ -9730,7 +10023,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_tilemap_layer",
@@ -9754,7 +10048,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_tilemap_layer",
@@ -9790,7 +10085,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "resize_tilemap",
@@ -9827,7 +10123,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_tilemap",
@@ -9846,7 +10143,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "create_skeleton2d",
@@ -9865,7 +10163,8 @@
         ]
       },
       "tokenCost": 15,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "add_bone2d",
@@ -9910,7 +10209,8 @@
         ]
       },
       "tokenCost": 10,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "remove_bone2d",
@@ -9934,7 +10234,8 @@
         ]
       },
       "tokenCost": 10,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "update_bone2d",
@@ -9984,7 +10285,8 @@
         ]
       },
       "tokenCost": 10,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_skeletal_animation2d",
@@ -10021,7 +10323,8 @@
         ]
       },
       "tokenCost": 20,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "add_keyframe2d",
@@ -10079,7 +10382,8 @@
         ]
       },
       "tokenCost": 10,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "play_skeletal_animation2d",
@@ -10115,7 +10419,8 @@
         ]
       },
       "tokenCost": 5,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_skeleton2d_skin",
@@ -10139,7 +10444,8 @@
         ]
       },
       "tokenCost": 5,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "create_ik_chain2d",
@@ -10184,7 +10490,8 @@
         ]
       },
       "tokenCost": 15,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_skeleton2d",
@@ -10203,7 +10510,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "import_skeleton_json",
@@ -10237,7 +10545,8 @@
         ]
       },
       "tokenCost": 25,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "auto_weight_skeleton2d",
@@ -10269,7 +10578,8 @@
         ]
       },
       "tokenCost": 20,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "add_skeleton2d_mesh_attachment",
@@ -10360,7 +10670,8 @@
         ]
       },
       "tokenCost": 30,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "enter_edit_mode",
@@ -10379,7 +10690,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "exit_edit_mode",
@@ -10390,7 +10702,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "set_selection_mode",
@@ -10414,7 +10727,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "mesh_extrude",
@@ -10449,7 +10763,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "mesh_subdivide",
@@ -10472,7 +10787,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "recalc_normals",
@@ -10488,7 +10804,8 @@
         }
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "get_security_status",
@@ -10500,7 +10817,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "security:read"
+      "requiredScope": "security:read",
+      "visibility": "internal"
     },
     {
       "name": "validate_project_security",
@@ -10512,7 +10830,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "security:read"
+      "requiredScope": "security:read",
+      "visibility": "internal"
     },
     {
       "name": "create_shader_graph",
@@ -10529,7 +10848,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "add_shader_node",
@@ -10605,7 +10925,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "connect_shader_nodes",
@@ -10639,7 +10960,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "compile_shader",
@@ -10656,7 +10978,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:read"
+      "requiredScope": "shaders:read",
+      "visibility": "internal"
     },
     {
       "name": "apply_shader_to_entity",
@@ -10679,7 +11002,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "remove_shader_from_entity",
@@ -10698,7 +11022,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:write"
+      "requiredScope": "shaders:write",
+      "visibility": "internal"
     },
     {
       "name": "list_shader_presets",
@@ -10710,7 +11035,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "shaders:read"
+      "requiredScope": "shaders:read",
+      "visibility": "internal"
     },
     {
       "name": "set_entity_lod",
@@ -10751,7 +11077,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "performance:write"
+      "requiredScope": "performance:write",
+      "visibility": "internal"
     },
     {
       "name": "generate_lods",
@@ -10770,7 +11097,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "performance:write"
+      "requiredScope": "performance:write",
+      "visibility": "internal"
     },
     {
       "name": "set_performance_budget",
@@ -10799,7 +11127,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "performance:write"
+      "requiredScope": "performance:write",
+      "visibility": "internal"
     },
     {
       "name": "get_performance_stats",
@@ -10811,7 +11140,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "performance:read"
+      "requiredScope": "performance:read",
+      "visibility": "internal"
     },
     {
       "name": "optimize_scene",
@@ -10823,7 +11153,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "performance:write"
+      "requiredScope": "performance:write",
+      "visibility": "internal"
     },
     {
       "name": "set_lod_distances",
@@ -10847,7 +11178,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "performance:write"
+      "requiredScope": "performance:write",
+      "visibility": "internal"
     },
     {
       "name": "set_simplification_backend",
@@ -10870,7 +11202,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "performance:write"
+      "requiredScope": "performance:write",
+      "visibility": "internal"
     },
     {
       "name": "create_leaderboard",
@@ -10914,7 +11247,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "list_leaderboards",
@@ -10933,7 +11267,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "configure_leaderboard",
@@ -10977,7 +11312,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "delete_leaderboard",
@@ -11001,7 +11337,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "project:manage"
+      "requiredScope": "project:manage",
+      "visibility": "internal"
     },
     {
       "name": "build_world",
@@ -11036,7 +11373,8 @@
         ]
       },
       "tokenCost": 3,
-      "requiredScope": "ai:generate"
+      "requiredScope": "ai:generate",
+      "visibility": "internal"
     },
     {
       "name": "get_current_world",
@@ -11047,7 +11385,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "clear_world",
@@ -11058,7 +11397,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "extract_translatable_strings",
@@ -11070,7 +11410,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "translate_scene",
@@ -11097,7 +11438,8 @@
         ]
       },
       "tokenCost": 5,
-      "requiredScope": "ai:generate"
+      "requiredScope": "ai:generate",
+      "visibility": "internal"
     },
     {
       "name": "set_preview_locale",
@@ -11119,7 +11461,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "list_locales",
@@ -11131,7 +11474,8 @@
         "required": []
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "design_economy",
@@ -11165,7 +11509,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "generate_cutscene",
@@ -11188,7 +11533,8 @@
         ]
       },
       "tokenCost": 20,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "play_cutscene",
@@ -11207,7 +11553,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "stop_cutscene",
@@ -11218,7 +11565,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     },
     {
       "name": "list_cutscenes",
@@ -11229,7 +11577,8 @@
         "properties": {}
       },
       "tokenCost": 0,
-      "requiredScope": "scene:read"
+      "requiredScope": "scene:read",
+      "visibility": "public"
     },
     {
       "name": "delete_cutscene",
@@ -11248,7 +11597,8 @@
         ]
       },
       "tokenCost": 0,
-      "requiredScope": "scene:write"
+      "requiredScope": "scene:write",
+      "visibility": "public"
     }
   ],
   "resources": [

@@ -72,4 +72,11 @@ describe('command manifest', () => {
       ).toBe(true);
     }
   });
+
+  it.each(manifest.commands)('$name has valid visibility field', (cmd) => {
+    expect(
+      ['public', 'internal'],
+      `Command "${cmd.name}" has visibility "${(cmd as { name: string; visibility?: string }).visibility}" — must be "public" or "internal"`,
+    ).toContain((cmd as { name: string; visibility?: string }).visibility);
+  });
 });
