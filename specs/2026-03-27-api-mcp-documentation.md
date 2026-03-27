@@ -144,11 +144,12 @@ The `ci-gate-check.ts` script:
 // This avoids false positives from grepping minified .next/ output.
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import matter from 'gray-matter';
 
-const mcpContentDir = path.join(__dirname, '../content/mcp');
+const mcpContentDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../content/mcp');
 const commandsManifest = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../../mcp-server/manifest/commands.json'), 'utf-8'),
+  fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../mcp-server/manifest/commands.json'), 'utf-8'),
 );
 const internalCommands = new Set(
   commandsManifest
@@ -180,7 +181,7 @@ The CI check uses **JSON structural comparison** (parse both files and deep-equa
 
 ```yaml
 - name: Verify MCP manifest sync
-  run: node -e "
+  run: tsx -e "
     const a = JSON.parse(require('fs').readFileSync('mcp-server/manifest/commands.json','utf-8'));
     const b = JSON.parse(require('fs').readFileSync('web/src/data/commands.json','utf-8'));
     const sort = arr => arr.slice().sort((x,y) => x.name < y.name ? -1 : 1);
@@ -297,13 +298,14 @@ Per design system spec Section 9.1:
     "fumadocs-openapi": "^5",
     "next": "^16",
     "react": "^19",
-    "react-dom": "^19"
+    "react-dom": "^19",
+    "gray-matter": "^4"
   },
   "devDependencies": {
     "tsx": "^4",
-    "gray-matter": "^4",
     "typescript": "^5"
   }
+}
 }
 ```
 
@@ -385,6 +387,8 @@ Fumadocs responsive defaults are accepted for mobile. No custom breakpoints or m
 | Internal | Vercel preview URL or `docs-internal.spawnforge.ai` | All commands + all routes | Vercel Deployment Protection (mandatory) |
 
 CI gate verifies public build contains no internal content (Section 3.4).
+
+> **IMPORTANT: Deployment timing.** The internal Vercel project is NOT deployed until Phase 3. In Phases 1-2, only the public build ships. The `INCLUDE_INTERNAL` env var must NEVER be set on the public Vercel project. Only the separate internal Vercel project (created in Phase 3 with Deployment Protection enabled) may have it.
 
 ---
 
