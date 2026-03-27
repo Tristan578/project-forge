@@ -28,6 +28,7 @@ describe('POST /api/auth/webhook', () => {
   const env = process.env;
 
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     process.env.CLERK_WEBHOOK_SECRET = 'whsec_mock';
   });

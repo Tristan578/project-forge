@@ -28,6 +28,7 @@ function mockDbChain(data: unknown[] = []) {
 
 describe('GET /api/community/games/[id]', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

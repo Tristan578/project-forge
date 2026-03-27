@@ -151,6 +151,7 @@ describe('POST /api/chat', () => {
   let POST: (request: NextRequest) => Promise<Response>;
 
   beforeEach(async () => {
+    vi.resetModules();
     vi.clearAllMocks();
 
     // Default: auth succeeds

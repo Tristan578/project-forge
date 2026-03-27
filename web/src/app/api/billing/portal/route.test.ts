@@ -43,6 +43,7 @@ function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>)
 
 describe('POST /api/billing/portal', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
     process.env.NEXT_PUBLIC_APP_URL = 'http://localhost:3000';

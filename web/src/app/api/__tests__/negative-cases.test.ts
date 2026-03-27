@@ -162,6 +162,7 @@ function makeRequestRaw(url: string, rawBody: string, method = 'POST'): NextRequ
 
 describe('GET /api/tokens/balance — negative cases', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 
@@ -202,6 +203,7 @@ describe('GET /api/tokens/balance — negative cases', () => {
 
 describe('POST /api/feedback — negative cases', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockLogger.child.mockReturnValue(mockLogger);
     mockExtractRequestId.mockReturnValue('req-1');
@@ -315,6 +317,7 @@ describe('POST /api/feedback — negative cases', () => {
 
 describe('POST /api/publish — negative cases', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mockLogger.child.mockReturnValue(mockLogger);
     mockExtractRequestId.mockReturnValue('req-1');
@@ -424,6 +427,7 @@ describe('POST /api/publish — negative cases', () => {
 
 describe('POST /api/generate/model — negative cases', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

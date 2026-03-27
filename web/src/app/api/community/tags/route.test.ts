@@ -11,6 +11,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('GET /api/community/tags', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

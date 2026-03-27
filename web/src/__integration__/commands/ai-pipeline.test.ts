@@ -435,6 +435,7 @@ describe('full pipeline: GDD → Level → Effects → Review', () => {
 
 describe('error propagation across pipeline stages', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.restoreAllMocks();
   });
 
