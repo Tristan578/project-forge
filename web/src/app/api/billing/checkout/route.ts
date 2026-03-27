@@ -1,8 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimitResponse } from '@/lib/rateLimit';
-import { distributedRateLimit } from '@/lib/rateLimit/distributed';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { users } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -28,19 +26,16 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * Create a Stripe Checkout session for a subscription upgrade.
  * Body: { tier: 'hobbyist' | 'creator' | 'pro' }
  */
-export async function POST(req: Request) {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `billing-checkout:${id}`, max: 5, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
-  const { user } = authResult.ctx;
+  const user = mid.authContext!.user;
   const reqLog = logger.child({ endpoint: 'POST /api/billing/checkout', userId: user.id });
-
-  // Rate limit: 5 checkout requests per minute per user (distributed across instances)
-  const rl = await distributedRateLimit(`billing-checkout:${user.id}`, 5, 60);
-  if (!rl.allowed) {
-    reqLog.warn('Checkout rate limit exceeded');
-    return rateLimitResponse(rl.remaining, rl.resetAt);
-  }
 
   let body;
   try {
@@ -76,7 +71,7 @@ export async function POST(req: Request) {
         email: user.email,
         metadata: {
           userId: user.id,
-          clerkId: authResult.ctx.clerkId,
+          clerkId: mid.authContext!.clerkId,
         },
       });
       customerId = customer.id;

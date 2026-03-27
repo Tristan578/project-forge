@@ -1,38 +1,52 @@
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit } from '@/lib/rateLimit';
+import { NextRequest } from 'next/server';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { listProjects, createProject } from '@/lib/projects/service';
 
-vi.mock('@/lib/auth/api-auth');
-vi.mock('@/lib/rateLimit', () => ({
-  rateLimit: vi.fn(),
-  rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
-}));
+vi.mock('@/lib/api/middleware');
 vi.mock('@/lib/projects/service');
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
 
+function makeReq(method = 'GET', body?: string) {
+  const url = 'http://localhost:3000/api/projects';
+  if (body) {
+    return new NextRequest(url, {
+      method,
+      body,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  return new NextRequest(url, { method });
+}
+
+function mockMiddlewareSuccess(userId = 'user_1', tier = 'creator' as const) {
+  vi.mocked(withApiMiddleware).mockResolvedValue({
+    error: undefined,
+    userId,
+    authContext: { clerkId: 'clerk_1', user: { id: userId, tier } as never },
+  });
+}
+
 describe('GET /api/projects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as never },
-    });
+    mockMiddlewareSuccess();
   });
 
   it('should return 401 when not authenticated', async () => {
     const mockResponse = new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: mockResponse as never,
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: mockResponse as never,
+      userId: null,
+      authContext: null,
     });
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
 
     expect(res.status).toBe(401);
   });
@@ -44,7 +58,7 @@ describe('GET /api/projects', () => {
     ] as never);
 
     const { GET } = await import('./route');
-    const res = await GET();
+    const res = await GET(makeReq());
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -55,50 +69,40 @@ describe('GET /api/projects', () => {
 describe('POST /api/projects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as never },
-    });
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 60000 });
+    mockMiddlewareSuccess();
   });
 
   it('should return 401 when not authenticated', async () => {
     const mockResponse = new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
-    vi.mocked(authenticateRequest).mockResolvedValue({
-      ok: false as const,
-      response: mockResponse as never,
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: mockResponse as never,
+      userId: null,
+      authContext: null,
     });
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'Test', sceneData: {} }),
-    });
-    const res = await POST(req);
+    const res = await POST(makeReq('POST', JSON.stringify({ name: 'Test', sceneData: {} })));
 
     expect(res.status).toBe(401);
   });
 
   it('should return 429 when rate limited', async () => {
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    const rlResponse = new Response(JSON.stringify({ error: 'Rate limited' }), { status: 429 });
+    vi.mocked(withApiMiddleware).mockResolvedValue({
+      error: rlResponse as never,
+      userId: null,
+      authContext: null,
+    });
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'Test', sceneData: {} }),
-    });
-    const res = await POST(req);
+    const res = await POST(makeReq('POST', JSON.stringify({ name: 'Test', sceneData: {} })));
 
     expect(res.status).toBe(429);
   });
 
   it('should return 400 when name is missing', async () => {
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects', {
-      method: 'POST',
-      body: JSON.stringify({ sceneData: {} }),
-    });
-    const res = await POST(req);
+    const res = await POST(makeReq('POST', JSON.stringify({ sceneData: {} })));
     const body = await res.json();
 
     expect(res.status).toBe(400);
@@ -107,11 +111,7 @@ describe('POST /api/projects', () => {
 
   it('should return 400 when sceneData is missing', async () => {
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'Test' }),
-    });
-    const res = await POST(req);
+    const res = await POST(makeReq('POST', JSON.stringify({ name: 'Test' })));
     const body = await res.json();
 
     expect(res.status).toBe(400);
@@ -122,11 +122,7 @@ describe('POST /api/projects', () => {
     vi.mocked(createProject).mockResolvedValue({ id: 'p-new', name: 'New Project' } as never);
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'New Project', sceneData: { entities: [] } }),
-    });
-    const res = await POST(req);
+    const res = await POST(makeReq('POST', JSON.stringify({ name: 'New Project', sceneData: { entities: [] } })));
     const body = await res.json();
 
     expect(res.status).toBe(201);
@@ -140,11 +136,7 @@ describe('POST /api/projects', () => {
     vi.mocked(createProject).mockRejectedValue(error);
 
     const { POST } = await import('./route');
-    const req = new Request('http://localhost:3000/api/projects', {
-      method: 'POST',
-      body: JSON.stringify({ name: 'New Project', sceneData: {} }),
-    });
-    const res = await POST(req);
+    const res = await POST(makeReq('POST', JSON.stringify({ name: 'New Project', sceneData: {} })));
     const body = await res.json();
 
     expect(res.status).toBe(403);

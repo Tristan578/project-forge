@@ -1,7 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { authenticateRequest } from '@/lib/auth/api-auth';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 function getStripe() {
@@ -16,15 +15,15 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
  * POST /api/billing/portal
  * Create a Stripe billing portal session for managing subscriptions.
  */
-export async function POST() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export async function POST(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `billing-portal:${id}`, max: 5, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
-  // Rate limit: 5 portal requests per minute per user
-  const rl = await rateLimit(`billing-portal:${authResult.ctx.user.id}`, 5, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
-
-  const user = authResult.ctx.user;
+  const user = mid.authContext!.user;
 
   if (!user.stripeCustomerId) {
     return NextResponse.json(

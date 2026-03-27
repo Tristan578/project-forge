@@ -1,8 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { authenticateRequest } from '@/lib/auth/api-auth';
+import { withApiMiddleware } from '@/lib/api/middleware';
 import { logger } from '@/lib/logging/logger';
-import { rateLimit, rateLimitResponse } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
@@ -12,13 +11,15 @@ const stripeSecret = process.env.STRIPE_SECRET_KEY;
  * Get current billing status for the authenticated user.
  * Includes subscription status from Stripe when available.
  */
-export async function GET() {
-  const authResult = await authenticateRequest();
-  if (!authResult.ok) return authResult.response;
+export async function GET(req: NextRequest) {
+  const mid = await withApiMiddleware(req, {
+    requireAuth: true,
+    rateLimit: true,
+    rateLimitConfig: { key: (id) => `billing-status:${id}`, max: 30, windowSeconds: 60 },
+  });
+  if (mid.error) return mid.error;
 
-  const user = authResult.ctx.user;
-  const rl = await rateLimit(`user:billing-status:${user.id}`, 30, 60_000);
-  if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
+  const user = mid.authContext!.user;
   const reqLog = logger.child({ endpoint: 'GET /api/billing/status', userId: user.id });
 
   try {
