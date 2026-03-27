@@ -34,19 +34,19 @@ const THREE_ENTITY_SCENE = JSON.stringify({
   name: 'RoundTripScene',
   entities: [
     {
-      id: 'rt-entity-1',
+      entityId: 'rt-entity-1',
       name: 'Alpha',
       entity_type: 'Cube',
       transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
     },
     {
-      id: 'rt-entity-2',
+      entityId: 'rt-entity-2',
       name: 'Beta',
       entity_type: 'Sphere',
       transform: { position: [2, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
     },
     {
-      id: 'rt-entity-3',
+      entityId: 'rt-entity-3',
       name: 'Gamma',
       entity_type: 'Cube',
       transform: { position: [-2, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
@@ -60,7 +60,7 @@ const NAMED_SCENE_JSON = JSON.stringify({
   name: 'MySavedScene',
   entities: [
     {
-      id: 'named-entity-1',
+      entityId: 'named-entity-1',
       name: 'NamedEntity',
       entity_type: 'Cube',
       transform: { position: [0, 0, 0], rotation: [0, 0, 0, 1], scale: [1, 1, 1] },
@@ -74,7 +74,7 @@ const POSITIONED_ENTITY_SCENE = JSON.stringify({
   name: 'PositionTest',
   entities: [
     {
-      id: 'pos-entity-1',
+      entityId: 'pos-entity-1',
       name: 'PositionedCube',
       entity_type: 'Cube',
       transform: {
@@ -107,21 +107,20 @@ test.describe('Save/Load round-trip — store level @ui', () => {
       };
       if (!store) throw new Error('Store unavailable');
       const scene = JSON.parse(sceneJson) as {
-        entities: Array<{ id: string; name: string; entity_type: string }>;
+        entities: Array<{ entityId: string; name: string; entity_type: string }>;
       };
       const nodes: Record<string, unknown> = {};
       const rootIds: string[] = [];
       for (const ent of scene.entities) {
-        nodes[ent.id] = {
-          id: ent.id,
+        nodes[ent.entityId] = {
+          entityId: ent.entityId,
           name: ent.name,
-          entityType: ent.entity_type,
           parentId: null,
           children: [],
           visible: true,
           components: [],
         };
-        rootIds.push(ent.id);
+        rootIds.push(ent.entityId);
       }
       store.getState().setFullGraph({ nodes, rootIds });
     }, THREE_ENTITY_SCENE);
@@ -262,7 +261,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
   test('entity properties survive round-trip (position [5,10,15])', async ({ page, editor }) => {
     const scene = JSON.parse(POSITIONED_ENTITY_SCENE) as {
       entities: Array<{
-        id: string;
+        entityId: string;
         name: string;
         entity_type: string;
         transform: { position: [number, number, number]; rotation: [number, number, number, number]; scale: [number, number, number] };
@@ -272,7 +271,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Inject sceneGraph node
     await page.evaluate(
-      (args: { id: string; name: string; entityType: string }) => {
+      (args: { entityId: string; name: string }) => {
         const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
           getState: () => {
             setFullGraph: (g: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
@@ -280,26 +279,25 @@ test.describe('Save/Load round-trip — store level @ui', () => {
         };
         if (!store) throw new Error('Store unavailable');
         const node = {
-          id: args.id,
+          entityId: args.entityId,
           name: args.name,
-          entityType: args.entityType,
           parentId: null,
           children: [],
           visible: true,
           components: [],
         };
         store.getState().setFullGraph({
-          nodes: { [args.id]: node },
-          rootIds: [args.id],
+          nodes: { [args.entityId]: node },
+          rootIds: [args.entityId],
         });
       },
-      { id: entity.id, name: entity.name, entityType: entity.entity_type },
+      { entityId: entity.entityId, name: entity.name },
     );
 
     // Set the primaryTransform for this entity using the real updateTransform API:
     // updateTransform(entityId, field, value) where field is 'position'|'rotation'|'scale'
     await page.evaluate(
-      (args: { id: string; position: [number, number, number] }) => {
+      (args: { entityId: string; position: [number, number, number] }) => {
         const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
           getState: () => {
             setPrimaryTransform: (t: {
@@ -312,20 +310,20 @@ test.describe('Save/Load round-trip — store level @ui', () => {
         };
         if (!store) throw new Error('Store unavailable');
         store.getState().setPrimaryTransform({
-          entityId: args.id,
+          entityId: args.entityId,
           position: args.position,
           rotation: [0, 0, 0],
           scale: [1, 1, 1],
         });
       },
-      { id: entity.id, position: entity.transform.position },
+      { entityId: entity.entityId, position: entity.transform.position },
     );
 
     // Verify primaryTransform was set
     await expect.poll(
       async () => {
         const t = await editor.getStoreState<{ entityId: string; position: [number, number, number] } | null>('primaryTransform');
-        return t?.entityId === entity.id ? t.position : null;
+        return t?.entityId === entity.entityId ? t.position : null;
       },
       { timeout: 3_000 }
     ).toEqual([5, 10, 15]);
@@ -345,7 +343,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
         ? state.primaryTransform
         : null;
       return JSON.stringify({ graphNode, transform, entityId });
-    }, entity.id);
+    }, entity.entityId);
 
     expect(serialized.length).toBeGreaterThan(5);
 
@@ -383,13 +381,13 @@ test.describe('Save/Load round-trip — store level @ui', () => {
           store.getState().setPrimaryTransform(transform);
         }
       },
-      { serializedJson: serialized, entityId: entity.id },
+      { serializedJson: serialized, entityId: entity.entityId },
     );
 
     // Verify graph node survived
     await expect.poll(
       () => editor.getStoreState<Record<string, unknown>>('sceneGraph.nodes')
-        .then((nodes) => nodes[entity.id] ?? null),
+        .then((nodes) => nodes[entity.entityId] ?? null),
       { timeout: 3_000 }
     ).not.toBeNull();
 
@@ -397,7 +395,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     await expect.poll(
       async () => {
         const t = await editor.getStoreState<{ entityId: string; position: [number, number, number] } | null>('primaryTransform');
-        return t?.entityId === entity.id ? t.position : null;
+        return t?.entityId === entity.entityId ? t.position : null;
       },
       { timeout: 3_000 }
     ).toEqual([5, 10, 15]);
