@@ -20,8 +20,12 @@ import { ScriptEditorPanel } from './ScriptEditorPanel';
 import { ScriptExplorerPanel } from './ScriptExplorerPanel';
 import { SceneSettings } from './SceneSettings';
 import { AssetPanel } from './AssetPanel';
-import { AudioMixerPanel } from './AudioMixerPanel';
 import { DocsPanel } from './DocsPanel';
+
+// ---- Heavy supplemental panels — lazy imports (not in default layout, opened on demand) ----
+const AudioMixerPanel = lazy(() =>
+  import('./AudioMixerPanel').then((m) => ({ default: m.AudioMixerPanel }))
+);
 
 // ---- AI / advanced panels — lazy imports (opened on demand) ----
 const UIBuilderPanel = lazy(() =>
@@ -240,14 +244,6 @@ function AssetPanelWrapper(_props: IDockviewPanelProps) {
   );
 }
 
-function AudioMixerPanelWrapper(_props: IDockviewPanelProps) {
-  return (
-    <div className="h-full w-full overflow-hidden bg-zinc-900">
-      <AudioMixerPanel />
-    </div>
-  );
-}
-
 function DocsPanelWrapper(_props: IDockviewPanelProps) {
   return (
     <div className="h-full w-full overflow-hidden bg-zinc-900">
@@ -267,7 +263,8 @@ const PANEL_COMPONENTS: Record<string, React.FunctionComponent<IDockviewPanelPro
   'script-explorer': ScriptExplorerPanelWrapper,
   'scene-settings': SceneSettingsPanel,
   'asset-browser': AssetPanelWrapper,
-  'audio-mixer': AudioMixerPanelWrapper,
+  // Heavy supplemental — lazy
+  'audio-mixer': withSuspense(AudioMixerPanel),
   docs: DocsPanelWrapper,
   // AI / advanced — lazy, no tier restriction
   'ui-builder': withSuspense(UIBuilderPanel),
