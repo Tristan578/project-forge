@@ -36,7 +36,7 @@ vi.mock('@/lib/ai/contentSafety', () => ({
   sanitizePrompt: vi.fn((p: string) => ({ safe: true, filtered: p })),
 }));
 vi.mock('@/lib/tokens/service', () => ({
-  refundTokens: vi.fn().mockResolvedValue(undefined),
+  refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
 }));
 vi.mock('@/lib/db/client', () => ({
   getDb: vi.fn().mockReturnValue({}),

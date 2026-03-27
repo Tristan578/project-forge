@@ -44,7 +44,7 @@ vi.mock('@/lib/rateLimit', () => ({
   rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
 }));
 vi.mock('@/lib/tokens/service', () => ({
-  refundTokens: vi.fn().mockResolvedValue(undefined),
+  refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
 }));
 
 const mockUser = { id: 'user_sfx', tier: 'creator' };

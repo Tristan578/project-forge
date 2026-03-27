@@ -46,7 +46,7 @@ vi.mock('@/lib/tokens/pricing', () => ({
 }));
 
 vi.mock('@/lib/tokens/service', () => ({
-  refundTokens: vi.fn().mockResolvedValue(undefined),
+  refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
 }));
 
 vi.mock('@/lib/chat/tools', () => ({
@@ -190,7 +190,7 @@ describe('POST /api/chat', () => {
     } as unknown as ReturnType<typeof streamText>);
 
     // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
-    vi.mocked(refundTokens).mockResolvedValue(undefined);
+    vi.mocked(refundTokens: vi.fn().mockResolvedValue({ refunded: true });
 
     // Re-import to get fresh module
     const mod = await import('../route');

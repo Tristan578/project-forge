@@ -44,7 +44,7 @@ vi.mock('@/lib/api/middleware', () => ({
 
 vi.mock('@/lib/tokens/service', () => ({
   getTokenBalance: (...args: unknown[]) => mockGetTokenBalance(...args),
-  refundTokens: vi.fn().mockResolvedValue(undefined),
+  refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
 }));
 
 vi.mock('@/lib/db/client', () => ({
