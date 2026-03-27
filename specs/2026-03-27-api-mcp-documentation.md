@@ -27,7 +27,7 @@ A dedicated documentation site at `docs.spawnforge.ai` serving API reference (Op
 ### Prerequisites
 
 - **Plan A Phase 0** (spec: `docs/superpowers/plans/2026-03-27-design-system-implementation.md`, Tasks A1-A3) must complete first: workspace bootstrap creates the root `package.json` with `workspaces: ["packages/*", "apps/*", "web"]` and the npm workspace structure that this spec's `apps/docs` site lives inside.
-- **Phase 2 depends on Plan E** (spec: `docs/superpowers/plans/2026-03-27-plan-e-backend-consolidation.md`): OpenAPI generation requires the `withApiMiddleware` helper to accept a `validate` option containing Zod schemas for request body/query/params. The `validate` option signature is: `validate: { body?: ZodSchema, query?: ZodSchema, params?: ZodSchema }`. Phase 2 cannot start until Plan E ships this interface.
+- **Phase 2 depends on Plan E** (spec: `docs/superpowers/plans/2026-03-27-plan-e-backend-consolidation.md`): OpenAPI generation requires the `withApiMiddleware` helper's `validate` option (Zod schema). Plan E defines `validate?: ZodSchema` as a flat body schema. The OpenAPI generator extracts this schema from route files to produce the spec. Phase 2 also requires Plan E to add a `public?: boolean` option to `withApiMiddleware` for route visibility — this amendment to Plan E must be coordinated before Phase 2 begins.
 
 ---
 
@@ -136,54 +136,85 @@ docs-internal-gate:
 
 > The `needs-docs` output is added to the CI gate job's path-change detection, matching `apps/docs/**` and `mcp-server/manifest/**`. This prevents every Rust engine PR from paying the docs build tax (~3-5 min).
 
-The `ci-gate-check.ts` script:
+The `ci-gate-check.ts` script is structured as a **testable core function** (`checkGate()`) with a thin CLI wrapper. This pattern allows unit testing without `process.exit()` killing the test runner:
 
 ```ts
 // apps/docs/scripts/ci-gate-check.ts
-// Reads generated MDX frontmatter and asserts:
-// 1. Every command MDX file has a `commandName` field (prevents silent bypass)
-// 2. No internal command appears in the public build output
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import matter from 'gray-matter';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const mcpContentDir = path.join(__dirname, '../content/mcp');
-const manifest = JSON.parse(
-  fs.readFileSync(path.join(__dirname, '../../../mcp-server/manifest/commands.json'), 'utf-8'),
-);
-const internalCommands = new Set(
-  manifest.commands
-    .filter((c: { visibility?: string }) => c.visibility !== 'public')
-    .map((c: { name: string }) => c.name),
-);
 
-if (!fs.existsSync(mcpContentDir)) {
-  console.log('CI gate passed: no content/mcp/ directory (nothing to check).');
-  process.exit(0);
+export interface GateResult {
+  passed: boolean;
+  errors: string[];
+  checkedCount: number;
 }
 
-let failed = false;
-const mdxFiles = fs.readdirSync(mcpContentDir).filter(f => f.endsWith('.mdx') && f !== 'index.mdx');
-for (const file of mdxFiles) {
-  const raw = fs.readFileSync(path.join(mcpContentDir, file), 'utf-8');
-  const { data } = matter(raw);
+/**
+ * Core gate logic — testable, no side effects.
+ * Tests import and call this directly.
+ */
+export function checkGate(contentDir: string, manifestPath: string): GateResult {
+  const errors: string[] = [];
 
-  // Every command MDX MUST have a commandName field — prevents silent bypass
-  if (!data.commandName) {
-    console.error(`::error::MDX file '${file}' missing required 'commandName' frontmatter field`);
-    failed = true;
-    continue;
+  if (!fs.existsSync(contentDir)) {
+    return { passed: true, errors: [], checkedCount: 0 };
   }
 
-  if (internalCommands.has(data.commandName)) {
-    console.error(`::error::Internal command '${data.commandName}' found in public MDX file '${file}'`);
-    failed = true;
+  let manifest: { commands: Array<{ name: string; visibility?: string }> };
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+  } catch (err) {
+    return { passed: false, errors: [`Failed to read manifest: ${manifestPath} — ${err}`], checkedCount: 0 };
   }
+
+  if (!manifest.commands || !Array.isArray(manifest.commands)) {
+    return { passed: false, errors: [`Manifest missing .commands array: ${manifestPath}`], checkedCount: 0 };
+  }
+
+  const internalCommands = new Set(
+    manifest.commands
+      .filter((c) => c.visibility !== 'public')
+      .map((c) => c.name),
+  );
+
+  const mdxFiles = fs.readdirSync(contentDir).filter(f => f.endsWith('.mdx') && f !== 'index.mdx');
+  for (const file of mdxFiles) {
+    const raw = fs.readFileSync(path.join(contentDir, file), 'utf-8');
+    const { data } = matter(raw);
+
+    // commandName MUST be a string — non-string values bypass Set.has() silently
+    if (typeof data.commandName !== 'string' || !data.commandName) {
+      errors.push(`MDX file '${file}' missing or non-string 'commandName' frontmatter field`);
+      continue;
+    }
+
+    if (internalCommands.has(data.commandName)) {
+      errors.push(`Internal command '${data.commandName}' found in public MDX file '${file}'`);
+    }
+  }
+
+  return { passed: errors.length === 0, errors, checkedCount: mdxFiles.length };
 }
-if (failed) process.exit(1);
-console.log(`CI gate passed: ${mdxFiles.length} command pages checked, no internal commands found.`);
+
+// --- CLI wrapper (only runs when executed directly, not when imported) ---
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMainModule) {
+  const result = checkGate(
+    path.join(__dirname, '../content/mcp'),
+    path.join(__dirname, '../../../mcp-server/manifest/commands.json'),
+  );
+  for (const err of result.errors) {
+    console.error(`::error::${err}`);
+  }
+  if (result.passed) {
+    console.log(`CI gate passed: ${result.checkedCount} command pages checked, no internal commands found.`);
+  }
+  process.exit(result.passed ? 0 : 1);
+}
 ```
 
 **Required frontmatter schema for generated command MDX files:**
@@ -215,19 +246,50 @@ The CI check uses **JSON structural comparison** (parse both files, extract `.co
     tsx apps/docs/scripts/check-manifest-sync.ts
 ```
 
-The `check-manifest-sync.ts` script (not inline `tsx -e`, to avoid ESM/CJS `require()` issues):
+The `check-manifest-sync.ts` script uses `__dirname`-relative paths (not `process.cwd()`) and a testable core function:
 
 ```ts
 // apps/docs/scripts/check-manifest-sync.ts
 import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-const a = JSON.parse(fs.readFileSync('mcp-server/manifest/commands.json', 'utf-8'));
-const b = JSON.parse(fs.readFileSync('web/src/data/commands.json', 'utf-8'));
-const sort = (arr: Array<{ name: string }>) => [...arr].sort((x, y) => x.name < y.name ? -1 : 1);
-const sa = JSON.stringify(sort(a.commands));
-const sb = JSON.stringify(sort(b.commands));
-if (sa !== sb) { console.error('MCP manifests are out of sync'); process.exit(1); }
-console.log('Manifest sync check passed.');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, '../../..');
+
+export function checkSync(canonicalPath: string, copyPath: string): { passed: boolean; error?: string } {
+  let a, b;
+  try {
+    a = JSON.parse(fs.readFileSync(canonicalPath, 'utf-8'));
+  } catch { return { passed: false, error: `Cannot read canonical manifest: ${canonicalPath}` }; }
+  try {
+    b = JSON.parse(fs.readFileSync(copyPath, 'utf-8'));
+  } catch { return { passed: false, error: `Cannot read copy manifest: ${copyPath}` }; }
+
+  const sort = (arr: Array<{ name: string }>) => [...arr].sort((x, y) => x.name < y.name ? -1 : 1);
+  const sa = JSON.stringify(sort(a.commands ?? []));
+  const sb = JSON.stringify(sort(b.commands ?? []));
+  if (sa !== sb) return { passed: false, error: 'MCP manifests are out of sync' };
+  return { passed: true };
+}
+
+// CLI wrapper
+const isMainModule = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
+if (isMainModule) {
+  const result = checkSync(
+    path.join(repoRoot, 'mcp-server/manifest/commands.json'),
+    path.join(repoRoot, 'web/src/data/commands.json'),
+  );
+  if (!result.passed) { console.error(result.error); process.exit(1); }
+  console.log('Manifest sync check passed.');
+}
+```
+
+The CI step must use `npx tsx` (not bare `tsx`) to resolve from workspace node_modules:
+
+```yaml
+- name: Verify MCP manifest sync
+  run: npx tsx apps/docs/scripts/check-manifest-sync.ts
 ```
 
 ### 3.6 Manifest Schema Update
@@ -271,10 +333,10 @@ The generator:
 
 ### 4.2 Fumadocs OpenAPI Integration
 
-`fumadocs-openapi` renders the spec as interactive pages with try-it-out panels:
+`fumadocs-openapi` renders the spec as interactive pages with try-it-out panels. **This config is added only in Phase 2** — Phase 1 does not install `fumadocs-openapi` or reference `openapi.json` (the file does not exist until Phase 2).
 
 ```ts
-// apps/docs/fumadocs.config.ts
+// apps/docs/fumadocs.config.ts (Phase 2 addition — NOT present in Phase 1)
 import { generateFiles } from 'fumadocs-openapi';
 
 export default {
@@ -284,6 +346,8 @@ export default {
   },
 };
 ```
+
+> **Phase 1:** `fumadocs.config.ts` is either absent or contains an empty export. `fumadocs-openapi` is NOT in Phase 1 `package.json` — it is added in Phase 2 alongside the `openapi.json` generator.
 
 ### 4.3 Internal Route Exclusion
 
@@ -340,7 +404,6 @@ Per design system spec Section 9.1:
   "dependencies": {
     "fumadocs-core": "^14",
     "fumadocs-ui": "^14",
-    "fumadocs-openapi": "^5",
     "next": "^16",
     "react": "^19",
     "react-dom": "^19",
@@ -398,7 +461,7 @@ The MCP index page (`content/mcp/index.mdx`) provides:
 - **Category sidebar** — 37 categories listed alphabetically in the left navigation, each linking to its category page
 - **Faceted filtering** — filter commands by category and by scope (`scene:read`, `scene:write`, `query:*`, etc.)
 - **Breadcrumbs** — `Docs > MCP Commands > {Category}` on every command page
-- **Search zero results** — when search returns no matches: "No commands found for '{query}'. Try a different keyword or browse by category."
+- **Search zero results** — when search query returns no matches: "No commands found for '{query}'. Try a different keyword or browse by category." When the query is empty (user cleared the input), show the default unfiltered list — no zero-results message.
 - **Filter zero results** — when faceted filters produce no matches: "No public commands match these filters." with a "Clear filters" button that resets all active filters. Filter controls remain visible in this state.
 - **Phase 1 placeholder** — `/api/index.mdx` in Phase 1 shows: "The REST API reference is coming soon. It will be available once the API middleware ships with schema validation. In the meantime, explore the MCP command reference above." This sets a clear expectation without promising a date.
 - **Generation edge cases:**
@@ -440,19 +503,19 @@ CI gate verifies public build contains no internal content (Section 3.4).
 
 > **IMPORTANT: Deployment timing.** The internal Vercel project is NOT deployed until Phase 3. In Phases 1-2, only the public build ships. The `INCLUDE_INTERNAL` env var must NEVER be set on the public Vercel project. Only the separate internal Vercel project (created in Phase 3 with Deployment Protection enabled) may have it.
 
-**Enforcement mechanism:** The `generate-mcp-docs.ts` script logs the count of public vs internal commands at build time. The CI gate (Section 3.4) is the enforcement — it fails the build if any internal command leaks to generated MDX. As an additional safeguard, the docs `next.config.ts` includes a build-time check:
+**Enforcement mechanism:** The `generate-mcp-docs.ts` script logs the count of public vs internal commands at build time. The CI gate (Section 3.4) is the enforcement — it fails the build if any internal command leaks to generated MDX. As an additional safeguard, the docs `next.config.ts` includes a build-time check using a **custom environment variable** `IS_INTERNAL_DOCS_BUILD`:
 
 ```ts
 // apps/docs/next.config.ts
-if (process.env.INCLUDE_INTERNAL === 'true' && !process.env.VERCEL_DEPLOYMENT_PROTECTION) {
+if (process.env.INCLUDE_INTERNAL === 'true' && !process.env.IS_INTERNAL_DOCS_BUILD) {
   throw new Error(
-    'INCLUDE_INTERNAL=true requires Vercel Deployment Protection. ' +
-    'This env var must NEVER be set on the public Vercel project.'
+    'INCLUDE_INTERNAL=true requires IS_INTERNAL_DOCS_BUILD=true. ' +
+    'Only the internal Vercel project (with Deployment Protection) may have these vars.'
   );
 }
 ```
 
-This prevents accidental deployment of internal content without Deployment Protection.
+> **Note:** `VERCEL_DEPLOYMENT_PROTECTION` is NOT a real Vercel system env var. The `IS_INTERNAL_DOCS_BUILD` custom var must be manually set on the internal Vercel project alongside `INCLUDE_INTERNAL=true`. Both vars are absent from the public project. The CI gate (Section 3.4) is the primary enforcement; this build-time check is a defense-in-depth safeguard.
 
 ---
 
@@ -492,14 +555,20 @@ This prevents accidental deployment of internal content without Deployment Prote
 
 ### Unit Tests
 
-- **`generate-mcp-docs.ts`**: given commands.json with mixed visibility, assert only public commands in output. Also test:
-  - Malformed/missing `commands.json` → script exits non-zero with descriptive error
-  - Zero public commands → generates index page with "No public commands available" message
-  - Missing `.commands` field in manifest object → script exits non-zero
+- **`generate-mcp-docs.ts`**: Same testable-function pattern as `checkGate()` — extract a `generateMcpDocs(manifestPath, outputDir): { generatedCount: number, errors: string[] }` function. Tests call this function with temp directories. Cases:
+  - Mixed visibility → only public commands in output directory
+  - Malformed/missing `commands.json` → `{ errors: ['...'] }` (not `process.exit`)
+  - Zero public commands → generates index with "No public commands available" message
+  - Missing `.commands` field → `{ errors: ['...'] }`
+  - **Author name sanitization**: given git author `<script>alert(1)</script>` → HTML-escaped or omitted in generated MDX
+  - **Author name BiDi override**: given git author with `\u202e` → author field omitted entirely
 - **Visibility field validation** in `manifest.test.ts` (see Section 3.6) — ships in same PR as batch tagging
-- **Dual-file sync** (`check-manifest-sync.ts`): parse both JSON files, extract `.commands` arrays, deep-equal on name-sorted arrays. Also test:
-  - Missing file → script exits non-zero with path in error message
-  - Empty commands array → passes (both files have empty arrays)
+- **Dual-file sync** (`check-manifest-sync.ts`): Tests import `checkSync()` function directly. Cases:
+  - Both files match → `{ passed: true }`
+  - Files differ → `{ passed: false, error: '...' }`
+  - Missing canonical file → `{ passed: false, error: '...path...' }`
+  - Missing copy file → `{ passed: false, error: '...path...' }`
+  - Empty commands arrays in both → `{ passed: true }`
 - **CI gate script** (`ci-gate-check.ts`): tests in `apps/docs/scripts/__tests__/ci-gate-check.test.ts`
 
   The CI gate script uses `process.exit()` which would kill the test runner if imported directly. Tests MUST extract the core logic into a testable `checkGate(contentDir, manifestPath): { passed: boolean, errors: string[] }` function that returns a result object. The top-level script calls this function and maps the result to `process.exit()`. Tests import and call `checkGate()` directly:
@@ -557,35 +626,49 @@ This update MUST ship in the same PR as the batch tagging and manifest test upda
 
 ### 12.1 `needs-docs` CI Output
 
-The existing `ci-gate` job in `.github/workflows/ci.yml` must be extended with a new output:
+The existing `ci-gate` job in `.github/workflows/ci.yml` must be extended:
 
+**1. Add output to the `ci-gate` job outputs block:**
 ```yaml
 needs-docs:
   description: 'Whether apps/docs/** or mcp-server/manifest/** changed'
   value: ${{ steps.changes.outputs.docs }}
 ```
 
-And the path filter step must include:
-
-```yaml
-docs:
-  - 'apps/docs/**'
-  - 'mcp-server/manifest/**'
+**2. Extend the `Detect changed paths` bash `run:` block** (the step with `id: changes`):
+```bash
+docs=false
+echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
+echo "docs=$docs" >> "$GITHUB_OUTPUT"
 ```
 
-### 12.2 `apps/docs` Install Step
+**3. Extend the `any_code` condition** to include `docs`:
+```bash
+any_code=$( [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] && echo true || echo false )
+```
 
-The CI gate job must install `apps/docs` dependencies before running scripts:
+**4. The docs gate job MUST declare `needs: [ci-gate]`:**
+```yaml
+docs-internal-gate:
+  needs: [ci-gate]
+  if: ${{ needs.ci-gate.outputs.needs-docs == 'true' }}
+```
+
+### 12.2 `apps/docs` Install + Gate Steps
+
+The CI gate job runs from workspace root. Use `npx tsx` (not bare `tsx`) to resolve from workspace node_modules:
 
 ```yaml
-- run: npm ci  # Runs from workspace root, installs all workspaces including apps/docs
+- run: npm ci  # Workspace root — installs all packages including apps/docs
 - name: Generate MCP docs
-  run: cd apps/docs && npm run generate:mcp
+  run: cd apps/docs && npx tsx scripts/generate-mcp-docs.ts
 - name: Assert no internal commands in generated MDX
-  run: tsx apps/docs/scripts/ci-gate-check.ts
+  run: npx tsx apps/docs/scripts/ci-gate-check.ts
+- name: Verify MCP manifest sync
+  run: npx tsx apps/docs/scripts/check-manifest-sync.ts
 ```
 
-Since the workspace root `npm ci` installs all workspace packages (including `apps/docs`), no separate install is needed — but the generation step MUST run before the gate check.
+The generation step MUST run before the gate check (gate reads generated MDX files).
 
 ### 12.3 Content Directory Pre-creation
 
@@ -608,23 +691,36 @@ When Phase 2 ships, a corresponding CI gate must verify no internal route paths 
 
 ## 13. Success Criteria
 
+### Phase 1 (blocks merge)
+
 - [ ] `docs.spawnforge.ai` serves MCP command reference
 - [ ] Only `visibility: "public"` commands appear in public build
-- [ ] CI gate (Node.js MDX frontmatter check) fails if internal commands leak to public
-- [ ] CI gate fails if any command MDX is missing `commandName` frontmatter
-- [ ] commands.json dual-file sync enforced via JSON structural comparison in CI (targeting `.commands` array)
+- [ ] CI gate fails if internal commands leak to public MDX
+- [ ] CI gate fails if any command MDX is missing or non-string `commandName` frontmatter
+- [ ] commands.json dual-file sync enforced via `checkSync()` in CI (targeting `.commands` array)
 - [ ] Landing page clearly describes MCP vs API paths
 - [ ] Category index page has search, alphabetical sidebar, faceted filtering, breadcrumbs
-- [ ] Fumadocs `<Callout>` notice on public index page (accessible markup)
-- [ ] "Last updated" metadata shown on all Phase 1 MCP pages (bot authors omitted)
-- [ ] API placeholder on `/api` explains dependency on Plan E (no vague "next release")
-- [ ] Search and filter zero-results states show descriptive messages with clear actions
-- [ ] Mobile explicitly deferred to Phase 3 ticket
-- [ ] OpenAPI reference renders from Zod schemas (after Plan E — Phase 2)
-- [ ] Phase 2 ships with OpenAPI CI gate (Section 12.4)
-- [ ] Internal build has Vercel Deployment Protection enabled before first deploy (Phase 3)
+- [ ] Fumadocs `<Callout>` notice on public index page (verify ARIA output, add `role="note"` wrapper if needed)
+- [ ] "Last updated" metadata shown on all MCP pages (bot authors omitted, XSS-safe, BiDi-safe)
+- [ ] API placeholder on `/api` explains dependency on Plan E
+- [ ] Search zero-results and filter zero-results show distinct descriptive messages; empty query shows default list
 - [ ] No AI attribution anywhere on the site
 - [ ] Fumadocs search works for public content
-- [ ] CI gate script has unit tests via extracted `checkGate()` function
+- [ ] `checkGate()` unit tests pass (5 cases including non-string commandName)
+- [ ] `checkSync()` unit tests pass (5 cases including missing files)
+- [ ] `generateMcpDocs()` unit tests pass (6 cases including author sanitization)
 - [ ] CLAUDE.md step 15 updated with visibility field requirement
 - [ ] Batch tagging + manifest test + CLAUDE.md update ship in single atomic PR
+- [ ] Phase 3 mobile ticket created with PF-XXX ID before Phase 1 closes
+
+### Phase 2 (blocks Phase 2 merge)
+
+- [ ] OpenAPI reference renders from Zod schemas
+- [ ] OpenAPI CI gate verifies no internal routes in `openapi.json` (Section 12.4)
+- [ ] Plan E amended with `public?: boolean` on `withApiMiddleware` options
+
+### Phase 3 (blocks Phase 3 merge)
+
+- [ ] Internal Vercel project has Deployment Protection enabled before first deploy
+- [ ] `IS_INTERNAL_DOCS_BUILD=true` and `INCLUDE_INTERNAL=true` set on internal project only
+- [ ] Chromatic visual regression connected with defined snapshot pages and thresholds
