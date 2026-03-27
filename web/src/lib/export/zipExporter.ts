@@ -147,6 +147,7 @@ export async function exportAsZip(
 
   // Generate main HTML with real WASM loading
   const isEmbed = options.format === 'embed';
+  const isPwa = options.format === 'pwa';
   const html = generateZipIndexHtml({
     title: options.title,
     bgColor: options.bgColor,
@@ -158,6 +159,7 @@ export async function exportAsZip(
     hasWebGL2,
     embedBridge: isEmbed ? generatePostMessageBridge() : undefined,
     orientationLock: options.orientationLock,
+    isPwa,
   });
 
   entries.push({
@@ -176,6 +178,38 @@ export async function exportAsZip(
       path: 'README.txt',
       content: generateReadme(options.title),
     });
+  }
+
+  // Add PWA files for installable game exports
+  if (options.format === 'pwa') {
+    const { generateManifest, generateServiceWorker, generatePlaceholderIcons } = await import('./pwaGenerator');
+    entries.push({
+      path: 'manifest.json',
+      content: generateManifest({
+        title: options.title,
+        backgroundColor: options.bgColor,
+        themeColor: options.bgColor,
+      }),
+    });
+    entries.push({
+      path: 'sw.js',
+      content: generateServiceWorker(),
+    });
+    // Placeholder icons — paths must match manifest.json and sw.js references:
+    // manifest uses "icon-192.png" and "icon-512.png" at root level.
+    try {
+      const icons = await generatePlaceholderIcons(options.title);
+      for (const [name, dataUrl] of Object.entries(icons) as [string, string][]) {
+        const size = name === 'icon192' ? 192 : 512;
+        const response = await fetch(dataUrl);
+        entries.push({
+          path: `icon-${size}.png`,
+          content: await response.blob(),
+        });
+      }
+    } catch {
+      // Canvas not available (SSR/test) — skip icons
+    }
   }
 
   // Add .itch.toml for itch.io compatibility (always include for ZIP/PWA/embed)
@@ -204,8 +238,9 @@ function generateZipIndexHtml(options: {
   hasWebGL2: boolean;
   embedBridge?: string;
   orientationLock?: 'landscape' | 'portrait' | 'none';
+  isPwa?: boolean;
 }): string {
-  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock } = options;
+  const { title, bgColor: rawBgColor, resolution, includeDebug, loadingScreenHtml, loadingScript, hasWebGPU, hasWebGL2, embedBridge, orientationLock, isPwa } = options;
   const bgColor = validateCssColor(rawBgColor);
 
   const debugScript = includeDebug
@@ -242,7 +277,7 @@ function generateZipIndexHtml(options: {
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <title>${escapeHtml(title)}</title>
+  <title>${escapeHtml(title)}</title>${isPwa ? '\n  <link rel="manifest" href="manifest.json" />' : ''}
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -404,7 +439,16 @@ function generateZipIndexHtml(options: {
         if (loadingText) loadingText.textContent = 'Failed to load game. ' + err.message;
       });
     }, { once: true });
-  </script>
+  </script>${isPwa ? `
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('./sw.js')
+          .then(function(reg) { console.log('[SW] Registered:', reg.scope); })
+          .catch(function(err) { console.warn('[SW] Registration failed:', err); });
+      });
+    }
+  </script>` : ''}
 </body>
 </html>`;
 }
