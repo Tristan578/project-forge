@@ -10,6 +10,8 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
+import { DB_PROVIDER } from '@/lib/config/providers';
+
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      'elevenlabs',
+      DB_PROVIDER.sfx,
       tokenCost,
       'sfx_generation',
       { prompt: safePrompt, durationSeconds }
@@ -95,7 +97,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       audioBase64: result.audioBase64,
       durationSeconds: result.durationSeconds,
-      provider: 'elevenlabs',
+      provider: DB_PROVIDER.sfx,
     });
   } catch (err) {
     // Refund tokens on provider failure

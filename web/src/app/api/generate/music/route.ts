@@ -10,6 +10,8 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { refundTokens } from '@/lib/tokens/service';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { DB_PROVIDER } from '@/lib/config/providers';
+
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -73,7 +75,7 @@ export async function POST(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      'suno',
+      DB_PROVIDER.music,
       tokenCost,
       'music_generation',
       { prompt: safePrompt, durationSeconds, instrumental }
@@ -100,7 +102,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         jobId: result.taskId,
-        provider: 'suno',
+        provider: DB_PROVIDER.music,
         status: 'pending',
         estimatedSeconds: 60,
         usageId,

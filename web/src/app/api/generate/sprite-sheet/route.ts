@@ -10,6 +10,8 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
+import { DB_PROVIDER } from '@/lib/config/providers';
+
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -85,7 +87,7 @@ export async function POST(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      'replicate',
+      DB_PROVIDER.sprite,
       tokenCost,
       'sprite_sheet_generation',
       { prompt: safePrompt.trim(), frameCount, style, size }
@@ -113,7 +115,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         jobId: result.taskId,
-        provider: 'replicate',
+        provider: DB_PROVIDER.sprite,
         status: result.status,
         estimatedSeconds: frameCount * 10,
       },
