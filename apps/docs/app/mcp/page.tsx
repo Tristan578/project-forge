@@ -27,7 +27,7 @@ export default async function McpIndexPage() {
       <p
         style={{
           marginBottom: '1.5rem',
-          color: 'var(--sf-text-secondary, #a1a1aa)',
+          color: 'rgba(250,250,250,0.7)',
           fontSize: '1rem',
         }}
       >
@@ -60,18 +60,22 @@ export default async function McpIndexPage() {
             categories={categories}
             scopes={scopes}
             totalCommands={publicCount}
+            onFilterChange={() => {
+              // Client-side filtering is handled within the component.
+              // In a full Fumadocs integration this would update URL search params.
+            }}
           />
         </aside>
 
         {/* Main content: category list */}
         <div>
           {publicCount === 0 ? (
-            <p style={{ color: 'var(--sf-text-muted, #71717a)', fontStyle: 'italic' }}>
+            <p style={{ color: 'rgba(250,250,250,0.6)', fontStyle: 'italic' }}>
               No public commands available yet. Commands are being reviewed for public documentation.
             </p>
           ) : (
             <>
-              <p style={{ marginBottom: '1rem', color: 'var(--sf-text-secondary, #a1a1aa)', fontSize: '0.875rem' }}>
+              <p style={{ marginBottom: '1rem', color: 'rgba(250,250,250,0.7)', fontSize: '0.875rem' }}>
                 {publicCount} public commands across {categories.length} categories. Use the filters
                 to narrow your search or browse by category below.
               </p>

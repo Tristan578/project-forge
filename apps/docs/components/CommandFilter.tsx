@@ -11,13 +11,8 @@ export interface CommandFilterProps {
   totalCommands: number;
   /** Visible command count after filters are applied (controlled by parent) */
   visibleCount?: number;
-  /**
-   * Optional callback fired when filters change.
-   * Safe to omit when rendered from a Server Component — the filter state is
-   * managed internally. Pass this only when the parent needs to respond to
-   * filter changes (e.g. updating URL search params from a Client Component).
-   */
-  onFilterChange?: (filters: CommandFilters) => void;
+  /** Callback fired when filters change */
+  onFilterChange: (filters: CommandFilters) => void;
 }
 
 export interface CommandFilters {
@@ -62,7 +57,7 @@ export function CommandFilter({
       next.delete(category);
     }
     setSelectedCategories(next);
-    onFilterChange?.({ categories: next, scopes: selectedScopes });
+    onFilterChange({ categories: next, scopes: selectedScopes });
   }
 
   function handleScopeChange(scope: string, checked: boolean) {
@@ -73,13 +68,13 @@ export function CommandFilter({
       next.delete(scope);
     }
     setSelectedScopes(next);
-    onFilterChange?.({ categories: selectedCategories, scopes: next });
+    onFilterChange({ categories: selectedCategories, scopes: next });
   }
 
   function handleClearFilters() {
     setSelectedCategories(new Set());
     setSelectedScopes(new Set());
-    onFilterChange?.({ categories: new Set(), scopes: new Set() });
+    onFilterChange({ categories: new Set(), scopes: new Set() });
     // Return focus to the clear button so keyboard users stay oriented
     clearButtonRef.current?.focus();
   }
@@ -223,7 +218,7 @@ export function CommandFilter({
           aria-atomic="true"
           style={{
             fontSize: '0.75rem',
-            color: 'var(--sf-text-muted, #71717a)',
+            color: 'rgba(250,250,250,0.6)',
           }}
         >
           Showing {displayCount} {displayCount === 1 ? 'command' : 'commands'}
@@ -288,8 +283,7 @@ const clearButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: '0.75rem',
   fontWeight: 500,
-  padding: '0.625rem 0.875rem',
-  minHeight: '44px',
+  padding: '0.25rem 0.625rem',
 };
 
 const inlineTextButtonStyle: React.CSSProperties = {
@@ -298,7 +292,6 @@ const inlineTextButtonStyle: React.CSSProperties = {
   color: 'var(--accent, #3b82f6)',
   cursor: 'pointer',
   textDecoration: 'underline',
-  padding: '0.625rem 0',
-  minHeight: '44px',
+  padding: 0,
   fontSize: 'inherit',
 };
