@@ -87,6 +87,7 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 - **Command-driven**: All engine ops go through `handle_command()` JSON commands.
 - **Event-driven**: Bevy → bridge → JS callback → Zustand store → React re-render.
 - **wasm-bindgen version**: Must be 0.2.108 (pinned to match Cargo.lock).
+- **Import boundary exception**: `@spawnforge/ui` is the only allowed external import via `transpilePackages` in `next.config.ts`. All other imports must be within `web/`.
 
 ## Test Conventions
 
