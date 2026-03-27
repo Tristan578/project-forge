@@ -128,7 +128,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Step 2: verify all 3 entities are present via getStoreState helper
     const nodeIds = await editor.getStoreState<string[]>('sceneGraph.nodes')
-      .then((nodes) => Object.keys(nodes as Record<string, unknown>));
+      .then((nodes) => Object.keys(nodes as unknown as Record<string, unknown>));
 
     expect(nodeIds).toContain('rt-entity-1');
     expect(nodeIds).toContain('rt-entity-2');
@@ -569,7 +569,8 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
       if (typeof originalSave !== 'function') return;
       store.setState({
         saveScene: () => {
-          (window as unknown as Record<string, unknown>).__onDispatch?.('export_scene');
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ((window as any).__onDispatch as ((c: string) => void) | undefined)?.('export_scene');
           originalSave();
         },
       });
@@ -633,14 +634,14 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
     // Without a projectId, status should remain idle or briefly transition
     await expect.poll(
       () => page.evaluate(() => {
-        const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const store = (window as any).__EDITOR_STORE as {
           getState: () => { cloudSaveStatus: string };
         } | undefined;
-        return store?.getState().cloudSaveStatus ?? null;
+        const status = store?.getState().cloudSaveStatus ?? null;
+        return status !== null && ['idle', 'saving', 'error'].includes(status);
       }),
       { timeout: 3_000 }
-    ).toSatisfy((status: unknown) =>
-      ['idle', 'saving', 'error'].includes(status as string)
-    );
+    ).toBeTruthy();
   });
 });
