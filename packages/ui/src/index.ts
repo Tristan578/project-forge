@@ -18,3 +18,10 @@ export {
 } from './tokens';
 export { useTheme } from './hooks/useTheme';
 export type { UseThemeOptions } from './hooks/useTheme';
+
+// Tier 1 Primitives
+export { Button, type ButtonProps } from './primitives/Button';
+export { Input, type InputProps } from './primitives/Input';
+export { Badge, type BadgeProps } from './primitives/Badge';
+export { Card, type CardProps } from './primitives/Card';
+export { Label, type LabelProps } from './primitives/Label';
