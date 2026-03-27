@@ -10,6 +10,8 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
+import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
+import type { Provider } from '@/lib/db/schema';
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      'replicate',
+      DIRECT_CAPABILITY_PROVIDER.sprite as Provider,
       tokenCost,
       'tileset_generation',
       { prompt: safePrompt, tileSize, gridSize }
@@ -97,7 +99,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         jobId: result.taskId,
-        provider: 'replicate',
+        provider: DIRECT_CAPABILITY_PROVIDER.sprite,
         status: result.status,
         estimatedSeconds: 60,
       },
