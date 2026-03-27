@@ -461,16 +461,16 @@ test.describe('Welcome modal onboarding gate @ui', () => {
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
 
-    // Check "Don't show again" — scroll into view first (CI viewport is small)
+    // Check "Don't show again" — force:true bypasses viewport check
+    // CI headless Chrome viewport clips the dialog bottom; scrollIntoView doesn't help
+    // because the dialog overlay itself doesn't scroll in the expected way
     const checkbox = welcomeModal.getByRole('checkbox');
-    await checkbox.scrollIntoViewIfNeeded();
-    await checkbox.check();
+    await checkbox.check({ force: true });
     await expect(checkbox).toBeChecked();
 
     // Click Skip
     const skipBtn = welcomeModal.getByRole('button', { name: /^skip$/i });
-    await skipBtn.scrollIntoViewIfNeeded();
-    await skipBtn.click();
+    await skipBtn.click({ force: true });
     await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
 
     // forge-welcomed should now be set in localStorage
@@ -509,10 +509,10 @@ test.describe('Welcome modal onboarding gate @ui', () => {
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
 
-    // Do NOT check "Don't show again" — just click Skip (scroll first for CI viewport)
+    // Do NOT check "Don't show again" — just click Skip
+    // force:true bypasses viewport check (CI headless Chrome clips dialog bottom)
     const skipBtn = welcomeModal.getByRole('button', { name: /^skip$/i });
-    await skipBtn.scrollIntoViewIfNeeded();
-    await skipBtn.click();
+    await skipBtn.click({ force: true });
     await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
 
     // forge-welcomed must NOT be set
