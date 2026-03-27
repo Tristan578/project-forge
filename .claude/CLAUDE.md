@@ -251,7 +251,7 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 | **Architect** | `feature-dev:code-architect` | Structure, dependencies, scaling, phase ordering, monorepo, build pipeline |
 | **Security** | `security-reviewer` | Injection, auth, data exposure, validation, XSS, CSRF |
 | **DX** | `dx-guardian` | Developer workflow, onboarding, migration burden, documentation, ergonomics |
-| **UX/Frontend** | `builder` | Theme differentiation, accessibility (WCAG), component UX, Tailwind integration, performance |
+| **UX/Frontend** | `ux-reviewer` | Theme differentiation, accessibility (WCAG AA), component UX, Tailwind integration, responsive, interaction patterns |
 | **Test** | `test-writer` | Test coverage gaps, testing mechanisms, CI gates, parameterization, visual regression |
 
 **Rules:**
@@ -277,6 +277,7 @@ All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. E
 | `security-reviewer` | Auth, injection, encryption, dependency audits |
 | `test-writer` | Vitest + RTL tests, coverage gaps |
 | `infra-devops` | Deploy, CI/CD, monitoring, Vercel, Cloudflare, Neon, Upstash, Sentry |
+| `ux-reviewer` | UX antagonist, accessibility (WCAG AA), theme coherence, design system compliance |
 | `code-reviewer` | PR review, code audits, regression checks |
 | `docs-maintainer` | Documentation updates, README, CLAUDE.md |
 | `rust-engine` | Bevy ECS, bridge, WASM, engine/ code |
