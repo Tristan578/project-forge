@@ -18,6 +18,7 @@ import {
   E2E_TIMEOUT_NAV_MS,
   E2E_TIMEOUT_LOAD_MS,
 } from '../constants';
+import { waitForHydration } from '../helpers/wait-helpers';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -207,22 +208,14 @@ test.describe('Accessibility Audit — WelcomeModal @ui', () => {
       );
     });
 
-    await page.goto('/dev', { waitUntil: 'commit', timeout: E2E_TIMEOUT_LOAD_MS * 6 });
+    await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
     await page.waitForLoadState('domcontentloaded');
 
     try {
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 90_000 },
-      );
+      await waitForHydration(page, 90_000);
     } catch {
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await page.waitForFunction(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 40_000 },
-      );
+      await waitForHydration(page, 40_000);
     }
 
     const welcomeModal = page.locator(
@@ -265,7 +258,7 @@ test.describe('Accessibility Audit — Keyboard Shortcuts Panel @ui', () => {
 
     // Look for a keyboard shortcuts dialog / panel
     const panel = page
-      .locator('[role="dialog"], [data-testid="keyboard-shortcuts"]')
+      .locator('[role="dialog"][aria-labelledby="shortcuts-dialog-title"]')
       .first();
 
     const isVisible = await panel
@@ -289,7 +282,7 @@ test.describe('Accessibility Audit — Keyboard Shortcuts Panel @ui', () => {
     }
 
     const results = await new AxeBuilder({ page })
-      .include('[role="dialog"], [data-testid="keyboard-shortcuts"]')
+      .include('[role="dialog"][aria-labelledby="shortcuts-dialog-title"]')
       .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
       .disableRules(['color-contrast'])
       .analyze();
