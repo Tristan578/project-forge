@@ -1,0 +1,6 @@
+{
+  "name": "spawnforge",
+  "private": true,
+  "workspaces": ["packages/*", "apps/*", "web"],
+  "engines": { "node": ">=20" }
+}

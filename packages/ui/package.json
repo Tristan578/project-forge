@@ -1,0 +1,36 @@
+{
+  "name": "@spawnforge/ui",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./internal": { "types": "./dist/internal.d.ts", "default": "./dist/internal.js" },
+    "./tokens": { "types": "./dist/tokens/index.d.ts", "default": "./dist/tokens/index.js" },
+    "./tokens/theme.css": "./src/tokens/theme.css"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "react": "^19",
+    "react-dom": "^19"
+  },
+  "dependencies": {
+    "clsx": "^2",
+    "tailwind-merge": "^3"
+  },
+  "devDependencies": {
+    "vitest": "^4",
+    "@testing-library/react": "^16",
+    "@testing-library/jest-dom": "^6",
+    "jsdom": "^29",
+    "typescript": "^5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19"
+  }
+}
