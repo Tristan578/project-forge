@@ -210,12 +210,6 @@ export function SceneToolbar() {
         <div
           role="status"
           aria-live="polite"
-          aria-label={
-            cloudSaveStatus === 'saved' ? 'Saved to cloud' :
-            cloudSaveStatus === 'saving' ? 'Saving to cloud...' :
-            cloudSaveStatus === 'error' ? 'Cloud save error' :
-            'Not saved'
-          }
           tabIndex={0}
           className="flex h-6 w-6 items-center justify-center rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
           title={
@@ -228,6 +222,14 @@ export function SceneToolbar() {
           {cloudSaveStatus === 'saved' && <Cloud size={13} className="text-green-500" aria-hidden="true" />}
           {cloudSaveStatus === 'saving' && <Loader2 size={13} className="animate-spin text-blue-500" aria-hidden="true" />}
           {cloudSaveStatus === 'error' && <CloudOff size={13} className="text-red-500" aria-hidden="true" />}
+          {/* Visually hidden text for aria-live announcement — DOM text content
+              is required for screen readers to detect changes in live regions. */}
+          <span className="sr-only">
+            {cloudSaveStatus === 'saved' ? 'Saved to cloud' :
+             cloudSaveStatus === 'saving' ? 'Saving to cloud...' :
+             cloudSaveStatus === 'error' ? 'Cloud save error' :
+             'Not saved'}
+          </span>
         </div>
       )}
 
