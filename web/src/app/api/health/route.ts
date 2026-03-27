@@ -8,6 +8,7 @@ import {
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { logger } from '@/lib/logging/logger';
 import { captureException } from '@/lib/monitoring/sentry-server';
+import { HEALTH_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
 /** Public status vocabulary — 'healthy' is remapped to 'up'. */
 type PublicStatus = 'up' | 'degraded' | 'down';
@@ -35,7 +36,7 @@ interface CachedReport {
 }
 
 let cachedReport: CachedReport | null = null;
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_MS = HEALTH_CACHE_TTL_MS;
 
 /** Exposed for testing — resets the module-level cache. */
 export function resetHealthCache(): void {

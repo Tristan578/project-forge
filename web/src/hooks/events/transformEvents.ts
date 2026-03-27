@@ -8,8 +8,9 @@ import { setLastExportedScene } from '@/lib/storage/autoSave';
 import { invalidateSceneCache } from '@/lib/ai/cachedContext';
 import type { SceneNode } from '@/stores/slices/types';
 import { castPayload, type SetFn, type GetFn } from './types';
+import { DEBOUNCE_TRANSFORM_AUTOSAVE_MS } from '@/lib/config/timeouts';
 
-const TRANSFORM_DEBOUNCE_MS = 2000;
+const TRANSFORM_DEBOUNCE_MS = DEBOUNCE_TRANSFORM_AUTOSAVE_MS;
 
 // Debounced auto-save: triggers export_scene command after inactivity
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;

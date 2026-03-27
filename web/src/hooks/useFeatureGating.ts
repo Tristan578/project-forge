@@ -9,6 +9,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ProviderCapability } from '@/lib/providers/types';
 import type { CapabilitiesResponse, CapabilityStatus } from '@/app/api/capabilities/route';
+import { ERROR_TTL_MS } from '@/lib/config/timeouts';
 
 /** High-level feature identifiers that map to one or more provider capabilities */
 export type FeatureId =
@@ -72,8 +73,8 @@ let cachedState: CapabilitiesState | null = null;
 let fetchPromise: Promise<void> | null = null;
 let subscribers: Array<() => void> = [];
 
-/** TTL for error states — allows retry after 30 seconds (PF-508) */
-export const ERROR_TTL_MS = 30_000;
+/** TTL for error states — allows retry after 30 seconds (PF-508). Re-exported from @/lib/config/timeouts */
+export { ERROR_TTL_MS } from '@/lib/config/timeouts';
 let errorCachedAt: number | null = null;
 
 function notifySubscribers(): void {

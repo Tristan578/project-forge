@@ -10,12 +10,14 @@ import {
   clearInitEvents,
 } from '@/lib/initLog';
 
+import { ENGINE_GLOBAL_TIMEOUT_MS } from '@/lib/config/timeouts';
+
 // Timeout thresholds in milliseconds
 const PHASE_TIMEOUTS: Partial<Record<InitPhase, number>> = {
   wasm_loading: 10_000,
   renderer_init: 15_000,
 };
-const GLOBAL_TIMEOUT = 30_000;
+const GLOBAL_TIMEOUT = ENGINE_GLOBAL_TIMEOUT_MS;
 const MAX_RETRIES = 3;
 
 export interface PhaseStatus {

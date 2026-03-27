@@ -4,6 +4,7 @@ import { emitStatusEvent } from './useEngineStatus';
 import { captureException, setTag } from '@/lib/monitoring/sentry-client';
 import { showError } from '@/lib/toast';
 import { fetchWasmWithMetrics } from '@/lib/monitoring/cdnAnalytics';
+import { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
 
 /** Loading progress state exported for UI components to display progress feedback. */
 export type LoadingPhase = 'idle' | 'detecting' | 'downloading' | 'initializing' | 'ready' | 'error';
@@ -14,9 +15,8 @@ export interface LoadingState {
   error?: string;
 }
 
-/** Timeout constants (exported for testing) */
-export const GPU_INIT_TIMEOUT_MS = 30_000;
-export const WASM_FETCH_TIMEOUT_MS = 60_000;
+// Re-export for backwards compatibility (tests import from this module)
+export { GPU_INIT_TIMEOUT_MS, WASM_FETCH_TIMEOUT_MS } from '@/lib/config/timeouts';
 
 let currentLoadingState: LoadingState = { phase: 'idle' };
 type LoadingStateListener = (state: LoadingState) => void;

@@ -1,12 +1,13 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useEngine } from './useEngine';
+import { DEBOUNCE_VIEWPORT_MS } from '@/lib/config/timeouts';
 
 // Viewport constraints from spec
 const MIN_WIDTH = 375;
 const MIN_HEIGHT = 667;
 const MAX_WIDTH = 3840;
 const MAX_HEIGHT = 2160;
-const DEBOUNCE_MS = 100;
+const DEBOUNCE_MS = DEBOUNCE_VIEWPORT_MS;
 
 export type ViewportBreakpoint =
   | 'mobile'

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { TIP_COOLDOWN_MS } from '@/lib/config/timeouts';
 
 export type OnboardingPath = 'ai' | 'template' | 'blank' | 'tour';
 export type VisibilityTier = 'novice' | 'intermediate' | 'advanced' | 'expert';
@@ -181,7 +182,7 @@ export const useOnboardingStore = create<OnboardingState>()(
         const state = get();
         set({
           dismissedTips: [...state.dismissedTips, tipId],
-          tipCooldownUntil: Date.now() + 30000, // 30 seconds
+          tipCooldownUntil: Date.now() + TIP_COOLDOWN_MS,
         });
       },
 

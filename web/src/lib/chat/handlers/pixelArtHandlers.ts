@@ -7,14 +7,18 @@ import type { ToolHandler, ExecutionResult } from './types';
 import { PALETTES, getPalette, validateCustomPalette } from '@/lib/generate/palettes';
 import type { PaletteId } from '@/lib/generate/palettes';
 import { trackJob, makeJobId } from './generationHandlers';
+import {
+  PIXEL_ART_SIZES,
+  PIXEL_ART_DITHERING_MODES,
+  PIXEL_ART_STYLES,
+  type PixelArtStyle,
+  type DitheringMode,
+} from '@/lib/config/providers';
 
 const VALID_PALETTE_IDS = Object.keys(PALETTES) as PaletteId[];
-const VALID_SIZES = [16, 32, 64, 128] as const;
-const VALID_DITHERING = ['none', 'bayer4x4', 'bayer8x8'] as const;
-const VALID_STYLES = ['character', 'prop', 'tile', 'icon', 'environment'] as const;
-
-type DitheringMode = (typeof VALID_DITHERING)[number];
-type PixelArtStyle = (typeof VALID_STYLES)[number];
+const VALID_SIZES = PIXEL_ART_SIZES;
+const VALID_DITHERING = PIXEL_ART_DITHERING_MODES;
+const VALID_STYLES = PIXEL_ART_STYLES;
 
 export const handleGeneratePixelArt: ToolHandler = async (args): Promise<ExecutionResult> => {
   const prompt = args['prompt'];

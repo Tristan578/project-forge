@@ -15,6 +15,19 @@
  * rejected immediately when OPEN.
  */
 
+import {
+  PROVIDER_NAMES,
+  CIRCUIT_BREAKER_DEFAULTS,
+  type ProviderName,
+} from '@/lib/config/providers';
+import {
+  CIRCUIT_BREAKER_WINDOW_MS,
+  CIRCUIT_BREAKER_HALF_OPEN_MS,
+} from '@/lib/config/timeouts';
+
+// Re-export ProviderName from centralized config
+export type { ProviderName } from '@/lib/config/providers';
+
 export type ProviderCircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
 
 export interface ProviderCircuitStats {
@@ -268,19 +281,6 @@ export class ProviderCircuitBreaker {
 // Registry — singleton breakers per provider
 // ---------------------------------------------------------------------------
 
-/** All known AI providers that need circuit breaking. */
-export type ProviderName =
-  | 'anthropic'
-  | 'openai'
-  | 'meshy'
-  | 'elevenlabs'
-  | 'suno'
-  | 'replicate'
-  | 'removebg'
-  | 'openrouter'
-  | 'vercel-gateway'
-  | 'github-models';
-
 const BREAKER_REGISTRY = new Map<ProviderName, ProviderCircuitBreaker>();
 
 /**
@@ -292,11 +292,11 @@ export function getProviderBreaker(provider: ProviderName): ProviderCircuitBreak
   if (existing) return existing;
 
   const breaker = new ProviderCircuitBreaker(provider, {
-    windowMs: 5 * 60 * 1000,       // 5-minute sliding window
-    errorRateThreshold: 0.5,         // 50% error rate trips the circuit
-    minRequestsToEvaluate: 3,        // Minimum 3 requests before evaluating
-    costAnomalyMultiplier: 2,        // 2× estimated cost triggers anomaly
-    halfOpenAfterMs: 60 * 1000,      // 60 seconds before probing
+    windowMs: CIRCUIT_BREAKER_WINDOW_MS,
+    errorRateThreshold: CIRCUIT_BREAKER_DEFAULTS.errorRateThreshold,
+    minRequestsToEvaluate: CIRCUIT_BREAKER_DEFAULTS.minRequestsToEvaluate,
+    costAnomalyMultiplier: CIRCUIT_BREAKER_DEFAULTS.costAnomalyMultiplier,
+    halfOpenAfterMs: CIRCUIT_BREAKER_HALF_OPEN_MS,
   });
 
   BREAKER_REGISTRY.set(provider, breaker);
@@ -307,12 +307,7 @@ export function getProviderBreaker(provider: ProviderName): ProviderCircuitBreak
  * Get all circuit breaker states — used by the admin endpoint.
  */
 export function getAllBreakerStats(): ProviderCircuitStats[] {
-  const allProviders: ProviderName[] = [
-    'anthropic', 'openai', 'meshy', 'elevenlabs', 'suno',
-    'replicate', 'removebg', 'openrouter', 'vercel-gateway', 'github-models',
-  ];
-
-  return allProviders.map((name) => getProviderBreaker(name).getStats());
+  return [...PROVIDER_NAMES].map((name) => getProviderBreaker(name).getStats());
 }
 
 /**
@@ -336,11 +331,11 @@ export function resetProviderBreaker(provider: ProviderName): void {
     BREAKER_REGISTRY.set(
       provider,
       new ProviderCircuitBreaker(provider, {
-        windowMs: 5 * 60 * 1000,
-        errorRateThreshold: 0.5,
-        minRequestsToEvaluate: 3,
-        costAnomalyMultiplier: 2,
-        halfOpenAfterMs: 60 * 1000,
+        windowMs: CIRCUIT_BREAKER_WINDOW_MS,
+        errorRateThreshold: CIRCUIT_BREAKER_DEFAULTS.errorRateThreshold,
+        minRequestsToEvaluate: CIRCUIT_BREAKER_DEFAULTS.minRequestsToEvaluate,
+        costAnomalyMultiplier: CIRCUIT_BREAKER_DEFAULTS.costAnomalyMultiplier,
+        halfOpenAfterMs: CIRCUIT_BREAKER_HALF_OPEN_MS,
       })
     );
   }

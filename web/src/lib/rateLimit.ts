@@ -1,4 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  RATE_LIMIT_PUBLIC_WINDOW_MS,
+  RATE_LIMIT_ADMIN_WINDOW_MS,
+  RATE_LIMIT_PUBLIC_MAX,
+  RATE_LIMIT_ADMIN_MAX,
+} from '@/lib/config/timeouts';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -253,8 +259,8 @@ export function rateLimitResponse(remaining: number, resetAt: number): NextRespo
 export async function rateLimitPublicRoute(
   req: NextRequest,
   endpoint: string,
-  maxRequests: number = 30,
-  windowMs: number = 5 * 60 * 1000
+  maxRequests: number = RATE_LIMIT_PUBLIC_MAX,
+  windowMs: number = RATE_LIMIT_PUBLIC_WINDOW_MS
 ): Promise<NextResponse | null> {
   const ip = getClientIp(req);
   const key = `public:${endpoint}:${ip}`;
@@ -274,8 +280,8 @@ export async function rateLimitPublicRoute(
 export async function rateLimitAdminRoute(
   userId: string,
   endpoint: string,
-  maxRequests: number = 10,
-  windowMs: number = 60_000
+  maxRequests: number = RATE_LIMIT_ADMIN_MAX,
+  windowMs: number = RATE_LIMIT_ADMIN_WINDOW_MS
 ): Promise<NextResponse | null> {
   const key = `admin:${endpoint}:${userId}`;
   const result = await rateLimit(key, maxRequests, windowMs);

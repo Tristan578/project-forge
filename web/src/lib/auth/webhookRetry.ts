@@ -13,6 +13,8 @@
  * For durable retry, migrate to a persistent queue (DB table, Redis, SQS).
  */
 
+import { WEBHOOK_RETRY_MAX_DELAY_MS } from '@/lib/config/timeouts';
+
 export interface RetryEntry {
   id: string;
   eventType: string;
@@ -33,7 +35,7 @@ export interface RetryQueueConfig {
 const DEFAULT_CONFIG: RetryQueueConfig = {
   maxRetries: 5,
   baseDelayMs: 1000,
-  maxDelayMs: 60_000,
+  maxDelayMs: WEBHOOK_RETRY_MAX_DELAY_MS,
   maxQueueSize: 100,
 };
 

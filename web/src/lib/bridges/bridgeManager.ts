@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { homedir, platform } from 'os';
 import { join } from 'path';
 import type { BridgeToolConfig, BridgeToolStatus, BridgesConfig, PlatformPaths } from './types';
+import { BRIDGE_CACHE_TTL_MS } from '@/lib/config/timeouts';
 
 const CONFIG_DIR = join(homedir(), '.spawnforge');
 const CONFIG_FILE = join(CONFIG_DIR, 'bridges.json');
@@ -153,8 +154,8 @@ function getVersion(binaryPath: string): Promise<{ version: string | null; error
 // Cache discovery results to avoid spawning child processes on every API call.
 // TTL: 60 seconds — stale discovery is acceptable for a local tool check.
 const discoveryCache = new Map<string, { result: BridgeToolConfig; expires: number }>();
-const CACHE_TTL_MS = 60_000;
-const ERROR_CACHE_TTL_MS = 5 * 60_000; // 5-minute TTL for negative results (PF-509)
+const CACHE_TTL_MS = BRIDGE_CACHE_TTL_MS;
+const ERROR_CACHE_TTL_MS = 5 * 60_000; // 5-minute TTL for negative results (PF-509) — intentionally 5x BRIDGE_CACHE_TTL_MS
 
 /** Discover a bridge tool: find binary, check version, return config. */
 export async function discoverTool(toolId: string): Promise<BridgeToolConfig> {

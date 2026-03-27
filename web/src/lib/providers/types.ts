@@ -3,29 +3,14 @@
  *
  * Defines the capability taxonomy, backend identifiers, and the ProviderBackend
  * interface used by all concrete backend implementations.
+ *
+ * ProviderCapability and BackendId are sourced from @/lib/config/providers
+ * and re-exported here for backwards compatibility.
  */
 
-/** All capability types that a backend can support */
-export type ProviderCapability =
-  | 'chat'
-  | 'embedding'
-  | 'image'
-  | 'model3d'
-  | 'texture'
-  | 'sfx'
-  | 'voice'
-  | 'music'
-  | 'sprite'
-  | 'bg_removal';
-
-/** All supported backend identifiers */
-export type BackendId =
-  | 'direct'
-  | 'vercel-gateway'
-  | 'openrouter'
-  | 'github-models'
-  | 'cloudflare-ai'
-  | 'byok';
+// Re-export canonical types from centralized config (also imported for local interface use below)
+import type { ProviderCapability, BackendId } from '@/lib/config/providers';
+export type { ProviderCapability, BackendId };
 
 /**
  * A resolved route — everything needed to make an API call through a

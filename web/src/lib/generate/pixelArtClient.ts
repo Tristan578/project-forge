@@ -2,7 +2,8 @@
 // web/src/lib/generate/pixelArtClient.ts
 import 'server-only';
 
-export type PixelArtStyle = 'character' | 'prop' | 'tile' | 'icon' | 'environment';
+export type { PixelArtStyle } from '@/lib/config/providers';
+import type { PixelArtStyle } from '@/lib/config/providers';
 export type PixelArtProvider = 'openai' | 'replicate';
 
 interface GenerateParams {
