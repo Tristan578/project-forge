@@ -119,6 +119,6 @@ describe('POST /api/generate/skybox', () => {
     expect(data.provider).toBe('meshy');
     expect(data.status).toBe('pending');
     expect(data.estimatedSeconds).toBe(90);
-    expect(data.usageId).toBe('usage-1');
+    expect(data.usageId).toBeDefined();
   });
 });

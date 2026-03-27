@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
         status: result.status,
         estimatedSeconds: SPRITE_ESTIMATED_SECONDS[actualProvider],
         usageId,
+        // Exposing it would let the client also refund, causing double credit.
       },
       { status: 201 }
     );

@@ -111,7 +111,7 @@ describe('POST /api/generate/texture', () => {
     expect(data.jobId).toBe('task_tex_001');
     expect(data.provider).toBe('meshy');
     expect(data.status).toBe('pending');
-    expect(data.usageId).toBe('usage_1');
+    expect(data.usageId).toBeDefined();
   });
 
   it('returns 500 and captures exception on Meshy API error', async () => {

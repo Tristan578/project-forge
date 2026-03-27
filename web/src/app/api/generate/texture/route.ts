@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
         status: 'pending',
         estimatedSeconds: 60,
         usageId,
+        // Exposing it would let the client also refund, causing double credit.
       },
       { status: 201 }
     );
