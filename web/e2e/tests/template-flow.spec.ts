@@ -461,16 +461,23 @@ test.describe('Welcome modal onboarding gate @ui', () => {
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
 
-    // Check "Don't show again" — force:true bypasses viewport check
-    // CI headless Chrome viewport clips the dialog bottom; scrollIntoView doesn't help
-    // because the dialog overlay itself doesn't scroll in the expected way
+    // Check "Don't show again" via JS click — CI viewport clips the dialog bottom
+    // and Playwright refuses to interact even with force:true (viewport constraint)
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-labelledby="welcome-modal-title"]');
+      const cb = dialog?.querySelector('input[type="checkbox"]') as HTMLInputElement | null;
+      if (cb) { cb.click(); }
+    });
     const checkbox = welcomeModal.getByRole('checkbox');
-    await checkbox.check({ force: true });
     await expect(checkbox).toBeChecked();
 
-    // Click Skip
-    const skipBtn = welcomeModal.getByRole('button', { name: /^skip$/i });
-    await skipBtn.click({ force: true });
+    // Click Skip via JS
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-labelledby="welcome-modal-title"]');
+      const btns = dialog?.querySelectorAll('button');
+      const skip = Array.from(btns ?? []).find(b => /^skip$/i.test(b.textContent?.trim() ?? ''));
+      if (skip) { skip.click(); }
+    });
     await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
 
     // forge-welcomed should now be set in localStorage
@@ -509,10 +516,14 @@ test.describe('Welcome modal onboarding gate @ui', () => {
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
 
-    // Do NOT check "Don't show again" — just click Skip
-    // force:true bypasses viewport check (CI headless Chrome clips dialog bottom)
-    const skipBtn = welcomeModal.getByRole('button', { name: /^skip$/i });
-    await skipBtn.click({ force: true });
+    // Do NOT check "Don't show again" — just click Skip via JS
+    // CI viewport clips dialog bottom; Playwright refuses interaction even with force:true
+    await page.evaluate(() => {
+      const dialog = document.querySelector('[role="dialog"][aria-labelledby="welcome-modal-title"]');
+      const btns = dialog?.querySelectorAll('button');
+      const skip = Array.from(btns ?? []).find(b => /^skip$/i.test(b.textContent?.trim() ?? ''));
+      if (skip) { skip.click(); }
+    });
     await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
 
     // forge-welcomed must NOT be set
