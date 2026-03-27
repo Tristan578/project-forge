@@ -20,11 +20,16 @@ vi.mock('../BillingTab', () => ({
   BillingTab: () => <div data-testid="billing-tab">BillingTab</div>,
 }));
 
+vi.mock('../AppearanceTab', () => ({
+  AppearanceTab: () => <div data-testid="appearance-tab">AppearanceTab</div>,
+}));
+
 vi.mock('lucide-react', () => ({
   Settings: (props: Record<string, unknown>) => <span data-testid="settings-icon" {...props} />,
   Coins: (props: Record<string, unknown>) => <span data-testid="coins-icon" {...props} />,
   Key: (props: Record<string, unknown>) => <span data-testid="key-icon" {...props} />,
   CreditCard: (props: Record<string, unknown>) => <span data-testid="credit-card-icon" {...props} />,
+  Palette: (props: Record<string, unknown>) => <span data-testid="palette-icon" {...props} />,
   X: (props: Record<string, unknown>) => <span data-testid="x-icon" {...props} />,
 }));
 
@@ -64,6 +69,11 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('tab', { name: /Billing/ })).toBeDefined();
   });
 
+  it('renders Appearance tab button', () => {
+    render(<SettingsPanel onClose={mockOnClose} />);
+    expect(screen.getByRole('tab', { name: /Appearance/ })).toBeDefined();
+  });
+
   it('shows TokenDashboard by default', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
     expect(screen.getByTestId('token-dashboard')).toBeDefined();
@@ -79,6 +89,12 @@ describe('SettingsPanel', () => {
     render(<SettingsPanel onClose={mockOnClose} />);
     fireEvent.click(screen.getByRole('tab', { name: /Billing/ }));
     expect(screen.getByTestId('billing-tab')).toBeDefined();
+  });
+
+  it('shows AppearanceTab when Appearance tab clicked', () => {
+    render(<SettingsPanel onClose={mockOnClose} />);
+    fireEvent.click(screen.getByRole('tab', { name: /Appearance/ }));
+    expect(screen.getByTestId('appearance-tab')).toBeDefined();
   });
 
   it('calls onClose when X button clicked', () => {
