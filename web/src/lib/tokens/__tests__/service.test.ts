@@ -32,7 +32,7 @@ function resetChain() {
 }
 
 const mockNeonSql = Object.assign(
-  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]) => ({ query: 'mock' })),
+  vi.fn((_strings: TemplateStringsArray, ..._values: unknown[]): unknown => ({ query: 'mock' })),
   { transaction: vi.fn().mockResolvedValue(undefined) }
 );
 
