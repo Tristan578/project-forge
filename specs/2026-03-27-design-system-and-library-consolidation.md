@@ -348,7 +348,7 @@ Effects use: CSS animations, SVG `<animate>`, CSS gradients, `border-image`, pse
 
 ### 5.4 Testing
 
-**Visual regression (Chromatic) is MANDATORY.** One snapshot per theme (effects on + off) = 14 baselines.
+**Visual regression (Chromatic) is MANDATORY.** 13 baselines minimum: Dark = 1 (no effects), other 6 themes = 2 each (effects on + off).
 
 - **Playwright:** Assert `[data-sf-effect]` element exists, `animationName !== 'none'`, `pointer-events: none`, z-index matches.
 - **Reduced motion (Playwright):** `page.emulateMedia({ reducedMotion: 'reduce' })` → effect container not rendered.
@@ -380,7 +380,7 @@ Effects use: CSS animations, SVG `<animate>`, CSS gradients, `border-image`, pse
 - **Colors:** `/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/` (hex only). Extends existing `validateCssColor()` pattern.
 - **Lengths:** `/^\d+(\.\d+)?(px|rem)$/`
 - **Fonts:** Exact allowlist (Section 4.8). No free-text.
-- **Durations:** `/^\d+(ms|s)$/`
+- **Durations:** `/^\d+ms$/` (ms only — `s` unit rejected to avoid normalization bugs). Max 2000ms.
 - **Metadata:** `name`/`author` max 64 chars, `description` max 256. Rendered via React default escaping only.
 - **File size:** 50KB max.
 - **`schemaVersion`:** Required, positive integer. Missing/invalid → reject.
@@ -404,6 +404,9 @@ v1 = Section 4.2 catalog. Additive = non-breaking. Rename/remove = v2 with migra
 | `"--sf-accent": null` | Rejected (not string) |
 | `"--sf-font-ui": "Comic Sans"` | Rejected (not in allowlist) |
 | `"--sf-font-mono": "'x', url(//evil)"` | Rejected |
+| `"--sf-transition": "3s"` | Rejected (s unit not allowed, ms only) |
+| `"--sf-transition": "5000ms"` | Rejected (exceeds 2000ms max) |
+| `"--sf-radius-md": "100px"` | Rejected (exceeds 64px max) |
 | Unknown key `--sf-custom-foo` | Dropped |
 | 60KB JSON | Rejected (>50KB) |
 | `name` 200 chars | Rejected (>64) |
@@ -534,7 +537,7 @@ CSS-only effects → no CPU profiling. Lighthouse gate: score must not drop >3 p
 
 1. Decide tier (primitive/composite/internal)
 2. Create in `packages/ui/src/{tier}/`
-3. Use tokens: `cn('bg-sf-bg-surface text-sf-text')`
+3. Use tokens: `cn('sf-surface sf-text sf-border')` (utility shortcuts) or `cn('bg-[var(--sf-bg-surface)] text-[var(--sf-text)]')` (canonical long form)
 4. Export in `index.ts` (tiers 1+2) or `internal.ts` (tier 3)
 5. Tests: parameterized 7 themes, axe, keyboard, all prop variants
 6. Story in `apps/design/stories/{tier}/`
@@ -619,7 +622,7 @@ CSS-only effects → no CPU profiling. Lighthouse gate: score must not drop >3 p
 13. **useTheme() test spec** — Unit tests for: resolution priority chain (custom > project > global > dark), invalid localStorage fallback, reduced-motion forces effects off, per-project override applies.
 14. **Font allowlist** — Built-in themes bypass custom theme validator (trusted static values). Custom themes validated against allowlist. Add bare 'Geist Sans' and 'Geist Mono' to allowlist for completeness.
 15. **ValidatedTheme type** — themeValidator.ts returns ValidatedTheme type. applyThemeTokens(theme: ValidatedTheme) is the sole DOM application call site. style.setProperty only called with validated values.
-16. **Numeric bounds** — Duration max 2000ms, length max 64px/4rem. Enforced as numeric check after regex match.
+16. **Numeric bounds** — Duration max 2000ms, length max 64px/4rem. Duration regex rejects `s` unit entirely — only `ms` accepted (simplest, avoids normalization bugs). Length numeric check after regex match. Add negative test case for `"3s"` → rejected.
 17. **Duplicate custom theme name** — On import, if name matches existing custom theme, prompt: "Replace existing theme '{name}'?" Yes replaces, No cancels.
 18. **Effects resolution** — sf-effects is global, not per-project. Effects off = off everywhere regardless of project theme.
 19. **Error message consistency** — schemaVersion future rejection: "This theme requires SpawnForge v{schemaVersion}. Your version supports v1."
