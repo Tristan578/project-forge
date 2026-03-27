@@ -46,14 +46,40 @@ fi
 ERRORS=""
 
 # 1. TypeScript check (fast, catches type errors from merge conflicts)
+# Retries once on Node 25.x JIT segfaults (exit codes 139/134/136 or
+# 'libnode' appearing in output, which indicates a V8 JIT crash).
 if echo "$CHANGED_FILES" | grep -qE '\.(ts|tsx)$'; then
   TSC_BIN="$WEB_DIR/node_modules/.bin/tsc"
   if [ ! -x "$TSC_BIN" ]; then exit 0; fi
-  TSC_OUTPUT=$(set +e; "$TSC_BIN" --noEmit 2>&1; echo "___TSC_RC___:$?") || true
-  TSC_EXIT=$(echo "$TSC_OUTPUT" | grep -o '___TSC_RC___:[0-9]*' | cut -d: -f2)
-  TSC_OUTPUT=$(echo "$TSC_OUTPUT" | grep -v '___TSC_RC___:')
-  if [ "$TSC_EXIT" = "139" ] || [ "$TSC_EXIT" = "134" ] || [ "$TSC_EXIT" = "136" ]; then
-    echo "[pre-push] WARNING: tsc crashed (signal $(( TSC_EXIT - 128 )), likely Node runtime bug). Allowing push — CI (Node 20) will catch real errors." >&2
+
+  run_tsc() {
+    TSC_OUTPUT=$(set +e; "$TSC_BIN" --noEmit 2>&1; echo "___TSC_RC___:$?") || true
+    TSC_EXIT=$(echo "$TSC_OUTPUT" | grep -o '___TSC_RC___:[0-9]*' | cut -d: -f2)
+    TSC_OUTPUT=$(echo "$TSC_OUTPUT" | grep -v '___TSC_RC___:')
+  }
+
+  is_jit_segfault() {
+    local exit_code="$1"
+    local output="$2"
+    # Signal exits: 139=SIGSEGV, 134=SIGABRT, 136=SIGFPE
+    if [ "$exit_code" = "139" ] || [ "$exit_code" = "134" ] || [ "$exit_code" = "136" ]; then
+      return 0
+    fi
+    # libnode in the output indicates a Node runtime crash (V8 JIT)
+    if echo "$output" | grep -q 'libnode'; then
+      return 0
+    fi
+    return 1
+  }
+
+  run_tsc
+  if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+    echo "[pre-push] WARNING: tsc crashed (Node JIT segfault, likely Node 25.x V8 bug). Retrying once..." >&2
+    run_tsc
+  fi
+
+  if is_jit_segfault "$TSC_EXIT" "$TSC_OUTPUT"; then
+    echo "[pre-push] WARNING: tsc crashed twice (signal exit / libnode). Allowing push — CI (Node 20) will catch real errors." >&2
   elif [ "$TSC_EXIT" != "0" ] && [ -n "$TSC_EXIT" ]; then
     echo "$TSC_OUTPUT" | tail -10 >&2
     ERRORS="${ERRORS}TypeScript errors found. "
