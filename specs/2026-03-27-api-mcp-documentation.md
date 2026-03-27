@@ -26,8 +26,8 @@ A dedicated documentation site at `docs.spawnforge.ai` serving API reference (Op
 
 ### Prerequisites
 
-- **Plan A Phase 0** must complete first: workspace bootstrap creates the `apps/` directory that this spec's `apps/docs` site lives inside.
-- **Phase 2 depends on Plan E**: OpenAPI generation requires the `withApiMiddleware` `validate` field (Zod schema extraction) introduced in Plan E.
+- **Plan A Phase 0** (spec: `docs/superpowers/plans/2026-03-27-design-system-implementation.md`, Tasks A1-A3) must complete first: workspace bootstrap creates the root `package.json` with `workspaces: ["packages/*", "apps/*", "web"]` and the npm workspace structure that this spec's `apps/docs` site lives inside.
+- **Phase 2 depends on Plan E** (spec: `docs/superpowers/plans/2026-03-27-plan-e-backend-consolidation.md`): OpenAPI generation requires the `withApiMiddleware` helper to accept a `validate` option containing Zod schemas for request body/query/params. The `validate` option signature is: `validate: { body?: ZodSchema, query?: ZodSchema, params?: ZodSchema }`. Phase 2 cannot start until Plan E ships this interface.
 
 ---
 
@@ -306,11 +306,13 @@ Last updated: {date} by {author}
 This metadata is included **starting in Phase 1** (not deferred to Phase 3), so every MCP command page ships with accurate attribution from day one.
 
 - `{date}` — ISO 8601 from `git log -1 --format='%aI' -- <canonical-source>`
-- `{author}` — from `git log -1 --format='%an' -- <canonical-source>`
+- `{author}` — from a **separate** `git log -1 --format='%an' -- <canonical-source>` call (not pipe-delimited with date, since author names can contain `|`)
 - **Canonical source** for MCP docs: `mcp-server/manifest/commands.json`
 - **Canonical source** for API docs: the route handler `.ts` file
 - If git metadata unavailable (generated files, CI builds): omit author field entirely. Never hardcode a name.
-- **Author name MUST be HTML-escaped** before interpolation (`<`, `>`, `&`, `"` replaced). Git author names are user-controlled strings. If the escaped string contains non-printable characters, omit the author field entirely.
+- If the last commit author matches a bot pattern (`/bot\b/i` or `github-actions`): omit the author field. Only display human author names.
+- **Author name MUST be HTML-escaped** before interpolation (`<`, `>`, `&`, `"` replaced). Git author names are user-controlled strings.
+- **Non-printable character check:** After escaping, test against `/[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060\ufeff]/`. If any match, omit the author field entirely. This covers ASCII control characters, zero-width spaces, BiDi overrides, and BOM.
 
 ### 5.2 Branding
 
@@ -348,7 +350,6 @@ Per design system spec Section 9.1:
     "tsx": "^4",
     "typescript": "^5"
   }
-}
 }
 ```
 
@@ -397,8 +398,9 @@ The MCP index page (`content/mcp/index.mdx`) provides:
 - **Category sidebar** — 37 categories listed alphabetically in the left navigation, each linking to its category page
 - **Faceted filtering** — filter commands by category and by scope (`scene:read`, `scene:write`, `query:*`, etc.)
 - **Breadcrumbs** — `Docs > MCP Commands > {Category}` on every command page
-- **Zero results state** — when search returns no matches: "No commands found for '{query}'. Try a different keyword or browse by category."
-- **Phase 1 placeholder** — "API reference is available after the next release." shown on `/api/index.mdx` in Phase 1 before Plan E completes.
+- **Search zero results** — when search returns no matches: "No commands found for '{query}'. Try a different keyword or browse by category."
+- **Filter zero results** — when faceted filters produce no matches: "No public commands match these filters." with a "Clear filters" button that resets all active filters. Filter controls remain visible in this state.
+- **Phase 1 placeholder** — `/api/index.mdx` in Phase 1 shows: "The REST API reference is coming soon. It will be available once the API middleware ships with schema validation. In the meantime, explore the MCP command reference above." This sets a clear expectation without promising a date.
 - **Generation edge cases:**
   - If `generate-mcp-docs.ts` produces zero public commands (all internal), the MCP index page shows: "No public commands available yet. Commands are being reviewed for public documentation."
   - If `commands.json` is malformed or missing, the generation script exits with a clear error and the docs build fails (never deploys a broken site).
@@ -421,7 +423,7 @@ This applies to category index pages as well when a category has both public and
 
 ### 7.4 Mobile Responsiveness
 
-Fumadocs responsive defaults are accepted for mobile. No custom breakpoints or mobile-specific overrides are required in Phase 1. The built-in Fumadocs sidebar collapse and responsive layout are sufficient.
+Fumadocs responsive defaults are accepted for Phase 1 mobile. Mobile is explicitly **out of scope for custom work in Phase 1**. A Phase 3 ticket will be created for mobile verification against 44px touch targets and 320px minimum viewport. Fumadocs 14.x uses Radix-based sidebar collapse and responsive navigation which handles the most common mobile patterns.
 
 **Loading states:** All pages are statically generated at build time (SSG). No client-side data fetching occurs during page load, so no loading skeleton or progress indicator is needed. The generated MDX is pre-rendered HTML — pages load instantly from Vercel's CDN.
 
@@ -539,25 +541,90 @@ Test cases:
 
 ## 11. New Command Checklist Note
 
-When adding a new MCP command (per CLAUDE.md step 15), the `visibility` field MUST be included in the manifest entry. Tag it explicitly as `"public"` or `"internal"` — do not rely on the default. Update CLAUDE.md step 15 to include: "Set `visibility: 'public'` or `visibility: 'internal'` on every new command."
+When adding a new MCP command (per CLAUDE.md step 15), the `visibility` field MUST be included in the manifest entry. Tag it explicitly as `"public"` or `"internal"` — do not rely on the default.
+
+**Exact CLAUDE.md update** — replace the current step 15 text with:
+
+```
+15. `mcp-server/manifest/commands.json` — MCP commands. Set `visibility: 'public'` or `visibility: 'internal'` on every new command (mandatory — manifest tests will fail without it).
+```
+
+This update MUST ship in the same PR as the batch tagging and manifest test update — not deferred.
 
 ---
 
-## 12. Success Criteria
+## 12. CI Integration Details
+
+### 12.1 `needs-docs` CI Output
+
+The existing `ci-gate` job in `.github/workflows/ci.yml` must be extended with a new output:
+
+```yaml
+needs-docs:
+  description: 'Whether apps/docs/** or mcp-server/manifest/** changed'
+  value: ${{ steps.changes.outputs.docs }}
+```
+
+And the path filter step must include:
+
+```yaml
+docs:
+  - 'apps/docs/**'
+  - 'mcp-server/manifest/**'
+```
+
+### 12.2 `apps/docs` Install Step
+
+The CI gate job must install `apps/docs` dependencies before running scripts:
+
+```yaml
+- run: npm ci  # Runs from workspace root, installs all workspaces including apps/docs
+- name: Generate MCP docs
+  run: cd apps/docs && npm run generate:mcp
+- name: Assert no internal commands in generated MDX
+  run: tsx apps/docs/scripts/ci-gate-check.ts
+```
+
+Since the workspace root `npm ci` installs all workspace packages (including `apps/docs`), no separate install is needed — but the generation step MUST run before the gate check.
+
+### 12.3 Content Directory Pre-creation
+
+The `apps/docs/content/mcp/` directory must be created as part of the scaffold (even if empty) and committed to git with a `.gitkeep` file. The `generate-mcp-docs.ts` script creates files in this directory but should not be responsible for creating the directory itself. Fumadocs reads this directory on startup — an absent directory causes a startup error.
+
+### 12.4 Phase 2 OpenAPI CI Gate
+
+When Phase 2 ships, a corresponding CI gate must verify no internal route paths appear in `apps/docs/public/openapi.json`. This is a Phase 2 AC, not Phase 1, but is documented here to prevent the gap from being forgotten:
+
+```yaml
+- name: Assert no internal routes in OpenAPI spec
+  run: tsx apps/docs/scripts/ci-gate-openapi.ts
+```
+
+### 12.5 Deployment Protection Prerequisite (Phase 3)
+
+**Hard AC for Phase 3:** The internal Vercel project MUST have Deployment Protection (SSO) enabled **before** the first deployment. This is a prerequisite, not a follow-up.
+
+---
+
+## 13. Success Criteria
 
 - [ ] `docs.spawnforge.ai` serves MCP command reference
 - [ ] Only `visibility: "public"` commands appear in public build
 - [ ] CI gate (Node.js MDX frontmatter check) fails if internal commands leak to public
-- [ ] commands.json dual-file sync enforced via JSON structural comparison in CI
+- [ ] CI gate fails if any command MDX is missing `commandName` frontmatter
+- [ ] commands.json dual-file sync enforced via JSON structural comparison in CI (targeting `.commands` array)
 - [ ] Landing page clearly describes MCP vs API paths
 - [ ] Category index page has search, alphabetical sidebar, faceted filtering, breadcrumbs
-- [ ] "Some commands require internal access" notice on public index page
-- [ ] "Last updated" metadata shown on all Phase 1 MCP pages
-- [ ] "API reference available after next release" placeholder on `/api` in Phase 1
-- [ ] Zero-results search state shows descriptive message
-- [ ] Fumadocs mobile responsiveness accepted as-is (no custom overrides needed)
+- [ ] Fumadocs `<Callout>` notice on public index page (accessible markup)
+- [ ] "Last updated" metadata shown on all Phase 1 MCP pages (bot authors omitted)
+- [ ] API placeholder on `/api` explains dependency on Plan E (no vague "next release")
+- [ ] Search and filter zero-results states show descriptive messages with clear actions
+- [ ] Mobile explicitly deferred to Phase 3 ticket
 - [ ] OpenAPI reference renders from Zod schemas (after Plan E — Phase 2)
-- [ ] Internal build has Vercel Deployment Protection (Phase 3)
+- [ ] Phase 2 ships with OpenAPI CI gate (Section 12.4)
+- [ ] Internal build has Vercel Deployment Protection enabled before first deploy (Phase 3)
 - [ ] No AI attribution anywhere on the site
 - [ ] Fumadocs search works for public content
-- [ ] CI gate script has unit tests covering pass, fail, and empty-directory cases
+- [ ] CI gate script has unit tests via extracted `checkGate()` function
+- [ ] CLAUDE.md step 15 updated with visibility field requirement
+- [ ] Batch tagging + manifest test + CLAUDE.md update ship in single atomic PR
