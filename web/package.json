@@ -28,6 +28,7 @@
     "check:bundle-size": "node scripts/check-bundle-size.js"
   },
   "dependencies": {
+    "@spawnforge/ui": "*",
     "@ai-sdk/anthropic": "^3.0.63",
     "@ai-sdk/gateway": "^3.0.78",
     "@ai-sdk/react": "^3.0.138",

@@ -40,6 +40,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  transpilePackages: ['@spawnforge/ui'],
   compress: true,
   // This is a top-level config option that gates the experimental caching
   // a build error: "Error: Caching is not enabled in the current environment."
