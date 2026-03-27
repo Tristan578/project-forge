@@ -230,6 +230,19 @@ description: "Creates a new entity in the scene"
 
 The `generate-mcp-docs.ts` script MUST write all four frontmatter fields for every generated command page. The CI gate checks `commandName` and cross-references against the manifest's internal command set.
 
+**Generated MDX body content.** Each command page MUST include the following sections in the body (after frontmatter), generated from the `commands.json` entry:
+
+1. **Description** — the command's `description` field, rendered as a paragraph
+2. **Parameters** — a table with columns: Name, Type, Required, Description. Generated from the command's `parameters` array. If no parameters, show "This command takes no parameters."
+3. **Example** — a fenced code block showing an example JSON invocation:
+   ```json
+   { "command": "create_entity", "args": { "name": "Player", "type": "mesh" } }
+   ```
+   Generated from the command's `example` field if present, or a synthesized example from the parameter schema with placeholder values if not.
+4. **Category** — a link back to the category index page: "Part of the [{category}](/mcp/{category}) command group."
+
+This ensures every command page is a complete reference, not just a description stub.
+
 Unit tests for this script live in `apps/docs/scripts/__tests__/ci-gate-check.test.ts` (see Section 9).
 
 ### 3.5 Dual-File Sync Enforcement
@@ -385,6 +398,26 @@ Per design system spec Section 9.1:
 - Footer: "SpawnForge Documentation — Built by Tristan Nolan"
 - Applies to docs site, in-product UI surfaces, commit messages
 
+### 5.3 Visual Identity
+
+The docs site at `docs.spawnforge.ai` is a public SpawnForge property and MUST maintain visual coherence with the editor. Fumadocs CSS variables must be overridden in `apps/docs/app/globals.css` to match SpawnForge brand values:
+
+- **Font family:** Geist Sans (`'Geist Sans', system-ui, sans-serif`) — same as the editor
+- **Mono font:** Geist Mono (`'Geist Mono', ui-monospace, monospace`) for code blocks
+- **Accent color:** `#3b82f6` (Dark theme accent) for links, active states, and sidebar highlights
+- **Background:** `#09090b` (Dark theme `--sf-bg-app`) for page background
+- **Surface:** `#18181b` (Dark theme `--sf-bg-surface`) for sidebar and card backgrounds
+- **Text:** `#fafafa` (Dark theme `--sf-text`) for primary text
+- **Border:** `#27272a` (Dark theme `--sf-border`) for dividers and card borders
+
+These are hardcoded CSS values in `globals.css` (not imported from `@spawnforge/ui`) since the docs site is a separate Next.js app that does not depend on the design system package. If the Dark theme tokens change in `@spawnforge/ui`, the docs site CSS must be updated manually — add a sync comment at the top of the file:
+
+```css
+/* SpawnForge brand values — keep in sync with packages/ui/src/tokens/themes.ts (dark theme) */
+```
+
+The docs site does NOT support theme switching (always Dark). Multi-theme docs support is out of scope.
+
 ---
 
 ## 6. Fumadocs Site Structure
@@ -459,7 +492,13 @@ The MCP index page (`content/mcp/index.mdx`) provides:
 
 - **Search bar** — full-text search across all command names and descriptions (Fumadocs Orama built-in)
 - **Category sidebar** — 37 categories listed alphabetically in the left navigation, each linking to its category page
-- **Faceted filtering** — filter commands by category and by scope (`scene:read`, `scene:write`, `query:*`, etc.)
+- **Faceted filtering** — filter commands by category and by scope (`scene:read`, `scene:write`, `query:*`, etc.). Accessibility requirements for the filter component:
+  - Filter groups use `role="group"` with `aria-labelledby` pointing to the group heading ("Category", "Scope")
+  - Individual filter checkboxes are native `<input type="checkbox">` (not custom divs) for built-in keyboard and screen reader support
+  - Tab navigates between filter groups; Space toggles the focused checkbox
+  - Active filter count announced via `aria-live="polite"` region: "Showing {N} commands" updates when filters change
+  - "Clear filters" button has `aria-label="Clear all filters"` and receives focus after activation
+  - All filter controls have visible focus indicators (2px solid outline, `--sf-accent` color)
 - **Breadcrumbs** — `Docs > MCP Commands > {Category}` on every command page
 - **Search zero results** — when search query returns no matches: "No commands found for '{query}'. Try a different keyword or browse by category." When the query is empty (user cleared the input), show the default unfiltered list — no zero-results message.
 - **Filter zero results** — when faceted filters produce no matches: "No public commands match these filters." with a "Clear filters" button that resets all active filters. Filter controls remain visible in this state.
@@ -642,10 +681,21 @@ echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && docs=true
 echo "docs=$docs" >> "$GITHUB_OUTPUT"
 ```
 
-**3. Extend the `any_code` condition** to include `docs`:
+**3. Modify the existing `any_code` block** in the same step to include `docs`. The current `ci.yml` uses a multi-line `if` form — add `|| [ "$docs" = "true" ]` to the existing condition. Replace the current block:
 ```bash
-any_code=$( [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ] && echo true || echo false )
+# BEFORE (current ci.yml ~line 53-56):
+any_code=false
+if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ]; then
+  any_code=true
+fi
+
+# AFTER (add docs condition):
+any_code=false
+if [ "$web" = "true" ] || [ "$engine" = "true" ] || [ "$mcp" = "true" ] || [ "$ci" = "true" ] || [ "$docs" = "true" ]; then
+  any_code=true
+fi
 ```
+> **IMPORTANT:** Do NOT leave the original block unchanged — `docs` must be included in `any_code` or docs-only PRs will never trigger the docs gate job.
 
 **4. The docs gate job MUST declare `needs: [ci-gate]`:**
 ```yaml
@@ -673,6 +723,15 @@ The generation step MUST run before the gate check (gate reads generated MDX fil
 ### 12.3 Content Directory Pre-creation
 
 The `apps/docs/content/mcp/` directory must be created as part of the scaffold (even if empty) and committed to git with a `.gitkeep` file. The `generate-mcp-docs.ts` script creates files in this directory but should not be responsible for creating the directory itself. Fumadocs reads this directory on startup — an absent directory causes a startup error.
+
+The `.gitignore` entry MUST target only generated `.mdx` files, NOT the directory itself — otherwise `.gitkeep` would also be ignored and the directory would not be committed:
+
+```gitignore
+# Generated MCP command pages (regenerated on every build)
+apps/docs/content/mcp/*.mdx
+```
+
+Do NOT use `apps/docs/content/mcp/` (directory pattern) — that ignores `.gitkeep` too.
 
 ### 12.4 Phase 2 OpenAPI CI Gate
 
@@ -705,6 +764,10 @@ When Phase 2 ships, a corresponding CI gate must verify no internal route paths 
 - [ ] API placeholder on `/api` explains dependency on Plan E
 - [ ] Search zero-results and filter zero-results show distinct descriptive messages; empty query shows default list
 - [ ] No AI attribution anywhere on the site
+- [ ] Docs site uses Geist Sans font, Dark theme accent (#3b82f6), and SpawnForge brand colors
+- [ ] Each command page includes: description, parameters table, example JSON, category link
+- [ ] Faceted filter uses native checkboxes, `role="group"` + `aria-labelledby`, visible focus indicators, `aria-live` count
+- [ ] Generated MDX `.gitignore` pattern is `apps/docs/content/mcp/*.mdx` (not the directory itself)
 - [ ] Fumadocs search works for public content
 - [ ] `checkGate()` unit tests pass (5 cases including non-string commandName)
 - [ ] `checkSync()` unit tests pass (5 cases including missing files)
