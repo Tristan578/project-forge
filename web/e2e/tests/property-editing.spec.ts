@@ -379,7 +379,7 @@ test.describe('Group 2: Material Editing @engine', () => {
     expect(Math.abs((materialAfter!.metallic ?? 0) - 0.85)).toBeLessThan(0.05);
   });
 
-  test('changing roughness input updates primaryMaterial.roughness in the store', async ({
+  test('changing roughness input updates primaryMaterial.perceptualRoughness in the store', async ({
     page,
     editor,
   }) => {
@@ -419,7 +419,7 @@ test.describe('Group 2: Material Editing @engine', () => {
         const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { roughness?: number } } } }).__EDITOR_STORE;
         if (!store) return false;
         const mat = store.getState().primaryMaterial;
-        return mat && Math.abs((mat.roughness ?? 0) - 0.25) < 0.05;
+        return mat && Math.abs((mat.perceptualRoughness ?? 0) - 0.25) < 0.05;
       },
       { timeout: 5_000 },
     );
@@ -428,7 +428,7 @@ test.describe('Group 2: Material Editing @engine', () => {
     const material = state?.primaryMaterial;
 
     expect(material).not.toBeNull();
-    expect(Math.abs((material!.roughness ?? 0) - 0.25)).toBeLessThan(0.05);
+    expect(Math.abs((material!.perceptualRoughness ?? 0) - 0.25)).toBeLessThan(0.05);
   });
 
   test('clicking a material preset changes primaryMaterial properties in the store', async ({
@@ -467,7 +467,7 @@ test.describe('Group 2: Material Editing @engine', () => {
         // Verify at least one key-value pair changed
         return (
           mat.metallic !== beforeParsed.metallic ||
-          mat.roughness !== beforeParsed.roughness ||
+          mat.perceptualRoughness !== beforeParsed.roughness ||
           JSON.stringify(mat.baseColor) !== JSON.stringify(beforeParsed.baseColor)
         );
       },
