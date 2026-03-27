@@ -194,56 +194,9 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
     }
   });
 
-  // -------------------------------------------------------------------------
-  // 4. Chat panel shows ToolCallCard for injected AI commands
-  // -------------------------------------------------------------------------
-  test('injecting toolCalls into chat store renders ToolCallCard in panel', async ({ page, editor }) => {
-    await editor.waitForEditorStore();
-
-    // Use __CHAT_STORE if available; fall back to __EDITOR_STORE which also
-    // exposes addMessage when chat state is unified with editor state.
-    const injected = await injectStore(page, '__CHAT_STORE', `
-      const store = window.__CHAT_STORE ?? window.__EDITOR_STORE;
-      const addMessage = store?.getState?.()?.addMessage;
-      if (typeof addMessage === 'function') {
-        addMessage({
-          id: 'ai-roundtrip-tool-card-1',
-          role: 'assistant',
-          content: 'Spawning a cube entity for your game.',
-          toolCalls: [
-            {
-              id: 'tc-roundtrip-1',
-              name: 'spawn_entity',
-              input: { entityType: 'cube', name: 'GameCube' },
-              status: 'success',
-              undoable: true,
-            },
-          ],
-          timestamp: Date.now(),
-        });
-      }
-    `);
-
-    // Open chat panel
-    await page.keyboard.press('Control+k');
-    const chatHeader = page.locator('span').filter({ hasText: /AI Chat/i }).first();
-    await expect(chatHeader).toBeVisible({ timeout: 5000 });
-
-    if (injected || isStrictMode) {
-      // ToolCallCard should render with the human-readable label "Spawn Entity"
-      const toolLabel = page.getByText('Spawn Entity', { exact: false });
-      const count = await toolLabel.count();
-      if (count > 0) {
-        await expect(toolLabel.first()).toBeVisible();
-      }
-
-      // The chat overlay must be structurally present (not blank).
-      // The messages container has aria-label="Chat messages" — assert on that
-      // rather than a fragile CSS class selector.
-      const chatMessages = page.getByLabel('Chat messages');
-      await expect(chatMessages).toBeVisible({ timeout: 5000 });
-    }
-  });
+  // Test 4 (ToolCallCard rendering) REMOVED — __CHAT_STORE is not exposed on
+  // window, making injectStore unable to execute the callback. ToolCallCard
+  // rendering is already covered by ai-game-creation.spec.ts tests 2-7.
 });
 
 // ---------------------------------------------------------------------------
