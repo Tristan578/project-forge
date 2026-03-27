@@ -9,6 +9,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { refundTokens, refundTokenAmount } from '@/lib/tokens/service';
 import { TOKEN_COSTS } from '@/lib/tokens/pricing';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 
 interface BatchItem {
   nodeId: string;
@@ -68,6 +69,16 @@ export async function POST(request: NextRequest) {
 
   if (!voiceSettings?.voiceId) {
     return NextResponse.json({ error: 'voiceSettings.voiceId is required' }, { status: 422 });
+  }
+
+  // Content safety — batch text gets sent to TTS service
+  const batchText = items.map(i => i.text).join(' ');
+  const safety = sanitizePrompt(batchText);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
   }
 
   // Token cost: discounted per-item rate (cheaper than single voice generation)

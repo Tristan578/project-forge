@@ -17,6 +17,7 @@ import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
 
 // ---------------------------------------------------------------------------
@@ -133,6 +134,17 @@ export async function POST(request: NextRequest) {
       );
     }
     validatedTargets.push(locale);
+  }
+
+  // 4b. Content safety — user-authored game text gets sent to AI
+  // Check a sample of strings (first 50) to avoid excessive processing
+  const sampleText = validatedStrings.slice(0, 50).map(s => s.text).join(' ');
+  const safety = sanitizePrompt(sampleText);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
   }
 
   // 5. Resolve API key — cost scales by work units (chunks * locales * 5 tokens)

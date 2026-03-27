@@ -10,6 +10,7 @@ import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLi
 import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
+import { sanitizePrompt } from '@/lib/ai/contentSafety';
 // Inline types — the pacing analysis route receives these from the client.
 interface PacingSegment {
   sceneIndex: number;
@@ -91,6 +92,18 @@ export async function POST(request: NextRequest) {
 
   if (!report.curve || !Array.isArray(report.curve.segments)) {
     return NextResponse.json({ error: 'report.curve.segments must be an array' }, { status: 422 });
+  }
+
+  // 3b. Content safety — scene names and emotions are user-authored text
+  const textToCheck = report.curve.segments
+    .map((s: PacingSegment) => `${s.sceneName} ${s.emotion}`)
+    .join(' ');
+  const safety = sanitizePrompt(textToCheck);
+  if (!safety.safe) {
+    return NextResponse.json(
+      { error: safety.reason ?? 'Content rejected by safety filter' },
+      { status: 422 }
+    );
   }
 
   // 4. Resolve API key and deduct tokens
