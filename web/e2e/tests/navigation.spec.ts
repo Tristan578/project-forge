@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
 /**
  * Navigation and routing E2E tests.
@@ -97,13 +98,13 @@ test.describe('Navigation & Routing @ui', () => {
       await privacyLink.click();
 
       // Next.js Link does client-side navigation — use toHaveURL with auto-retry
-      await expect(page).toHaveURL(/\/privacy/, { timeout: 15000 });
+      await expect(page).toHaveURL(/\/privacy/, { timeout: E2E_TIMEOUT_NAV_MS });
 
       const termsLink = page.locator('a[href="/terms"]').first();
       await expect(termsLink).toBeVisible();
       await termsLink.click();
 
-      await expect(page).toHaveURL(/\/terms/, { timeout: 15000 });
+      await expect(page).toHaveURL(/\/terms/, { timeout: E2E_TIMEOUT_NAV_MS });
     });
 
     test('pricing page Sign In button navigates to sign-in', async ({ page }) => {
@@ -115,14 +116,14 @@ test.describe('Navigation & Routing @ui', () => {
       const signInBtn = page.getByRole('button', { name: /sign in/i });
 
       // When signed out, the Sign In button should be visible
-      await expect(signInBtn).toBeVisible({ timeout: 5000 });
+      await expect(signInBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       await signInBtn.click();
 
       // The button calls router.push('/sign-in'). Use waitForURL instead
       // of waitForLoadState — the latter resolves immediately on the
       // current page and doesn't wait for Next.js client-side navigation.
-      await page.waitForURL('**/sign-in**', { timeout: 10000 });
+      await page.waitForURL('**/sign-in**', { timeout: E2E_TIMEOUT_LOAD_MS });
       expect(page.url()).toMatch(/sign-in/);
     });
   });
@@ -172,7 +173,7 @@ test.describe('Navigation & Routing @ui', () => {
       await page.waitForLoadState('domcontentloaded');
 
       const canvas = page.locator('canvas').first();
-      await expect(canvas).toBeVisible({ timeout: 15000 });
+      await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
     });
 
     test('/dev loads editor with sidebar', async ({ page }) => {
@@ -180,7 +181,7 @@ test.describe('Navigation & Routing @ui', () => {
       await page.waitForLoadState('domcontentloaded');
 
       const addEntityBtn = page.getByRole('button', { name: /add.*entity/i }).first();
-      await expect(addEntityBtn).toBeVisible({ timeout: 15000 });
+      await expect(addEntityBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
     });
   });
 
@@ -194,11 +195,11 @@ test.describe('Navigation & Routing @ui', () => {
       // Wait for the navigation to fully commit before calling goBack().
       // Without this, goBack() can race against the in-progress navigation on
       // slow CI runners and end up on an unexpected URL.
-      await expect(page).toHaveURL(/\/privacy/, { timeout: 15000 });
+      await expect(page).toHaveURL(/\/privacy/, { timeout: E2E_TIMEOUT_NAV_MS });
       await page.waitForLoadState('domcontentloaded');
 
       await page.goBack();
-      await expect(page).toHaveURL(/\/terms/, { timeout: 15000 });
+      await expect(page).toHaveURL(/\/terms/, { timeout: E2E_TIMEOUT_NAV_MS });
       await page.waitForLoadState('domcontentloaded');
     });
   });

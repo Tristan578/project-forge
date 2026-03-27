@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 /**
  * Tests for AI chat command execution pipeline.
@@ -35,7 +36,7 @@ test.describe('Chat Command Execution @engine', () => {
     await page.keyboard.press('Control+k');
 
     const chatInput = page.getByRole('textbox', { name: 'Chat message' });
-    await expect(chatInput).toBeVisible({ timeout: 5000 });
+    await expect(chatInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('rename entity updates hierarchy text', async ({ page, editor }) => {

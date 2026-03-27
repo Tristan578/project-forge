@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import { injectStore, isStrictMode } from '../helpers/store-injection';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
 test.describe('2D Workflows @ui', () => {
   test.beforeEach(async ({ editor }) => {
@@ -71,12 +72,12 @@ test.describe('2D Workflows @ui', () => {
 
   test('settings modal can be opened from sidebar', async ({ page }) => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
-    await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
+    await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
     await settingsBtn.click();
 
     // Settings modal renders as a dialog with role="dialog"
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     // Close it
     await page.keyboard.press('Escape');
@@ -129,7 +130,7 @@ test.describe('2D Workflows @ui', () => {
       const spriteSection = page.getByText(/sprite/i, { exact: false });
       const count = await spriteSection.count();
       if (count > 0) {
-        await expect(spriteSection.first()).toBeVisible({ timeout: 5000 });
+        await expect(spriteSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
       }
     }
   });
@@ -196,7 +197,7 @@ test.describe('2D Workflows @ui', () => {
     } else {
       // Menu may render as a dropdown div — check for Cube at minimum
       const cubeBtn = page.getByText('Cube', { exact: true });
-      await expect(cubeBtn.first()).toBeVisible({ timeout: 5000 });
+      await expect(cubeBtn.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 
@@ -210,7 +211,7 @@ test.describe('2D Workflows @ui', () => {
     } else {
       // May already be open as active panel — check for inspector content area
       const inspectorPanel = page.locator('.dv-panel').first();
-      await expect(inspectorPanel).toBeVisible({ timeout: 5000 });
+      await expect(inspectorPanel).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 
@@ -229,7 +230,7 @@ test.describe('2D Workflows @ui', () => {
     if (injected || isStrictMode) {
       const camera2dSection = page.getByText(/2d camera/i, { exact: false });
       const count = await camera2dSection.count();
-      if (count > 0) await expect(camera2dSection.first()).toBeVisible({ timeout: 5000 });
+      if (count > 0) await expect(camera2dSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 
@@ -274,7 +275,7 @@ test.describe('2D Workflows @ui', () => {
     if (injected || isStrictMode) {
       const physicsSection = page.getByText(/physics/i, { exact: false });
       const count = await physicsSection.count();
-      if (count > 0) await expect(physicsSection.first()).toBeVisible({ timeout: 5000 });
+      if (count > 0) await expect(physicsSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 
@@ -297,7 +298,7 @@ test.describe('2D Workflows @ui', () => {
     if (injected || isStrictMode) {
       const tilemapSection = page.getByText(/tilemap/i, { exact: false });
       const count = await tilemapSection.count();
-      if (count > 0) await expect(tilemapSection.first()).toBeVisible({ timeout: 5000 });
+      if (count > 0) await expect(tilemapSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 
@@ -333,7 +334,7 @@ test.describe('2D Workflows @ui', () => {
     if (injected || isStrictMode) {
       const skeletonSection = page.getByText(/skeleton/i, { exact: false });
       const count = await skeletonSection.count();
-      if (count > 0) await expect(skeletonSection.first()).toBeVisible({ timeout: 5000 });
+      if (count > 0) await expect(skeletonSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 });

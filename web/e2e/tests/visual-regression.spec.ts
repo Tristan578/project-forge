@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 /**
  * PF-691: Visual regression tests using Playwright snapshot matching.
@@ -32,7 +33,7 @@ test.describe('Visual Regression @ui @visual', () => {
   test.skip('sidebar matches baseline snapshot', async ({ page }) => {
     // Enable after baseline screenshots are committed
     const sidebar = page.locator('aside, [data-testid="sidebar"], .dv-dockview-container').first();
-    await expect(sidebar).toBeVisible({ timeout: 5_000 });
+    await expect(sidebar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const screenshot = await sidebar.screenshot();
     expect(screenshot).toMatchSnapshot('sidebar.png');
   });

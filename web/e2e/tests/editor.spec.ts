@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 /**
  * Editor scene interaction tests.
@@ -19,17 +20,17 @@ test.describe('Editor Scene @engine', () => {
 
     // Wait for transform data to arrive
     const transformLabel = page.getByText('Transform', { exact: false });
-    await expect(transformLabel.first()).toBeVisible({ timeout: 10000 });
+    await expect(transformLabel.first()).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('camera preset buttons work', async ({ page }) => {
     // Find the "Top View" button
     const topButton = page.locator('button[title*="Top View"]');
-    if (await topButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (await topButton.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS }).catch(() => false)) {
       await topButton.click();
 
       // Wait for the camera animation to complete
-      await expect(topButton).toHaveClass(/bg-blue-600/, { timeout: 5000 }).catch(() => {});
+      await expect(topButton).toHaveClass(/bg-blue-600/, { timeout: E2E_TIMEOUT_ELEMENT_MS }).catch(() => {});
       const buttonClasses = await topButton.getAttribute('class');
       expect(buttonClasses).toContain('bg-blue-600');
     }

@@ -11,6 +11,7 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_TEST_MS } from '../constants';
 
 test.describe('Performance Budget @ui', () => {
   test('LCP is under 2500ms on editor page', async ({ page, editor }) => {
@@ -100,7 +101,7 @@ test.describe('Performance Budget @ui', () => {
       (window as unknown as Record<string, unknown>).__SKIP_ENGINE = true;
     });
 
-    await page.goto('/dev', { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.goto('/dev', { waitUntil: 'domcontentloaded', timeout: E2E_TIMEOUT_TEST_MS });
 
     const elapsed = Date.now() - navigationStart;
     // CI runners are slower — use relaxed threshold

@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_WASM_MS } from '../constants';
 
 /**
  * Comprehensive keyboard shortcut tests for the editor.
@@ -15,20 +16,20 @@ test.describe('Keyboard Shortcuts @ui', () => {
 
     // Chat overlay should become visible
     const chatOverlay = page.locator('textarea, [placeholder*="message"], [placeholder*="chat"]').first();
-    await expect(chatOverlay).toBeVisible({ timeout: 5000 });
+    await expect(chatOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('Escape closes chat overlay', async ({ page }) => {
     // Open chat first
     await page.keyboard.press('Control+k');
     const chatOverlay = page.locator('textarea, [placeholder*="message"], [placeholder*="chat"]').first();
-    await expect(chatOverlay).toBeVisible({ timeout: 5000 });
+    await expect(chatOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Close with Escape
     await page.keyboard.press('Escape');
 
     // Chat should be hidden
-    await expect(chatOverlay).not.toBeVisible({ timeout: 3000 });
+    await expect(chatOverlay).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 
   test('W key activates Translate gizmo', async ({ page }) => {
@@ -90,7 +91,7 @@ test.describe('Keyboard Shortcuts @ui', () => {
     // until the next animation frame, so we poll until the store is confirmed intact.
     const storeExists = await page.waitForFunction(
       () => !!(window as any).__EDITOR_STORE, // eslint-disable-line @typescript-eslint/no-explicit-any
-      { timeout: 45_000 },
+      { timeout: E2E_TIMEOUT_WASM_MS },
     );
     expect(await storeExists.jsonValue()).toBe(true);
 
@@ -139,7 +140,7 @@ test.describe('Keyboard Shortcuts @ui', () => {
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Type space in dialog — should not trigger play mode
     await page.keyboard.press('Space');
@@ -159,7 +160,7 @@ test.describe('Keyboard Shortcuts @ui', () => {
     // Open settings
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
-    await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Press W — should NOT change gizmo mode since modal is open
     await page.keyboard.press('w');

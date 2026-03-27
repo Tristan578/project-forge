@@ -1,15 +1,16 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_AUTH_MS } from '../constants';
 
 test.describe('Modals @ui', () => {
   test('settings modal opens and is visible', async ({ page, editor }) => {
     await editor.loadPage();
 
     const settingsBtn = page.locator('button[title="Settings"]').first();
-    await expect(settingsBtn).toBeVisible({ timeout: 5000 });
+    await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await settingsBtn.click();
 
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('settings modal has tabs', async ({ page, editor }) => {
@@ -19,7 +20,7 @@ test.describe('Modals @ui', () => {
     await settingsBtn.click();
 
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const tokensTab = dialog.getByRole('tab', { name: /tokens/i });
     const keysTab = dialog.getByRole('tab', { name: /api.*keys|keys/i });
@@ -41,7 +42,7 @@ test.describe('Modals @ui', () => {
     await settingsBtn.click();
 
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const closeBtn = dialog.getByRole('button', { name: /close/i });
     await closeBtn.click();
@@ -56,7 +57,7 @@ test.describe('Modals @ui', () => {
     await settingsBtn.click();
 
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await page.keyboard.press('Escape');
 
@@ -79,12 +80,12 @@ test.describe('Modals @ui', () => {
     await page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__REACT_HYDRATED === true,
-      { timeout: 30_000 }
+      { timeout: E2E_TIMEOUT_AUTH_MS }
     );
 
     // QuickStartFlow or WelcomeModal should be visible (fixed overlay)
     const onboardingOverlay = page.locator('.fixed').filter({ hasText: /what kind of game|welcome|getting started/i }).first();
-    await expect(onboardingOverlay).toBeVisible({ timeout: 5000 });
+    await expect(onboardingOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('keyboard shortcuts modal opens via Help menu', async ({ page, editor }) => {
@@ -92,16 +93,16 @@ test.describe('Modals @ui', () => {
 
     // Open the Help dropdown menu
     const helpBtn = page.locator('button[aria-label="Help menu"]').first();
-    await expect(helpBtn).toBeVisible({ timeout: 5000 });
+    await expect(helpBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await helpBtn.click();
 
     // Click "Keyboard Shortcuts" menu item
     const shortcutsItem = page.getByRole('menuitem', { name: /keyboard shortcuts/i });
-    await expect(shortcutsItem).toBeVisible({ timeout: 5000 });
+    await expect(shortcutsItem).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await shortcutsItem.click();
 
     const shortcutsHeading = page.locator('h2').filter({ hasText: /keyboard shortcuts/i }).first();
-    await expect(shortcutsHeading).toBeVisible({ timeout: 5000 });
+    await expect(shortcutsHeading).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('keyboard shortcuts modal can be closed with Escape', async ({ page, editor }) => {
@@ -114,7 +115,7 @@ test.describe('Modals @ui', () => {
     await shortcutsItem.click();
 
     const shortcutsHeading = page.locator('h2').filter({ hasText: /keyboard shortcuts/i }).first();
-    await expect(shortcutsHeading).toBeVisible({ timeout: 5000 });
+    await expect(shortcutsHeading).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await page.keyboard.press('Escape');
 
@@ -132,11 +133,11 @@ test.describe('Modals @ui', () => {
     // On CI the modal may still be transitioning into position when the check runs.
     await page.waitForSelector('[role="dialog"][aria-labelledby="settings-dialog-title"]', {
       state: 'visible',
-      timeout: 10_000,
+      timeout: E2E_TIMEOUT_LOAD_MS,
     });
 
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Settings modal backdrop is a fixed overlay with z-[60]
     const backdrop = page.locator('.fixed').filter({ hasText: /settings/i }).first();

@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 /**
  * PF-673: Mobile viewport E2E tests.
@@ -32,7 +33,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
   test('mobile toolbar appears in compact layout', async ({ page }) => {
     // The mobile toolbar renders as a fixed bottom bar in compact mode
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('sidebar collapses to drawer at 390px', async ({ page }) => {
@@ -49,7 +50,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
 
   test('canvas area takes full viewport width', async ({ page }) => {
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10_000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     const canvasBox = await canvas.boundingBox();
     expect(canvasBox).not.toBeNull();
@@ -79,7 +80,7 @@ test.describe('Pixel 7 Viewport (412x915) @ui', () => {
 
   test('mobile toolbar appears in compact layout', async ({ page }) => {
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('sidebar collapses to drawer at 412px', async ({ page }) => {
@@ -93,7 +94,7 @@ test.describe('Pixel 7 Viewport (412x915) @ui', () => {
 
   test('canvas area takes full viewport width', async ({ page }) => {
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10_000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     const canvasBox = await canvas.boundingBox();
     expect(canvasBox).not.toBeNull();
@@ -103,7 +104,7 @@ test.describe('Pixel 7 Viewport (412x915) @ui', () => {
 
   test('mobile toolbar is anchored to bottom of viewport', async ({ page }) => {
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await toolbar.boundingBox();
     expect(box).not.toBeNull();
@@ -114,7 +115,7 @@ test.describe('Pixel 7 Viewport (412x915) @ui', () => {
 
   test('mobile toolbar spans full viewport width', async ({ page }) => {
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await toolbar.boundingBox();
     expect(box).not.toBeNull();

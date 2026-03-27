@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
 /**
  * Error resilience E2E tests.
@@ -132,7 +133,7 @@ test.describe('Error Resilience @ui', () => {
 
     test('rapid button clicks do not crash', async ({ page }) => {
       const addEntityBtn = page.getByRole('button', { name: 'Add Entity' });
-      if (await addEntityBtn.isVisible({ timeout: 5000 })) {
+      if (await addEntityBtn.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS })) {
         // Click rapidly 5 times
         for (let i = 0; i < 5; i++) {
           await addEntityBtn.click();
@@ -146,13 +147,13 @@ test.describe('Error Resilience @ui', () => {
 
     test('opening and closing settings rapidly does not crash', async ({ page }) => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
-      await expect(settingsBtn).toBeVisible({ timeout: 5000 });
+      await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       for (let i = 0; i < 3; i++) {
         await settingsBtn.click();
-        await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 3000 });
+        await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
         await page.keyboard.press('Escape');
-        await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
+        await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
       }
 
       // Editor canvas should still be visible
@@ -163,13 +164,13 @@ test.describe('Error Resilience @ui', () => {
       // Resize to mobile width
       await page.setViewportSize({ width: 375, height: 667 });
       // Wait for the canvas to remain visible at the new viewport before resizing again
-      await expect(page.locator('canvas').first()).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       // Resize back to desktop
       await page.setViewportSize({ width: 1280, height: 720 });
 
       // Editor should still be functional
-      await expect(page.locator('canvas').first()).toBeVisible({ timeout: 5_000 });
+      await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     });
 
     test('double-clicking on canvas does not produce errors', async ({ page }) => {
@@ -179,7 +180,7 @@ test.describe('Error Resilience @ui', () => {
       });
 
       const canvas = page.locator('canvas').first();
-      await expect(canvas).toBeVisible({ timeout: 10000 });
+      await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
       await canvas.dblclick();
       // Use networkidle to wait for any async handlers triggered by the click
@@ -205,7 +206,7 @@ test.describe('Error Resilience @ui', () => {
       await editor.loadPage();
 
       // Editor should still render
-      await expect(page.locator('canvas').first()).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('canvas').first()).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
     });
   });
 });

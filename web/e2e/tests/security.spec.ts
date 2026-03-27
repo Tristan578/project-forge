@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { E2E_TIMEOUT_AUTH_MS } from '../constants';
 
 test.describe('Security & Auth Flow', () => {
   test('returns secure CSP and standard security headers', async ({ request }) => {
@@ -39,7 +40,7 @@ test.describe('Security & Auth Flow', () => {
     // Clerk middleware intercepts and redirects unauthenticated users
     await page.waitForURL(
       (url) => url.toString().includes('sign-in') || url.toString().includes('login'),
-      { timeout: 30000 },
+      { timeout: E2E_TIMEOUT_AUTH_MS },
     );
 
     expect(page.url()).toMatch(/sign-in|login/);

@@ -15,6 +15,7 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 test.describe('update_material dispatch @engine', () => {
   test.beforeEach(async ({ editor }) => {
@@ -35,7 +36,7 @@ test.describe('update_material dispatch @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
-      { timeout: 10_000 },
+      { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
     // Retrieve the selected entity id
@@ -89,7 +90,7 @@ test.describe('update_material dispatch @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
-      { timeout: 10_000 },
+      { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
     const entityId = await page.evaluate((): string | null => {
@@ -151,7 +152,7 @@ test.describe('update_material dispatch @engine', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
-      { timeout: 10_000 },
+      { timeout: E2E_TIMEOUT_LOAD_MS },
     );
 
     const entityId = await page.evaluate((): string | null => {
@@ -186,7 +187,7 @@ test.describe('update_material dispatch @engine', () => {
             return mat !== undefined;
           },
           entityId as string,
-          { timeout: 5_000 },
+          { timeout: E2E_TIMEOUT_ELEMENT_MS },
         );
 
         const materialAfter = await page.evaluate((eid: string) => {
@@ -202,6 +203,6 @@ test.describe('update_material dispatch @engine', () => {
     }
 
     // Fallback: verify material section remained visible after interaction attempt
-    await expect(materialSection).toBeVisible({ timeout: 5_000 });
+    await expect(materialSection).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 });

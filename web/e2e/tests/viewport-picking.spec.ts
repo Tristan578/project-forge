@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 test.describe('Viewport Picking @engine', () => {
   test('clicking canvas center registers a pick event', async ({ page, editor }) => {
@@ -21,7 +22,7 @@ test.describe('Viewport Picking @engine', () => {
 
     // Wait for selection to register — Transform section appears in inspector
     const transformLabel = page.getByText('Transform', { exact: false });
-    await expect(transformLabel.first()).toBeVisible({ timeout: 10000 }).catch(() => {});
+    await expect(transformLabel.first()).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS }).catch(() => {});
 
     // Verify at least one entity is selected in the store
     const selectedCount = await page.evaluate(() => {

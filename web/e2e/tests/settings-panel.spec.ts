@@ -6,6 +6,7 @@
  * and content area rendering.
  */
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 // Target only the settings dialog, not Next.js error overlays or other modals
 const settingsDialog = '[role="dialog"][aria-labelledby="settings-dialog-title"]';
@@ -15,17 +16,17 @@ test.describe('Settings Panel @ui', () => {
     await editor.loadPage();
     // Open settings modal
     const settingsBtn = page.locator('button[title="Settings"]').first();
-    await expect(settingsBtn).toBeVisible({ timeout: 5000 });
+    await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await settingsBtn.click();
-    await expect(page.locator(settingsDialog)).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(settingsDialog)).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('settings dialog has correct ARIA attributes', async ({ page }) => {
     // Wait for dialog to be fully rendered before checking ARIA attributes.
     // On CI the dialog may not have completed its mount cycle when the check runs.
     const dialog = page.locator(settingsDialog);
-    await expect(dialog).toBeVisible({ timeout: 10_000 });
-    await expect(dialog).toHaveAttribute('aria-modal', 'true', { timeout: 10_000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
+    await expect(dialog).toHaveAttribute('aria-modal', 'true', { timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('tab list has correct ARIA role', async ({ page }) => {
@@ -266,7 +267,7 @@ test.describe('Settings Panel @ui', () => {
     const dialog = page.locator(settingsDialog);
     const billingTab = dialog.getByRole('tab', { name: /billing/i });
 
-    await expect(billingTab).toBeVisible({ timeout: 5000 });
+    await expect(billingTab).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     // Use force:true — the tab is visible but can be intercepted by
     // overlapping elements after scroll-into-view inside the dialog.
     await billingTab.click({ force: true });
@@ -275,7 +276,7 @@ test.describe('Settings Panel @ui', () => {
     // The loading text "Loading billing information..." also satisfies the pattern.
     await expect(
       dialog.getByText(/Current Plan|Loading billing/i).first()
-    ).toBeVisible({ timeout: 5000 });
+    ).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('tokens tab shows content when active', async ({ page }) => {
@@ -316,7 +317,7 @@ test.describe('Settings Panel @ui', () => {
     // Reopen
     const settingsBtn = page.locator('button[title="Settings"]').first();
     await settingsBtn.click();
-    await expect(dialog).toBeVisible({ timeout: 5000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Should still have correct structure
     const tabList = page.locator('[role="tablist"]');

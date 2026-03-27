@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 /**
  * Editor boot gate — verifies the editor shell loads and React hydrates
@@ -29,7 +30,7 @@ test.describe('Editor Boot @smoke', () => {
     // the dockview workspace successfully. The dockview library injects the
     // class "dv-dockview" on its root container element.
     const container = page.locator('.dv-dockview').first();
-    await expect(container).toBeVisible({ timeout: 10_000 });
+    await expect(container).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('no fatal console errors during boot', async ({ page, editor }) => {
