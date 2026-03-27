@@ -244,7 +244,7 @@ export default {
 
 ### 4.3 Internal Route Exclusion
 
-Routes with `requireAuth: true` AND matching internal patterns (`/api/admin/*`, `/api/billing/internal/*`) are excluded from the public OpenAPI spec. The generator reads a `publicRoutes` allowlist or uses route-level `@public` annotations.
+Routes are **excluded by default** from the public OpenAPI spec. Only routes explicitly annotated with `@public` in their `withApiMiddleware` options are included. This is an allowlist, not a denylist — new routes are invisible until intentionally opted in. No path-pattern matching or denylist.
 
 When `INCLUDE_INTERNAL=true`, all routes are included (internal build).
 
@@ -354,6 +354,10 @@ The MCP index page (`content/mcp/index.mdx`) provides:
 - **Breadcrumbs** — `Docs > MCP Commands > {Category}` on every command page
 - **Zero results state** — when search returns no matches: "No commands found for '{query}'. Try a different keyword or browse by category."
 - **Phase 1 placeholder** — "API reference is available after the next release." shown on `/api/index.mdx` in Phase 1 before Plan E completes.
+- **Generation edge cases:**
+  - If `generate-mcp-docs.ts` produces zero public commands (all internal), the MCP index page shows: "No public commands available yet. Commands are being reviewed for public documentation."
+  - If `commands.json` is malformed or missing, the generation script exits with a clear error and the docs build fails (never deploys a broken site).
+  - If search returns zero results, Fumadocs shows its default "No results found" message with the search query highlighted.
 
 Category groups in the sidebar are sorted alphabetically by category name. Sub-items within a category are sorted alphabetically by command name.
 
