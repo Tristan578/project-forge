@@ -416,7 +416,7 @@ test.describe('Group 2: Material Editing @engine', () => {
 
     await page.waitForFunction(
       () => {
-        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { roughness?: number } } } }).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { perceptualRoughness?: number } } } }).__EDITOR_STORE;
         if (!store) return false;
         const mat = store.getState().primaryMaterial;
         return mat && Math.abs((mat.perceptualRoughness ?? 0) - 0.25) < 0.05;
@@ -424,7 +424,7 @@ test.describe('Group 2: Material Editing @engine', () => {
       { timeout: 5_000 },
     );
 
-    const state = await getStoreState(page) as { primaryMaterial?: { roughness?: number } } | undefined;
+    const state = await getStoreState(page) as { primaryMaterial?: { perceptualRoughness?: number } } | undefined;
     const material = state?.primaryMaterial;
 
     expect(material).not.toBeNull();
@@ -441,7 +441,7 @@ test.describe('Group 2: Material Editing @engine', () => {
     expect(entityId).not.toBeNull();
 
     // Record state before clicking a preset
-    const beforeState = await getStoreState(page) as { primaryMaterial?: { metallic?: number; roughness?: number; baseColor?: number[] } } | undefined;
+    const beforeState = await getStoreState(page) as { primaryMaterial?: { metallic?: number; perceptualRoughness?: number; baseColor?: number[] } } | undefined;
     const before = beforeState?.primaryMaterial ?? null;
 
     // Look for a material preset button — the material library uses named presets
@@ -458,16 +458,16 @@ test.describe('Group 2: Material Editing @engine', () => {
     // After clicking a preset, primaryMaterial should have changed
     await page.waitForFunction(
       (beforeJson: string | null) => {
-        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { metallic?: number; roughness?: number; baseColor?: number[] } } } }).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { metallic?: number; perceptualRoughness?: number; baseColor?: number[] } } } }).__EDITOR_STORE;
         if (!store) return false;
         const mat = store.getState().primaryMaterial;
         if (!mat) return false;
         if (beforeJson === null) return true; // no prior material — any data is progress
-        const beforeParsed = JSON.parse(beforeJson) as { metallic?: number; roughness?: number; baseColor?: number[] };
+        const beforeParsed = JSON.parse(beforeJson) as { metallic?: number; perceptualRoughness?: number; baseColor?: number[] };
         // Verify at least one key-value pair changed
         return (
           mat.metallic !== beforeParsed.metallic ||
-          mat.perceptualRoughness !== beforeParsed.roughness ||
+          mat.perceptualRoughness !== beforeParsed.perceptualRoughness ||
           JSON.stringify(mat.baseColor) !== JSON.stringify(beforeParsed.baseColor)
         );
       },
