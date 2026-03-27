@@ -10,8 +10,8 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { rateLimitResponse } from '@/lib/rateLimit';
-import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
-import type { Provider } from '@/lib/db/schema';
+import { DB_PROVIDER } from '@/lib/config/providers';
+
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate + rate-limit (distributed, 10 req / 5 min per user)
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      DIRECT_CAPABILITY_PROVIDER.model3d as Provider,
+      DB_PROVIDER.model3d,
       tokenCost,
       operation,
       { prompt: safePrompt, mode, quality }
@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         jobId: result.taskId,
-        provider: DIRECT_CAPABILITY_PROVIDER.model3d,
+        provider: DB_PROVIDER.model3d,
         status: 'pending',
         estimatedSeconds: quality === 'high' ? 120 : 60,
         usageId,

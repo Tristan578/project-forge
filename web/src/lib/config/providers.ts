@@ -89,6 +89,36 @@ export const DIRECT_CAPABILITY_PROVIDER: Record<ProviderCapability, ProviderName
 };
 
 // ---------------------------------------------------------------------------
+// DB-safe provider subset (for routes that call resolveApiKey)
+// ---------------------------------------------------------------------------
+
+/**
+ * Subset of DIRECT_CAPABILITY_PROVIDER values that are valid DB Provider
+ * enum members. Use this in generate routes instead of casting
+ * `DIRECT_CAPABILITY_PROVIDER.X as Provider`.
+ *
+ * Compile-time safe: if a capability's provider is changed to a non-DB
+ * value (e.g. 'openrouter'), TypeScript will error here instead of
+ * silently passing and crashing at runtime with a Postgres enum violation.
+ */
+import type { Provider } from '@/lib/db/schema';
+
+type DbCapability = 'model3d' | 'texture' | 'sfx' | 'voice' | 'music' | 'sprite' | 'bg_removal' | 'image' | 'chat' | 'embedding';
+
+export const DB_PROVIDER: Record<DbCapability, Provider> = {
+  chat: 'anthropic',
+  embedding: 'openai',
+  model3d: 'meshy',
+  texture: 'meshy',
+  sfx: 'elevenlabs',
+  voice: 'elevenlabs',
+  music: 'suno',
+  image: 'openai',
+  sprite: 'replicate',
+  bg_removal: 'removebg',
+};
+
+// ---------------------------------------------------------------------------
 // Backend -> circuit breaker provider name mapping
 // ---------------------------------------------------------------------------
 

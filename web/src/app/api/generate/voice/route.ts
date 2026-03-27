@@ -10,8 +10,8 @@ import { rateLimitResponse } from '@/lib/rateLimit';
 import { distributedRateLimit, aggregateGenerationRateLimit } from '@/lib/rateLimit/distributed';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
 import { refundTokens } from '@/lib/tokens/service';
-import { DIRECT_CAPABILITY_PROVIDER } from '@/lib/config/providers';
-import type { Provider } from '@/lib/db/schema';
+import { DB_PROVIDER } from '@/lib/config/providers';
+
 
 export async function POST(request: NextRequest) {
   // 1. Authenticate
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
   try {
     const resolved = await resolveApiKey(
       authResult.ctx.user.id,
-      DIRECT_CAPABILITY_PROVIDER.voice as Provider,
+      DB_PROVIDER.voice,
       tokenCost,
       'voice_generation',
       { text: safeText, textLength: safeText.length }
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       audioBase64: result.audioBase64,
       durationSeconds: result.durationSeconds,
-      provider: DIRECT_CAPABILITY_PROVIDER.voice,
+      provider: DB_PROVIDER.voice,
     });
   } catch (err) {
     // Refund tokens on provider failure
