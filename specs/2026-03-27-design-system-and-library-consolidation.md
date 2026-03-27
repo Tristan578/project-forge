@@ -552,7 +552,7 @@ v1 theme after v2 additions, renamed token fallback, future version rejection, i
 
 ### 10.6 Visual Regression (Chromatic — Mandatory)
 
-7 themes x effects on/off = 14 baselines minimum. CI gate. Baseline update requires PR approval.
+13 baselines minimum: Dark = 1 (no effects), other 6 themes = 2 each (effects on + off). CI gate. Baseline update requires PR approval.
 
 ### 10.7 Performance
 

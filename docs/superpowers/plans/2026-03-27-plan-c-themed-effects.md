@@ -86,7 +86,7 @@ describe('ThemeAmbient', () => {
 // packages/ui/src/effects/ThemeAmbient.tsx
 'use client';
 
-import { lazy, Suspense, useMemo } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import type { ThemeName } from '../tokens';
 import { Z_INDEX } from '../tokens';
 
@@ -107,20 +107,46 @@ const EFFECT_MAP: Partial<Record<ThemeName, React.LazyExoticComponent<React.FC>>
   // dark: no effect
 };
 
+/**
+ * NOTE: This component MUST be imported with next/dynamic({ ssr: false })
+ * in the main app to avoid hydration mismatch (server renders null,
+ * client reads data-sf-theme from DOM).
+ *
+ * Example in EditorLayout.tsx:
+ *   const ThemeAmbient = dynamic(
+ *     () => import('@spawnforge/ui').then(m => ({ default: m.ThemeAmbient })),
+ *     { ssr: false }
+ *   );
+ */
 export function ThemeAmbient() {
-  const shouldRender = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return false;
-    const effects = document.documentElement.getAttribute('data-sf-effects');
-    if (effects === 'off') return false;
-    return true;
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [effectsOff, setEffectsOff] = useState(false);
+  const [theme, setTheme] = useState<ThemeName>('dark');
+
+  // Subscribe to prefers-reduced-motion changes
+  useEffect(() => {
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReducedMotion(mql.matches);
+    const handler = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
   }, []);
 
-  if (!shouldRender) return null;
+  // Observe data-sf-effects attribute changes
+  useEffect(() => {
+    const root = document.documentElement;
+    setEffectsOff(root.getAttribute('data-sf-effects') === 'off');
+    setTheme((root.getAttribute('data-sf-theme') ?? 'dark') as ThemeName);
 
-  const theme = (typeof document !== 'undefined'
-    ? document.documentElement.getAttribute('data-sf-theme')
-    : 'dark') as ThemeName;
+    const observer = new MutationObserver(() => {
+      setEffectsOff(root.getAttribute('data-sf-effects') === 'off');
+      setTheme((root.getAttribute('data-sf-theme') ?? 'dark') as ThemeName);
+    });
+    observer.observe(root, { attributes: true, attributeFilter: ['data-sf-effects', 'data-sf-theme'] });
+    return () => observer.disconnect();
+  }, []);
+
+  if (reducedMotion || effectsOff) return null;
 
   const EffectComponent = EFFECT_MAP[theme];
   if (!EffectComponent) return null;
@@ -333,7 +359,7 @@ module.exports = {
     if: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm, cache-dependency-path: package-lock.json }
       - run: npm ci
       - run: cd packages/ui && npm run build

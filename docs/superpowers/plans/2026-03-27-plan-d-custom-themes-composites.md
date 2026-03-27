@@ -54,10 +54,21 @@ describe('themeValidator', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('rejects future schemaVersion', () => {
+  it('rejects future schemaVersion with specific message', () => {
     const result = validateCustomTheme({ ...VALID_THEME, schemaVersion: 2 });
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('SpawnForge v2');
+    if (!result.ok) {
+      expect(result.error).toContain('This theme requires SpawnForge v2');
+      expect(result.error).toContain('Your version supports v1');
+    }
+  });
+
+  it('rejects JSON exceeding 50KB via byteSize parameter', () => {
+    // File size is checked pre-parse in the import UI (Task D4),
+    // but validator also accepts optional byteSize for defense-in-depth
+    const result = validateCustomTheme(VALID_THEME, { byteSize: 60_000 });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('50KB');
   });
 
   // Token value validation
@@ -202,7 +213,14 @@ type ValidationResult =
   | { ok: true; theme: ValidatedTheme }
   | { ok: false; error: string };
 
-export function validateCustomTheme(input: unknown): ValidationResult {
+export function validateCustomTheme(
+  input: unknown,
+  options?: { byteSize?: number },
+): ValidationResult {
+  if (options?.byteSize && options.byteSize > 50_000) {
+    return { ok: false, error: 'Theme file exceeds 50KB limit.' };
+  }
+
   if (!input || typeof input !== 'object') {
     return { ok: false, error: 'Input must be a JSON object.' };
   }
