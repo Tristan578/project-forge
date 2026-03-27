@@ -73,6 +73,9 @@ web/out/
 web/test-results/
 web/playwright-report/
 
+# ----- Packages -----
+packages/ui/dist/
+
 # ----- TypeScript -----
 *.tsbuildinfo
 
