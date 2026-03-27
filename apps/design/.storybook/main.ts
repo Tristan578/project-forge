@@ -6,7 +6,9 @@ const stories = [
   '../stories/tokens/**/*.stories.@(ts|tsx)',
 ];
 
-// Effects stories added when effects ship (Plan C)
+// Effects stories (Plan C)
+stories.push('../stories/effects/**/*.stories.@(ts|tsx)');
+
 // Internal stories gated by env var
 if (process.env.INCLUDE_INTERNAL === 'true') {
   stories.push('../stories/internal/**/*.stories.@(ts|tsx)');
