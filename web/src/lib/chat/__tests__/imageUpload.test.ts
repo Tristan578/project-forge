@@ -285,7 +285,7 @@ describe('processImageFile (mocked DOM)', () => {
     const file = makeFile('photo.png', 'image/png', 1000);
     const result = await processImageFile(file);
     expect(result.success).toBe(false);
-    expect(result.error).toBeTruthy();
+    expect(result.error).toBeDefined();
     expect(result.fileName).toBe('photo.png');
   });
 });

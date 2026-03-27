@@ -240,11 +240,11 @@ describe('analyzeScene', () => {
       const advice = analyzeScene(makeInput());
       expect(Array.isArray(advice)).toBe(true);
       for (const item of advice) {
-        expect(item.id).toBeTruthy();
-        expect(item.severity).toBeTruthy();
-        expect(item.category).toBeTruthy();
-        expect(item.title).toBeTruthy();
-        expect(item.description).toBeTruthy();
+        expect(item.id).not.toBe('');
+        expect(item.severity).not.toBe('');
+        expect(item.category).not.toBe('');
+        expect(item.title).not.toBe('');
+        expect(item.description).not.toBe('');
       }
     });
   });
