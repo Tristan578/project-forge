@@ -5,6 +5,7 @@ import { X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface GenerateMusicDialogProps {
   isOpen: boolean;
@@ -21,6 +22,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
   const primaryName = useEditorStore((s) => s.primaryName);
+  const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = 80;
   const canSubmit =
@@ -66,6 +68,7 @@ export function GenerateMusicDialog({ isOpen, onClose, entityId }: GenerateMusic
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="generate-music-dialog-title"
