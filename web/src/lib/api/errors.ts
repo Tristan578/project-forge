@@ -1,5 +1,40 @@
 import { NextResponse } from 'next/server';
 
+// ---------------------------------------------------------------------------
+// Plan E: ApiErrorResponse + apiError() helper
+// ---------------------------------------------------------------------------
+
+export interface ApiErrorResponse {
+  error: string;
+  code?: string;
+  details?: unknown;
+}
+
+/**
+ * Create a structured error response with a consistent shape.
+ *
+ * @example apiError(400, 'Invalid input')
+ * @example apiError(422, 'Validation failed', 'VALIDATION_ERROR')
+ * @example apiError(422, 'Validation failed', 'VALIDATION_ERROR', { field: 'name' })
+ */
+export function apiError(
+  status: number,
+  error: string,
+  code?: string,
+  details?: unknown,
+): NextResponse<ApiErrorResponse> {
+  return NextResponse.json(
+    {
+      error,
+      ...(code && { code }),
+      ...(details !== undefined && { details }),
+    },
+    { status },
+  );
+}
+
+// ---------------------------------------------------------------------------
+
 /**
  * Standardised API error response system (PF-217, PF-216).
  *
