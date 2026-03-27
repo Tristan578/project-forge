@@ -1,9 +1,9 @@
-# SpawnForge Design System & Library Consolidation (v2)
+# SpawnForge Design System & Library Consolidation (v3)
 
 **Spec ID:** 2026-03-27-design-system-and-library-consolidation
-**Status:** Review Round 2
+**Status:** Review Round 3
 **Date:** 2026-03-27
-**Revision:** v2 — addresses 21 issues from 5-reviewer antagonistic sweep
+**Revision:** v3 — addresses 16 issues from round 2 five-reviewer sweep
 
 ---
 
@@ -79,23 +79,32 @@ This resolves the import boundary — `@spawnforge/ui` lives outside `web/` but 
 
 ### 2.4 Package Entry Points
 
+Raw `.ts` exports break production builds with Sentry's webpack wrapper. The package needs a build step.
+
 ```jsonc
 // packages/ui/package.json
 {
   "name": "@spawnforge/ui",
   "version": "0.1.0",
   "private": true,
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts",
-    "./internal": "./src/internal.ts",
-    "./tokens": "./src/tokens/index.ts",
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./internal": { "types": "./dist/internal.d.ts", "default": "./dist/internal.js" },
+    "./tokens": { "types": "./dist/tokens/index.d.ts", "default": "./dist/tokens/index.js" },
     "./tokens/theme.css": "./src/tokens/theme.css"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
   },
   "peerDependencies": { "react": "^19", "react-dom": "^19" },
   "dependencies": { "clsx": "^2", "tailwind-merge": "^3" }
 }
+```
+
+CI runs `cd packages/ui && npm run build` before `web/` build. `theme.css` is the one raw source export (CSS, not TS).
 ```
 
 ### 2.5 cn() Utility
@@ -109,10 +118,33 @@ export function cn(...inputs: ClassValue[]) { return twMerge(clsx(inputs)); }
 
 > `clsx` and `tailwind-merge` are new dependencies.
 
-### 2.6 CI Pipeline Updates
+### 2.6 Lockfile Strategy
 
-- `quality-gates.yml`: run `npm install` from root (workspace-aware)
-- Add `packages/ui` to lint and tsc paths
+The root `package-lock.json` becomes the **sole canonical lockfile**. After workspace bootstrap:
+
+1. Run `npm install` from root to generate root `package-lock.json`
+2. Delete `web/package-lock.json` (no longer authoritative)
+3. Commit root `package-lock.json`
+4. Add `web/package-lock.json` to `.gitignore`
+
+### 2.7 CI Pipeline Updates
+
+All CI jobs in `quality-gates.yml` must be updated:
+
+```yaml
+# BEFORE (broken after workspace conversion)
+- run: npm ci
+  working-directory: web
+  cache-dependency-path: web/package-lock.json
+
+# AFTER
+- run: npm ci
+  # No working-directory — runs from workspace root
+  cache-dependency-path: package-lock.json
+```
+
+- Every job: remove `working-directory: web` from `npm ci` step, update `cache-dependency-path` to `package-lock.json`
+- Add `packages/ui` to lint, tsc, and vitest paths
 - Verify existing `web/` tests still pass
 
 ### 2.7 Acceptance Criteria
@@ -214,30 +246,45 @@ All values are **static hex colors or literal CSS values**. No Tailwind opacity 
 
 > Ice = crystalline 2px corners. Leaf = organic 10px. Mech = tactical 1px + monospace + 2px borders. Rust = industrial 4px + heavy 2px borders. Ember = warm 8px + slow transitions. These non-color overrides ensure themes are visually distinct even without effects.
 
-### 4.4 Tailwind v4 @theme Integration
+### 4.4 Tailwind v4 Integration
+
+> **Important:** Tailwind v4's `@theme` block is a **build-time static manifest**. `var()` references as `@theme` values do NOT work for runtime theme switching — they produce literal `var(--sf-bg-surface)` strings, not resolved colors. Therefore:
+
+**Color tokens use arbitrary-value syntax (the ONLY correct approach for runtime theming):**
+
+```tsx
+// CANONICAL — works with runtime data-sf-theme switching
+<div className="bg-[var(--sf-bg-surface)] text-[var(--sf-text)] border-[var(--sf-border)]">
+```
+
+**Static tokens (spacing, radius) CAN use `@theme`** because they don't change per theme:
 
 ```css
-/* packages/ui/src/tokens/theme.css — imported by consumers */
+/* packages/ui/src/tokens/theme.css */
 @theme {
-  --color-sf-bg-app: var(--sf-bg-app);
-  --color-sf-bg-surface: var(--sf-bg-surface);
-  --color-sf-bg-elevated: var(--sf-bg-elevated);
-  --color-sf-bg-overlay: var(--sf-bg-overlay);
-  --color-sf-text: var(--sf-text);
-  --color-sf-text-secondary: var(--sf-text-secondary);
-  --color-sf-text-muted: var(--sf-text-muted);
-  --color-sf-border: var(--sf-border);
-  --color-sf-border-strong: var(--sf-border-strong);
-  --color-sf-accent: var(--sf-accent);
-  --color-sf-destructive: var(--sf-destructive);
-  --color-sf-success: var(--sf-success);
-  --color-sf-warning: var(--sf-warning);
+  --spacing-sf-1: 4px;
+  --spacing-sf-2: 8px;
+  --spacing-sf-3: 12px;
+  --spacing-sf-4: 16px;
+  --spacing-sf-6: 24px;
+  --spacing-sf-8: 32px;
 }
 ```
 
 Usage: `@import '@spawnforge/ui/tokens/theme.css';` in `globals.css`.
 
-Enables: `bg-sf-bg-surface`, `text-sf-text`, `border-sf-border` as Tailwind utilities. Fallback `bg-[var(--sf-bg-surface)]` always works if `@theme` is not loaded.
+**To reduce verbosity**, components use the `cn()` utility with token shortcuts defined as Tailwind v4 `@utility` rules:
+
+```css
+/* packages/ui/src/tokens/theme.css — utility shortcuts */
+@utility sf-surface { background-color: var(--sf-bg-surface); }
+@utility sf-text { color: var(--sf-text); }
+@utility sf-border { border-color: var(--sf-border); }
+@utility sf-accent { color: var(--sf-accent); }
+/* etc. */
+```
+
+This enables the readable shorthand `className="sf-surface sf-text sf-border"` while still resolving at runtime via CSS custom properties.
 
 ### 4.5 Theme Application
 
@@ -429,11 +476,23 @@ INCLUDE_INTERNAL=true npm run storybook      # all stories
 
 ### 9.3 DB Migration (Phase 0)
 
-```sql
-ALTER TABLE projects ADD COLUMN theme TEXT;
+**Schema change** — add to `web/src/lib/db/schema.ts` in the `projects` table:
+
+```ts
+theme: text('theme'),  // nullable, no default — null means "use global default"
 ```
 
-Generated via `npm run db:generate`, deployed via `npx drizzle-kit push --force`.
+> Note: `projects.theme` is per-project (shared across collaborators). Per-user-per-project overrides are deferred to a future spec requiring a `user_project_settings` join table. V1 ships with global user default + shared project override.
+
+**Migration workflow:**
+- **Dev:** `npm run db:push` (schema diffing, no migration files)
+- **Production (CD):** `npm run db:generate` to create migration SQL, then `npm run db:migrate` to apply it. **Never use `drizzle-kit push --force` in production** — it bypasses safety checks.
+
+The CD workflow step changes from `npx drizzle-kit push --force` to:
+```bash
+npx drizzle-kit generate
+npx drizzle-kit migrate
+```
 
 ---
 
@@ -537,3 +596,31 @@ CSS-only effects → no CPU profiling. Lighthouse gate: score must not drop >3 p
 - [ ] Chromatic baselines for all themes
 - [ ] No hardcoded `zinc-*` in `@spawnforge/ui`
 - [ ] Codemod tool exists for legacy migration (Phase 7)
+
+---
+
+## Appendix A: v3 Fixes Applied (Round 2 Reviewer Feedback)
+
+### Applied in spec body above
+1. **Lockfile strategy** — Section 2.6: root lockfile canonical, web lockfile removed, CI npm ci from root
+2. **Package exports** — Section 2.4: build step to dist/, not raw .ts (Sentry wrapper compat)
+3. **@theme for colors** — Section 4.4: dropped for colors, use bg-[var(--sf-*)] + @utility shortcuts
+4. **Drizzle schema** — Section 9.3: add theme: text('theme') to projects table, use db:generate + db:migrate for prod
+5. **CI npm ci** — Section 2.7: all jobs updated from npm install to npm ci, cache-dependency-path to root
+
+### Additional fixes (to be integrated during implementation)
+6. **apps/design/package.json scaffold** — Storybook 8.6, @storybook/react, addon-a11y, chromatic as devDeps. Scripts: storybook, build-storybook.
+7. **Chromatic CI** — New quality-gates job with CHROMATIC_PROJECT_TOKEN secret, runs on packages/ui or apps/design changes, required status check.
+8. **packages/ui vitest config** — vitest.config.ts with jsdom environment, include src/**/*.test.{ts,tsx}. CI step after build.
+9. **Missing token values** — --sf-accent-hover, --sf-success, --sf-warning must be added to Section 4.3 theme table for all 7 themes before Phase 2 begins.
+10. **z-index tokens** — Use hardcoded constants (not CSS custom properties) for z-index scale: effects=5, panels=10, modals=50, tooltips=60, toasts=70. Playwright assertion: expect(zIndex).toBe('5').
+11. **Dark theme carve-out** — For Dark theme, assert [data-sf-effect] is NOT present. For other themes, assert present with animationName !== 'none'. Chromatic: 13 baselines (Dark gets 1, others get 2 each).
+12. **Primitives leak assertion** — After render: container.querySelectorAll('[class]') iterated, assert no class matches /zinc-|stone-|slate-/.
+13. **useTheme() test spec** — Unit tests for: resolution priority chain (custom > project > global > dark), invalid localStorage fallback, reduced-motion forces effects off, per-project override applies.
+14. **Font allowlist** — Built-in themes bypass custom theme validator (trusted static values). Custom themes validated against allowlist. Add bare 'Geist Sans' and 'Geist Mono' to allowlist for completeness.
+15. **ValidatedTheme type** — themeValidator.ts returns ValidatedTheme type. applyThemeTokens(theme: ValidatedTheme) is the sole DOM application call site. style.setProperty only called with validated values.
+16. **Numeric bounds** — Duration max 2000ms, length max 64px/4rem. Enforced as numeric check after regex match.
+17. **Duplicate custom theme name** — On import, if name matches existing custom theme, prompt: "Replace existing theme '{name}'?" Yes replaces, No cancels.
+18. **Effects resolution** — sf-effects is global, not per-project. Effects off = off everywhere regardless of project theme.
+19. **Error message consistency** — schemaVersion future rejection: "This theme requires SpawnForge v{schemaVersion}. Your version supports v1."
+20. **UUID validation** — sf-custom-theme-id validated against UUID v4 regex on read. Invalid = cleared, falls back to global default.
