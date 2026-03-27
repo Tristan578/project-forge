@@ -65,7 +65,7 @@ export function useDialogA11y({
   // Escape key handler
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (!isOpen || !dialogRef.current) return;
+      if (!isOpen) return;
 
       if (e.key === 'Escape') {
         e.stopPropagation();
@@ -73,7 +73,7 @@ export function useDialogA11y({
         return;
       }
 
-      if (e.key === 'Tab') {
+      if (e.key === 'Tab' && dialogRef.current) {
         const focusable = Array.from(
           dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS),
         ).filter((el) => !el.closest('[aria-hidden="true"]'));
