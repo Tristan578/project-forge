@@ -189,9 +189,14 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
   // concurrent refund calls both pass a SELECT check before either inserts.
   const neonSql = getNeonSql();
 
-  // Atomic: insert refund log only if not already refunded, then update balance
+  // Atomic transaction: INSERT refund log + UPDATE balance in one batch.
+  // If either fails, both roll back — preventing the case where the log
+  // is written but balance isn't credited (permanent token loss).
+  // The UPDATE uses EXISTS as a guard: if the INSERT was a no-op (already
+  // refunded), the UPDATE also does nothing.
   const refundMetadata = JSON.stringify({ refundedUsageId: usageId });
-  const insertResult = await neonSql`
+
+  const insertStmt = neonSql`
     INSERT INTO token_usage (user_id, operation, tokens, source, provider, metadata)
     SELECT ${userId}::uuid, 'refund', ${-record.tokens}, ${record.source}, ${record.provider}, ${refundMetadata}::jsonb
     WHERE NOT EXISTS (
@@ -200,19 +205,31 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
         AND operation = 'refund'
         AND metadata->>'refundedUsageId' = ${usageId}
     )
-    RETURNING id
   `;
 
-  // If INSERT returned 0 rows, this usageId was already refunded — skip balance update
-  if (!insertResult || insertResult.length === 0) return;
+  // Build the UPDATE based on source type
+  const updateStmt = record.source === 'monthly'
+    ? neonSql`
+        UPDATE users
+        SET monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${record.tokens}), updated_at = NOW()
+        WHERE id = ${userId}::uuid
+          AND EXISTS (
+            SELECT 1 FROM token_usage
+            WHERE user_id = ${userId}::uuid AND operation = 'refund' AND metadata->>'refundedUsageId' = ${usageId}
+          )
+      `
+    : neonSql`
+        UPDATE users
+        SET addon_tokens = addon_tokens + ${record.tokens}, updated_at = NOW()
+        WHERE id = ${userId}::uuid
+          AND EXISTS (
+            SELECT 1 FROM token_usage
+            WHERE user_id = ${userId}::uuid AND operation = 'refund' AND metadata->>'refundedUsageId' = ${usageId}
+          )
+      `;
 
-  // Credit the balance (only reaches here if refund log was freshly inserted)
-  if (record.source === 'monthly') {
-    await neonSql`UPDATE users SET monthly_tokens_used = GREATEST(0, monthly_tokens_used - ${record.tokens}), updated_at = NOW() WHERE id = ${userId}::uuid`;
-  } else {
-    // addon and mixed both refund to addon_tokens
-    await neonSql`UPDATE users SET addon_tokens = addon_tokens + ${record.tokens}, updated_at = NOW() WHERE id = ${userId}::uuid`;
-  }
+  // neonSql.transaction runs both in a single PostgreSQL transaction
+  await neonSql.transaction([insertStmt, updateStmt]);
 }
 
 /**

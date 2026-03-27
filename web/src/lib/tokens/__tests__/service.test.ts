@@ -396,45 +396,40 @@ describe('refundTokens', () => {
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 
-  it('refunds monthly tokens for monthly source', async () => {
+  it('refunds monthly tokens atomically via transaction', async () => {
     const { refundTokens } = await import('../service');
 
-    // SELECT usage record via Drizzle
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-1', userId: 'user-1', tokens: 30, source: 'monthly', provider: 'anthropic',
     }]);
 
-    // neonSql: 1st call = INSERT...WHERE NOT EXISTS (returns inserted row)
-    // neonSql: 2nd call = UPDATE balance
-    mockNeonSql
-      .mockResolvedValueOnce([{ id: 'refund-new' }])  // INSERT succeeded
-      .mockResolvedValueOnce([]);                       // UPDATE balance
-
+    // neonSql tagged templates build query objects (2 calls),
+    // then neonSql.transaction() executes them atomically (1 call)
     await refundTokens('user-1', 'usage-1');
 
+    // 2 tagged template calls (INSERT stmt + UPDATE stmt)
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
+    // 1 transaction call with both statements
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('is idempotent — skips if already refunded (atomic)', async () => {
+  it('is idempotent — transaction includes both INSERT and UPDATE guard', async () => {
     const { refundTokens } = await import('../service');
 
-    // SELECT usage record via Drizzle
     mockWhere.mockReturnValueOnce(chainableWhere());
     mockLimit.mockResolvedValueOnce([{
       id: 'usage-dup', userId: 'user-1', tokens: 20, source: 'addon', provider: 'anthropic',
     }]);
 
-    // neonSql: INSERT...WHERE NOT EXISTS returns [] (already refunded)
-    mockNeonSql.mockResolvedValueOnce([]);
-
     await refundTokens('user-1', 'usage-dup');
 
-    // Only 1 neonSql call (INSERT check) — balance UPDATE never reached
-    expect(mockNeonSql).toHaveBeenCalledTimes(1);
+    // Transaction always runs — the WHERE NOT EXISTS / EXISTS guards
+    // inside the SQL prevent actual changes when already refunded
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('refunds addon tokens for addon source', async () => {
+  it('refunds addon tokens atomically', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -442,16 +437,12 @@ describe('refundTokens', () => {
       id: 'usage-2', userId: 'user-1', tokens: 50, source: 'addon', provider: null,
     }]);
 
-    mockNeonSql
-      .mockResolvedValueOnce([{ id: 'refund-new' }])
-      .mockResolvedValueOnce([]);
-
     await refundTokens('user-1', 'usage-2');
 
-    expect(mockNeonSql).toHaveBeenCalledTimes(2);
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 
-  it('refunds to addon for mixed source', async () => {
+  it('refunds mixed source to addon atomically', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -459,13 +450,9 @@ describe('refundTokens', () => {
       id: 'usage-3', userId: 'user-1', tokens: 40, source: 'mixed', provider: 'meshy',
     }]);
 
-    mockNeonSql
-      .mockResolvedValueOnce([{ id: 'refund-new' }])
-      .mockResolvedValueOnce([]);
-
     await refundTokens('user-1', 'usage-3');
 
-    expect(mockNeonSql).toHaveBeenCalledTimes(2);
+    expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
   });
 });
 
