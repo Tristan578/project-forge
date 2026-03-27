@@ -44,3 +44,6 @@ export { Toast, type ToastProps, type ToastVariant } from './primitives/Toast';
 
 // Ambient theme effects
 export { ThemeAmbient } from './effects/ThemeAmbient';
+
+// Utilities
+export { validateCustomTheme, type ValidatedTheme } from './utils/themeValidator';
