@@ -9,6 +9,7 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 test.describe('Scene Management @ui', () => {
   test.beforeEach(async ({ editor }) => {
@@ -123,7 +124,7 @@ test.describe('Scene Management (engine) @engine', () => {
         if (!store) return false;
         return store.getState().selectedIds.size > 0;
       },
-      { timeout: 5000 },
+      { timeout: E2E_TIMEOUT_ELEMENT_MS },
     );
 
     const selectedCount = await page.evaluate(() => {

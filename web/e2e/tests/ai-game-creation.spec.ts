@@ -1,5 +1,9 @@
 import { test, expect } from '../fixtures/editor.fixture';
 import { injectStore, readStore, isStrictMode } from '../helpers/store-injection';
+import {
+  E2E_TIMEOUT_SHORT_MS,
+  E2E_TIMEOUT_ELEMENT_MS,
+} from '../constants';
 
 /**
  * E2E tests for the AI-driven game creation flow.
@@ -24,7 +28,7 @@ test.describe('AI Game Creation Flow @ui', () => {
     await page.keyboard.press('Control+k');
 
     const chatInput = page.getByRole('textbox', { name: 'Chat message' });
-    await expect(chatInput).toBeVisible({ timeout: 5000 });
+    await expect(chatInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await chatInput.click();
     await chatInput.fill('Create a simple platformer game with a player character');
@@ -59,7 +63,7 @@ test.describe('AI Game Creation Flow @ui', () => {
 
     await page.keyboard.press('Control+k');
     await expect(page.locator('span').filter({ hasText: /AI Chat/i }).first())
-      .toBeVisible({ timeout: 5000 });
+      .toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     if (injected || isStrictMode) {
       const toolLabel = page.getByText('Spawn Entity', { exact: false });
@@ -121,10 +125,10 @@ test.describe('AI Game Creation Flow @ui', () => {
 
     await page.keyboard.press('Control+k');
     await expect(page.locator('span').filter({ hasText: /AI Chat/i }).first())
-      .toBeVisible({ timeout: 5000 });
+      .toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const chatOverlay = page.locator('.fixed.z-50').first();
-    await expect(chatOverlay).toBeVisible({ timeout: 5000 });
+    await expect(chatOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const divCount = await chatOverlay.locator('div').count();
     expect(divCount).toBeGreaterThan(2);
   });
@@ -155,7 +159,7 @@ test.describe('AI Game Creation Flow @ui', () => {
 
     await page.keyboard.press('Control+k');
     await expect(page.locator('span').filter({ hasText: /AI Chat/i }).first())
-      .toBeVisible({ timeout: 5000 });
+      .toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     if (injected || isStrictMode) {
       const approveBtn = page.getByRole('button', { name: /Approve/i });
@@ -192,7 +196,7 @@ test.describe('AI Game Creation Flow @ui', () => {
 
     await page.keyboard.press('Control+k');
     const chatOverlay = page.locator('.fixed.z-50').first();
-    await expect(chatOverlay).toBeVisible({ timeout: 5000 });
+    await expect(chatOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     if (injected || isStrictMode) {
       const errorText = page.getByText(/error occurred/i, { exact: false });
@@ -210,7 +214,7 @@ test.describe('AI Game Creation Flow @ui', () => {
     await page.keyboard.press('Control+k');
 
     const chatInput = page.getByRole('textbox', { name: 'Chat message' });
-    await expect(chatInput).toBeVisible({ timeout: 5000 });
+    await expect(chatInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await chatInput.click();
     await chatInput.fill('Build me a shooter game');
@@ -223,7 +227,7 @@ test.describe('AI Game Creation Flow @ui', () => {
     // After submission attempt, input is typically cleared
     // We just verify the panel stays open (no crash)
     const chatHeader = page.locator('span').filter({ hasText: /AI Chat/i }).first();
-    await expect(chatHeader).toBeVisible({ timeout: 3000 });
+    await expect(chatHeader).toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 
   // -------------------------------------------------------------------------
