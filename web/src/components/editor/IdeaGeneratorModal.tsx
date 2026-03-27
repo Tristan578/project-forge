@@ -81,7 +81,6 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
         aria-modal="true"
         aria-labelledby="idea-gen-title"
         tabIndex={-1}
-        onKeyDown={handleKeyDown}
         className="mx-4 flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none"
       >
         {/* Header */}
