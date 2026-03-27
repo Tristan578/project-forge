@@ -26,7 +26,7 @@ export function apiError(
   return NextResponse.json(
     {
       error,
-      ...(code && { code }),
+      ...(code !== undefined && { code }),
       ...(details !== undefined && { details }),
     },
     { status },
