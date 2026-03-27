@@ -1,4 +1,5 @@
-export const maxDuration = 120; // API_MAX_DURATION_CHAT_S
+import { API_MAX_DURATION_CHAT_S } from '@/lib/config/timeouts';
+export const maxDuration = API_MAX_DURATION_CHAT_S;
 
 import { NextRequest } from 'next/server';
 import { readdir, readFile } from 'fs/promises';

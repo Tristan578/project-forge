@@ -7,6 +7,7 @@ import {
 } from '@/lib/monitoring/healthChecks';
 import { captureException } from '@/lib/monitoring/sentry-server';
 import { logger } from '@/lib/logging/logger';
+import { API_MAX_DURATION_CRON_S } from '@/lib/config/timeouts';
 
 /**
  * GET /api/cron/health-monitor
@@ -108,4 +109,4 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
 export const dynamic = 'force-dynamic';
 // Allow up to 30s for all 9 health checks to complete
-export const maxDuration = 30;
+export const maxDuration = API_MAX_DURATION_CRON_S;
