@@ -434,3 +434,100 @@ jobs:
       - name: cargo audit (engine)
         working-directory: engine
         run: cargo audit
+
+  lighthouse-delta:
+    name: Lighthouse Effects Delta Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Install web dependencies
+        run: cd web && npm ci
+
+      - name: Install @lhci/cli
+        run: npm install -g @lhci/cli
+
+      - name: Start dev server for baseline (effects off)
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_EFFECTS: 'off'
+          PORT: '3000'
+        run: |
+          npm run dev &
+          npx wait-on http://localhost:3000 --timeout 60000
+
+      - name: Collect baseline Lighthouse runs (effects off)
+        run: |
+          lhci collect \
+            --url=http://localhost:3000/dev \
+            --number-of-runs=3 \
+            --output=json \
+            --output-path=.lhci-baseline/ \
+            --chrome-flags="--headless --no-sandbox --disable-gpu"
+
+      - name: Start dev server for effects-on run
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+          NEXT_PUBLIC_EFFECTS: 'on'
+          PORT: '3001'
+        run: |
+          npm run dev &
+          npx wait-on http://localhost:3001 --timeout 60000
+
+      - name: Collect effects-on Lighthouse runs
+        run: |
+          lhci collect \
+            --url=http://localhost:3001/dev \
+            --number-of-runs=3 \
+            --output=json \
+            --output-path=.lhci-effects/ \
+            --chrome-flags="--headless --no-sandbox --disable-gpu"
+
+      - name: Assert effects delta less than 5 performance points
+        run: |
+          node << 'NODE_EOF'
+          const fs = require('fs');
+          const path = require('path');
+
+          function getMedianPerformance(dir) {
+            const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+            const scores = files.map(f => {
+              const report = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+              return report.categories && report.categories.performance
+                ? report.categories.performance.score
+                : 0;
+            }).sort((a, b) => a - b);
+            return scores[Math.floor(scores.length / 2)] || 0;
+          }
+
+          const baseScore = getMedianPerformance('.lhci-baseline');
+          const testScore = getMedianPerformance('.lhci-effects');
+          const delta = baseScore - testScore;
+
+          console.log('Baseline (effects off): ' + (baseScore * 100).toFixed(1));
+          console.log('Effects on: ' + (testScore * 100).toFixed(1));
+          console.log('Delta: ' + (delta * 100).toFixed(1) + ' points');
+
+          if (delta > 0.05) {
+            console.error('FAIL: Effects caused ' + (delta * 100).toFixed(1) + ' point regression (max allowed: 5)');
+            process.exit(1);
+          }
+          console.log('PASS: Effects delta within acceptable range (< 5 points)');
+          NODE_EOF
