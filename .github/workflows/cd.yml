@@ -520,17 +520,19 @@ jobs:
       - name: Install Vercel CLI
         run: npm i -g vercel@50.34.3
 
+      # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
+      # Adding working-directory:web here causes web/web path doubling on remote builds.
       - name: Link Vercel project (staging)
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
 
+      # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
+      # Adding working-directory:web here causes web/web path doubling on remote builds.
       - name: Deploy to staging (remote build)
         id: deploy
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
@@ -617,8 +619,9 @@ jobs:
           echo "prev_url=${prev_url}" >> "$GITHUB_OUTPUT"
           echo "Last-known-good production URL: ${prev_url:-unknown}"
 
+      # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
+      # Adding working-directory:web here causes web/web path doubling on remote builds.
       - name: Pull Vercel environment (production)
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -638,9 +641,10 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npm run db:migrate
 
+      # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
+      # Adding working-directory:web here causes web/web path doubling on remote builds.
       - name: Deploy to production (remote build)
         id: deploy
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
