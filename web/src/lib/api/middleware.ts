@@ -250,17 +250,13 @@ async function runMiddlewarePipeline(
       rawBody = await req.json();
     } catch {
       const { apiError } = await import('@/lib/api/errors');
-      const errResponse = apiError(400, 'Invalid JSON body', 'BAD_REQUEST');
-      if (handler) return errResponse;
-      return { error: errResponse, userId: null, authContext: null };
+      return apiError(400, 'Invalid JSON body', 'BAD_REQUEST');
     }
 
     const parsed = options.validate.safeParse(rawBody);
     if (!parsed.success) {
       const { apiError } = await import('@/lib/api/errors');
-      const errResponse = apiError(422, 'Validation failed', 'VALIDATION_ERROR', parsed.error.format());
-      if (handler) return errResponse;
-      return { error: errResponse, userId: null, authContext: null };
+      return apiError(422, 'Validation failed', 'VALIDATION_ERROR', parsed.error.format());
     }
     body = parsed.data;
   }
