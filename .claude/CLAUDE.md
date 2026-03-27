@@ -241,10 +241,25 @@ When adding a **new ECS component**, update these domain-scoped files:
 
 ## Agent Skills
 
-### Review Protocol
-All specs and PRs go through 4 antagonistic reviewers: Architect, Security, UX, DX.
-Verdict is PASS or FAIL only — any issue at any severity is a FAIL.
-Loop continues until all 4 pass clean. No shortcuts.
+### Review Protocol — MANDATORY (No Exceptions)
+All specs, plans, and PRs go through **5 antagonistic specialized reviewers**. Each reviewer uses a different agent with domain-specific expertise. Reviews are PASS or FAIL only — any issue at any severity is a FAIL. Loop continues until all 5 pass clean. No shortcuts. No consolidation into fewer reviewers.
+
+**The 5 Specialized Reviewers:**
+
+| Role | Agent Type | Focus |
+|------|-----------|-------|
+| **Architect** | `feature-dev:code-architect` | Structure, dependencies, scaling, phase ordering, monorepo, build pipeline |
+| **Security** | `security-reviewer` | Injection, auth, data exposure, validation, XSS, CSRF |
+| **DX** | `dx-guardian` | Developer workflow, onboarding, migration burden, documentation, ergonomics |
+| **UX/Frontend** | `builder` | Theme differentiation, accessibility (WCAG), component UX, Tailwind integration, performance |
+| **Test** | `test-writer` | Test coverage gaps, testing mechanisms, CI gates, parameterization, visual regression |
+
+**Rules:**
+- NEVER substitute a generic `code-reviewer` agent for the 5 specialized agents. A single reviewer has self-affirmation bias and lacks cross-domain expertise.
+- If M2 limits concurrency, dispatch in batches of 3 then 2 — but all 5 MUST review.
+- Each reviewer dispatched as a separate background agent with a focused prompt for their domain.
+- The review cycle found 21 issues in round 1 that a single reviewer would have missed. This process is proven.
+- Specs, plans, AND code all go through this cycle before merge/implementation.
 
 ### Orchestration
 - `/planner` — Architect flow, creates specs in `specs/`
