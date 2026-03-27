@@ -376,24 +376,25 @@ describe('refundTokens', () => {
     resetChain();
   });
 
-  it('does nothing for free usageId', async () => {
+  it('returns refunded:false and skips DB for free usageId', async () => {
     const { refundTokens } = await import('../service');
 
-    await refundTokens('user-1', 'free');
+    const result = await refundTokens('user-1', 'free');
 
+    expect(result.refunded).toBe(false);
     expect(mockSelect).not.toHaveBeenCalled();
   });
 
-  it('does nothing when usage record not found', async () => {
+  it('returns refunded:false when usage record not found', async () => {
     const { refundTokens } = await import('../service');
 
     mockLimit.mockResolvedValueOnce([]);
 
-    await refundTokens('user-1', 'missing-id');
+    const result = await refundTokens('user-1', 'missing-id');
 
-    // select was called but update was not
+    expect(result.refunded).toBe(false);
     expect(mockSelect).toHaveBeenCalled();
-    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockNeonSql.transaction).not.toHaveBeenCalled();
   });
 
   it('refunds monthly tokens atomically via transaction', async () => {
@@ -404,17 +405,16 @@ describe('refundTokens', () => {
       id: 'usage-1', userId: 'user-1', tokens: 30, source: 'monthly', provider: 'anthropic',
     }]);
 
-    // neonSql tagged templates build query objects (2 calls),
-    // then neonSql.transaction() executes them atomically (1 call)
-    await refundTokens('user-1', 'usage-1');
+    const result = await refundTokens('user-1', 'usage-1');
 
-    // 2 tagged template calls (INSERT stmt + UPDATE stmt)
+    expect(result.refunded).toBe(true);
     expect(mockNeonSql).toHaveBeenCalledTimes(2);
-    // 1 transaction call with both statements
     expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    // Transaction receives exactly 2 statements (INSERT + UPDATE)
+    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 
-  it('is idempotent — transaction includes both INSERT and UPDATE guard', async () => {
+  it('builds transaction with INSERT...WHERE NOT EXISTS guard (idempotency at SQL level)', async () => {
     const { refundTokens } = await import('../service');
 
     mockWhere.mockReturnValueOnce(chainableWhere());
@@ -422,11 +422,14 @@ describe('refundTokens', () => {
       id: 'usage-dup', userId: 'user-1', tokens: 20, source: 'addon', provider: 'anthropic',
     }]);
 
-    await refundTokens('user-1', 'usage-dup');
-
     // Transaction always runs — the WHERE NOT EXISTS / EXISTS guards
-    // inside the SQL prevent actual changes when already refunded
+    // inside the SQL prevent actual changes when already refunded.
+    // True idempotency testing requires integration tests against a real DB.
+    const result = await refundTokens('user-1', 'usage-dup');
+
+    expect(result.refunded).toBe(true); // function always returns true when record exists
     expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 
   it('refunds addon tokens atomically', async () => {
@@ -437,9 +440,11 @@ describe('refundTokens', () => {
       id: 'usage-2', userId: 'user-1', tokens: 50, source: 'addon', provider: null,
     }]);
 
-    await refundTokens('user-1', 'usage-2');
+    const result = await refundTokens('user-1', 'usage-2');
 
+    expect(result.refunded).toBe(true);
     expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
   });
 
   it('refunds mixed source to addon atomically', async () => {
@@ -450,9 +455,37 @@ describe('refundTokens', () => {
       id: 'usage-3', userId: 'user-1', tokens: 40, source: 'mixed', provider: 'meshy',
     }]);
 
-    await refundTokens('user-1', 'usage-3');
+    const result = await refundTokens('user-1', 'usage-3');
 
+    expect(result.refunded).toBe(true);
     expect(mockNeonSql.transaction).toHaveBeenCalledTimes(1);
+    expect(mockNeonSql.transaction.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it('returns refunded:false for free usageId', async () => {
+    const { refundTokens } = await import('../service');
+    const result = await refundTokens('user-1', 'free');
+    expect(result.refunded).toBe(false);
+  });
+
+  it('returns refunded:false when usage record not found', async () => {
+    const { refundTokens } = await import('../service');
+    mockLimit.mockResolvedValueOnce([]);
+    const result = await refundTokens('user-1', 'missing');
+    expect(result.refunded).toBe(false);
+  });
+
+  it('propagates transaction errors to caller', async () => {
+    const { refundTokens } = await import('../service');
+
+    mockWhere.mockReturnValueOnce(chainableWhere());
+    mockLimit.mockResolvedValueOnce([{
+      id: 'usage-err', userId: 'user-1', tokens: 10, source: 'addon', provider: 'anthropic',
+    }]);
+
+    mockNeonSql.transaction.mockRejectedValueOnce(new Error('connection reset'));
+
+    await expect(refundTokens('user-1', 'usage-err')).rejects.toThrow('connection reset');
   });
 });
 

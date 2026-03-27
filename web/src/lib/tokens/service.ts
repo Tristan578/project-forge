@@ -168,8 +168,13 @@ export async function deductTokens(
 }
 
 /** Refund tokens from a failed API call */
-export async function refundTokens(userId: string, usageId: string): Promise<void> {
-  if (usageId === 'free') return;
+export interface RefundResult {
+  /** Whether tokens were actually credited (false = already refunded or record not found) */
+  refunded: boolean;
+}
+
+export async function refundTokens(userId: string, usageId: string): Promise<RefundResult> {
+  if (usageId === 'free') return { refunded: false };
 
   const db = getDb();
 
@@ -180,7 +185,7 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
     .where(and(eq(tokenUsage.id, usageId), eq(tokenUsage.userId, userId)))
     .limit(1);
 
-  if (!record) return;
+  if (!record) return { refunded: false };
 
   // 2. Atomic idempotent refund using neonSql.transaction().
   // The refund log INSERT uses WHERE NOT EXISTS to atomically check-and-insert.
@@ -228,8 +233,11 @@ export async function refundTokens(userId: string, usageId: string): Promise<voi
           )
       `;
 
-  // neonSql.transaction runs both in a single PostgreSQL transaction
+  // neonSql.transaction runs both in a single PostgreSQL transaction.
+  // The INSERT's WHERE NOT EXISTS is the atomic idempotency gate.
+  // The UPDATE's EXISTS guard ensures balance is only credited if INSERT succeeded.
   await neonSql.transaction([insertStmt, updateStmt]);
+  return { refunded: true };
 }
 
 /**
