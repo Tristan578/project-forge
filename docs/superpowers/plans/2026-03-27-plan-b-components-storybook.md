@@ -88,10 +88,19 @@ export default config;
 ```ts
 // apps/design/.storybook/preview.ts
 import type { Preview } from '@storybook/react';
-import { THEME_NAMES } from '@spawnforge/ui';
+import { THEME_NAMES, THEME_DEFINITIONS, type ThemeName } from '@spawnforge/ui';
 
-// Import the theme CSS + token utilities
+// Import the theme CSS + token utilities (static import — NOT dynamic)
 import '@spawnforge/ui/tokens/theme.css';
+
+function applyTheme(theme: ThemeName) {
+  const tokens = THEME_DEFINITIONS[theme];
+  const root = document.documentElement;
+  root.setAttribute('data-sf-theme', theme);
+  for (const [key, value] of Object.entries(tokens)) {
+    root.style.setProperty(key, value as string);
+  }
+}
 
 const preview: Preview = {
   globalTypes: {
@@ -111,18 +120,9 @@ const preview: Preview = {
   },
   decorators: [
     (Story, context) => {
-      const theme = context.globals.sfTheme || 'dark';
-      // Apply theme tokens to the story root
-      document.documentElement.setAttribute('data-sf-theme', theme);
-      // Import and apply tokens dynamically
-      import('@spawnforge/ui').then(({ THEME_DEFINITIONS }) => {
-        const tokens = THEME_DEFINITIONS[theme as keyof typeof THEME_DEFINITIONS];
-        if (tokens) {
-          for (const [key, value] of Object.entries(tokens)) {
-            document.documentElement.style.setProperty(key, value as string);
-          }
-        }
-      });
+      const theme = (context.globals.sfTheme || 'dark') as ThemeName;
+      // Apply theme tokens synchronously — no async import, no FOUC
+      applyTheme(theme);
       return (
         <div style={{ background: 'var(--sf-bg-app)', color: 'var(--sf-text)', padding: '1rem', minHeight: '100vh' }}>
           <Story />
@@ -131,7 +131,7 @@ const preview: Preview = {
     },
   ],
   parameters: {
-    backgrounds: { disable: true }, // We handle backgrounds via theme tokens
+    backgrounds: { disable: true },
     layout: 'centered',
   },
 };
@@ -603,7 +603,7 @@ gh secret set CHROMATIC_PROJECT_TOKEN
         run: cd packages/ui && npm run build
 
       - name: Run Chromatic
-        uses: chromaui/action@latest
+        uses: chromaui/action@v11
         with:
           projectToken: ${{ secrets.CHROMATIC_PROJECT_TOKEN }}
           workingDir: apps/design

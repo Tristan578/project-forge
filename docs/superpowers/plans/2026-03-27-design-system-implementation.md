@@ -292,7 +292,7 @@ The full object becomes:
 ```ts
 const nextConfig: NextConfig = {
   transpilePackages: ['@spawnforge/ui'],
-  compress: false,
+  compress: true,  // NOTE: existing value is true — do NOT change it
   // ... rest of existing config
 };
 ```
@@ -1070,21 +1070,15 @@ In `web/src/lib/db/schema.ts`, add to the `projects` table definition (after `fo
 theme: text('theme'),  // nullable, no default — null means "use global default"
 ```
 
-- [ ] **Step 2: Generate migration**
-
-```bash
-cd web && npm run db:generate
-```
-
-Expected: New migration file in `web/drizzle/` with `ALTER TABLE projects ADD COLUMN theme TEXT`.
-
-- [ ] **Step 3: Apply to dev DB**
+- [ ] **Step 2: Apply to dev DB (dev uses db:push only)**
 
 ```bash
 cd web && npm run db:push
 ```
 
-Expected: Column added to dev database.
+Expected: Column added to dev database. No migration files generated — `db:push` diffs schema against DB directly.
+
+> **Note:** For production (CD pipeline), use `npm run db:generate` then `npm run db:migrate`. Dev uses `db:push` only — running `db:generate` in dev creates migration files that will conflict with the push-based workflow.
 
 - [ ] **Step 4: Verify**
 
