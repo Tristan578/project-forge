@@ -1,4 +1,5 @@
 import { test as base, expect, type Page } from '@playwright/test';
+import { E2E_HYDRATION_TIMEOUT_MS } from '../../src/lib/config/timeouts';
 
 /**
  * Page Object Model for the Project Forge editor.
@@ -39,7 +40,7 @@ export class EditorPage {
     await this.page.waitForFunction(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       () => (window as any).__FORGE_ENGINE_READY === true,
-      { timeout: 45_000 }
+      { timeout: E2E_HYDRATION_TIMEOUT_MS }
     );
     // Wait for the editor layout container to be visible (canonical way to know hydration + layout is stable)
     await this.page.locator('.dv-dockview').first().waitFor({ state: 'visible', timeout: 5000 });

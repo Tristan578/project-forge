@@ -1,5 +1,9 @@
 import type { Page } from '@playwright/test';
 import { expect } from '@playwright/test';
+import {
+  E2E_HYDRATION_TIMEOUT_MS,
+  E2E_VISIBILITY_TIMEOUT_MS,
+} from '../../src/lib/config/timeouts';
 
 /**
  * Condition-based wait utilities for E2E tests.
@@ -70,7 +74,7 @@ export async function waitForEntity(
  */
 export async function waitForEngineReady(
   page: Page,
-  timeout = 45000,
+  timeout = E2E_HYDRATION_TIMEOUT_MS,
 ): Promise<void> {
   await page.waitForFunction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,7 +92,7 @@ export async function waitForEngineReady(
  */
 export async function waitForHydration(
   page: Page,
-  timeout = 30000,
+  timeout = E2E_VISIBILITY_TIMEOUT_MS,
 ): Promise<void> {
   await page.waitForFunction(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

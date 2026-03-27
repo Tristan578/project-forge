@@ -1,13 +1,14 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
+import { VITEST_TEST_TIMEOUT_MS, VITEST_HOOK_TIMEOUT_MS } from './src/lib/config/timeouts';
 
 export default defineConfig({
   test: {
     name: 'jsdom-tests',
     environment: 'jsdom',
     pool: 'forks',
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    testTimeout: VITEST_TEST_TIMEOUT_MS,
+    hookTimeout: VITEST_HOOK_TIMEOUT_MS,
     teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,

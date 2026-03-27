@@ -1,4 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
+import {
+  E2E_TEST_TIMEOUT_MS,
+  E2E_NAVIGATION_TIMEOUT_MS,
+} from './src/lib/config/timeouts';
 
 export default defineConfig({
   testDir: './e2e',
@@ -8,13 +12,13 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
-  timeout: 60_000,
+  timeout: E2E_TEST_TIMEOUT_MS,
   expect: { timeout: 15_000 },
 
   use: {
     baseURL: 'http://localhost:3000',
     actionTimeout: 10_000,
-    navigationTimeout: 30_000,
+    navigationTimeout: E2E_NAVIGATION_TIMEOUT_MS,
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
