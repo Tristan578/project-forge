@@ -69,11 +69,19 @@ while [ "$attempt" -lt "$RETRIES" ]; do
   echo "Health check attempt ${attempt}/${RETRIES}: ${HEALTH_ENDPOINT}"
 
   if [ "$USE_VERCEL_CURL" = true ]; then
-    HTTP_CODE=$(vercel curl --token="$VERCEL_TOKEN" --silent \
-      --output /tmp/health_response.json \
-      --write-out "%{http_code}" \
-      --max-time "$TIMEOUT" \
-      "${DEPLOY_URL}/api/health") || HTTP_CODE="000"
+    # vercel curl doesn't support curl flags (--silent, --output, --write-out).
+    # Capture body to file, infer status from content.
+    if vercel curl "${DEPLOY_URL}/api/health" --token="$VERCEL_TOKEN" > /tmp/health_response.json 2>/dev/null; then
+      # vercel curl exits 0 on success — check if response is valid JSON
+      if python3 -c "import json; json.load(open('/tmp/health_response.json'))" 2>/dev/null; then
+        HTTP_CODE=200
+      else
+        HTTP_CODE=000
+      fi
+    else
+      HTTP_CODE=000
+      echo "" > /tmp/health_response.json
+    fi
   else
     HTTP_CODE=$(curl --silent \
       --output /tmp/health_response.json \
