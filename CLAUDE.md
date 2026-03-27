@@ -125,3 +125,11 @@ Required: `.env.local` with `DATABASE_URL`, `CLERK_SECRET_KEY`, `STRIPE_SECRET_K
 - **`auth()` crashes without Clerk keys** — Server Components must use `safeAuth()` from `@/lib/auth/safe-auth.ts`, not `auth()` from `@clerk/nextjs/server`. Without `clerkMiddleware()` (CI/E2E), `auth()` throws a fatal error that crashes the dev server and fails all E2E tests.
 - **neon-http `db.transaction()` throws** — the neon-http driver does not support Drizzle's `db.transaction()`. Use `getNeonSql()` → `neonSql.transaction([...statements])`. Within the batch, each statement sees prior statements' effects — place INSERT...SELECT BEFORE any UPDATE it reads from, or audit records reflect post-mutation state.
 - **vitest workspace drops coverage thresholds** — `--workspace vitest.workspace.ts` ignores per-project thresholds. CI must use the standalone `vitest.config.ts` (which has 70/60/65/72 thresholds). Workspace is for local dev only.
+- **usageId in generate route responses** — NEVER remove. Client-side `useGenerationPolling.triggerRefund()` needs it for async job refunds. Fix double-refund via idempotent `refundTokens()` (metadata JSONB check), not by removing usageId.
+- **`refundTokens()` idempotency** — Check `metadata->>'refundedUsageId'` before crediting. Without this, server + client both refunding the same failed job doubles credits.
+- **`onConflictDoUpdate` field completeness** — List EVERY mutable field in `.set()`. Missing fields silently keep original values. Compare `.values()` fields with `.set()` fields after every upsert.
+- **Delete children before insert on upsert** — `db.delete(childTable).where(eq(parentId))` before inserting new children. Otherwise concurrent upserts create duplicates.
+- **ZADD member uniqueness** — `Date.now()` collides in same ms. Use `` `${Date.now()}:${Math.random().toString(36).slice(2,8)}` `` for sorted set members.
+- **Dockview CSS class** — `.dv-dockview` (NOT `.dv-dockview-container`). Used in E2E fixtures and editor boot tests.
+- **Sentry re-reviews every commit** — Reply with commit SHA + evidence, not "already fixed". Sentry doesn't resolve until the code on the PR branch actually changes.
+- **SHADOWED_GLOBALS shared module** — `web/src/lib/scripting/sandboxGlobals.ts` is single source of truth. Import in scriptWorker, scriptBundler, and tests. Never duplicate the list.
