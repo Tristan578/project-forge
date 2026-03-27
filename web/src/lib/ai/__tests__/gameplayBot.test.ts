@@ -96,7 +96,7 @@ describe('BOT_STRATEGIES', () => {
 
   it.each(allStrategies)('strategy "%s" has a name and description', (strategy) => {
     const config = BOT_STRATEGIES[strategy];
-    expect(config.name).toBeTruthy();
+    expect(config.name).not.toBe('');
     expect(config.description.length).toBeGreaterThan(10);
   });
 

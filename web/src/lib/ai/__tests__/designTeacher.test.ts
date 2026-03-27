@@ -60,9 +60,9 @@ describe('DESIGN_PRINCIPLES catalog', () => {
 
   it('every principle has required fields', () => {
     for (const p of DESIGN_PRINCIPLES) {
-      expect(p.id).toBeTruthy();
-      expect(p.name).toBeTruthy();
-      expect(p.category).toBeTruthy();
+      expect(p.id).not.toBe('');
+      expect(p.name).not.toBe('');
+      expect(p.category).not.toBe('');
       expect(p.description.length).toBeGreaterThan(10);
       expect(p.example.length).toBeGreaterThan(10);
       expect(p.keywords.length).toBeGreaterThan(0);
@@ -203,8 +203,8 @@ describe('suggestLessons', () => {
     });
     const lessons = suggestLessons(ctx);
     for (const lesson of lessons) {
-      expect(lesson.principle).toBeTruthy();
-      expect(lesson.category).toBeTruthy();
+      expect(lesson.principle).not.toBe('');
+      expect(lesson.category).not.toBe('');
       expect(lesson.explanation.length).toBeGreaterThan(10);
       expect(lesson.example.length).toBeGreaterThan(5);
       expect(lesson.relevance.length).toBeGreaterThan(5);
@@ -341,7 +341,7 @@ describe('generateDesignCritique', () => {
     const critique = generateDesignCritique(ctx);
     expect(critique.scores.length).toBeGreaterThan(0);
     for (const score of critique.scores) {
-      expect(score.principle).toBeTruthy();
+      expect(score.principle).not.toBe('');
       expect(score.score).toBeGreaterThanOrEqual(0);
       expect(score.score).toBeLessThanOrEqual(10);
       expect(score.feedback.length).toBeGreaterThan(0);

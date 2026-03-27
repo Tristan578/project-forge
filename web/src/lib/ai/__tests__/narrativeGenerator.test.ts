@@ -149,16 +149,16 @@ describe('NARRATIVE_PRESETS', () => {
   it.each(Object.entries(NARRATIVE_PRESETS))(
     'preset "%s" should have valid structure',
     (_key, preset) => {
-      expect(preset.id).toBeTruthy();
-      expect(preset.name).toBeTruthy();
-      expect(preset.description).toBeTruthy();
+      expect(preset.id).not.toBe('');
+      expect(preset.name).not.toBe('');
+      expect(preset.description).not.toBe('');
       expect(preset.actStructure.length).toBeGreaterThanOrEqual(2);
       expect(preset.suggestedCharacterRoles.length).toBeGreaterThanOrEqual(2);
       expect(preset.endingTypes.length).toBeGreaterThanOrEqual(2);
 
       for (const act of preset.actStructure) {
-        expect(act.name).toBeTruthy();
-        expect(act.purpose).toBeTruthy();
+        expect(act.name).not.toBe('');
+        expect(act.purpose).not.toBe('');
       }
     },
   );

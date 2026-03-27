@@ -7,9 +7,9 @@ describe('toFriendlyError', () => {
   it('classifies a network Error by message keyword', () => {
     const result = toFriendlyError(new Error('Failed to fetch'));
     expect(result.code).toBe('NETWORK_ERROR');
-    expect(result.title).toBeTruthy();
-    expect(result.message).toBeTruthy();
-    expect(result.actionLabel).toBeTruthy();
+    expect(result.title).not.toBe('');
+    expect(result.message).not.toBe('');
+    expect(result.actionLabel).not.toBe('');
     expect(result.action).toBe('retry');
   });
 

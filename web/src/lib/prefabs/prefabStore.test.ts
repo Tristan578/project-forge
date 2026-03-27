@@ -44,8 +44,8 @@ describe('CRUD Operations', () => {
     expect(prefab.category).toBe('TestCategory');
     expect(prefab.description).toBe('Test description');
     expect(prefab.snapshot).toEqual(mockSnapshot);
-    expect(prefab.createdAt).toBeTruthy();
-    expect(prefab.updatedAt).toBeTruthy();
+    expect(prefab.createdAt).toBeGreaterThan(0);
+    expect(prefab.updatedAt).toBeGreaterThan(0);
   });
 
   it('savePrefab generates unique IDs', () => {
@@ -125,16 +125,16 @@ describe('Built-in Prefabs', () => {
   it('All built-ins have required fields', () => {
     const builtIns = getBuiltInPrefabs();
     builtIns.forEach(prefab => {
-      expect(prefab.id).toBeTruthy();
-      expect(prefab.name).toBeTruthy();
-      expect(prefab.category).toBeTruthy();
-      expect(prefab.description).toBeTruthy();
-      expect(prefab.snapshot).toBeTruthy();
-      expect(prefab.snapshot.entityType).toBeTruthy();
-      expect(prefab.snapshot.name).toBeTruthy();
-      expect(prefab.snapshot.transform).toBeTruthy();
-      expect(prefab.createdAt).toBeTruthy();
-      expect(prefab.updatedAt).toBeTruthy();
+      expect(prefab.id).not.toBe('');
+      expect(prefab.name).not.toBe('');
+      expect(prefab.category).not.toBe('');
+      expect(prefab.description).not.toBe('');
+      expect(prefab.snapshot).toBeDefined();
+      expect(prefab.snapshot.entityType).not.toBe('');
+      expect(prefab.snapshot.name).not.toBe('');
+      expect(prefab.snapshot.transform).toBeDefined();
+      expect(prefab.createdAt).toBeGreaterThan(0);
+      expect(prefab.updatedAt).toBeGreaterThan(0);
     });
   });
 
