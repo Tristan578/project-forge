@@ -205,17 +205,29 @@ export function SceneToolbar() {
         <Save size={13} />
       </button>
 
-      {/* Cloud save indicator */}
+      {/* Cloud save indicator — accessible with live region for screen readers */}
       {projectId && (
-        <div className="flex h-6 w-6 items-center justify-center" title={
-          cloudSaveStatus === 'saved' ? 'Saved to cloud' :
-          cloudSaveStatus === 'saving' ? 'Saving to cloud...' :
-          cloudSaveStatus === 'error' ? 'Cloud save error' :
-          'Not saved'
-        }>
-          {cloudSaveStatus === 'saved' && <Cloud size={13} className="text-green-500" />}
-          {cloudSaveStatus === 'saving' && <Loader2 size={13} className="animate-spin text-blue-500" />}
-          {cloudSaveStatus === 'error' && <CloudOff size={13} className="text-red-500" />}
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label={
+            cloudSaveStatus === 'saved' ? 'Saved to cloud' :
+            cloudSaveStatus === 'saving' ? 'Saving to cloud...' :
+            cloudSaveStatus === 'error' ? 'Cloud save error' :
+            'Not saved'
+          }
+          tabIndex={0}
+          className="flex h-6 w-6 items-center justify-center rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+          title={
+            cloudSaveStatus === 'saved' ? 'Saved to cloud' :
+            cloudSaveStatus === 'saving' ? 'Saving to cloud...' :
+            cloudSaveStatus === 'error' ? 'Cloud save error' :
+            'Not saved'
+          }
+        >
+          {cloudSaveStatus === 'saved' && <Cloud size={13} className="text-green-500" aria-hidden="true" />}
+          {cloudSaveStatus === 'saving' && <Loader2 size={13} className="animate-spin text-blue-500" aria-hidden="true" />}
+          {cloudSaveStatus === 'error' && <CloudOff size={13} className="text-red-500" aria-hidden="true" />}
         </div>
       )}
 
