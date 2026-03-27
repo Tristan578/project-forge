@@ -5,6 +5,7 @@ import { X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useGenerationStore } from '@/stores/generationStore';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface GenerateSpriteDialogProps {
   isOpen: boolean;
@@ -27,6 +28,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
   const addJob = useGenerationStore((s) => s.addJob);
+  const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = activeTab === 'single' ? 15 : activeTab === 'sheet' ? frameCount * 15 : 50;
   const canSubmit =
@@ -113,6 +115,7 @@ export function GenerateSpriteDialog({ isOpen, onClose }: GenerateSpriteDialogPr
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="generate-sprite-dialog-title"

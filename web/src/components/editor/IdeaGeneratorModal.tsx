@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Lightbulb, RefreshCw, Play, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 import {
   generateIdeas,
   GENRE_CATALOG,
@@ -33,7 +34,7 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
   const [selectedComplexity, setSelectedComplexity] = useState<'' | 'low' | 'medium' | 'high'>('');
   const [trendingOnly, setTrendingOnly] = useState(false);
 
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogA11y(onClose);
 
   // Generate on open — use prev-value pattern to avoid setState in an effect body.
   // Build filters from the current UI control state rather than the `filters`
@@ -51,47 +52,6 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
       setIdeas(generateIdeas(3, currentFilters));
     }
   }
-
-  // Focus trap
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key === 'Tab') {
-        const dialog = dialogRef.current;
-        if (!dialog) return;
-        const focusable = dialog.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable.length === 0) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
-      }
-    },
-    [onClose]
-  );
-
-  useEffect(() => {
-    if (isOpen && dialogRef.current) {
-      requestAnimationFrame(() => {
-        dialogRef.current?.focus();
-      });
-    }
-  }, [isOpen]);
 
   const handleRegenerate = useCallback(() => {
     const activeFilters: IdeaFilters = {
@@ -121,7 +81,6 @@ export function IdeaGeneratorModal({ isOpen, onClose, onStart }: IdeaGeneratorMo
         aria-modal="true"
         aria-labelledby="idea-gen-title"
         tabIndex={-1}
-        onKeyDown={handleKeyDown}
         className="mx-4 flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg border border-zinc-700 bg-zinc-900 shadow-2xl focus:outline-none"
       >
         {/* Header */}

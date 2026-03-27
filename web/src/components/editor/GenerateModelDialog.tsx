@@ -5,6 +5,7 @@ import { X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { GenerationProgress } from '@/components/ui/GenerationProgress';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface GenerateModelDialogProps {
   isOpen: boolean;
@@ -31,6 +32,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
+  const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = quality === 'standard' ? 100 : 200;
   const canSubmit =
@@ -79,6 +81,7 @@ export function GenerateModelDialog({ isOpen, onClose }: GenerateModelDialogProp
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="generate-model-dialog-title"
