@@ -46,9 +46,9 @@ describe('TEXTURE_STYLES', () => {
 
   it('each style has required fields', () => {
     for (const style of TEXTURE_STYLES) {
-      expect(style.name).toBeTruthy();
-      expect(style.description).toBeTruthy();
-      expect(style.promptModifier).toBeTruthy();
+      expect(style.name).not.toBe('');
+      expect(style.description).not.toBe('');
+      expect(style.promptModifier).not.toBe('');
       expect(style.materialAdjustments).toBeDefined();
     }
   });

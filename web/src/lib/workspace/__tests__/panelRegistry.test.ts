@@ -16,9 +16,9 @@ describe('PANEL_DEFINITIONS', () => {
 
   it('should have all required fields', () => {
     for (const [key, def] of Object.entries(PANEL_DEFINITIONS)) {
-      expect(def.id, `${key} id`).toBeTruthy();
-      expect(def.title, `${key} title`).toBeTruthy();
-      expect(def.component, `${key} component`).toBeTruthy();
+      expect(def.id, `${key} id`).not.toBe('');
+      expect(def.title, `${key} title`).not.toBe('');
+      expect(def.component, `${key} component`).toBeDefined();
     }
   });
 

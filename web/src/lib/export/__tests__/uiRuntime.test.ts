@@ -29,7 +29,7 @@ function generate(data: string = 'null'): string {
 
 describe('generateUIRuntimeCode: basic output shape', () => {
   it('returns a non-empty string', () => {
-    expect(generate()).toBeTruthy();
+    expect(generate()).not.toBe('');
     expect(typeof generate()).toBe('string');
   });
 

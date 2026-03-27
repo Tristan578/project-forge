@@ -29,13 +29,13 @@ describe('MarkdownRenderer', () => {
 
   it('renders plain text', () => {
     render(<MarkdownRenderer content="Hello world" />);
-    expect(screen.getByText('Hello world')).toBeTruthy();
+    expect(screen.getByText('Hello world')).toBeDefined();
   });
 
   it('renders bold and italic text', () => {
     render(<MarkdownRenderer content="This is **bold** and *italic*" />);
-    expect(screen.getByText('bold')).toBeTruthy();
-    expect(screen.getByText('italic')).toBeTruthy();
+    expect(screen.getByText('bold')).toBeDefined();
+    expect(screen.getByText('italic')).toBeDefined();
   });
 
   it('renders inline code', () => {
@@ -47,23 +47,23 @@ describe('MarkdownRenderer', () => {
   it('renders code blocks with language label', () => {
     const content = '```typescript\nconst x = 1;\n```';
     render(<MarkdownRenderer content={content} />);
-    expect(screen.getByText('typescript')).toBeTruthy();
-    expect(screen.getByText('const x = 1;')).toBeTruthy();
+    expect(screen.getByText('typescript')).toBeDefined();
+    expect(screen.getByText('const x = 1;')).toBeDefined();
   });
 
   it('renders unordered lists', () => {
     const content = '- Item 1\n- Item 2\n- Item 3';
     render(<MarkdownRenderer content={content} />);
-    expect(screen.getByText('Item 1')).toBeTruthy();
-    expect(screen.getByText('Item 2')).toBeTruthy();
-    expect(screen.getByText('Item 3')).toBeTruthy();
+    expect(screen.getByText('Item 1')).toBeDefined();
+    expect(screen.getByText('Item 2')).toBeDefined();
+    expect(screen.getByText('Item 3')).toBeDefined();
   });
 
   it('renders ordered lists', () => {
     const content = '1. First\n2. Second';
     render(<MarkdownRenderer content={content} />);
-    expect(screen.getByText('First')).toBeTruthy();
-    expect(screen.getByText('Second')).toBeTruthy();
+    expect(screen.getByText('First')).toBeDefined();
+    expect(screen.getByText('Second')).toBeDefined();
   });
 
   it('renders headings', () => {
@@ -86,7 +86,7 @@ describe('MarkdownRenderer', () => {
     render(<MarkdownRenderer content="> This is a quote" />);
     const quote = screen.getByText('This is a quote');
     // blockquote wraps a p which contains text
-    expect(quote.closest('blockquote')).toBeTruthy();
+    expect(quote.closest('blockquote')).not.toBeNull();
   });
 
   it('renders tables with GFM', () => {
@@ -130,15 +130,15 @@ describe('MarkdownRenderer', () => {
   it('renders horizontal rules', () => {
     const content = ['Above', '', '---', '', 'Below'].join('\n');
     render(<MarkdownRenderer content={content} />);
-    expect(screen.getByText('Above')).toBeTruthy();
-    expect(screen.getByText('Below')).toBeTruthy();
-    expect(document.querySelector('hr')).toBeTruthy();
+    expect(screen.getByText('Above')).toBeDefined();
+    expect(screen.getByText('Below')).toBeDefined();
+    expect(document.querySelector('hr')).not.toBeNull();
   });
 
   it('renders strikethrough (GFM)', () => {
     render(<MarkdownRenderer content="This is ~~deleted~~ text" />);
     const del = document.querySelector('del');
-    expect(del).toBeTruthy();
+    expect(del).not.toBeNull();
     expect(del?.textContent).toBe('deleted');
   });
 });

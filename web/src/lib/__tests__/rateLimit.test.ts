@@ -323,7 +323,7 @@ describe('rateLimitAdminRoute', () => {
     const result = await rateLimitAdminRoute('admin-7', 'admin-test-5', 2, 60_000);
     expect(result).not.toBeNull();
     expect(result!.headers.get('X-RateLimit-Remaining')).toBe('0');
-    expect(result!.headers.get('Retry-After')).toBeTruthy();
-    expect(result!.headers.get('X-RateLimit-Reset')).toBeTruthy();
+    expect(result!.headers.get('Retry-After')).not.toBeNull();
+    expect(result!.headers.get('X-RateLimit-Reset')).not.toBeNull();
   });
 });

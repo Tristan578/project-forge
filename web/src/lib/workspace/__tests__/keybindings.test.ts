@@ -20,10 +20,10 @@ describe('DEFAULT_BINDINGS', () => {
 
   it('should have all required fields', () => {
     for (const binding of DEFAULT_BINDINGS) {
-      expect(binding.action).toBeTruthy();
-      expect(binding.label).toBeTruthy();
-      expect(binding.category).toBeTruthy();
-      expect(binding.defaultKey).toBeTruthy();
+      expect(binding.action).not.toBe('');
+      expect(binding.label).not.toBe('');
+      expect(binding.category).not.toBe('');
+      expect(binding.defaultKey).not.toBe('');
       expect(binding.customKey).toBeNull();
     }
   });

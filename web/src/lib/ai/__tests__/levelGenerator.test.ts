@@ -19,8 +19,8 @@ describe('LEVEL_TEMPLATES', () => {
   it.each(templateIds)('template "%s" exists with name and description', (id) => {
     const template = LEVEL_TEMPLATES[id];
     expect(template).toBeDefined();
-    expect(template.name).toBeTruthy();
-    expect(template.description).toBeTruthy();
+    expect(template.name).not.toBe('');
+    expect(template.description).not.toBe('');
     expect(typeof template.generate).toBe('function');
   });
 

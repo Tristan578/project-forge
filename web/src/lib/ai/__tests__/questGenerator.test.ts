@@ -42,10 +42,10 @@ describe('CHAIN_TEMPLATES', () => {
 
   it('each template has all required fields', () => {
     for (const template of Object.values(CHAIN_TEMPLATES)) {
-      expect(template.id).toBeTruthy();
-      expect(template.name).toBeTruthy();
-      expect(template.description).toBeTruthy();
-      expect(template.arcDescription).toBeTruthy();
+      expect(template.id).not.toBe('');
+      expect(template.name).not.toBe('');
+      expect(template.description).not.toBe('');
+      expect(template.arcDescription).not.toBe('');
       expect(template.questCount).toBeGreaterThan(0);
     }
   });
@@ -257,8 +257,8 @@ describe('generateQuestChain', () => {
   it('all quests have giverNpc and location', () => {
     const chain = generateQuestChain(defaultOptions());
     for (const quest of chain.quests) {
-      expect(quest.giverNpc).toBeTruthy();
-      expect(quest.location).toBeTruthy();
+      expect(quest.giverNpc).not.toBe('');
+      expect(quest.location).not.toBe('');
     }
   });
 

@@ -47,9 +47,9 @@ describe('CAMERA_PRESETS', () => {
   it('every preset has required fields', () => {
     for (const key of PRESET_KEYS) {
       const preset = CAMERA_PRESETS[key];
-      expect(preset.name).toBeTruthy();
-      expect(preset.genre).toBeTruthy();
-      expect(preset.mode).toBeTruthy();
+      expect(preset.name).not.toBe('');
+      expect(preset.genre).not.toBe('');
+      expect(preset.mode).not.toBe('');
       expect(typeof preset.followDistance).toBe('number');
       expect(typeof preset.followHeight).toBe('number');
       expect(typeof preset.followSmoothing).toBe('number');

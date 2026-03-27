@@ -8,9 +8,9 @@ describe('onboardingTasks', () => {
 
   it('every task has required fields', () => {
     for (const task of ONBOARDING_TASKS) {
-      expect(task.id).toBeTruthy();
-      expect(task.label).toBeTruthy();
-      expect(task.description).toBeTruthy();
+      expect(task.id).not.toBe('');
+      expect(task.label).not.toBe('');
+      expect(task.description).not.toBe('');
       expect(['basic', 'advanced']).toContain(task.category);
     }
   });

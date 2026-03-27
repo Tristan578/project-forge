@@ -53,7 +53,7 @@ describe('parseTweeFile - single passage text node', () => {
   it('assigns a non-empty tree id', () => {
     const input = passage('P', '', 'Text.');
     const tree = parseTweeFile(input);
-    expect(tree.id).toBeTruthy();
+    expect(tree.id).not.toBe('');
   });
 
   it('all nodes have valid types', () => {

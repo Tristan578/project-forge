@@ -41,12 +41,12 @@ describe('buildTruncatedApiMessages', () => {
     const summaryMsg = result.find(
       (m) => typeof m.content === 'string' && m.content.includes('Earlier conversation summarized')
     );
-    expect(summaryMsg).toBeTruthy();
+    expect(summaryMsg).not.toBeUndefined();
     // Should still contain the final message
     const finalMsg = result.find(
       (m) => typeof m.content === 'string' && m.content === 'final message'
     );
-    expect(finalMsg).toBeTruthy();
+    expect(finalMsg).not.toBeUndefined();
   });
 
   it('preserves tool_use/tool_result pairs (drops both together)', () => {
@@ -78,7 +78,7 @@ describe('buildTruncatedApiMessages', () => {
     const finalMsg = result.find(
       (m) => typeof m.content === 'string' && (m.content === 'final question' || m.content.includes('final question'))
     );
-    expect(finalMsg).toBeTruthy();
+    expect(finalMsg).not.toBeUndefined();
 
     // Dropped messages should have produced a summary marker
     const hasSummary = result.some(
@@ -142,7 +142,7 @@ describe('buildTruncatedApiMessages', () => {
     const summaryMsg = result.find(
       (m) => typeof m.content === 'string' && m.content.includes('Earlier conversation summarized')
     );
-    expect(summaryMsg).toBeTruthy();
+    expect(summaryMsg).not.toBeUndefined();
   });
 
   it('filters out system messages', () => {

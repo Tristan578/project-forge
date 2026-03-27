@@ -87,7 +87,7 @@ describe('COMPLEXITY_LABELS', () => {
   it('has a label for every level', () => {
     const levels: ComplexityLevel[] = ['beginner', 'intermediate', 'expert'];
     for (const level of levels) {
-      expect(COMPLEXITY_LABELS[level]).toBeTruthy();
+      expect(COMPLEXITY_LABELS[level]).not.toBe('');
     }
   });
 });
@@ -96,7 +96,7 @@ describe('COMPLEXITY_DESCRIPTIONS', () => {
   it('has a description for every level', () => {
     const levels: ComplexityLevel[] = ['beginner', 'intermediate', 'expert'];
     for (const level of levels) {
-      expect(COMPLEXITY_DESCRIPTIONS[level]).toBeTruthy();
+      expect(COMPLEXITY_DESCRIPTIONS[level]).not.toBe('');
     }
   });
 });

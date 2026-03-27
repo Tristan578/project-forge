@@ -164,7 +164,7 @@ describe('GET /api/health', () => {
       }
 
       const res = await GET(req);
-      expect(res.headers.get('Retry-After')).toBeTruthy();
+      expect(res.headers.get('Retry-After')).not.toBeNull();
       expect(res.headers.get('X-RateLimit-Remaining')).toBe('0');
     });
 

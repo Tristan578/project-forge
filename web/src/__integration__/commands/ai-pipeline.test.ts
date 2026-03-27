@@ -155,8 +155,8 @@ describe('GDD → Level pipeline', () => {
     const level = await generateLevel(FIXTURE_GDD.summary);
     expect(level).toBeDefined();
     expect(level.rooms.length).toBeGreaterThan(0);
-    expect(level.startRoom).toBeTruthy();
-    expect(level.exitRoom).toBeTruthy();
+    expect(level.startRoom).not.toBe('');
+    expect(level.exitRoom).not.toBe('');
     // Genre-based selection should have some result
     expect(typeof genre).toBe('string');
   });
@@ -165,7 +165,7 @@ describe('GDD → Level pipeline', () => {
     // A GDD with dungeon/corridor mechanics → dungeon template
     const dungeonGDD = { ...FIXTURE_GDD, summary: 'A dungeon crawl with corridors and locked rooms' };
     const level = await generateLevel(dungeonGDD.summary);
-    expect(level.name).toBeTruthy();
+    expect(level.name).not.toBe('');
     expect(level.rooms.every((r) => r.id)).toBe(true);
   });
 
@@ -359,7 +359,7 @@ describe('full pipeline: GDD → Level → Effects → Review', () => {
 
     // The GDD summary should work as a level description string
     const level = await generateLevel(gdd.summary);
-    expect(level.name).toBeTruthy();
+    expect(level.name).not.toBe('');
     expect(level.rooms.length).toBeGreaterThan(0);
 
     // Level commands should be a non-empty array

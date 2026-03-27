@@ -33,7 +33,7 @@ describe('ESTIMATED_TIMES', () => {
 
   it('has a non-empty label for every entry', () => {
     for (const [type, range] of Object.entries(ESTIMATED_TIMES)) {
-      expect(range.label, `${type}.label`).toBeTruthy();
+      expect(range.label, `${type}.label`).not.toBe('');
     }
   });
 
@@ -152,7 +152,6 @@ describe('getCurrentStage', () => {
 
   it('returns a middle stage at 50% progress', () => {
     const stage = getCurrentStage('model', 50);
-    expect(stage).toBeTruthy();
     expect(stage).not.toBe('');
   });
 
@@ -164,7 +163,7 @@ describe('getCurrentStage', () => {
     for (const type of types) {
       for (const progress of [0, 25, 50, 75, 99, 100]) {
         const stage = getCurrentStage(type, progress);
-        expect(stage, `${type} @ ${progress}%`).toBeTruthy();
+        expect(stage, `${type} @ ${progress}%`).not.toBe('');
       }
     }
   });
@@ -205,7 +204,7 @@ describe('GENERATION_STAGES', () => {
   it('each stage label is a non-empty string ending with "..."', () => {
     for (const [type, stages] of Object.entries(GENERATION_STAGES)) {
       for (const stage of stages) {
-        expect(stage, `${type} stage "${stage}"`).toBeTruthy();
+        expect(stage, `${type} stage "${stage}"`).not.toBe('');
         expect(stage.endsWith('...'), `${type}: "${stage}" should end with "..."`).toBe(true);
       }
     }

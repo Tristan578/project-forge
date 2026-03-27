@@ -65,16 +65,16 @@ describe('ideaHandlers.generate_game_ideas', () => {
     expect(result.success).toBe(true);
     const ideas = (result.result as { ideas: Record<string, unknown>[] }).ideas;
     const idea = ideas[0];
-    expect(idea.id).toBeTruthy();
-    expect(idea.title).toBeTruthy();
-    expect(idea.description).toBeTruthy();
-    expect(idea.primaryGenre).toBeTruthy();
-    expect(idea.secondaryGenre).toBeTruthy();
+    expect(idea.id).not.toBe('');
+    expect(idea.title).not.toBe('');
+    expect(idea.description).not.toBe('');
+    expect(idea.primaryGenre).not.toBe('');
+    expect(idea.secondaryGenre).not.toBe('');
     expect(Array.isArray(idea.mechanics)).toBe(true);
     expect(typeof idea.score).toBe('number');
     expect(Array.isArray(idea.hooks)).toBe(true);
-    expect(idea.targetAudience).toBeTruthy();
-    expect(idea.templateMatch).toBeTruthy();
+    expect(idea.targetAudience).not.toBe('');
+    expect(idea.templateMatch).not.toBe('');
   });
 
   it('filters by genreIds', async () => {
@@ -129,7 +129,7 @@ describe('ideaHandlers.get_idea_details', () => {
     const result = await ideaHandlers['get_idea_details']({}, makeCtx());
     expect(result.success).toBe(true);
     const r = result.result as Record<string, unknown>;
-    expect(r.title).toBeTruthy();
+    expect(r.title).not.toBe('');
     expect(typeof r.gddOutlinePrompt).toBe('string');
     expect((r.gddOutlinePrompt as string).length).toBeGreaterThan(50);
   });
@@ -141,7 +141,7 @@ describe('ideaHandlers.get_idea_details', () => {
     );
     expect(result.success).toBe(true);
     const r = result.result as Record<string, unknown>;
-    expect(r.gddOutlinePrompt).toBeTruthy();
+    expect(r.gddOutlinePrompt).not.toBe('');
   });
 
   it('applies title override', async () => {
@@ -215,9 +215,9 @@ describe('ideaHandlers.start_from_idea', () => {
     );
     expect(result.success).toBe(true);
     const r = result.result as Record<string, unknown>;
-    expect(r.templateUsed).toBeTruthy();
+    expect(r.templateUsed).not.toBe('');
     expect(['2d', '3d']).toContain(r.projectType);
-    expect(r.sceneName).toBeTruthy();
+    expect(r.sceneName).not.toBe('');
   });
 
   it('uses explicit templateMatch when provided', async () => {
@@ -304,12 +304,12 @@ describe('ideaHandlers.remix_idea', () => {
     );
     expect(result.success).toBe(true);
     const r = result.result as Record<string, unknown>;
-    expect(r.id).toBeTruthy();
-    expect(r.title).toBeTruthy();
-    expect(r.description).toBeTruthy();
+    expect(r.id).not.toBe('');
+    expect(r.title).not.toBe('');
+    expect(r.description).not.toBe('');
     expect(Array.isArray(r.mechanics)).toBe(true);
     expect(typeof r.score).toBe('number');
-    expect(r.templateMatch).toBeTruthy();
+    expect(r.templateMatch).not.toBe('');
   });
 
   it('rejects invalid dimension enum', async () => {

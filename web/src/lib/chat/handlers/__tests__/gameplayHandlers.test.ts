@@ -347,8 +347,8 @@ describe('list_game_component_types', () => {
     const { result } = await invokeHandler(gameplayHandlers, 'list_game_component_types', {});
     const data = result.result as { types: Array<{ name: string; description: string }> };
     for (const t of data.types) {
-      expect(t.name).toBeTruthy();
-      expect(t.description).toBeTruthy();
+      expect(t.name).not.toBe('');
+      expect(t.description).not.toBe('');
     }
   });
 });

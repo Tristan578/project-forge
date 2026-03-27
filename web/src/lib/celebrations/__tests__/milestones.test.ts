@@ -43,8 +43,8 @@ describe('milestones', () => {
     it('returns celebration data on first call', () => {
       const data = checkMilestone('FIRST_ENTITY');
       expect(data).not.toBeNull();
-      expect(data?.title).toBeTruthy();
-      expect(data?.message).toBeTruthy();
+      expect(data?.title).not.toBe('');
+      expect(data?.message).not.toBe('');
     });
 
     it('returns null on second call (already celebrated)', () => {
@@ -60,17 +60,17 @@ describe('milestones', () => {
 
     it('returns data for FIRST_PLAY', () => {
       const data = checkMilestone('FIRST_PLAY');
-      expect(data?.title).toBeTruthy();
+      expect(data?.title).not.toBe('');
     });
 
     it('returns data for FIRST_PUBLISH', () => {
       const data = checkMilestone('FIRST_PUBLISH');
-      expect(data?.message).toBeTruthy();
+      expect(data?.message).not.toBe('');
     });
 
     it('returns data for FIRST_AI_GENERATION', () => {
       const data = checkMilestone('FIRST_AI_GENERATION');
-      expect(data?.title).toBeTruthy();
+      expect(data?.title).not.toBe('');
     });
 
     it('returns data for ENTITY_COUNT_50', () => {
