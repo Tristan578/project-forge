@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 
 // ---------------------------------------------------------------------------
 // Mocks must be declared before any imports that reference the mocked modules.
@@ -219,6 +220,67 @@ describe('withApiMiddleware', () => {
       await withApiMiddleware(makeRequest());
 
       expect(mockDistributedRateLimit).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Zod validation (Plan E task E2)
+  // -----------------------------------------------------------------------
+
+  describe('validate option', () => {
+    it('validates request body with Zod schema and passes parsed body to handler', async () => {
+      const handler = withApiMiddleware(
+        async (_req, { body }) => NextResponse.json({ received: body }),
+        {
+          requireAuth: false,
+          validate: z.object({ name: z.string(), count: z.number() }),
+        },
+      );
+
+      const req = new NextRequest('http://localhost/api/test', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'test', count: 5 }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await handler(req);
+      expect(res.status).toBe(200);
+      const resBody = await res.json();
+      expect(resBody.received).toEqual({ name: 'test', count: 5 });
+    });
+
+    it('returns 422 for invalid body', async () => {
+      const handler = withApiMiddleware(
+        async () => NextResponse.json({ ok: true }),
+        {
+          requireAuth: false,
+          validate: z.object({ name: z.string() }),
+        },
+      );
+
+      const req = new NextRequest('http://localhost/api/test', {
+        method: 'POST',
+        body: JSON.stringify({ name: 123 }), // wrong type
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await handler(req);
+      expect(res.status).toBe(422);
+    });
+
+    it('does not run validation when validate option is not provided', async () => {
+      const handlerFn = vi.fn(async () => NextResponse.json({ ok: true }));
+      const handler = withApiMiddleware(handlerFn, { requireAuth: false });
+
+      const req = new NextRequest('http://localhost/api/test', {
+        method: 'POST',
+        body: JSON.stringify({ anything: true }),
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await handler(req);
+      expect(res.status).toBe(200);
+      expect(handlerFn).toHaveBeenCalled();
     });
   });
 });

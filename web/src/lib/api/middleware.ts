@@ -50,6 +50,7 @@ import { authenticateRequest } from '@/lib/auth/api-auth';
 import { rateLimit, getClientIp } from '@/lib/rateLimit';
 import { distributedRateLimit } from '@/lib/rateLimit/distributed';
 import type { AuthContext } from '@/lib/auth/api-auth';
+import type { ZodSchema } from 'zod';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -87,7 +88,31 @@ export interface MiddlewareOptions {
   rateLimit?: boolean;
   /** Rate-limit configuration. Required when rateLimit = true. */
   rateLimitConfig?: RateLimitConfig;
+  /**
+   * Zod schema to validate the request body against.
+   * When provided, the body is parsed from JSON, validated, and passed to the
+   * handler as `context.body`. On failure, returns 422 VALIDATION_ERROR.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  validate?: ZodSchema<any>;
 }
+
+// ---------------------------------------------------------------------------
+// Handler-wrapping overload types (Plan E)
+// ---------------------------------------------------------------------------
+
+/** Context passed to wrapped handlers. */
+export interface HandlerContext {
+  userId: string | null;
+  authContext: AuthContext | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  body: any;
+}
+
+export type WrappedHandler = (
+  req: NextRequest,
+  context: HandlerContext,
+) => Promise<NextResponse>;
 
 /** Successful middleware result — handler may proceed. */
 export interface MiddlewareSuccess {
@@ -112,20 +137,53 @@ export type MiddlewareResult = MiddlewareSuccess | MiddlewareFailure;
 // ---------------------------------------------------------------------------
 
 /**
- * Run the standard API middleware pipeline (auth → rate-limit) and return
- * either a success result or an error response to return immediately.
+ * Run the standard API middleware pipeline (auth → rate-limit → validate)
+ * and return either a success result or an error response.
  *
- * @example
+ * **Overload 1 — result object** (existing usage):
  * ```ts
- * const mid = await withApiMiddleware(req, { requireAuth: true, rateLimit: true,
- *   rateLimitConfig: { key: (id) => `chat:${id}`, max: 10, windowSeconds: 60 } });
+ * const mid = await withApiMiddleware(req, { requireAuth: true });
  * if (mid.error) return mid.error;
  * ```
+ *
+ * **Overload 2 — handler wrapper** (Plan E):
+ * ```ts
+ * export const POST = withApiMiddleware(
+ *   async (req, { body, userId }) => NextResponse.json({ ok: true }),
+ *   { requireAuth: true, validate: z.object({ name: z.string() }) },
+ * );
+ * ```
  */
-export async function withApiMiddleware(
+export function withApiMiddleware(
+  handler: WrappedHandler,
+  options: MiddlewareOptions,
+): (req: NextRequest) => Promise<NextResponse>;
+export function withApiMiddleware(
   req: NextRequest,
+  options?: MiddlewareOptions,
+): Promise<MiddlewareResult>;
+export function withApiMiddleware(
+  reqOrHandler: NextRequest | WrappedHandler,
   options: MiddlewareOptions = {},
-): Promise<MiddlewareResult> {
+): Promise<MiddlewareResult> | ((req: NextRequest) => Promise<NextResponse>) {
+  // Handler-wrapping overload
+  if (typeof reqOrHandler === 'function') {
+    const handler = reqOrHandler;
+    return (req: NextRequest) => runMiddlewarePipeline(req, options, handler) as Promise<NextResponse>;
+  }
+  // Legacy result-object overload
+  return runMiddlewarePipeline(reqOrHandler, options, null) as Promise<MiddlewareResult>;
+}
+
+// ---------------------------------------------------------------------------
+// Core pipeline (shared between both overloads)
+// ---------------------------------------------------------------------------
+
+async function runMiddlewarePipeline(
+  req: NextRequest,
+  options: MiddlewareOptions,
+  handler: WrappedHandler | null,
+): Promise<MiddlewareResult | NextResponse> {
   const requireAuth = options.requireAuth ?? true;
   const shouldRateLimit = options.rateLimit ?? false;
 
@@ -138,6 +196,7 @@ export async function withApiMiddleware(
   if (requireAuth) {
     const authResult = await authenticateRequest();
     if (!authResult.ok) {
+      if (handler) return authResult.response;
       return { error: authResult.response, userId: null, authContext: null };
     }
     authContext = authResult.ctx;
@@ -173,12 +232,44 @@ export async function withApiMiddleware(
 
     if (!allowed) {
       const { rateLimitResponse: rlResponse } = await import('@/lib/rateLimit');
-      return {
-        error: rlResponse(remaining, resetAt),
-        userId: null,
-        authContext: null,
-      };
+      const errorResponse = rlResponse(remaining, resetAt);
+      if (handler) return errorResponse;
+      return { error: errorResponse, userId: null, authContext: null };
     }
+  }
+
+  // ------------------------------------------------------------------
+  // Step 3: Body validation (handler-wrapping overload only)
+  // ------------------------------------------------------------------
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any = undefined;
+
+  if (options.validate) {
+    let rawBody: unknown;
+    try {
+      rawBody = await req.json();
+    } catch {
+      const { apiError } = await import('@/lib/api/errors');
+      const errResponse = apiError(400, 'Invalid JSON body', 'BAD_REQUEST');
+      if (handler) return errResponse;
+      return { error: errResponse, userId: null, authContext: null };
+    }
+
+    const parsed = options.validate.safeParse(rawBody);
+    if (!parsed.success) {
+      const { apiError } = await import('@/lib/api/errors');
+      const errResponse = apiError(422, 'Validation failed', 'VALIDATION_ERROR', parsed.error.format());
+      if (handler) return errResponse;
+      return { error: errResponse, userId: null, authContext: null };
+    }
+    body = parsed.data;
+  }
+
+  // ------------------------------------------------------------------
+  // Handler invocation (handler-wrapping overload only)
+  // ------------------------------------------------------------------
+  if (handler) {
+    return handler(req, { userId, authContext, body });
   }
 
   return { error: undefined, userId, authContext };
