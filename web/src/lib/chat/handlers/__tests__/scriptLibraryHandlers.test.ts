@@ -286,8 +286,8 @@ describe('list_script_templates', () => {
     expect(result.success).toBe(true);
     const data = result.result as { templates: Array<{ id: string; name: string }> };
     expect(data.templates.length).toBeGreaterThan(0);
-    expect(data.templates[0].id).toBeTruthy();
-    expect(data.templates[0].name).toBeTruthy();
+    expect(data.templates[0].id).not.toBe('');
+    expect(data.templates[0].name).not.toBe('');
   });
 
   it('includes character_controller template', async () => {
