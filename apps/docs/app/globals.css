@@ -1,0 +1,15 @@
+/* SpawnForge brand values — keep in sync with packages/ui/src/tokens/themes.ts (dark theme) */
+@import "tailwindcss";
+
+:root {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --muted: #18181b;
+  --border: #27272a;
+  --accent: #3b82f6;
+  font-family: 'Geist Sans', system-ui, sans-serif;
+}
+
+code, pre {
+  font-family: 'Geist Mono', ui-monospace, monospace;
+}

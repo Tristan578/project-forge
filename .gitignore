@@ -127,3 +127,6 @@ autoforge/node_modules/
 .claude/taskboard.db
 .claude/taskboard.db-shm
 .claude/taskboard.db-wal
+
+# Generated MCP command pages (regenerated on every build)
+apps/docs/content/mcp/*.mdx

@@ -1,0 +1,28 @@
+{
+  "name": "@spawnforge/docs",
+  "private": true,
+  "scripts": {
+    "dev": "tsx scripts/generate-mcp-docs.ts && next dev -p 3001",
+    "build": "tsx scripts/generate-mcp-docs.ts && next build",
+    "start": "next start -p 3001",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "fumadocs-core": "^16",
+    "fumadocs-ui": "^16",
+    "next": "^16",
+    "react": "^19",
+    "react-dom": "^19",
+    "gray-matter": "^4"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "typescript": "^5",
+    "vitest": "^3",
+    "@playwright/test": "^1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/node": "^20"
+  }
+}
