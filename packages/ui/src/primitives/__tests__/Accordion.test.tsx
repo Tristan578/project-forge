@@ -16,21 +16,27 @@ describe('Accordion', () => {
   });
 
   it('content hidden by default', () => {
-    render(<Accordion items={items} />);
-    expect(screen.queryByText('Content 1')).toBeNull();
+    const { container } = render(<Accordion items={items} />);
+    // Content stays in DOM (for aria-controls validity) but is hidden via [hidden]
+    const contentRegion = container.querySelector('#accordion-content-item1');
+    expect(contentRegion).not.toBeNull();
+    expect(contentRegion?.hasAttribute('hidden')).toBe(true);
   });
 
   it('expands on click', () => {
-    render(<Accordion items={items} />);
+    const { container } = render(<Accordion items={items} />);
     fireEvent.click(screen.getByText('Section 1'));
-    expect(screen.getByText('Content 1')).not.toBeNull();
+    const contentRegion = container.querySelector('#accordion-content-item1');
+    expect(contentRegion?.hasAttribute('hidden')).toBe(false);
   });
 
   it('collapses on second click', () => {
-    render(<Accordion items={items} />);
+    const { container } = render(<Accordion items={items} />);
     fireEvent.click(screen.getByText('Section 1'));
     fireEvent.click(screen.getByText('Section 1'));
-    expect(screen.queryByText('Content 1')).toBeNull();
+    // Content stays in DOM but must be hidden via [hidden] when collapsed
+    const contentRegion = container.querySelector('#accordion-content-item1');
+    expect(contentRegion?.hasAttribute('hidden')).toBe(true);
   });
 
   it('triggers have aria-expanded', () => {
@@ -39,6 +45,15 @@ describe('Accordion', () => {
     expect(triggers[0].getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(triggers[0]);
     expect(triggers[0].getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('aria-controls always points to a mounted content element', () => {
+    const { container } = render(<Accordion items={items} />);
+    const triggers = screen.getAllByRole('button');
+    const controlsId = triggers[0].getAttribute('aria-controls');
+    expect(controlsId).toBeTruthy();
+    // Content element must exist in DOM regardless of collapsed/expanded state
+    expect(container.querySelector(`#${controlsId}`)).not.toBeNull();
   });
 
   it.each(THEME_NAMES)('renders without error in %s theme', (theme) => {

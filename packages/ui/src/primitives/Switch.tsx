@@ -1,10 +1,11 @@
 import { useId, type InputHTMLAttributes } from 'react';
 import { cn } from '../utils/cn';
 
-export interface SwitchProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size' | 'type'> {
-  label?: string;
-  size?: 'sm' | 'md';
-}
+// Either a visible label or an aria-label must be supplied for accessible name.
+type SwitchBaseProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'size' | 'type'>;
+export type SwitchProps =
+  | (SwitchBaseProps & { label: string; 'aria-label'?: string; size?: 'sm' | 'md' })
+  | (SwitchBaseProps & { label?: never; 'aria-label': string; size?: 'sm' | 'md' });
 
 export function Switch({ className, label, size = 'md', id: providedId, ...props }: SwitchProps) {
   const generatedId = useId();
@@ -36,21 +37,20 @@ export function Switch({ className, label, size = 'md', id: providedId, ...props
           )}
           aria-hidden="true"
         />
-        {/* Thumb — uses CSS custom props to avoid class-based primitives leak */}
+        {/* Thumb — CSS variable --sw-travel is set via data-size and toggled via peer-checked:left-* */}
         <span
           className={cn(
-            'pointer-events-none absolute top-0.5 left-0.5',
+            'pointer-events-none absolute top-0.5',
             'rounded-full bg-[var(--sf-bg-surface)] shadow',
             size === 'sm' ? 'h-4 w-4' : 'h-5 w-5',
-            // Shift thumb right when checked. Formula: track-width - thumb-width - (2 × inset)
-            // sm: 36px - 16px - 4px = 16px; md: 44px - 20px - 4px = 20px
+            // Unchecked: left-0.5 (2px). Checked: shift to track-width - thumb-width - inset
+            // sm: 36-16-2=18px → peer-checked:left-[18px]; md: 44-20-2=22px → peer-checked:left-[22px]
             size === 'sm'
-              ? 'peer-checked:translate-x-[16px]'
-              : 'peer-checked:translate-x-[20px]',
+              ? 'left-0.5 peer-checked:left-[18px]'
+              : 'left-0.5 peer-checked:left-[22px]',
           )}
           style={{
-            // transition handled via CSS; no hardcoded color primitives
-            transition: 'transform var(--sf-transition, 150ms)',
+            transition: 'left var(--sf-transition, 150ms)',
           }}
         />
       </div>

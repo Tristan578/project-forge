@@ -70,16 +70,17 @@ export function Accordion({ items, defaultOpen, className }: AccordionProps) {
                 <path d="m6 9 6 6 6-6" />
               </svg>
             </button>
-            {isOpen && (
-              <div
-                id={`accordion-content-${item.id}`}
-                role="region"
-                aria-labelledby={`accordion-trigger-${item.id}`}
-                className="px-4 pb-3 text-sm text-[var(--sf-text-secondary)]"
-              >
-                {item.content}
-              </div>
-            )}
+            {/* Keep content in DOM so aria-controls always points to a mounted element.
+                Use hidden attribute to hide it from AT and layout when collapsed. */}
+            <div
+              id={`accordion-content-${item.id}`}
+              role="region"
+              aria-labelledby={`accordion-trigger-${item.id}`}
+              hidden={!isOpen}
+              className="px-4 pb-3 text-sm text-[var(--sf-text-secondary)]"
+            >
+              {item.content}
+            </div>
           </div>
         );
       })}

@@ -1,9 +1,11 @@
 import { useId, type InputHTMLAttributes } from 'react';
 import { cn } from '../utils/cn';
 
-export interface CheckboxProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type'> {
-  label?: string;
-}
+// Either a visible label or an aria-label must be supplied for accessible name.
+type CheckboxBaseProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'type'>;
+export type CheckboxProps =
+  | (CheckboxBaseProps & { label: string; 'aria-label'?: string })
+  | (CheckboxBaseProps & { label?: never; 'aria-label': string });
 
 export function Checkbox({ className, label, id: providedId, ...props }: CheckboxProps) {
   const generatedId = useId();
