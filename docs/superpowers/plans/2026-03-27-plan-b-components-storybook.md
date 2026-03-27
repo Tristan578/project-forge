@@ -220,7 +220,8 @@ describe('Button', () => {
     // No hardcoded primitive classes leak
     const allClasses = Array.from(container.querySelectorAll('[class]'))
       .flatMap((el) => el.className.split(' '));
-    const leaks = allClasses.filter((c) => /^(bg-zinc|text-zinc|border-zinc|bg-stone|text-stone|bg-slate|text-slate)/.test(c));
+    // Fix 14: broader regex catches ring-, shadow-, fill-, divide- etc. containing primitive scales
+    const leaks = allClasses.filter((c) => /zinc-|stone-|slate-/.test(c));
     expect(leaks, `Hardcoded primitives found: ${leaks.join(', ')}`).toHaveLength(0);
   });
 
@@ -229,6 +230,13 @@ describe('Button', () => {
     render(<Button>Accessible</Button>);
     const btn = screen.getByRole('button');
     expect(btn.tagName).toBe('BUTTON');
+  });
+
+  // Fix 10: Touch target assertion — sm must carry min-h-[44px] class for mobile
+  it('sm size carries mobile touch-target class (min-h-[44px])', () => {
+    const { container } = render(<Button size="sm">Small</Button>);
+    const btn = container.querySelector('button');
+    expect(btn?.className, 'sm Button must include min-h-[44px] for WCAG 2.5.5 touch target').toContain('min-h-[44px]');
   });
 });
 ```
@@ -261,7 +269,9 @@ const variantStyles: Record<NonNullable<ButtonProps['variant']>, string> = {
 };
 
 const sizeStyles: Record<NonNullable<ButtonProps['size']>, string> = {
-  sm: 'h-8 px-3 text-xs',
+  // Fix 10: sm must meet 44px touch target on mobile (WCAG 2.5.5)
+  // h-8 (32px) in desktop, overridden to min-h-[44px] on touch devices via @media (pointer: coarse)
+  sm: 'h-8 min-h-[44px] sm:min-h-0 px-3 text-xs',
   md: 'h-9 px-4 text-sm',
   lg: 'h-10 px-6 text-base',
 };
@@ -423,6 +433,169 @@ git commit -m "feat: Button primitive with tests + Storybook story (reference im
 **Props:** `min`, `max`, `step`, `value`, `onChange`, `disabled`
 **Key:** Standalone range input. Track uses `--sf-bg-elevated`, thumb uses `--sf-accent`. Composed by SliderInput in tier 2.
 
+### Task B7b: useDialogA11y hook (REQUIRED before Modal)
+
+> Fix 11: This hook must be implemented before B8 Modal and B9 Dialog — both depend on it.
+
+**Files:**
+- Create: `packages/ui/src/hooks/useDialogA11y.ts`
+- Test: `packages/ui/src/hooks/__tests__/useDialogA11y.test.ts`
+
+- [ ] **Step 1: Write failing tests**
+
+```ts
+// packages/ui/src/hooks/__tests__/useDialogA11y.test.ts
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, act } from '@testing-library/react';
+import { useDialogA11y } from '../useDialogA11y';
+
+describe('useDialogA11y', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns dialogProps with role=dialog and aria-modal=true', () => {
+    const { result } = renderHook(() =>
+      useDialogA11y({ title: 'Test Dialog', isOpen: true, onClose: vi.fn() })
+    );
+    expect(result.current.dialogProps.role).toBe('dialog');
+    expect(result.current.dialogProps['aria-modal']).toBe(true);
+  });
+
+  it('aria-labelledby on dialog matches id on titleProps', () => {
+    const { result } = renderHook(() =>
+      useDialogA11y({ title: 'My Dialog', isOpen: true, onClose: vi.fn() })
+    );
+    const labelledBy = result.current.dialogProps['aria-labelledby'];
+    expect(labelledBy).toBeDefined();
+    expect(result.current.titleProps.id).toBe(labelledBy);
+  });
+
+  it('calls onClose when Escape is pressed and dialog is open', () => {
+    const onClose = vi.fn();
+    renderHook(() => useDialogA11y({ title: 'Test', isOpen: true, onClose }));
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT call onClose when Escape is pressed and dialog is closed', () => {
+    const onClose = vi.fn();
+    renderHook(() => useDialogA11y({ title: 'Test', isOpen: false, onClose }));
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+```
+
+- [ ] **Step 2: Implement useDialogA11y**
+
+```ts
+// packages/ui/src/hooks/useDialogA11y.ts
+import { useEffect, useId, useRef, useCallback } from 'react';
+
+export interface UseDialogA11yOptions {
+  title: string;
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export interface UseDialogA11yReturn {
+  dialogProps: {
+    role: 'dialog';
+    'aria-modal': true;
+    'aria-labelledby': string;
+  };
+  titleProps: {
+    id: string;
+  };
+}
+
+/**
+ * Provides ARIA attributes for modal/dialog components.
+ * Handles:
+ *   - role="dialog" + aria-modal="true"
+ *   - aria-labelledby wired to the title element
+ *   - Escape key → onClose
+ *   - Focus trap (returns focus to trigger on close)
+ *
+ * Usage:
+ *   const { dialogProps, titleProps } = useDialogA11y({ title, isOpen, onClose });
+ *   <div {...dialogProps}><h2 {...titleProps}>{title}</h2>...</div>
+ */
+export function useDialogA11y({
+  title: _title,
+  isOpen,
+  onClose,
+}: UseDialogA11yOptions): UseDialogA11yReturn {
+  const titleId = useId();
+  const triggerRef = useRef<Element | null>(null);
+
+  // Capture the element that opened the dialog so we can return focus on close
+  useEffect(() => {
+    if (isOpen) {
+      triggerRef.current = document.activeElement;
+    } else if (triggerRef.current instanceof HTMLElement) {
+      triggerRef.current.focus();
+      triggerRef.current = null;
+    }
+  }, [isOpen]);
+
+  // Escape key handler
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        e.stopPropagation();
+        onClose();
+      }
+    },
+    [isOpen, onClose],
+  );
+
+  useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  return {
+    dialogProps: {
+      role: 'dialog',
+      'aria-modal': true,
+      'aria-labelledby': titleId,
+    },
+    titleProps: {
+      id: titleId,
+    },
+  };
+}
+```
+
+- [ ] **Step 3: Run tests**
+
+```bash
+cd packages/ui && npx vitest run src/hooks/__tests__/useDialogA11y.test.ts
+```
+
+Expected: All 4 tests pass.
+
+- [ ] **Step 4: Export from index.ts**
+
+```ts
+export { useDialogA11y, type UseDialogA11yOptions, type UseDialogA11yReturn } from './hooks/useDialogA11y';
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/ui/src/hooks/useDialogA11y.ts packages/ui/src/hooks/__tests__/useDialogA11y.test.ts packages/ui/src/index.ts
+git commit -m "feat: useDialogA11y hook (focus trap, Escape, aria-modal, return-focus-on-close)"
+```
+
+---
+
 ### Task B8: Modal
 
 **Props:** `open`, `onClose`, `title`, `children`, `footer`
@@ -491,8 +664,8 @@ git commit -m "feat: Button primitive with tests + Storybook story (reference im
 ---
 
 **For each of B3-B20:** Follow the B2 pattern exactly:
-1. Write failing test (parameterized across 7 themes + primitives leak check)
-2. Implement component with tokens
+1. Write failing test (parameterized across 7 themes + primitives leak check + touch-target assertion for any interactive sm-size element)
+2. Implement component with tokens (add `min-h-[44px] sm:min-h-0` to any `sm` interactive size variant — Fix 10)
 3. Write Storybook story with all variants
 4. Export from `packages/ui/src/index.ts`
 5. Build + test

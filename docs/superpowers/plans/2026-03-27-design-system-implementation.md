@@ -557,7 +557,7 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
     '--sf-accent-hover': '#d97706',
     '--sf-destructive': '#ef4444',
     '--sf-success': '#22c55e',
-    '--sf-warning': '#f59e0b',
+    '--sf-warning': '#fbbf24', // Fix 13: was #f59e0b (identical to --sf-accent)
     '--sf-radius-md': '8px',
     '--sf-radius-lg': '10px',
     '--sf-radius-xl': '14px',
@@ -652,7 +652,7 @@ export const THEME_DEFINITIONS: Record<ThemeName, ThemeTokens> = {
     '--sf-accent': '#00ff88',
     '--sf-accent-hover': '#00cc6a',
     '--sf-destructive': '#ff3366',
-    '--sf-success': '#00ff88',
+    '--sf-success': '#00cc66', // Fix 12: was #00ff88 (identical to --sf-accent)
     '--sf-warning': '#ffaa00',
     '--sf-radius-md': '1px',
     '--sf-radius-lg': '2px',
@@ -729,6 +729,48 @@ describe('Theme Definitions', () => {
     const accents = THEME_NAMES.map(t => THEME_DEFINITIONS[t]['--sf-accent']);
     const unique = new Set(accents);
     expect(unique.size).toBe(7);
+  });
+
+  // --- Fix 7: Parameterized contrast ratio test ---
+  // Luminance + contrast computation per WCAG 2.1 Section 1.4.3
+  function linearizeChannel(c8bit: number): number {
+    const s = c8bit / 255;
+    return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  }
+
+  function relativeLuminance(hex: string): number {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return 0.2126 * linearizeChannel(r) + 0.7152 * linearizeChannel(g) + 0.0722 * linearizeChannel(b);
+  }
+
+  function contrastRatio(hex1: string, hex2: string): number {
+    const L1 = relativeLuminance(hex1);
+    const L2 = relativeLuminance(hex2);
+    const lighter = Math.max(L1, L2);
+    const darker = Math.min(L1, L2);
+    return (lighter + 0.05) / (darker + 0.05);
+  }
+
+  // Text-on-background pairs that must meet WCAG AA (4.5:1)
+  const TEXT_BG_PAIRS: Array<[keyof ThemeTokens, keyof ThemeTokens, string]> = [
+    ['--sf-text', '--sf-bg-app', 'primary text on app background'],
+    ['--sf-text', '--sf-bg-surface', 'primary text on surface'],
+    ['--sf-text-secondary', '--sf-bg-app', 'secondary text on app background'],
+    ['--sf-text-secondary', '--sf-bg-surface', 'secondary text on surface'],
+  ];
+
+  it.each(THEME_NAMES)('%s theme meets WCAG AA contrast ratio (>= 4.5:1) for text pairs', (theme) => {
+    const tokens = THEME_DEFINITIONS[theme];
+    for (const [textKey, bgKey, description] of TEXT_BG_PAIRS) {
+      const textHex = tokens[textKey] as string;
+      const bgHex = tokens[bgKey] as string;
+      // Only test 6-digit hex colors (not CSS variables or font stacks)
+      if (!textHex.startsWith('#') || !bgHex.startsWith('#')) continue;
+      const ratio = contrastRatio(textHex, bgHex);
+      expect(ratio, `${theme}: ${description} — contrast ${ratio.toFixed(2)}:1 (${textHex} on ${bgHex})`).toBeGreaterThanOrEqual(4.5);
+    }
   });
 });
 ```
@@ -961,6 +1003,43 @@ describe('useTheme', () => {
     const { result } = renderHook(() => useTheme());
     expect(result.current.effectsEnabled).toBe(false);
   });
+
+  // --- Fix 15: Full resolution chain — custom > project > global > dark ---
+
+  it('custom theme (projectTheme param) overrides global localStorage', () => {
+    localStorage.setItem('sf-theme', 'ice');
+    // projectTheme = 'ember' wins over global 'ice'
+    const { result } = renderHook(() => useTheme({ projectTheme: 'ember' }));
+    expect(result.current.theme).toBe('ember');
+  });
+
+  it('global localStorage wins over dark default when no projectTheme', () => {
+    localStorage.setItem('sf-theme', 'leaf');
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.theme).toBe('leaf');
+  });
+
+  it('dark is the fallback when neither projectTheme nor localStorage are set', () => {
+    // beforeEach clears localStorage
+    const { result } = renderHook(() => useTheme());
+    expect(result.current.theme).toBe('dark');
+  });
+
+  it('resolution priority: custom > project > global > dark', () => {
+    localStorage.setItem('sf-theme', 'rust');
+    // When projectTheme is provided, it wins over global
+    const { result: withProject } = renderHook(() => useTheme({ projectTheme: 'mech' }));
+    expect(withProject.current.theme).toBe('mech');
+
+    // When projectTheme is absent, global localStorage wins
+    const { result: withGlobal } = renderHook(() => useTheme());
+    expect(withGlobal.current.theme).toBe('rust');
+
+    // Clear global — falls back to dark
+    localStorage.clear();
+    const { result: withDark } = renderHook(() => useTheme());
+    expect(withDark.current.theme).toBe('dark');
+  });
 });
 ```
 
@@ -1006,9 +1085,33 @@ function applyThemeToDOM(theme: ThemeName) {
   }
 }
 
-export function useTheme() {
-  const [theme, setThemeState] = useState<ThemeName>(readTheme);
+export interface UseThemeOptions {
+  /**
+   * Per-project theme override. Resolution priority:
+   *   projectTheme (custom) > global localStorage > 'dark' (fallback)
+   *
+   * Pass the `theme` field from the DB projects row. When null/undefined,
+   * the global user preference takes effect.
+   */
+  projectTheme?: ThemeName | null;
+}
+
+export function useTheme(options?: UseThemeOptions) {
+  const projectTheme = options?.projectTheme ?? null;
+
+  // Resolve theme: custom (project) > global localStorage > dark
+  const resolveTheme = useCallback((): ThemeName => {
+    if (projectTheme && VALID_THEMES.has(projectTheme)) return projectTheme;
+    return readTheme();
+  }, [projectTheme]);
+
+  const [theme, setThemeState] = useState<ThemeName>(resolveTheme);
   const [effectsEnabled, setEffectsEnabledState] = useState<boolean>(readEffects);
+
+  // Re-resolve when projectTheme changes
+  useEffect(() => {
+    setThemeState(resolveTheme());
+  }, [resolveTheme]);
 
   // Apply theme to DOM on mount and change
   useEffect(() => {

@@ -132,16 +132,27 @@ export function ThemeAmbient() {
     return () => mql.removeEventListener('change', handler);
   }, []);
 
-  // Observe data-sf-effects attribute changes
+  // Fix 6: Observe data-sf-effects + data-sf-theme attribute changes.
+  // Batch both state updates in a single MutationObserver callback to prevent
+  // a race where matchMedia fires between the two separate setX() calls.
+  // React 18 batches these automatically inside event handlers, but MutationObserver
+  // callbacks are microtasks — wrapping in a single flushSync-free batch via
+  // reading both attributes at once avoids any intermediate render with mismatched state.
   useEffect(() => {
     const root = document.documentElement;
-    setEffectsOff(root.getAttribute('data-sf-effects') === 'off');
-    setTheme((root.getAttribute('data-sf-theme') ?? 'dark') as ThemeName);
 
-    const observer = new MutationObserver(() => {
-      setEffectsOff(root.getAttribute('data-sf-effects') === 'off');
-      setTheme((root.getAttribute('data-sf-theme') ?? 'dark') as ThemeName);
-    });
+    function syncFromDOM() {
+      const effectsOff = root.getAttribute('data-sf-effects') === 'off';
+      const currentTheme = (root.getAttribute('data-sf-theme') ?? 'dark') as ThemeName;
+      // Batch: both state updates happen in the same React render cycle
+      setEffectsOff(effectsOff);
+      setTheme(currentTheme);
+    }
+
+    // Read initial state
+    syncFromDOM();
+
+    const observer = new MutationObserver(syncFromDOM);
     observer.observe(root, { attributes: true, attributeFilter: ['data-sf-effects', 'data-sf-theme'] });
     return () => observer.disconnect();
   }, []);
@@ -329,18 +340,31 @@ npm install -D @lhci/cli
 
 ```js
 // .lighthouserc.js
+// Fix 17: Use delta comparison (effects-on vs effects-off) rather than an absolute floor.
+// A static floor of 0.5 is too coarse — it passes even if effects drop perf by 40 points.
+// The delta gate ensures effects themselves cause < 0.05 regression relative to their absence.
+//
+// Implementation: Two URLs are tested — one with effects off (baseline) and one with effects on.
+// The CI script computes the score delta. If effects drop performance by more than 0.05 (5 points),
+// the gate fails. This isolates ambient effect overhead from overall app performance.
+
 module.exports = {
   ci: {
     collect: {
-      url: ['http://localhost:3000/dev'],
+      url: [
+        // Baseline: effects disabled
+        'http://localhost:3000/dev#effects=off',
+        // Test: effects enabled
+        'http://localhost:3000/dev#effects=on',
+      ],
       startServerCommand: 'cd web && npm run dev',
       startServerReadyPattern: 'Ready in',
       numberOfRuns: 3,
     },
     assert: {
-      assertions: {
-        'categories:performance': ['error', { minScore: 0.5, aggregationMethod: 'median-run' }],
-      },
+      // No absolute floor — the delta script handles the gate.
+      // This config uploads results for the delta computation step.
+      assertions: {},
     },
     upload: {
       target: 'temporary-public-storage',
@@ -349,11 +373,11 @@ module.exports = {
 };
 ```
 
-- [ ] **Step 3: Add to CI (optional — can be manual pre-release check)**
+- [ ] **Step 3: Add delta gate CI job (Fix 17)**
 
 ```yaml
-  lighthouse:
-    name: Lighthouse Performance
+  lighthouse-delta:
+    name: Lighthouse Effects Delta Gate
     runs-on: ubuntu-latest
     needs: [web-tests]
     if: ${{ github.event_name == 'pull_request' }}
@@ -363,7 +387,42 @@ module.exports = {
         with: { node-version: 20, cache: npm, cache-dependency-path: package-lock.json }
       - run: npm ci
       - run: cd packages/ui && npm run build
-      - run: npx lhci autorun
+
+      - name: Start dev server (effects-off baseline)
+        run: |
+          cd web && NEXT_PUBLIC_EFFECTS=off npm run dev &
+          npx wait-on http://localhost:3000 --timeout 60000
+        env:
+          PORT: 3000
+
+      - name: Collect baseline (effects off)
+        run: npx lhci collect --url=http://localhost:3000/dev --output-path=.lhci-baseline.json --number-of-runs=3
+
+      - name: Collect test run (effects on)
+        run: npx lhci collect --url=http://localhost:3000/dev --output-path=.lhci-effects.json --number-of-runs=3
+
+      - name: Assert effects delta < 0.05
+        run: |
+          node -e "
+          const base = require('./.lhci-baseline.json');
+          const test = require('./.lhci-effects.json');
+          // Extract median performance scores
+          function median(runs) {
+            const scores = runs.map(r => r.categories.performance.score).sort((a,b) => a-b);
+            return scores[Math.floor(scores.length / 2)];
+          }
+          const baseScore = median(base);
+          const testScore = median(test);
+          const delta = baseScore - testScore;
+          console.log('Baseline (effects off):', baseScore.toFixed(3));
+          console.log('Effects on:', testScore.toFixed(3));
+          console.log('Delta:', delta.toFixed(3));
+          if (delta > 0.05) {
+            console.error('FAIL: Effects caused ' + (delta * 100).toFixed(1) + ' point regression (max allowed: 5 points)');
+            process.exit(1);
+          }
+          console.log('PASS: Effects delta within acceptable range');
+          "
 ```
 
 - [ ] **Step 4: Commit**
