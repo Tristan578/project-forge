@@ -461,13 +461,16 @@ test.describe('Welcome modal onboarding gate @ui', () => {
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
 
-    // Check "Don't show again"
+    // Check "Don't show again" — scroll into view first (CI viewport is small)
     const checkbox = welcomeModal.getByRole('checkbox');
+    await checkbox.scrollIntoViewIfNeeded();
     await checkbox.check();
     await expect(checkbox).toBeChecked();
 
     // Click Skip
-    await welcomeModal.getByRole('button', { name: /^skip$/i }).click();
+    const skipBtn = welcomeModal.getByRole('button', { name: /^skip$/i });
+    await skipBtn.scrollIntoViewIfNeeded();
+    await skipBtn.click();
     await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
 
     // forge-welcomed should now be set in localStorage
@@ -506,8 +509,10 @@ test.describe('Welcome modal onboarding gate @ui', () => {
     const welcomeModal = page.locator('[role="dialog"][aria-labelledby="welcome-modal-title"]');
     await welcomeModal.waitFor({ state: 'visible', timeout: 8_000 });
 
-    // Do NOT check "Don't show again" — just click Skip
-    await welcomeModal.getByRole('button', { name: /^skip$/i }).click();
+    // Do NOT check "Don't show again" — just click Skip (scroll first for CI viewport)
+    const skipBtn = welcomeModal.getByRole('button', { name: /^skip$/i });
+    await skipBtn.scrollIntoViewIfNeeded();
+    await skipBtn.click();
     await expect(welcomeModal).not.toBeVisible({ timeout: 5_000 });
 
     // forge-welcomed must NOT be set
