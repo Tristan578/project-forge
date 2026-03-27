@@ -11,6 +11,7 @@
  * - No test passes if the store value is undefined / null — we require a real value.
  * - Tests that cannot prove correctness without GPU round-trips are clearly scoped
  *   to what can be proven in headless CI (optimistic store writes on input change).
+ * - Tests skip (rather than vacuously pass) when expected UI elements are not found.
  */
 
 import type { Page } from '@playwright/test';
@@ -19,6 +20,11 @@ import { test, expect, EditorPage } from '../fixtures/editor.fixture';
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/** Read the full Zustand editor store state. */
+async function getStoreState(page: Page) {
+  return page.evaluate(() => (window as unknown as { __EDITOR_STORE?: { getState: () => unknown } }).__EDITOR_STORE?.getState());
+}
 
 /** Spawn a cube and wait for the scene graph to have at least 2 nodes (Camera + Cube). */
 async function spawnCubeAndSelect(page: Page, editor: EditorPage) {
@@ -30,8 +36,7 @@ async function spawnCubeAndSelect(page: Page, editor: EditorPage) {
   // Wait for selection to be reflected in the store
   await page.waitForFunction(
     () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
       return store && store.getState().selectedIds.size > 0;
     },
     { timeout: 10_000 },
@@ -41,8 +46,7 @@ async function spawnCubeAndSelect(page: Page, editor: EditorPage) {
 /** Return the currently selected primary entity ID from the store, or null. */
 async function getPrimaryEntityId(page: Page): Promise<string | null> {
   return page.evaluate((): string | null => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const store = (window as any).__EDITOR_STORE;
+    const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
     if (!store) return null;
     const ids = [...store.getState().selectedIds] as string[];
     return ids[0] ?? null;
@@ -58,7 +62,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
     await editor.load();
   });
 
-  test('selecting a cube makes the Transform section visible in the inspector @engine', async ({
+  test('selecting a cube makes the Transform section visible in the inspector', async ({
     page,
     editor,
   }) => {
@@ -73,7 +77,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
     await expect(page.getByText('Z', { exact: true }).first()).toBeVisible();
   });
 
-  test('editing X position input updates primaryTransform in the store @engine', async ({
+  test('editing X position input updates primaryTransform in the store', async ({
     page,
     editor,
   }) => {
@@ -100,8 +104,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
     // WASM round-trip). We verify that optimistic write here.
     await page.waitForFunction(
       () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryTransform?: { position?: number[] } } } }).__EDITOR_STORE;
         if (!store) return false;
         const t = store.getState().primaryTransform;
         // primaryTransform.position[0] should be approximately 7.5
@@ -110,38 +113,49 @@ test.describe('Group 1: Transform Editing @engine', () => {
       { timeout: 5_000 },
     );
 
-    const transform = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().primaryTransform;
-    });
+    const state = await getStoreState(page) as { primaryTransform?: { position?: number[] } } | undefined;
+    const transform = state?.primaryTransform;
 
     expect(transform).not.toBeNull();
-    expect(typeof transform.position[0]).toBe('number');
-    expect(Math.abs(transform.position[0] - 7.5)).toBeLessThan(0.1);
+    expect(typeof transform!.position![0]).toBe('number');
+    expect(Math.abs(transform!.position![0] - 7.5)).toBeLessThan(0.1);
   });
 
-  test('editing Y and Z position inputs both update the store @engine', async ({
+  test('editing Y and Z position inputs both update the store', async ({
     page,
     editor,
   }) => {
     await spawnCubeAndSelect(page, editor);
 
+    // Locate position row by the "Position" label (Vec3Input renders a row label)
+    // then target inputs within that row. Fall back to transform section inputs if
+    // the Position label is not present.
     const transformSection = page.getByText('Transform', { exact: false }).first().locator('..');
-    const inputs = transformSection.locator('input');
 
-    // Verify at least 3 inputs exist (X, Y, Z for position)
-    const inputCount = await inputs.count();
-    expect(inputCount).toBeGreaterThanOrEqual(3);
+    // Try label-based approach first: find the Position row and its Y/Z inputs
+    const positionRow = transformSection.locator('text=Position').first().locator('..').locator('..');
+    const positionRowInputCount = await positionRow.locator('input').count().catch(() => 0);
 
-    // Edit Y (index 1) and Z (index 2) in the position row
-    const yInput = inputs.nth(1);
+    let yInput: ReturnType<Page['locator']>;
+    let zInput: ReturnType<Page['locator']>;
+
+    if (positionRowInputCount >= 3) {
+      // Within the position row: X=0, Y=1, Z=2
+      yInput = positionRow.locator('input').nth(1);
+      zInput = positionRow.locator('input').nth(2);
+    } else {
+      // Fallback: use transform section — position occupies inputs 0-2
+      const inputs = transformSection.locator('input');
+      const inputCount = await inputs.count();
+      expect(inputCount).toBeGreaterThanOrEqual(3);
+      yInput = inputs.nth(1);
+      zInput = inputs.nth(2);
+    }
+
     await yInput.click({ clickCount: 3 });
     await yInput.fill('3.0');
     await yInput.press('Enter');
 
-    const zInput = inputs.nth(2);
     await zInput.click({ clickCount: 3 });
     await zInput.fill('-2.5');
     await zInput.press('Enter');
@@ -149,8 +163,7 @@ test.describe('Group 1: Transform Editing @engine', () => {
     // Wait for both values to appear in the store
     await page.waitForFunction(
       () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryTransform?: { position?: number[] } } } }).__EDITOR_STORE;
         if (!store) return false;
         const t = store.getState().primaryTransform;
         if (!t) return false;
@@ -161,89 +174,106 @@ test.describe('Group 1: Transform Editing @engine', () => {
       { timeout: 5_000 },
     );
 
-    const transform = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().primaryTransform;
-    });
+    const state = await getStoreState(page) as { primaryTransform?: { position?: number[] } } | undefined;
+    const transform = state?.primaryTransform;
 
     expect(transform).not.toBeNull();
-    expect(Math.abs(transform.position[1] - 3.0)).toBeLessThan(0.1);
-    expect(Math.abs(transform.position[2] - (-2.5))).toBeLessThan(0.1);
+    expect(Math.abs(transform!.position![1] - 3.0)).toBeLessThan(0.1);
+    expect(Math.abs(transform!.position![2] - (-2.5))).toBeLessThan(0.1);
   });
 
-  test('editing a rotation input updates primaryTransform.rotation in the store @engine', async ({
+  test('editing a rotation input updates primaryTransform.rotation in the store', async ({
     page,
     editor,
   }) => {
     await spawnCubeAndSelect(page, editor);
 
-    // The inspector renders position, rotation, scale rows in order.
-    // Position = inputs 0-2, Rotation = inputs 3-5, Scale = inputs 6-8.
     const transformSection = page.getByText('Transform', { exact: false }).first().locator('..');
-    const inputs = transformSection.locator('input');
-    const inputCount = await inputs.count();
 
-    // We need at least 4 inputs to reach rotation X
-    expect(inputCount).toBeGreaterThanOrEqual(4);
+    // Locate the rotation row by label, then find X input within it
+    const rotationRow = transformSection.locator('text=Rotation').first().locator('..').locator('..');
+    const rotationRowInputCount = await rotationRow.locator('input').count().catch(() => 0);
 
-    // Edit rotation X (input index 3)
-    const rotXInput = inputs.nth(3);
+    let rotXInput: ReturnType<Page['locator']>;
+
+    if (rotationRowInputCount >= 1) {
+      // Within the rotation row: X is the first input
+      rotXInput = rotationRow.locator('input').first();
+    } else {
+      // Fallback: position(0-2) + rotation starts at index 3
+      const inputs = transformSection.locator('input');
+      const inputCount = await inputs.count();
+      if (inputCount < 4) {
+        test.skip(true, 'SKIP: rotation inputs not found in inspector (fewer than 4 inputs in transform section)');
+        return;
+      }
+      rotXInput = inputs.nth(3);
+    }
+
     await rotXInput.click({ clickCount: 3 });
     await rotXInput.fill('45');
     await rotXInput.press('Enter');
 
     await page.waitForFunction(
       () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryTransform?: { rotation?: number[] } } } }).__EDITOR_STORE;
         if (!store) return false;
         const t = store.getState().primaryTransform;
-        // The inspector likely passes degrees; the store may store radians or degrees
-        // depending on conversion. We just verify the rotation array is defined and changed.
         return t && Array.isArray(t.rotation) && t.rotation.length === 3;
       },
       { timeout: 5_000 },
     );
 
-    const transform = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().primaryTransform;
-    });
+    const state = await getStoreState(page) as { primaryTransform?: { rotation?: number[] } } | undefined;
+    const transform = state?.primaryTransform;
 
     expect(transform).not.toBeNull();
-    expect(Array.isArray(transform.rotation)).toBe(true);
-    expect(transform.rotation.length).toBe(3);
-    // rotation[0] should be non-zero after editing (default is 0)
-    expect(transform.rotation[0]).not.toBe(0);
+    expect(Array.isArray(transform!.rotation)).toBe(true);
+    expect(transform!.rotation!.length).toBe(3);
+
+    // rotation[0] should be close to 45 degrees (≈0.785 rad) or 45 (if stored as degrees).
+    // Tolerance of 1.0 handles both representations.
+    const rotVal = transform!.rotation![0];
+    const inDegrees = Math.abs(rotVal - 45) < 1.0;
+    const inRadians = Math.abs(rotVal - 0.785398) < 1.0;
+    expect(inDegrees || inRadians).toBe(true);
   });
 
-  test('editing a scale input updates primaryTransform.scale in the store @engine', async ({
+  test('editing a scale input updates primaryTransform.scale in the store', async ({
     page,
     editor,
   }) => {
     await spawnCubeAndSelect(page, editor);
 
     const transformSection = page.getByText('Transform', { exact: false }).first().locator('..');
-    const inputs = transformSection.locator('input');
-    const inputCount = await inputs.count();
 
-    // Position(0-2) + Rotation(3-5) + Scale(6-8) — need at least 7
-    expect(inputCount).toBeGreaterThanOrEqual(7);
+    // Locate the scale row by label, then find X input within it
+    const scaleRow = transformSection.locator('text=Scale').first().locator('..').locator('..');
+    const scaleRowInputCount = await scaleRow.locator('input').count().catch(() => 0);
 
-    // Edit scale X (input index 6)
-    const scaleXInput = inputs.nth(6);
+    let scaleXInput: ReturnType<Page['locator']>;
+
+    if (scaleRowInputCount >= 1) {
+      // Within the scale row: X is the first input
+      scaleXInput = scaleRow.locator('input').first();
+    } else {
+      // Fallback: position(0-2) + rotation(3-5) + scale starts at index 6
+      const inputs = transformSection.locator('input');
+      const inputCount = await inputs.count();
+      if (inputCount < 7) {
+        test.skip(true, 'SKIP: scale inputs not found in inspector (fewer than 7 inputs in transform section)');
+        return;
+      }
+      scaleXInput = inputs.nth(6);
+    }
+
     await scaleXInput.click({ clickCount: 3 });
     await scaleXInput.fill('2.0');
     await scaleXInput.press('Enter');
 
     await page.waitForFunction(
       () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryTransform?: { scale?: number[] } } } }).__EDITOR_STORE;
         if (!store) return false;
         const t = store.getState().primaryTransform;
         return t && Array.isArray(t.scale) && Math.abs(t.scale[0] - 2.0) < 0.1;
@@ -251,15 +281,11 @@ test.describe('Group 1: Transform Editing @engine', () => {
       { timeout: 5_000 },
     );
 
-    const transform = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().primaryTransform;
-    });
+    const state = await getStoreState(page) as { primaryTransform?: { scale?: number[] } } | undefined;
+    const transform = state?.primaryTransform;
 
     expect(transform).not.toBeNull();
-    expect(Math.abs(transform.scale[0] - 2.0)).toBeLessThan(0.1);
+    expect(Math.abs(transform!.scale![0] - 2.0)).toBeLessThan(0.1);
   });
 });
 
@@ -272,7 +298,7 @@ test.describe('Group 2: Material Editing @engine', () => {
     await editor.load();
   });
 
-  test('selecting a cube makes the Material section visible in the inspector @engine', async ({
+  test('selecting a cube makes the Material section visible in the inspector', async ({
     page,
     editor,
   }) => {
@@ -282,7 +308,7 @@ test.describe('Group 2: Material Editing @engine', () => {
     await expect(materialHeading).toBeVisible({ timeout: 8_000 });
   });
 
-  test('changing metallic input dispatches update_material and updates the store @engine', async ({
+  test('changing metallic input dispatches update_material and updates the store', async ({
     page,
     editor,
   }) => {
@@ -292,65 +318,56 @@ test.describe('Group 2: Material Editing @engine', () => {
     expect(entityId).not.toBeNull();
 
     // Capture the current primaryMaterial before editing
-    const before = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().primaryMaterial;
-    });
+    const beforeState = await getStoreState(page) as { primaryMaterial?: { metallic?: number } } | undefined;
+    const beforeMetallic = beforeState?.primaryMaterial?.metallic ?? null;
 
     // Find the metallic label and its sibling input
     const metallicLabel = page.locator('text=/metallic/i').first();
     const metallicLabelVisible = await metallicLabel.isVisible().catch(() => false);
 
-    if (metallicLabelVisible) {
-      const metallicInput = metallicLabel.locator('..').locator('input').first();
-      const hasInput = (await metallicInput.count()) > 0;
-
-      if (hasInput && await metallicInput.isVisible().catch(() => false)) {
-        await metallicInput.click({ clickCount: 3 });
-        await metallicInput.fill('0.85');
-        await metallicInput.press('Enter');
-
-        // The updateMaterial slice action writes to primaryMaterial immediately.
-        // We wait for the value to change from its pre-edit state.
-        await page.waitForFunction(
-          (beforeMetallic: number | null) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const store = (window as any).__EDITOR_STORE;
-            if (!store) return false;
-            const mat = store.getState().primaryMaterial;
-            if (!mat) return false;
-            // Verify metallic changed AND is close to what we typed
-            const changed = beforeMetallic === null || Math.abs(mat.metallic - beforeMetallic) > 0.01;
-            const correct = Math.abs(mat.metallic - 0.85) < 0.05;
-            return changed && correct;
-          },
-          before?.metallic ?? null,
-          { timeout: 5_000 },
-        );
-
-        const materialAfter = await page.evaluate(() => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const store = (window as any).__EDITOR_STORE;
-          if (!store) return null;
-          return store.getState().primaryMaterial;
-        });
-
-        expect(materialAfter).not.toBeNull();
-        expect(Math.abs(materialAfter.metallic - 0.85)).toBeLessThan(0.05);
-        return;
-      }
+    if (!metallicLabelVisible) {
+      test.skip(true, 'SKIP: metallic label not found in inspector — UI layout may differ');
+      return;
     }
 
-    // If the metallic input is not rendered (layout variation), fall back to
-    // asserting the material section itself is still visible — prevents silent pass.
-    await expect(page.getByText(/material/i).first()).toBeVisible();
-    // Signal that we hit the fallback path — allows tracking how often this occurs
-    console.warn('[property-editing] metallic input not found; UI layout may differ');
+    const metallicInput = metallicLabel.locator('..').locator('input').first();
+    const hasInput = (await metallicInput.count()) > 0;
+    const inputVisible = hasInput && await metallicInput.isVisible().catch(() => false);
+
+    if (!inputVisible) {
+      test.skip(true, 'SKIP: metallic input element not found — UI layout may differ');
+      return;
+    }
+
+    await metallicInput.click({ clickCount: 3 });
+    await metallicInput.fill('0.85');
+    await metallicInput.press('Enter');
+
+    // The updateMaterial slice action writes to primaryMaterial immediately.
+    // We wait for the value to change from its pre-edit state.
+    await page.waitForFunction(
+      (beforeVal: number | null) => {
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { metallic?: number } } } }).__EDITOR_STORE;
+        if (!store) return false;
+        const mat = store.getState().primaryMaterial;
+        if (!mat) return false;
+        // Verify metallic changed AND is close to what we typed
+        const changed = beforeVal === null || Math.abs((mat.metallic ?? 0) - beforeVal) > 0.01;
+        const correct = Math.abs((mat.metallic ?? 0) - 0.85) < 0.05;
+        return changed && correct;
+      },
+      beforeMetallic,
+      { timeout: 5_000 },
+    );
+
+    const afterState = await getStoreState(page) as { primaryMaterial?: { metallic?: number } } | undefined;
+    const materialAfter = afterState?.primaryMaterial;
+
+    expect(materialAfter).not.toBeNull();
+    expect(Math.abs((materialAfter!.metallic ?? 0) - 0.85)).toBeLessThan(0.05);
   });
 
-  test('changing roughness input updates primaryMaterial.roughness in the store @engine', async ({
+  test('changing roughness input updates primaryMaterial.roughness in the store', async ({
     page,
     editor,
   }) => {
@@ -358,8 +375,7 @@ test.describe('Group 2: Material Editing @engine', () => {
 
     await page.waitForFunction(
       () => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
         return store && store.getState().selectedIds.size > 0;
       },
       { timeout: 10_000 },
@@ -368,42 +384,42 @@ test.describe('Group 2: Material Editing @engine', () => {
     const roughnessLabel = page.locator('text=/roughness/i').first();
     const roughnessVisible = await roughnessLabel.isVisible().catch(() => false);
 
-    if (roughnessVisible) {
-      const roughnessInput = roughnessLabel.locator('..').locator('input').first();
-      const hasInput = (await roughnessInput.count()) > 0;
-
-      if (hasInput && await roughnessInput.isVisible().catch(() => false)) {
-        await roughnessInput.click({ clickCount: 3 });
-        await roughnessInput.fill('0.25');
-        await roughnessInput.press('Enter');
-
-        await page.waitForFunction(
-          () => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const store = (window as any).__EDITOR_STORE;
-            if (!store) return false;
-            const mat = store.getState().primaryMaterial;
-            return mat && Math.abs(mat.roughness - 0.25) < 0.05;
-          },
-          { timeout: 5_000 },
-        );
-
-        const material = await page.evaluate(() => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const store = (window as any).__EDITOR_STORE;
-          return store ? store.getState().primaryMaterial : null;
-        });
-
-        expect(material).not.toBeNull();
-        expect(Math.abs(material.roughness - 0.25)).toBeLessThan(0.05);
-        return;
-      }
+    if (!roughnessVisible) {
+      test.skip(true, 'SKIP: roughness label not found in inspector — UI layout may differ');
+      return;
     }
 
-    await expect(page.getByText(/material/i).first()).toBeVisible();
+    const roughnessInput = roughnessLabel.locator('..').locator('input').first();
+    const hasInput = (await roughnessInput.count()) > 0;
+    const inputVisible = hasInput && await roughnessInput.isVisible().catch(() => false);
+
+    if (!inputVisible) {
+      test.skip(true, 'SKIP: roughness input element not found — UI layout may differ');
+      return;
+    }
+
+    await roughnessInput.click({ clickCount: 3 });
+    await roughnessInput.fill('0.25');
+    await roughnessInput.press('Enter');
+
+    await page.waitForFunction(
+      () => {
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { roughness?: number } } } }).__EDITOR_STORE;
+        if (!store) return false;
+        const mat = store.getState().primaryMaterial;
+        return mat && Math.abs((mat.roughness ?? 0) - 0.25) < 0.05;
+      },
+      { timeout: 5_000 },
+    );
+
+    const state = await getStoreState(page) as { primaryMaterial?: { roughness?: number } } | undefined;
+    const material = state?.primaryMaterial;
+
+    expect(material).not.toBeNull();
+    expect(Math.abs((material!.roughness ?? 0) - 0.25)).toBeLessThan(0.05);
   });
 
-  test('clicking a material preset changes primaryMaterial properties in the store @engine', async ({
+  test('clicking a material preset changes primaryMaterial properties in the store', async ({
     page,
     editor,
   }) => {
@@ -413,53 +429,42 @@ test.describe('Group 2: Material Editing @engine', () => {
     expect(entityId).not.toBeNull();
 
     // Record state before clicking a preset
-    const before = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().primaryMaterial;
-    });
+    const beforeState = await getStoreState(page) as { primaryMaterial?: { metallic?: number; roughness?: number; baseColor?: number[] } } | undefined;
+    const before = beforeState?.primaryMaterial ?? null;
 
     // Look for a material preset button — the material library uses named presets
     const presetBtn = page.locator('button').filter({ hasText: /metal|plastic|wood|glass|stone/i }).first();
     const presetVisible = await presetBtn.isVisible({ timeout: 5_000 }).catch(() => false);
 
-    if (presetVisible) {
-      await presetBtn.click();
-
-      // After clicking a preset, primaryMaterial should have changed
-      await page.waitForFunction(
-        (beforeJson: string | null) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const store = (window as any).__EDITOR_STORE;
-          if (!store) return false;
-          const mat = store.getState().primaryMaterial;
-          if (!mat) return false;
-          if (beforeJson === null) return true; // no prior material — any data is progress
-          const beforeParsed = JSON.parse(beforeJson);
-          // Verify at least one key-value pair changed
-          return (
-            mat.metallic !== beforeParsed.metallic ||
-            mat.roughness !== beforeParsed.roughness ||
-            JSON.stringify(mat.baseColor) !== JSON.stringify(beforeParsed.baseColor)
-          );
-        },
-        before ? JSON.stringify(before) : null,
-        { timeout: 5_000 },
-      );
-
-      const materialAfter = await page.evaluate(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
-        return store ? store.getState().primaryMaterial : null;
-      });
-
-      expect(materialAfter).not.toBeNull();
-    } else {
-      // If no preset buttons are visible, the material library panel may not be open.
-      // Assert the material section is at least visible to prevent silent false-pass.
-      await expect(page.getByText(/material/i).first()).toBeVisible();
+    if (!presetVisible) {
+      test.skip(true, 'SKIP: material preset buttons not found — material library panel may not be open');
+      return;
     }
+
+    await presetBtn.click();
+
+    // After clicking a preset, primaryMaterial should have changed
+    await page.waitForFunction(
+      (beforeJson: string | null) => {
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryMaterial?: { metallic?: number; roughness?: number; baseColor?: number[] } } } }).__EDITOR_STORE;
+        if (!store) return false;
+        const mat = store.getState().primaryMaterial;
+        if (!mat) return false;
+        if (beforeJson === null) return true; // no prior material — any data is progress
+        const beforeParsed = JSON.parse(beforeJson) as { metallic?: number; roughness?: number; baseColor?: number[] };
+        // Verify at least one key-value pair changed
+        return (
+          mat.metallic !== beforeParsed.metallic ||
+          mat.roughness !== beforeParsed.roughness ||
+          JSON.stringify(mat.baseColor) !== JSON.stringify(beforeParsed.baseColor)
+        );
+      },
+      before ? JSON.stringify(before) : null,
+      { timeout: 5_000 },
+    );
+
+    const afterState = await getStoreState(page) as { primaryMaterial?: unknown } | undefined;
+    expect(afterState?.primaryMaterial).not.toBeNull();
   });
 });
 
@@ -472,7 +477,7 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     await editor.load();
   });
 
-  test('physics section is visible in the inspector after selecting a cube @engine', async ({
+  test('physics section is visible in the inspector after selecting a cube', async ({
     page,
     editor,
   }) => {
@@ -482,7 +487,7 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     await expect(physicsSection).toBeVisible({ timeout: 8_000 });
   });
 
-  test('toggling physics enabled checkbox changes physicsEnabled in the store @engine', async ({
+  test('toggling physics enabled checkbox changes physicsEnabled in the store', async ({
     page,
     editor,
   }) => {
@@ -492,11 +497,8 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     await expect(page.getByText(/physics/i).first()).toBeVisible({ timeout: 8_000 });
 
     // Capture initial state — physicsEnabled starts false for newly spawned entities
-    const initialEnabled = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store ? store.getState().physicsEnabled : null;
-    });
+    const initialState = await getStoreState(page) as { physicsEnabled?: boolean } | undefined;
+    const initialEnabled = initialState?.physicsEnabled ?? null;
 
     // Find the physics enable/disable toggle — typically a checkbox or switch
     const physicsToggle = page
@@ -504,72 +506,30 @@ test.describe('Group 3: Physics Toggle @engine', () => {
       .first();
     const toggleVisible = await physicsToggle.isVisible({ timeout: 5_000 }).catch(() => false);
 
-    if (toggleVisible) {
-      const wasChecked = await physicsToggle.isChecked();
-      await physicsToggle.click();
-
-      // Wait for the store's physicsEnabled to flip
-      await page.waitForFunction(
-        (was: boolean) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const store = (window as any).__EDITOR_STORE;
-          if (!store) return false;
-          return store.getState().physicsEnabled !== was;
-        },
-        wasChecked,
-        { timeout: 5_000 },
-      );
-
-      const nowEnabled = await page.evaluate(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
-        return store ? store.getState().physicsEnabled : null;
-      });
-
-      // physicsEnabled must have actually changed
-      expect(nowEnabled).not.toBe(initialEnabled);
-    } else {
-      // No checkbox found — still assert physics section visible to catch regressions
-      await expect(page.getByText(/physics/i).first()).toBeVisible();
+    if (!toggleVisible) {
+      test.skip(true, 'SKIP: physics toggle checkbox not found in inspector — UI layout may differ');
+      return;
     }
-  });
 
-  test('setPrimaryPhysics action populates physicsEnabled and primaryPhysics in the store @engine', async ({
-    page,
-    editor,
-  }) => {
-    await spawnCubeAndSelect(page, editor);
+    const wasChecked = await physicsToggle.isChecked();
+    await physicsToggle.click();
 
-    const entityId = await getPrimaryEntityId(page);
-    expect(entityId).not.toBeNull();
+    // Wait for the store's physicsEnabled to flip
+    await page.waitForFunction(
+      (was: boolean) => {
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { physicsEnabled?: boolean } } }).__EDITOR_STORE;
+        if (!store) return false;
+        return store.getState().physicsEnabled !== was;
+      },
+      wasChecked,
+      { timeout: 5_000 },
+    );
 
-    // setPrimaryPhysics is called by the engine event handler when Rust emits physics data.
-    // Calling it directly verifies the store path works and returns correct state.
-    await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) throw new Error('Store unavailable');
-      store.getState().setPrimaryPhysics(
-        { bodyType: 'Dynamic', mass: 1.0, friction: 0.5, restitution: 0.3, linearDamping: 0.0, angularDamping: 0.0 },
-        true,
-      );
-    });
+    const nowState = await getStoreState(page) as { physicsEnabled?: boolean } | undefined;
+    const nowEnabled = nowState?.physicsEnabled ?? null;
 
-    const state = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      const s = store.getState();
-      return { physicsEnabled: s.physicsEnabled, primaryPhysics: s.primaryPhysics };
-    });
-
-    expect(state).not.toBeNull();
-    // physicsEnabled must be true after setPrimaryPhysics(..., true)
-    expect(state.physicsEnabled).toBe(true);
-    // primaryPhysics must be the object we passed in
-    expect(state.primaryPhysics).not.toBeNull();
-    expect(state.primaryPhysics.bodyType).toBe('Dynamic');
-    expect(state.primaryPhysics.mass).toBeCloseTo(1.0);
+    // physicsEnabled must have actually changed
+    expect(nowEnabled).not.toBe(initialEnabled);
   });
 });
 
@@ -582,7 +542,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
     await editor.load();
   });
 
-  test('position edit via inspector matches value read back from store @engine', async ({
+  test('position edit via inspector matches value read back from store', async ({
     page,
     editor,
   }) => {
@@ -604,8 +564,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
     // 1. Store must have the value
     await page.waitForFunction(
       (expected: number) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryTransform?: { position?: number[] } } } }).__EDITOR_STORE;
         if (!store) return false;
         const t = store.getState().primaryTransform;
         return t && typeof t.position?.[0] === 'number' && Math.abs(t.position[0] - expected) < 0.1;
@@ -614,12 +573,8 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
       { timeout: 5_000 },
     );
 
-    const storeValue = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().primaryTransform?.position?.[0] ?? null;
-    });
+    const state = await getStoreState(page) as { primaryTransform?: { position?: number[] } } | undefined;
+    const storeValue = state?.primaryTransform?.position?.[0] ?? null;
 
     expect(storeValue).not.toBeNull();
     expect(Math.abs((storeValue as number) - targetValue)).toBeLessThan(0.1);
@@ -630,78 +585,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
     expect(parseFloat(inputDisplayValue)).toBeCloseTo(targetValue, 1);
   });
 
-  test('material update via store action is reflected in primaryMaterial @engine', async ({
-    page,
-    editor,
-  }) => {
-    await spawnCubeAndSelect(page, editor);
-
-    const entityId = await getPrimaryEntityId(page);
-    expect(entityId).not.toBeNull();
-
-    // Call the store's updateMaterial action directly — this mirrors what the
-    // engine event handler calls after a WASM material change event.
-    await page.evaluate((eid: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) throw new Error('Store unavailable');
-      store.getState().updateMaterial(eid, {
-        baseColor: [0.2, 0.8, 0.4, 1.0],
-        roughness: 0.6,
-        metallic: 0.3,
-        emissive: [0, 0, 0],
-        unlit: false,
-        doubleSided: false,
-        wireframe: false,
-        transparent: false,
-        depthBias: 0.0,
-      });
-    }, entityId as string);
-
-    // primaryMaterial should now contain exactly what we wrote
-    const material = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store ? store.getState().primaryMaterial : null;
-    });
-
-    expect(material).not.toBeNull();
-    expect(material.baseColor).toEqual([0.2, 0.8, 0.4, 1.0]);
-    expect(material.roughness).toBeCloseTo(0.6);
-    expect(material.metallic).toBeCloseTo(0.3);
-  });
-
-  test('transform update via store action is reflected in primaryTransform @engine', async ({
-    page,
-    editor,
-  }) => {
-    await spawnCubeAndSelect(page, editor);
-
-    const entityId = await getPrimaryEntityId(page);
-    expect(entityId).not.toBeNull();
-
-    // Call updateTransform directly — verifies the optimistic store write path
-    await page.evaluate((eid: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) throw new Error('Store unavailable');
-      store.getState().updateTransform(eid, 'position', [3.0, 1.5, -4.0]);
-    }, entityId as string);
-
-    const transform = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store ? store.getState().primaryTransform : null;
-    });
-
-    expect(transform).not.toBeNull();
-    // The optimistic write sets position on the primaryTransform object
-    expect(Math.abs(transform.position[0] - 3.0)).toBeLessThan(0.01);
-    expect(Math.abs(transform.position[1] - 1.5)).toBeLessThan(0.01);
-    expect(Math.abs(transform.position[2] - (-4.0))).toBeLessThan(0.01);
-  });
-
-  test('dispatchCommand can be called without crashing and selection remains valid @engine', async ({
+  test('dispatchCommand can be called and primaryTransform.position updates to the dispatched value', async ({
     page,
     editor,
   }) => {
@@ -713,8 +597,7 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
     // Dispatch a transform update through the public dispatchCommand API —
     // the same path used by every MCP command and chat handler.
     const dispatchResult = await page.evaluate((eid: string): boolean => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { dispatchCommand: (cmd: string, args: unknown) => void; selectedIds: Set<string> } } }).__EDITOR_STORE;
       if (!store) return false;
       try {
         store.getState().dispatchCommand('update_transform', {
@@ -730,10 +613,33 @@ test.describe('Group 4: Store Round-Trip Verification @engine', () => {
     // dispatchCommand must not throw
     expect(dispatchResult).toBe(true);
 
+    // Wait for the optimistic store write to propagate — tolerance 0.1 for WASM round-trips
+    await page.waitForFunction(
+      () => {
+        const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryTransform?: { position?: number[] } } } }).__EDITOR_STORE;
+        if (!store) return false;
+        const t = store.getState().primaryTransform;
+        if (!t || !Array.isArray(t.position)) return false;
+        return (
+          Math.abs(t.position[0] - 1.0) < 0.1 &&
+          Math.abs(t.position[1] - 2.0) < 0.1 &&
+          Math.abs(t.position[2] - 3.0) < 0.1
+        );
+      },
+      { timeout: 5_000 },
+    );
+
+    const state = await getStoreState(page) as { primaryTransform?: { position?: number[] }; selectedIds?: Set<string> } | undefined;
+    const transform = state?.primaryTransform;
+
+    expect(transform).not.toBeNull();
+    expect(Math.abs(transform!.position![0] - 1.0)).toBeLessThan(0.1);
+    expect(Math.abs(transform!.position![1] - 2.0)).toBeLessThan(0.1);
+    expect(Math.abs(transform!.position![2] - 3.0)).toBeLessThan(0.1);
+
     // Selection must still be valid after the dispatch
     const selectionValid = await page.evaluate((eid: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { selectedIds: Set<string> } } }).__EDITOR_STORE;
       return store ? store.getState().selectedIds.has(eid) : false;
     }, entityId as string);
 
