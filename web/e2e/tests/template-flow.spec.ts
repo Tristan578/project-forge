@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import type { Page } from '@playwright/test';
 
 /**
  * Template gallery and starter bundle onboarding flow tests.
@@ -240,7 +241,7 @@ test.describe('Template selection flow @ui', () => {
    * Helper: navigate to /dev with WelcomeModal visible and TemplateGallery open.
    * Returns when the gallery dialog is visible.
    */
-  async function openTemplateGallery(page: Parameters<Parameters<typeof test>[1]>[0]) {
+  async function openTemplateGallery(page: Page) {
     await page.addInitScript(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__SKIP_ENGINE = true;
