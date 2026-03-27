@@ -133,15 +133,15 @@ describe('scene CRUD integration', () => {
       });
     });
 
-    it('clears selection state immediately on delete (optimistic)', () => {
+    it('does NOT clear selection state before WASM confirmation (PF-7746)', () => {
       h.simulateEntitySpawned(makeNode('entity-1', 'Cube'));
       h.getState().selectEntity('entity-1', 'replace');
       h.getState().deleteSelectedEntities();
 
+      // Selection stays until engine confirms via SELECTION_CHANGED event
       const state = h.getState();
-      expect(state.selectedIds.size).toBe(0);
-      expect(state.primaryId).toBeNull();
-      expect(state.primaryName).toBeNull();
+      expect(state.selectedIds.has('entity-1')).toBe(true);
+      expect(state.primaryId).toBe('entity-1');
     });
 
     it('after engine confirms deletion, node is removed from sceneGraph', () => {
