@@ -46,7 +46,7 @@ test.describe('Misc Routes @ui', () => {
       const response = await request.get('/api/status');
       const body = await response.json();
 
-      expect(['operational', 'degraded', 'outage']).toContain(body.overall);
+      expect(['operational', 'partial_outage', 'major_outage', 'maintenance']).toContain(body.overall);
     });
 
     test('status service entries have required shape', async ({ request }) => {
