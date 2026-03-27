@@ -17,10 +17,10 @@ describe('MATERIAL_PRESETS', () => {
 
   it('should have all required fields', () => {
     for (const preset of MATERIAL_PRESETS) {
-      expect(preset.id).toBeTruthy();
-      expect(preset.name).toBeTruthy();
-      expect(preset.category).toBeTruthy();
-      expect(preset.description).toBeTruthy();
+      expect(preset.id).not.toBe('');
+      expect(preset.name).not.toBe('');
+      expect(preset.category).not.toBe('');
+      expect(preset.description).not.toBe('');
       expect(preset.tags.length).toBeGreaterThan(0);
       expect(preset.data).toBeDefined();
       expect(preset.data.baseColor).toBeDefined();

@@ -47,7 +47,7 @@ describe('GET /api/openapi', () => {
     const body = await res.json();
 
     expect(res.status).toBe(404);
-    expect(body.error).toBeTruthy();
+    expect(body.error).toBeDefined();
   });
 
   it('should return 500 when spec file has invalid JSON', async () => {
