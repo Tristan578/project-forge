@@ -496,8 +496,8 @@ apps/design/
     internal/            <- tier 3 stories (gated)
 ```
 
-- **MCP docs** auto-generated from `mcp-server/manifest/commands.json` — a build step converts the manifest to an MDX page with searchable command tables
-- **API docs** rendered from an OpenAPI spec (generated from route handlers or hand-maintained)
+- **MCP docs** auto-generated from `mcp-server/manifest/commands.json` — a build step converts the manifest to MDX. **Only commands with `"visibility": "public"` are included in the public build.** Commands without this field or with `"visibility": "internal"` are gated by `INCLUDE_INTERNAL`. This requires adding a `visibility` field to the manifest schema (default: `"internal"` — safe by default, explicit opt-in for public).
+- **API docs** rendered from an OpenAPI spec (hand-maintained `openapi.yaml`). Internal routes excluded from the public spec file.
 - **Internal API docs** gated by the same `INCLUDE_INTERNAL` build flag as tier 3 stories
 
 ### 9.4 Metadata & Attribution
@@ -508,8 +508,9 @@ Every documentation page includes a footer:
 Last updated: {date} by {author}
 ```
 
-- `{date}` — ISO 8601 date/time, auto-populated from git commit timestamp of the source file
-- `{author}` — git commit author name. Default: "Tristan Nolan"
+- `{date}` — ISO 8601 date/time from git commit timestamp of the **canonical source file** (e.g., `commands.json` for MCP docs, `openapi.yaml` for API docs, the `.tsx` component file for component docs). NOT the generated MDX output — generated files' git timestamps reflect the build, not the last intentional change.
+- `{author}` — git commit author of the canonical source file. Default: "Tristan Nolan"
+- The build pipeline must read `git log -1 --format='%aI|%an' -- <source-file>` and inject the values into the generated MDX.
 - Storybook global footer: "SpawnForge Design System — Built by Tristan Nolan"
 
 ### 9.5 Branding Rules
@@ -637,7 +638,8 @@ CSS-only effects → no CPU profiling. Lighthouse gate: score must not drop >3 p
 | **2** | 20 tier 1 primitives, Dark+Light verified, Storybook deployed, Chromatic connected |
 | **3** | Ember+Ice colors+effects, `ThemeAmbient`, reduced-motion, effects toggle |
 | **4** | Rust+Leaf+Mech colors+effects, full 7-theme E2E suite |
-| **5** | Tier 2 composites, custom theme import/export, internal Storybook build |
+| **5** | Tier 2 composites, custom theme import/export, internal Storybook build (with `INCLUDE_INTERNAL` gating verified BEFORE any public deploy) |
+| **5b** | API/MCP docs: add `visibility` field to manifest schema, commands.json→MDX pipeline, OpenAPI spec, internal API docs. **Prerequisite: `INCLUDE_INTERNAL` gating must be deployed and verified before any MCP/API docs go public.** |
 | **6** | Backend consolidation (error shapes, middleware, Zod) |
 | **7** | Frontend consolidation, codemod tool, lint rules, incremental migration |
 
