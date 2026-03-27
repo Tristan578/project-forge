@@ -426,12 +426,16 @@ const primaryId = useEditorStore(s => s.primaryId);
 - Mech: scan lines, HUD brackets, monospace font override, sharp corners
 - Full E2E test coverage per theme (7 themes x assertion suite)
 
-### Phase 5: Tier 2 composites + internal build
+### Phase 5: Tier 2 composites + internal build + custom themes
 
 - Extract domain-specific composites to package
 - Build composite stories
 - Set up internal Storybook build with tier 3 gating
 - Deploy internal build
+- Implement custom theme JSON schema validation
+- Build import/export UI in Settings panel
+- Custom theme resolution in `useTheme()` hook
+- E2E test: import custom theme JSON, verify tokens applied
 
 ### Phase 6: Backend consolidation
 
@@ -447,7 +451,81 @@ const primaryId = useEditorStore(s => s.primaryId);
 
 ---
 
-## 9. DNS Setup (User Action Required)
+## 9. Custom Themes (v1)
+
+### 9.1 Scope
+
+Users (or their AI tools) can create custom themes for SpawnForge. A custom theme is a **token-value-only JSON file** — no arbitrary CSS, no custom effects, no font URL injection.
+
+### 9.2 Custom Theme Schema
+
+```json
+{
+  "schemaVersion": 1,
+  "name": "Cyberpunk",
+  "author": "dev123",
+  "description": "Neon-drenched dark theme",
+  "tokens": {
+    "--sf-bg-app": "#0a0014",
+    "--sf-bg-surface": "#140020",
+    "--sf-bg-elevated": "#1e0030",
+    "--sf-bg-overlay": "#280040",
+    "--sf-accent": "#ff00ff",
+    "--sf-text": "#e0e0ff",
+    "--sf-text-secondary": "#9090c0",
+    "--sf-text-muted": "#606090",
+    "--sf-border": "#2a2a4a",
+    "--sf-border-strong": "#4a4a6a",
+    "--sf-destructive": "#ff3366",
+    "--sf-success": "#00ff88",
+    "--sf-warning": "#ffaa00",
+    "--sf-radius-md": "0px",
+    "--sf-border-width": "2px",
+    "--sf-font-ui": "inherit"
+  }
+}
+```
+
+### 9.3 Constraints
+
+- **Token values only.** Only tokens from the semantic catalog (Section 3.2) are accepted. Unknown keys are silently ignored.
+- **No arbitrary CSS.** Custom themes cannot inject stylesheets, `@import`, `url()`, or `content` properties.
+- **No custom effects.** Ambient effects are built-in only. Custom themes inherit the nearest built-in theme's effects or none.
+- **`--sf-font-ui` restricted to `inherit` or built-in fonts.** No external font URLs (prevents tracking and layout shift). Future: curated font list.
+- **Validated on import.** Token values are validated against CSS value grammar (colors, lengths, font stacks). Invalid values rejected with specific error messages.
+
+### 9.4 Versioned Token Contract
+
+The semantic token catalog is versioned. `schemaVersion: 1` corresponds to the token set defined in Section 3.2.
+
+- **Additive changes** (new tokens) are non-breaking — custom themes ignore unknown tokens.
+- **Removing or renaming tokens** is a breaking change requiring `schemaVersion: 2`. The theme loader handles migration or warns.
+- Built-in themes always use the latest schema. Custom themes declare their version.
+
+### 9.5 Theme Resolution Order
+
+```
+custom theme (if set) > project theme override > global user default > "dark"
+```
+
+### 9.6 Import/Export
+
+- **Export:** Settings panel "Export Theme" button downloads the JSON file.
+- **Import:** Settings panel "Import Theme" accepts JSON file upload. Validated before applying.
+- **Share:** Custom themes can be shared as JSON files (copy/paste, GitHub gist, etc.)
+- **URL import (future):** Load theme from URL. Deferred to v2 — needs CORS and content security review.
+
+### 9.7 Theme Editor (Future — Not in This Spec)
+
+A visual "Theme Editor" panel where users tweak token values with live preview, color pickers, and spacing sliders. This is a significant feature and will get its own spec. The JSON import/export path ships first as the MVP.
+
+### 9.8 AI Theme Generation (Future — Not in This Spec)
+
+"Describe your theme" → AI generates a custom theme JSON. Requires the Theme Editor UI + AI SDK integration. Deferred.
+
+---
+
+## 10. DNS Setup (User Action Required)
 
 1. **Cloudflare DNS:** Add CNAME record `design` -> `cname.vercel-dns.com`
 2. **Vercel:** Create project for `apps/design/`, add `design.spawnforge.ai` as custom domain
@@ -496,3 +574,6 @@ Every component in `@spawnforge/ui` ships with tests covering:
 - [ ] All request validation uses Zod
 - [ ] axe-core passes for all components in all 7 themes
 - [ ] `prefers-reduced-motion` disables all ambient effects
+- [ ] Custom theme JSON import/export works from Settings panel
+- [ ] Custom theme validates token values and rejects invalid input
+- [ ] Token catalog is versioned (`schemaVersion: 1`)
