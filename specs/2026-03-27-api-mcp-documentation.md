@@ -127,11 +127,14 @@ The CI gate reads the **generated MDX files** directly — it does not grep the 
 ```yaml
 docs-internal-gate:
   name: Verify Public Docs Exclude Internal Content
+  if: ${{ needs.ci-gate.outputs.needs-docs == 'true' }}  # Only runs when apps/docs/** or mcp-server/manifest/** changed
   steps:
     - run: cd apps/docs && npm run build  # No INCLUDE_INTERNAL
     - name: Assert no internal commands in generated MDX
       run: tsx apps/docs/scripts/ci-gate-check.ts
 ```
+
+> The `needs-docs` output is added to the CI gate job's path-change detection, matching `apps/docs/**` and `mcp-server/manifest/**`. This prevents every Rust engine PR from paying the docs build tax (~3-5 min).
 
 The `ci-gate-check.ts` script:
 
@@ -193,16 +196,12 @@ The CI check uses **JSON structural comparison** (parse both files and deep-equa
 Update `mcp-server/src/manifest.test.ts` to validate the `visibility` field:
 
 ```ts
-// Optional field, defaults to 'internal' if absent
-if (cmd.visibility) {
-  expect(['public', 'internal']).toContain(cmd.visibility);
-}
-
-// Warning: commands without an explicit visibility field
-if (!cmd.visibility) {
-  console.warn(`[manifest] Command '${cmd.name}' is missing a visibility field. Defaulting to 'internal'. Tag explicitly to suppress this warning.`);
-}
+// visibility is REQUIRED on all commands (mandatory after batch tagging)
+expect(cmd.visibility, `Command "${cmd.name}" missing visibility field`).toBeDefined();
+expect(['public', 'internal']).toContain(cmd.visibility);
 ```
+
+> Note: The field is mandatory in the test — commands without `visibility` will fail `npx vitest run`. This catches missing fields at PR time, not just at docs deployment.
 
 ---
 
@@ -267,6 +266,7 @@ This metadata is included **starting in Phase 1** (not deferred to Phase 3), so 
 - **Canonical source** for MCP docs: `mcp-server/manifest/commands.json`
 - **Canonical source** for API docs: the route handler `.ts` file
 - If git metadata unavailable (generated files, CI builds): omit author field entirely. Never hardcode a name.
+- **Author name MUST be HTML-escaped** before interpolation (`<`, `>`, `&`, `"` replaced). Git author names are user-controlled strings. If the escaped string contains non-printable characters, omit the author field entirely.
 
 ### 5.2 Branding
 
@@ -372,6 +372,8 @@ This applies to the category index pages as well when a category has both public
 ### 7.4 Mobile Responsiveness
 
 Fumadocs responsive defaults are accepted for mobile. No custom breakpoints or mobile-specific overrides are required in Phase 1. The built-in Fumadocs sidebar collapse and responsive layout are sufficient.
+
+**Loading states:** All pages are statically generated at build time (SSG). No client-side data fetching occurs during page load, so no loading skeleton or progress indicator is needed. The generated MDX is pre-rendered HTML — pages load instantly from Vercel's CDN.
 
 ---
 
