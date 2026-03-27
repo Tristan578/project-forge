@@ -139,8 +139,12 @@ export function EditModeInspector() {
 
       {/* Selected Count */}
       <div className="text-xs text-zinc-400">
-        Selected: {selectedIndices.length} {selectionMode}
-        {selectedIndices.length !== 1 ? 's' : ''}
+        Selected: {selectedIndices.length}{' '}
+        {selectedIndices.length === 1
+          ? selectionMode
+          : selectionMode === 'vertex'
+            ? 'vertices'
+            : `${selectionMode}s`}
       </div>
 
       {/* Operations */}

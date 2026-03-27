@@ -123,7 +123,7 @@ describe('EditModeInspector', () => {
   it('shows selected count', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1', selectedIndices: [0, 1, 2], selectionMode: 'vertex' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Selected: 3 vertexs').textContent).toBe('Selected: 3 vertexs');
+    expect(screen.getByText('Selected: 3 vertices').textContent).toBe('Selected: 3 vertices');
   });
 
   it('renders operation buttons', () => {
