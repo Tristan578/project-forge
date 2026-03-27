@@ -551,6 +551,11 @@ jobs:
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
+          # Staging is a preview deployment (no --prod) so Deployment Protection
+          # returns 401 to unauthenticated requests. The bypass secret lets the
+          # health check through. Configure in Vercel → Project Settings →
+          # Deployment Protection → Protection Bypass for Automation.
+          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
   # ---- Stage 2: Deploy to Production ----
@@ -663,6 +668,7 @@ jobs:
           HEALTH_CHECK_STABILIZE_S: '10'
           HEALTH_CHECK_RETRIES: '3'
           HEALTH_CHECK_INTERVAL_S: '10'
+          VERCEL_AUTOMATION_BYPASS: ${{ secrets.VERCEL_AUTOMATION_BYPASS }}
         run: bash scripts/post-deploy-health-check.sh "$DEPLOY_URL"
 
       - name: Install Playwright for smoke tests
