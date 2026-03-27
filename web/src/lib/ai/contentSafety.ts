@@ -97,7 +97,8 @@ const INJECTION_PATTERNS: RegExp[] = [
   /system[ ]*:[ ]/i,
   /\[[ ]*INST[ ]*\]/i,
   /\[[ ]*SYSTEM[ ]*\]/i,
-  /<[ ]*\|?[ ]*system[ ]*\|?[ ]*>/i,
+  // ReDoS-safe: replaced [ ]* quantifiers with {0,5} limits (CodeQL #54)
+  /<[ ]{0,5}\|?[ ]{0,5}system[ ]{0,5}\|?[ ]{0,5}>/i,
   /you[ ]+are[ ]+now[ ]+(a|an|the)[ ]/i,
   /act[ ]+as[ ]+(a|an|the|if)[ ]/i,
   /new[ ]+instructions?[ ]*:/i,

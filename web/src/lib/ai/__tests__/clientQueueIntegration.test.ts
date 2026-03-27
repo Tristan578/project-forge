@@ -19,7 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const encoder = new TextEncoder();
 
 function makeSseResponse(text: string): Response {
-  const body = `data: {"type":"text_delta","text":"${text.replace(/"/g, '\\"')}"}\ndata: {"type":"done"}\n`;
+  const body = `data: {"type":"text_delta","text":${JSON.stringify(text)}}\ndata: {"type":"done"}\n`;
   return new Response(
     new ReadableStream({
       start(controller) {
