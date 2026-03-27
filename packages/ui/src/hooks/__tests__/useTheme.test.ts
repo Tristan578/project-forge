@@ -118,4 +118,32 @@ describe('useTheme', () => {
     const { result: withDark } = renderHook(() => useTheme());
     expect(withDark.current.theme).toBe('dark');
   });
+
+  it('setEffectsEnabled with reduced-motion active stores "on" in localStorage but keeps effectsEnabled false (regression for bug fixed in 492354a6)', () => {
+    // Simulate reduced-motion environment
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+    }));
+
+    const { result } = renderHook(() => useTheme());
+
+    // Initial state: reduced-motion forces effects off
+    expect(result.current.effectsEnabled).toBe(false);
+
+    // User calls setEffectsEnabled(true) — preference should persist but runtime stays off
+    act(() => result.current.setEffectsEnabled(true));
+
+    // localStorage must store the user's preference ('on'), not the runtime override
+    expect(localStorage.getItem('sf-effects')).toBe('on');
+
+    // effectsEnabled must remain false because reduced-motion is active at runtime
+    expect(result.current.effectsEnabled).toBe(false);
+  });
 });
