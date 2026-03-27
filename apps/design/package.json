@@ -1,0 +1,21 @@
+{
+  "name": "@spawnforge/design",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "storybook": "storybook dev -p 6006",
+    "build-storybook": "storybook build -o storybook-static"
+  },
+  "devDependencies": {
+    "storybook": "^8.6",
+    "@storybook/react": "^8.6",
+    "@storybook/react-vite": "^8.6",
+    "@storybook/addon-a11y": "^8.6",
+    "@storybook/addon-essentials": "^8.6",
+    "@storybook/test": "^8.6",
+    "@spawnforge/ui": "*",
+    "chromatic": "^11",
+    "react": "^19",
+    "react-dom": "^19"
+  }
+}

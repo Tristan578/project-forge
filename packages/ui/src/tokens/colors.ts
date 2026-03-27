@@ -15,6 +15,7 @@ export interface ThemeColorTokens {
   '--sf-border-strong': string;
   '--sf-accent': string;
   '--sf-accent-hover': string;
+  '--sf-on-accent': string;
   '--sf-destructive': string;
   '--sf-success': string;
   '--sf-warning': string;
