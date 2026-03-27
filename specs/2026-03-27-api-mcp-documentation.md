@@ -140,36 +140,64 @@ The `ci-gate-check.ts` script:
 
 ```ts
 // apps/docs/scripts/ci-gate-check.ts
-// Reads generated MDX frontmatter and asserts visibility == 'public' for all entries.
-// This avoids false positives from grepping minified .next/ output.
+// Reads generated MDX frontmatter and asserts:
+// 1. Every command MDX file has a `commandName` field (prevents silent bypass)
+// 2. No internal command appears in the public build output
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import matter from 'gray-matter';
 
-const mcpContentDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '../content/mcp');
-const commandsManifest = JSON.parse(
-  fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../mcp-server/manifest/commands.json'), 'utf-8'),
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const mcpContentDir = path.join(__dirname, '../content/mcp');
+const manifest = JSON.parse(
+  fs.readFileSync(path.join(__dirname, '../../../mcp-server/manifest/commands.json'), 'utf-8'),
 );
 const internalCommands = new Set(
-  commandsManifest
+  manifest.commands
     .filter((c: { visibility?: string }) => c.visibility !== 'public')
     .map((c: { name: string }) => c.name),
 );
 
+if (!fs.existsSync(mcpContentDir)) {
+  console.log('CI gate passed: no content/mcp/ directory (nothing to check).');
+  process.exit(0);
+}
+
 let failed = false;
-const mdxFiles = fs.readdirSync(mcpContentDir).filter(f => f.endsWith('.mdx'));
+const mdxFiles = fs.readdirSync(mcpContentDir).filter(f => f.endsWith('.mdx') && f !== 'index.mdx');
 for (const file of mdxFiles) {
   const raw = fs.readFileSync(path.join(mcpContentDir, file), 'utf-8');
   const { data } = matter(raw);
-  if (data.commandName && internalCommands.has(data.commandName)) {
+
+  // Every command MDX MUST have a commandName field — prevents silent bypass
+  if (!data.commandName) {
+    console.error(`::error::MDX file '${file}' missing required 'commandName' frontmatter field`);
+    failed = true;
+    continue;
+  }
+
+  if (internalCommands.has(data.commandName)) {
     console.error(`::error::Internal command '${data.commandName}' found in public MDX file '${file}'`);
     failed = true;
   }
 }
 if (failed) process.exit(1);
-console.log('CI gate passed: no internal commands found in generated MDX.');
+console.log(`CI gate passed: ${mdxFiles.length} command pages checked, no internal commands found.`);
 ```
+
+**Required frontmatter schema for generated command MDX files:**
+
+```yaml
+---
+commandName: "create_entity"     # REQUIRED — matches commands.json name field
+category: "entity"               # REQUIRED — category for sidebar grouping
+visibility: "public"             # REQUIRED — must match commands.json visibility
+description: "Creates a new entity in the scene"
+---
+```
+
+The `generate-mcp-docs.ts` script MUST write all four frontmatter fields for every generated command page. The CI gate checks `commandName` and cross-references against the manifest's internal command set.
 
 Unit tests for this script live in `apps/docs/scripts/__tests__/ci-gate-check.test.ts` (see Section 9).
 
@@ -177,32 +205,47 @@ Unit tests for this script live in `apps/docs/scripts/__tests__/ci-gate-check.te
 
 `mcp-server/manifest/commands.json` is the **authoritative** source. `web/src/data/commands.json` is a derived copy. Sync always writes from the canonical source to the copy.
 
-The CI check uses **JSON structural comparison** (parse both files and deep-equal on sorted arrays), not text diff, to avoid false failures from formatting differences:
+The CI check uses **JSON structural comparison** (parse both files, extract `.commands` array, deep-equal on sorted arrays), not text diff, to avoid false failures from formatting differences.
+
+> **Note:** `commands.json` is an object with `{ version, commands, resources }` — the comparison targets the `.commands` array specifically, not the top-level object.
 
 ```yaml
 - name: Verify MCP manifest sync
-  run: tsx -e "
-    const a = JSON.parse(require('fs').readFileSync('mcp-server/manifest/commands.json','utf-8'));
-    const b = JSON.parse(require('fs').readFileSync('web/src/data/commands.json','utf-8'));
-    const sort = arr => arr.slice().sort((x,y) => x.name < y.name ? -1 : 1);
-    const sa = JSON.stringify(sort(a));
-    const sb = JSON.stringify(sort(b));
-    if (sa !== sb) { console.error('MCP manifests are out of sync'); process.exit(1); }
-    console.log('Manifest sync check passed.');
-  "
+  run: |
+    tsx apps/docs/scripts/check-manifest-sync.ts
+```
+
+The `check-manifest-sync.ts` script (not inline `tsx -e`, to avoid ESM/CJS `require()` issues):
+
+```ts
+// apps/docs/scripts/check-manifest-sync.ts
+import fs from 'fs';
+
+const a = JSON.parse(fs.readFileSync('mcp-server/manifest/commands.json', 'utf-8'));
+const b = JSON.parse(fs.readFileSync('web/src/data/commands.json', 'utf-8'));
+const sort = (arr: Array<{ name: string }>) => [...arr].sort((x, y) => x.name < y.name ? -1 : 1);
+const sa = JSON.stringify(sort(a.commands));
+const sb = JSON.stringify(sort(b.commands));
+if (sa !== sb) { console.error('MCP manifests are out of sync'); process.exit(1); }
+console.log('Manifest sync check passed.');
 ```
 
 ### 3.6 Manifest Schema Update
 
-Update `mcp-server/src/manifest.test.ts` to validate the `visibility` field:
+Update `mcp-server/src/manifest.test.ts` to validate the `visibility` field. Add as a **new `it` block** (not inline in the existing field check loop) for clear error attribution:
 
 ```ts
-// visibility is REQUIRED on all commands (mandatory after batch tagging)
-expect(cmd.visibility, `Command "${cmd.name}" missing visibility field`).toBeDefined();
-expect(['public', 'internal']).toContain(cmd.visibility);
+it.each(manifest.commands)('$name has valid visibility field', (cmd) => {
+  expect(
+    ['public', 'internal'],
+    `Command "${cmd.name}" has visibility "${cmd.visibility}" — must be "public" or "internal"`,
+  ).toContain(cmd.visibility);
+});
 ```
 
-> Note: The field is mandatory in the test — commands without `visibility` will fail `npx vitest run`. This catches missing fields at PR time, not just at docs deployment.
+This uses `.toContain()` which implicitly asserts the field is defined (undefined is not in the array), and provides a clear error message naming the offending command.
+
+> **Ordering:** The visibility test and the batch tagging MUST ship in the **same PR**. The batch tagging agent runs first (adding `visibility` to every command), then the test is added — never the reverse. This prevents a window where the test fails on commands that haven't been tagged yet.
 
 ---
 
@@ -365,11 +408,16 @@ Category groups in the sidebar are sorted alphabetically by category name. Sub-i
 
 ### 7.3 Internal-Boundary UX
 
-Public docs pages include a notice at the top of the MCP index page:
+Public docs pages include an accessible notice at the top of the MCP index page, rendered as a Fumadocs `<Callout>` component (which uses `role="note"` and appropriate ARIA semantics):
 
-> **Note:** Some commands require internal access and are not shown here. If you are a SpawnForge team member and need access to internal command documentation, [request access here](#).
+```mdx
+<Callout type="info" title="Partial listing">
+  Some commands require internal access and are not shown here.
+  If you are a SpawnForge team member, contact the team for internal documentation access.
+</Callout>
+```
 
-This applies to the category index pages as well when a category has both public and internal commands — a note states "X additional internal commands are not shown in this view."
+This applies to category index pages as well when a category has both public and internal commands — the callout states "X additional internal commands are not shown in this view." The count is computed at generation time from the manifest.
 
 ### 7.4 Mobile Responsiveness
 
@@ -389,6 +437,20 @@ Fumadocs responsive defaults are accepted for mobile. No custom breakpoints or m
 CI gate verifies public build contains no internal content (Section 3.4).
 
 > **IMPORTANT: Deployment timing.** The internal Vercel project is NOT deployed until Phase 3. In Phases 1-2, only the public build ships. The `INCLUDE_INTERNAL` env var must NEVER be set on the public Vercel project. Only the separate internal Vercel project (created in Phase 3 with Deployment Protection enabled) may have it.
+
+**Enforcement mechanism:** The `generate-mcp-docs.ts` script logs the count of public vs internal commands at build time. The CI gate (Section 3.4) is the enforcement — it fails the build if any internal command leaks to generated MDX. As an additional safeguard, the docs `next.config.ts` includes a build-time check:
+
+```ts
+// apps/docs/next.config.ts
+if (process.env.INCLUDE_INTERNAL === 'true' && !process.env.VERCEL_DEPLOYMENT_PROTECTION) {
+  throw new Error(
+    'INCLUDE_INTERNAL=true requires Vercel Deployment Protection. ' +
+    'This env var must NEVER be set on the public Vercel project.'
+  );
+}
+```
+
+This prevents accidental deployment of internal content without Deployment Protection.
 
 ---
 
@@ -428,23 +490,50 @@ CI gate verifies public build contains no internal content (Section 3.4).
 
 ### Unit Tests
 
-- `generate-mcp-docs.ts`: given commands.json with mixed visibility, assert only public commands in output
-- Visibility field validation in `manifest.test.ts` (with missing-field warning, see Section 3.6)
-- Dual-file sync check: parse both JSON files, deep-equal on name-sorted arrays (not text diff)
-- **CI gate script** (`ci-gate-check.ts`): unit tests in `apps/docs/scripts/__tests__/ci-gate-check.test.ts`
-  - Test: given MDX files with only public commands, script exits 0
-  - Test: given one MDX file with an internal command's `commandName` in frontmatter, script exits 1
-  - Test: given empty `content/mcp/` directory, script exits 0 (no files = nothing to flag)
+- **`generate-mcp-docs.ts`**: given commands.json with mixed visibility, assert only public commands in output. Also test:
+  - Malformed/missing `commands.json` → script exits non-zero with descriptive error
+  - Zero public commands → generates index page with "No public commands available" message
+  - Missing `.commands` field in manifest object → script exits non-zero
+- **Visibility field validation** in `manifest.test.ts` (see Section 3.6) — ships in same PR as batch tagging
+- **Dual-file sync** (`check-manifest-sync.ts`): parse both JSON files, extract `.commands` arrays, deep-equal on name-sorted arrays. Also test:
+  - Missing file → script exits non-zero with path in error message
+  - Empty commands array → passes (both files have empty arrays)
+- **CI gate script** (`ci-gate-check.ts`): tests in `apps/docs/scripts/__tests__/ci-gate-check.test.ts`
+
+  The CI gate script uses `process.exit()` which would kill the test runner if imported directly. Tests MUST extract the core logic into a testable `checkGate(contentDir, manifestPath): { passed: boolean, errors: string[] }` function that returns a result object. The top-level script calls this function and maps the result to `process.exit()`. Tests import and call `checkGate()` directly:
+
+  - Test: given MDX files with only public `commandName` fields → `{ passed: true, errors: [] }`
+  - Test: given one MDX file with an internal command's `commandName` → `{ passed: false, errors: ['...'] }`
+  - Test: given MDX file missing `commandName` frontmatter → `{ passed: false, errors: ['...missing commandName...'] }`
+  - Test: given empty `content/mcp/` directory → `{ passed: true, errors: [] }`
+  - Test: given non-existent `content/mcp/` directory → `{ passed: true, errors: [] }`
 
 ### E2E Tests
 
-- `docs.spawnforge.ai` loads, MCP command pages render
-- Search returns results for public commands
-- No internal command names appear in public build (enforced by CI gate script)
+E2E tests run against a **local dev server** started by Playwright's `webServer` config (not the deployed URL), ensuring tests validate the current build artifact:
+
+```ts
+// apps/docs/playwright.config.ts
+export default defineConfig({
+  webServer: {
+    command: 'npm run dev',
+    port: 3001,
+    reuseExistingServer: !process.env.CI,
+  },
+  // ...
+});
+```
+
+Test cases:
+- Docs site loads at `/`, landing page renders MCP and API sections
+- `/mcp` page renders command categories in sidebar
+- Search for a known public command returns results
+- No internal command names appear in rendered page content (belt-and-suspenders with CI gate)
 
 ### Visual Regression
 
 - Chromatic connected to `apps/docs/` for page layout consistency (Phase 3)
+- Phase 3 will define snapshot pages and regression thresholds
 
 ---
 
