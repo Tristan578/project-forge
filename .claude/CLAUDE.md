@@ -225,7 +225,7 @@ When adding a **new ECS component**, update these domain-scoped files:
 ### Integration (5 files)
 13. `web/src/components/editor/InspectorPanel.tsx` — Import + render
 14. `web/src/components/chat/ToolCallCard.tsx` — Display labels
-15. `mcp-server/manifest/commands.json` — MCP commands
+15. `mcp-server/manifest/commands.json` — MCP commands. Set `visibility: 'public'` or `visibility: 'internal'` on every new command (mandatory — manifest tests will fail without it).
 16. `web/src/data/commands.json` — **COPY of #15** (keep in sync)
 17. `TESTING.md` — Manual test cases
 
