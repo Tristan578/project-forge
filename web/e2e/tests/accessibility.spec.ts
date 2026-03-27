@@ -1,4 +1,9 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_LOAD_MS,
+  E2E_TIMEOUT_NAV_MS,
+} from '../constants';
 
 /**
  * Accessibility E2E tests.
@@ -66,11 +71,11 @@ test.describe('Accessibility @ui', () => {
     test('dialogs have proper role and labeling', async ({ page }) => {
       // Open settings to test dialog accessibility
       const settingsBtn = page.locator('button[title="Settings"]').first();
-      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
+      await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
       await settingsBtn.click();
 
       const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       // Dialog should have aria-label or aria-labelledby
       const ariaLabel = await dialog.getAttribute('aria-label');
@@ -99,7 +104,7 @@ test.describe('Accessibility @ui', () => {
           if (!tag || tag === 'BODY') return null;
           return tag;
         },
-        { timeout: 10_000 },
+        { timeout: E2E_TIMEOUT_LOAD_MS },
       );
       const tag = await focusedTag.jsonValue();
       expect(tag).toBeTruthy();
@@ -110,31 +115,31 @@ test.describe('Accessibility @ui', () => {
       test.slow();
       // Open settings
       const settingsBtn = page.locator('button[title="Settings"]').first();
-      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
+      await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
       // Escape should close it
       await page.keyboard.press('Escape');
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
     });
 
     test('focus returns to trigger after dialog closes', async ({ page }) => {
       test.slow();
       const settingsBtn = page.locator('button[title="Settings"]').first();
-      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
+      await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
       await page.keyboard.press('Escape');
       // Wait for dialog to fully close before checking focus
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
       // Focus should ideally return to the settings button (or at least somewhere reasonable)
       // Use waitForFunction to allow focus to settle after animation completes
       const focusedTag = await page.waitForFunction(
         () => document.activeElement?.tagName ?? null,
-        { timeout: 5000 },
+        { timeout: E2E_TIMEOUT_ELEMENT_MS },
       );
       expect(await focusedTag.jsonValue()).toBeTruthy();
     });
@@ -142,9 +147,9 @@ test.describe('Accessibility @ui', () => {
     // fixme: focus management in settings dialog is timing-dependent on CI
     test.fixme('Tab key moves focus to interactive elements inside settings dialog', async ({ page }) => {
       const settingsBtn = page.locator('button[title="Settings"]').first();
-      await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
+      await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
       await settingsBtn.click();
-      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       // Tab once — focus should land on an interactive element
       await page.keyboard.press('Tab');

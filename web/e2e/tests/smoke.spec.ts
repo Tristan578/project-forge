@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 test.describe('Editor Smoke Tests @engine', () => {
   test('page loads without console errors', async ({ page, editor }) => {
@@ -43,7 +44,7 @@ test.describe('Editor Smoke Tests @engine', () => {
 
     // Check for Camera entity in the hierarchy
     const cameraElement = page.getByText('Camera', { exact: false });
-    await expect(cameraElement.first()).toBeVisible({ timeout: 10000 });
+    await expect(cameraElement.first()).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('sidebar is visible with interactive buttons', async ({ page, editor }) => {

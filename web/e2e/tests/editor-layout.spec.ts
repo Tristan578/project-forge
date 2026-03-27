@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 test.describe('Editor Layout @engine', () => {
   test.beforeEach(async ({ editor }) => {
@@ -225,7 +226,7 @@ test.describe('Responsive Layout @ui', () => {
 
     // MobileToolbar is fixed at bottom with h-12 — always present in compact mode
     const mobileToolbar = page.locator('.fixed.bottom-0').first();
-    await expect(mobileToolbar).toBeVisible({ timeout: 5000 });
+    await expect(mobileToolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const box = await mobileToolbar.boundingBox();
     expect(box).not.toBeNull();
     // Should span the full width
@@ -239,7 +240,7 @@ test.describe('Responsive Layout @ui', () => {
     await editor.loadPage();
 
     // Gizmo mode buttons (Move, Rotate, Scale) are always present in compact mode
-    await expect(page.locator('button[title="Move"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('button[title="Move"]')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await expect(page.locator('button[title="Rotate"]')).toBeVisible();
     await expect(page.locator('button[title="Scale"]')).toBeVisible();
   });
@@ -250,7 +251,7 @@ test.describe('Responsive Layout @ui', () => {
 
     // In full mode (>=1440px), all panels should be visible
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 5000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Check for hierarchy and inspector panel tabs
     const hierarchyTab = page.locator('.dv-tab').filter({ hasText: /hierarchy|scene/i }).first();
@@ -267,7 +268,7 @@ test.describe('Responsive Layout @ui', () => {
 
     // Canvas should be visible
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 5000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Resize to compact
     await page.setViewportSize({ width: 900, height: 800 });
@@ -289,7 +290,7 @@ test.describe('Responsive Layout @ui', () => {
     // Wait until the store is mounted before reading state
     await page.waitForFunction(
       () => !!(window as unknown as Record<string, unknown>).__EDITOR_STORE,
-      { timeout: 5000 }
+      { timeout: E2E_TIMEOUT_ELEMENT_MS }
     );
 
     const touchConfig = await page.evaluate(() => {
@@ -312,16 +313,16 @@ test.describe('Responsive Layout @ui', () => {
     // Panel toggle buttons are always present in compact mode (< 1024px)
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
     const inspectorToggle = page.locator('button[title="Inspector"]');
-    await expect(hierarchyToggle).toBeVisible({ timeout: 5000 });
+    await expect(hierarchyToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await expect(inspectorToggle).toBeVisible();
 
     // Click hierarchy toggle — the scene hierarchy drawer should open
     await hierarchyToggle.click();
     const drawer = page.locator('[aria-label="Scene hierarchy panel"]');
-    await expect(drawer).toBeInViewport({ timeout: 5000 });
+    await expect(drawer).toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Close drawer by pressing Escape (clicking toggle is blocked by drawer overlay)
     await page.keyboard.press('Escape');
-    await expect(drawer).not.toBeInViewport({ timeout: 5000 });
+    await expect(drawer).not.toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 });

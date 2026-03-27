@@ -11,6 +11,11 @@
 
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_SHORT_MS,
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_NAV_MS,
+} from '../constants';
 
 test.describe('Accessibility Audit @ui', () => {
   test.beforeEach(async ({ editor }) => {
@@ -68,11 +73,11 @@ test.describe('Accessibility Audit @ui', () => {
   test('settings dialog has zero critical or serious axe violations', async ({ page }) => {
     // Open the settings dialog
     const settingsBtn = page.locator('button[title="Settings"]').first();
-    await expect(settingsBtn).toBeVisible({ timeout: 15_000 });
+    await expect(settingsBtn).toBeVisible({ timeout: E2E_TIMEOUT_NAV_MS });
     await settingsBtn.click();
 
     const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Audit only the dialog — tighter scope than full page
     const results = await new AxeBuilder({ page })
@@ -92,6 +97,6 @@ test.describe('Accessibility Audit @ui', () => {
     }
 
     await page.keyboard.press('Escape');
-    await expect(dialog).not.toBeVisible({ timeout: 3_000 });
+    await expect(dialog).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 });

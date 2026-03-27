@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_NAV_MS } from '../constants';
 
 test.describe('Export Pipeline @engine', () => {
   test.beforeEach(async ({ editor }) => {
@@ -63,7 +64,7 @@ test.describe('Export Pipeline @engine', () => {
     await titleInput.fill('TestExport');
 
     // Listen for download event
-    const downloadPromise = page.waitForEvent('download', { timeout: 15000 }).catch(() => null);
+    const downloadPromise = page.waitForEvent('download', { timeout: E2E_TIMEOUT_NAV_MS }).catch(() => null);
 
     // Click the export/download button in the dialog
     const dialogExportBtn = page.locator('button').filter({ hasText: /^export$|^download$/i }).last();
@@ -97,7 +98,7 @@ test.describe('Export Pipeline @engine', () => {
     await titleInput.fill('GameWithCube');
 
     // Listen for download
-    const downloadPromise = page.waitForEvent('download', { timeout: 15000 }).catch(() => null);
+    const downloadPromise = page.waitForEvent('download', { timeout: E2E_TIMEOUT_NAV_MS }).catch(() => null);
 
     const dialogExportBtn = page.locator('button').filter({ hasText: /^export$|^download$/i }).last();
     await dialogExportBtn.click();

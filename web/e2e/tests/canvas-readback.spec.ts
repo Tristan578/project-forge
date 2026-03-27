@@ -12,6 +12,7 @@
 import { test, expect } from '@playwright/test';
 import { AgentViewport } from '../lib/agentViewport';
 import { captureCanvasFrame, isBlankFrame } from '../lib/canvasReadback';
+import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 test.describe('canvasReadback', () => {
   test('@ui canvas is present in the editor page', async ({ page }) => {
@@ -20,7 +21,7 @@ test.describe('canvasReadback', () => {
 
     // The editor always renders a canvas element (even when WASM is skipped)
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeAttached({ timeout: 5000 });
+    await expect(canvas).toBeAttached({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('@ui captureCanvasFrame returns a valid structure', async ({ page }) => {

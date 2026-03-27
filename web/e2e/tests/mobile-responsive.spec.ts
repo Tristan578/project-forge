@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 /**
  * PF-673: Mobile viewport E2E tests.
@@ -23,7 +24,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
 
   test('canvas is visible', async ({ page }) => {
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10_000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('editor layout renders at iPhone 14 size', async ({ page }) => {
@@ -49,12 +50,12 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
 
   test('mobile toolbar is visible', async ({ page }) => {
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('mobile toolbar spans full viewport width', async ({ page }) => {
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await toolbar.boundingBox();
     expect(box).not.toBeNull();
@@ -65,7 +66,7 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
 
   test('mobile toolbar is anchored to the bottom of the viewport', async ({ page }) => {
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await toolbar.boundingBox();
     expect(box).not.toBeNull();
@@ -76,23 +77,23 @@ test.describe('iPhone 14 Viewport (390x844) @ui', () => {
 
   test('scene hierarchy panel is accessible via mobile toggle', async ({ page }) => {
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
-    await expect(hierarchyToggle).toBeVisible({ timeout: 5_000 });
+    await expect(hierarchyToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await hierarchyToggle.click();
 
     const drawer = page.locator('[aria-label="Scene hierarchy panel"]');
-    await expect(drawer).toBeInViewport({ timeout: 5_000 });
+    await expect(drawer).toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('inspector panel is accessible via mobile toggle', async ({ page }) => {
     const inspectorToggle = page.locator('button[title="Inspector"]');
-    await expect(inspectorToggle).toBeVisible({ timeout: 5_000 });
+    await expect(inspectorToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await inspectorToggle.click();
 
     // Inspector drawer should become visible/in-viewport
     const drawer = page.locator('[aria-label="Inspector panel"]');
-    await expect(drawer).toBeInViewport({ timeout: 5_000 });
+    await expect(drawer).toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 });
 
@@ -107,7 +108,7 @@ test.describe('iPad Viewport (768x1024) @ui', () => {
 
   test('canvas is visible', async ({ page }) => {
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10_000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('editor layout renders at iPad size', async ({ page }) => {
@@ -130,27 +131,27 @@ test.describe('iPad Viewport (768x1024) @ui', () => {
 
   test('mobile toolbar is visible at tablet width', async ({ page }) => {
     const toolbar = page.locator('.fixed.bottom-0').first();
-    await expect(toolbar).toBeVisible({ timeout: 5_000 });
+    await expect(toolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('scene hierarchy panel is accessible via mobile toggle', async ({ page }) => {
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
-    await expect(hierarchyToggle).toBeVisible({ timeout: 5_000 });
+    await expect(hierarchyToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await hierarchyToggle.click();
 
     const drawer = page.locator('[aria-label="Scene hierarchy panel"]');
-    await expect(drawer).toBeInViewport({ timeout: 5_000 });
+    await expect(drawer).toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('inspector panel is accessible via mobile toggle', async ({ page }) => {
     const inspectorToggle = page.locator('button[title="Inspector"]');
-    await expect(inspectorToggle).toBeVisible({ timeout: 5_000 });
+    await expect(inspectorToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await inspectorToggle.click();
 
     const drawer = page.locator('[aria-label="Inspector panel"]');
-    await expect(drawer).toBeInViewport({ timeout: 5_000 });
+    await expect(drawer).toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 });
 
@@ -170,7 +171,7 @@ test.describe('Touch Target Sizes @ui', () => {
 
       test('Move gizmo button meets 44x44px WCAG 2.5.5 minimum', async ({ page }) => {
         const btn = page.locator('button[title="Move"]');
-        await expect(btn).toBeVisible({ timeout: 5_000 });
+        await expect(btn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
         const box = await btn.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -179,7 +180,7 @@ test.describe('Touch Target Sizes @ui', () => {
 
       test('Rotate gizmo button meets 44x44px WCAG 2.5.5 minimum', async ({ page }) => {
         const btn = page.locator('button[title="Rotate"]');
-        await expect(btn).toBeVisible({ timeout: 5_000 });
+        await expect(btn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
         const box = await btn.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -188,7 +189,7 @@ test.describe('Touch Target Sizes @ui', () => {
 
       test('Scale gizmo button meets 44x44px WCAG 2.5.5 minimum', async ({ page }) => {
         const btn = page.locator('button[title="Scale"]');
-        await expect(btn).toBeVisible({ timeout: 5_000 });
+        await expect(btn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
         const box = await btn.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -197,7 +198,7 @@ test.describe('Touch Target Sizes @ui', () => {
 
       test('Scene Hierarchy toggle meets 44x44px WCAG 2.5.5 minimum', async ({ page }) => {
         const btn = page.locator('button[title="Scene Hierarchy"]');
-        await expect(btn).toBeVisible({ timeout: 5_000 });
+        await expect(btn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
         const box = await btn.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -206,7 +207,7 @@ test.describe('Touch Target Sizes @ui', () => {
 
       test('Inspector toggle meets 44x44px WCAG 2.5.5 minimum', async ({ page }) => {
         const btn = page.locator('button[title="Inspector"]');
-        await expect(btn).toBeVisible({ timeout: 5_000 });
+        await expect(btn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
         const box = await btn.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.width).toBeGreaterThanOrEqual(44);

@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 /**
  * PF-690: Load budget performance tests.
@@ -21,7 +22,7 @@ test.describe('Editor Load Budget @ui @slow', () => {
 
     // Canvas should be visible — proxy for the editor being interactive
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 5_000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const tti = Date.now() - start;
     expect(tti).toBeLessThan(5_000);

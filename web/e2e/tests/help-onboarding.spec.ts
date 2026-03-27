@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_SHORT_MS, E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_AUTH_MS } from '../constants';
 
 /**
  * Help menu and onboarding flow tests.
@@ -13,7 +14,7 @@ test.describe('Help & Onboarding @ui', () => {
 
     test('help menu button is visible in toolbar', async ({ page }) => {
       const helpBtn = page.locator('button[aria-label="Help menu"]').first();
-      await expect(helpBtn).toBeVisible({ timeout: 5000 });
+      await expect(helpBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     });
 
     test('help menu opens with menu items', async ({ page }) => {
@@ -30,12 +31,12 @@ test.describe('Help & Onboarding @ui', () => {
       await helpBtn.click();
 
       const shortcutsItem = page.getByRole('menuitem', { name: /keyboard shortcuts/i });
-      await expect(shortcutsItem).toBeVisible({ timeout: 3000 });
+      await expect(shortcutsItem).toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
       await shortcutsItem.click();
 
       // Shortcuts modal should be visible with heading
       const heading = page.locator('h2').filter({ hasText: /keyboard shortcuts/i }).first();
-      await expect(heading).toBeVisible({ timeout: 5000 });
+      await expect(heading).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     });
 
     test('shortcuts modal lists shortcut categories', async ({ page }) => {
@@ -62,7 +63,7 @@ test.describe('Help & Onboarding @ui', () => {
       await page.mouse.click(10, 10);
 
       // Menu should close (items should not be visible)
-      await expect(menuItems.first()).not.toBeVisible({ timeout: 3000 });
+      await expect(menuItems.first()).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
     });
   });
 
@@ -81,12 +82,12 @@ test.describe('Help & Onboarding @ui', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 30_000 },
+        { timeout: E2E_TIMEOUT_AUTH_MS },
       );
 
       // QuickStartFlow or WelcomeModal should appear (fixed overlay)
       const onboardingOverlay = page.locator('.fixed').filter({ hasText: /what kind of game|welcome|getting started/i }).first();
-      await expect(onboardingOverlay).toBeVisible({ timeout: 5000 });
+      await expect(onboardingOverlay).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     });
 
     test('onboarding does not appear when already completed', async ({ page }) => {
@@ -104,7 +105,7 @@ test.describe('Help & Onboarding @ui', () => {
       await page.waitForFunction(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         () => (window as any).__REACT_HYDRATED === true,
-        { timeout: 30_000 },
+        { timeout: E2E_TIMEOUT_AUTH_MS },
       );
 
       // Wait for network idle so any deferred data fetches complete before checking

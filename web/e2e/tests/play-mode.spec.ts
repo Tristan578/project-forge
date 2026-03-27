@@ -1,4 +1,8 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_SHORT_MS,
+  E2E_TIMEOUT_ELEMENT_MS,
+} from '../constants';
 
 test.describe('Play Mode @engine', () => {
   test.beforeEach(async ({ editor }) => {
@@ -191,7 +195,7 @@ test.describe('Play Mode UI @ui', () => {
     const pauseBtn = page.locator('button[aria-label="Pause"]');
     const stopBtn = page.locator('button[aria-label="Stop"]');
 
-    await expect(playBtn).toBeVisible({ timeout: 5000 });
+    await expect(playBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await expect(playBtn).toBeEnabled();
     await expect(pauseBtn).toBeVisible();
     await expect(pauseBtn).toBeDisabled();
@@ -217,7 +221,7 @@ test.describe('Play Mode UI @ui', () => {
     });
 
     const resumeBtn = page.locator('button[aria-label="Resume"]');
-    await expect(resumeBtn).toBeVisible({ timeout: 3000 });
+    await expect(resumeBtn).toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
     await expect(resumeBtn).toBeEnabled();
   });
 

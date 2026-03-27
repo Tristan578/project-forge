@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS, E2E_TIMEOUT_LOAD_MS } from '../constants';
 
 /**
  * PF-41: Mobile touch controls and responsive layout E2E tests.
@@ -24,7 +25,7 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('tablet viewport (768×1024) shows canvas', async ({ page, editor }) => {
@@ -32,7 +33,7 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('desktop viewport (1280×800) shows canvas', async ({ page, editor }) => {
@@ -40,7 +41,7 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('small mobile viewport (320×568) shows canvas', async ({ page, editor }) => {
@@ -48,7 +49,7 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('tablet landscape viewport (1024×768) shows canvas', async ({ page, editor }) => {
@@ -56,7 +57,7 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('full desktop viewport (1440×900) shows canvas', async ({ page, editor }) => {
@@ -64,7 +65,7 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('canvas is visible after switching from mobile to desktop viewport', async ({ page, editor }) => {
@@ -73,11 +74,11 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     // Resize to desktop
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(canvas).toBeVisible({ timeout: 5000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('canvas is visible after switching from desktop to mobile viewport', async ({ page, editor }) => {
@@ -86,11 +87,11 @@ test.describe('Responsive Layout Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     // Resize to mobile
     await page.setViewportSize({ width: 375, height: 667 });
-    await expect(canvas).toBeVisible({ timeout: 5000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 });
 
@@ -132,11 +133,11 @@ test.describe('Mobile Sidebar Collapse @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     // At >= 1024px (condensed/full mode) sidebar should be rendered and visible
     const sidebar = page.locator('aside[aria-label="Editor tools"]').first();
-    await expect(sidebar).toBeVisible({ timeout: 5000 });
+    await expect(sidebar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await sidebar.boundingBox();
     expect(box).not.toBeNull();
@@ -154,7 +155,7 @@ test.describe('Mobile Toolbar @ui', () => {
 
     // MobileToolbar is fixed bottom-0 with h-12 (48px)
     const mobileToolbar = page.locator('.fixed.bottom-0').first();
-    await expect(mobileToolbar).toBeVisible({ timeout: 5000 });
+    await expect(mobileToolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('mobile toolbar spans full width at compact viewport', async ({ page, editor }) => {
@@ -162,7 +163,7 @@ test.describe('Mobile Toolbar @ui', () => {
     await editor.loadPage();
 
     const mobileToolbar = page.locator('.fixed.bottom-0').first();
-    await expect(mobileToolbar).toBeVisible({ timeout: 5000 });
+    await expect(mobileToolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await mobileToolbar.boundingBox();
     expect(box).not.toBeNull();
@@ -176,7 +177,7 @@ test.describe('Mobile Toolbar @ui', () => {
     await editor.loadPage();
 
     const mobileToolbar = page.locator('.fixed.bottom-0').first();
-    await expect(mobileToolbar).toBeVisible({ timeout: 5000 });
+    await expect(mobileToolbar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await mobileToolbar.boundingBox();
     expect(box).not.toBeNull();
@@ -189,7 +190,7 @@ test.describe('Mobile Toolbar @ui', () => {
     await page.setViewportSize({ width: 375, height: 667 });
     await editor.loadPage();
 
-    await expect(page.locator('button[title="Move"]')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('button[title="Move"]')).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await expect(page.locator('button[title="Rotate"]')).toBeVisible();
     await expect(page.locator('button[title="Scale"]')).toBeVisible();
   });
@@ -199,7 +200,7 @@ test.describe('Mobile Toolbar @ui', () => {
     await editor.loadPage();
 
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
-    await expect(hierarchyToggle).toBeVisible({ timeout: 5000 });
+    await expect(hierarchyToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('inspector toggle button is present in mobile toolbar', async ({ page, editor }) => {
@@ -207,7 +208,7 @@ test.describe('Mobile Toolbar @ui', () => {
     await editor.loadPage();
 
     const inspectorToggle = page.locator('button[title="Inspector"]');
-    await expect(inspectorToggle).toBeVisible({ timeout: 5000 });
+    await expect(inspectorToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 });
 
@@ -221,7 +222,7 @@ test.describe('Touch Target Sizes @ui', () => {
 
     // WCAG 2.5.5 requires 44×44 CSS pixels for touch targets.
     const moveBtn = page.locator('button[title="Move"]');
-    await expect(moveBtn).toBeVisible({ timeout: 5000 });
+    await expect(moveBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await moveBtn.boundingBox();
     expect(box).not.toBeNull();
@@ -235,7 +236,7 @@ test.describe('Touch Target Sizes @ui', () => {
     await editor.loadPage();
 
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
-    await expect(hierarchyToggle).toBeVisible({ timeout: 5000 });
+    await expect(hierarchyToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await hierarchyToggle.boundingBox();
     expect(box).not.toBeNull();
@@ -248,7 +249,7 @@ test.describe('Touch Target Sizes @ui', () => {
     await editor.loadPage();
 
     const inspectorToggle = page.locator('button[title="Inspector"]');
-    await expect(inspectorToggle).toBeVisible({ timeout: 5000 });
+    await expect(inspectorToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await inspectorToggle.boundingBox();
     expect(box).not.toBeNull();
@@ -261,7 +262,7 @@ test.describe('Touch Target Sizes @ui', () => {
     await editor.loadPage();
 
     const rotateBtn = page.locator('button[title="Rotate"]');
-    await expect(rotateBtn).toBeVisible({ timeout: 5000 });
+    await expect(rotateBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await rotateBtn.boundingBox();
     expect(box).not.toBeNull();
@@ -337,7 +338,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();
@@ -350,7 +351,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();
@@ -363,7 +364,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();
@@ -376,14 +377,14 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     const mobileBox = await canvas.boundingBox();
     expect(mobileBox).not.toBeNull();
 
     await page.setViewportSize({ width: 1440, height: 900 });
     // Wait for the canvas to respond to the viewport change before measuring
-    await expect(canvas).toBeVisible({ timeout: 5_000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const desktopBox = await canvas.boundingBox();
     expect(desktopBox).not.toBeNull();
@@ -397,7 +398,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
     await editor.loadPage();
 
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 10000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     const viewports = [
       { width: 375, height: 667 },
@@ -408,7 +409,7 @@ test.describe('Canvas Rendering Across Breakpoints @ui', () => {
 
     for (const vp of viewports) {
       await page.setViewportSize(vp);
-      await expect(canvas).toBeVisible({ timeout: 5000 });
+      await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 });
@@ -422,12 +423,12 @@ test.describe('Mobile Drawer Panels @ui', () => {
     await editor.loadPage();
 
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
-    await expect(hierarchyToggle).toBeVisible({ timeout: 5000 });
+    await expect(hierarchyToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await hierarchyToggle.click();
 
     const drawer = page.locator('[aria-label="Scene hierarchy panel"]');
-    await expect(drawer).toBeInViewport({ timeout: 5000 });
+    await expect(drawer).toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('hierarchy drawer closes on Escape key', async ({ page, editor }) => {
@@ -435,14 +436,14 @@ test.describe('Mobile Drawer Panels @ui', () => {
     await editor.loadPage();
 
     const hierarchyToggle = page.locator('button[title="Scene Hierarchy"]');
-    await expect(hierarchyToggle).toBeVisible({ timeout: 5000 });
+    await expect(hierarchyToggle).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await hierarchyToggle.click();
 
     const drawer = page.locator('[aria-label="Scene hierarchy panel"]');
-    await expect(drawer).toBeInViewport({ timeout: 5000 });
+    await expect(drawer).toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     await page.keyboard.press('Escape');
-    await expect(drawer).not.toBeInViewport({ timeout: 5000 });
+    await expect(drawer).not.toBeInViewport({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 });

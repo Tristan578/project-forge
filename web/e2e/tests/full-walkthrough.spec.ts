@@ -1,4 +1,9 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_SHORT_MS,
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_LOAD_MS,
+} from '../constants';
 
 /**
  * PF-161: Full demo walkthrough regression test (@engine).
@@ -31,7 +36,7 @@ test.describe('Full Demo Walkthrough @engine', () => {
     await editor.selectEntity('Cube');
 
     const transformSection = page.getByText('Transform', { exact: false });
-    await expect(transformSection.first()).toBeVisible({ timeout: 10000 });
+    await expect(transformSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     // Verify position inputs exist
     const inputs = page.locator('input[type="text"]');
@@ -42,13 +47,13 @@ test.describe('Full Demo Walkthrough @engine', () => {
   test('play mode starts and stops without crash', async ({ page }) => {
     // Find and click play button
     const playBtn = page.locator('button[title*="Play"], button[title*="play"]').first();
-    await expect(playBtn).toBeVisible({ timeout: 5000 });
+    await expect(playBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await playBtn.click();
 
     // Wait for the stop button to appear — its presence confirms play mode is active
     const stopBtn = page.locator('button[title*="Stop"], button[title*="stop"]').first();
-    await stopBtn.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {/* engine may not reach play in headless */});
-    if (await stopBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await stopBtn.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_ELEMENT_MS }).catch(() => {/* engine may not reach play in headless */});
+    if (await stopBtn.isVisible({ timeout: E2E_TIMEOUT_SHORT_MS }).catch(() => false)) {
       await stopBtn.click();
     }
 
@@ -59,12 +64,12 @@ test.describe('Full Demo Walkthrough @engine', () => {
   test('export dialog opens with expected options', async ({ page }) => {
     // Look for export button in toolbar
     const exportBtn = page.locator('button').filter({ hasText: /export/i }).first();
-    if (await exportBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (await exportBtn.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS }).catch(() => false)) {
       await exportBtn.click();
 
       // Export dialog should appear
       const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       // Should have format options
       const formatOption = dialog.getByText(/html|zip|pwa/i, { exact: false });
@@ -89,30 +94,30 @@ test.describe('Full Demo Walkthrough @engine', () => {
     // Step 2: Select and verify transform
     await editor.selectEntity('Cube');
     const transformSection = page.getByText('Transform', { exact: false });
-    await expect(transformSection.first()).toBeVisible({ timeout: 10000 });
+    await expect(transformSection.first()).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
 
     // Step 3: Enter play mode
     const playBtn = page.locator('button[title*="Play"], button[title*="play"]').first();
-    if (await playBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (await playBtn.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS }).catch(() => false)) {
       await playBtn.click();
       // Wait for play-mode stop button to appear before proceeding
       const stopBtnInFlow = page.locator('button[title*="Stop"], button[title*="stop"]').first();
-      await stopBtnInFlow.waitFor({ state: 'visible', timeout: 3_000 }).catch(() => {/* headless may not reach play */});
+      await stopBtnInFlow.waitFor({ state: 'visible', timeout: E2E_TIMEOUT_SHORT_MS }).catch(() => {/* headless may not reach play */});
 
       // Step 4: Stop play mode
       const stopBtn = page.locator('button[title*="Stop"], button[title*="stop"]').first();
-      if (await stopBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      if (await stopBtn.isVisible({ timeout: E2E_TIMEOUT_SHORT_MS }).catch(() => false)) {
         await stopBtn.click();
       }
     }
 
     // Step 5: Open export
     const exportBtn = page.locator('button').filter({ hasText: /export/i }).first();
-    if (await exportBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+    if (await exportBtn.isVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS }).catch(() => false)) {
       await exportBtn.click();
 
       const dialog = page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]');
-      await expect(dialog).toBeVisible({ timeout: 5000 });
+      await expect(dialog).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
       // Verify export dialog has content
       const dialogText = await dialog.textContent();

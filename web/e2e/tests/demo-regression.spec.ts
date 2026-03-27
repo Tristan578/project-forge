@@ -10,6 +10,11 @@
  * directly to test UI reactions to mode changes.
  */
 import { test, expect } from '../fixtures/editor.fixture';
+import {
+  E2E_TIMEOUT_SHORT_MS,
+  E2E_TIMEOUT_ELEMENT_MS,
+  E2E_TIMEOUT_LOAD_MS,
+} from '../constants';
 
 test.describe('Demo Regression Walkthrough @ui', () => {
   test.beforeEach(async ({ editor }) => {
@@ -19,24 +24,24 @@ test.describe('Demo Regression Walkthrough @ui', () => {
   test('editor loads with core panels visible', async ({ page }) => {
     // Hierarchy panel
     const hierarchyTab = page.locator('.dv-tab').filter({ hasText: /hierarchy/i }).first();
-    await expect(hierarchyTab).toBeVisible({ timeout: 5000 });
+    await expect(hierarchyTab).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Canvas should be present
     await expect(page.locator('canvas').first()).toBeVisible();
 
     // Inspector panel
     const inspectorTab = page.locator('.dv-tab').filter({ hasText: /inspector/i }).first();
-    await expect(inspectorTab).toBeVisible({ timeout: 5000 });
+    await expect(inspectorTab).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Scene/Assets tabs should be present
     const sceneTab = page.locator('.dv-tab').filter({ hasText: /scene/i }).first();
-    await expect(sceneTab).toBeVisible({ timeout: 5000 });
+    await expect(sceneTab).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
   });
 
   test('play controls are visible and respond to mode changes', async ({ page }) => {
     // Play button should be visible and enabled in edit mode
     const playBtn = page.locator('button[aria-label="Play"]');
-    await expect(playBtn).toBeVisible({ timeout: 5000 });
+    await expect(playBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     await expect(playBtn).toBeEnabled();
 
     // Pause and Stop should be disabled in edit mode
@@ -136,7 +141,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
   test('play → pause → resume → stop lifecycle UI works', async ({ page }) => {
     // Verify initial state
     const playBtn = page.locator('button[aria-label="Play"]');
-    await expect(playBtn).toBeVisible({ timeout: 5000 });
+    await expect(playBtn).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Simulate play via store
     await page.evaluate(() => {
@@ -239,7 +244,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
 
     // Hierarchy should show the entity (allow extra time for React re-render in CI)
     const hierarchyItem = page.getByText('Test Cube');
-    await expect(hierarchyItem.first()).toBeVisible({ timeout: 10000 });
+    await expect(hierarchyItem.first()).toBeVisible({ timeout: E2E_TIMEOUT_LOAD_MS });
   });
 
   test('settings modal opens and closes', async ({ page, editor }) => {
@@ -247,17 +252,17 @@ test.describe('Demo Regression Walkthrough @ui', () => {
 
     // Settings modal should appear
     const settingsHeading = page.getByText(/Settings/i).first();
-    await expect(settingsHeading).toBeVisible({ timeout: 5000 });
+    await expect(settingsHeading).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Close with Escape and assert the dialog is gone
     await page.keyboard.press('Escape');
-    await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: 3000 });
+    await expect(page.locator('[role="dialog"][aria-labelledby="settings-dialog-title"]')).not.toBeVisible({ timeout: E2E_TIMEOUT_SHORT_MS });
   });
 
   test('sidebar contains tool groups', async ({ page }) => {
     // The sidebar should have tool buttons (transform tools, entity add, etc.)
     const sidebar = page.locator('[data-testid="sidebar"], aside, [class*="sidebar"]').first();
-    await expect(sidebar).toBeVisible({ timeout: 5000 });
+    await expect(sidebar).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     const buttons = sidebar.locator('button');
     const count = await buttons.count();
     expect(count).toBeGreaterThan(0);
@@ -265,7 +270,7 @@ test.describe('Demo Regression Walkthrough @ui', () => {
 
   test('canvas element has correct dimensions', async ({ page }) => {
     const canvas = page.locator('canvas').first();
-    await expect(canvas).toBeVisible({ timeout: 5000 });
+    await expect(canvas).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     const box = await canvas.boundingBox();
     expect(box).not.toBeNull();

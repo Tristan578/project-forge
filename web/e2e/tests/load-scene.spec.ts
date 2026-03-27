@@ -14,6 +14,7 @@
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_LOAD_MS, E2E_TIMEOUT_NAV_MS } from '../constants';
 
 /** Minimal valid .forge scene JSON with one Cube entity */
 const MINIMAL_SCENE_JSON = JSON.stringify({
@@ -44,7 +45,7 @@ test.describe('load_scene store action @ui', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
     const hasLoadScene = await page.evaluate(() => {
@@ -63,7 +64,7 @@ test.describe('load_scene store action @ui', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
     const error = await page.evaluate((json: string) => {
@@ -88,7 +89,7 @@ test.describe('load_scene store action @ui', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
     // Should not throw — the store/engine should handle invalid JSON gracefully
@@ -122,7 +123,7 @@ test.describe('load_scene store action @ui', () => {
         const store = (window as any).__EDITOR_STORE;
         return store && typeof store.getState().loadScene === 'function';
       },
-      { timeout: 15_000 },
+      { timeout: E2E_TIMEOUT_NAV_MS },
     );
 
     const error = await page.evaluate((json: string) => {
@@ -174,7 +175,7 @@ test.describe('load_scene engine round-trip @engine', () => {
         return count !== before || count === 0;
       },
       countBefore,
-      { timeout: 10_000 },
+      { timeout: E2E_TIMEOUT_LOAD_MS },
     ).catch(() => {
       // Some engines may not round-trip the scene graph nodes immediately in headless.
       // The test still passes if the scene load didn't crash.

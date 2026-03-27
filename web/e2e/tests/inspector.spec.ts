@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
+import { E2E_TIMEOUT_ELEMENT_MS } from '../constants';
 
 test.describe('Inspector Panel @engine', () => {
   test.beforeEach(async ({ editor }) => {
@@ -14,7 +15,7 @@ test.describe('Inspector Panel @engine', () => {
 
     // Wait for material inspector to appear
     const materialHeading = page.getByText('Material', { exact: false });
-    await expect(materialHeading.first()).toBeVisible({ timeout: 5000 });
+    await expect(materialHeading.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Get the selected entity id from the store
     const selectedIdsBefore = await page.evaluate(() => {
@@ -54,7 +55,7 @@ test.describe('Inspector Panel @engine', () => {
             return state.materialDataMap && entityId in state.materialDataMap;
           },
           selectedIdsBefore,
-          { timeout: 5000 },
+          { timeout: E2E_TIMEOUT_ELEMENT_MS },
         );
 
         const materialData = await page.evaluate((entityId: string) => {
@@ -69,7 +70,7 @@ test.describe('Inspector Panel @engine', () => {
       }
     } else {
       // Material section visible is enough to confirm the inspector rendered
-      await expect(materialHeading.first()).toBeVisible({ timeout: 5000 });
+      await expect(materialHeading.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
     }
   });
 
@@ -84,7 +85,7 @@ test.describe('Inspector Panel @engine', () => {
 
     // Check Transform section is visible
     const transformHeading = page.getByText('Transform', { exact: false });
-    await expect(transformHeading.first()).toBeVisible({ timeout: 5000 });
+    await expect(transformHeading.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Check for X, Y, Z input labels
     const xLabel = page.getByText('X', { exact: true });
@@ -107,7 +108,7 @@ test.describe('Inspector Panel @engine', () => {
     const transformSection = page.locator('text=Transform').locator('..').first();
     const inputs = transformSection.locator('input[type="text"]');
     const firstInput = inputs.first();
-    await expect(firstInput).toBeVisible({ timeout: 5000 });
+    await expect(firstInput).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Clear and type new value
     await firstInput.click();
@@ -129,7 +130,7 @@ test.describe('Inspector Panel @engine', () => {
 
     // Check for Material section
     const materialHeading = page.getByText('Material', { exact: false });
-    await expect(materialHeading.first()).toBeVisible({ timeout: 5000 });
+    await expect(materialHeading.first()).toBeVisible({ timeout: E2E_TIMEOUT_ELEMENT_MS });
 
     // Check for common material properties (color, metallic, roughness, etc.)
     // At least one should be visible
