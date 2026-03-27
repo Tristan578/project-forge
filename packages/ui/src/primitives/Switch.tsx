@@ -40,14 +40,17 @@ export function Switch({ className, label, size = 'md', id: providedId, ...props
         <span
           className={cn(
             'pointer-events-none absolute top-0.5 left-0.5',
-            'rounded-full bg-white shadow',
+            'rounded-full bg-[var(--sf-bg-surface)] shadow',
             size === 'sm' ? 'h-4 w-4' : 'h-5 w-5',
-            // Use peer-checked to shift right via margin-left, avoids translate-
-            'peer-checked:ml-auto',
+            // Shift thumb right when checked. Formula: track-width - thumb-width - (2 × inset)
+            // sm: 36px - 16px - 4px = 16px; md: 44px - 20px - 4px = 20px
+            size === 'sm'
+              ? 'peer-checked:translate-x-[16px]'
+              : 'peer-checked:translate-x-[20px]',
           )}
           style={{
             // transition handled via CSS; no hardcoded color primitives
-            transition: 'left var(--sf-transition, 150ms)',
+            transition: 'transform var(--sf-transition, 150ms)',
           }}
         />
       </div>
