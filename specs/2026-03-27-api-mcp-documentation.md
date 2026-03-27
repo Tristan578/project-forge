@@ -495,7 +495,7 @@ The MCP index page (`content/mcp/index.mdx`) provides:
 - **Faceted filtering** — filter commands by category and by scope (`scene:read`, `scene:write`, `query:*`, etc.). Accessibility requirements for the filter component:
   - Filter groups use `role="group"` with `aria-labelledby` pointing to the group heading ("Category", "Scope")
   - Individual filter checkboxes are native `<input type="checkbox">` (not custom divs) for built-in keyboard and screen reader support
-  - Tab navigates between filter groups; Space toggles the focused checkbox
+  - Tab moves through each checkbox in DOM order (browser default for native inputs); Space toggles the focused checkbox. No custom keyboard handling is needed
   - Active filter count announced via `aria-live="polite"` region: "Showing {N} commands" updates when filters change
   - "Clear filters" button has `aria-label="Clear all filters"` and receives focus after activation
   - All filter controls have visible focus indicators (2px solid outline, `--sf-accent` color)
