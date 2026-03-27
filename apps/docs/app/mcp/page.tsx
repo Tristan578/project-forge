@@ -60,10 +60,6 @@ export default async function McpIndexPage() {
             categories={categories}
             scopes={scopes}
             totalCommands={publicCount}
-            onFilterChange={() => {
-              // Client-side filtering is handled within the component.
-              // In a full Fumadocs integration this would update URL search params.
-            }}
           />
         </aside>
 

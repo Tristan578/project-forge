@@ -11,8 +11,13 @@ export interface CommandFilterProps {
   totalCommands: number;
   /** Visible command count after filters are applied (controlled by parent) */
   visibleCount?: number;
-  /** Callback fired when filters change */
-  onFilterChange: (filters: CommandFilters) => void;
+  /**
+   * Optional callback fired when filters change.
+   * Safe to omit when rendered from a Server Component — the filter state is
+   * managed internally. Pass this only when the parent needs to respond to
+   * filter changes (e.g. updating URL search params from a Client Component).
+   */
+  onFilterChange?: (filters: CommandFilters) => void;
 }
 
 export interface CommandFilters {
@@ -57,7 +62,7 @@ export function CommandFilter({
       next.delete(category);
     }
     setSelectedCategories(next);
-    onFilterChange({ categories: next, scopes: selectedScopes });
+    onFilterChange?.({ categories: next, scopes: selectedScopes });
   }
 
   function handleScopeChange(scope: string, checked: boolean) {
@@ -68,13 +73,13 @@ export function CommandFilter({
       next.delete(scope);
     }
     setSelectedScopes(next);
-    onFilterChange({ categories: selectedCategories, scopes: next });
+    onFilterChange?.({ categories: selectedCategories, scopes: next });
   }
 
   function handleClearFilters() {
     setSelectedCategories(new Set());
     setSelectedScopes(new Set());
-    onFilterChange({ categories: new Set(), scopes: new Set() });
+    onFilterChange?.({ categories: new Set(), scopes: new Set() });
     // Return focus to the clear button so keyboard users stay oriented
     clearButtonRef.current?.focus();
   }
