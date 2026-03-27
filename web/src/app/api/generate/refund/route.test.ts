@@ -33,7 +33,7 @@ describe('POST /api/generate/refund', () => {
       ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
     });
     vi.mocked(rateLimit).mockResolvedValue({ allowed: true, remaining: 2, resetAt: Date.now() + 60000 });
-    vi.mocked(refundTokens: vi.fn().mockResolvedValue({ refunded: true });
+    vi.mocked(refundTokens).mockResolvedValue({ refunded: true });
   });
 
   it('returns 401 when unauthenticated', async () => {

@@ -190,7 +190,7 @@ describe('POST /api/chat', () => {
     } as unknown as ReturnType<typeof streamText>);
 
     // Default: refundTokens returns a Promise (vi.clearAllMocks wipes mockResolvedValue)
-    vi.mocked(refundTokens: vi.fn().mockResolvedValue({ refunded: true });
+    vi.mocked(refundTokens).mockResolvedValue({ refunded: true });
 
     // Re-import to get fresh module
     const mod = await import('../route');
