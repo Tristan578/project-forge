@@ -169,10 +169,10 @@ export function withApiMiddleware(
   // Handler-wrapping overload
   if (typeof reqOrHandler === 'function') {
     const handler = reqOrHandler;
-    return (req: NextRequest) => runMiddlewarePipeline(req, options, handler);
+    return (req: NextRequest) => runMiddlewarePipeline(req, options, handler) as Promise<NextResponse>;
   }
   // Legacy result-object overload
-  return runMiddlewarePipeline(reqOrHandler, options, null);
+  return runMiddlewarePipeline(reqOrHandler, options, null) as Promise<MiddlewareResult>;
 }
 
 // ---------------------------------------------------------------------------
