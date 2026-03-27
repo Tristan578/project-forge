@@ -42,6 +42,7 @@ function mockMiddlewareSuccess(overrides?: Partial<ReturnType<typeof makeUser>>)
 
 describe('GET /api/billing/status', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     process.env.STRIPE_SECRET_KEY = 'sk_test_mock';
   });

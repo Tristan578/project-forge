@@ -7,7 +7,7 @@
  *
  * @see https://github.com/Tristan578/project-forge/issues/7836
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
 
@@ -114,6 +114,10 @@ describe('Regression #2: refund endpoint idempotency', () => {
  * export surface.
  */
 describe('Regression #3: rateLimit module exports', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
   it('exports rateLimit as an async function', async () => {
     const mod = await import('@/lib/rateLimit');
     expect(typeof mod.rateLimit).toBe('function');

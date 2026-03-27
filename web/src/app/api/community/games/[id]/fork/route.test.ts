@@ -32,6 +32,7 @@ function mockDbChain(data: unknown[] = []) {
 
 describe('POST /api/community/games/[id]/fork', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,

@@ -18,6 +18,7 @@ vi.mock('@/lib/db/schema', () => ({
 
 describe('POST /api/community/games/[id]/flag', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
