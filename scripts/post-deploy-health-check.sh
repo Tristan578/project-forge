@@ -16,6 +16,7 @@
 #   HEALTH_CHECK_INTERVAL_S   Seconds between retry attempts (default: 10)
 #   HEALTH_CHECK_STABILIZE_S  Seconds to wait before the first check (default: 30)
 #   HEALTH_CHECK_TIMEOUT_S    curl max-time per request in seconds (default: 15)
+#   VERCEL_AUTOMATION_BYPASS_SECRET  Bypass token for Vercel Deployment Protection (optional)
 #
 # Exit codes:
 #   0  All checks passed — deployment is healthy
@@ -37,6 +38,14 @@ STABILIZE="${HEALTH_CHECK_STABILIZE_S:-30}"
 TIMEOUT="${HEALTH_CHECK_TIMEOUT_S:-15}"
 
 HEALTH_ENDPOINT="${DEPLOY_URL}/api/health"
+BYPASS_SECRET="${VERCEL_AUTOMATION_BYPASS_SECRET:-}"
+
+# Build curl args for Vercel Deployment Protection bypass
+BYPASS_ARGS=()
+if [[ -n "$BYPASS_SECRET" ]]; then
+  BYPASS_ARGS=(--header "x-vercel-protection-bypass: ${BYPASS_SECRET}")
+  echo "Using Vercel Deployment Protection bypass token"
+fi
 
 # ---------- stabilization wait --------------------------------------------
 
@@ -54,6 +63,7 @@ while [ "$attempt" -lt "$RETRIES" ]; do
     --output /tmp/health_response.json \
     --write-out "%{http_code}" \
     --max-time "$TIMEOUT" \
+    "${BYPASS_ARGS[@]}" \
     "$HEALTH_ENDPOINT") || HTTP_CODE="000"
 
   echo "  HTTP status: ${HTTP_CODE}"
