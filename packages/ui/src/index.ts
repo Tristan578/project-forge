@@ -36,3 +36,8 @@ export { Popover, type PopoverProps } from './primitives/Popover';
 export { ScrollArea, type ScrollAreaProps } from './primitives/ScrollArea';
 export { Tabs, type TabsProps, type TabItem } from './primitives/Tabs';
 export { useDialogA11y, type UseDialogA11yOptions, type UseDialogA11yReturn } from './hooks/useDialogA11y';
+export { Accordion, type AccordionProps, type AccordionItem } from './primitives/Accordion';
+export { Avatar, type AvatarProps } from './primitives/Avatar';
+export { Progress, type ProgressProps } from './primitives/Progress';
+export { Skeleton, type SkeletonProps } from './primitives/Skeleton';
+export { Toast, type ToastProps, type ToastVariant } from './primitives/Toast';
