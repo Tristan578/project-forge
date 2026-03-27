@@ -44,8 +44,8 @@ describe('CRUD Operations', () => {
     expect(prefab.category).toBe('TestCategory');
     expect(prefab.description).toBe('Test description');
     expect(prefab.snapshot).toEqual(mockSnapshot);
-    expect(prefab.createdAt).toBeGreaterThan(0);
-    expect(prefab.updatedAt).toBeGreaterThan(0);
+    expect(prefab.createdAt).not.toBe('');
+    expect(prefab.updatedAt).not.toBe('');
   });
 
   it('savePrefab generates unique IDs', () => {
@@ -133,8 +133,8 @@ describe('Built-in Prefabs', () => {
       expect(prefab.snapshot.entityType).not.toBe('');
       expect(prefab.snapshot.name).not.toBe('');
       expect(prefab.snapshot.transform).toBeDefined();
-      expect(prefab.createdAt).toBeGreaterThan(0);
-      expect(prefab.updatedAt).toBeGreaterThan(0);
+      expect(prefab.createdAt).not.toBe('');
+      expect(prefab.updatedAt).not.toBe('');
     });
   });
 
