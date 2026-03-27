@@ -28,19 +28,19 @@
     "check:bundle-size": "node scripts/check-bundle-size.js"
   },
   "dependencies": {
-    "@spawnforge/ui": "*",
     "@ai-sdk/anthropic": "^3.0.63",
     "@ai-sdk/gateway": "^3.0.78",
     "@ai-sdk/react": "^3.0.138",
     "@anthropic-ai/sdk": "^0.80.0",
     "@aws-sdk/client-s3": "^3.1004.0",
     "@aws-sdk/s3-request-presigner": "^3.1014.0",
-    "@clerk/nextjs": "^7.0.6",
+    "@clerk/nextjs": "^7.0.7",
     "@clerk/themes": "^2.4.57",
     "@google/generative-ai": "^0.24.1",
     "@monaco-editor/react": "^4.7.0",
     "@neondatabase/serverless": "^1.0.2",
     "@sentry/nextjs": "^10.45.0",
+    "@spawnforge/ui": "*",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "@vercel/analytics": "^2.0.1",
@@ -96,6 +96,8 @@
   "overrides": {
     "esbuild": ">=0.25.0",
     "dompurify": ">=3.3.2",
+    "brace-expansion": ">=5.0.5",
+    "path-to-regexp": ">=8.4.0",
     "next-intl": {
       "typescript": "$typescript"
     }
