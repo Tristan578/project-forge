@@ -2,7 +2,7 @@
  * Tests for the DB-backed webhook idempotency service.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Required mocks BEFORE module import
 vi.mock('server-only', () => ({}));
@@ -50,7 +50,12 @@ vi.mock('@/lib/db/client', () => ({
 import { claimEvent, releaseEvent, isProcessed, cleanupExpired, finalizeEvent } from '../webhookIdempotency';
 
 describe('webhookIdempotency', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
+    vi.useFakeTimers({ now: new Date('2026-03-27T00:00:00Z') });
     vi.clearAllMocks();
     // Reset mock return values to defaults
     mockInsertReturning.mockResolvedValue([{ eventId: 'evt_default' }]);
@@ -86,20 +91,15 @@ describe('webhookIdempotency', () => {
     });
 
     it('uses a short in-flight TTL of 5 minutes', async () => {
-      const before = Date.now();
       mockInsertReturning.mockResolvedValueOnce([{ eventId: 'evt_ttl' }]);
 
       await claimEvent('evt_ttl', 'stripe');
 
       const insertedValues = mockInsertValues.mock.calls[0][0] as { expiresAt: Date };
-      const after = Date.now();
 
-      // 5 minutes in-flight TTL
-      const expectedMinMs = before + 5 * 60 * 1000;
-      const expectedMaxMs = after + 5 * 60 * 1000;
-
-      expect(insertedValues.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
-      expect(insertedValues.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
+      // With fake timers pinned to 2026-03-27T00:00:00Z, the TTL should be exactly 5 min later
+      const expectedMs = new Date('2026-03-27T00:05:00Z').getTime();
+      expect(insertedValues.expiresAt.getTime()).toBe(expectedMs);
     });
   });
 
@@ -108,33 +108,23 @@ describe('webhookIdempotency', () => {
   // ----------------------------------------------------------------
   describe('finalizeEvent', () => {
     it('extends the TTL to 72 hours by default', async () => {
-      const before = Date.now();
-
       await finalizeEvent('evt_finalize');
 
       const setArg = mockUpdateSet.mock.calls[0][0] as { expiresAt: Date };
-      const after = Date.now();
 
-      const expectedMinMs = before + 72 * 60 * 60 * 1000;
-      const expectedMaxMs = after + 72 * 60 * 60 * 1000;
-
-      expect(setArg.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
-      expect(setArg.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
+      // Fake time is 2026-03-27T00:00:00Z + 72 hours
+      const expectedMs = new Date('2026-03-30T00:00:00Z').getTime();
+      expect(setArg.expiresAt.getTime()).toBe(expectedMs);
     });
 
     it('accepts a custom TTL', async () => {
-      const before = Date.now();
-
       await finalizeEvent('evt_custom', 24);
 
       const setArg = mockUpdateSet.mock.calls[0][0] as { expiresAt: Date };
-      const after = Date.now();
 
-      const expectedMinMs = before + 24 * 60 * 60 * 1000;
-      const expectedMaxMs = after + 24 * 60 * 60 * 1000;
-
-      expect(setArg.expiresAt.getTime()).toBeGreaterThanOrEqual(expectedMinMs);
-      expect(setArg.expiresAt.getTime()).toBeLessThanOrEqual(expectedMaxMs);
+      // Fake time + 24 hours
+      const expectedMs = new Date('2026-03-28T00:00:00Z').getTime();
+      expect(setArg.expiresAt.getTime()).toBe(expectedMs);
     });
   });
 
