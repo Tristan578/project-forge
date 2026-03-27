@@ -5,6 +5,7 @@ import { X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
 import { useEditorStore } from '@/stores/editorStore';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface GenerateSoundDialogProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
   const primaryName = useEditorStore((s) => s.primaryName);
+  const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = soundType === 'sfx' ? 20 : 40;
   const prompt = soundType === 'sfx' ? sfxPrompt : voiceText;
@@ -82,6 +84,7 @@ export function GenerateSoundDialog({ isOpen, onClose, entityId }: GenerateSound
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="generate-sound-dialog-title"

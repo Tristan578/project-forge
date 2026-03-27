@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { X, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { useUserStore } from '@/stores/userStore';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 interface GenerateSkyboxDialogProps {
   isOpen: boolean;
@@ -18,6 +19,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const tokenBalance = useUserStore((s) => s.tokenBalance);
+  const dialogRef = useDialogA11y(onClose);
 
   const tokenCost = 50;
   const canSubmit =
@@ -61,6 +63,7 @@ export function GenerateSkyboxDialog({ isOpen, onClose }: GenerateSkyboxDialogPr
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="generate-skybox-dialog-title"
