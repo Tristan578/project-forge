@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 import { X, Bug, Lightbulb, MessageSquare, Send, CheckCircle } from 'lucide-react';
+import { useDialogA11y } from '@/hooks/useDialogA11y';
 
 type FeedbackType = 'bug' | 'feature' | 'general';
 
@@ -35,42 +36,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
     }
   }
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Close on Escape + focus trap
-  useEffect(() => {
-    if (!open) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-      if (e.key === 'Tab') {
-        const dialog = dialogRef.current;
-        if (!dialog) return;
-        const focusable = dialog.querySelectorAll<HTMLElement>(
-          'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
-        );
-        if (focusable.length === 0) return;
-        const first = focusable[0];
-        const last = focusable[focusable.length - 1];
-        if (e.shiftKey) {
-          if (document.activeElement === first) {
-            e.preventDefault();
-            last.focus();
-          }
-        } else {
-          if (document.activeElement === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        }
-      }
-    };
-    document.addEventListener('keydown', handleKey);
-    return () => document.removeEventListener('keydown', handleKey);
-  }, [open, onClose]);
+  const dialogRef = useDialogA11y(onClose);
 
   const handleSubmit = useCallback(async () => {
     if (description.trim().length < 10) {
