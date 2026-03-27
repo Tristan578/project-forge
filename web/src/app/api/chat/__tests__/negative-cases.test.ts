@@ -47,7 +47,7 @@ vi.mock('@/lib/tokens/pricing', () => ({
 }));
 
 vi.mock('@/lib/tokens/service', () => ({
-  refundTokens: vi.fn().mockResolvedValue(undefined),
+  refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
 }));
 
 vi.mock('@/lib/chat/tools', () => ({

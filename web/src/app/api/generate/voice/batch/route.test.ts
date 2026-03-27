@@ -26,8 +26,8 @@ vi.mock('@/lib/rateLimit', () => ({
   rateLimitResponse: vi.fn().mockReturnValue(new Response('Rate Limited', { status: 429 })),
 }));
 vi.mock('@/lib/tokens/service', () => ({
-  refundTokens: vi.fn().mockResolvedValue(undefined),
-  refundTokenAmount: vi.fn().mockResolvedValue(undefined),
+  refundTokens: vi.fn().mockResolvedValue({ refunded: true }),
+  refundTokenAmount: vi.fn().mockResolvedValue({ refunded: true }),
 }));
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),

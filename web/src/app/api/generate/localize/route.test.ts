@@ -90,7 +90,7 @@ describe('POST /api/generate/localize', () => {
     vi.mocked(rateLimitResponse).mockReturnValue(
       NextResponse.json({ error: 'Too many requests' }, { status: 429 }),
     );
-    vi.mocked(refundTokens).mockResolvedValue(undefined);
+    vi.mocked(refundTokens).mockResolvedValue({ refunded: true });
     mockGenerateText.mockResolvedValue({ text: translationResponseJson });
   });
 
