@@ -99,7 +99,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
   test('inject entities → serialize scene → deserialize → entities match', async ({ page, editor }) => {
     // Step 1: populate sceneGraph with three nodes via setFullGraph
     await page.evaluate((sceneJson: string) => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           setFullGraph: (graph: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
           sceneGraph: { nodes: Record<string, unknown>; rootIds: string[] };
@@ -136,7 +136,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Step 3: serialize the graph into a JSON string (simulate export)
     const serialized = await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           sceneGraph: { nodes: Record<string, unknown>; rootIds: string[] };
         };
@@ -150,7 +150,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Step 4: clear the store and re-populate from serialized data
     await page.evaluate((serializedJson: string) => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           setFullGraph: (graph: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
         };
@@ -173,7 +173,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Entity names survive round-trip
     const nodeNames = await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           sceneGraph: { nodes: Record<string, { name: string }> };
         };
@@ -191,7 +191,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
   test('scene name persists across save/load', async ({ page, editor }) => {
     // Set scene name via the real store action
     await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { setSceneName: (name: string) => void };
       };
       if (!store) throw new Error('Store unavailable');
@@ -206,7 +206,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Serialize scene state (name + graph) to simulate a file export
     const serialized = await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           sceneName: string;
           sceneGraph: { nodes: Record<string, unknown>; rootIds: string[] };
@@ -222,7 +222,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Reset name to default
     await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { setSceneName: (name: string) => void };
       };
       if (!store) throw new Error('Store unavailable');
@@ -237,7 +237,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // Restore from serialized — simulates what a load handler does after
     // receiving the SCENE_LOADED event from the engine
     await page.evaluate((serializedJson: string) => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           setSceneName: (name: string) => void;
           setFullGraph: (graph: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
@@ -273,7 +273,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // Inject sceneGraph node
     await page.evaluate(
       (args: { id: string; name: string; entityType: string }) => {
-        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
           getState: () => {
             setFullGraph: (g: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
           };
@@ -300,7 +300,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // updateTransform(entityId, field, value) where field is 'position'|'rotation'|'scale'
     await page.evaluate(
       (args: { id: string; position: [number, number, number] }) => {
-        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
           getState: () => {
             setPrimaryTransform: (t: {
               entityId: string;
@@ -332,7 +332,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Serialize current state
     const serialized = await page.evaluate((entityId: string) => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           sceneGraph: { nodes: Record<string, unknown> };
           primaryTransform: { entityId: string; position: [number, number, number] } | null;
@@ -352,7 +352,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // Clear and restore
     await page.evaluate(
       (args: { serializedJson: string; entityId: string }) => {
-        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
           getState: () => {
             setFullGraph: (g: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
             setPrimaryTransform: (t: {
@@ -407,7 +407,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // Track whether loadScene threw
     const error = await page.evaluate((json: string) => {
       try {
-        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
           getState: () => { loadScene: (json: string) => void };
         };
         if (!store) return 'Store unavailable';
@@ -436,7 +436,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
   test('setSceneName then loadScene — store reflects scene name update', async ({ page, editor }) => {
     // Pre-set scene name to something different
     await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { setSceneName: (name: string) => void };
       };
       if (!store) throw new Error('Store unavailable');
@@ -453,7 +453,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // also call setSceneName to simulate the SCENE_LOADED event the engine
     // would emit after processing. This tests that both paths work together.
     await page.evaluate((json: string) => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => {
           loadScene: (json: string) => void;
           setSceneName: (name: string) => void;
@@ -481,7 +481,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Transition to saving
     await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { setCloudSaveStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void };
       };
       if (!store) throw new Error('Store unavailable');
@@ -495,7 +495,7 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Transition to saved
     await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { setCloudSaveStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void };
       };
       if (!store) throw new Error('Store unavailable');
@@ -549,7 +549,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
 
     // Verify no projectId is set (so Ctrl+S calls saveScene not saveToCloud)
     const projectId = await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { projectId: string | null };
       } | undefined;
       return store?.getState().projectId ?? null;
@@ -560,7 +560,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
 
     // Patch saveScene to capture the call
     await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { saveScene: () => void };
         setState: (patch: Record<string, unknown>) => void;
       };
@@ -569,7 +569,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
       if (typeof originalSave !== 'function') return;
       store.setState({
         saveScene: () => {
-          (window as Record<string, unknown>).__onDispatch?.('export_scene');
+          (window as unknown as Record<string, unknown>).__onDispatch?.('export_scene');
           originalSave();
         },
       });
@@ -586,7 +586,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
   test('scene hierarchy is still visible after a loadScene call', async ({ page }) => {
     // Load a minimal scene via the store action
     await page.evaluate((json: string) => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { loadScene: (json: string) => void };
       };
       if (!store) throw new Error('Store unavailable');
@@ -620,7 +620,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
     test.skip(btnCount === 0, 'Save button not present in this layout variant');
 
     const statusBefore = await page.evaluate(() => {
-      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+      const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
         getState: () => { cloudSaveStatus: string };
       } | undefined;
       return store?.getState().cloudSaveStatus ?? null;
@@ -633,7 +633,7 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
     // Without a projectId, status should remain idle or briefly transition
     await expect.poll(
       () => page.evaluate(() => {
-        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        const store = (window as unknown as Record<string, unknown>).__EDITOR_STORE as {
           getState: () => { cloudSaveStatus: string };
         } | undefined;
         return store?.getState().cloudSaveStatus ?? null;
