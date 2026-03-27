@@ -117,7 +117,7 @@ describe('TokenDepletedModal', () => {
     render(<TokenDepletedModal />);
     const modal = screen.getByTestId('token-depleted-modal');
     const labelId = modal.getAttribute('aria-labelledby');
-    expect(labelId).toBeTruthy();
+    expect(labelId).not.toBeNull();
     expect(document.getElementById(labelId!)).toBeDefined();
   });
 
