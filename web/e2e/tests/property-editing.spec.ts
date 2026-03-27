@@ -210,18 +210,30 @@ test.describe('Group 1: Transform Editing @engine', () => {
       rotXInput = inputs.nth(3);
     }
 
+    // Capture the rotation value BEFORE editing so we can detect a real change.
+    const beforeRotState = await getStoreState(page) as { primaryTransform?: { rotation?: number[] } } | undefined;
+    const beforeRot = beforeRotState?.primaryTransform?.rotation?.[0] ?? null;
+
     await rotXInput.click({ clickCount: 3 });
     await rotXInput.fill('45');
     await rotXInput.press('Enter');
 
+    // Wait for rotation[0] to actually CHANGE from its pre-edit value AND land near 45° or 0.785 rad.
+    // This prevents a false positive where the default value (0) already satisfies a loose tolerance.
     await page.waitForFunction(
-      () => {
+      ([before]: [number | null]) => {
         const store = (window as unknown as { __EDITOR_STORE?: { getState: () => { primaryTransform?: { rotation?: number[] } } } }).__EDITOR_STORE;
         if (!store) return false;
         const t = store.getState().primaryTransform;
-        return t && Array.isArray(t.rotation) && t.rotation.length === 3;
+        if (!t || !Array.isArray(t.rotation) || t.rotation.length < 1) return false;
+        const val = t.rotation[0];
+        // Must have changed from its initial value
+        if (before !== null && val === before) return false;
+        // Must be close to 45 degrees OR close to 0.785398 radians (strict tolerance)
+        return Math.abs(val - 45) < 1.0 || Math.abs(val - 0.785398) < 0.1;
       },
-      { timeout: 5_000 },
+      [beforeRot] as [number | null],
+      { timeout: 10_000 },
     );
 
     const state = await getStoreState(page) as { primaryTransform?: { rotation?: number[] } } | undefined;
@@ -231,11 +243,11 @@ test.describe('Group 1: Transform Editing @engine', () => {
     expect(Array.isArray(transform!.rotation)).toBe(true);
     expect(transform!.rotation!.length).toBe(3);
 
-    // rotation[0] should be close to 45 degrees (≈0.785 rad) or 45 (if stored as degrees).
-    // Tolerance of 1.0 handles both representations.
+    // rotation[0] must be close to 45 degrees (strict) OR close to 0.785398 radians (strict).
+    // Tolerance of 1.0 for degrees, 0.1 for radians — tight enough that default 0 cannot satisfy either.
     const rotVal = transform!.rotation![0];
     const inDegrees = Math.abs(rotVal - 45) < 1.0;
-    const inRadians = Math.abs(rotVal - 0.785398) < 1.0;
+    const inRadians = Math.abs(rotVal - 0.785398) < 0.1;
     expect(inDegrees || inRadians).toBe(true);
   });
 
@@ -500,8 +512,12 @@ test.describe('Group 3: Physics Toggle @engine', () => {
     const initialState = await getStoreState(page) as { physicsEnabled?: boolean } | undefined;
     const initialEnabled = initialState?.physicsEnabled ?? null;
 
-    // Find the physics enable/disable toggle — typically a checkbox or switch
-    const physicsToggle = page
+    // Find the physics enable/disable toggle — scoped to the Physics section to avoid
+    // matching the Material "Double Sided" checkbox (or any other page-level checkbox).
+    const physicsSectionHeading = page.getByText(/physics/i).first();
+    // Walk up to the section container, then scope the checkbox search within it.
+    const physicsSectionContainer = physicsSectionHeading.locator('..').locator('..');
+    const physicsToggle = physicsSectionContainer
       .locator('[role="checkbox"], input[type="checkbox"]')
       .first();
     const toggleVisible = await physicsToggle.isVisible({ timeout: 5_000 }).catch(() => false);
