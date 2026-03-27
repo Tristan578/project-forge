@@ -130,7 +130,7 @@ docs-internal-gate:
   steps:
     - run: cd apps/docs && npm run build  # No INCLUDE_INTERNAL
     - name: Assert no internal commands in generated MDX
-      run: node apps/docs/scripts/ci-gate-check.ts
+      run: tsx apps/docs/scripts/ci-gate-check.ts
 ```
 
 The `ci-gate-check.ts` script:
@@ -286,10 +286,10 @@ Per design system spec Section 9.1:
   "name": "@spawnforge/docs",
   "private": true,
   "scripts": {
-    "dev": "node scripts/generate-mcp-docs.ts && next dev -p 3001",
-    "build": "node scripts/generate-mcp-docs.ts && next build",
-    "generate:mcp": "node scripts/generate-mcp-docs.ts",
-    "generate:api": "node scripts/generate-api-docs.ts"
+    "dev": "tsx scripts/generate-mcp-docs.ts && next dev -p 3001",
+    "build": "tsx scripts/generate-mcp-docs.ts && next build",
+    "generate:mcp": "tsx scripts/generate-mcp-docs.ts",
+    "generate:api": "tsx scripts/generate-api-docs.ts"
   },
   "dependencies": {
     "fumadocs-core": "^14",
@@ -298,6 +298,11 @@ Per design system spec Section 9.1:
     "next": "^16",
     "react": "^19",
     "react-dom": "^19"
+  },
+  "devDependencies": {
+    "tsx": "^4",
+    "gray-matter": "^4",
+    "typescript": "^5"
   }
 }
 ```
