@@ -521,7 +521,6 @@ jobs:
         run: npm i -g vercel@50.34.3
 
       - name: Link Vercel project (staging)
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
@@ -530,7 +529,6 @@ jobs:
 
       - name: Deploy to staging (remote build)
         id: deploy
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_STAGING_PROJECT_ID }}
@@ -618,7 +616,6 @@ jobs:
           echo "Last-known-good production URL: ${prev_url:-unknown}"
 
       - name: Pull Vercel environment (production)
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
@@ -640,7 +637,6 @@ jobs:
 
       - name: Deploy to production (remote build)
         id: deploy
-        working-directory: web
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_TEAM_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
