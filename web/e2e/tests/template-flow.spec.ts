@@ -19,7 +19,10 @@ test.describe('Template Gallery @ui', () => {
       (window as any).__SKIP_ENGINE = true;
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
-      // Do NOT set forge-welcomed — we need WelcomeModal visible
+      // Do NOT set forge-welcomed — we need WelcomeModal visible.
+      // Set isNewUser=false so OnboardingGate routes to WelcomeModal instead
+      // of OnboardingWizard (which intercepts brand-new users).
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -70,6 +73,7 @@ test.describe('Template Gallery @ui', () => {
       (window as any).__SKIP_ENGINE = true;
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -118,6 +122,7 @@ test.describe('Template Gallery @ui', () => {
       (window as any).__SKIP_ENGINE = true;
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -165,6 +170,7 @@ test.describe('Template Gallery @ui', () => {
       (window as any).__SKIP_ENGINE = true;
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -205,6 +211,7 @@ test.describe('Template Gallery @ui', () => {
       (window as any).__SKIP_ENGINE = true;
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -247,7 +254,8 @@ test.describe('Template selection flow @ui', () => {
       (window as any).__SKIP_ENGINE = true;
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
-      // forge-welcomed is intentionally absent
+      // forge-welcomed is intentionally absent; isNewUser=false routes to WelcomeModal
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -373,8 +381,11 @@ test.describe('Welcome modal onboarding gate @ui', () => {
       (window as any).__SKIP_ENGINE = true;
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
-      // Explicitly remove forge-welcomed to simulate first visit
+      // Explicitly remove forge-welcomed to simulate first visit.
+      // Set isNewUser=false so OnboardingGate routes to WelcomeModal instead of
+      // OnboardingWizard (which intercepts sessions with no prior Zustand state).
       localStorage.removeItem('forge-welcomed');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -426,6 +437,7 @@ test.describe('Welcome modal onboarding gate @ui', () => {
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
       localStorage.removeItem('forge-welcomed');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -470,6 +482,7 @@ test.describe('Welcome modal onboarding gate @ui', () => {
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
       localStorage.removeItem('forge-welcomed');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -509,6 +522,7 @@ test.describe('Welcome modal onboarding gate @ui', () => {
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
       localStorage.removeItem('forge-welcomed');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });
@@ -552,6 +566,7 @@ test.describe('Template gallery ARIA structure @ui', () => {
       localStorage.setItem('forge-mobile-dismissed', '1');
       localStorage.setItem('forge-checklist-dismissed', '1');
       localStorage.removeItem('forge-welcomed');
+      localStorage.setItem('forge-onboarding-v2', JSON.stringify({ state: { isNewUser: false }, version: 0 }));
     });
 
     await page.goto('/dev', { waitUntil: 'commit', timeout: 60_000 });

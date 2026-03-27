@@ -357,18 +357,21 @@ function OnboardingGate() {
     return null;
   }
 
-  // Legacy users: show WelcomeModal (existing behavior)
+  // Legacy users who already completed the old welcome flow — no overlay needed.
+  // WelcomeModal's internal useSyncExternalStore checks !forge-welcomed, so
+  // rendering it here (when forge-welcomed IS set) would always be a no-op anyway.
   if (legacyDone) {
-    return <WelcomeModal />;
+    return null;
   }
 
-  // New users who haven't completed onboarding yet
+  // True first-time users (isNewUser=true in persisted Zustand store) → wizard
   if (isNewUser) {
     return <OnboardingWizard onComplete={handleWizardComplete} />;
   }
 
-  // Default: no overlay
-  return null;
+  // Returning users who don't have any legacy key (cleared storage after the wizard
+  // or bypassed it) → WelcomeModal as the lightweight fallback welcome experience
+  return <WelcomeModal />;
 }
 
 // ---- Main EditorLayout ----
