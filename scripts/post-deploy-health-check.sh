@@ -44,15 +44,16 @@ BYPASS_SECRET="${VERCEL_AUTOMATION_BYPASS:-}"
 
 HEALTH_ENDPOINT="${DEPLOY_URL}/api/health"
 
-# Build curl args — add bypass when the secret is available.
-# Vercel Deployment Protection accepts the bypass as both a header AND query params.
-# Using query params (x-vercel-protection-bypass + x-vercel-set-bypass-cookie) as the
-# header-only approach returns 401 for SSO-protected deployments.
-CURL_EXTRA_ARGS=()
-if [ -n "$BYPASS_SECRET" ]; then
-  HEALTH_ENDPOINT="${DEPLOY_URL}/api/health?x-vercel-protection-bypass=${BYPASS_SECRET}&x-vercel-set-bypass-cookie=true"
-  CURL_EXTRA_ARGS+=(--header "x-vercel-protection-bypass: ${BYPASS_SECRET}")
-  echo "Deployment Protection bypass will be sent (header + query params)"
+# Determine the fetch command. SSO-protected deployments reject bypass tokens;
+# they require Vercel CLI authentication. Use `vercel curl` when VERCEL_TOKEN
+# is available (set by the CD workflow), falling back to plain curl + bypass params.
+USE_VERCEL_CURL=false
+if command -v vercel >/dev/null 2>&1 && [ -n "${VERCEL_TOKEN:-}" ]; then
+  USE_VERCEL_CURL=true
+  echo "Using 'vercel curl' for authenticated health check (SSO bypass)"
+elif [ -n "${VERCEL_AUTOMATION_BYPASS:-}" ]; then
+  HEALTH_ENDPOINT="${DEPLOY_URL}/api/health?x-vercel-protection-bypass=${VERCEL_AUTOMATION_BYPASS}&x-vercel-set-bypass-cookie=true"
+  echo "Using bypass token (query params) for health check"
 fi
 
 # ---------- stabilization wait --------------------------------------------
@@ -67,12 +68,19 @@ while [ "$attempt" -lt "$RETRIES" ]; do
   attempt=$(( attempt + 1 ))
   echo "Health check attempt ${attempt}/${RETRIES}: ${HEALTH_ENDPOINT}"
 
-  HTTP_CODE=$(curl --silent \
-    --output /tmp/health_response.json \
-    --write-out "%{http_code}" \
-    --max-time "$TIMEOUT" \
-    "${CURL_EXTRA_ARGS[@]}" \
-    "$HEALTH_ENDPOINT") || HTTP_CODE="000"
+  if [ "$USE_VERCEL_CURL" = true ]; then
+    HTTP_CODE=$(vercel curl --token="$VERCEL_TOKEN" --silent \
+      --output /tmp/health_response.json \
+      --write-out "%{http_code}" \
+      --max-time "$TIMEOUT" \
+      "${DEPLOY_URL}/api/health") || HTTP_CODE="000"
+  else
+    HTTP_CODE=$(curl --silent \
+      --output /tmp/health_response.json \
+      --write-out "%{http_code}" \
+      --max-time "$TIMEOUT" \
+      "$HEALTH_ENDPOINT") || HTTP_CODE="000"
+  fi
 
   echo "  HTTP status: ${HTTP_CODE}"
 
