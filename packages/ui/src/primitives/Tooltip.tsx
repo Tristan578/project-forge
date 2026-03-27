@@ -1,4 +1,4 @@
-import { useState, useId, type ReactNode, type HTMLAttributes } from 'react';
+import { useState, useId, cloneElement, isValidElement, type ReactNode, type HTMLAttributes } from 'react';
 import type React from 'react';
 import { cn } from '../utils/cn';
 import { Z_INDEX } from '../tokens';
@@ -29,6 +29,14 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
   const [visible, setVisible] = useState(false);
   const tooltipId = useId();
 
+  // Inject aria-describedby on the direct child element so assistive technology
+  // can announce the tooltip content when the element is focused.
+  const childWithAriaDescribedBy = isValidElement(children)
+    ? cloneElement(children as React.ReactElement<HTMLAttributes<HTMLElement>>, {
+        'aria-describedby': tooltipId,
+      })
+    : children;
+
   return (
     <div
       className={cn('relative inline-flex', className)}
@@ -37,7 +45,7 @@ export function Tooltip({ content, children, side = 'top', className }: TooltipP
       onFocus={() => setVisible(true)}
       onBlur={() => setVisible(false)}
     >
-      {children}
+      {childWithAriaDescribedBy}
       <div
         id={tooltipId}
         role="tooltip"

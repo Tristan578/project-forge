@@ -43,6 +43,16 @@ describe('Popover', () => {
     expect(container.querySelector('[data-popover-content]')).toBeNull();
   });
 
+  it('closes when Escape is pressed', () => {
+    const { container } = render(
+      <Popover trigger={<button>Open</button>} content={<div>Popover</div>} />
+    );
+    fireEvent.click(screen.getByRole('button'));
+    expect(container.querySelector('[data-popover-content]')).not.toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(container.querySelector('[data-popover-content]')).toBeNull();
+  });
+
   it('uses overlay background token', () => {
     render(
       <Popover trigger={<button>Open</button>} content={<div>Content</div>} />

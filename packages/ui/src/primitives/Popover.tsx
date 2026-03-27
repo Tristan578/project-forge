@@ -40,8 +40,18 @@ export function Popover({ trigger, content, align = 'start', side = 'bottom', cl
         setOpen(false);
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    }
     document.addEventListener('mousedown', handleOutside);
-    return () => document.removeEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, [open]);
 
   return (

@@ -22,6 +22,18 @@ describe('Tooltip', () => {
     expect(container.querySelector('[role="tooltip"]')).not.toBeNull();
   });
 
+  it('injects aria-describedby on the child element', () => {
+    const { container } = render(
+      <Tooltip content="Describe me">
+        <button>Trigger</button>
+      </Tooltip>
+    );
+    const btn = container.querySelector('button');
+    const tooltip = container.querySelector('[role="tooltip"]');
+    expect(btn?.getAttribute('aria-describedby')).toBeTruthy();
+    expect(btn?.getAttribute('aria-describedby')).toBe(tooltip?.id);
+  });
+
   it('uses overlay background token', () => {
     const { container } = render(
       <Tooltip content="Tooltip text">
