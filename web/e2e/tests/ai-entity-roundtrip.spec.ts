@@ -43,13 +43,11 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       const addNode = store?.getState?.()?.addNode;
       if (typeof addNode === 'function') {
         addNode({
-          id: '${entityId}',
+          entityId: '${entityId}',
           name: '${entityName}',
-          type: 'Cube',
           parentId: null,
           visible: true,
-          locked: false,
-          childIds: [],
+          children: [], components: ["Mesh3d", "MeshMaterial3d"],
         });
       }
     `);
@@ -96,13 +94,11 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       const addNode = store?.getState?.()?.addNode;
       if (typeof addNode === 'function') {
         addNode({
-          id: '${entityId}',
+          entityId: '${entityId}',
           name: 'AIMaterialTarget',
-          type: 'Cube',
           parentId: null,
           visible: true,
-          locked: false,
-          childIds: [],
+          children: [], components: ["Mesh3d", "MeshMaterial3d"],
         });
       }
     `);
@@ -154,9 +150,9 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
     await editor.waitForEditorStore();
 
     const entities = [
-      { id: 'ai-batch-1', name: 'BatchPlayer', type: 'Cube' },
-      { id: 'ai-batch-2', name: 'BatchGround', type: 'Plane' },
-      { id: 'ai-batch-3', name: 'BatchEnemy', type: 'Sphere' },
+      { entityId: 'ai-batch-1', name: 'BatchPlayer' },
+      { entityId: 'ai-batch-2', name: 'BatchGround' },
+      { entityId: 'ai-batch-3', name: 'BatchEnemy' },
     ];
 
     // Inject all three nodes atomically
@@ -164,9 +160,9 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       const store = window.__EDITOR_STORE;
       const addNode = store?.getState?.()?.addNode;
       if (typeof addNode === 'function') {
-        addNode({ id: '${entities[0].id}', name: '${entities[0].name}', type: '${entities[0].type}', parentId: null, visible: true, locked: false, childIds: [] });
-        addNode({ id: '${entities[1].id}', name: '${entities[1].name}', type: '${entities[1].type}', parentId: null, visible: true, locked: false, childIds: [] });
-        addNode({ id: '${entities[2].id}', name: '${entities[2].name}', type: '${entities[2].type}', parentId: null, visible: true, locked: false, childIds: [] });
+        addNode({ entityId: 'ai-batch-1', name: 'BatchPlayer', parentId: null, visible: true, children: [], components: ['Mesh3d'] });
+        addNode({ entityId: 'ai-batch-2', name: 'BatchGround', parentId: null, visible: true, children: [], components: ['Mesh3d'] });
+        addNode({ entityId: 'ai-batch-3', name: 'BatchEnemy', parentId: null, visible: true, children: [], components: ['Mesh3d'] });
       }
     `);
 
@@ -180,9 +176,9 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       const nodePresent = await readStore<boolean>(
         page,
         '__EDITOR_STORE',
-        `!!(window.__EDITOR_STORE?.getState?.()?.sceneGraph?.nodes?.['${entity.id}'])`,
+        `!!(window.__EDITOR_STORE?.getState?.()?.sceneGraph?.nodes?.['${entity.entityId}'])`,
       );
-      expect(nodePresent, `Entity ${entity.name} (${entity.id}) missing from sceneGraph`).toBe(true);
+      expect(nodePresent, `Entity ${entity.name} (${entity.entityId}) missing from sceneGraph`).toBe(true);
     }
 
     // All node names must be queryable from the DOM.
