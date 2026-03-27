@@ -28,9 +28,10 @@ export function Dialog({ open, onClose, title, description, children, actions, c
         onClick={onClose}
         aria-hidden="true"
       />
-      {/* Dialog panel */}
+      {/* Dialog panel — tabIndex allows focus to land here when no focusable children exist */}
       <div
         {...dialogProps}
+        tabIndex={-1}
         className={cn(
           'fixed',
           'w-full max-w-md',
