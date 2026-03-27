@@ -268,6 +268,27 @@ describe('withApiMiddleware', () => {
       expect(res.status).toBe(422);
     });
 
+    it('returns 400 for malformed JSON body', async () => {
+      const handler = withApiMiddleware(
+        async () => NextResponse.json({ ok: true }),
+        {
+          requireAuth: false,
+          validate: z.object({ name: z.string() }),
+        },
+      );
+
+      const req = new NextRequest('http://localhost/api/test', {
+        method: 'POST',
+        body: 'not valid json {{{',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      const res = await handler(req);
+      expect(res.status).toBe(400);
+      const resBody = await res.json();
+      expect(resBody.error).toBeTruthy();
+    });
+
     it('does not run validation when validate option is not provided', async () => {
       const handlerFn = vi.fn(async () => NextResponse.json({ ok: true }));
       const handler = withApiMiddleware(handlerFn, { requireAuth: false });
