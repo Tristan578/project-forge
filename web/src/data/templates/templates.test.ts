@@ -9,11 +9,11 @@ describe('game templates', () => {
 
   it('all registry entries have required fields', () => {
     for (const entry of TEMPLATE_REGISTRY) {
-      expect(entry.id).toBeTruthy();
-      expect(entry.name).toBeTruthy();
-      expect(entry.description).toBeTruthy();
-      expect(entry.category).toBeTruthy();
-      expect(entry.difficulty).toBeTruthy();
+      expect(entry.id).not.toBe('');
+      expect(entry.name).not.toBe('');
+      expect(entry.description).not.toBe('');
+      expect(entry.category).not.toBe('');
+      expect(entry.difficulty).not.toBe('');
       expect(entry.thumbnail).toBeDefined();
       expect(entry.entityCount).toBeGreaterThan(0);
       expect(typeof entry.load).toBe('function');
@@ -63,9 +63,9 @@ describe('game templates', () => {
 
       it('all entities have required fields', () => {
         for (const entity of template.sceneData.entities) {
-          expect(entity.entityId).toBeTruthy();
-          expect(entity.entityName).toBeTruthy();
-          expect(entity.entityType).toBeTruthy();
+          expect(entity.entityId).not.toBe('');
+          expect(entity.entityName).not.toBe('');
+          expect(entity.entityType).not.toBe('');
           expect(entity.transform).toBeDefined();
           expect(entity.transform.translation).toHaveLength(3);
           expect(entity.transform.rotation).toHaveLength(4);
@@ -102,7 +102,7 @@ describe('game templates', () => {
       });
 
       it('has an input preset', () => {
-        expect(template.inputPreset).toBeTruthy();
+        expect(template.inputPreset).not.toBe('');
         expect(['fps', 'platformer', 'topdown', 'racing']).toContain(template.inputPreset);
       });
     });

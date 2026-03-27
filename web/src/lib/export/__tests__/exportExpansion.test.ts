@@ -129,8 +129,8 @@ describe('Export Presets', () => {
   it('all presets should have loading screen config', () => {
     for (const preset of Object.values(EXPORT_PRESETS)) {
       expect(preset.loadingScreen).toBeDefined();
-      expect(preset.loadingScreen.backgroundColor).toBeTruthy();
-      expect(preset.loadingScreen.progressStyle).toBeTruthy();
+      expect(preset.loadingScreen.backgroundColor).not.toBe('');
+      expect(preset.loadingScreen.progressStyle).not.toBe('');
     }
   });
 

@@ -16,11 +16,11 @@ describe('promptTemplates data', () => {
 
   it('every template has required fields', () => {
     for (const t of BUILT_IN_TEMPLATES) {
-      expect(t.id).toBeTruthy();
-      expect(t.name).toBeTruthy();
-      expect(t.description).toBeTruthy();
-      expect(t.prompt).toBeTruthy();
-      expect(t.category).toBeTruthy();
+      expect(t.id).not.toBe('');
+      expect(t.name).not.toBe('');
+      expect(t.description).not.toBe('');
+      expect(t.prompt).not.toBe('');
+      expect(t.category).not.toBe('');
       expect(Array.isArray(t.variables)).toBe(true);
       expect(Array.isArray(t.tags)).toBe(true);
       expect(t.tags.length).toBeGreaterThan(0);
@@ -65,8 +65,8 @@ describe('promptTemplates data', () => {
     ];
     for (const c of cats) {
       expect(PROMPT_CATEGORIES[c]).toBeDefined();
-      expect(PROMPT_CATEGORIES[c].label).toBeTruthy();
-      expect(PROMPT_CATEGORIES[c].description).toBeTruthy();
+      expect(PROMPT_CATEGORIES[c].label).not.toBe('');
+      expect(PROMPT_CATEGORIES[c].description).not.toBe('');
     }
   });
 });
