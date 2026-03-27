@@ -252,9 +252,9 @@ test.describe('Accessibility Audit — Keyboard Shortcuts Panel @ui', () => {
   test('keyboard shortcuts panel has zero critical or serious axe violations', async ({
     page,
   }) => {
-    // Open the keyboard shortcuts panel via the standard shortcut (Shift+?)
-    // or via the toolbar button if it exists.
-    await page.keyboard.press('Shift+?');
+    // Open the keyboard shortcuts panel via '?' shortcut
+    // Note: '?' already implies Shift — 'Shift+?' is redundant in Playwright
+    await page.keyboard.press('?');
 
     // Look for a keyboard shortcuts dialog / panel
     const panel = page
