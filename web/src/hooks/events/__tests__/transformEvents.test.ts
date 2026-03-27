@@ -75,6 +75,39 @@ describe('handleTransformEvent', () => {
       expect(result).toBe(true);
       expect(actions.setSelection).toHaveBeenCalledWith([], null, null);
     });
+
+    it('clears primaryTransform when primaryId becomes null (regression for #7746)', () => {
+      // When WASM confirms entity deletion it emits SELECTION_CHANGED with null
+      // primaryId. We must clear primaryTransform so the inspector does not show
+      // stale data for the deleted entity.
+      const payload = {
+        selectedIds: [],
+        primaryId: null,
+        primaryName: null,
+      };
+
+      handleTransformEvent('SELECTION_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      expect(useEditorStore.setState).toHaveBeenCalledWith({ primaryTransform: null });
+    });
+
+    it('does NOT clear primaryTransform when a non-null entity is selected', () => {
+      // Only clear transform on deselect, not on a normal selection change.
+      const payload = {
+        selectedIds: ['entity-1'],
+        primaryId: 'entity-1',
+        primaryName: 'Cube',
+      };
+
+      handleTransformEvent('SELECTION_CHANGED', payload, mockSetGet.set, mockSetGet.get);
+
+      // setState should NOT have been called with primaryTransform: null
+      const calls = vi.mocked(useEditorStore.setState).mock.calls;
+      const clearedTransform = calls.some(
+        (call) => call[0] && typeof call[0] === 'object' && 'primaryTransform' in (call[0] as object) && (call[0] as { primaryTransform: unknown }).primaryTransform === null
+      );
+      expect(clearedTransform).toBe(false);
+    });
   });
 
   describe('SCENE_GRAPH_UPDATE', () => {
