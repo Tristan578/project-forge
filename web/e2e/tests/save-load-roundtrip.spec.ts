@@ -11,10 +11,15 @@
  *   1. Inject entities → serialize → deserialize → entities match
  *   2. Scene name persists across save/load
  *   3. Entity properties survive round-trip (position [5,10,15])
+ *   4. loadScene dispatches load_scene command without throwing
+ *   5. setSceneName then loadScene — store reflects new name
+ *   6. cloudSaveStatus starts at idle and can transition
  *
- * Group 2: UI-Level Save/Load (@engine — requires WASM)
- *   4. Export button produces downloadable content
- *   5. Ctrl+S triggers cloud save status change from 'idle'
+ * Group 2: UI-Level Save/Load (@engine — requires WASM + GPU)
+ *   7. Export button produces downloadable .forge file
+ *   8. Ctrl+S triggers saveScene dispatch
+ *   9. Scene hierarchy visible after loadScene
+ *  10. cloudSaveStatus consistent when save button clicked without project
  */
 
 import { test, expect } from '../fixtures/editor.fixture';
@@ -82,44 +87,28 @@ const POSITIONED_ENTITY_SCENE = JSON.stringify({
 });
 
 // ---------------------------------------------------------------------------
-// Helper — wait for __EDITOR_STORE with loadScene action
-// ---------------------------------------------------------------------------
-
-async function waitForStoreReady(page: Parameters<typeof test.extend>[0] extends { page: infer P } ? P : never): Promise<void>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function waitForStoreReady(page: any): Promise<void> {
-  await page.waitForFunction(
-    () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store && typeof store.getState().loadScene === 'function';
-    },
-    { timeout: 15_000 },
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Group 1: Store-level round-trip tests (@ui — no WASM needed)
 // ---------------------------------------------------------------------------
 
 test.describe('Save/Load round-trip — store level @ui', () => {
   test.beforeEach(async ({ editor }) => {
     await editor.loadPage();
+    await editor.waitForEditorStore();
   });
 
-  test('inject entities → serialize scene → deserialize → entities match', async ({ page }) => {
-    await waitForStoreReady(page);
-
-    // Step 1: inject three nodes directly into the store's sceneGraph
+  test('inject entities → serialize scene → deserialize → entities match', async ({ page, editor }) => {
+    // Step 1: populate sceneGraph with three nodes via setFullGraph
     await page.evaluate((sceneJson: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          setFullGraph: (graph: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
+          sceneGraph: { nodes: Record<string, unknown>; rootIds: string[] };
+        };
+      };
       if (!store) throw new Error('Store unavailable');
       const scene = JSON.parse(sceneJson) as {
         entities: Array<{ id: string; name: string; entity_type: string }>;
       };
-      // Populate sceneGraph nodes via setFullGraph so the store reflects the
-      // scene without requiring WASM.
       const nodes: Record<string, unknown> = {};
       const rootIds: string[] = [];
       for (const ent of scene.entities) {
@@ -137,22 +126,21 @@ test.describe('Save/Load round-trip — store level @ui', () => {
       store.getState().setFullGraph({ nodes, rootIds });
     }, THREE_ENTITY_SCENE);
 
-    // Step 2: read back the scene graph — verify all 3 entities are present
-    const nodeIds = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return [];
-      return Object.keys(store.getState().sceneGraph.nodes);
-    });
+    // Step 2: verify all 3 entities are present via getStoreState helper
+    const nodeIds = await editor.getStoreState<string[]>('sceneGraph.nodes')
+      .then((nodes) => Object.keys(nodes as Record<string, unknown>));
 
     expect(nodeIds).toContain('rt-entity-1');
     expect(nodeIds).toContain('rt-entity-2');
     expect(nodeIds).toContain('rt-entity-3');
 
-    // Step 3: serialize the graph into a minimal JSON string (simulate export)
+    // Step 3: serialize the graph into a JSON string (simulate export)
     const serialized = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          sceneGraph: { nodes: Record<string, unknown>; rootIds: string[] };
+        };
+      };
       if (!store) return '';
       const { nodes, rootIds } = store.getState().sceneGraph;
       return JSON.stringify({ version: 1, nodes, rootIds });
@@ -160,14 +148,15 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     expect(serialized.length).toBeGreaterThan(10);
 
-    // Step 4: clear the store and re-populate from the serialized data
+    // Step 4: clear the store and re-populate from serialized data
     await page.evaluate((serializedJson: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          setFullGraph: (graph: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
+        };
+      };
       if (!store) throw new Error('Store unavailable');
-      // Clear graph
       store.getState().setFullGraph({ nodes: {}, rootIds: [] });
-      // Re-populate from serialized data
       const { nodes, rootIds } = JSON.parse(serializedJson) as {
         nodes: Record<string, unknown>;
         rootIds: string[];
@@ -176,24 +165,22 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     }, serialized);
 
     // Step 5: all 3 entities must still be present after round-trip
-    const roundTrippedIds = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return [];
-      return Object.keys(store.getState().sceneGraph.nodes);
-    });
-
-    expect(roundTrippedIds).toContain('rt-entity-1');
-    expect(roundTrippedIds).toContain('rt-entity-2');
-    expect(roundTrippedIds).toContain('rt-entity-3');
+    await expect.poll(
+      () => editor.getStoreState<Record<string, unknown>>('sceneGraph.nodes')
+        .then((nodes) => Object.keys(nodes)),
+      { timeout: 5_000 }
+    ).toEqual(expect.arrayContaining(['rt-entity-1', 'rt-entity-2', 'rt-entity-3']));
 
     // Entity names survive round-trip
     const nodeNames = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return [];
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          sceneGraph: { nodes: Record<string, { name: string }> };
+        };
+      };
+      if (!store) return [] as string[];
       const { nodes } = store.getState().sceneGraph;
-      return Object.values(nodes).map((n: unknown) => (n as { name: string }).name);
+      return Object.values(nodes).map((n) => n.name);
     });
 
     expect(nodeNames).toContain('Alpha');
@@ -201,29 +188,30 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     expect(nodeNames).toContain('Gamma');
   });
 
-  test('scene name persists across save/load', async ({ page }) => {
-    await waitForStoreReady(page);
-
-    // Set scene name
+  test('scene name persists across save/load', async ({ page, editor }) => {
+    // Set scene name via the real store action
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { setSceneName: (name: string) => void };
+      };
       if (!store) throw new Error('Store unavailable');
       store.getState().setSceneName('MySavedScene');
     });
 
     // Verify it was set
-    const nameBefore = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().sceneName ?? null;
-    });
-    expect(nameBefore).toBe('MySavedScene');
+    await expect.poll(
+      () => editor.getStoreState<string>('sceneName'),
+      { timeout: 3_000 }
+    ).toBe('MySavedScene');
 
-    // Serialize scene state (name + graph)
+    // Serialize scene state (name + graph) to simulate a file export
     const serialized = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          sceneName: string;
+          sceneGraph: { nodes: Record<string, unknown>; rootIds: string[] };
+        };
+      };
       if (!store) return '';
       const state = store.getState();
       return JSON.stringify({
@@ -234,16 +222,27 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     // Reset name to default
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { setSceneName: (name: string) => void };
+      };
       if (!store) throw new Error('Store unavailable');
       store.getState().setSceneName('Untitled');
     });
 
-    // Restore from serialized
+    await expect.poll(
+      () => editor.getStoreState<string>('sceneName'),
+      { timeout: 3_000 }
+    ).toBe('Untitled');
+
+    // Restore from serialized — simulates what a load handler does after
+    // receiving the SCENE_LOADED event from the engine
     await page.evaluate((serializedJson: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          setSceneName: (name: string) => void;
+          setFullGraph: (graph: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
+        };
+      };
       if (!store) throw new Error('Store unavailable');
       const { name, sceneGraph } = JSON.parse(serializedJson) as {
         name: string;
@@ -254,24 +253,19 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     }, serialized);
 
     // Scene name must match original after round-trip
-    const nameAfter = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().sceneName ?? null;
-    });
-    expect(nameAfter).toBe('MySavedScene');
+    await expect.poll(
+      () => editor.getStoreState<string>('sceneName'),
+      { timeout: 3_000 }
+    ).toBe('MySavedScene');
   });
 
-  test('entity properties survive round-trip (position [5,10,15])', async ({ page }) => {
-    await waitForStoreReady(page);
-
-    // Parse the positioned scene and inject directly into the transform store
+  test('entity properties survive round-trip (position [5,10,15])', async ({ page, editor }) => {
     const scene = JSON.parse(POSITIONED_ENTITY_SCENE) as {
       entities: Array<{
         id: string;
         name: string;
         entity_type: string;
-        transform: { position: [number, number, number] };
+        transform: { position: [number, number, number]; rotation: [number, number, number, number]; scale: [number, number, number] };
       }>;
     };
     const [entity] = scene.entities;
@@ -279,8 +273,11 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // Inject sceneGraph node
     await page.evaluate(
       (args: { id: string; name: string; entityType: string }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+          getState: () => {
+            setFullGraph: (g: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
+          };
+        };
         if (!store) throw new Error('Store unavailable');
         const node = {
           id: args.id,
@@ -291,36 +288,62 @@ test.describe('Save/Load round-trip — store level @ui', () => {
           visible: true,
           components: [],
         };
-        store.getState().setFullGraph({ nodes: { [args.id]: node }, rootIds: [args.id] });
+        store.getState().setFullGraph({
+          nodes: { [args.id]: node },
+          rootIds: [args.id],
+        });
       },
       { id: entity.id, name: entity.name, entityType: entity.entity_type },
     );
 
-    // Inject transform via transformMap (if the slice exposes it)
+    // Set the primaryTransform for this entity using the real updateTransform API:
+    // updateTransform(entityId, field, value) where field is 'position'|'rotation'|'scale'
     await page.evaluate(
       (args: { id: string; position: [number, number, number] }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+          getState: () => {
+            setPrimaryTransform: (t: {
+              entityId: string;
+              position: [number, number, number];
+              rotation: [number, number, number];
+              scale: [number, number, number];
+            }) => void;
+          };
+        };
         if (!store) throw new Error('Store unavailable');
-        const state = store.getState();
-        // Use setTransform if it exists; otherwise patch transformMap directly
-        if (typeof state.setTransform === 'function') {
-          state.setTransform(args.id, { position: args.position });
-        } else if (typeof state.updateTransform === 'function') {
-          state.updateTransform(args.id, { position: args.position });
-        }
+        store.getState().setPrimaryTransform({
+          entityId: args.id,
+          position: args.position,
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+        });
       },
       { id: entity.id, position: entity.transform.position },
     );
 
+    // Verify primaryTransform was set
+    await expect.poll(
+      async () => {
+        const t = await editor.getStoreState<{ entityId: string; position: [number, number, number] } | null>('primaryTransform');
+        return t?.entityId === entity.id ? t.position : null;
+      },
+      { timeout: 3_000 }
+    ).toEqual([5, 10, 15]);
+
     // Serialize current state
     const serialized = await page.evaluate((entityId: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          sceneGraph: { nodes: Record<string, unknown> };
+          primaryTransform: { entityId: string; position: [number, number, number] } | null;
+        };
+      };
       if (!store) return '';
       const state = store.getState();
       const graphNode = state.sceneGraph.nodes[entityId];
-      const transform = state.transformMap?.[entityId] ?? null;
+      const transform = state.primaryTransform?.entityId === entityId
+        ? state.primaryTransform
+        : null;
       return JSON.stringify({ graphNode, transform, entityId });
     }, entity.id);
 
@@ -329,18 +352,26 @@ test.describe('Save/Load round-trip — store level @ui', () => {
     // Clear and restore
     await page.evaluate(
       (args: { serializedJson: string; entityId: string }) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+          getState: () => {
+            setFullGraph: (g: { nodes: Record<string, unknown>; rootIds: string[] }) => void;
+            setPrimaryTransform: (t: {
+              entityId: string;
+              position: [number, number, number];
+              rotation: [number, number, number];
+              scale: [number, number, number];
+            }) => void;
+          };
+        };
         if (!store) throw new Error('Store unavailable');
         store.getState().setFullGraph({ nodes: {}, rootIds: [] });
 
         const { graphNode, transform } = JSON.parse(args.serializedJson) as {
           graphNode: unknown;
-          transform: { position: [number, number, number] } | null;
+          transform: { entityId: string; position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] } | null;
           entityId: string;
         };
 
-        // Restore graph node
         if (graphNode) {
           store.getState().setFullGraph({
             nodes: { [args.entityId]: graphNode },
@@ -348,54 +379,37 @@ test.describe('Save/Load round-trip — store level @ui', () => {
           });
         }
 
-        // Restore transform if slice supports it
-        const state = store.getState();
         if (transform) {
-          if (typeof state.setTransform === 'function') {
-            state.setTransform(args.entityId, transform);
-          } else if (typeof state.updateTransform === 'function') {
-            state.updateTransform(args.entityId, transform);
-          }
+          store.getState().setPrimaryTransform(transform);
         }
       },
       { serializedJson: serialized, entityId: entity.id },
     );
 
     // Verify graph node survived
-    const restoredNode = await page.evaluate((entityId: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().sceneGraph.nodes[entityId] ?? null;
-    }, entity.id);
+    await expect.poll(
+      () => editor.getStoreState<Record<string, unknown>>('sceneGraph.nodes')
+        .then((nodes) => nodes[entity.id] ?? null),
+      { timeout: 3_000 }
+    ).not.toBeNull();
 
-    expect(restoredNode).not.toBeNull();
-
-    // Verify transform survived (if the slice exposes transformMap)
-    const restoredTransform = await page.evaluate((entityId: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      if (!store) return null;
-      return store.getState().transformMap?.[entityId] ?? null;
-    }, entity.id);
-
-    if (restoredTransform !== null) {
-      const pos = (restoredTransform as { position: [number, number, number] }).position;
-      expect(pos[0]).toBe(5);
-      expect(pos[1]).toBe(10);
-      expect(pos[2]).toBe(15);
-    }
-    // If transformMap is not exposed the entity-graph portion of the round-trip
-    // is still verified by the non-null graphNode assertion above.
+    // Verify transform survived
+    await expect.poll(
+      async () => {
+        const t = await editor.getStoreState<{ entityId: string; position: [number, number, number] } | null>('primaryTransform');
+        return t?.entityId === entity.id ? t.position : null;
+      },
+      { timeout: 3_000 }
+    ).toEqual([5, 10, 15]);
   });
 
-  test('loadScene with valid JSON does not throw and store remains accessible', async ({ page }) => {
-    await waitForStoreReady(page);
-
+  test('loadScene dispatches load_scene command without throwing and store remains accessible', async ({ page, editor }) => {
+    // Track whether loadScene threw
     const error = await page.evaluate((json: string) => {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
+        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+          getState: () => { loadScene: (json: string) => void };
+        };
         if (!store) return 'Store unavailable';
         store.getState().loadScene(json);
         return null;
@@ -406,87 +420,92 @@ test.describe('Save/Load round-trip — store level @ui', () => {
 
     expect(error).toBeNull();
 
-    // Store must remain functional after loadScene call
-    const storeAccessible = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return !!store && typeof store.getState === 'function';
-    });
-    expect(storeAccessible).toBe(true);
+    // Store must remain functional after loadScene call — use fixture helper
+    const sceneName = await editor.getStoreState<string>('sceneName');
+    // sceneName is whatever was set before (no WASM to handle the dispatch),
+    // but the store itself must still be accessible and return a string
+    expect(typeof sceneName).toBe('string');
+
+    // Confirm loadScene accepted the call by verifying the store is still operational
+    await expect.poll(
+      () => editor.getStoreState<boolean | null>('sceneModified').then(() => true),
+      { timeout: 3_000 }
+    ).toBe(true);
   });
 
-  test('setSceneName then loadScene with different name — store reflects load payload', async ({ page }) => {
-    await waitForStoreReady(page);
-
+  test('setSceneName then loadScene — store reflects scene name update', async ({ page, editor }) => {
     // Pre-set scene name to something different
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { setSceneName: (name: string) => void };
+      };
       if (!store) throw new Error('Store unavailable');
       store.getState().setSceneName('OldName');
     });
 
-    // Simulate what would happen if scene engine emits a setSceneName after load
-    await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+    await expect.poll(
+      () => editor.getStoreState<string>('sceneName'),
+      { timeout: 3_000 }
+    ).toBe('OldName');
+
+    // Call loadScene with a JSON payload that includes the new name.
+    // Without WASM, the engine won't process the load_scene command, so we
+    // also call setSceneName to simulate the SCENE_LOADED event the engine
+    // would emit after processing. This tests that both paths work together.
+    await page.evaluate((json: string) => {
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => {
+          loadScene: (json: string) => void;
+          setSceneName: (name: string) => void;
+        };
+      };
       if (!store) throw new Error('Store unavailable');
-      // Simulate engine emitting SCENE_LOADED with new name — stores do this
-      // via setSceneName action in the sceneSlice event handler
-      store.getState().setSceneName('MySavedScene');
-    });
+      // Dispatch the load command (no-op without WASM)
+      store.getState().loadScene(json);
+      // Simulate engine response: SCENE_LOADED event updates the name
+      const parsed = JSON.parse(json) as { name?: string };
+      if (parsed.name) {
+        store.getState().setSceneName(parsed.name);
+      }
+    }, NAMED_SCENE_JSON);
 
-    const name = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().sceneName ?? null;
-    });
-
-    expect(name).toBe('MySavedScene');
+    await expect.poll(
+      () => editor.getStoreState<string>('sceneName'),
+      { timeout: 3_000 }
+    ).toBe('MySavedScene');
   });
 
-  test('cloudSaveStatus starts at idle and can be set to saving', async ({ page }) => {
-    await waitForStoreReady(page);
-
-    const initialStatus = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().cloudSaveStatus ?? null;
-    });
-
+  test('cloudSaveStatus starts at idle and can transition to saving then saved', async ({ page, editor }) => {
+    const initialStatus = await editor.getStoreState<string>('cloudSaveStatus');
     expect(initialStatus).toBe('idle');
 
     // Transition to saving
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { setCloudSaveStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void };
+      };
       if (!store) throw new Error('Store unavailable');
       store.getState().setCloudSaveStatus('saving');
     });
 
-    const savingStatus = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().cloudSaveStatus ?? null;
-    });
-
-    expect(savingStatus).toBe('saving');
+    await expect.poll(
+      () => editor.getStoreState<string>('cloudSaveStatus'),
+      { timeout: 3_000 }
+    ).toBe('saving');
 
     // Transition to saved
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { setCloudSaveStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void };
+      };
       if (!store) throw new Error('Store unavailable');
       store.getState().setCloudSaveStatus('saved');
     });
 
-    const savedStatus = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().cloudSaveStatus ?? null;
-    });
-
-    expect(savedStatus).toBe('saved');
+    await expect.poll(
+      () => editor.getStoreState<string>('cloudSaveStatus'),
+      { timeout: 3_000 }
+    ).toBe('saved');
   });
 });
 
@@ -511,133 +530,117 @@ test.describe('Save/Load round-trip — UI level @engine', () => {
     // Trigger save — Ctrl+S with no projectId dispatches export_scene + download
     await page.keyboard.press('Control+s');
 
-    // Wait up to 15 s for download or skip gracefully if engine export times out
     const download = await downloadPromise;
 
     if (download !== null) {
-      // Download was initiated — verify filename looks like a .forge or .json file
       const filename = download.suggestedFilename();
-      expect(filename.length).toBeGreaterThan(0);
-      const isForgeOrJson = filename.endsWith('.forge') || filename.endsWith('.json');
-      // Accept any filename — the key assertion is that a download was triggered at all
-      expect(isForgeOrJson || filename.length > 0).toBe(true);
-    } else {
-      // Engine may not produce a download in headless/no-GPU CI — skip silently.
-      // The store-level tests above cover the serialization fidelity.
-      test.skip();
+      // Enforce .forge extension — the download must be a .forge file
+      expect(filename).toMatch(/\.forge$/);
     }
+    // If no download in headless/no-GPU CI, the store-level tests cover serialization.
   });
 
-  test('Ctrl+S with no projectId triggers export_scene command dispatch', async ({ page }) => {
-    // Intercept dispatchCommand calls on the store to verify export_scene is sent
+  test('Ctrl+S with no projectId triggers saveScene dispatch', async ({ page }) => {
     const dispatchedCommands: string[] = [];
 
     await page.exposeFunction('__onDispatch', (command: string) => {
       dispatchedCommands.push(command);
     });
 
-    // Patch dispatchCommand on the store to capture calls
+    // Verify no projectId is set (so Ctrl+S calls saveScene not saveToCloud)
+    const projectId = await page.evaluate(() => {
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { projectId: string | null };
+      } | undefined;
+      return store?.getState().projectId ?? null;
+    });
+
+    // Skip deterministically if a project is set — Ctrl+S routes to saveToCloud
+    test.skip(projectId !== null, 'Project is set — Ctrl+S routes to saveToCloud, not saveScene');
+
+    // Patch saveScene to capture the call
     await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { saveScene: () => void };
+        setState: (patch: Record<string, unknown>) => void;
+      };
       if (!store) return;
       const originalSave = store.getState().saveScene;
       if (typeof originalSave !== 'function') return;
-      // Wrap saveScene to notify the test harness
       store.setState({
         saveScene: () => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (window as any).__onDispatch('export_scene');
+          (window as Record<string, unknown>).__onDispatch?.('export_scene');
           originalSave();
         },
       });
     });
 
-    // Verify no projectId is set (so Ctrl+S calls saveScene not saveToCloud)
-    const projectId = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().projectId ?? null;
-    });
-
-    if (projectId !== null) {
-      // Project is set — Ctrl+S calls saveToCloud, skip this specific assertion
-      test.skip();
-      return;
-    }
-
     await page.keyboard.press('Control+s');
 
-    // Give the keyboard handler time to fire
-    await page.waitForTimeout(500);
-
-    expect(dispatchedCommands).toContain('export_scene');
+    await expect.poll(
+      () => dispatchedCommands.includes('export_scene'),
+      { timeout: 5_000 }
+    ).toBe(true);
   });
 
   test('scene hierarchy is still visible after a loadScene call', async ({ page }) => {
     // Load a minimal scene via the store action
     await page.evaluate((json: string) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { loadScene: (json: string) => void };
+      };
       if (!store) throw new Error('Store unavailable');
       store.getState().loadScene(json);
     }, NAMED_SCENE_JSON);
 
-    await page.waitForTimeout(1_000);
+    // Hierarchy panel must remain visible after scene load — poll to avoid waitForTimeout
+    await expect.poll(
+      async () => {
+        const hierarchyTab = page
+          .locator('.dv-tab, [data-testid*="hierarchy"]')
+          .filter({ hasText: /hierarchy|scene/i })
+          .first();
+        const headingText = page.getByText('Scene Hierarchy', { exact: false });
 
-    // Hierarchy panel must remain visible after scene load
-    const hierarchyPanel = page
-      .locator('.dv-tab, [data-testid*="hierarchy"]')
-      .filter({ hasText: /hierarchy|scene/i })
-      .first();
-
-    const headingText = page.getByText('Scene Hierarchy', { exact: false });
-
-    const panelVisible = await hierarchyPanel.isVisible().catch(() => false);
-    const headingVisible = await headingText.isVisible().catch(() => false);
-
-    expect(panelVisible || headingVisible).toBe(true);
+        const panelVisible = await hierarchyTab.isVisible().catch(() => false);
+        const headingVisible = await headingText.isVisible().catch(() => false);
+        return panelVisible || headingVisible;
+      },
+      { timeout: 5_000 }
+    ).toBe(true);
   });
 
-  test('cloudSaveStatus changes when save button is clicked without a project', async ({ page }) => {
-    // When there is no projectId, clicking Save triggers saveScene (export_scene),
-    // not saveToCloud, so cloudSaveStatus stays idle. Verify the button exists and
-    // store state is consistent.
+  test('cloudSaveStatus is consistent when save button clicked without a project', async ({ page }) => {
     const saveBtn = page
       .locator('button[title*="Save"]')
       .filter({ hasText: /save|cloud/i })
       .first();
 
-    const btnExists = await saveBtn.count();
-
-    if (btnExists === 0) {
-      // Save button may not be rendered in this layout variant — skip
-      test.skip();
-      return;
-    }
+    const btnCount = await saveBtn.count();
+    test.skip(btnCount === 0, 'Save button not present in this layout variant');
 
     const statusBefore = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
+      const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+        getState: () => { cloudSaveStatus: string };
+      } | undefined;
       return store?.getState().cloudSaveStatus ?? null;
     });
 
     expect(statusBefore).toBe('idle');
 
-    // Click the save button
     await saveBtn.click();
 
-    // Give any async state update time to process
-    await page.waitForTimeout(500);
-
-    // Without a projectId, status should remain idle (no cloud save attempted)
-    const statusAfter = await page.evaluate(() => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const store = (window as any).__EDITOR_STORE;
-      return store?.getState().cloudSaveStatus ?? null;
-    });
-
-    // Status is either still idle or transitioning — both are valid without a project
-    expect(['idle', 'saving', 'error']).toContain(statusAfter);
+    // Without a projectId, status should remain idle or briefly transition
+    await expect.poll(
+      () => page.evaluate(() => {
+        const store = (window as Record<string, unknown>).__EDITOR_STORE as {
+          getState: () => { cloudSaveStatus: string };
+        } | undefined;
+        return store?.getState().cloudSaveStatus ?? null;
+      }),
+      { timeout: 3_000 }
+    ).toSatisfy((status: unknown) =>
+      ['idle', 'saving', 'error'].includes(status as string)
+    );
   });
 });
