@@ -13,3 +13,15 @@
 code, pre {
   font-family: 'Geist Mono', ui-monospace, monospace;
 }
+
+/* Visible focus indicators — 2px solid accent colour for all interactive elements.
+   Required by spec Section 7.2 and WCAG 2.1 SC 2.4.7 (Focus Visible). */
+:focus-visible {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 2px;
+}
+
+/* Suppress browser default focus ring only when :focus-visible is supported */
+:focus:not(:focus-visible) {
+  outline: none;
+}
