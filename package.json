@@ -2,5 +2,9 @@
   "name": "spawnforge",
   "private": true,
   "workspaces": ["packages/*", "apps/*", "web"],
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=20" },
+  "overrides": {
+    "dompurify": ">=3.3.2",
+    "esbuild": ">=0.25.0"
+  }
 }
