@@ -211,13 +211,19 @@ describe('sf-migrate-tokens codemod', () => {
 npx vitest run scripts/__tests__/sf-migrate-tokens.test.ts
 ```
 
-- [ ] **Step 5: Create runner script**
+- [ ] **Step 5: Compile transform to JS (jscodeshift can't run .ts directly)**
+
+```bash
+npx tsc scripts/sf-migrate-tokens.ts --outDir scripts/dist --module commonjs --esModuleInterop true --target ES2022
+```
+
+- [ ] **Step 6: Create runner script**
 
 ```bash
 #!/usr/bin/env bash
 # scripts/run-migrate-tokens.sh
 # Usage: bash scripts/run-migrate-tokens.sh web/src/components/editor/InspectorPanel.tsx
-npx jscodeshift --parser=tsx --transform scripts/sf-migrate-tokens.ts "$@"
+npx jscodeshift --parser=tsx --transform scripts/dist/sf-migrate-tokens.js "$@"
 ```
 
 - [ ] **Step 6: Commit**

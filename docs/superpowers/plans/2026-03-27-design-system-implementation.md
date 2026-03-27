@@ -144,7 +144,7 @@ mkdir -p packages/ui/src/utils/__tests__
     "@testing-library/react": "^16",
     "@testing-library/jest-dom": "^6",
     "jsdom": "^29",
-    "typescript": "^6",
+    "typescript": "^5",
     "@types/react": "^19",
     "@types/react-dom": "^19"
   }
@@ -223,6 +223,7 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
     globals: true,
+    setupFiles: ['@testing-library/jest-dom/vitest'],
   },
 });
 ```
@@ -300,7 +301,7 @@ const nextConfig: NextConfig = {
 - [ ] **Step 3: Run npm install from root to link workspace**
 
 ```bash
-cd /path/to/project-forge && npm install
+cd "$(git rev-parse --show-toplevel)" && npm install
 ```
 
 - [ ] **Step 4: Verify import works**
@@ -372,6 +373,25 @@ cache-dependency-path: package-lock.json
 ```
 
 Remove `working-directory: web` from `npm ci` steps. Keep `working-directory: web` on steps that run `npx eslint`, `npx tsc`, `npx vitest` etc. (those still need to run from web/).
+
+**ALSO update the `setup-node` action in every job:**
+```yaml
+# BEFORE
+- uses: actions/setup-node@v6
+  with:
+    node-version: 20
+    cache: npm
+    cache-dependency-path: web/package-lock.json
+
+# AFTER
+- uses: actions/setup-node@v6
+  with:
+    node-version: 20
+    cache: npm
+    cache-dependency-path: package-lock.json
+```
+
+Without this, npm cache misses on every CI run (wrong lockfile path).
 
 Also add a `packages/ui` build step before web tests:
 ```yaml

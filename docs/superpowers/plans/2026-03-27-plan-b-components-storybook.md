@@ -142,7 +142,7 @@ export default preview;
 - [ ] **Step 5: Install dependencies**
 
 ```bash
-cd /path/to/project-forge && npm install
+cd "$(git rev-parse --show-toplevel)" && npm install
 ```
 
 - [ ] **Step 6: Verify Storybook starts**
