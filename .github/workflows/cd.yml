@@ -636,13 +636,15 @@ jobs:
         run: npm ci
 
       - name: Run database migrations
-        # Migrations must run before the new code is deployed so any schema
-        # changes are in place when the first request hits the new runtime.
+        # db:push diffs schema.ts against the live DB and applies only what's
+        # needed. This is idempotent — safe to run even if schema was already
+        # pushed manually during development. db:migrate (SQL file based) fails
+        # when migrations were pre-applied via db:push.
         # DATABASE_URL is supplied as a repository secret (matches the production DB).
         working-directory: web
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: npm run db:migrate
+        run: npx drizzle-kit push --force
 
       # Run from repo root — Vercel rootDirectory=web handles the subdirectory.
       # Adding working-directory:web here causes web/web path doubling on remote builds.
