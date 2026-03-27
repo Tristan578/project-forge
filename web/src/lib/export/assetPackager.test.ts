@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { packageAssets } from './assetPackager';
+import { packageAssets, MAX_ASSET_SIZE_BYTES, MAX_PACKAGE_SIZE_BYTES } from './assetPackager';
 import type { AssetMetadata } from '@/stores/editorStore';
 
 // ---------------------------------------------------------------------------
@@ -293,6 +293,152 @@ describe('assetPackager', () => {
       await packageAssets(assets, { compress: true, compressionConfig: customConfig });
       const callArgs = vi.mocked(compressTexture).mock.calls[0];
       expect(callArgs[1]).toEqual(customConfig);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Size limits (regression for #7744 — OOM on large exports)
+  // -------------------------------------------------------------------------
+
+  describe('size limits', () => {
+    it('exports MAX_ASSET_SIZE_BYTES and MAX_PACKAGE_SIZE_BYTES constants', () => {
+      expect(MAX_ASSET_SIZE_BYTES).toBe(10 * 1024 * 1024);
+      expect(MAX_PACKAGE_SIZE_BYTES).toBe(200 * 1024 * 1024);
+    });
+
+    it('includes assets within the per-asset size limit', async () => {
+      // 1 byte under the default 10 MB limit
+      const justUnder = new ArrayBuffer(MAX_ASSET_SIZE_BYTES - 1);
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        asset1: createAsset('asset1', 'big.glb', 'gltf_model', justUnder),
+      };
+      const result = await packageAssets(assets);
+      expect(result.assets).toHaveLength(1);
+      expect(result.assets[0].id).toBe('asset1');
+    });
+
+    it('skips an asset that exceeds the per-asset size limit and warns (regression #7744)', async () => {
+      const oversized = new ArrayBuffer(MAX_ASSET_SIZE_BYTES + 1);
+      const normalBuffer = new ArrayBuffer(1024);
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        big: createAsset('big', 'huge_texture.png', 'texture', oversized),
+        small: createAsset('small', 'icon.png', 'texture', normalBuffer),
+      };
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const result = await packageAssets(assets);
+      warnSpy.mockRestore();
+
+      // Oversized asset is silently dropped
+      expect(result.assets.map((a) => a.id)).not.toContain('big');
+      // Normal asset is still present
+      expect(result.assets.map((a) => a.id)).toContain('small');
+      expect(result.totalSize).toBe(1024);
+    });
+
+    it('emits a console.warn with the asset name when skipping an oversized asset', async () => {
+      const oversized = new ArrayBuffer(MAX_ASSET_SIZE_BYTES + 1);
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        toobig: createAsset('toobig', 'oversized_texture.png', 'texture', oversized),
+      };
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await packageAssets(assets);
+
+      // Assert before restoring so mock.calls is still populated
+      expect(warnSpy).toHaveBeenCalledOnce();
+      const warnMessage = warnSpy.mock.calls[0][0] as string;
+      expect(warnMessage).toContain('oversized_texture.png');
+      expect(warnMessage).toContain('toobig');
+      warnSpy.mockRestore();
+    });
+
+    it('respects a custom maxAssetSize option', async () => {
+      const slightlyLarge = new ArrayBuffer(2 * 1024 * 1024); // 2 MB
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        medium: createAsset('medium', 'medium.glb', 'gltf_model', slightlyLarge),
+      };
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      // Set custom limit of 1 MB — the 2 MB asset should be skipped
+      const result = await packageAssets(assets, { maxAssetSize: 1 * 1024 * 1024 });
+
+      // Assert before restoring
+      expect(result.assets).toHaveLength(0);
+      expect(warnSpy).toHaveBeenCalledOnce();
+      warnSpy.mockRestore();
+    });
+
+    it('throws when total package size would exceed the limit (regression #7744)', async () => {
+      // Two assets each just under the per-asset limit but together exceeding 200 MB
+      const halfPackage = new ArrayBuffer(MAX_PACKAGE_SIZE_BYTES / 2 + 1);
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        asset1: createAsset('asset1', 'part1.glb', 'gltf_model', halfPackage),
+        asset2: createAsset('asset2', 'part2.glb', 'gltf_model', halfPackage),
+      };
+
+      await expect(
+        packageAssets(assets, { maxAssetSize: MAX_PACKAGE_SIZE_BYTES }),
+      ).rejects.toThrow(/package size limit exceeded/i);
+    });
+
+    it('throws with a helpful message including the asset name and limit', async () => {
+      const halfPackage = new ArrayBuffer(MAX_PACKAGE_SIZE_BYTES / 2 + 1);
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        asset1: createAsset('asset1', 'part1.glb', 'gltf_model', halfPackage),
+        asset2: createAsset('asset2', 'part2.glb', 'gltf_model', halfPackage),
+      };
+
+      let thrownError: Error | undefined;
+      try {
+        await packageAssets(assets, { maxAssetSize: MAX_PACKAGE_SIZE_BYTES });
+      } catch (err) {
+        thrownError = err as Error;
+      }
+
+      expect(thrownError).toBeDefined();
+      expect(thrownError?.message).toContain('200 MB');
+      expect(thrownError?.message).toContain('part2.glb');
+    });
+
+    it('respects a custom maxPackageSize option', async () => {
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        asset1: createAsset('asset1', 'file1.glb', 'gltf_model', new ArrayBuffer(600)),
+        asset2: createAsset('asset2', 'file2.glb', 'gltf_model', new ArrayBuffer(600)),
+      };
+
+      // Set custom limit of 1000 bytes — combined 1200 bytes should exceed it
+      await expect(
+        packageAssets(assets, { maxPackageSize: 1000 }),
+      ).rejects.toThrow(/package size limit exceeded/i);
+    });
+
+    it('does not throw when total size equals the package limit exactly', async () => {
+      // Exactly at the limit — should succeed (limit is exclusive: > not >=)
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        asset1: createAsset('asset1', 'file1.glb', 'gltf_model', new ArrayBuffer(500)),
+        asset2: createAsset('asset2', 'file2.glb', 'gltf_model', new ArrayBuffer(500)),
+      };
+
+      const result = await packageAssets(assets, { maxPackageSize: 1000 });
+      expect(result.assets).toHaveLength(2);
+      expect(result.totalSize).toBe(1000);
+    });
+
+    it('validates size before compression when compress=true', async () => {
+      // Per-asset check happens on asset.data (before compression)
+      const oversized = new ArrayBuffer(MAX_ASSET_SIZE_BYTES + 1);
+      const assets: Record<string, AssetMetadata & { data?: ArrayBuffer }> = {
+        big: createAsset('big', 'big.png', 'texture', oversized),
+      };
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const result = await packageAssets(assets, { compress: true });
+      warnSpy.mockRestore();
+
+      // Asset skipped before compressTexture is called
+      expect(compressTexture).not.toHaveBeenCalled();
+      expect(result.assets).toHaveLength(0);
     });
   });
 });
