@@ -142,6 +142,7 @@ export const projects = pgTable(
     thumbnail: text('thumbnail'),
     entityCount: integer('entity_count').notNull().default(0),
     formatVersion: integer('format_version').notNull().default(1),
+    theme: text('theme'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

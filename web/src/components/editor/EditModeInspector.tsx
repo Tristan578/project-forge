@@ -9,23 +9,21 @@ import { X, Box, Circle, Square } from 'lucide-react';
 import { useState } from 'react';
 
 export function EditModeInspector() {
-  const {
-    editModeActive,
-    editModeEntityId,
-    selectionMode,
-    selectedIndices,
-    wireframeVisible,
-    xrayMode,
-    vertexCount,
-    edgeCount,
-    faceCount,
-    exitEditMode,
-    setSelectionMode,
-    performMeshOperation,
-    recalcNormals,
-    toggleWireframe,
-    toggleXray,
-  } = useEditorStore();
+  const editModeActive = useEditorStore((s) => s.editModeActive);
+  const editModeEntityId = useEditorStore((s) => s.editModeEntityId);
+  const selectionMode = useEditorStore((s) => s.selectionMode);
+  const selectedIndices = useEditorStore((s) => s.selectedIndices);
+  const wireframeVisible = useEditorStore((s) => s.wireframeVisible);
+  const xrayMode = useEditorStore((s) => s.xrayMode);
+  const vertexCount = useEditorStore((s) => s.vertexCount);
+  const edgeCount = useEditorStore((s) => s.edgeCount);
+  const faceCount = useEditorStore((s) => s.faceCount);
+  const exitEditMode = useEditorStore((s) => s.exitEditMode);
+  const setSelectionMode = useEditorStore((s) => s.setSelectionMode);
+  const performMeshOperation = useEditorStore((s) => s.performMeshOperation);
+  const recalcNormals = useEditorStore((s) => s.recalcNormals);
+  const toggleWireframe = useEditorStore((s) => s.toggleWireframe);
+  const toggleXray = useEditorStore((s) => s.toggleXray);
 
   const [extrudeDistance, setExtrudeDistance] = useState(1.0);
   const [insetAmount, setInsetAmount] = useState(0.1);
@@ -141,8 +139,12 @@ export function EditModeInspector() {
 
       {/* Selected Count */}
       <div className="text-xs text-zinc-400">
-        Selected: {selectedIndices.length} {selectionMode}
-        {selectedIndices.length !== 1 ? 's' : ''}
+        Selected: {selectedIndices.length}{' '}
+        {selectedIndices.length === 1
+          ? selectionMode
+          : selectionMode === 'vertex'
+            ? 'vertices'
+            : `${selectionMode}s`}
       </div>
 
       {/* Operations */}

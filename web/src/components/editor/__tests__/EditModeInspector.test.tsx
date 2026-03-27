@@ -38,8 +38,7 @@ describe('EditModeInspector', () => {
     edgeCount = 12,
     faceCount = 6,
   } = {}) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore).mockImplementation((_selector?: any) => ({
+    const state = {
       editModeActive,
       editModeEntityId,
       selectionMode,
@@ -55,7 +54,11 @@ describe('EditModeInspector', () => {
       recalcNormals: mockRecalcNormals,
       toggleWireframe: mockToggleWireframe,
       toggleXray: mockToggleXray,
-    }));
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(useEditorStore).mockImplementation((selector?: any) =>
+      selector ? selector(state) : state
+    );
   }
 
   beforeEach(() => {
@@ -120,7 +123,7 @@ describe('EditModeInspector', () => {
   it('shows selected count', () => {
     setupStore({ editModeActive: true, editModeEntityId: 'entity-1', selectedIndices: [0, 1, 2], selectionMode: 'vertex' });
     render(<EditModeInspector />);
-    expect(screen.getByText('Selected: 3 vertexs').textContent).toBe('Selected: 3 vertexs');
+    expect(screen.getByText('Selected: 3 vertices').textContent).toBe('Selected: 3 vertices');
   });
 
   it('renders operation buttons', () => {

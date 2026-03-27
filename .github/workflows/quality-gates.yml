@@ -75,10 +75,12 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
-        working-directory: web
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
 
       - run: npx eslint --max-warnings 0
         working-directory: web
@@ -97,10 +99,12 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
-        working-directory: web
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
 
       - run: npx tsc --noEmit
         working-directory: web
@@ -119,10 +123,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
-        working-directory: web
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
+
+      - name: Test @spawnforge/ui
+        run: cd packages/ui && npx vitest run
 
       - name: Run tests with coverage
         working-directory: web
@@ -354,11 +363,13 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
-        working-directory: web
+
+      - name: Build @spawnforge/ui
+        run: cd packages/ui && npm run build
 
       - name: Create WASM stubs
         # The dev server will attempt to load engine-pkg-* files. Without real WASM
@@ -396,10 +407,9 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
-        working-directory: web
 
       - name: npm audit (web)
         working-directory: web

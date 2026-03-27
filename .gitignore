@@ -61,6 +61,7 @@ web/public/engine-pkg-webgpu-runtime/
 
 # ----- Node / npm -----
 node_modules/
+web/package-lock.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -71,6 +72,9 @@ web/.next/
 web/out/
 web/test-results/
 web/playwright-report/
+
+# ----- Packages -----
+packages/ui/dist/
 
 # ----- TypeScript -----
 *.tsbuildinfo

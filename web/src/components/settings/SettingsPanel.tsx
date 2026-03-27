@@ -1,14 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Settings, Coins, Key, CreditCard, X } from 'lucide-react';
+import { Settings, Coins, Key, CreditCard, Palette, X } from 'lucide-react';
 import { TokenDashboard } from './TokenDashboard';
 import { ApiKeyManager } from './ApiKeyManager';
 import { BillingTab } from './BillingTab';
+import { AppearanceTab } from './AppearanceTab';
 
-type Tab = 'tokens' | 'keys' | 'billing';
+type Tab = 'tokens' | 'keys' | 'billing' | 'appearance';
 
-const TAB_ORDER: Tab[] = ['tokens', 'keys', 'billing'];
+const TAB_ORDER: Tab[] = ['tokens', 'keys', 'billing', 'appearance'];
 
 interface SettingsPanelProps {
   onClose: () => void;
@@ -147,6 +148,22 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             <CreditCard size={14} />
             Billing
           </button>
+          <button
+            role="tab"
+            id="settings-tab-appearance"
+            aria-selected={activeTab === 'appearance'}
+            aria-controls="settings-tabpanel-appearance"
+            tabIndex={activeTab === 'appearance' ? 0 : -1}
+            onClick={() => setActiveTab('appearance')}
+            className={`flex items-center gap-1.5 px-4 py-2 text-sm transition-colors ${
+              activeTab === 'appearance'
+                ? 'border-b-2 border-blue-500 text-zinc-200'
+                : 'text-zinc-400 hover:text-zinc-300'
+            }`}
+          >
+            <Palette size={14} />
+            Appearance
+          </button>
         </div>
 
         {/* Content */}
@@ -159,6 +176,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           {activeTab === 'tokens' && <TokenDashboard />}
           {activeTab === 'keys' && <ApiKeyManager />}
           {activeTab === 'billing' && <BillingTab />}
+          {activeTab === 'appearance' && <AppearanceTab />}
         </div>
       </div>
     </div>
