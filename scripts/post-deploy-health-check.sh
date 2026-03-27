@@ -44,11 +44,15 @@ BYPASS_SECRET="${VERCEL_AUTOMATION_BYPASS:-}"
 
 HEALTH_ENDPOINT="${DEPLOY_URL}/api/health"
 
-# Build curl args — add bypass header when the secret is available.
+# Build curl args — add bypass when the secret is available.
+# Vercel Deployment Protection accepts the bypass as both a header AND query params.
+# Using query params (x-vercel-protection-bypass + x-vercel-set-bypass-cookie) as the
+# header-only approach returns 401 for SSO-protected deployments.
 CURL_EXTRA_ARGS=()
 if [ -n "$BYPASS_SECRET" ]; then
+  HEALTH_ENDPOINT="${DEPLOY_URL}/api/health?x-vercel-protection-bypass=${BYPASS_SECRET}&x-vercel-set-bypass-cookie=true"
   CURL_EXTRA_ARGS+=(--header "x-vercel-protection-bypass: ${BYPASS_SECRET}")
-  echo "Deployment Protection bypass header will be sent"
+  echo "Deployment Protection bypass will be sent (header + query params)"
 fi
 
 # ---------- stabilization wait --------------------------------------------
