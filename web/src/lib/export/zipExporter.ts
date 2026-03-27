@@ -193,14 +193,15 @@ export async function exportAsZip(
       path: 'sw.js',
       content: generateServiceWorker(),
     });
-    // Placeholder icons — data URLs converted to Blobs for the zip
+    // Placeholder icons — paths must match manifest.json and sw.js references:
+    // manifest uses "icon-192.png" and "icon-512.png" at root level.
     try {
       const icons = await generatePlaceholderIcons(options.title);
       for (const [name, dataUrl] of Object.entries(icons) as [string, string][]) {
         const size = name === 'icon192' ? 192 : 512;
         const response = await fetch(dataUrl);
         entries.push({
-          path: `icons/icon-${size}x${size}.png`,
+          path: `icon-${size}.png`,
           content: await response.blob(),
         });
       }
