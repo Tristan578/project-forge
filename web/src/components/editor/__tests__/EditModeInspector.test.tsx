@@ -38,8 +38,7 @@ describe('EditModeInspector', () => {
     edgeCount = 12,
     faceCount = 6,
   } = {}) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    vi.mocked(useEditorStore).mockImplementation((_selector?: any) => ({
+    const state = {
       editModeActive,
       editModeEntityId,
       selectionMode,
@@ -55,7 +54,11 @@ describe('EditModeInspector', () => {
       recalcNormals: mockRecalcNormals,
       toggleWireframe: mockToggleWireframe,
       toggleXray: mockToggleXray,
-    }));
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(useEditorStore).mockImplementation((selector?: any) =>
+      selector ? selector(state) : state
+    );
   }
 
   beforeEach(() => {
