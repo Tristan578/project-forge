@@ -198,8 +198,9 @@ jobs:
     outputs:
       engine-changed: ${{ steps.filter.outputs.engine }}
       web-changed: ${{ steps.filter.outputs.web }}
-      docs-changed: ${{ steps.filter.outputs.docs }}
-      design-changed: ${{ steps.filter.outputs.design }}
+      docs-changed: ${{ steps.filter.outputs.docs-changed }}
+      design-changed: ${{ steps.filter.outputs.design-changed }}
+      web-changed-files: ${{ steps.filter.outputs.web-changed-files }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -249,6 +250,12 @@ jobs:
 
           echo "$CHANGED" | grep -qE '^apps/docs/|^mcp-server/manifest/' && echo "docs-changed=true" >> "$GITHUB_OUTPUT" || echo "docs-changed=false" >> "$GITHUB_OUTPUT"
           echo "$CHANGED" | grep -qE '^apps/design/|^packages/ui/' && echo "design-changed=true" >> "$GITHUB_OUTPUT" || echo "design-changed=false" >> "$GITHUB_OUTPUT"
+
+          # Expose changed web file list for schema-change gating
+          WEB_FILES=$(echo "$CHANGED" | grep '^web/' || true)
+          echo "web-changed-files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$WEB_FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
   build-wasm:
     name: WASM Build
@@ -409,6 +416,7 @@ jobs:
 
   security:
     name: Rust Security Audit
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -734,8 +742,8 @@ jobs:
   # Independent of the main web deploy — docs can ship without a full Vercel web build.
   deploy-docs:
     name: Deploy Docs
-    needs: [check-changes]
-    if: needs.check-changes.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [check-changes, lint, typecheck]
+    if: (needs.check-changes.outputs.docs-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -772,8 +780,8 @@ jobs:
   # Deploys apps/design (Storybook) to the Vercel design project when UI or design files changed.
   deploy-design:
     name: Deploy Design Workbench
-    needs: [check-changes]
-    if: needs.check-changes.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch'
+    needs: [check-changes, lint, typecheck]
+    if: (needs.check-changes.outputs.design-changed == 'true' || github.event_name == 'workflow_dispatch') && needs.lint.result != 'failure' && needs.typecheck.result != 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
