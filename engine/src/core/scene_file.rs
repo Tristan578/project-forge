@@ -88,6 +88,83 @@ impl Default for SceneName {
 // Build helper
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_scene_file() -> SceneFile {
+        SceneFile {
+            format_version: 3,
+            metadata: SceneMetadata {
+                name: "TestScene".to_string(),
+                created_at: "2026-01-01".to_string(),
+                modified_at: "2026-01-02".to_string(),
+            },
+            environment: crate::core::environment::EnvironmentSettings::default(),
+            ambient_light: AmbientLightData::default(),
+            input_bindings: crate::core::input::InputMap::default(),
+            assets: HashMap::new(),
+            post_processing: crate::core::post_processing::PostProcessingSettings::default(),
+            audio_buses: crate::core::audio::AudioBusConfig::default(),
+            entities: Vec::new(),
+            game_ui: None,
+            custom_wgsl_source: None,
+        }
+    }
+
+    #[test]
+    fn scene_file_serialize_deserialize_round_trip() {
+        let original = minimal_scene_file();
+        let json = serde_json::to_string(&original).expect("serialization failed");
+        let restored: SceneFile = serde_json::from_str(&json).expect("deserialization failed");
+
+        assert_eq!(restored.format_version, 3);
+        assert_eq!(restored.metadata.name, "TestScene");
+        assert!(restored.entities.is_empty());
+        assert!(restored.game_ui.is_none());
+    }
+
+    #[test]
+    fn scene_file_round_trip_preserves_entities_empty() {
+        let original = minimal_scene_file();
+        let json = serde_json::to_string(&original).unwrap();
+        let restored: SceneFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.entities.len(), 0);
+        assert_eq!(restored.format_version, original.format_version);
+    }
+
+    #[test]
+    fn scene_file_round_trip_preserves_game_ui() {
+        let mut scene = minimal_scene_file();
+        scene.game_ui = Some("<div>test</div>".to_string());
+        let json = serde_json::to_string(&scene).unwrap();
+        let restored: SceneFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.game_ui, Some("<div>test</div>".to_string()));
+    }
+
+    #[test]
+    fn scene_file_game_ui_none_round_trips() {
+        let scene = minimal_scene_file();
+        assert!(scene.game_ui.is_none());
+        let json = serde_json::to_string(&scene).unwrap();
+        let restored: SceneFile = serde_json::from_str(&json).unwrap();
+        assert!(restored.game_ui.is_none());
+    }
+
+    #[test]
+    fn ambient_light_data_default_is_white_bright() {
+        let light = AmbientLightData::default();
+        assert_eq!(light.color, [1.0, 1.0, 1.0]);
+        assert!(light.brightness > 0.0);
+    }
+
+    #[test]
+    fn scene_name_resource_default_is_untitled() {
+        let name = SceneName::default();
+        assert_eq!(name.0, "Untitled");
+    }
+}
+
 /// Build a `SceneFile` from pre-collected data.
 pub fn build_scene_file(
     scene_name: &str,

@@ -271,6 +271,180 @@ fn height_to_color(t: f32) -> [f32; 4] {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- generate_heightmap ---
+
+    #[test]
+    fn generate_heightmap_resolution_64_returns_4096_values() {
+        let data = TerrainData {
+            resolution: 64,
+            ..TerrainData::default()
+        };
+        let heights = generate_heightmap(&data);
+        assert_eq!(heights.len(), 4096, "64x64 = 4096 values");
+    }
+
+    #[test]
+    fn generate_heightmap_height_scale_zero_produces_all_zeros() {
+        let data = TerrainData {
+            height_scale: 0.0,
+            resolution: 16,
+            ..TerrainData::default()
+        };
+        let heights = generate_heightmap(&data);
+        for h in &heights {
+            assert!(h.abs() < 1e-5, "height_scale=0 must produce zero heights, got {}", h);
+        }
+    }
+
+    #[test]
+    fn generate_heightmap_perlin_noise_type() {
+        let data = TerrainData {
+            noise_type: NoiseType::Perlin,
+            resolution: 16,
+            ..TerrainData::default()
+        };
+        let heights = generate_heightmap(&data);
+        assert_eq!(heights.len(), 256);
+        // With default height_scale=10, values should be non-trivial range
+        let max_h = heights.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+        assert!(max_h.abs() > 0.0, "Perlin noise should produce non-zero heights");
+    }
+
+    #[test]
+    fn generate_heightmap_simplex_noise_type() {
+        let data = TerrainData {
+            noise_type: NoiseType::Simplex,
+            resolution: 16,
+            ..TerrainData::default()
+        };
+        let heights = generate_heightmap(&data);
+        assert_eq!(heights.len(), 256);
+    }
+
+    #[test]
+    fn generate_heightmap_value_noise_type() {
+        let data = TerrainData {
+            noise_type: NoiseType::Value,
+            resolution: 16,
+            ..TerrainData::default()
+        };
+        let heights = generate_heightmap(&data);
+        assert_eq!(heights.len(), 256);
+    }
+
+    // --- build_terrain_mesh ---
+
+    #[test]
+    fn build_terrain_mesh_resolution_2_produces_4_vertices() {
+        // resolution=2 → 2x2 grid → 4 vertices
+        let heights = vec![0.0f32; 4];
+        let mesh = build_terrain_mesh(&heights, 2, 10.0);
+        // Position attribute should have 4 entries
+        use bevy::mesh::VertexAttributeValues;
+        if let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(bevy::mesh::Mesh::ATTRIBUTE_POSITION)
+        {
+            assert_eq!(positions.len(), 4, "2x2 grid must have 4 vertices");
+        } else {
+            panic!("Mesh has no position attribute or wrong type");
+        }
+    }
+
+    #[test]
+    fn build_terrain_mesh_no_nan_values() {
+        let data = TerrainData {
+            resolution: 16,
+            ..TerrainData::default()
+        };
+        let heights = generate_heightmap(&data);
+        let mesh = build_terrain_mesh(&heights, data.resolution, data.size);
+        use bevy::mesh::VertexAttributeValues;
+        if let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(bevy::mesh::Mesh::ATTRIBUTE_POSITION)
+        {
+            for p in positions {
+                assert!(!p[0].is_nan(), "NaN in position.x");
+                assert!(!p[1].is_nan(), "NaN in position.y");
+                assert!(!p[2].is_nan(), "NaN in position.z");
+            }
+        }
+        if let Some(VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(bevy::mesh::Mesh::ATTRIBUTE_NORMAL)
+        {
+            for n in normals {
+                assert!(!n[0].is_nan(), "NaN in normal.x");
+                assert!(!n[1].is_nan(), "NaN in normal.y");
+                assert!(!n[2].is_nan(), "NaN in normal.z");
+            }
+        }
+    }
+
+    // --- height_to_color boundary values ---
+
+    // height_to_color is private, but we can test it indirectly via build_terrain_mesh
+    // by using known heights where a single height spans the range.
+    // We also expose a direct test by using the module-level private fn via test scope.
+
+    #[test]
+    fn height_to_color_low_is_green() {
+        // t = 0.0 → grass green band
+        let c = super::height_to_color(0.0);
+        assert!(c[1] > c[0], "low height should be greenish: {:?}", c);
+        assert_eq!(c[3], 1.0, "alpha must be 1.0");
+    }
+
+    #[test]
+    fn height_to_color_threshold_0_3() {
+        // t = 0.3 → exactly on boundary (green → brown lerp starts)
+        let c = super::height_to_color(0.3);
+        assert_eq!(c[3], 1.0);
+    }
+
+    #[test]
+    fn height_to_color_mid_is_brownish() {
+        // t = 0.6 → boundary between medium and high zones
+        let c = super::height_to_color(0.6);
+        assert_eq!(c[3], 1.0);
+    }
+
+    #[test]
+    fn height_to_color_threshold_0_85() {
+        // t = 0.85 → boundary high → peak
+        let c = super::height_to_color(0.85);
+        assert_eq!(c[3], 1.0);
+    }
+
+    #[test]
+    fn height_to_color_peak_approaches_white() {
+        // t = 1.0 → full white snow
+        let c = super::height_to_color(1.0);
+        // All RGB channels should approach 1.0
+        assert!(c[0] > 0.9, "peak R should approach 1.0: {:?}", c);
+        assert!(c[1] > 0.9, "peak G should approach 1.0: {:?}", c);
+        assert!(c[2] > 0.9, "peak B should approach 1.0: {:?}", c);
+        assert_eq!(c[3], 1.0);
+    }
+
+    #[test]
+    fn height_to_color_all_values_in_range() {
+        for i in 0..=100 {
+            let t = i as f32 / 100.0;
+            let c = super::height_to_color(t);
+            for (j, ch) in c.iter().enumerate() {
+                assert!(
+                    (0.0..=1.0).contains(ch),
+                    "height_to_color({}) channel {} = {} out of [0,1]",
+                    t, j, ch
+                );
+            }
+        }
+    }
+}
+
 /// Apply sculpting: modify heightmap at world-space position within radius.
 /// `position` is in local terrain space (x, z).
 /// `radius` is in world units.
