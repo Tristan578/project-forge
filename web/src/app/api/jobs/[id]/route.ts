@@ -46,12 +46,21 @@ export async function PATCH(
       }
       updates.status = body.status;
     }
-    if (typeof body.progress === 'number') updates.progress = body.progress;
+    if (body.progress !== undefined) {
+      if (
+        typeof body.progress !== 'number' ||
+        !Number.isFinite(body.progress) ||
+        body.progress < 0 ||
+        body.progress > 100
+      ) {
+        return NextResponse.json({ error: 'progress must be a finite number between 0 and 100' }, { status: 400 });
+      }
+      updates.progress = body.progress;
+    }
     if (body.errorMessage !== undefined) updates.errorMessage = body.errorMessage;
     if (body.resultUrl !== undefined) updates.resultUrl = body.resultUrl;
     if (body.resultMeta !== undefined) updates.resultMeta = body.resultMeta;
     if (typeof body.imported === 'boolean') updates.imported = body.imported ? 1 : 0;
-    if (typeof body.refunded === 'boolean') updates.refunded = body.refunded ? 1 : 0;
 
     if (body.status === 'completed' || body.status === 'failed') {
       updates.completedAt = new Date();
