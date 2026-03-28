@@ -166,6 +166,13 @@ fn handle_camera_shake(payload: serde_json::Value) -> super::CommandResult {
         .and_then(|v| v.as_f64())
         .ok_or("Missing duration")? as f32;
 
+    if !intensity.is_finite() || !duration.is_finite() {
+        return Err("camera_shake: intensity and duration must be finite numbers".to_string());
+    }
+
+    let intensity = intensity.clamp(0.0, 100.0);
+    let duration = duration.clamp(0.0, 30.0);
+
     if queue_camera_shake_from_bridge(CameraShakeRequest {
         intensity,
         duration,
