@@ -21,8 +21,8 @@ test.describe('Theme Effects @ui', () => {
       document.documentElement.setAttribute('data-sf-theme', 'dark');
       document.documentElement.setAttribute('data-sf-effects', 'on');
     });
-    // Allow React to re-render after attribute change
-    await page.waitForTimeout(200);
+    // Wait until React has removed any prior effect element before asserting absence
+    await page.waitForFunction(() => !document.querySelector('[data-sf-effect]'));
     const effect = page.locator('[data-sf-effect]');
     await expect(effect).toHaveCount(0);
   });
@@ -52,7 +52,8 @@ test.describe('Theme Effects @ui', () => {
       document.documentElement.setAttribute('data-sf-theme', 'ember');
       document.documentElement.setAttribute('data-sf-effects', 'off');
     });
-    await page.waitForTimeout(200);
+    // Wait until React has removed any prior effect element before asserting absence
+    await page.waitForFunction(() => !document.querySelector('[data-sf-effect]'));
     const effect = page.locator('[data-sf-effect]');
     await expect(effect).toHaveCount(0);
   });
@@ -63,7 +64,8 @@ test.describe('Theme Effects @ui', () => {
       document.documentElement.setAttribute('data-sf-theme', 'ember');
       document.documentElement.setAttribute('data-sf-effects', 'on');
     });
-    await page.waitForTimeout(200);
+    // Wait until React has removed any prior effect element before asserting absence
+    await page.waitForFunction(() => !document.querySelector('[data-sf-effect]'));
     const effect = page.locator('[data-sf-effect]');
     await expect(effect).toHaveCount(0);
   });
@@ -74,7 +76,7 @@ test.describe('Theme Effects @ui', () => {
       document.documentElement.setAttribute('data-sf-theme', 'dark');
       document.documentElement.setAttribute('data-sf-effects', 'on');
     });
-    await page.waitForTimeout(200);
+    await page.waitForFunction(() => !document.querySelector('[data-sf-effect]'));
     await expect(page.locator('[data-sf-effect]')).toHaveCount(0);
 
     // Switch to ember
