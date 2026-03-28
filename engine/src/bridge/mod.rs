@@ -106,12 +106,30 @@ pub fn emit_init_event(phase: &str, message: Option<&str>, error: Option<&str>) 
     });
 }
 
+/// Validate that a canvas ID contains only safe characters for use in a CSS selector.
+/// Allowed: ASCII alphanumeric, hyphen, underscore.
+fn validate_canvas_id(canvas_id: &str) -> bool {
+    !canvas_id.is_empty()
+        && canvas_id.len() <= 128
+        && canvas_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Initialize the Forge engine and attach to a canvas element.
 /// This function is idempotent - subsequent calls are no-ops.
 #[wasm_bindgen]
 pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
     // Set panic hook for better error messages in browser console
     console_error_panic_hook::set_once();
+
+    // Validate canvas_id before embedding in a CSS selector to prevent injection.
+    if !validate_canvas_id(canvas_id) {
+        return Err(JsValue::from_str(&format!(
+            "Invalid canvas_id '{}': must contain only alphanumeric characters, hyphens, or underscores",
+            canvas_id
+        )));
+    }
 
     // Singleton check - only initialize once
     if core::Engine::is_initialized() {
