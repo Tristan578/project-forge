@@ -38,6 +38,7 @@ pub enum QueryRequest {
     SpriteSheetState { entity_id: String },
     SpriteAnimatorState { entity_id: String },
     PlayState,
+    GameComponentTypes,
 }
 
 // === Queue Methods ===

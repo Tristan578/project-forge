@@ -99,11 +99,10 @@ fn handle_remove_game_component(payload: serde_json::Value) -> super::CommandRes
 }
 
 /// Handle list_game_component_types command.
-/// Returns static list of available types with default data.
+/// Queues a static query response with all available game component type names.
 fn handle_list_game_component_types(_payload: serde_json::Value) -> super::CommandResult {
-    // This is a synchronous query, handled directly via handle_query in dispatch
-    // But we need to return data immediately here
-    Ok(())
+    use crate::core::pending_commands::QueryRequest;
+    super::handle_query(QueryRequest::GameComponentTypes)
 }
 
 // --- Game Camera Commands ---
