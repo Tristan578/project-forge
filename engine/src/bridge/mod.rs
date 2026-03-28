@@ -229,6 +229,15 @@ pub fn init_engine(canvas_id: &str) -> Result<(), JsValue> {
 /// and dispatches to the appropriate handler in core.
 #[wasm_bindgen]
 pub fn handle_command(command: &str, payload: JsValue) -> Result<JsValue, JsValue> {
+    // Reject oversized command strings before any allocation
+    if command.len() > 128 {
+        let response = CommandResponse::err(format!(
+            "Command name too long ({} chars, limit 128)", command.len()
+        ));
+        return response.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+            .map_err(|e| JsValue::from_str(&e.to_string()));
+    }
+
     // Parse the payload from JsValue to serde_json::Value
     let payload_value: serde_json::Value = serde_wasm_bindgen::from_value(payload)
         .unwrap_or(serde_json::Value::Null);
@@ -263,6 +272,18 @@ pub fn handle_command_batch(batch: JsValue) -> Result<JsValue, JsValue> {
 
     let batch_value: serde_json::Value = serde_wasm_bindgen::from_value(batch)
         .unwrap_or(serde_json::Value::Null);
+
+    // Reject oversized batches before dispatching
+    if let Some(arr) = batch_value.as_array() {
+        if arr.len() > 256 {
+            use core::commands::CommandResponse;
+            let responses: Vec<CommandResponse> = vec![CommandResponse::err(format!(
+                "Batch too large ({} items, limit 256)", arr.len()
+            ))];
+            return responses.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+                .map_err(|e| JsValue::from_str(&e.to_string()));
+        }
+    }
 
     let responses = core::commands::dispatch_batch(batch_value);
 

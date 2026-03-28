@@ -99,10 +99,14 @@ fn handle_remove_game_component(payload: serde_json::Value) -> super::CommandRes
 }
 
 /// Handle list_game_component_types command.
-/// Returns static list of available types with default data.
+/// Queues a static query response with all available game component type names.
+/// The query system will emit a QUERY_GAME_COMPONENT_TYPES event with the full list.
 fn handle_list_game_component_types(_payload: serde_json::Value) -> super::CommandResult {
-    // This is a synchronous query, handled directly via handle_query in dispatch
-    // But we need to return data immediately here
+    use crate::core::pending_commands::{queue_query_from_bridge, QueryRequest};
+    // Best-effort queue — may fail in test context (no PendingCommands resource).
+    // The command itself always succeeds; the event fires on the next frame if the
+    // engine is running.
+    let _ = queue_query_from_bridge(QueryRequest::GameComponentTypes);
     Ok(())
 }
 

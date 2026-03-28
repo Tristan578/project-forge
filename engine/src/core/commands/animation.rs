@@ -38,6 +38,19 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
                 Err(e) => Some(Err(e)),
             }
         },
+        // Stub handlers for animation commands not yet fully implemented
+        "create_animation_clip" => Some(Err("Not yet implemented: create_animation_clip".to_string())),
+        "add_keyframe" => Some(Err("Not yet implemented: add_keyframe".to_string())),
+        "remove_keyframe" => Some(Err("Not yet implemented: remove_keyframe".to_string())),
+        "update_keyframe" => Some(Err("Not yet implemented: update_keyframe".to_string())),
+        "get_animation_clips" => Some(Err("Not yet implemented: get_animation_clips".to_string())),
+        "play_animation_clip" => Some(Err("Not yet implemented: play_animation_clip".to_string())),
+        "stop_animation_clip" => Some(Err("Not yet implemented: stop_animation_clip".to_string())),
+        "set_animation_state_machine" => Some(Err("Not yet implemented: set_animation_state_machine".to_string())),
+        "remove_animation_state_machine" => Some(Err("Not yet implemented: remove_animation_state_machine".to_string())),
+        "list_skeleton_animations" => Some(Err("Not yet implemented: list_skeleton_animations".to_string())),
+        "get_skeleton_animation" => Some(Err("Not yet implemented: get_skeleton_animation".to_string())),
+
         _ => None,
     }
 }

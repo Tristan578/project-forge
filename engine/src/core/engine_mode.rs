@@ -246,7 +246,7 @@ pub fn snapshot_scene(
 pub fn restore_scene(
     commands: &mut Commands,
     snapshot: &SceneSnapshot,
-    entity_query: &Query<(
+    entity_query: &mut Query<(
         Entity,
         &EntityId,
         &mut Transform,
@@ -277,10 +277,46 @@ pub fn restore_scene(
         }
     }
 
-    // 4. Restore transforms for entities that still exist
-    // Note: We can't mutate through the immutable query reference here.
-    // The actual restoration happens in the system that calls this, using commands.
-    // For now, we queue transform/state restoration via commands.
+    // 4. Restore transforms and base component data for entities that still exist.
+    // Build a map from entity_id -> snapshot for O(1) lookups.
+    let snapshot_map: std::collections::HashMap<&str, &EntitySnapshot> = snapshot.entities.iter()
+        .map(|s| (s.entity_id.as_str(), s))
+        .collect();
+
+    for (entity, eid, mut transform, mut name, mut visible, mat_data, light_data, phys_data) in entity_query.iter_mut() {
+        if let Some(snap) = snapshot_map.get(eid.0.as_str()) {
+            // Restore transform
+            *transform = snap.transform.to_transform();
+            // Restore name
+            name.0 = snap.name.clone();
+            // Restore visibility
+            visible.0 = snap.visible;
+
+            // Restore material data if present on entity and in snapshot
+            if let (Some(mut mat), Some(ref snap_mat)) = (mat_data, &snap.material_data) {
+                *mat = snap_mat.clone();
+            }
+            // Restore light data if present on entity and in snapshot
+            if let (Some(mut light), Some(ref snap_light)) = (light_data, &snap.light_data) {
+                *light = snap_light.clone();
+            }
+            // Restore physics data if present on entity and in snapshot
+            if let (Some(mut phys), Some(ref snap_phys)) = (phys_data, &snap.physics_data) {
+                *phys = snap_phys.clone();
+            }
+            // For components not in the query (script, audio, particles, etc.),
+            // commands.entity().insert() is used to queue the restore.
+            if let Some(ref snap_script) = snap.script_data {
+                commands.entity(entity).insert(snap_script.clone());
+            }
+            if let Some(ref snap_audio) = snap.audio_data {
+                commands.entity(entity).insert(snap_audio.clone());
+            }
+            if let Some(ref snap_particle) = snap.particle_data {
+                commands.entity(entity).insert(snap_particle.clone());
+            }
+        }
+    }
 
     // 5. Respawn entities that were deleted during play
     for snap in &snapshot.entities {
