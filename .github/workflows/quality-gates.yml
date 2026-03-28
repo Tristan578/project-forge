@@ -531,3 +531,43 @@ jobs:
           }
           console.log('PASS: Effects delta within acceptable range (< 5 points)');
           NODE_EOF
+
+  storybook-internal-gate:
+    name: Storybook Internal Leak Gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: cd packages/ui && npm run build
+
+      - name: Build public Storybook (INCLUDE_INTERNAL not set)
+        run: cd apps/design && npm run build-storybook -- --output-dir storybook-public
+        env:
+          INCLUDE_INTERNAL: ''
+
+      - name: Assert no internal story titles in public build
+        run: |
+          if [ ! -d "apps/design/stories/internal" ]; then
+            echo "No internal stories directory -- nothing to check."
+            exit 0
+          fi
+          INTERNAL_TITLES=$(grep -r --include="*.stories.*" "title:" apps/design/stories/internal/ \
+            | sed "s/.*title:[[:space:]]*['\"]//;s/['\"].*//" \
+            | tr '\n' '|' | sed 's/|$//')
+          if [ -z "$INTERNAL_TITLES" ]; then
+            echo "No internal story titles found -- nothing to check."
+            exit 0
+          fi
+          echo "Checking for internal titles: $INTERNAL_TITLES"
+          if grep -r --include="*.js" -E "$INTERNAL_TITLES" apps/design/storybook-public/ 2>/dev/null | head -5; then
+            echo "::error::Public Storybook build contains internal story titles. Check INCLUDE_INTERNAL gating."
+            exit 1
+          fi
+          echo "PASS: No internal story titles found in public Storybook build."
