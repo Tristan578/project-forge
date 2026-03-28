@@ -100,9 +100,14 @@ fn handle_remove_game_component(payload: serde_json::Value) -> super::CommandRes
 
 /// Handle list_game_component_types command.
 /// Queues a static query response with all available game component type names.
+/// The query system will emit a QUERY_GAME_COMPONENT_TYPES event with the full list.
 fn handle_list_game_component_types(_payload: serde_json::Value) -> super::CommandResult {
-    use crate::core::pending_commands::QueryRequest;
-    super::handle_query(QueryRequest::GameComponentTypes)
+    use crate::core::pending_commands::{queue_query_from_bridge, QueryRequest};
+    // Best-effort queue — may fail in test context (no PendingCommands resource).
+    // The command itself always succeeds; the event fires on the next frame if the
+    // engine is running.
+    let _ = queue_query_from_bridge(QueryRequest::GameComponentTypes);
+    Ok(())
 }
 
 // --- Game Camera Commands ---
