@@ -10,7 +10,10 @@ use super::csg;
 use super::entity_id::{EntityId, EntityName, EntityVisible};
 use super::game_camera::{GameCameraData, ActiveGameCamera};
 use super::terrain::{self, TerrainEnabled};
-use super::tilemap::TilemapEnabled;
+use super::lod::LodData;
+use super::physics_2d::{Physics2dData, Physics2dEnabled};
+use super::skeleton2d::{SkeletonData2d, SkeletonEnabled2d};
+use super::tilemap::{TilemapData, TilemapEnabled};
 // Re-export history types for backward compatibility (bridge/mod.rs accesses these via entity_factory::)
 pub use super::history::{EntitySnapshot, HistoryStack, TransformSnapshot, UndoableAction};
 use super::lighting::LightData;
@@ -144,6 +147,13 @@ struct AuxComponentData {
     game_camera_data: Option<GameCameraData>,
     active_game_camera: bool,
     sprite_data: Option<super::sprite::SpriteData>,
+    physics2d_data: Option<Physics2dData>,
+    physics2d_enabled: bool,
+    tilemap_data: Option<TilemapData>,
+    tilemap_enabled: bool,
+    skeleton2d_data: Option<SkeletonData2d>,
+    skeleton2d_enabled: bool,
+    lod_data: Option<LodData>,
 }
 
 impl Default for AuxComponentData {
@@ -164,6 +174,13 @@ impl Default for AuxComponentData {
             game_camera_data: None,
             active_game_camera: false,
             sprite_data: None,
+            physics2d_data: None,
+            physics2d_enabled: false,
+            tilemap_data: None,
+            tilemap_enabled: false,
+            skeleton2d_data: None,
+            skeleton2d_enabled: false,
+            lod_data: None,
         }
     }
 }
@@ -193,6 +210,16 @@ fn build_aux_index(
         Option<&ActiveGameCamera>,
     )>,
     sprite_query: &Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
+    physics2d_tilemap_skeleton_lod_query: &Query<(
+        &EntityId,
+        Option<&Physics2dData>,
+        Option<&Physics2dEnabled>,
+        Option<&TilemapData>,
+        Option<&TilemapEnabled>,
+        Option<&SkeletonData2d>,
+        Option<&SkeletonEnabled2d>,
+        Option<&LodData>,
+    )>,
 ) -> HashMap<String, AuxComponentData> {
     let mut index: HashMap<String, AuxComponentData> = HashMap::new();
 
@@ -233,6 +260,17 @@ fn build_aux_index(
     for (eid, sd) in sprite_query.iter() {
         let entry = index.entry(eid.0.clone()).or_default();
         entry.sprite_data = sd.cloned();
+    }
+
+    for (eid, p2d, p2de, tmd, tme, sk, ske, ld) in physics2d_tilemap_skeleton_lod_query.iter() {
+        let entry = index.entry(eid.0.clone()).or_default();
+        entry.physics2d_data = p2d.cloned();
+        entry.physics2d_enabled = p2de.is_some();
+        entry.tilemap_data = tmd.cloned();
+        entry.tilemap_enabled = tme.is_some();
+        entry.skeleton2d_data = sk.cloned();
+        entry.skeleton2d_enabled = ske.is_some();
+        entry.lod_data = ld.cloned();
     }
 
     index
@@ -279,6 +317,13 @@ fn snapshot_entity(
     snapshot.game_camera_data = aux.game_camera_data.clone();
     snapshot.active_game_camera = aux.active_game_camera;
     snapshot.sprite_data = aux.sprite_data.clone();
+    snapshot.physics2d_data = aux.physics2d_data.clone();
+    snapshot.physics2d_enabled = aux.physics2d_enabled;
+    snapshot.tilemap_data = aux.tilemap_data.clone();
+    snapshot.tilemap_enabled = aux.tilemap_enabled;
+    snapshot.skeleton2d_data = aux.skeleton2d_data.clone();
+    snapshot.skeleton2d_enabled = aux.skeleton2d_enabled;
+    snapshot.lod_data = aux.lod_data.clone();
     snapshot
 }
 
@@ -321,6 +366,27 @@ fn insert_aux_components(entity_commands: &mut bevy::ecs::system::EntityCommands
     if let Some(ref sd) = aux.sprite_data {
         entity_commands.insert(sd.clone());
     }
+    if let Some(ref p2d) = aux.physics2d_data {
+        entity_commands.insert(p2d.clone());
+    }
+    if aux.physics2d_enabled {
+        entity_commands.insert(Physics2dEnabled);
+    }
+    if let Some(ref tmd) = aux.tilemap_data {
+        entity_commands.insert(tmd.clone());
+    }
+    if aux.tilemap_enabled {
+        entity_commands.insert(TilemapEnabled);
+    }
+    if let Some(ref sk) = aux.skeleton2d_data {
+        entity_commands.insert(sk.clone());
+    }
+    if aux.skeleton2d_enabled {
+        entity_commands.insert(SkeletonEnabled2d);
+    }
+    if let Some(ref ld) = aux.lod_data {
+        entity_commands.insert(ld.clone());
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +405,7 @@ pub fn apply_delete_requests(
     procedural_joint_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>)>,
     game_anim_query: Query<(&EntityId, Option<&super::game_components::GameComponents>, Option<&AnimationClipData>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
+    physics2d_tilemap_skeleton_lod_query: Query<(&EntityId, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>, Option<&LodData>)>,
     mut selection: ResMut<Selection>,
     mut selection_events: MessageWriter<SelectionChangedEvent>,
     mut history: ResMut<HistoryStack>,
@@ -351,7 +418,7 @@ pub fn apply_delete_requests(
     let entity_index: HashMap<String, (Entity, &EntityId, &EntityName, &Transform, &EntityVisible, Option<&EntityType>, Option<&MaterialData>, Option<&LightData>, Option<&PhysicsData>, Option<&PhysicsEnabled>, Option<&AssetRef>)> =
         query.iter().map(|row| (row.1 .0.clone(), row)).collect();
 
-    // Pre-index auxiliary component data (single O(n) pass over 6 queries)
+    // Pre-index auxiliary component data (single O(n) pass over 7 queries)
     let aux_index = build_aux_index(
         &script_audio_query,
         &reverb_particle_query,
@@ -359,6 +426,7 @@ pub fn apply_delete_requests(
         &procedural_joint_query,
         &game_anim_query,
         &sprite_query,
+        &physics2d_tilemap_skeleton_lod_query,
     );
 
     let empty_aux = AuxComponentData::default();
@@ -443,6 +511,7 @@ pub fn apply_duplicate_requests(
     procedural_joint_query: Query<(&EntityId, Option<&super::procedural_mesh::ProceduralMeshData>, Option<&JointData>)>,
     game_anim_query: Query<(&EntityId, Option<&super::game_components::GameComponents>, Option<&AnimationClipData>, Option<&GameCameraData>, Option<&ActiveGameCamera>)>,
     sprite_query: Query<(&EntityId, Option<&super::sprite::SpriteData>)>,
+    physics2d_tilemap_skeleton_lod_query: Query<(&EntityId, Option<&Physics2dData>, Option<&Physics2dEnabled>, Option<&TilemapData>, Option<&TilemapEnabled>, Option<&SkeletonData2d>, Option<&SkeletonEnabled2d>, Option<&LodData>)>,
     mut history: ResMut<HistoryStack>,
 ) {
     if pending.duplicate_requests.is_empty() {
@@ -467,7 +536,7 @@ pub fn apply_duplicate_requests(
         .map(|(eid, ar)| (eid.0.clone(), ar.cloned()))
         .collect();
 
-    // Pre-index auxiliary component data (single O(n) pass over 6 queries)
+    // Pre-index auxiliary component data (single O(n) pass over 7 queries)
     let aux_index = build_aux_index(
         &script_audio_query,
         &reverb_particle_query,
@@ -475,6 +544,7 @@ pub fn apply_duplicate_requests(
         &procedural_joint_query,
         &game_anim_query,
         &sprite_query,
+        &physics2d_tilemap_skeleton_lod_query,
     );
 
     let empty_aux = AuxComponentData::default();
