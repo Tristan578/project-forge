@@ -21,6 +21,9 @@
     "typescript": "^5",
     "vitest": "^3",
     "@playwright/test": "^1",
+    "@testing-library/react": "^16",
+    "@testing-library/jest-dom": "^6",
+    "@testing-library/user-event": "^14",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/node": "^20"
