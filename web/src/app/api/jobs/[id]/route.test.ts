@@ -138,10 +138,18 @@ describe('PATCH /api/jobs/[id]', () => {
   });
 
   it('should silently ignore refunded field', async () => {
+    const mockSet = vi.fn().mockReturnThis();
+    const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
     const mockDb = {
-      select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
-      where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
-      update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(),
+      select: vi.fn().mockReturnValue({
+        from: vi.fn().mockReturnThis(),
+        where: vi.fn().mockReturnThis(),
+        limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
+      }),
+      update: vi.fn().mockReturnValue({
+        set: mockSet.mockReturnValue({ where: mockUpdateWhere }),
+        where: mockUpdateWhere,
+      }),
     };
     vi.mocked(getDb).mockReturnValue(mockDb as never);
 
@@ -153,8 +161,8 @@ describe('PATCH /api/jobs/[id]', () => {
     const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
     expect(res.status).toBe(200);
     // Verify refunded was not included in the set() call
-    const setCall = mockDb.set.mock.calls[0][0];
-    expect(setCall.refunded).toBeUndefined();
+    const setCall = mockSet.mock.calls[0]?.[0] as Record<string, unknown> | undefined;
+    expect(setCall?.refunded).toBeUndefined();
   });
 
   it('should return 500 on database error', async () => {

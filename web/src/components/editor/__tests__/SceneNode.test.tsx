@@ -112,7 +112,7 @@ describe('SceneNode', () => {
     );
 
     const draggable = container.querySelector('[draggable]') as HTMLElement;
-    expect(draggable).toBeTruthy();
+    expect(draggable).not.toBeNull();
     // Provide a mock dataTransfer since jsdom does not implement it
     fireEvent.dragStart(draggable, {
       dataTransfer: {
@@ -137,7 +137,7 @@ describe('SceneNode', () => {
     );
 
     const draggable = container.querySelector('[draggable]') as HTMLElement;
-    expect(draggable).toBeTruthy();
+    expect(draggable).not.toBeNull();
     fireEvent.dragEnd(draggable);
 
     expect(mockOnDragEnd).toHaveBeenCalledTimes(1);
@@ -154,7 +154,7 @@ describe('SceneNode', () => {
     );
 
     const row = container.querySelector('[draggable]');
-    expect(row).toBeTruthy();
+    expect(row).not.toBeNull();
     expect(row!.className).toContain('opacity-50');
   });
 });

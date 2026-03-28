@@ -59,6 +59,7 @@ test.describe('Performance Budget @ui', () => {
     if (lcpValues.length === 0) {
       // LCP may not fire when GPU/WASM is skipped — treat as not applicable
       // rather than failing the test (this only happens in certain CI configs)
+      console.warn('No LCP measurements collected — budget check skipped');
       return;
     }
 

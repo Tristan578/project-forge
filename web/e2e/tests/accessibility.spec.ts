@@ -249,12 +249,13 @@ test.describe('Accessibility @ui', () => {
       test.slow();
       // Tab repeatedly until we reach a treeitem or the hierarchy tree
       const maxTabs = 20;
+      let focused = false;
       for (let i = 0; i < maxTabs; i++) {
         await page.keyboard.press('Tab');
-        const tree = page.locator('[role="tree"][aria-label="Scene hierarchy"]');
-        const focused = await page.evaluate(() => document.activeElement?.closest('[role="tree"]') !== null);
-        if (focused || await tree.count() > 0) break;
+        focused = await page.evaluate(() => document.activeElement?.closest('[role="tree"]') !== null);
+        if (focused) break;
       }
+      expect(focused).toBe(true);
 
       // Hierarchy tree element should be present and reachable
       const hierarchyTree = page.locator('[role="tree"][aria-label="Scene hierarchy"]');

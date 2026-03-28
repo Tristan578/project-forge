@@ -67,17 +67,17 @@ vi.mock('lucide-react', async () => {
 import { useEditorStore } from '@/stores/editorStore';
 import { analyzeAccessibility } from '@/lib/ai/accessibilityGenerator';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockedStore = useEditorStore as any;
+const mockedStore = vi.mocked(useEditorStore);
 
 function mockStore(overrides: Record<string, unknown> = {}) {
   const sceneGraph = (overrides.sceneGraph as Record<string, unknown>) ?? { nodes: {} };
-  const state: Record<string, unknown> = {
+  const state = {
     sceneGraph,
     ...overrides,
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.mocked(useEditorStore).mockImplementation((selector: any) => selector(state));
+  } as unknown as Parameters<typeof useEditorStore>[0] extends (s: infer S) => unknown ? S : never;
+  mockedStore.mockImplementation((selector) =>
+    (selector as (s: typeof state) => unknown)(state),
+  );
   // Also update getState so buildSceneContextFromStore works
   mockedStore.getState.mockReturnValue({
     sceneGraph,
@@ -88,7 +88,7 @@ function mockStore(overrides: Record<string, unknown> = {}) {
     inputBindings: [],
     allGameComponents: {},
     ...overrides,
-  });
+  } as unknown as ReturnType<typeof mockedStore.getState>);
 }
 
 describe('AccessibilityPanel', () => {

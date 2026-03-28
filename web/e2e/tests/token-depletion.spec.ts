@@ -61,8 +61,11 @@ test.describe('Token Depletion @api', () => {
         const response = await request.post(endpoint, {
           data: { prompt: 'test' },
         });
-        // Must require auth — 401 or 400 for missing body (never 200 without auth)
-        expect(response.status(), `Expected ${endpoint} to be auth-gated`).not.toBe(200);
+        // Must require auth — 400, 401, 402, or 429 expected (never 200 without auth)
+        expect(
+          [400, 401, 402, 429].includes(response.status()),
+          `Expected ${endpoint} to be auth-gated, got ${response.status()}`,
+        ).toBe(true);
       }
     });
   });

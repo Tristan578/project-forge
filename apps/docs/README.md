@@ -35,10 +35,15 @@ For production deployments set:
 
 ## Test Suite
 
+All commands must be run from within the `apps/docs/` directory:
+
 ```bash
 cd apps/docs
 npm test        # vitest run — runs scripts, lib, and component tests
 ```
+
+The MCP manifest path used by scripts resolves to `../../mcp-server/manifest/commands.json`
+relative to `apps/docs/`.
 
 Tests live in:
 
