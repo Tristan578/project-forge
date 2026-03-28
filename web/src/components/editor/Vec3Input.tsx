@@ -17,6 +17,7 @@ interface Vec3InputProps {
   min?: number;
   max?: number;
   disabled?: boolean;
+  'data-testid'?: string;
 }
 
 /**
@@ -43,6 +44,7 @@ export function Vec3Input({
   min,
   max,
   disabled = false,
+  'data-testid': testId,
 }: Vec3InputProps) {
   const handleChange = useCallback(
     (axis: 0 | 1 | 2, newValue: number) => {
@@ -81,7 +83,7 @@ export function Vec3Input({
   `;
 
   return (
-    <div className="space-y-1" onKeyDown={handleKeyDown}>
+    <div className="space-y-1" data-testid={testId} onKeyDown={handleKeyDown}>
       <div className="flex items-center justify-between">
         <label className="text-xs font-medium text-zinc-400">{label}</label>
         <div className="flex items-center gap-0.5">

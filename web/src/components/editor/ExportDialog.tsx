@@ -211,7 +211,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={(e) => { if (e.target === e.currentTarget && !isExporting) onClose(); }}>
+    <div data-testid="export-dialog" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={(e) => { if (e.target === e.currentTarget && !isExporting) onClose(); }}>
       <div ref={dialogRef} role="dialog" aria-labelledby="export-dialog-title" aria-modal="true" tabIndex={-1} className="w-full max-w-md rounded-lg bg-zinc-900 shadow-xl focus:outline-none">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-zinc-700 px-4 py-3">

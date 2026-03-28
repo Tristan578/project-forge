@@ -16,33 +16,19 @@ test.describe('Publish Flow @engine', () => {
   });
 
   test('publish dialog can be opened from toolbar', async ({ page }) => {
-    // Look for publish/share button
+    // Look for publish/share button — must be present
     const publishBtn = page
       .locator('button[title*="Publish"], button[title*="Share"], button[title*="publish"]')
       .first();
 
-    if (await publishBtn.count() > 0) {
-      await publishBtn.click();
+    await expect(publishBtn).toBeVisible();
+    await publishBtn.click();
 
-
-      // Should see a dialog with publish-related content
-      const dialog = page
-        .locator('[class*="fixed"]')
-        .filter({ hasText: /publish|share|deploy/i });
-      const visible = await dialog.isVisible().catch(() => false);
-      expect(visible).toBe(true);
-    } else {
-      // Publish button may not be in toolbar — test via store instead
-      const hasPublishAction = await page.evaluate(() => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const store = (window as any).__EDITOR_STORE;
-        return (
-          typeof store?.getState()?.publishGame === 'function' ||
-          typeof store?.getState()?.setExporting === 'function'
-        );
-      });
-      expect(hasPublishAction).toBe(true);
-    }
+    // Should see a dialog with publish-related content
+    const dialog = page
+      .locator('[class*="fixed"]')
+      .filter({ hasText: /publish|share|deploy/i });
+    await expect(dialog).toBeVisible();
   });
 
   test('publish store has required actions', async ({ page }) => {
@@ -75,35 +61,29 @@ test.describe('Publish Flow @engine', () => {
   });
 
   test('publish flow validates slug length', async ({ page }) => {
-    // Open publish-related dialog if available
+    // Open publish-related dialog — button must be present
     const publishBtn = page
       .locator('button[title*="Publish"], button[title*="Share"]')
       .first();
 
-    if (await publishBtn.count() > 0) {
-      await publishBtn.click();
+    await expect(publishBtn).toBeVisible();
+    await publishBtn.click();
 
+    // Find slug input and try short slug — must be present
+    const slugInput = page
+      .locator('input[placeholder*="slug"], input[name*="slug"]')
+      .first();
+    await expect(slugInput).toBeVisible();
+    await slugInput.fill('ab');
 
-      // Find slug input and try short slug
-      const slugInput = page
-        .locator('input[placeholder*="slug"], input[name*="slug"]')
-        .first();
-      if (await slugInput.count() > 0) {
-        await slugInput.fill('ab');
-
-
-        // Publish button should be disabled with slug < 3 chars
-        const publishActionBtn = page
-          .locator('button')
-          .filter({ hasText: /^publish$/i })
-          .first();
-        if (await publishActionBtn.count() > 0) {
-          const isDisabled = await publishActionBtn.isDisabled();
-          expect(isDisabled).toBe(true);
-        }
-      }
-    }
-    // If no publish UI found, test passes (publish may require auth)
+    // Publish button should be disabled with slug < 3 chars
+    const publishActionBtn = page
+      .locator('button')
+      .filter({ hasText: /^publish$/i })
+      .first();
+    await expect(publishActionBtn).toBeVisible();
+    const isDisabled = await publishActionBtn.isDisabled();
+    expect(isDisabled).toBe(true);
   });
 
   test('publish flow auto-generates slug from title', async ({ page }) => {
@@ -111,27 +91,24 @@ test.describe('Publish Flow @engine', () => {
       .locator('button[title*="Publish"], button[title*="Share"]')
       .first();
 
-    if (await publishBtn.count() > 0) {
-      await publishBtn.click();
+    await expect(publishBtn).toBeVisible();
+    await publishBtn.click();
 
+    // Find title input and enter a title — must be present
+    const titleInput = page
+      .locator('input[placeholder*="title"], input[name*="title"]')
+      .first();
+    const slugInput = page
+      .locator('input[placeholder*="slug"], input[name*="slug"]')
+      .first();
 
-      // Find title input and enter a title
-      const titleInput = page
-        .locator('input[placeholder*="title"], input[name*="title"]')
-        .first();
-      const slugInput = page
-        .locator('input[placeholder*="slug"], input[name*="slug"]')
-        .first();
+    await expect(titleInput).toBeVisible();
+    await expect(slugInput).toBeVisible();
+    await titleInput.fill('My Awesome Game');
 
-      if (await titleInput.count() > 0 && await slugInput.count() > 0) {
-        await titleInput.fill('My Awesome Game');
-
-
-        const slugValue = await slugInput.inputValue();
-        // Slug should be auto-generated (lowercased, hyphenated)
-        expect(slugValue).toMatch(/^[a-z0-9-]+$/);
-      }
-    }
+    const slugValue = await slugInput.inputValue();
+    // Slug should be auto-generated (lowercased, hyphenated)
+    expect(slugValue).toMatch(/^[a-z0-9-]+$/);
   });
 
   test('scene can be exported via store action', async ({ page, editor }) => {
