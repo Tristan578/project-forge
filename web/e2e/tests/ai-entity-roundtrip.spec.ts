@@ -1,5 +1,5 @@
 import { test, expect } from '../fixtures/editor.fixture';
-import { injectStore, readStore, isStrictMode } from '../helpers/store-injection';
+import { injectStore, readStore } from '../helpers/store-injection';
 
 /**
  * E2E tests for the AI → entity round-trip pipeline.
@@ -52,10 +52,7 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       }
     `);
 
-    if (!injected && !isStrictMode) {
-      test.skip(true, 'Store not available — skipping assertion');
-      return;
-    }
+    expect(injected).toBe(true);
 
     // Verify sceneGraph.nodes has the new entity
     const nodeExists = await readStore<boolean>(
@@ -122,10 +119,7 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       }
     `);
 
-    if (!injected && !isStrictMode) {
-      test.skip(true, 'Store not available — skipping assertion');
-      return;
-    }
+    expect(injected).toBe(true);
 
     // primaryMaterial is the last-written material (single slot in the slice)
     const primaryMaterial = await readStore<{ baseColor: number[]; roughness: number; metallic: number } | null>(
@@ -166,10 +160,7 @@ test.describe('AI → Entity Round-trip: Store Pipeline @ui', () => {
       }
     `);
 
-    if (!injected && !isStrictMode) {
-      test.skip(true, 'Store not available — skipping assertion');
-      return;
-    }
+    expect(injected).toBe(true);
 
     // Every node must be present in sceneGraph.nodes
     for (const entity of entities) {

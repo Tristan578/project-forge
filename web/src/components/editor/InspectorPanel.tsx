@@ -283,6 +283,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
               onPaste={handlePastePosition}
               step={0.1}
               precision={3}
+              data-testid="vec3-position"
             />
 
             <Vec3Input
@@ -295,6 +296,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
               onPaste={handlePasteRotation}
               step={1}
               precision={1}
+              data-testid="vec3-rotation"
             />
 
             <Vec3Input
@@ -308,6 +310,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
               step={0.1}
               precision={3}
               min={0.001}
+              data-testid="vec3-scale"
             />
           </div>
         </CollapsibleSection>
