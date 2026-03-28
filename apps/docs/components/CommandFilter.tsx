@@ -223,7 +223,7 @@ export function CommandFilter({
           aria-atomic="true"
           style={{
             fontSize: '0.75rem',
-            color: 'rgba(250,250,250,0.6)',
+            color: 'var(--sf-text-muted, #71717a)',
           }}
         >
           Showing {displayCount} {displayCount === 1 ? 'command' : 'commands'}

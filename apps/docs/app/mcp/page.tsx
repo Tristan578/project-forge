@@ -27,7 +27,7 @@ export default async function McpIndexPage() {
       <p
         style={{
           marginBottom: '1.5rem',
-          color: 'rgba(250,250,250,0.7)',
+          color: 'var(--sf-text-secondary, #a1a1aa)',
           fontSize: '1rem',
         }}
       >
@@ -66,12 +66,12 @@ export default async function McpIndexPage() {
         {/* Main content: category list */}
         <div>
           {publicCount === 0 ? (
-            <p style={{ color: 'rgba(250,250,250,0.6)', fontStyle: 'italic' }}>
+            <p style={{ color: 'var(--sf-text-muted, #71717a)', fontStyle: 'italic' }}>
               No public commands available yet. Commands are being reviewed for public documentation.
             </p>
           ) : (
             <>
-              <p style={{ marginBottom: '1rem', color: 'rgba(250,250,250,0.7)', fontSize: '0.875rem' }}>
+              <p style={{ marginBottom: '1rem', color: 'var(--sf-text-secondary, #a1a1aa)', fontSize: '0.875rem' }}>
                 {publicCount} public commands across {categories.length} categories. Use the filters
                 to narrow your search or browse by category below.
               </p>
