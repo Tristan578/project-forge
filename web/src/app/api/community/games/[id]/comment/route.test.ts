@@ -12,6 +12,7 @@ vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/rateLimit', () => ({
   rateLimit: vi.fn(),
   rateLimitResponse: vi.fn(() => new Response('Rate limited', { status: 429 })),
+  rateLimitPublicRoute: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('@/lib/db/client');
 vi.mock('@/lib/db/schema', () => ({
