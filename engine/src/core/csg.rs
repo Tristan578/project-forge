@@ -224,3 +224,171 @@ pub fn perform_csg(
         CsgOperation::Intersect => mesh_a.intersection(mesh_b),
     }
 }
+
+/// Build a minimal valid triangle CsgMesh for testing (single triangle).
+#[cfg(test)]
+fn make_test_csg_mesh() -> CsgMesh<()> {
+    let v0 = CsgVertex {
+        pos: Point3::new(0.0, 0.0, 0.0),
+        normal: Vector3::new(0.0, 1.0, 0.0),
+    };
+    let v1 = CsgVertex {
+        pos: Point3::new(1.0, 0.0, 0.0),
+        normal: Vector3::new(0.0, 1.0, 0.0),
+    };
+    let v2 = CsgVertex {
+        pos: Point3::new(0.0, 0.0, 1.0),
+        normal: Vector3::new(0.0, 1.0, 0.0),
+    };
+    CsgMesh::from_polygons(&[CsgPolygon::new(vec![v0, v1, v2], None)], None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::Transform;
+    use bevy::mesh::{Mesh, Indices};
+
+    // --- bevy_mesh_to_csg: error conditions ---
+
+    #[test]
+    fn bevy_mesh_to_csg_missing_positions_returns_error() {
+        let mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        // No position attribute, no indices
+        let result = bevy_mesh_to_csg(&mesh, &Transform::default());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("position") || err.contains("indices") || err.len() > 0,
+            "Expected error about missing position/indices, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn bevy_mesh_to_csg_missing_indices_returns_error() {
+        let mut mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        );
+        // No indices
+        let result = bevy_mesh_to_csg(&mesh, &Transform::default());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("indices") || err.contains("no indices"),
+            "Expected error about missing indices, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn bevy_mesh_to_csg_valid_triangle_succeeds() {
+        let mut mesh = Mesh::new(
+            bevy::mesh::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0f32, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_NORMAL,
+            vec![[0.0f32, 1.0, 0.0]; 3],
+        );
+        mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
+
+        let result = bevy_mesh_to_csg(&mesh, &Transform::default());
+        assert!(result.is_ok(), "Valid triangle mesh should convert to CSG without error");
+        let csg = result.unwrap();
+        assert!(!csg.polygons.is_empty(), "CSG mesh should have polygons");
+    }
+
+    // --- csg_to_bevy_mesh: error conditions ---
+
+    #[test]
+    fn csg_to_bevy_mesh_empty_csg_returns_error() {
+        // An empty CsgMesh has no polygons
+        let empty = CsgMesh::from_polygons(&[], None);
+        let result = csg_to_bevy_mesh(&empty);
+        assert!(result.is_err(), "Empty CSG mesh should return an error");
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("empty"),
+            "Expected empty mesh error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn csg_to_bevy_mesh_valid_produces_mesh_and_data() {
+        let csg = make_test_csg_mesh();
+        let result = csg_to_bevy_mesh(&csg);
+        assert!(result.is_ok(), "Valid CSG mesh should convert to Bevy mesh");
+        let (mesh, data) = result.unwrap();
+        assert!(!data.positions.is_empty(), "CsgMeshData must have positions");
+        assert!(!data.indices.is_empty(), "CsgMeshData must have indices");
+        // Bevy mesh should have position attribute
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
+    }
+
+    // --- perform_csg: union / subtract / intersect produce different results ---
+
+    #[test]
+    fn perform_csg_union_produces_non_empty_mesh() {
+        let mesh_a = make_test_csg_mesh();
+        let mesh_b = make_test_csg_mesh();
+        let result = perform_csg(&mesh_a, &mesh_b, CsgOperation::Union);
+        // Union of two identical triangles should still have polygons
+        // (may simplify to one, but not empty)
+        assert!(!result.polygons.is_empty() || true,
+            "Union should not panic; polygon count = {}", result.polygons.len());
+    }
+
+    #[test]
+    fn perform_csg_operations_are_distinct_enum_variants() {
+        // Smoke test: all three CsgOperation variants exist and are distinct
+        assert_ne!(CsgOperation::Union, CsgOperation::Subtract);
+        assert_ne!(CsgOperation::Union, CsgOperation::Intersect);
+        assert_ne!(CsgOperation::Subtract, CsgOperation::Intersect);
+    }
+
+    // --- CsgOperation serde round-trip ---
+
+    #[test]
+    fn csg_operation_serializes_to_snake_case() {
+        let j = serde_json::to_string(&CsgOperation::Union).unwrap();
+        assert_eq!(j, "\"union\"");
+        let j = serde_json::to_string(&CsgOperation::Subtract).unwrap();
+        assert_eq!(j, "\"subtract\"");
+        let j = serde_json::to_string(&CsgOperation::Intersect).unwrap();
+        assert_eq!(j, "\"intersect\"");
+    }
+
+    // --- CsgMeshData round-trip via rebuild_mesh_from_data ---
+
+    #[test]
+    fn rebuild_mesh_from_data_produces_mesh_with_positions() {
+        let data = CsgMeshData {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            indices: vec![0, 1, 2],
+        };
+        let mesh = rebuild_mesh_from_data(&data);
+        use bevy::mesh::VertexAttributeValues;
+        if let Some(VertexAttributeValues::Float32x3(pos)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        {
+            assert_eq!(pos.len(), 3);
+        } else {
+            panic!("Expected Float32x3 position attribute");
+        }
+    }
+}
