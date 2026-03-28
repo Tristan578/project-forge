@@ -95,6 +95,10 @@ describe('validateCssColor', () => {
       expect(validateCssColor('#abc')).toBe('#abc');
     });
 
+    it('accepts 4-digit hex (CSS4 #rgba shorthand)', () => {
+      expect(validateCssColor('#f00a')).toBe('#f00a');
+    });
+
     it('accepts 6-digit hex', () => {
       expect(validateCssColor('#aabbcc')).toBe('#aabbcc');
     });
