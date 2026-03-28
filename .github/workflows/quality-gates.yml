@@ -489,8 +489,10 @@ jobs:
       - name: Install web dependencies
         run: cd web && npm ci
 
-      - name: Install @lhci/cli
-        run: npm install -g @lhci/cli
+      - name: Install @lhci/cli and Chrome
+        run: |
+          npm install -g @lhci/cli
+          npx puppeteer browsers install chrome
 
       - name: Build Next.js for baseline (effects off)
         working-directory: web
