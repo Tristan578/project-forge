@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * Complexity slice — manages the progressive complexity level for the editor UI.
  *

@@ -22,7 +22,7 @@ export interface AudioSlice {
   playAudio: (entityId: string) => void;
   stopAudio: (entityId: string) => void;
   pauseAudio: (entityId: string) => void;
-  setEntityAudio: (entityId: string, audio: AudioData | null) => void;
+  setPrimaryAudio: (audio: AudioData | null) => void;
   setAudioBuses: (buses: AudioBusDef[]) => void;
   updateAudioBus: (busName: string, update: { volume?: number; muted?: boolean; soloed?: boolean }) => void;
   createAudioBus: (name: string, volume?: number) => void;
@@ -84,7 +84,7 @@ export const createAudioSlice: StateCreator<AudioSlice, [], [], AudioSlice> = (s
   pauseAudio: (entityId) => {
     if (dispatchCommand) dispatchCommand('pause_audio', { entityId });
   },
-  setEntityAudio: (entityId, audio) => set({ primaryAudio: audio }),
+  setPrimaryAudio: (audio) => set({ primaryAudio: audio }),
   setAudioBuses: (buses) => set({ audioBuses: buses }),
   updateAudioBus: (busName, update) => {
     const state = get();
