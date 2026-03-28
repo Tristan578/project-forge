@@ -101,7 +101,7 @@ describe('AccessibilityPanel', () => {
 
   it('renders the Accessibility heading', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByText('Accessibility')).toBeDefined();
+    expect(screen.getByText('Accessibility')).toBeInTheDocument();
   });
 
   it('shows entity count in the header', () => {
@@ -114,18 +114,18 @@ describe('AccessibilityPanel', () => {
       },
     });
     render(<AccessibilityPanel />);
-    expect(screen.getByText('2 entities')).toBeDefined();
+    expect(screen.getByText('2 entities')).toBeInTheDocument();
   });
 
   it('shows 0 entities when scene graph is empty', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByText('0 entities')).toBeDefined();
+    expect(screen.getByText('0 entities')).toBeInTheDocument();
   });
 
   it('renders Audit and Auto-Generate action buttons', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByLabelText('Run accessibility audit')).toBeDefined();
-    expect(screen.getByLabelText('Auto-generate accessibility profile')).toBeDefined();
+    expect(screen.getByLabelText('Run accessibility audit')).toBeInTheDocument();
+    expect(screen.getByLabelText('Auto-generate accessibility profile')).toBeInTheDocument();
   });
 
   it('calls analyzeAccessibility when Audit button is clicked', () => {
@@ -137,36 +137,36 @@ describe('AccessibilityPanel', () => {
   it('displays audit score after running audit', () => {
     render(<AccessibilityPanel />);
     fireEvent.click(screen.getByLabelText('Run accessibility audit'));
-    expect(screen.getByText('72')).toBeDefined();
-    expect(screen.getByText('Accessibility Score')).toBeDefined();
+    expect(screen.getByText('72')).toBeInTheDocument();
+    expect(screen.getByText('Accessibility Score')).toBeInTheDocument();
   });
 
   it('displays issue count by category after audit', () => {
     render(<AccessibilityPanel />);
     fireEvent.click(screen.getByLabelText('Run accessibility audit'));
-    expect(screen.getByText('1 issue')).toBeDefined();
+    expect(screen.getByText('1 issue')).toBeInTheDocument();
   });
 
   it('shows passed checks count after audit', () => {
     render(<AccessibilityPanel />);
     fireEvent.click(screen.getByLabelText('Run accessibility audit'));
-    expect(screen.getByText('2/8 checks passed')).toBeDefined();
+    expect(screen.getByText('2/8 checks passed')).toBeInTheDocument();
   });
 
   it('shows issue message when visual category is expanded', () => {
     render(<AccessibilityPanel />);
     fireEvent.click(screen.getByLabelText('Run accessibility audit'));
     // Visual category should be expanded by default
-    expect(screen.getByText('No colorblind mode configured')).toBeDefined();
+    expect(screen.getByText('No colorblind mode configured')).toBeInTheDocument();
   });
 
   it('renders colorblind simulation section', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByText('Colorblind Simulation')).toBeDefined();
-    expect(screen.getByLabelText('Simulate Protanopia')).toBeDefined();
-    expect(screen.getByLabelText('Simulate Deuteranopia')).toBeDefined();
-    expect(screen.getByLabelText('Simulate Tritanopia')).toBeDefined();
-    expect(screen.getByLabelText('Simulate Achromatopsia')).toBeDefined();
+    expect(screen.getByText('Colorblind Simulation')).toBeInTheDocument();
+    expect(screen.getByLabelText('Simulate Protanopia')).toBeInTheDocument();
+    expect(screen.getByLabelText('Simulate Deuteranopia')).toBeInTheDocument();
+    expect(screen.getByLabelText('Simulate Tritanopia')).toBeInTheDocument();
+    expect(screen.getByLabelText('Simulate Achromatopsia')).toBeInTheDocument();
   });
 
   it('enables colorblind simulation when a mode button is clicked', () => {
@@ -175,28 +175,28 @@ describe('AccessibilityPanel', () => {
     fireEvent.click(screen.getByLabelText('Simulate Protanopia'));
     // After click, toggle button should show "Active" or "Off"
     // The filter strength slider should now appear
-    expect(screen.getByLabelText('Colorblind filter strength')).toBeDefined();
+    expect(screen.getByLabelText('Colorblind filter strength')).toBeInTheDocument();
   });
 
   it('renders screen reader section with entity description count', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByText('Screen Reader Descriptions')).toBeDefined();
-    expect(screen.getByText('0 entity descriptions generated')).toBeDefined();
+    expect(screen.getByText('Screen Reader Descriptions')).toBeInTheDocument();
+    expect(screen.getByText('0 entity descriptions generated')).toBeInTheDocument();
   });
 
   it('renders input remapping section', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByText('Input Remapping')).toBeDefined();
-    expect(screen.getByText('No input bindings configured in the scene.')).toBeDefined();
+    expect(screen.getByText('Input Remapping')).toBeInTheDocument();
+    expect(screen.getByText('No input bindings configured in the scene.')).toBeInTheDocument();
   });
 
   it('renders subtitles section', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByText('Subtitles')).toBeDefined();
+    expect(screen.getByText('Subtitles')).toBeInTheDocument();
   });
 
   it('renders font scale section', () => {
     render(<AccessibilityPanel />);
-    expect(screen.getByText('Font Scale')).toBeDefined();
+    expect(screen.getByText('Font Scale')).toBeInTheDocument();
   });
 });

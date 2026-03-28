@@ -37,10 +37,10 @@ function SliderRow({ label, value, min = 0, max = 1, step = 0.01, onChange, tool
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+        className="h-1 flex-1 cursor-pointer appearance-none rounded bg-[var(--sf-bg-elevated)]
           [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
           [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-          [&::-webkit-slider-thumb]:bg-zinc-300"
+          [&::-webkit-slider-thumb]:bg-[var(--sf-border-strong)]"
       />
       <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
         {value.toFixed(2)}
@@ -108,7 +108,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
           <select
             value={textureRef ?? '__none__'}
             onChange={(e) => handleSelectChange(e.target.value)}
-            className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
+            className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
           >
             <option value="__none__">None</option>
             {textureAssets.map((asset) => (
@@ -129,7 +129,7 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
       ) : (
         <>
           <button
-            className="flex items-center gap-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+            className="flex items-center gap-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-400 hover:border-[var(--sf-border-strong)] hover:text-zinc-200"
             onClick={() => fileRef.current?.click()}
             title={`Upload ${label.toLowerCase()} texture`}
           >
@@ -168,7 +168,7 @@ function CollapsibleSection({ title, children, defaultOpen = false }: {
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="mt-2 border-t border-zinc-800 pt-2">
+    <div className="mt-2 border-t border-[var(--sf-border)] pt-2">
       <button
         className="mb-2 flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-400"
         onClick={() => setOpen(!open)}
@@ -191,7 +191,7 @@ function PresetSelector({ onApply, onSaveToLibrary }: { onApply: (preset: Materi
         <select
           value={selectedId}
           onChange={(e) => setSelectedId(e.target.value)}
-          className="min-w-0 flex-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
+          className="min-w-0 flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
         >
           <option value="">(Custom)</option>
           {ALL_CATEGORIES.map((cat) => {
@@ -209,7 +209,7 @@ function PresetSelector({ onApply, onSaveToLibrary }: { onApply: (preset: Materi
       </div>
       <div className="flex items-center gap-2 pl-20">
         <button
-          className="shrink-0 rounded border border-zinc-700 bg-zinc-800 px-3 py-1 text-xs text-zinc-300 hover:border-blue-500 hover:text-blue-400 disabled:opacity-40 transition-colors"
+          className="shrink-0 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-3 py-1 text-xs text-zinc-300 hover:border-blue-500 hover:text-blue-400 disabled:opacity-40 transition-colors"
           disabled={!selectedId}
           onClick={() => {
             const preset = getPresetById(selectedId);
@@ -222,7 +222,7 @@ function PresetSelector({ onApply, onSaveToLibrary }: { onApply: (preset: Materi
           Apply Preset
         </button>
         <button
-          className="shrink-0 rounded border border-zinc-700 bg-zinc-800 p-1 text-zinc-400 hover:border-zinc-500 hover:text-purple-400"
+          className="shrink-0 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] p-1 text-zinc-400 hover:border-[var(--sf-border-strong)] hover:text-purple-400"
           onClick={onSaveToLibrary}
           title="Save current material to library"
         >
@@ -328,14 +328,14 @@ export const MaterialInspector = memo(function MaterialInspector() {
   const shaderType = primaryShaderEffect?.shaderType ?? 'none';
 
   return (
-    <div className="border-t border-zinc-800 pt-4">
+    <div className="border-t border-[var(--sf-border)] pt-4">
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">
           Material
         </h3>
         <button
           onClick={() => openShaderEditor()}
-          className="flex items-center gap-1 rounded bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+          className="flex items-center gap-1 rounded bg-[var(--sf-bg-surface)] px-2 py-1 text-[10px] text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-300"
           title="Open Shader Editor"
         >
           <Layers className="h-3 w-3" />
@@ -354,7 +354,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
             <select
               value={shaderType}
               onChange={(e) => handleShaderTypeChange(e.target.value)}
-              className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
+              className="flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
             >
               <option value="none">Standard PBR</option>
               <option value="dissolve">Dissolve</option>
@@ -383,7 +383,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
                     const [r, g, b] = hexToLinear(e.target.value);
                     handleShaderParamChange('customColor', [r, g, b, primaryShaderEffect.customColor[3]]);
                   }}
-                  className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
+                  className="h-6 w-8 cursor-pointer rounded border border-[var(--sf-border)] bg-transparent"
                 />
               </div>
               <SliderRow
@@ -458,7 +458,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               const [r, g, b] = hexToLinear(e.target.value);
               handleUpdate({ baseColor: [r, g, b, primaryMaterial.baseColor[3]] });
             }}
-            className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
+            className="h-6 w-8 cursor-pointer rounded border border-[var(--sf-border)] bg-transparent"
           />
           <span className="text-xs text-zinc-400">{baseColorHex}</span>
         </div>
@@ -491,10 +491,10 @@ export const MaterialInspector = memo(function MaterialInspector() {
             step={0.01}
             value={primaryMaterial.metallic}
             onChange={(e) => handleUpdate({ metallic: parseFloat(e.target.value) })}
-            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-[var(--sf-bg-elevated)]
               [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-              [&::-webkit-slider-thumb]:bg-zinc-300"
+              [&::-webkit-slider-thumb]:bg-[var(--sf-border-strong)]"
           />
           <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
             {primaryMaterial.metallic.toFixed(2)}
@@ -511,10 +511,10 @@ export const MaterialInspector = memo(function MaterialInspector() {
             step={0.01}
             value={primaryMaterial.perceptualRoughness}
             onChange={(e) => handleUpdate({ perceptualRoughness: parseFloat(e.target.value) })}
-            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-[var(--sf-bg-elevated)]
               [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-              [&::-webkit-slider-thumb]:bg-zinc-300"
+              [&::-webkit-slider-thumb]:bg-[var(--sf-border-strong)]"
           />
           <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
             {primaryMaterial.perceptualRoughness.toFixed(2)}
@@ -531,10 +531,10 @@ export const MaterialInspector = memo(function MaterialInspector() {
             step={0.01}
             value={primaryMaterial.reflectance}
             onChange={(e) => handleUpdate({ reflectance: parseFloat(e.target.value) })}
-            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+            className="h-1 flex-1 cursor-pointer appearance-none rounded bg-[var(--sf-bg-elevated)]
               [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-              [&::-webkit-slider-thumb]:bg-zinc-300"
+              [&::-webkit-slider-thumb]:bg-[var(--sf-border-strong)]"
           />
           <span className="w-10 text-right text-xs tabular-nums text-zinc-400">
             {primaryMaterial.reflectance.toFixed(2)}
@@ -551,7 +551,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               const [r, g, b] = hexToLinear(e.target.value);
               handleUpdate({ emissive: [r, g, b, primaryMaterial.emissive[3]] });
             }}
-            className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
+            className="h-6 w-8 cursor-pointer rounded border border-[var(--sf-border)] bg-transparent"
           />
           <span className="text-xs text-zinc-400">{emissiveHex}</span>
         </div>
@@ -583,7 +583,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
             type="checkbox"
             checked={primaryMaterial.doubleSided}
             onChange={(e) => handleUpdate({ doubleSided: e.target.checked })}
-            className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
+            className="h-3.5 w-3.5 rounded border-[var(--sf-border)] bg-[var(--sf-bg-surface)] text-blue-500
               focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
           />
         </div>
@@ -595,13 +595,13 @@ export const MaterialInspector = memo(function MaterialInspector() {
             type="checkbox"
             checked={primaryMaterial.unlit}
             onChange={(e) => handleUpdate({ unlit: e.target.checked })}
-            className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-blue-500
+            className="h-3.5 w-3.5 rounded border-[var(--sf-border)] bg-[var(--sf-bg-surface)] text-blue-500
               focus:ring-1 focus:ring-blue-500 focus:ring-offset-0"
           />
         </div>
 
         {/* Texture Slots */}
-        <div className="mt-2 border-t border-zinc-800 pt-2">
+        <div className="mt-2 border-t border-[var(--sf-border)] pt-2">
           <div className="mb-2 flex items-center justify-between">
             <h4 className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
               Textures<InfoTooltip term="textures" />
@@ -648,7 +648,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
             <select
               value={primaryMaterial.parallaxMappingMethod ?? 'occlusion'}
               onChange={(e) => handleUpdate({ parallaxMappingMethod: e.target.value as 'occlusion' | 'relief' })}
-              className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-300"
+              className="flex-1 rounded border border-[var(--sf-border)] bg-[var(--sf-bg-surface)] px-1.5 py-0.5 text-xs text-zinc-300"
             >
               <option value="occlusion">Occlusion</option>
               <option value="relief">Relief</option>
@@ -688,7 +688,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
               type="checkbox"
               checked={primaryMaterial.attenuationDistance == null}
               onChange={(e) => handleUpdate({ attenuationDistance: e.target.checked ? null : 10 })}
-              className="h-3 w-3 rounded border-zinc-600 bg-zinc-800 text-blue-500"
+              className="h-3 w-3 rounded border-[var(--sf-border)] bg-[var(--sf-bg-surface)] text-blue-500"
               title="Infinite attenuation distance"
             />
             <span className="text-[10px] text-zinc-400">Infinite</span>
@@ -700,10 +700,10 @@ export const MaterialInspector = memo(function MaterialInspector() {
                 step={0.1}
                 value={primaryMaterial.attenuationDistance}
                 onChange={(e) => handleUpdate({ attenuationDistance: parseFloat(e.target.value) })}
-                className="h-1 flex-1 cursor-pointer appearance-none rounded bg-zinc-700
+                className="h-1 flex-1 cursor-pointer appearance-none rounded bg-[var(--sf-bg-elevated)]
                   [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:w-3
                   [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full
-                  [&::-webkit-slider-thumb]:bg-zinc-300"
+                  [&::-webkit-slider-thumb]:bg-[var(--sf-border-strong)]"
               />
             )}
           </div>
@@ -716,7 +716,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
                 const [r, g, b] = hexToLinear(e.target.value);
                 handleUpdate({ attenuationColor: [r, g, b] });
               }}
-              className="h-6 w-8 cursor-pointer rounded border border-zinc-700 bg-transparent"
+              className="h-6 w-8 cursor-pointer rounded border border-[var(--sf-border)] bg-transparent"
             />
             <span className="text-xs text-zinc-400">{attColorHex}</span>
           </div>

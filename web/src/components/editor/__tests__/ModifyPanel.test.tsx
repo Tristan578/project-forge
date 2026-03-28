@@ -50,13 +50,13 @@ describe('ModifyPanel', () => {
 
   it('renders the Modify Game heading', () => {
     render(<ModifyPanel />);
-    expect(screen.getByText('Modify Game')).toBeDefined();
+    expect(screen.getByText('Modify Game')).toBeInTheDocument();
   });
 
   it('renders the description textarea in idle state', () => {
     render(<ModifyPanel />);
     const textarea = screen.getByLabelText('What would you like to change?');
-    expect(textarea).toBeDefined();
+    expect(textarea).toBeInTheDocument();
   });
 
   it('Plan Changes button is disabled when description is empty', () => {
@@ -82,7 +82,7 @@ describe('ModifyPanel', () => {
       target: { value: 'make enemies faster' },
     });
     fireEvent.click(screen.getByText('Plan Changes'));
-    expect(screen.getByText('Analyzing scene and planning modifications...')).toBeDefined();
+    expect(screen.getByText('Analyzing scene and planning modifications...')).toBeInTheDocument();
   });
 
   it('shows error message when planModification throws', async () => {
@@ -93,7 +93,7 @@ describe('ModifyPanel', () => {
     });
     fireEvent.click(screen.getByText('Plan Changes'));
     await waitFor(() => screen.getByText('AI service unavailable'));
-    expect(screen.getByText('AI service unavailable')).toBeDefined();
+    expect(screen.getByText('AI service unavailable')).toBeInTheDocument();
   });
 
   it('shows Try again button after error', async () => {
@@ -104,7 +104,7 @@ describe('ModifyPanel', () => {
     });
     fireEvent.click(screen.getByText('Plan Changes'));
     await waitFor(() => screen.getByText('Try again'));
-    expect(screen.getByText('Try again')).toBeDefined();
+    expect(screen.getByText('Try again')).toBeInTheDocument();
   });
 
   it('resets to idle state when Try again is clicked', async () => {
@@ -118,7 +118,7 @@ describe('ModifyPanel', () => {
     fireEvent.click(screen.getByText('Try again'));
     // After reset, error should be gone and Plan Changes button should reappear
     expect(screen.queryByText('Try again')).toBeNull();
-    expect(screen.getByText('Plan Changes')).toBeDefined();
+    expect(screen.getByText('Plan Changes')).toBeInTheDocument();
   });
 
   it('shows plan summary after successful planning', async () => {
@@ -137,14 +137,14 @@ describe('ModifyPanel', () => {
     });
     fireEvent.click(screen.getByText('Plan Changes'));
     await waitFor(() => screen.getByText('Increase enemy speed by 50%'));
-    expect(screen.getByText('Increase enemy speed by 50%')).toBeDefined();
-    expect(screen.getByText('Confidence: 92%')).toBeDefined();
+    expect(screen.getByText('Increase enemy speed by 50%')).toBeInTheDocument();
+    expect(screen.getByText('Confidence: 92%')).toBeInTheDocument();
   });
 
   it('renders scope selector with Selected and Entire Scene buttons', () => {
     render(<ModifyPanel />);
-    expect(screen.getByTitle('Only modify selected entities')).toBeDefined();
-    expect(screen.getByTitle('Modify any entity in the scene')).toBeDefined();
+    expect(screen.getByTitle('Only modify selected entities')).toBeInTheDocument();
+    expect(screen.getByTitle('Modify any entity in the scene')).toBeInTheDocument();
   });
 
   it('toggles scope when scope buttons are clicked', () => {

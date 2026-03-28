@@ -33,6 +33,7 @@ export function TilemapInspector() {
 
   const handleRemoveTilemap = useCallback(() => {
     if (!primaryId) return;
+    // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
     if (confirm('Remove tilemap from this entity?')) {
       removeTilemapData(primaryId);
     }
@@ -63,6 +64,7 @@ export function TilemapInspector() {
 
   const handleRemoveLayer = useCallback((layerIndex: number) => {
     if (!primaryId || !tilemapData) return;
+    // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
     if (confirm(`Remove layer "${tilemapData.layers[layerIndex].name}"?`)) {
       setTilemapData(primaryId, { ...tilemapData, layers: tilemapData.layers.filter((_, i) => i !== layerIndex) });
     }

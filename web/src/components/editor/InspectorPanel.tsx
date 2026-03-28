@@ -195,7 +195,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
   // No selection — show empty state hint + Scene Settings
   if (!primaryId) {
     return (
-      <div className="flex h-full flex-col bg-zinc-900 px-3 py-4 overflow-y-auto">
+      <div className="flex h-full flex-col bg-[var(--sf-bg-app)] px-3 py-4 overflow-y-auto">
         <EmptyState
           icon={MousePointerClick}
           title="Select an entity"
@@ -220,7 +220,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
   const buttonClass = `
     p-1 rounded transition-opacity duration-150
-    text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700
+    text-zinc-400 hover:text-zinc-200 hover:bg-[var(--sf-bg-elevated)]
     opacity-60 hover:opacity-100
   `;
 
@@ -240,7 +240,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
           onChange={(e) => setLocalName(e.target.value)}
           onBlur={handleNameBlur}
           onKeyDown={handleNameKeyDown}
-          className="w-full rounded bg-zinc-800 px-2 py-1.5 text-sm text-zinc-200 outline-none
+          className="w-full rounded bg-[var(--sf-bg-surface)] px-2 py-1.5 text-sm text-zinc-200 outline-none
             focus:ring-1 focus:ring-blue-500"
         />
       </div>
@@ -513,7 +513,7 @@ export const InspectorPanel = memo(function InspectorPanel() {
       >
         <button
           onClick={() => setRightPanelTab('script')}
-          className="w-full rounded bg-zinc-800 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-700 hover:text-zinc-300"
+          className="w-full rounded bg-[var(--sf-bg-surface)] px-2 py-1.5 text-xs text-zinc-400 hover:bg-[var(--sf-bg-elevated)] hover:text-zinc-300"
         >
           {hasScript ? 'Edit Script' : 'Add Script'}
         </button>
@@ -522,10 +522,10 @@ export const InspectorPanel = memo(function InspectorPanel() {
       {/* Show skeleton if we have selection but no transform yet */}
       {!primaryTransform && (
         <div className="mt-4 space-y-3">
-          <div className="h-3 w-24 animate-pulse rounded bg-zinc-800" />
-          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
-          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
-          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
+          <div className="h-3 w-24 animate-pulse rounded bg-[var(--sf-bg-surface)]" />
+          <div className="h-8 w-full animate-pulse rounded bg-[var(--sf-bg-surface)]" />
+          <div className="h-8 w-full animate-pulse rounded bg-[var(--sf-bg-surface)]" />
+          <div className="h-8 w-full animate-pulse rounded bg-[var(--sf-bg-surface)]" />
         </div>
       )}
 

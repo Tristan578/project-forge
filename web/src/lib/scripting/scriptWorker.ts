@@ -72,6 +72,9 @@ let entityInfos: Record<string, EntityInfo> = {};
 let currentInput: InputState = { pressed: {}, justPressed: {}, justReleased: {}, axes: {} };
 const timeData = { delta: 0, elapsed: 0 };
 let sharedState: Record<string, unknown> = {};
+// Touch capability is sent from the main thread in the 'init' message.
+// Workers cannot safely access navigator.maxTouchPoints (it may not exist).
+let isTouchDeviceFlag = false;
 const audioPlayingState = new Map<string, boolean>();
 let scripts: ScriptInstance[] = [];
 let spawnCounter = 0;
@@ -303,8 +306,10 @@ function buildForgeApi(scriptEntityId: string) {
       justReleased: (action: string) => !!currentInput.justReleased[action],
       getAxis: (action: string) => currentInput.axes[action] ?? 0,
       isTouchDevice: () => {
-        // In web worker context, check for touch support
-        return typeof self !== 'undefined' && ('ontouchstart' in self || (navigator && navigator.maxTouchPoints > 0));
+        // Touch capability is derived from the main thread's init message.
+        // Workers cannot reliably access navigator.maxTouchPoints — it may be
+        // undefined in the worker context and the worker cannot query the DOM.
+        return isTouchDeviceFlag;
       },
       vibrate: (pattern: number[]) => {
         pendingCommands.push({ cmd: 'vibrate', pattern });
@@ -1048,6 +1053,8 @@ self.onmessage = (e: MessageEvent) => {
       skeletonStates = msg.skeletonStates || {};
       physics2dVelocities = msg.physics2dVelocities || {};
       prevEntityStates = {};
+      // Main thread passes touch capability so the worker doesn't need navigator access
+      isTouchDeviceFlag = typeof msg.isTouchDevice === 'boolean' ? msg.isTouchDevice : false;
       uiElements.clear();
       uiDirty = false;
 

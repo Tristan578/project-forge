@@ -20,11 +20,11 @@ vi.mock('@/stores/workspaceStore', () => ({
   useWorkspaceStore: vi.fn(() => ({})),
 }));
 
-vi.mock('../GenerateSkyboxDialog', () => ({
+vi.mock('@/components/editor/GenerateSkyboxDialog', () => ({
   GenerateSkyboxDialog: () => null,
 }));
 
-vi.mock('../SceneStatistics', () => ({
+vi.mock('@/components/editor/SceneStatistics', () => ({
   SceneStatistics: () => <div data-testid="scene-statistics">Stats</div>,
 }));
 
@@ -154,73 +154,73 @@ describe('SceneSettings', () => {
   it('renders SceneStatistics', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByTestId('scene-statistics')).toBeDefined();
+    expect(screen.getByTestId('scene-statistics')).toBeInTheDocument();
   });
 
   it('renders Quality Preset section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Quality Preset')).toBeDefined();
+    expect(screen.getByText('Quality Preset')).toBeInTheDocument();
   });
 
   it('renders Ambient Light section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Ambient Light')).toBeDefined();
+    expect(screen.getByText('Ambient Light')).toBeInTheDocument();
   });
 
   it('renders Environment section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Environment')).toBeDefined();
+    expect(screen.getByText('Environment')).toBeInTheDocument();
   });
 
   it('renders Fog section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Fog')).toBeDefined();
+    expect(screen.getByText('Fog')).toBeInTheDocument();
   });
 
   it('renders Bloom section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Bloom')).toBeDefined();
+    expect(screen.getByText('Bloom')).toBeInTheDocument();
   });
 
   it('renders Chromatic Aberration section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Chromatic Aberration')).toBeDefined();
+    expect(screen.getByText('Chromatic Aberration')).toBeInTheDocument();
   });
 
   it('renders Color Grading section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Color Grading')).toBeDefined();
+    expect(screen.getByText('Color Grading')).toBeInTheDocument();
   });
 
   it('renders Sharpening section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Sharpening')).toBeDefined();
+    expect(screen.getByText('Sharpening')).toBeInTheDocument();
   });
 
   it('renders Depth of Field section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Depth of Field')).toBeDefined();
+    expect(screen.getByText('Depth of Field')).toBeInTheDocument();
   });
 
   it('renders Motion Blur section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Motion Blur')).toBeDefined();
+    expect(screen.getByText('Motion Blur')).toBeInTheDocument();
   });
 
   it('renders Mobile Controls section', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Mobile Controls')).toBeDefined();
+    expect(screen.getByText('Mobile Controls')).toBeInTheDocument();
   });
 
   // ── Quality Preset ────────────────────────────────────────────────────
@@ -394,8 +394,8 @@ describe('SceneSettings', () => {
   it('renders Upload and Generate buttons in Environment', () => {
     setupStore();
     render(<SceneSettings />);
-    expect(screen.getByText('Upload')).toBeDefined();
-    expect(screen.getByText('Generate')).toBeDefined();
+    expect(screen.getByText('Upload')).toBeInTheDocument();
+    expect(screen.getByText('Generate')).toBeInTheDocument();
   });
 
   it('opens docs on help button', () => {

@@ -54,7 +54,7 @@ describe('PanelsMenu', () => {
 
   it('renders Panels button', () => {
     render(<PanelsMenu />);
-    expect(screen.getByText('Panels')).toBeDefined();
+    expect(screen.getByText('Panels')).toBeInTheDocument();
   });
 
   it('does not show dropdown initially', () => {
@@ -65,15 +65,15 @@ describe('PanelsMenu', () => {
   it('shows dropdown when Panels button clicked', () => {
     render(<PanelsMenu />);
     fireEvent.click(screen.getByTitle('Show/hide panels'));
-    expect(screen.getByText('Toggle Panels')).toBeDefined();
+    expect(screen.getByText('Toggle Panels')).toBeInTheDocument();
   });
 
   it('shows panel names in dropdown', () => {
     render(<PanelsMenu />);
     fireEvent.click(screen.getByTitle('Show/hide panels'));
-    expect(screen.getByText('Scene Hierarchy')).toBeDefined();
-    expect(screen.getByText('Inspector')).toBeDefined();
-    expect(screen.getByText('Asset Browser')).toBeDefined();
+    expect(screen.getByText('Scene Hierarchy')).toBeInTheDocument();
+    expect(screen.getByText('Inspector')).toBeInTheDocument();
+    expect(screen.getByText('Asset Browser')).toBeInTheDocument();
   });
 
   it('calls openPanel when a panel button clicked', () => {
@@ -87,11 +87,11 @@ describe('PanelsMenu', () => {
     setupStore({ openPanels: ['scene'] });
     render(<PanelsMenu />);
     fireEvent.click(screen.getByTitle('Show/hide panels'));
-    expect(screen.getByText('open')).toBeDefined();
+    expect(screen.getByText('open')).toBeInTheDocument();
   });
 
   it('renders button with title "Show/hide panels"', () => {
     render(<PanelsMenu />);
-    expect(screen.getByTitle('Show/hide panels')).toBeDefined();
+    expect(screen.getByTitle('Show/hide panels')).toBeInTheDocument();
   });
 });

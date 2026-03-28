@@ -55,6 +55,16 @@ export function injectLoopGuards(source: string): LoopGuardResult {
       }
     }
     if (src[i] === '"' || src[i] === "'" || src[i] === '`') {
+      // KNOWN LIMITATION: Template literals with ${...} expressions are scanned
+      // with a simple quote-matching loop that does NOT track expression depth.
+      // A template literal containing a nested loop — e.g. `${[1,2].forEach(i=>{for(;;){}})}` —
+      // will have the loop scanner skip the inner loop body because it's inside the
+      // string range delimited by the backtick pair. This means loop guards are NOT
+      // injected into loops inside template literal expressions.
+      // Mitigation: the worker runs with a per-frame iteration budget (onUpdate timeout)
+      // so such loops will eventually be killed by the frame watchdog even without guards.
+      // TODO(PF): Implement a proper JS tokenizer (or use acorn) to correctly handle
+      // nested expressions in template literals.
       const quote = src[i];
       result += src[i++];
       while (i < len && src[i] !== quote) {

@@ -41,7 +41,7 @@ describe('InspectorErrorBoundary', () => {
         <ThrowingChild shouldThrow={false} />
       </InspectorErrorBoundary>
     );
-    expect(screen.getByText('Working content')).toBeDefined();
+    expect(screen.getByText('Working content')).toBeInTheDocument();
   });
 
   it('renders fallback UI when child throws', () => {
@@ -50,7 +50,7 @@ describe('InspectorErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </InspectorErrorBoundary>
     );
-    expect(screen.getByText('Material failed to render')).toBeDefined();
+    expect(screen.getByText('Material failed to render')).toBeInTheDocument();
   });
 
   it('renders alert triangle icon in fallback', () => {
@@ -59,7 +59,7 @@ describe('InspectorErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </InspectorErrorBoundary>
     );
-    expect(screen.getByTestId('alert-icon')).toBeDefined();
+    expect(screen.getByTestId('alert-icon')).toBeInTheDocument();
   });
 
   it('renders Retry button in fallback', () => {
@@ -68,7 +68,7 @@ describe('InspectorErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </InspectorErrorBoundary>
     );
-    expect(screen.getByText('Retry')).toBeDefined();
+    expect(screen.getByText('Retry')).toBeInTheDocument();
   });
 
   it('shows section name in error message', () => {
@@ -77,7 +77,7 @@ describe('InspectorErrorBoundary', () => {
         <ThrowingChild shouldThrow={true} />
       </InspectorErrorBoundary>
     );
-    expect(screen.getByText('Physics failed to render')).toBeDefined();
+    expect(screen.getByText('Physics failed to render')).toBeInTheDocument();
   });
 
   it('restores children after clicking Retry', () => {
@@ -90,11 +90,11 @@ describe('InspectorErrorBoundary', () => {
       </InspectorErrorBoundary>
     );
     const retryButton = screen.getByText('Retry');
-    expect(retryButton).toBeDefined();
+    expect(retryButton).toBeInTheDocument();
     // Clicking retry resets state — child will throw again but error boundary catches it
     fireEvent.click(retryButton);
     // Still shows fallback after retry since child still throws
-    expect(screen.getByText('Material failed to render')).toBeDefined();
+    expect(screen.getByText('Material failed to render')).toBeInTheDocument();
   });
 
   it('hides children in fallback state', () => {

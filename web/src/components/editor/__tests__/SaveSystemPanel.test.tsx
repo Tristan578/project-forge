@@ -45,20 +45,20 @@ describe('SaveSystemPanel', () => {
 
   it('renders the Save System Generator heading', () => {
     render(<SaveSystemPanel />);
-    expect(screen.getByText('Save System Generator')).toBeDefined();
+    expect(screen.getByText('Save System Generator')).toBeInTheDocument();
   });
 
   it('renders the step 1 Analyze Scene section', () => {
     render(<SaveSystemPanel />);
-    expect(screen.getByText('1. Analyze Scene')).toBeDefined();
-    expect(screen.getByText('Analyze Scene')).toBeDefined();
+    expect(screen.getByText('1. Analyze Scene')).toBeInTheDocument();
+    expect(screen.getByText('Analyze Scene')).toBeInTheDocument();
   });
 
   it('renders configuration inputs for save slots and auto-save', () => {
     render(<SaveSystemPanel />);
-    expect(screen.getByText('Save Slots')).toBeDefined();
-    expect(screen.getByText('Auto-save (sec)')).toBeDefined();
-    expect(screen.getByText('Enable compression')).toBeDefined();
+    expect(screen.getByText('Save Slots')).toBeInTheDocument();
+    expect(screen.getByText('Auto-save (sec)')).toBeInTheDocument();
+    expect(screen.getByText('Enable compression')).toBeInTheDocument();
   });
 
   it('calls analyzeSaveNeeds when Analyze Scene button is clicked', () => {
@@ -76,15 +76,15 @@ describe('SaveSystemPanel', () => {
   it('displays detected fields after analysis', () => {
     render(<SaveSystemPanel />);
     fireEvent.click(screen.getByText('Analyze Scene'));
-    expect(screen.getByText('3 field(s) detected')).toBeDefined();
-    expect(screen.getByText('player.health')).toBeDefined();
-    expect(screen.getByText('player.position')).toBeDefined();
+    expect(screen.getByText('3 field(s) detected')).toBeInTheDocument();
+    expect(screen.getByText('player.health')).toBeInTheDocument();
+    expect(screen.getByText('player.position')).toBeInTheDocument();
   });
 
   it('shows field types alongside detected fields', () => {
     render(<SaveSystemPanel />);
     fireEvent.click(screen.getByText('Analyze Scene'));
-    expect(screen.getByText('number')).toBeDefined();
+    expect(screen.getByText('number')).toBeInTheDocument();
     expect(screen.getAllByText('object').length).toBeGreaterThanOrEqual(1);
   });
 
@@ -129,13 +129,13 @@ describe('SaveSystemPanel', () => {
     render(<SaveSystemPanel />);
     const addBtn = screen.getByLabelText('Add checkpoint');
     fireEvent.click(addBtn);
-    expect(screen.getByText('Checkpoint 1')).toBeDefined();
+    expect(screen.getByText('Checkpoint 1')).toBeInTheDocument();
   });
 
   it('removes a checkpoint when the remove button is clicked', () => {
     render(<SaveSystemPanel />);
     fireEvent.click(screen.getByLabelText('Add checkpoint'));
-    expect(screen.getByText('Checkpoint 1')).toBeDefined();
+    expect(screen.getByText('Checkpoint 1')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Remove checkpoint Checkpoint 1'));
     expect(screen.queryByText('Checkpoint 1')).toBeNull();
@@ -143,7 +143,7 @@ describe('SaveSystemPanel', () => {
 
   it('shows empty checkpoint message when no checkpoints exist', () => {
     render(<SaveSystemPanel />);
-    expect(screen.getByText(/No checkpoints yet/)).toBeDefined();
+    expect(screen.getByText(/No checkpoints yet/)).toBeInTheDocument();
   });
 
   it('shows validation errors when validateSaveSystemConfig returns errors', () => {
@@ -152,7 +152,7 @@ describe('SaveSystemPanel', () => {
     ]);
     render(<SaveSystemPanel />);
     fireEvent.click(screen.getByText('Generate Save System'));
-    expect(screen.getByText('Save slots must be between 1 and 20')).toBeDefined();
+    expect(screen.getByText('Save slots must be between 1 and 20')).toBeInTheDocument();
   });
 
   it('shows generated script after successful generation', () => {
@@ -160,9 +160,9 @@ describe('SaveSystemPanel', () => {
     render(<SaveSystemPanel />);
     fireEvent.click(screen.getByText('Analyze Scene'));
     fireEvent.click(screen.getByText('Generate Save System'));
-    expect(screen.getByText('Generated Script')).toBeDefined();
+    expect(screen.getByText('Generated Script')).toBeInTheDocument();
     // The script is rendered in a <pre> block; match partial content
-    expect(screen.getByText((content) => content.includes('Generated save system script'))).toBeDefined();
+    expect(screen.getByText((content) => content.includes('Generated save system script'))).toBeInTheDocument();
   });
 
   it('shows Copy Script to Clipboard button after generation', () => {
@@ -170,6 +170,6 @@ describe('SaveSystemPanel', () => {
     render(<SaveSystemPanel />);
     fireEvent.click(screen.getByText('Analyze Scene'));
     fireEvent.click(screen.getByText('Generate Save System'));
-    expect(screen.getByText('Copy Script to Clipboard')).toBeDefined();
+    expect(screen.getByText('Copy Script to Clipboard')).toBeInTheDocument();
   });
 });

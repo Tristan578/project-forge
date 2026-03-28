@@ -29,8 +29,8 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
   }
-  const name = (body.name as string) || 'Default';
-  const scopes = (body.scopes as ApiKeyScope[]) || [...API_KEY_SCOPES];
+  const name = (typeof body.name === 'string' && body.name.trim()) ? body.name.trim() : 'Default';
+  const scopes: ApiKeyScope[] = Array.isArray(body.scopes) ? (body.scopes as ApiKeyScope[]) : [...API_KEY_SCOPES];
 
   // Validate scopes
   const invalidScopes = findInvalidScopes(scopes);

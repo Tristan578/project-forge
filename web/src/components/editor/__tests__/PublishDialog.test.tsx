@@ -72,31 +72,31 @@ describe('PublishDialog', () => {
   it('renders Publish Game heading when open', () => {
     setupStore();
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Publish Game')).toBeDefined();
+    expect(screen.getByText('Publish Game')).toBeInTheDocument();
   });
 
   it('renders title input with placeholder', () => {
     setupStore({ sceneName: 'My Scene' });
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText('My Awesome Game')).toBeDefined();
+    expect(screen.getByPlaceholderText('My Awesome Game')).toBeInTheDocument();
   });
 
   it('renders URL Slug label', () => {
     setupStore();
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('URL Slug')).toBeDefined();
+    expect(screen.getByText('URL Slug')).toBeInTheDocument();
   });
 
   it('renders Description textarea', () => {
     setupStore();
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText('A brief description of your game')).toBeDefined();
+    expect(screen.getByPlaceholderText('A brief description of your game')).toBeInTheDocument();
   });
 
   it('renders Tags section', () => {
     setupStore();
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText('e.g. platformer, puzzle')).toBeDefined();
+    expect(screen.getByPlaceholderText('e.g. platformer, puzzle')).toBeInTheDocument();
   });
 
   it('calls onClose when Cancel is clicked', () => {
@@ -116,19 +116,19 @@ describe('PublishDialog', () => {
   it('shows Publish button', () => {
     setupStore();
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Publish')).toBeDefined();
+    expect(screen.getByText('Publish')).toBeInTheDocument();
   });
 
   it('shows Publishing... when isPublishing', () => {
     setupStore({ isPublishing: true });
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Publishing...')).toBeDefined();
+    expect(screen.getByText('Publishing...')).toBeInTheDocument();
   });
 
   it('shows error message when publishError set', () => {
     setupStore({ publishError: 'Slug already taken' });
     render(<PublishDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Slug already taken')).toBeDefined();
+    expect(screen.getByText('Slug already taken')).toBeInTheDocument();
   });
 
   it('adds tag when Add button is clicked', () => {
@@ -137,6 +137,6 @@ describe('PublishDialog', () => {
     const tagInput = screen.getByPlaceholderText('e.g. platformer, puzzle');
     fireEvent.change(tagInput, { target: { value: 'platformer' } });
     fireEvent.click(screen.getByText('Add'));
-    expect(screen.getByText('platformer')).toBeDefined();
+    expect(screen.getByText('platformer')).toBeInTheDocument();
   });
 });

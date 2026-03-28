@@ -77,32 +77,32 @@ describe('TutorialOverlay', () => {
   it('renders step title and description', () => {
     setupStore();
     render(<TutorialOverlay />);
-    expect(screen.getByText('Welcome')).toBeDefined();
-    expect(screen.getByText('Welcome to SpawnForge!')).toBeDefined();
+    expect(screen.getByText('Welcome')).toBeInTheDocument();
+    expect(screen.getByText('Welcome to SpawnForge!')).toBeInTheDocument();
   });
 
   it('renders step counter', () => {
     setupStore();
     render(<TutorialOverlay />);
-    expect(screen.getByText('Step 1 of 3')).toBeDefined();
+    expect(screen.getByText('Step 1 of 3')).toBeInTheDocument();
   });
 
   it('renders step number badge', () => {
     setupStore();
     render(<TutorialOverlay />);
-    expect(screen.getByText('1')).toBeDefined();
+    expect(screen.getByText('1')).toBeInTheDocument();
   });
 
   it('renders Next button on non-last step', () => {
     setupStore();
     render(<TutorialOverlay />);
-    expect(screen.getByText('Next')).toBeDefined();
+    expect(screen.getByText('Next')).toBeInTheDocument();
   });
 
   it('renders Skip Tutorial button', () => {
     setupStore();
     render(<TutorialOverlay />);
-    expect(screen.getByText('Skip Tutorial')).toBeDefined();
+    expect(screen.getByText('Skip Tutorial')).toBeInTheDocument();
   });
 
   // ── Navigation ────────────────────────────────────────────────────────
@@ -133,7 +133,7 @@ describe('TutorialOverlay', () => {
   it('renders Complete button on last step', () => {
     setupStore({ tutorialStep: 2 });
     render(<TutorialOverlay />);
-    expect(screen.getByText('Complete')).toBeDefined();
+    expect(screen.getByText('Complete')).toBeInTheDocument();
   });
 
   it('completes tutorial on Complete click', () => {
@@ -146,8 +146,8 @@ describe('TutorialOverlay', () => {
   it('renders last step title', () => {
     setupStore({ tutorialStep: 2 });
     render(<TutorialOverlay />);
-    expect(screen.getByText('Done')).toBeDefined();
-    expect(screen.getByText('Step 3 of 3')).toBeDefined();
+    expect(screen.getByText('Done')).toBeInTheDocument();
+    expect(screen.getByText('Step 3 of 3')).toBeInTheDocument();
   });
 
   // ── Action-required step ──────────────────────────────────────────────
@@ -162,8 +162,8 @@ describe('TutorialOverlay', () => {
   it('renders action step content', () => {
     setupStore({ tutorialStep: 1 });
     render(<TutorialOverlay />);
-    expect(screen.getByText('Select Entity')).toBeDefined();
-    expect(screen.getByText('Click an entity in the viewport.')).toBeDefined();
+    expect(screen.getByText('Select Entity')).toBeInTheDocument();
+    expect(screen.getByText('Click an entity in the viewport.')).toBeInTheDocument();
   });
 
   // ── Backdrop ──────────────────────────────────────────────────────────

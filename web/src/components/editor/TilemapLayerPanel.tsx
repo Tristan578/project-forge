@@ -30,6 +30,7 @@ export function TilemapLayerPanel() {
   const handleRemoveLayer = useCallback((layerIndex: number) => {
     if (!primaryId || !tilemapData) return;
     const layer = tilemapData.layers[layerIndex];
+    // TODO(PF): Replace confirm() with an inline confirmation dialog (accessible, styled).
     if (confirm(`Remove layer "${layer.name}"?`)) {
       setTilemapData(primaryId, { ...tilemapData, layers: tilemapData.layers.filter((_, i) => i !== layerIndex) });
     }

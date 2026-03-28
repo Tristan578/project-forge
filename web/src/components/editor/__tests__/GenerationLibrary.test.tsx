@@ -73,41 +73,41 @@ describe('GenerationLibrary', () => {
 
   it('renders Generation Library heading', () => {
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('Generation Library')).toBeDefined();
+    expect(screen.getByText('Generation Library')).toBeInTheDocument();
   });
 
   it('renders search input', () => {
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByPlaceholderText('Search prompts...')).toBeDefined();
+    expect(screen.getByPlaceholderText('Search prompts...')).toBeInTheDocument();
   });
 
   it('renders All filter chip', () => {
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('All')).toBeDefined();
+    expect(screen.getByText('All')).toBeInTheDocument();
   });
 
   it('renders type filter chips', () => {
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('3D Model')).toBeDefined();
-    expect(screen.getByText('Texture')).toBeDefined();
-    expect(screen.getByText('Sound FX')).toBeDefined();
+    expect(screen.getByText('3D Model')).toBeInTheDocument();
+    expect(screen.getByText('Texture')).toBeInTheDocument();
+    expect(screen.getByText('Sound FX')).toBeInTheDocument();
   });
 
   it('shows empty state when no entries', () => {
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('No generations yet. Generated assets will appear here.')).toBeDefined();
+    expect(screen.getByText('No generations yet. Generated assets will appear here.')).toBeInTheDocument();
   });
 
   it('shows "No results match your search" when filtered empty', () => {
     setupStore({ entries: [], allEntries: [sampleEntry] });
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('No results match your search.')).toBeDefined();
+    expect(screen.getByText('No results match your search.')).toBeInTheDocument();
   });
 
   it('renders entry prompt text when entries exist', () => {
     setupStore({ entries: [sampleEntry], allEntries: [sampleEntry] });
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('Mossy stone wall')).toBeDefined();
+    expect(screen.getByText('Mossy stone wall')).toBeInTheDocument();
   });
 
   it('renders type badge for entry', () => {
@@ -120,7 +120,7 @@ describe('GenerationLibrary', () => {
   it('shows entry count in header', () => {
     setupStore({ entries: [sampleEntry], allEntries: [sampleEntry] });
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('(1)')).toBeDefined();
+    expect(screen.getByText('(1)')).toBeInTheDocument();
   });
 
   it('calls setSearchQuery when search input changes', () => {
@@ -145,14 +145,14 @@ describe('GenerationLibrary', () => {
   it('shows Clear history button when entries exist', () => {
     setupStore({ entries: [sampleEntry], allEntries: [sampleEntry] });
     render(<GenerationLibrary onClose={mockOnClose} />);
-    expect(screen.getByText('Clear history')).toBeDefined();
+    expect(screen.getByText('Clear history')).toBeInTheDocument();
   });
 
   it('shows confirm dialog when Clear history clicked', () => {
     setupStore({ entries: [sampleEntry], allEntries: [sampleEntry] });
     render(<GenerationLibrary onClose={mockOnClose} />);
     fireEvent.click(screen.getByText('Clear history'));
-    expect(screen.getByText('Clear all history?')).toBeDefined();
+    expect(screen.getByText('Clear all history?')).toBeInTheDocument();
   });
 
   it('calls clearAll when Confirm clicked', () => {

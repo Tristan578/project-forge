@@ -26,17 +26,17 @@ describe('NumberInput', () => {
 
   it('renders with label when provided', () => {
     render(<NumberInput value={0} onChange={mockOnChange} label="X" />);
-    expect(screen.getByText('X')).toBeDefined();
+    expect(screen.getByText('X')).toBeInTheDocument();
   });
 
   it('uses ariaLabel as aria-label when provided', () => {
     render(<NumberInput value={0} onChange={mockOnChange} ariaLabel="Position X" />);
-    expect(screen.getByLabelText('Position X')).toBeDefined();
+    expect(screen.getByLabelText('Position X')).toBeInTheDocument();
   });
 
   it('uses label as aria-label when ariaLabel not provided', () => {
     render(<NumberInput value={0} onChange={mockOnChange} label="X" />);
-    expect(screen.getByLabelText('X')).toBeDefined();
+    expect(screen.getByLabelText('X')).toBeInTheDocument();
   });
 
   it('is disabled when disabled prop is true', () => {

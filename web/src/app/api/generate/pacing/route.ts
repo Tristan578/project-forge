@@ -11,6 +11,7 @@ import { generateText } from 'ai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { AI_MODEL_FAST } from '@/lib/ai/models';
 import { sanitizePrompt } from '@/lib/ai/contentSafety';
+import { refundTokens } from '@/lib/tokens/service';
 // Inline types — the pacing analysis route receives these from the client.
 interface PacingSegment {
   sceneIndex: number;
@@ -192,7 +193,6 @@ Generate 2–4 additional AI suggestions to improve the emotional pacing.`;
   } catch (err) {
     if (usageId) {
       try {
-        const { refundTokens } = await import('@/lib/tokens/service');
         await refundTokens(authResult.ctx.user.id, usageId);
       } catch (refundErr) {
         captureException(refundErr, { route: '/api/generate/pacing', action: 'refund', usageId });

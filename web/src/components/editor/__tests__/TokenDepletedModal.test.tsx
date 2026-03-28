@@ -62,7 +62,7 @@ describe('TokenDepletedModal', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
     const modal = screen.getByTestId('token-depleted-modal');
-    expect(modal).toBeDefined();
+    expect(modal).toBeInTheDocument();
     expect(modal.getAttribute('role')).toBe('dialog');
     expect(modal.getAttribute('aria-modal')).toBe('true');
   });
@@ -70,22 +70,22 @@ describe('TokenDepletedModal', () => {
   it('displays the "You\'re out of tokens" heading', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
-    expect(screen.getByText(/out of tokens/i)).toBeDefined();
+    expect(screen.getByText(/out of tokens/i)).toBeInTheDocument();
   });
 
   it('shows the current tier name in the modal', () => {
     mockChatState.showTokenDepletedModal = true;
     mockUserState.tier = 'creator';
     render(<TokenDepletedModal />);
-    expect(screen.getByText('Creator')).toBeDefined();
+    expect(screen.getByText('Creator')).toBeInTheDocument();
   });
 
   it('shows all three action buttons', () => {
     mockChatState.showTokenDepletedModal = true;
     render(<TokenDepletedModal />);
-    expect(screen.getByTestId('upgrade-plan-button')).toBeDefined();
-    expect(screen.getByTestId('buy-token-pack-button')).toBeDefined();
-    expect(screen.getByTestId('byok-link')).toBeDefined();
+    expect(screen.getByTestId('upgrade-plan-button')).toBeInTheDocument();
+    expect(screen.getByTestId('buy-token-pack-button')).toBeInTheDocument();
+    expect(screen.getByTestId('byok-link')).toBeInTheDocument();
   });
 
   it('navigates to /pricing when Upgrade Plan is clicked', () => {
@@ -118,7 +118,7 @@ describe('TokenDepletedModal', () => {
     const modal = screen.getByTestId('token-depleted-modal');
     const labelId = modal.getAttribute('aria-labelledby');
     expect(labelId).not.toBeNull();
-    expect(document.getElementById(labelId!)).toBeDefined();
+    expect(document.getElementById(labelId!)).toBeInTheDocument();
   });
 
   it('renders backdrop element when modal is visible', () => {
@@ -126,7 +126,7 @@ describe('TokenDepletedModal', () => {
     const { container } = render(<TokenDepletedModal />);
     // Backdrop has aria-hidden="true"
     const backdrop = container.querySelector('[aria-hidden="true"]');
-    expect(backdrop).toBeDefined();
+    expect(backdrop).toBeInTheDocument();
   });
 
   it('displays tier labels for all tiers', () => {
@@ -141,7 +141,7 @@ describe('TokenDepletedModal', () => {
       mockChatState.showTokenDepletedModal = true;
       mockUserState.tier = tier;
       const { unmount } = render(<TokenDepletedModal />);
-      expect(screen.getByText(label)).toBeDefined();
+      expect(screen.getByText(label)).toBeInTheDocument();
       unmount();
     }
   });

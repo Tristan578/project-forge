@@ -85,7 +85,7 @@ describe('AnimationClipInspector', () => {
   it('shows Add Animation Clip button when no clip', () => {
     setupStore({ primaryAnimationClip: null });
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Add Animation Clip')).toBeDefined();
+    expect(screen.getByText('Add Animation Clip')).toBeInTheDocument();
   });
 
   it('creates clip on Add button click', () => {
@@ -100,13 +100,13 @@ describe('AnimationClipInspector', () => {
   it('renders Keyframe Animation header', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Keyframe Animation')).toBeDefined();
+    expect(screen.getByText('Keyframe Animation')).toBeInTheDocument();
   });
 
   it('shows track count badge', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('1 track')).toBeDefined();
+    expect(screen.getByText('1 track')).toBeInTheDocument();
   });
 
   // ── Clip properties ───────────────────────────────────────────────────
@@ -114,7 +114,7 @@ describe('AnimationClipInspector', () => {
   it('renders duration input with correct value', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Duration (s)')).toBeDefined();
+    expect(screen.getByText('Duration (s)')).toBeInTheDocument();
     const durationInput = document.querySelector('input[type="number"]') as HTMLInputElement;
     expect(durationInput.value).toBe('2');
   });
@@ -130,7 +130,7 @@ describe('AnimationClipInspector', () => {
   it('renders play mode select', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Play Mode')).toBeDefined();
+    expect(screen.getByText('Play Mode')).toBeInTheDocument();
     const selects = document.querySelectorAll('select');
     const playModeSelect = Array.from(selects).find((s) =>
       Array.from(s.options).some((o) => o.textContent === 'Loop'),
@@ -152,8 +152,8 @@ describe('AnimationClipInspector', () => {
   it('renders speed slider', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Speed')).toBeDefined();
-    expect(screen.getByText('1.0x')).toBeDefined();
+    expect(screen.getByText('Speed')).toBeInTheDocument();
+    expect(screen.getByText('1.0x')).toBeInTheDocument();
   });
 
   it('changes speed', () => {
@@ -167,7 +167,7 @@ describe('AnimationClipInspector', () => {
   it('renders autoplay checkbox', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Autoplay in Play mode')).toBeDefined();
+    expect(screen.getByText('Autoplay in Play mode')).toBeInTheDocument();
     const checkbox = document.querySelector('input[type="checkbox"]') as HTMLInputElement;
     expect(checkbox.checked).toBe(false);
   });
@@ -185,11 +185,11 @@ describe('AnimationClipInspector', () => {
   it('renders Preview and Stop buttons', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Preview')).toBeDefined();
+    expect(screen.getByText('Preview')).toBeInTheDocument();
     // Stop button exists among buttons
     const buttons = document.querySelectorAll('button');
     const stopBtn = Array.from(buttons).find((b) => b.textContent?.includes('Stop'));
-    expect(stopBtn).toBeDefined();
+    expect(stopBtn).toBeInTheDocument();
   });
 
   it('calls previewClip play on Preview click', () => {
@@ -213,13 +213,13 @@ describe('AnimationClipInspector', () => {
   it('renders track with target label', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Position X')).toBeDefined();
+    expect(screen.getByText('Position X')).toBeInTheDocument();
   });
 
   it('shows keyframe count on track', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('2 keyframes')).toBeDefined();
+    expect(screen.getByText('2 keyframes')).toBeInTheDocument();
   });
 
   it('expands track on click to show keyframes', () => {
@@ -227,7 +227,7 @@ describe('AnimationClipInspector', () => {
     render(<AnimationClipInspector />);
     fireEvent.click(screen.getByText('Position X'));
     // After expanding, keyframe values should be visible
-    expect(screen.getByText('Add Keyframe')).toBeDefined();
+    expect(screen.getByText('Add Keyframe')).toBeInTheDocument();
   });
 
   // ── Add track flow ────────────────────────────────────────────────────
@@ -238,7 +238,7 @@ describe('AnimationClipInspector', () => {
     // The outer Add Track button (not in expanded track)
     const buttons = document.querySelectorAll('button');
     const addTrackBtn = Array.from(buttons).find((b) => b.textContent?.includes('Add Track'));
-    expect(addTrackBtn).toBeDefined();
+    expect(addTrackBtn).toBeInTheDocument();
   });
 
   it('opens add track form on click', () => {
@@ -247,8 +247,8 @@ describe('AnimationClipInspector', () => {
     const buttons = document.querySelectorAll('button');
     const addTrackBtn = Array.from(buttons).find((b) => b.textContent?.includes('Add Track'))!;
     fireEvent.click(addTrackBtn);
-    expect(screen.getByText('Property')).toBeDefined();
-    expect(screen.getByText('Select property...')).toBeDefined();
+    expect(screen.getByText('Property')).toBeInTheDocument();
+    expect(screen.getByText('Select property...')).toBeInTheDocument();
   });
 
   // ── Remove clip ───────────────────────────────────────────────────────
@@ -256,7 +256,7 @@ describe('AnimationClipInspector', () => {
   it('renders Remove Animation Clip button', () => {
     setupStore();
     render(<AnimationClipInspector />);
-    expect(screen.getByText('Remove Animation Clip')).toBeDefined();
+    expect(screen.getByText('Remove Animation Clip')).toBeInTheDocument();
   });
 
   it('removes clip on click', () => {

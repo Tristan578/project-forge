@@ -31,8 +31,8 @@ describe('InspectorErrorBoundary', () => {
   describe('component structure', () => {
     it('should be a class component (React error boundary requirement)', () => {
       expect(typeof InspectorErrorBoundary).toBe('function');
-      expect(InspectorErrorBoundary.prototype.render).toBeDefined();
-      expect(InspectorErrorBoundary.prototype.componentDidCatch).toBeDefined();
+      expect(InspectorErrorBoundary.prototype.render).toBeInTheDocument();
+      expect(InspectorErrorBoundary.prototype.componentDidCatch).toBeInTheDocument();
     });
 
     it('should have getDerivedStateFromError static method', () => {

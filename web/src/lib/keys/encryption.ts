@@ -1,7 +1,16 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
-const IV_LENGTH = 16;
+// AES-256-GCM is specified to use 96-bit (12-byte) IVs for maximum security.
+// Using 12 bytes is the NIST recommendation (SP 800-38D) because it avoids the
+// extra GHASH computation required for non-96-bit IVs and provides the strongest
+// collision resistance guarantee for random IV generation.
+//
+// MIGRATION NOTE: Keys stored before this change used a 16-byte IV (base64-encoded).
+// The decryptProviderKey function is backwards-compatible: it reads the IV length
+// from the stored base64 string at runtime, so existing 16-byte-IV ciphertexts will
+// continue to decrypt correctly. Only new keys written after this change use 12-byte IVs.
+const IV_LENGTH = 12;
 const TAG_LENGTH = 16;
 
 function getMasterKey(): Buffer {

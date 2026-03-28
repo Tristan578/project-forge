@@ -76,7 +76,7 @@ describe('DialogueTreeEditor', () => {
   it('renders Dialogue Editor header', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText('Dialogue Editor')).toBeDefined();
+    expect(screen.getByText('Dialogue Editor')).toBeInTheDocument();
   });
 
   it('calls loadFromLocalStorage on mount', () => {
@@ -90,7 +90,7 @@ describe('DialogueTreeEditor', () => {
   it('shows empty state when no tree selected', () => {
     setupStore({ selectedTreeId: null, dialogueTrees: {} });
     render(<DialogueTreeEditor />);
-    expect(screen.getByText(/Select or create/)).toBeDefined();
+    expect(screen.getByText(/Select or create/)).toBeInTheDocument();
   });
 
   // ── Tree selector ─────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ describe('DialogueTreeEditor', () => {
   it('shows tree name in dropdown', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText('Main Quest')).toBeDefined();
+    expect(screen.getByText('Main Quest')).toBeInTheDocument();
   });
 
   it('selects tree on dropdown change', () => {
@@ -145,7 +145,7 @@ describe('DialogueTreeEditor', () => {
   it('renders tree name input', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText('Tree Name')).toBeDefined();
+    expect(screen.getByText('Tree Name')).toBeInTheDocument();
     const nameInputs = screen.getAllByDisplayValue('Main Quest');
     // One in select, one in text input
     expect(nameInputs.length).toBeGreaterThanOrEqual(1);
@@ -165,32 +165,32 @@ describe('DialogueTreeEditor', () => {
   it('shows node count and start node', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText(/3 nodes/)).toBeDefined();
+    expect(screen.getByText(/3 nodes/)).toBeInTheDocument();
   });
 
   it('renders text node with label', () => {
     setupStore();
     render(<DialogueTreeEditor />);
     // Label wraps text in quotes
-    expect(screen.getByText(/Hello traveler, welcome to the village/)).toBeDefined();
+    expect(screen.getByText(/Hello traveler, welcome to the village/)).toBeInTheDocument();
   });
 
   it('renders choice node with choice count', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText('2 choices')).toBeDefined();
+    expect(screen.getByText('2 choices')).toBeInTheDocument();
   });
 
   it('renders end node', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText('End')).toBeDefined();
+    expect(screen.getByText('End')).toBeInTheDocument();
   });
 
   it('shows START badge on start node', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText('START')).toBeDefined();
+    expect(screen.getByText('START')).toBeInTheDocument();
   });
 
   it('selects node on click', () => {
@@ -215,7 +215,7 @@ describe('DialogueTreeEditor', () => {
   it('renders Add Node button', () => {
     setupStore();
     render(<DialogueTreeEditor />);
-    expect(screen.getByText('Add Node')).toBeDefined();
+    expect(screen.getByText('Add Node')).toBeInTheDocument();
   });
 
   it('opens add node menu on click', () => {
@@ -223,11 +223,11 @@ describe('DialogueTreeEditor', () => {
     render(<DialogueTreeEditor />);
     fireEvent.click(screen.getByText('Add Node'));
     // CSS capitalize means DOM text is lowercase + " Node"
-    expect(screen.getByText('text Node')).toBeDefined();
-    expect(screen.getByText('choice Node')).toBeDefined();
-    expect(screen.getByText('condition Node')).toBeDefined();
-    expect(screen.getByText('action Node')).toBeDefined();
-    expect(screen.getByText('end Node')).toBeDefined();
+    expect(screen.getByText('text Node')).toBeInTheDocument();
+    expect(screen.getByText('choice Node')).toBeInTheDocument();
+    expect(screen.getByText('condition Node')).toBeInTheDocument();
+    expect(screen.getByText('action Node')).toBeInTheDocument();
+    expect(screen.getByText('end Node')).toBeInTheDocument();
   });
 
   it('adds text node from menu', () => {

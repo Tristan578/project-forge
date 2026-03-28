@@ -72,10 +72,10 @@ describe('TerrainInspector', () => {
       },
     });
     render(<TerrainInspector />);
-    expect(screen.getByText('Terrain')).toBeDefined();
-    expect(screen.getByText('Resolution')).toBeDefined();
-    expect(screen.getByText('Noise')).toBeDefined();
-    expect(screen.getByText('Randomize')).toBeDefined();
+    expect(screen.getByText('Terrain')).toBeInTheDocument();
+    expect(screen.getByText('Resolution')).toBeInTheDocument();
+    expect(screen.getByText('Noise')).toBeInTheDocument();
+    expect(screen.getByText('Randomize')).toBeInTheDocument();
   });
 
   it('renders terrain when entity has EntityType::Terrain component', () => {
@@ -106,6 +106,6 @@ describe('TerrainInspector', () => {
       },
     });
     render(<TerrainInspector />);
-    expect(screen.getByText('Terrain')).toBeDefined();
+    expect(screen.getByText('Terrain')).toBeInTheDocument();
   });
 });

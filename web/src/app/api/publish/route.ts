@@ -12,6 +12,7 @@ import { extractRequestId } from '@/lib/logging/requestContext';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function POST(request: NextRequest) {
+  try {
   const requestId = extractRequestId(request.headers);
   const reqLog = logger.child({ requestId, endpoint: 'POST /api/publish' });
 
@@ -102,7 +103,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  try {
   const db = getDb();
 
   // Check tier publish limits
@@ -222,3 +222,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to publish game' }, { status: 500 });
   }
 }
+

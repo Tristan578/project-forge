@@ -72,7 +72,7 @@ describe('PhysicsFeelPanel', () => {
 
   it('renders the Physics Feel heading', () => {
     render(<PhysicsFeelPanel />);
-    expect(screen.getByText('Physics Feel')).toBeDefined();
+    expect(screen.getByText('Physics Feel')).toBeInTheDocument();
   });
 
   it('renders 8 preset buttons in the gallery', () => {
@@ -132,7 +132,7 @@ describe('PhysicsFeelPanel', () => {
     render(<PhysicsFeelPanel />);
     const slider = screen.getByLabelText('Blend factor between Preset A and Preset B');
     fireEvent.change(slider, { target: { value: '0.5' } });
-    expect(screen.getByText('50%')).toBeDefined();
+    expect(screen.getByText('50%')).toBeInTheDocument();
   });
 
   it('calls analyzePhysicsFeel when Analyze scene button is clicked', () => {
@@ -145,7 +145,7 @@ describe('PhysicsFeelPanel', () => {
     render(<PhysicsFeelPanel />);
     fireEvent.click(screen.getByLabelText('Analyze current scene physics feel'));
     // Analysis shows closest feel label in the results panel
-    expect(screen.getByText('87%')).toBeDefined();
+    expect(screen.getByText('87%')).toBeInTheDocument();
     // "Snappy Platformer" is shown in the analysis — may also appear in preset gallery
     expect(screen.getAllByText('Snappy Platformer').length).toBeGreaterThanOrEqual(1);
   });
@@ -153,7 +153,7 @@ describe('PhysicsFeelPanel', () => {
   it('renders preset B select for blending', () => {
     render(<PhysicsFeelPanel />);
     const select = screen.getByLabelText('Select Preset B for blending');
-    expect(select).toBeDefined();
+    expect(select).toBeInTheDocument();
   });
 
   it('custom description input accepts text', () => {

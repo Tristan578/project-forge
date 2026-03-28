@@ -63,7 +63,7 @@ describe('Sidebar', () => {
 
   it('renders correctly', () => {
     render(<Sidebar />);
-    expect(screen.getByRole('toolbar', { name: /Editor tools/i })).toBeDefined();
+    expect(screen.getByRole('toolbar', { name: /Editor tools/i })).toBeInTheDocument();
   });
 
   it('shows gizmo controls and allows switching', () => {

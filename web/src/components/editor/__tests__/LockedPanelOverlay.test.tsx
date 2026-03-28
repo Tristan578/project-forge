@@ -44,18 +44,18 @@ describe('LockedPanelOverlay', () => {
   it('has role="region" for landmark navigation', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
     const region = screen.getByRole('region');
-    expect(region).toBeDefined();
+    expect(region).toBeInTheDocument();
     expect(region.getAttribute('aria-label')).toBe('Panel locked — upgrade required');
   });
 
   it('shows tier label from getRequiredTier lookup', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
-    expect(screen.getByText('Pro plan required')).toBeDefined();
+    expect(screen.getByText('Pro plan required')).toBeInTheDocument();
   });
 
   it('uses override requiredTier when provided', () => {
     render(<LockedPanelOverlay panelId="unknown-panel" requiredTier="studio" />);
-    expect(screen.getByText('Studio plan required')).toBeDefined();
+    expect(screen.getByText('Studio plan required')).toBeInTheDocument();
     // getRequiredTier should NOT be called when requiredTier is provided
     expect(vi.mocked(getRequiredTier)).not.toHaveBeenCalled();
   });
@@ -72,27 +72,27 @@ describe('LockedPanelOverlay', () => {
     expect(screen.getByText('a higher plan plan required')).toBeUndefined;
     // The component renders "a higher plan plan required" — this is a known quirk
     // where the fallback string is used as both label and tier. Verify the actual text:
-    expect(screen.getByText(/plan required/)).toBeDefined();
+    expect(screen.getByText(/plan required/)).toBeInTheDocument();
   });
 
   it('shows starter tier for accessibility panel', () => {
     render(<LockedPanelOverlay panelId="accessibility" />);
-    expect(screen.getByText('Starter plan required')).toBeDefined();
+    expect(screen.getByText('Starter plan required')).toBeInTheDocument();
   });
 
   it('shows studio tier for economy panel', () => {
     render(<LockedPanelOverlay panelId="economy" />);
-    expect(screen.getByText('Studio plan required')).toBeDefined();
+    expect(screen.getByText('Studio plan required')).toBeInTheDocument();
   });
 
   it('upgrade link text mentions the tier name', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
     // Text is split across JSX nodes: "Upgrade to " + tierLabel
-    expect(screen.getByRole('link', { name: /Upgrade to Pro/i })).toBeDefined();
+    expect(screen.getByRole('link', { name: /Upgrade to Pro/i })).toBeInTheDocument();
   });
 
   it('shows descriptive message about upgrading', () => {
     render(<LockedPanelOverlay panelId="physics-feel" />);
-    expect(screen.getByText(/Upgrade to unlock this AI feature/)).toBeDefined();
+    expect(screen.getByText(/Upgrade to unlock this AI feature/)).toBeInTheDocument();
   });
 });

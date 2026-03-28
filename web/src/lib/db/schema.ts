@@ -94,6 +94,9 @@ export const providerKeys = pgTable(
     encryptedKey: text('encrypted_key').notNull(),
     iv: text('iv').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    // updatedAt tracks key rotation — set on every upsert so callers can use it
+    // instead of overwriting createdAt (which should reflect the original creation time).
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [uniqueIndex('uq_provider_keys_user_provider').on(table.userId, table.provider)]
 );
