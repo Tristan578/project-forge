@@ -230,6 +230,17 @@ pub(super) fn apply_custom_skybox_requests(
     use bevy::asset::RenderAssetUsages;
 
     for request in pending.custom_skybox_requests.drain(..) {
+        // Guard against excessively large skybox payloads (base64 overhead ~1.33x,
+        // so 10MB decoded ≈ 13.5MB base64).
+        const MAX_SKYBOX_BASE64_LEN: usize = 13_500_000;
+        if request.data_base64.len() > MAX_SKYBOX_BASE64_LEN {
+            tracing::error!(
+                "Custom skybox rejected: base64 payload {} bytes exceeds 10MB limit",
+                request.data_base64.len()
+            );
+            continue;
+        }
+
         // Parse data URL: "data:image/png;base64,AAAA..."
         let raw_base64 = if let Some(comma_pos) = request.data_base64.find(',') {
             &request.data_base64[comma_pos + 1..]
