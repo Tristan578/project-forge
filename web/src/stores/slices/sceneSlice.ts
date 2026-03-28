@@ -166,7 +166,8 @@ export const createSceneSlice: StateCreator<SceneSlice, [], [], SceneSlice> = (s
   setCloudSaveStatus: (status) => set({ cloudSaveStatus: status }),
   setLastCloudSave: (timestamp) => set({ lastCloudSave: timestamp }),
   loadTemplate: async (_templateId) => {
-    throw new Error('loadTemplate: not implemented');
+    // Not yet implemented — log warning instead of throwing to avoid crashing callers
+    console.warn('loadTemplate: not yet implemented');
   },
   switchScene: (sceneId) => {
     if (dispatchCommand) dispatchCommand('switch_scene', { sceneId });
