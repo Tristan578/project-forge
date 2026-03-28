@@ -148,4 +148,26 @@ describe('ThemeAmbient', () => {
     });
     expect(container.querySelector('[data-sf-effect]')).toBeNull();
   });
+
+  it('switches from dark to ember when data-sf-theme attribute is mutated', async () => {
+    // Start in dark theme — ThemeAmbient renders null
+    document.documentElement.setAttribute('data-sf-theme', 'dark');
+    document.documentElement.setAttribute('data-sf-effects', 'on');
+
+    let container!: HTMLElement;
+    await act(async () => {
+      ({ container } = render(<ThemeAmbient />));
+    });
+    expect(container.querySelector('[data-sf-effect]')).toBeNull();
+
+    // Mutate data-sf-theme to 'ember' — the MutationObserver in ThemeAmbient
+    // should pick up the change and re-render with the ember effect.
+    await act(async () => {
+      document.documentElement.setAttribute('data-sf-theme', 'ember');
+    });
+
+    const effect = container.querySelector('[data-sf-effect]');
+    expect(effect).not.toBeNull();
+    expect(effect?.getAttribute('data-sf-effect')).toBe('ember');
+  });
 });
