@@ -1444,13 +1444,25 @@ pub fn apply_material_updates(
         for (entity_id, mut current_mat) in query.iter_mut() {
             if entity_id.0 == update.entity_id {
                 let old_material = current_mat.clone();
-                *current_mat = update.material_data.clone();
+                // Merge: start from incoming update but preserve existing texture IDs
+                // when the update leaves them as None (update_material only sends changed fields).
+                let mut new_mat = update.material_data.clone();
+                if new_mat.base_color_texture.is_none() { new_mat.base_color_texture = old_material.base_color_texture.clone(); }
+                if new_mat.normal_map_texture.is_none() { new_mat.normal_map_texture = old_material.normal_map_texture.clone(); }
+                if new_mat.metallic_roughness_texture.is_none() { new_mat.metallic_roughness_texture = old_material.metallic_roughness_texture.clone(); }
+                if new_mat.emissive_texture.is_none() { new_mat.emissive_texture = old_material.emissive_texture.clone(); }
+                if new_mat.occlusion_texture.is_none() { new_mat.occlusion_texture = old_material.occlusion_texture.clone(); }
+                if new_mat.depth_map_texture.is_none() { new_mat.depth_map_texture = old_material.depth_map_texture.clone(); }
+                if new_mat.clearcoat_texture.is_none() { new_mat.clearcoat_texture = old_material.clearcoat_texture.clone(); }
+                if new_mat.clearcoat_roughness_texture.is_none() { new_mat.clearcoat_roughness_texture = old_material.clearcoat_roughness_texture.clone(); }
+                if new_mat.clearcoat_normal_texture.is_none() { new_mat.clearcoat_normal_texture = old_material.clearcoat_normal_texture.clone(); }
+                *current_mat = new_mat.clone();
 
                 // Record for undo
                 history.push(UndoableAction::MaterialChange {
                     entity_id: update.entity_id.clone(),
                     old_material,
-                    new_material: update.material_data.clone(),
+                    new_material: new_mat,
                 });
                 break;
             }
