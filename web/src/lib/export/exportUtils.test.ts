@@ -48,7 +48,7 @@ describe('escapeScriptContent', () => {
   });
 
   it('escapes <!-- to prevent HTML comment interpretation', () => {
-    expect(escapeScriptContent('<!-- comment -->')).toBe('<\\!-- comment -->');
+    expect(escapeScriptContent('<!-- comment -->')).toBe('\\x3C!-- comment -->');
   });
 
   it('handles nested </script> sequences', () => {
@@ -69,7 +69,7 @@ describe('escapeScriptContent', () => {
     const result = escapeScriptContent(input);
     expect(result).not.toContain('<!--');
     expect(result).not.toContain('</script>');
-    expect(result.match(/<\\!--/g)?.length).toBe(2);
+    expect(result.match(/\\x3C!--/g)?.length).toBe(2);
     expect(result.match(/<\\\/script/g)?.length).toBe(2);
   });
 

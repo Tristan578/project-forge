@@ -120,7 +120,7 @@ export function generateGameHTML(options: GameTemplateOptions): string {
         }
 
         // Orientation lock
-        ${orientationLock && orientationLock !== 'none'
+        ${orientationLock && ['landscape', 'portrait'].includes(orientationLock)
           ? `if (screen.orientation && screen.orientation.lock) { screen.orientation.lock('${orientationLock}').catch(function() {}); }`
           : '// No orientation lock requested'
         }
@@ -193,7 +193,7 @@ function generateUIRuntimeScript(uiData: string): string {
   const runtimeCode = generateUIRuntimeCode(uiData);
   return `
   <script>
-    ${runtimeCode}
+    ${escapeScriptContent(runtimeCode)}
   </script>`;
 }
 

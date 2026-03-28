@@ -270,7 +270,7 @@ describe('generateUIRuntimeCode: script injection prevention', () => {
     const malicious = '{"screens":[],"name":"<!--"}';
     const code = generateUIRuntimeCode(malicious);
     expect(code).not.toContain('<!--');
-    expect(code).toContain('<\\!--');
+    expect(code).toContain('\\x3C!--');
   });
 
   it('does not alter safe JSON uiData', () => {

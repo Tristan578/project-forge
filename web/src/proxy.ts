@@ -29,7 +29,12 @@ function handleCors(req: NextRequest): NextResponse | null {
     const isAllowedOrigin =
       !origin ||
       ALLOWED_ORIGINS.includes(origin) ||
-      (process.env.NODE_ENV === 'development' && (origin.startsWith('http://localhost') || origin.includes('.localhost:')));
+      (process.env.NODE_ENV === 'development' && (() => {
+        try {
+          const u = new URL(origin);
+          return u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname.endsWith('.localhost');
+        } catch { return false; }
+      })());
 
     if (!isAllowedOrigin) {
       return NextResponse.json({ error: 'Origin not allowed' }, { status: 403 });

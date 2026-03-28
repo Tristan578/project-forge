@@ -24,7 +24,7 @@ export function escapeHtml(text: string): string {
 export function escapeScriptContent(content: string): string {
   return content
     .replace(/<\/script/gi, '<\\/script')
-    .replace(/<!--/g, '<\\!--');
+    .replace(/<!--/g, '\\x3C!--');
 }
 
 /**
