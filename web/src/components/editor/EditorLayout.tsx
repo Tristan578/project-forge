@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, lazy, Suspense, useSyncExternalStore } from 'react';
+import dynamic from 'next/dynamic';
 import { X } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { CanvasArea } from './CanvasArea';
@@ -13,6 +14,12 @@ import { PanelsMenu } from './PanelsMenu';
 import { TokenBalance } from '../settings/TokenBalance';
 import { DrawerPanel } from './DrawerPanel';
 import { MobileToolbar } from './MobileToolbar';
+
+// ThemeAmbient: SSR must be disabled — reads data-sf-theme from DOM at runtime
+const ThemeAmbient = dynamic(
+  () => import('@spawnforge/ui').then(m => ({ default: m.ThemeAmbient })),
+  { ssr: false }
+);
 
 // Lazy-load heavy panels that aren't visible on initial render
 const ScriptEditorPanel = lazy(() => import('./ScriptEditorPanel').then(m => ({ default: m.ScriptEditorPanel })));
@@ -652,6 +659,7 @@ export function EditorLayout() {
           onDismiss={dismissCelebration}
         />
       )}
+      <ThemeAmbient />
     </div>
   );
 }
