@@ -264,6 +264,24 @@ export async function refundTokenAmount(
 
   const db = getDb();
 
+  // Idempotency guard: if usageId is provided, check whether a partial_refund
+  // record with this refundedUsageId already exists. This prevents double-crediting
+  // when both server and client race to trigger a refund (matches refundTokens pattern).
+  if (usageId) {
+    const [existing] = await db
+      .select({ id: tokenUsage.id })
+      .from(tokenUsage)
+      .where(
+        and(
+          eq(tokenUsage.userId, userId),
+          eq(tokenUsage.operation, 'partial_refund'),
+          sql`${tokenUsage.metadata}->>'refundedUsageId' = ${usageId}`,
+        ),
+      )
+      .limit(1);
+    if (existing) return; // Already refunded — skip to prevent double-credit
+  }
+
   // Determine the original source so we credit the right pool.
   let source: 'monthly' | 'addon' | 'mixed' = 'addon';
   if (usageId) {

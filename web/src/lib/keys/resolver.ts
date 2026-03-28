@@ -124,7 +124,9 @@ export async function storeProviderKey(
   const { encryptProviderKey } = await import('./encryption');
   const { encrypted, iv } = encryptProviderKey(plainKey);
 
-  // Upsert: insert or update on conflict
+  // Upsert: insert or update on conflict.
+  // Use updatedAt (not createdAt) on the conflict path so the original creation
+  // timestamp is preserved when a user rotates their key.
   await db
     .insert(providerKeys)
     .values({
@@ -138,7 +140,7 @@ export async function storeProviderKey(
       set: {
         encryptedKey: encrypted,
         iv,
-        createdAt: new Date(),
+        updatedAt: new Date(),
       },
     });
 }
