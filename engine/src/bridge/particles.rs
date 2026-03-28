@@ -141,13 +141,16 @@ pub(super) fn apply_particle_preset_requests(
     }
 }
 
-/// System that applies pending particle playback actions (always-active).
-/// Playback is controlled via ParticleEnabled toggle on both platforms.
+/// System that drains particle playback requests (intentional no-op stub).
+///
+/// Playback (play/stop/burst) is controlled by toggling `ParticleEnabled`
+/// via `apply_particle_toggles`. The `sync_hanabi_effects` system (WebGPU)
+/// watches for `ParticleEnabled` component changes and drives actual GPU
+/// particle playback. This system exists solely to drain the queue so
+/// requests do not accumulate indefinitely.
 pub(super) fn apply_particle_playback(
     mut pending: ResMut<PendingCommands>,
 ) {
-    // Playback (play/stop/burst) is handled by toggling ParticleEnabled.
-    // The sync_hanabi_effects system (WebGPU) watches for component changes.
     pending.particle_playback.clear();
 }
 

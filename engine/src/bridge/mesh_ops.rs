@@ -19,12 +19,6 @@ use crate::core::{
     asset_manager::AssetRef,
     audio::{AudioData, AudioEnabled},
 };
-use wasm_bindgen::prelude::wasm_bindgen;
-
-#[wasm_bindgen]
-extern "C" {
-    fn log(s: &str);
-}
 
 /// System that processes pending array requests (duplicate entity in pattern).
 pub(super) fn apply_array_requests(
@@ -361,7 +355,7 @@ pub(super) fn apply_instantiate_prefab(
         let snapshot: HistEntitySnapshot = match serde_json::from_str(&request.snapshot_json) {
             Ok(s) => s,
             Err(e) => {
-                log(&format!("Failed to deserialize prefab snapshot: {}", e));
+                super::log(&format!("Failed to deserialize prefab snapshot: {}", e));
                 continue;
             }
         };

@@ -17,15 +17,7 @@ use crate::core::{
     shader_effects::ShaderEffectData,
     asset_manager::AssetRef,
 };
-use wasm_bindgen::prelude::wasm_bindgen;
-
 use super::events;
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console)]
-    fn log(s: &str);
-}
 
 /// System that processes pending CSG boolean operation requests (editor-only).
 #[cfg(not(feature = "runtime"))]

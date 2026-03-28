@@ -174,6 +174,7 @@ pub(super) fn apply_scene_export(
         }
         Err(e) => {
             tracing::error!("Failed to serialize scene: {}", e);
+            events::emit_event("SCENE_EXPORT_ERROR", &serde_json::json!({"error": e.to_string()}));
         }
     }
 }
@@ -214,7 +215,9 @@ pub(super) fn apply_scene_load(
     };
 
     if scene_file.format_version > 3 {
-        tracing::error!("Unsupported scene format version: {}", scene_file.format_version);
+        let msg = format!("Unsupported scene format version {}", scene_file.format_version);
+        tracing::error!("{}", msg);
+        events::emit_event("SCENE_LOAD_ERROR", &serde_json::json!({"error": msg}));
         return;
     }
 

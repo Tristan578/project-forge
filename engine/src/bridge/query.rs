@@ -195,9 +195,6 @@ pub(super) fn process_query_requests(
                     }
                 }
             }
-            QueryRequest::ReverbZoneState { entity_id: _ } => {
-                // Note: reverb zone query handled in separate process_reverb_zone_queries to avoid param limit
-            }
             QueryRequest::ScriptTemplates => {
                 #[derive(serde::Serialize)]
                 #[serde(rename_all = "camelCase")]
@@ -291,6 +288,9 @@ pub(super) fn process_query_requests(
             QueryRequest::PlayState => {
                 // Handled by process_play_state_queries system to avoid system parameter limit
             }
+            // ReverbZoneState is routed to `remaining` above and handled by
+            // process_reverb_zone_queries. This arm exists only for exhaustiveness.
+            QueryRequest::ReverbZoneState { .. } => {}
         }
     }
 }

@@ -320,6 +320,7 @@ pub(super) fn apply_physics2d_toggles(
 }
 
 /// System that applies 2D joint creation requests (editor-only, metadata-only).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_create_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
@@ -348,6 +349,7 @@ pub(super) fn apply_create_joint2d_requests(
 }
 
 /// System that applies 2D joint update requests (editor-only, metadata-only).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_update_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut query: Query<(&EntityId, &mut PhysicsJoint2d)>,
@@ -375,6 +377,7 @@ pub(super) fn apply_update_joint2d_requests(
 }
 
 /// System that applies 2D joint removal requests (editor-only, metadata-only).
+#[cfg(not(feature = "runtime"))]
 pub(super) fn apply_remove_joint2d_requests(
     mut pending: ResMut<PendingCommands>,
     mut commands: Commands,
