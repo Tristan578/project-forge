@@ -252,4 +252,38 @@ describe('CommandFilter', () => {
       expect(checkboxes).toHaveLength(DEFAULT_CATEGORIES.length);
     });
   });
+
+  describe('accessibility contract', () => {
+    it('renders filter groups with role="group" and aria-labelledby', () => {
+      render(
+        <CommandFilter categories={DEFAULT_CATEGORIES} scopes={DEFAULT_SCOPES} totalCommands={10} />,
+      );
+      const groups = screen.getAllByRole('group');
+      expect(groups.length).toBeGreaterThanOrEqual(2);
+      for (const group of groups) {
+        expect(group).toHaveAttribute('aria-labelledby');
+      }
+    });
+
+    it('renders status region with aria-live="polite" and aria-atomic', () => {
+      render(
+        <CommandFilter categories={DEFAULT_CATEGORIES} scopes={DEFAULT_SCOPES} totalCommands={10} />,
+      );
+      const status = screen.getByText(/Showing \d+ commands/);
+      const liveRegion = status.closest('[aria-live]');
+      expect(liveRegion).toHaveAttribute('aria-live', 'polite');
+      expect(liveRegion).toHaveAttribute('aria-atomic', 'true');
+    });
+
+    it('clear button has aria-label', () => {
+      const { container } = render(
+        <CommandFilter categories={DEFAULT_CATEGORIES} scopes={DEFAULT_SCOPES} totalCommands={10} visibleCount={5} />,
+      );
+      // Activate a filter first to show clear button
+      const checkbox = screen.getAllByRole('checkbox')[0];
+      fireEvent.click(checkbox);
+      const clearBtn = container.querySelector('[aria-label="Clear all filters"]');
+      expect(clearBtn).not.toBeNull();
+    });
+  });
 });

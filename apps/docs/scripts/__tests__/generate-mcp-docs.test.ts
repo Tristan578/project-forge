@@ -90,7 +90,7 @@ describe('generateMcpDocs', () => {
     const content = fs.readFileSync(path.join(outputDir, 'spawn_entity.mdx'), 'utf-8');
     // Extract frontmatter
     const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-    expect(fmMatch, 'MDX must have frontmatter block').toBeTruthy();
+    expect(fmMatch, 'MDX must have frontmatter block').not.toBeNull();
 
     expect(content).toContain('commandName:');
     expect(content).toContain('category:');

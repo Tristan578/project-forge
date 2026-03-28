@@ -84,13 +84,24 @@ export function sanitizeAuthor(raw: string): string | null {
   return escaped;
 }
 
-/** HTML-escape a string for safe inclusion in MDX body text. */
+/** Escape a string for safe inclusion in YAML double-quoted strings and MDX body. */
 function htmlEscape(str: string): string {
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/[\r\n]/g, ' ');
+}
+
+/** Validate category format (alphanumeric + hyphens/underscores only). */
+function isValidCategory(category: string): boolean {
+  return /^[a-z0-9_-]+$/.test(category);
+}
+
+/** Validate visibility is an expected value. */
+function isValidVisibility(v: unknown): v is 'public' | 'internal' {
+  return v === 'public' || v === 'internal';
 }
 
 /** Get git last-updated metadata for a file. Returns { date, author } or null. */
@@ -195,7 +206,7 @@ function generateCommandMdx(cmd: Command, metadata: { date: string; author: stri
     '---',
     `commandName: "${escapedName}"`,
     `category: "${escapedCategory}"`,
-    `visibility: "${cmd.visibility ?? 'internal'}"`,
+    `visibility: "${isValidVisibility(cmd.visibility) ? cmd.visibility : 'internal'}"`,
     `description: "${escapedDesc}"`,
     ...(metadata ? [`lastUpdated: "${metadata.date}"`] : []),
     ...(metadata?.author ? [`lastUpdatedBy: "${metadata.author}"`] : []),
@@ -263,6 +274,10 @@ export function generateMcpDocs(manifestPath: string, outputDir: string): Genera
   for (const cmd of publicCommands) {
     if (!isValidCommandName(cmd.name)) {
       errors.push(`Skipping command with invalid name format: "${cmd.name}" (must match /^[a-z_][a-z0-9_]*$/)`);
+      continue;
+    }
+    if (!isValidCategory(cmd.category)) {
+      errors.push(`Skipping command "${cmd.name}" with invalid category: "${cmd.category}" (must match /^[a-z0-9_-]+$/)`);
       continue;
     }
     try {

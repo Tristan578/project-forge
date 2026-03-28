@@ -4,12 +4,12 @@ import { ThemeAmbient } from '../ThemeAmbient';
 
 describe('ThemeAmbient', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
     document.documentElement.setAttribute('data-sf-theme', 'dark');
     document.documentElement.setAttribute('data-sf-effects', 'on');
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     document.documentElement.removeAttribute('data-sf-theme');
     document.documentElement.removeAttribute('data-sf-effects');
   });
