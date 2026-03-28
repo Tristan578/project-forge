@@ -176,37 +176,37 @@ describe('EditorLayout', () => {
   it('renders desktop layout with SpawnForge branding', () => {
     setupStores('desktop');
     render(<EditorLayout />);
-    expect(screen.getByText('SpawnForge')).toBeDefined();
+    expect(screen.getByText('SpawnForge')).toBeInTheDocument();
   });
 
   it('renders scene name in top bar', () => {
     setupStores('desktop');
     render(<EditorLayout />);
-    expect(screen.getByText('My Game')).toBeDefined();
+    expect(screen.getByText('My Game')).toBeInTheDocument();
   });
 
   it('renders sidebar in desktop mode', () => {
     setupStores('desktop');
     render(<EditorLayout />);
-    expect(screen.getByTestId('sidebar')).toBeDefined();
+    expect(screen.getByTestId('sidebar')).toBeInTheDocument();
   });
 
   it('renders workspace provider in desktop mode', () => {
     setupStores('desktop');
     render(<EditorLayout />);
-    expect(screen.getByTestId('workspace-provider')).toBeDefined();
+    expect(screen.getByTestId('workspace-provider')).toBeInTheDocument();
   });
 
   it('renders play controls', () => {
     setupStores('desktop');
     render(<EditorLayout />);
-    expect(screen.getByTestId('play-controls')).toBeDefined();
+    expect(screen.getByTestId('play-controls')).toBeInTheDocument();
   });
 
   it('renders generation status', () => {
     setupStores('desktop');
     render(<EditorLayout />);
-    expect(screen.getByTestId('gen-status')).toBeDefined();
+    expect(screen.getByTestId('gen-status')).toBeInTheDocument();
   });
 
   it('calls useGenerationPolling hook', () => {
@@ -226,13 +226,13 @@ describe('EditorLayout', () => {
   it('renders compact layout with canvas area', () => {
     setupStores('compact');
     render(<EditorLayout />);
-    expect(screen.getByTestId('canvas-area')).toBeDefined();
+    expect(screen.getByTestId('canvas-area')).toBeInTheDocument();
   });
 
   it('renders mobile toolbar in compact mode', () => {
     setupStores('compact');
     render(<EditorLayout />);
-    expect(screen.getByTestId('mobile-toolbar')).toBeDefined();
+    expect(screen.getByTestId('mobile-toolbar')).toBeInTheDocument();
   });
 
   it('does not render sidebar in compact mode', () => {
@@ -245,14 +245,14 @@ describe('EditorLayout', () => {
     setupStores('compact');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('toggle-left'));
-    expect(screen.getByTestId('scene-hierarchy')).toBeDefined();
+    expect(screen.getByTestId('scene-hierarchy')).toBeInTheDocument();
   });
 
   it('opens right drawer on mobile toggle', () => {
     setupStores('compact');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('toggle-right'));
-    expect(screen.getByTestId('inspector')).toBeDefined();
+    expect(screen.getByTestId('inspector')).toBeInTheDocument();
   });
 
   // ── Help menu ─────────────────────────────────────────────────────────
@@ -261,14 +261,14 @@ describe('EditorLayout', () => {
     setupStores('desktop');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('open-shortcuts'));
-    expect(await screen.findByTestId('shortcuts-panel')).toBeDefined();
+    expect(await screen.findByTestId('shortcuts-panel')).toBeInTheDocument();
   });
 
   it('opens feedback dialog', async () => {
     setupStores('desktop');
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('open-feedback'));
-    expect(await screen.findByTestId('feedback-dialog')).toBeDefined();
+    expect(await screen.findByTestId('feedback-dialog')).toBeInTheDocument();
   });
 
   // ── Global keyboard shortcuts ─────────────────────────────────────────
@@ -291,7 +291,7 @@ describe('EditorLayout', () => {
     act(() => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '?', bubbles: true }));
     });
-    expect(await screen.findByTestId('cheat-sheet')).toBeDefined();
+    expect(await screen.findByTestId('cheat-sheet')).toBeInTheDocument();
   });
 
   // ── Right panel tabs ──────────────────────────────────────────────────
@@ -301,10 +301,10 @@ describe('EditorLayout', () => {
     render(<EditorLayout />);
     fireEvent.click(screen.getByTestId('toggle-right'));
     // Tabs should be visible (use role=tab to distinguish from panel content)
-    expect(screen.getByRole('tab', { name: 'Inspector' })).toBeDefined();
-    expect(screen.getByRole('tab', { name: 'AI Chat' })).toBeDefined();
-    expect(screen.getByRole('tab', { name: 'Script' })).toBeDefined();
-    expect(screen.getByRole('tab', { name: 'UI' })).toBeDefined();
+    expect(screen.getByRole('tab', { name: 'Inspector' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'AI Chat' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Script' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'UI' })).toBeInTheDocument();
   });
 
   it('switches right panel tab on click', () => {

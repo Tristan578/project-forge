@@ -115,31 +115,31 @@ describe('TaskboardPanel', () => {
   describe('Rendering', () => {
     it('renders the Tasks panel header', () => {
       render(<TaskboardPanel />);
-      expect(screen.getByText('Tasks')).toBeDefined();
+      expect(screen.getByText('Tasks')).toBeInTheDocument();
     });
 
     it('renders all three column labels', () => {
       render(<TaskboardPanel />);
-      expect(screen.getByText('To Do')).toBeDefined();
-      expect(screen.getByText('In Progress')).toBeDefined();
-      expect(screen.getByText('Done')).toBeDefined();
+      expect(screen.getByText('To Do')).toBeInTheDocument();
+      expect(screen.getByText('In Progress')).toBeInTheDocument();
+      expect(screen.getByText('Done')).toBeInTheDocument();
     });
 
     it('shows correct total task count in header', () => {
       resetStore(makeTasks());
       render(<TaskboardPanel />);
       // Header shows "N total"
-      expect(screen.getByText('4 total')).toBeDefined();
+      expect(screen.getByText('4 total')).toBeInTheDocument();
     });
 
     it('renders tasks in correct columns', () => {
       resetStore(makeTasks());
       render(<TaskboardPanel />);
 
-      expect(screen.getByText('Todo Task One')).toBeDefined();
-      expect(screen.getByText('Todo Task Two')).toBeDefined();
-      expect(screen.getByText('In Progress Task')).toBeDefined();
-      expect(screen.getByText('Done Task')).toBeDefined();
+      expect(screen.getByText('Todo Task One')).toBeInTheDocument();
+      expect(screen.getByText('Todo Task Two')).toBeInTheDocument();
+      expect(screen.getByText('In Progress Task')).toBeInTheDocument();
+      expect(screen.getByText('Done Task')).toBeInTheDocument();
     });
 
     it('displays column task counts', () => {
@@ -152,7 +152,7 @@ describe('TaskboardPanel', () => {
 
     it('renders with zero tasks', () => {
       render(<TaskboardPanel />);
-      expect(screen.getByText('0 total')).toBeDefined();
+      expect(screen.getByText('0 total')).toBeInTheDocument();
     });
   });
 
@@ -190,7 +190,7 @@ describe('TaskboardPanel', () => {
       const bar75 = screen.getAllByRole('progressbar').find(
         (el) => el.getAttribute('aria-valuenow') === '75'
       );
-      expect(bar75).toBeDefined();
+      expect(bar75).toBeInTheDocument();
     });
   });
 
@@ -202,7 +202,7 @@ describe('TaskboardPanel', () => {
       // Plus button is the add-task trigger in the To Do column
       const addButton = screen.getByLabelText('Add task');
       fireEvent.click(addButton);
-      expect(screen.getByPlaceholderText('Task title…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Task title…')).toBeInTheDocument();
     });
 
     it('adds a new task on form submit', () => {
@@ -217,7 +217,7 @@ describe('TaskboardPanel', () => {
       // Submit via form submit event (Enter key)
       fireEvent.submit(input.closest('form')!);
 
-      expect(screen.getByText('New shiny task')).toBeDefined();
+      expect(screen.getByText('New shiny task')).toBeInTheDocument();
       expect(useTaskStore.getState().tasks).toHaveLength(1);
     });
 
@@ -296,7 +296,7 @@ describe('TaskboardPanel', () => {
       const taskCard = screen.getByRole('button', { name: /Todo Task One/i });
       fireEvent.click(taskCard);
 
-      expect(screen.getByPlaceholderText('Add description…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Add description…')).toBeInTheDocument();
     });
 
     it('collapses task card on second click', () => {
@@ -334,7 +334,7 @@ describe('TaskboardPanel', () => {
       resetStore(makeTasks());
       render(<TaskboardPanel />);
       const clearButton = screen.getByLabelText('Clear completed tasks');
-      expect(clearButton).toBeDefined();
+      expect(clearButton).toBeInTheDocument();
     });
 
     it('clears all done tasks when clear button is clicked', () => {
@@ -430,7 +430,7 @@ describe('TaskboardPanel', () => {
       const taskCard = screen.getByRole('button', { name: /Todo Task One/i });
       fireEvent.keyDown(taskCard, { key: 'Enter' });
 
-      expect(screen.getByPlaceholderText('Add description…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Add description…')).toBeInTheDocument();
     });
 
     it('task cards respond to Space key for expand', () => {
@@ -440,7 +440,7 @@ describe('TaskboardPanel', () => {
       const taskCard = screen.getByRole('button', { name: /Todo Task One/i });
       fireEvent.keyDown(taskCard, { key: ' ' });
 
-      expect(screen.getByPlaceholderText('Add description…')).toBeDefined();
+      expect(screen.getByPlaceholderText('Add description…')).toBeInTheDocument();
     });
   });
 });

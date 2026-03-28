@@ -73,13 +73,13 @@ describe('ReverbZoneInspector', () => {
   it('renders Reverb Zone heading', () => {
     setupStore();
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Reverb Zone')).toBeDefined();
+    expect(screen.getByText('Reverb Zone')).toBeInTheDocument();
   });
 
   it('shows Add Reverb Zone button when not enabled', () => {
     setupStore({ enabled: false });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Add Reverb Zone')).toBeDefined();
+    expect(screen.getByText('Add Reverb Zone')).toBeInTheDocument();
   });
 
   it('calls updateReverbZone with defaults when Add Reverb Zone clicked', () => {
@@ -95,7 +95,7 @@ describe('ReverbZoneInspector', () => {
   it('shows controls when enabled with reverbZone', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Shape')).toBeDefined();
+    expect(screen.getByText('Shape')).toBeInTheDocument();
   });
 
   it('shows Shape select with Box option selected', () => {
@@ -111,7 +111,7 @@ describe('ReverbZoneInspector', () => {
   it('shows Size inputs for box shape', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Size')).toBeDefined();
+    expect(screen.getByText('Size')).toBeInTheDocument();
   });
 
   it('shows Radius input for sphere shape', () => {
@@ -123,46 +123,46 @@ describe('ReverbZoneInspector', () => {
       enabled: true,
     });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Radius')).toBeDefined();
+    expect(screen.getByText('Radius')).toBeInTheDocument();
   });
 
   it('shows Type (preset) select', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Type')).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Hall' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Room' })).toBeDefined();
-    expect(screen.getByRole('option', { name: 'Cave' })).toBeDefined();
+    expect(screen.getByText('Type')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Hall' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Room' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Cave' })).toBeInTheDocument();
   });
 
   it('shows Wet Mix slider', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Wet Mix')).toBeDefined();
+    expect(screen.getByText('Wet Mix')).toBeInTheDocument();
   });
 
   it('shows Decay Time slider', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Decay Time')).toBeDefined();
+    expect(screen.getByText('Decay Time')).toBeInTheDocument();
   });
 
   it('shows Pre-Delay slider', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Pre-Delay')).toBeDefined();
+    expect(screen.getByText('Pre-Delay')).toBeInTheDocument();
   });
 
   it('shows Priority field', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Priority')).toBeDefined();
+    expect(screen.getByText('Priority')).toBeInTheDocument();
   });
 
   it('shows Remove Reverb Zone button', () => {
     setupStore({ reverbZone: baseReverbZone, enabled: true });
     render(<ReverbZoneInspector entityId="entity-1" />);
-    expect(screen.getByText('Remove Reverb Zone')).toBeDefined();
+    expect(screen.getByText('Remove Reverb Zone')).toBeInTheDocument();
   });
 
   it('calls removeReverbZone when Remove clicked', () => {

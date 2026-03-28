@@ -159,17 +159,17 @@ describe('VisualScriptEditor', () => {
 
   it('renders the ReactFlow canvas container', () => {
     render(<VisualScriptEditor graph={EMPTY_GRAPH} onGraphChange={onGraphChange} onCompile={onCompile} />);
-    expect(screen.getByTestId('react-flow')).toBeDefined();
+    expect(screen.getByTestId('react-flow')).toBeInTheDocument();
   });
 
   it('renders the Add Node button in the panel', () => {
     render(<VisualScriptEditor graph={EMPTY_GRAPH} onGraphChange={onGraphChange} onCompile={onCompile} />);
-    expect(screen.getByText('+ Add Node')).toBeDefined();
+    expect(screen.getByText('+ Add Node')).toBeInTheDocument();
   });
 
   it('renders the Compile button in the panel', () => {
     render(<VisualScriptEditor graph={EMPTY_GRAPH} onGraphChange={onGraphChange} onCompile={onCompile} />);
-    expect(screen.getByText('Compile')).toBeDefined();
+    expect(screen.getByText('Compile')).toBeInTheDocument();
   });
 
   it('toggles NodePalette open when Add Node button is clicked', () => {
@@ -177,13 +177,13 @@ describe('VisualScriptEditor', () => {
     expect(screen.queryByTestId('node-palette')).toBeNull();
 
     fireEvent.click(screen.getByText('+ Add Node'));
-    expect(screen.getByTestId('node-palette')).toBeDefined();
+    expect(screen.getByTestId('node-palette')).toBeInTheDocument();
   });
 
   it('closes NodePalette when its close button is clicked', () => {
     render(<VisualScriptEditor graph={EMPTY_GRAPH} onGraphChange={onGraphChange} onCompile={onCompile} />);
     fireEvent.click(screen.getByText('+ Add Node'));
-    expect(screen.getByTestId('node-palette')).toBeDefined();
+    expect(screen.getByTestId('node-palette')).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText('Close palette'));
     expect(screen.queryByTestId('node-palette')).toBeNull();

@@ -1,12 +1,12 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 vi.mock('server-only', () => ({}));
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { GET } from './route';
 import { authenticateRequest } from '@/lib/auth/api-auth';
 import { resolveApiKey, ApiKeyError } from '@/lib/keys/resolver';
 import { SunoClient } from '@/lib/generate/sunoClient';
+import type { User } from '@/lib/db/schema';
 
 vi.mock('@/lib/auth/api-auth');
 vi.mock('@/lib/keys/resolver', async (importOriginal) => {
@@ -19,11 +19,11 @@ vi.mock('@/lib/generate/sunoClient', () => ({
   })),
 }));
 
-function makeRequest(jobId?: string) {
+function makeRequest(jobId?: string): NextRequest {
   const url = jobId
     ? `http://test/api/generate/music/status?jobId=${jobId}`
     : 'http://test/api/generate/music/status';
-  return new Request(url) as any;
+  return new NextRequest(url);
 }
 
 describe('GET /api/generate/music/status', () => {
@@ -31,7 +31,7 @@ describe('GET /api/generate/music/status', () => {
     vi.clearAllMocks();
     vi.mocked(authenticateRequest).mockResolvedValue({
       ok: true as const,
-      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as any },
+      ctx: { clerkId: 'clerk_1', user: { id: 'user_1', tier: 'creator' } as unknown as User },
     });
     vi.mocked(resolveApiKey).mockResolvedValue({ type: 'platform', key: 'test-key', metered: true, usageId: 'usage-1' });
   });
@@ -65,16 +65,16 @@ describe('GET /api/generate/music/status', () => {
   });
 
   it('returns completed status for completed/succeeded task', async () => {
-    vi.mocked(SunoClient).mockImplementation(function () {
-      return {
-        getStatus: vi.fn().mockResolvedValue({
+    vi.mocked(SunoClient).mockImplementation(
+      function (this: InstanceType<typeof SunoClient>) {
+        this.getStatus = vi.fn().mockResolvedValue({
           status: 'completed',
           progress: 100,
           audioUrl: 'https://cdn.suno.ai/song.mp3',
           durationSeconds: 120,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof SunoClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(200);
@@ -86,14 +86,14 @@ describe('GET /api/generate/music/status', () => {
   });
 
   it('returns failed status for failed task', async () => {
-    vi.mocked(SunoClient).mockImplementation(function () {
-      return {
-        getStatus: vi.fn().mockResolvedValue({
+    vi.mocked(SunoClient).mockImplementation(
+      function (this: InstanceType<typeof SunoClient>) {
+        this.getStatus = vi.fn().mockResolvedValue({
           status: 'failed',
           progress: 0,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof SunoClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
@@ -102,14 +102,14 @@ describe('GET /api/generate/music/status', () => {
   });
 
   it('returns processing status for generating task', async () => {
-    vi.mocked(SunoClient).mockImplementation(function () {
-      return {
-        getStatus: vi.fn().mockResolvedValue({
+    vi.mocked(SunoClient).mockImplementation(
+      function (this: InstanceType<typeof SunoClient>) {
+        this.getStatus = vi.fn().mockResolvedValue({
           status: 'generating',
           progress: 60,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof SunoClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
@@ -117,14 +117,14 @@ describe('GET /api/generate/music/status', () => {
   });
 
   it('returns pending status for unknown status values', async () => {
-    vi.mocked(SunoClient).mockImplementation(function () {
-      return {
-        getStatus: vi.fn().mockResolvedValue({
+    vi.mocked(SunoClient).mockImplementation(
+      function (this: InstanceType<typeof SunoClient>) {
+        this.getStatus = vi.fn().mockResolvedValue({
           status: 'queued',
           progress: 0,
-        }),
-      } as any;
-    } as any);
+        });
+      } as unknown as typeof SunoClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     const data = await res.json();
@@ -132,11 +132,11 @@ describe('GET /api/generate/music/status', () => {
   });
 
   it('returns 500 when provider throws', async () => {
-    vi.mocked(SunoClient).mockImplementation(function () {
-      return {
-        getStatus: vi.fn().mockRejectedValue(new Error('Suno API down')),
-      } as any;
-    } as any);
+    vi.mocked(SunoClient).mockImplementation(
+      function (this: InstanceType<typeof SunoClient>) {
+        this.getStatus = vi.fn().mockRejectedValue(new Error('Suno API down'));
+      } as unknown as typeof SunoClient
+    );
 
     const res = await GET(makeRequest('job-123'));
     expect(res.status).toBe(500);

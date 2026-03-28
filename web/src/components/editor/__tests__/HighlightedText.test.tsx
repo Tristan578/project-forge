@@ -3,7 +3,7 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@/test/utils/componentTestUtils';
 import { HighlightedText } from '../HighlightedText';
 
@@ -12,23 +12,25 @@ vi.mock('@/lib/hierarchyFilter', () => ({
 }));
 
 describe('HighlightedText', () => {
+  beforeEach(() => vi.clearAllMocks());
+
   afterEach(() => {
     cleanup();
   });
 
   it('renders plain text when no highlight', () => {
     render(<HighlightedText text="Player Entity" />);
-    expect(screen.getByText('Player Entity')).toBeDefined();
+    expect(screen.getByText('Player Entity')).toBeInTheDocument();
   });
 
   it('renders plain text when highlight is empty string', () => {
     render(<HighlightedText text="Player Entity" highlight="" />);
-    expect(screen.getByText('Player Entity')).toBeDefined();
+    expect(screen.getByText('Player Entity')).toBeInTheDocument();
   });
 
   it('renders plain text when highlight is whitespace', () => {
     render(<HighlightedText text="Player Entity" highlight="   " />);
-    expect(screen.getByText('Player Entity')).toBeDefined();
+    expect(screen.getByText('Player Entity')).toBeInTheDocument();
   });
 
   it('highlights the matching substring', () => {

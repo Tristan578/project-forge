@@ -100,13 +100,13 @@ describe('IdeaGeneratorModal', () => {
 
   it('renders the modal when isOpen is true', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
-    expect(screen.getByText('Game Idea Generator')).toBeDefined();
+    expect(screen.getByText('Game Idea Generator')).toBeInTheDocument();
   });
 
   it('has role="dialog" and aria-modal="true" for accessibility', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
     const dialog = screen.getByRole('dialog');
-    expect(dialog).toBeDefined();
+    expect(dialog).toBeInTheDocument();
     expect(dialog.getAttribute('aria-modal')).toBe('true');
   });
 
@@ -114,7 +114,7 @@ describe('IdeaGeneratorModal', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
     const dialog = screen.getByRole('dialog');
     expect(dialog.getAttribute('aria-labelledby')).toBe('idea-gen-title');
-    expect(screen.getByText('Game Idea Generator')).toBeDefined();
+    expect(screen.getByText('Game Idea Generator')).toBeInTheDocument();
   });
 
   it('calls onClose when the close button is clicked', () => {
@@ -130,9 +130,9 @@ describe('IdeaGeneratorModal', () => {
 
   it('renders idea cards for all generated ideas', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
-    expect(screen.getByText('Neon Dungeon Crawler')).toBeDefined();
-    expect(screen.getByText('City Builder Puzzle')).toBeDefined();
-    expect(screen.getByText('Space Survival RPG')).toBeDefined();
+    expect(screen.getByText('Neon Dungeon Crawler')).toBeInTheDocument();
+    expect(screen.getByText('City Builder Puzzle')).toBeInTheDocument();
+    expect(screen.getByText('Space Survival RPG')).toBeInTheDocument();
   });
 
   it('calls generateIdeas again when Generate button is clicked', () => {
@@ -146,13 +146,13 @@ describe('IdeaGeneratorModal', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
     // Click on first idea card to expand it
     fireEvent.click(screen.getByText('Neon Dungeon Crawler'));
-    expect(screen.getByText('A fast-paced roguelike with neon visuals.')).toBeDefined();
+    expect(screen.getByText('A fast-paced roguelike with neon visuals.')).toBeInTheDocument();
   });
 
   it('shows Start button on expanded idea card', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
     fireEvent.click(screen.getByText('Neon Dungeon Crawler'));
-    expect(screen.getByText('Start this idea')).toBeDefined();
+    expect(screen.getByText('Start this idea')).toBeInTheDocument();
   });
 
   it('calls onStart and onClose when Start button is clicked', () => {
@@ -165,13 +165,13 @@ describe('IdeaGeneratorModal', () => {
 
   it('shows the Filters toggle button', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
-    expect(screen.getByText('Filters')).toBeDefined();
+    expect(screen.getByText('Filters')).toBeInTheDocument();
   });
 
   it('shows filter controls when Filters is toggled', () => {
     render(<IdeaGeneratorModal isOpen={true} onClose={onClose} />);
     fireEvent.click(screen.getByText('Filters'));
-    expect(screen.getByLabelText('Genre')).toBeDefined();
-    expect(screen.getByLabelText('Max complexity')).toBeDefined();
+    expect(screen.getByLabelText('Genre')).toBeInTheDocument();
+    expect(screen.getByLabelText('Max complexity')).toBeInTheDocument();
   });
 });

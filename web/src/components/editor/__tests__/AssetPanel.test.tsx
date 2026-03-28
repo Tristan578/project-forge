@@ -84,21 +84,21 @@ describe('AssetPanel', () => {
   it('shows empty state when no assets', () => {
     setupStore();
     render(<AssetPanel />);
-    expect(screen.getByText(/No assets imported/)).toBeDefined();
+    expect(screen.getByText(/No assets imported/)).toBeInTheDocument();
   });
 
   it('renders import buttons on assets tab', () => {
     setupStore();
     render(<AssetPanel />);
-    expect(screen.getByLabelText('Import 3D model')).toBeDefined();
-    expect(screen.getByLabelText('Import texture')).toBeDefined();
-    expect(screen.getByLabelText('Import audio')).toBeDefined();
+    expect(screen.getByLabelText('Import 3D model')).toBeInTheDocument();
+    expect(screen.getByLabelText('Import texture')).toBeInTheDocument();
+    expect(screen.getByLabelText('Import audio')).toBeInTheDocument();
   });
 
   it('renders AI generate button', () => {
     setupStore();
     render(<AssetPanel />);
-    expect(screen.getByLabelText('AI Generate')).toBeDefined();
+    expect(screen.getByLabelText('AI Generate')).toBeInTheDocument();
   });
 
   // ── Tab switching ─────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ describe('AssetPanel', () => {
     setupStore();
     render(<AssetPanel />);
     fireEvent.click(screen.getByText('Materials'));
-    expect(screen.getByTestId('material-library')).toBeDefined();
+    expect(screen.getByTestId('material-library')).toBeInTheDocument();
   });
 
   it('hides import buttons on materials tab', () => {
@@ -122,7 +122,7 @@ describe('AssetPanel', () => {
     render(<AssetPanel />);
     fireEvent.click(screen.getByText('Materials'));
     fireEvent.click(screen.getByText('Assets'));
-    expect(screen.getByText(/No assets imported/)).toBeDefined();
+    expect(screen.getByText(/No assets imported/)).toBeInTheDocument();
   });
 
   // ── Asset cards ───────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ describe('AssetPanel', () => {
     render(<AssetPanel />);
     fireEvent.click(screen.getByLabelText('AI Generate'));
     fireEvent.click(screen.getByText('Generate 3D Model'));
-    expect(screen.getByTestId('gen-model-dialog')).toBeDefined();
+    expect(screen.getByTestId('gen-model-dialog')).toBeInTheDocument();
   });
 
   it('opens Generate Skybox dialog', () => {
@@ -190,7 +190,7 @@ describe('AssetPanel', () => {
     render(<AssetPanel />);
     fireEvent.click(screen.getByLabelText('AI Generate'));
     fireEvent.click(screen.getByText('Generate Skybox'));
-    expect(screen.getByTestId('gen-skybox-dialog')).toBeDefined();
+    expect(screen.getByTestId('gen-skybox-dialog')).toBeInTheDocument();
   });
 
   it('closes AI dropdown after selecting an option', () => {

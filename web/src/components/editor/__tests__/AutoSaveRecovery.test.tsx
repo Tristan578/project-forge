@@ -98,8 +98,10 @@ describe('AutoSaveRecovery', () => {
       vi.mocked(getWasmModule).mockReturnValue({} as never);
       mockStore({ lastCloudSave: new Date(NOW - 2 * 60 * 60 * 1000).toISOString() });
       render(<AutoSaveRecovery />);
+      // Flush microtasks and timers for async useEffect + Promise.then chain
       await flushPromises();
-      expect(screen.queryByText('Unsaved work recovered')).toBeDefined();
+      await flushPromises();
+      expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
     });
   });
 
@@ -185,9 +187,9 @@ describe('AutoSaveRecovery', () => {
       vi.mocked(getWasmModule).mockReturnValue({} as never);
       mockStore({ lastCloudSave: null });
       render(<AutoSaveRecovery />);
-      await flushPromises();
+      await vi.runAllTimersAsync();
       // With no cloud save to compare against, the dialog should show
-      expect(screen.queryByText('Unsaved work recovered')).toBeDefined();
+      expect(screen.getByText('Unsaved work recovered')).toBeInTheDocument();
     });
 
     it('does not show dialog when lastCloudSave is set and is newer', async () => {

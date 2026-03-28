@@ -54,15 +54,15 @@ describe('ExportDialog', () => {
   it('renders dialog with title and export button when open', () => {
     mockEditorStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Export Game')).toBeDefined();
-    expect(screen.getByText('Export')).toBeDefined();
-    expect(screen.getByText('Cancel')).toBeDefined();
+    expect(screen.getByText('Export Game')).toBeInTheDocument();
+    expect(screen.getByText('Export')).toBeInTheDocument();
+    expect(screen.getByText('Cancel')).toBeInTheDocument();
   });
 
   it('shows preset buttons', () => {
     mockEditorStore();
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />);
-    expect(screen.getByText('Quick Presets')).toBeDefined();
-    expect(screen.getByText('Web Standard')).toBeDefined();
+    expect(screen.getByText('Quick Presets')).toBeInTheDocument();
+    expect(screen.getByText('Web Standard')).toBeInTheDocument();
   });
 });

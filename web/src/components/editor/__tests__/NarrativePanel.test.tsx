@@ -117,17 +117,17 @@ describe('NarrativePanel', () => {
 
   it('renders the Narrative Arc Generator heading', () => {
     render(<NarrativePanel />);
-    expect(screen.getByText('Narrative Arc Generator')).toBeDefined();
+    expect(screen.getByText('Narrative Arc Generator')).toBeInTheDocument();
   });
 
   it('renders the Story Premise textarea', () => {
     render(<NarrativePanel />);
-    expect(screen.getByLabelText('Story premise input')).toBeDefined();
+    expect(screen.getByLabelText('Story premise input')).toBeInTheDocument();
   });
 
   it('renders the narrative preset selector', () => {
     render(<NarrativePanel />);
-    expect(screen.getByLabelText('Select narrative preset')).toBeDefined();
+    expect(screen.getByLabelText('Select narrative preset')).toBeInTheDocument();
   });
 
   it('shows preset options including hero_journey and mystery', () => {
@@ -155,7 +155,7 @@ describe('NarrativePanel', () => {
 
   it('shows empty state message before generation', () => {
     render(<NarrativePanel />);
-    expect(screen.getByText(/Enter a story premise and click Generate/)).toBeDefined();
+    expect(screen.getByText(/Enter a story premise and click Generate/)).toBeInTheDocument();
   });
 
   it('calls generateNarrative when Generate Narrative button is clicked', async () => {
@@ -174,7 +174,7 @@ describe('NarrativePanel', () => {
       target: { value: 'A mystery unfolds' },
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
-    expect(screen.getByText('Generating...')).toBeDefined();
+    expect(screen.getByText('Generating...')).toBeInTheDocument();
   });
 
   it('shows arc title after successful generation', async () => {
@@ -184,7 +184,7 @@ describe('NarrativePanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByText('The Last Guardian'));
-    expect(screen.getByText('The Last Guardian')).toBeDefined();
+    expect(screen.getByText('The Last Guardian')).toBeInTheDocument();
   });
 
   it('shows genre and themes after generation', async () => {
@@ -194,7 +194,7 @@ describe('NarrativePanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByText(/Fantasy/));
-    expect(screen.getByText(/sacrifice/)).toBeDefined();
+    expect(screen.getByText(/sacrifice/)).toBeInTheDocument();
   });
 
   it('shows character names after generation', async () => {
@@ -204,7 +204,7 @@ describe('NarrativePanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByText('Aria'));
-    expect(screen.getByText('Lord Malak')).toBeDefined();
+    expect(screen.getByText('Lord Malak')).toBeInTheDocument();
   });
 
   it('shows character roles after generation', async () => {
@@ -214,7 +214,7 @@ describe('NarrativePanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByText('protagonist'));
-    expect(screen.getByText('antagonist')).toBeDefined();
+    expect(screen.getByText('antagonist')).toBeInTheDocument();
   });
 
   it('shows ending names after generation', async () => {
@@ -224,7 +224,7 @@ describe('NarrativePanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByText('Victory'));
-    expect(screen.getByText('Defeat')).toBeDefined();
+    expect(screen.getByText('Defeat')).toBeInTheDocument();
   });
 
   it('shows Export to Dialogue System button after generation', async () => {
@@ -234,7 +234,7 @@ describe('NarrativePanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByLabelText('Export narrative to dialogue system'));
-    expect(screen.getByLabelText('Export narrative to dialogue system')).toBeDefined();
+    expect(screen.getByLabelText('Export narrative to dialogue system')).toBeInTheDocument();
   });
 
   it('shows error message when generateNarrative throws', async () => {
@@ -245,7 +245,7 @@ describe('NarrativePanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate narrative'));
     await waitFor(() => screen.getByText('AI service error'));
-    expect(screen.getByText('AI service error')).toBeDefined();
+    expect(screen.getByText('AI service error')).toBeInTheDocument();
   });
 
   it('calls findDeadEnds on the generated arc', async () => {

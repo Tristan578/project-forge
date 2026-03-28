@@ -48,18 +48,18 @@ describe('EconomyPanel', () => {
 
   it('renders the Economy Designer heading', () => {
     render(<EconomyPanel />);
-    expect(screen.getByText('Economy Designer')).toBeDefined();
+    expect(screen.getByText('Economy Designer')).toBeInTheDocument();
   });
 
   it('renders preset selector and game description controls', () => {
     render(<EconomyPanel />);
-    expect(screen.getByLabelText('Economy preset')).toBeDefined();
-    expect(screen.getByLabelText('Game description for economy generation')).toBeDefined();
+    expect(screen.getByLabelText('Economy preset')).toBeInTheDocument();
+    expect(screen.getByLabelText('Game description for economy generation')).toBeInTheDocument();
   });
 
   it('shows empty state message before any economy is loaded', () => {
     render(<EconomyPanel />);
-    expect(screen.getByText(/Select a preset or describe your game/)).toBeDefined();
+    expect(screen.getByText(/Select a preset or describe your game/)).toBeInTheDocument();
   });
 
   it('calls generateEconomy when Generate Economy button is clicked', async () => {
@@ -72,7 +72,7 @@ describe('EconomyPanel', () => {
     vi.mocked(generateEconomy).mockReturnValue(new Promise(() => {}));
     render(<EconomyPanel />);
     fireEvent.click(screen.getByLabelText('Generate economy'));
-    expect(screen.getByText('Generating...')).toBeDefined();
+    expect(screen.getByText('Generating...')).toBeInTheDocument();
   });
 
   it('loads economy from preset when preset is selected', () => {
@@ -80,7 +80,7 @@ describe('EconomyPanel', () => {
     const select = screen.getByLabelText('Economy preset') as HTMLSelectElement;
     fireEvent.change(select, { target: { value: 'casual_mobile' } });
     // Economy should be loaded — Balance Score section should appear
-    expect(screen.getByText('Balance Score')).toBeDefined();
+    expect(screen.getByText('Balance Score')).toBeInTheDocument();
   });
 
   it('calls validateBalance when preset is loaded', () => {
@@ -96,8 +96,8 @@ describe('EconomyPanel', () => {
     fireEvent.change(screen.getByLabelText('Economy preset') as HTMLSelectElement, {
       target: { value: 'casual_mobile' },
     });
-    expect(screen.getByText('85')).toBeDefined();
-    expect(screen.getByText('/100')).toBeDefined();
+    expect(screen.getByText('85')).toBeInTheDocument();
+    expect(screen.getByText('/100')).toBeInTheDocument();
   });
 
   it('shows Currencies section after economy is loaded', () => {
@@ -106,7 +106,7 @@ describe('EconomyPanel', () => {
       target: { value: 'casual_mobile' },
     });
     // Section title is "Currencies (N)" with count
-    expect(screen.getByText(/^Currencies/)).toBeDefined();
+    expect(screen.getByText(/^Currencies/)).toBeInTheDocument();
   });
 
   it('shows Shop Items section after economy is loaded', () => {
@@ -115,7 +115,7 @@ describe('EconomyPanel', () => {
       target: { value: 'casual_mobile' },
     });
     // Section title is "Shop Items (N)" with count
-    expect(screen.getByText(/^Shop Items/)).toBeDefined();
+    expect(screen.getByText(/^Shop Items/)).toBeInTheDocument();
   });
 
   it('description textarea accepts text input', () => {

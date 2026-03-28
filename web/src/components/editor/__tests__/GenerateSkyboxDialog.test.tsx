@@ -46,19 +46,19 @@ describe('GenerateSkyboxDialog', () => {
 
   it('renders Generate Skybox heading', () => {
     render(<GenerateSkyboxDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Generate Skybox')).toBeDefined();
+    expect(screen.getByText('Generate Skybox')).toBeInTheDocument();
   });
 
   it('renders style options (Realistic, Fantasy, Sci-Fi, Cartoon)', () => {
     render(<GenerateSkyboxDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('Realistic')).toBeDefined();
-    expect(screen.getByText('Fantasy')).toBeDefined();
-    expect(screen.getByText('Cartoon')).toBeDefined();
+    expect(screen.getByText('Realistic')).toBeInTheDocument();
+    expect(screen.getByText('Fantasy')).toBeInTheDocument();
+    expect(screen.getByText('Cartoon')).toBeInTheDocument();
   });
 
   it('renders token cost of 50', () => {
     render(<GenerateSkyboxDialog isOpen={true} onClose={mockOnClose} />);
-    expect(screen.getByText('50')).toBeDefined();
+    expect(screen.getByText('50')).toBeInTheDocument();
   });
 
   it('disables Generate when prompt is empty', () => {

@@ -91,17 +91,17 @@ describe('WorldBuilderPanel', () => {
 
   it('renders the World Builder heading', () => {
     render(<WorldBuilderPanel />);
-    expect(screen.getByText('World Builder')).toBeDefined();
+    expect(screen.getByText('World Builder')).toBeInTheDocument();
   });
 
   it('renders the world description textarea', () => {
     render(<WorldBuilderPanel />);
-    expect(screen.getByLabelText('Describe your world concept')).toBeDefined();
+    expect(screen.getByLabelText('Describe your world concept')).toBeInTheDocument();
   });
 
   it('renders the genre preset selector', () => {
     render(<WorldBuilderPanel />);
-    expect(screen.getByLabelText('Genre preset (optional)')).toBeDefined();
+    expect(screen.getByLabelText('Genre preset (optional)')).toBeInTheDocument();
   });
 
   it('shows preset options in the genre select', () => {
@@ -141,12 +141,12 @@ describe('WorldBuilderPanel', () => {
     fireEvent.change(screen.getByLabelText('Genre preset (optional)'), {
       target: { value: 'medieval_fantasy' },
     });
-    expect(screen.getByLabelText('Load preset world')).toBeDefined();
+    expect(screen.getByLabelText('Load preset world')).toBeInTheDocument();
   });
 
   it('shows empty state message before generation', () => {
     render(<WorldBuilderPanel />);
-    expect(screen.getByText(/Describe a world concept or select a genre preset/)).toBeDefined();
+    expect(screen.getByText(/Describe a world concept or select a genre preset/)).toBeInTheDocument();
   });
 
   it('calls generateWorld when Generate button is clicked', async () => {
@@ -165,7 +165,7 @@ describe('WorldBuilderPanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
     await waitFor(() => screen.getByText('Aethoria'));
-    expect(screen.getByText('Aethoria')).toBeDefined();
+    expect(screen.getByText('Aethoria')).toBeInTheDocument();
   });
 
   it('shows world genre and era after generation', async () => {
@@ -175,8 +175,8 @@ describe('WorldBuilderPanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
     await waitFor(() => screen.getByText('Aethoria'));
-    expect(screen.getByText('Fantasy')).toBeDefined();
-    expect(screen.getByText('Medieval')).toBeDefined();
+    expect(screen.getByText('Fantasy')).toBeInTheDocument();
+    expect(screen.getByText('Medieval')).toBeInTheDocument();
   });
 
   it('shows faction section after generation', async () => {
@@ -196,7 +196,7 @@ describe('WorldBuilderPanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
     await waitFor(() => screen.getByText('Verdant Vale'));
-    expect(screen.getByText('Regions')).toBeDefined();
+    expect(screen.getByText('Regions')).toBeInTheDocument();
   });
 
   it('shows Export button after generation', async () => {
@@ -206,7 +206,7 @@ describe('WorldBuilderPanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
     await waitFor(() => screen.getByLabelText('Export world as markdown'));
-    expect(screen.getByLabelText('Export world as markdown')).toBeDefined();
+    expect(screen.getByLabelText('Export world as markdown')).toBeInTheDocument();
   });
 
   it('calls worldToMarkdown when Export is clicked', async () => {
@@ -234,7 +234,7 @@ describe('WorldBuilderPanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Generate world with AI'));
     await waitFor(() => screen.getByText('World gen failed'));
-    expect(screen.getByText('World gen failed')).toBeDefined();
+    expect(screen.getByText('World gen failed')).toBeInTheDocument();
   });
 
   it('loads preset world when Load Preset is clicked', () => {
@@ -244,7 +244,7 @@ describe('WorldBuilderPanel', () => {
     });
     fireEvent.click(screen.getByLabelText('Load preset world'));
     // After loading the preset, world name should appear
-    expect(screen.getByText('Aethoria')).toBeDefined();
+    expect(screen.getByText('Aethoria')).toBeInTheDocument();
   });
 
   it('description textarea accepts text input', () => {

@@ -59,28 +59,28 @@ describe('SortingLayerPanel', () => {
   it('renders Sorting Layers heading', () => {
     setupStore();
     render(<SortingLayerPanel />);
-    expect(screen.getByText('Sorting Layers')).toBeDefined();
+    expect(screen.getByText('Sorting Layers')).toBeInTheDocument();
   });
 
   it('renders default layer names', () => {
     setupStore();
     render(<SortingLayerPanel />);
-    expect(screen.getByText('Background')).toBeDefined();
-    expect(screen.getByText('Default')).toBeDefined();
-    expect(screen.getByText('Foreground')).toBeDefined();
-    expect(screen.getByText('UI')).toBeDefined();
+    expect(screen.getByText('Background')).toBeInTheDocument();
+    expect(screen.getByText('Default')).toBeInTheDocument();
+    expect(screen.getByText('Foreground')).toBeInTheDocument();
+    expect(screen.getByText('UI')).toBeInTheDocument();
   });
 
   it('renders new layer input', () => {
     setupStore();
     render(<SortingLayerPanel />);
-    expect(screen.getByPlaceholderText('New layer name')).toBeDefined();
+    expect(screen.getByPlaceholderText('New layer name')).toBeInTheDocument();
   });
 
   it('renders Add button', () => {
     setupStore();
     render(<SortingLayerPanel />);
-    expect(screen.getByText('Add')).toBeDefined();
+    expect(screen.getByText('Add')).toBeInTheDocument();
   });
 
   it('calls addSortingLayer when Add is clicked with layer name', () => {
@@ -131,7 +131,7 @@ describe('SortingLayerPanel', () => {
       ],
     });
     render(<SortingLayerPanel />);
-    expect(screen.getByTitle('Delete layer')).toBeDefined();
+    expect(screen.getByTitle('Delete layer')).toBeInTheDocument();
   });
 
   it('calls removeSortingLayer when delete button is clicked on custom layer', () => {
@@ -154,6 +154,6 @@ describe('SortingLayerPanel', () => {
       },
     });
     render(<SortingLayerPanel />);
-    expect(screen.getByText('2')).toBeDefined();
+    expect(screen.getByText('2')).toBeInTheDocument();
   });
 });
