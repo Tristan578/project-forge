@@ -217,7 +217,7 @@ export const AssetPanel = memo(function AssetPanel() {
       {/* Import progress bar */}
       {importProgress && (
         <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-800/50 px-3 py-1.5">
-          <Loader2 size={12} className="animate-spin text-blue-400" />
+          <Loader2 size={12} className="motion-safe:animate-spin text-blue-400" />
           <span className="text-xs text-zinc-400">
             Importing {importProgress.current}/{importProgress.total}...
           </span>

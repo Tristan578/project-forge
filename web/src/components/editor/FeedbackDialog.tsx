@@ -182,7 +182,7 @@ export function FeedbackDialog({ open, onClose }: FeedbackDialogProps) {
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {submitting ? (
-                <span className="animate-pulse">Submitting...</span>
+                <span className="motion-safe:animate-pulse">Submitting...</span>
               ) : (
                 <>
                   <Send size={14} />

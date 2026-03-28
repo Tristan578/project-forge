@@ -160,7 +160,7 @@ export function ModifyPanel() {
       {/* Loading state */}
       {panelState === 'planning' && (
         <div className="flex items-center gap-2 text-xs text-zinc-400">
-          <Loader2 size={14} className="animate-spin" />
+          <Loader2 size={14} className="motion-safe:animate-spin" />
           Analyzing scene and planning modifications...
         </div>
       )}
@@ -254,7 +254,7 @@ export function ModifyPanel() {
 
           {panelState === 'executing' && (
             <div className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="motion-safe:animate-spin" />
               Applying modifications...
             </div>
           )}

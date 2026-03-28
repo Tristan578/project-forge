@@ -220,7 +220,7 @@ export function ReviewPanel() {
         {/* Loading state */}
         {loading && (
           <div className="flex flex-col items-center justify-center gap-3 py-8">
-            <Loader2 size={24} className="text-yellow-400 animate-spin" />
+            <Loader2 size={24} className="text-yellow-400 motion-safe:animate-spin" />
             <p className="text-xs text-zinc-400">Analyzing your game...</p>
           </div>
         )}

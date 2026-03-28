@@ -37,7 +37,7 @@ export function GenerationStatus() {
         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
         className="flex items-center gap-2 rounded bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700"
       >
-        <Loader2 size={14} className="animate-spin" />
+        <Loader2 size={14} className="motion-safe:animate-spin" />
         <span>Generating ({activeJobs.length})</span>
         <ChevronDown size={12} />
       </button>

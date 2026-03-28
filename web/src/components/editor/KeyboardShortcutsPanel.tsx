@@ -198,7 +198,7 @@ export function KeyboardShortcutsPanel({ open, onClose }: KeyboardShortcutsPanel
                           aria-label={isEditing ? `Press a key combo for ${binding.label}` : `Rebind ${binding.label} (${effectiveKey})`}
                           className={`rounded px-1.5 py-0.5 text-[11px] font-mono transition-colors ${
                             isEditing
-                              ? 'bg-blue-600 text-white animate-pulse'
+                              ? 'bg-blue-600 text-white motion-safe:animate-pulse'
                               : isCustomized
                                 ? 'bg-blue-900/50 text-blue-300 hover:bg-blue-900/70'
                                 : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'

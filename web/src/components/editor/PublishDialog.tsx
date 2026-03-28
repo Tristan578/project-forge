@@ -207,7 +207,7 @@ export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
               <button onClick={handlePublish}
                 disabled={isPublishing || !title || slug.length < 3 || slugAvailable === false}
                 className="flex flex-1 items-center justify-center gap-2 rounded bg-blue-600 py-2 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50">
-                {isPublishing ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+                {isPublishing ? <Loader2 size={14} className="motion-safe:animate-spin" /> : <Globe size={14} />}
                 {isPublishing ? 'Publishing...' : 'Publish'}
               </button>
             </div>

@@ -42,7 +42,7 @@ const COLUMNS: ColumnConfig[] = [
     id: 'in_progress',
     label: 'In Progress',
     color: 'text-blue-400',
-    icon: <Loader2 size={13} className="animate-spin" />,
+    icon: <Loader2 size={13} className="motion-safe:animate-spin" />,
   },
   {
     id: 'done',

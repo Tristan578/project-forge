@@ -54,11 +54,19 @@ export function ContextMenu({
 }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [clampedPosition, setClampedPosition] = useState(position);
+  const triggerRef = useRef<Element | null>(null);
 
   // Reset position when it changes
   useEffect(() => {
     setClampedPosition(position);
   }, [position]);
+
+  // Store the focused element before opening so we can restore it on close
+  useEffect(() => {
+    if (isOpen) {
+      triggerRef.current = document.activeElement;
+    }
+  }, [isOpen]);
 
   // Menu item definitions (multi-select aware labels)
   const isMulti = selectionCount > 1;
@@ -97,13 +105,23 @@ export function ContextMenu({
     },
   ];
 
+  // Wrap onClose to restore focus to the triggering element
+  const handleClose = useCallback(() => {
+    onClose();
+    requestAnimationFrame(() => {
+      if (triggerRef.current instanceof HTMLElement) {
+        triggerRef.current.focus();
+      }
+    });
+  }, [onClose]);
+
   // Handle click outside to close
   useEffect(() => {
     if (!isOpen) return;
 
     const handleClickOutside = (e: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
+        handleClose();
       }
     };
 
@@ -112,7 +130,7 @@ export function ContextMenu({
     return () => {
       document.removeEventListener('mousedown', handleClickOutside, true);
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, handleClose]);
 
   // Track focused menu item index
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -137,7 +155,7 @@ export function ContextMenu({
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        handleClose();
         return;
       }
 
@@ -164,7 +182,7 @@ export function ContextMenu({
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [isOpen, onClose, focusedIndex, actionableIndices, focusItem]);
+  }, [isOpen, handleClose, focusedIndex, actionableIndices, focusItem]);
 
   // Auto-focus first item when menu opens
   useEffect(() => {
@@ -219,7 +237,7 @@ export function ContextMenu({
 
   const handleMenuItemClick = (action: () => void) => {
     action();
-    onClose();
+    handleClose();
   };
 
   return (

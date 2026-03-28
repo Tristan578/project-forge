@@ -293,7 +293,7 @@ export function TutorialPanel() {
             >
               {isGenerating ? (
                 <>
-                  <Loader2 size={13} className="animate-spin" />
+                  <Loader2 size={13} className="motion-safe:animate-spin" />
                   Generating...
                 </>
               ) : (

@@ -191,7 +191,7 @@ export function BehaviorTreePanel() {
             aria-label="Generate behavior tree"
           >
             {isGenerating ? (
-              <Loader2 size={12} className="animate-spin" />
+              <Loader2 size={12} className="motion-safe:animate-spin" />
             ) : (
               <Sparkles size={12} />
             )}

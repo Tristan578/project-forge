@@ -280,7 +280,7 @@ export function GDDPanel() {
         >
           {isGenerating ? (
             <>
-              <Loader2 size={14} className="animate-spin" />
+              <Loader2 size={14} className="motion-safe:animate-spin" />
               Generating GDD...
             </>
           ) : (

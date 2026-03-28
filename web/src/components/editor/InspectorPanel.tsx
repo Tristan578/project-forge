@@ -230,10 +230,11 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Name field */}
       <div className="mb-4">
-        <label className="mb-1 block text-xs font-medium text-zinc-400">
+        <label htmlFor="entity-name" className="mb-1 block text-xs font-medium text-zinc-400">
           <span>Name <InfoTooltip term="name" /></span>
         </label>
         <input
+          id="entity-name"
           ref={nameInputRef}
           type="text"
           value={localName}
@@ -518,11 +519,11 @@ export const InspectorPanel = memo(function InspectorPanel() {
 
       {/* Show skeleton if we have selection but no transform yet */}
       {!primaryTransform && (
-        <div className="mt-4 space-y-3">
-          <div className="h-3 w-24 animate-pulse rounded bg-zinc-800" />
-          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
-          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
-          <div className="h-8 w-full animate-pulse rounded bg-zinc-800" />
+        <div className="mt-4 space-y-3" aria-busy="true" aria-label="Loading entity properties">
+          <div className="h-3 w-24 motion-safe:animate-pulse rounded bg-zinc-800" />
+          <div className="h-8 w-full motion-safe:animate-pulse rounded bg-zinc-800" />
+          <div className="h-8 w-full motion-safe:animate-pulse rounded bg-zinc-800" />
+          <div className="h-8 w-full motion-safe:animate-pulse rounded bg-zinc-800" />
         </div>
       )}
 

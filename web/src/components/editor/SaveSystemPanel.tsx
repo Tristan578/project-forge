@@ -310,7 +310,7 @@ export function SaveSystemPanel() {
             className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded bg-green-600 hover:bg-green-500 disabled:bg-zinc-700 disabled:text-zinc-400 text-white text-xs font-medium transition-colors duration-150 focus:ring-2 focus:ring-green-500 focus:outline-none"
           >
             {isGenerating ? (
-              <Loader2 size={12} className="animate-spin" />
+              <Loader2 size={12} className="motion-safe:animate-spin" />
             ) : (
               <Save size={12} />
             )}

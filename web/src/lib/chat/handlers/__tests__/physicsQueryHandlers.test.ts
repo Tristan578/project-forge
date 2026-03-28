@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { invokeHandler, createMockStore } from './handlerTestUtils';
 import { physicsJointHandlers } from '../physicsJointHandlers';
-import { queryHandlers } from '../queryHandlers';
+import { handlers2d } from '../handlers2d';
 import type { PhysicsData } from '@/stores/editorStore';
 
 // ---------------------------------------------------------------------------
@@ -35,7 +35,7 @@ describe('get_physics — edge cases', () => {
     };
 
     const { result } = await invokeHandler(
-      queryHandlers,
+      physicsJointHandlers,
       'get_physics',
       {},
       { primaryPhysics: fullPhysics, physicsEnabled: true }
@@ -65,7 +65,7 @@ describe('get_physics — edge cases', () => {
     };
 
     const { result } = await invokeHandler(
-      queryHandlers,
+      physicsJointHandlers,
       'get_physics',
       {},
       { primaryPhysics: physics, physicsEnabled: true }
@@ -95,7 +95,7 @@ describe('get_physics — edge cases', () => {
 
     // Physics data exists but is disabled
     const { result } = await invokeHandler(
-      queryHandlers,
+      physicsJointHandlers,
       'get_physics',
       {},
       { primaryPhysics: physics, physicsEnabled: false }
@@ -127,7 +127,7 @@ describe('get_joint — edge cases', () => {
       };
 
       const { result } = await invokeHandler(
-        queryHandlers,
+        physicsJointHandlers,
         'get_joint',
         {},
         { primaryJoint: joint }
@@ -151,7 +151,7 @@ describe('get_joint — edge cases', () => {
     };
 
     const { result } = await invokeHandler(
-      queryHandlers,
+      physicsJointHandlers,
       'get_joint',
       {},
       { primaryJoint: joint }
@@ -173,7 +173,7 @@ describe('get_joint — edge cases', () => {
     };
 
     const { result } = await invokeHandler(
-      queryHandlers,
+      physicsJointHandlers,
       'get_joint',
       {},
       { primaryJoint: joint }
@@ -620,7 +620,7 @@ describe('apply_force — additional cases', () => {
 
 describe('get_physics2d — edge cases', () => {
   it('returns error when entityId is missing', async () => {
-    const { result } = await invokeHandler(queryHandlers, 'get_physics2d', {});
+    const { result } = await invokeHandler(handlers2d, 'get_physics2d', {});
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('entityId');
@@ -645,20 +645,19 @@ describe('get_physics2d — edge cases', () => {
     };
 
     const { result } = await invokeHandler(
-      queryHandlers,
+      handlers2d,
       'get_physics2d',
       { entityId: 'sprite-1' },
       { physics2d: { 'sprite-1': physicsData } }
     );
 
     expect(result.success).toBe(true);
-    const data = result.result as { data: typeof physicsData };
-    expect(data.data).toEqual(physicsData);
+    expect(result.result).toEqual(physicsData);
   });
 
   it('returns error when entity exists but has no 2D physics', async () => {
     const { result } = await invokeHandler(
-      queryHandlers,
+      handlers2d,
       'get_physics2d',
       { entityId: 'cube-without-physics2d' },
       { physics2d: {} }
@@ -681,13 +680,13 @@ describe('get_physics2d — edge cases', () => {
     };
 
     const { result: resultA } = await invokeHandler(
-      queryHandlers,
+      handlers2d,
       'get_physics2d',
       { entityId: 'sprite-A' },
       { physics2d: { 'sprite-A': dataA, 'sprite-B': dataB } }
     );
     const { result: resultB } = await invokeHandler(
-      queryHandlers,
+      handlers2d,
       'get_physics2d',
       { entityId: 'sprite-B' },
       { physics2d: { 'sprite-A': dataA, 'sprite-B': dataB } }

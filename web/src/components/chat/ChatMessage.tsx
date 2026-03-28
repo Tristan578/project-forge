@@ -68,6 +68,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
         <div className="mb-1.5 w-full">
           <button
             onClick={() => setThinkingOpen(!thinkingOpen)}
+            aria-expanded={thinkingOpen}
+            aria-label={thinkingOpen ? 'Hide reasoning' : 'Show reasoning'}
             className="flex items-center gap-1 text-[10px] text-amber-500/70 hover:text-amber-400 transition-colors"
           >
             <Brain size={11} />

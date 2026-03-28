@@ -383,6 +383,8 @@ export function ToolCallCard({ toolCall, onApprove, onReject }: ToolCallCardProp
       <button
         className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left"
         onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-label={expanded ? `Collapse ${label} details` : `Expand ${label} details`}
       >
         {statusIcon}
         <span className={`font-medium ${isRejected || isUndone ? 'text-zinc-400 line-through' : 'text-zinc-300'}`}>

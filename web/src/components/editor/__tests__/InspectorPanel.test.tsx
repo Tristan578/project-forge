@@ -210,7 +210,7 @@ describe('InspectorPanel', () => {
   it('shows loading skeleton when no transform yet', () => {
     setupStore({ primaryTransform: null });
     render(<InspectorPanel />);
-    const skeletons = document.querySelectorAll('.animate-pulse');
+    const skeletons = document.querySelectorAll('[aria-busy="true"]');
     expect(skeletons.length).toBeGreaterThan(0);
   });
 

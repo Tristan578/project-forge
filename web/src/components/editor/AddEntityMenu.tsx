@@ -191,7 +191,7 @@ export function AddEntityMenu({ onSpawn }: AddEntityMenuProps) {
         onClick={() => setOpen(!open)}
         title="Add Entity"
         aria-label="Add Entity"
-        aria-haspopup="true"
+        aria-haspopup="menu"
         aria-expanded={open}
         className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors ${
           open

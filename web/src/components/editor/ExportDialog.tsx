@@ -63,12 +63,12 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
         if (e.shiftKey) {
-          if (document.activeElement === first) {
+          if (!dialog.contains(document.activeElement) || document.activeElement === first) {
             e.preventDefault();
             last.focus();
           }
         } else {
-          if (document.activeElement === last) {
+          if (!dialog.contains(document.activeElement) || document.activeElement === last) {
             e.preventDefault();
             first.focus();
           }
@@ -237,6 +237,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
                   key={key}
                   onClick={() => applyPreset(key)}
                   disabled={isExporting}
+                  aria-pressed={selectedPreset === key}
                   className={`rounded border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-50 ${
                     selectedPreset === key
                       ? 'border-blue-500 bg-blue-500/20 text-blue-200'
@@ -552,7 +553,7 @@ export function ExportDialog({ isOpen, onClose }: ExportDialogProps) {
           >
             {isExporting ? (
               <>
-                <Loader2 size={14} className="animate-spin" />
+                <Loader2 size={14} className="motion-safe:animate-spin" />
                 Exporting...
               </>
             ) : (

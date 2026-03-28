@@ -246,7 +246,7 @@ export function PlaytestPanel() {
             className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
             aria-label={`Run playtest with ${selectedStrategy} strategy`}
           >
-            {isRunning ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
+            {isRunning ? <Loader2 size={14} className="motion-safe:animate-spin" /> : <Play size={14} />}
             Run Playtest
           </button>
           <button
@@ -255,7 +255,7 @@ export function PlaytestPanel() {
             className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 disabled:cursor-not-allowed text-xs font-medium transition-colors duration-150"
             aria-label="Run playtest with all strategies"
           >
-            {isRunningAll ? <Loader2 size={14} className="animate-spin" /> : <PlayCircle size={14} />}
+            {isRunningAll ? <Loader2 size={14} className="motion-safe:animate-spin" /> : <PlayCircle size={14} />}
             Run All
           </button>
         </div>

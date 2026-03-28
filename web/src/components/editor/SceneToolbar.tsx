@@ -220,7 +220,7 @@ export function SceneToolbar() {
           }
         >
           {cloudSaveStatus === 'saved' && <Cloud size={13} className="text-green-500" aria-hidden="true" />}
-          {cloudSaveStatus === 'saving' && <Loader2 size={13} className="animate-spin text-blue-500" aria-hidden="true" />}
+          {cloudSaveStatus === 'saving' && <Loader2 size={13} className="motion-safe:animate-spin text-blue-500" aria-hidden="true" />}
           {cloudSaveStatus === 'error' && <CloudOff size={13} className="text-red-500" aria-hidden="true" />}
           {/* Visually hidden text for aria-live announcement — DOM text content
               is required for screen readers to detect changes in live regions. */}

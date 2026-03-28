@@ -332,7 +332,7 @@ export function WorldBuilderPanel() {
               aria-label="Generate world with AI"
             >
               {loading ? (
-                <Loader2 size={12} className="animate-spin" />
+                <Loader2 size={12} className="motion-safe:animate-spin" />
               ) : (
                 <Sparkles size={12} />
               )}

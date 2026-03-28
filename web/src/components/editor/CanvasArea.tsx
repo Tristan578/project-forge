@@ -29,8 +29,10 @@ export function CanvasArea() {
     <div className="relative h-full w-full overflow-hidden bg-zinc-950">
       <canvas
         id={CANVAS_ID}
+        role="application"
+        aria-label="3D game viewport"
         className="block h-full w-full"
-      />
+      >3D scene viewport</canvas>
 
       {/* Game HUD overlay - visible during play mode */}
       {engineMode !== 'edit' && hudElements.length > 0 && (

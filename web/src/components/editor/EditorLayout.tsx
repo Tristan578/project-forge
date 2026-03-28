@@ -126,7 +126,7 @@ function RightPanelTabs({ activeTab, onTabChange }: { activeTab: RightPanelTab; 
       >
         AI Chat
         {hasUnread && activeTab !== 'chat' && (
-          <span className="absolute top-1 right-2 h-1.5 w-1.5 rounded-full bg-purple-400 animate-pulse" aria-label="Unread messages" />
+          <span className="absolute top-1 right-2 h-1.5 w-1.5 rounded-full bg-purple-400 motion-safe:animate-pulse" aria-label="Unread messages" />
         )}
       </button>
       <button

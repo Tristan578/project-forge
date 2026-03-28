@@ -321,6 +321,7 @@ export function SceneNode({
       <div
         ref={rowRef}
         draggable={!isEditing}
+        tabIndex={isFocused ? 0 : -1}
         className={`flex items-center gap-1 px-2 py-1 cursor-grab select-none ${getSelectionClasses()} ${getDragClasses()}`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={handleClick}

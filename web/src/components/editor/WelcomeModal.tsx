@@ -45,12 +45,26 @@ export function WelcomeModal() {
       .slice(0, 5),
   );
 
+  // Track the element focused before the modal opened so focus can be restored on dismiss.
+  // Use prev-value pattern to capture at the moment visibility becomes true without an effect.
+  const [preFocusElement, setPreFocusElement] = useState<HTMLElement | null>(null);
+  const [prevVisible, setPrevVisible] = useState(visible);
+  if (prevVisible !== visible) {
+    setPrevVisible(visible);
+    if (visible && document.activeElement instanceof HTMLElement) {
+      setPreFocusElement(document.activeElement);
+    }
+  }
+
   const handleDismiss = useCallback(() => {
     setDismissed(true);
     if (dontShowAgain) {
       localStorage.setItem(STORAGE_KEY, '1');
     }
-  }, [dontShowAgain]);
+    requestAnimationFrame(() => {
+      preFocusElement?.focus();
+    });
+  }, [dontShowAgain, preFocusElement]);
 
   const handleTemplateClose = useCallback(() => {
     setShowTemplates(false);
@@ -104,12 +118,12 @@ export function WelcomeModal() {
         const first = focusable[0];
         const last = focusable[focusable.length - 1];
         if (e.shiftKey) {
-          if (document.activeElement === first) {
+          if (!dialog.contains(document.activeElement) || document.activeElement === first) {
             e.preventDefault();
             last.focus();
           }
         } else {
-          if (document.activeElement === last) {
+          if (!dialog.contains(document.activeElement) || document.activeElement === last) {
             e.preventDefault();
             first.focus();
           }

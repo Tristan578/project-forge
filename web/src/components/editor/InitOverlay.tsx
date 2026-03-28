@@ -68,7 +68,7 @@ function TimeoutWarning({
 
   return (
     <div className="mt-4 rounded bg-red-900/50 px-3 py-2 text-sm text-red-200">
-      Something went wrong during initialization.
+      Engine initialization failed. Try refreshing the page or switching to WebGL2 mode below.
     </div>
   );
 }

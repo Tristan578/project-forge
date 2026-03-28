@@ -136,10 +136,10 @@ import { LockedPanelOverlay } from './LockedPanelOverlay';
 function PanelLoadingSkeleton() {
   return (
     <div className="flex h-full w-full flex-col gap-2 bg-zinc-900 p-3" role="status" aria-label="Loading panel">
-      <div className="h-3 w-2/3 animate-pulse rounded bg-zinc-700" />
-      <div className="h-3 w-1/2 animate-pulse rounded bg-zinc-700" />
-      <div className="h-3 w-3/4 animate-pulse rounded bg-zinc-700" />
-      <div className="mt-2 h-3 w-1/3 animate-pulse rounded bg-zinc-700" />
+      <div className="h-3 w-2/3 motion-safe:animate-pulse rounded bg-zinc-700" />
+      <div className="h-3 w-1/2 motion-safe:animate-pulse rounded bg-zinc-700" />
+      <div className="h-3 w-3/4 motion-safe:animate-pulse rounded bg-zinc-700" />
+      <div className="mt-2 h-3 w-1/3 motion-safe:animate-pulse rounded bg-zinc-700" />
     </div>
   );
 }
