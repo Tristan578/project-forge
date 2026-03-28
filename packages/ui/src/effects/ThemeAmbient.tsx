@@ -3,6 +3,7 @@
 import { lazy, Suspense, useState, useEffect } from 'react';
 import type { ThemeName } from '../tokens';
 import { Z_INDEX } from '../tokens';
+import './effects.css';
 
 const EmberGlow = lazy(() => import('./EmberGlow'));
 const IceFrost = lazy(() => import('./IceFrost'));

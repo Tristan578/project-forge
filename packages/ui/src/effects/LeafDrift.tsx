@@ -54,46 +54,6 @@ const LEAF_CONFIGS: Array<{ startStyle: React.CSSProperties; animName: string }>
 export default function LeafDrift() {
   return (
     <>
-      <style>{`
-        @keyframes sf-leaf-drift-1 {
-          0%   { transform: translate(0, 0) rotate(0deg);   opacity: 0; }
-          10%  { opacity: 0.7; }
-          90%  { opacity: 0.5; }
-          100% { transform: translate(20px, -60px) rotate(30deg); opacity: 0; }
-        }
-        @keyframes sf-leaf-drift-2 {
-          0%   { transform: translate(0, 0) rotate(10deg);  opacity: 0; }
-          10%  { opacity: 0.6; }
-          90%  { opacity: 0.4; }
-          100% { transform: translate(15px, -50px) rotate(-20deg); opacity: 0; }
-        }
-        @keyframes sf-leaf-drift-3 {
-          0%   { transform: translate(0, 0) rotate(-5deg);  opacity: 0; }
-          10%  { opacity: 0.7; }
-          90%  { opacity: 0.5; }
-          100% { transform: translate(-18px, -55px) rotate(25deg); opacity: 0; }
-        }
-        @keyframes sf-leaf-drift-4 {
-          0%   { transform: translate(0, 0) rotate(15deg);  opacity: 0; }
-          10%  { opacity: 0.5; }
-          90%  { opacity: 0.3; }
-          100% { transform: translate(-12px, -45px) rotate(-30deg); opacity: 0; }
-        }
-        @keyframes sf-leaf-drift-5 {
-          0%   { transform: translate(0, 0) rotate(-10deg); opacity: 0; }
-          10%  { opacity: 0.6; }
-          90%  { opacity: 0.4; }
-          100% { transform: translate(22px, -65px) rotate(20deg); opacity: 0; }
-        }
-        @keyframes sf-leaf-drift-6 {
-          0%   { transform: translate(0, 0) rotate(5deg);   opacity: 0; }
-          10%  { opacity: 0.7; }
-          90%  { opacity: 0.5; }
-          100% { transform: translate(-16px, -50px) rotate(-15deg); opacity: 0; }
-        }
-        .sf-leaf { animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
-      `}</style>
-
       {/* Subtle vine-like gradient on left edge */}
       <div
         style={{
@@ -112,6 +72,8 @@ export default function LeafDrift() {
           style={{
             ...config.startStyle,
             animationName: config.animName,
+            animationTimingFunction: 'ease-in-out',
+            animationIterationCount: 'infinite',
           }}
         />
       ))}

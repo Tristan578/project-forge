@@ -14,17 +14,6 @@ const SPARK_POSITIONS: Array<React.CSSProperties> = [
 export default function EmberGlow() {
   return (
     <>
-      <style>{`
-        @keyframes sf-ember-pulse {
-          0%, 100% { opacity: 0.3; transform: scale(1); }
-          50% { opacity: 0.6; transform: scale(1.05); }
-        }
-        @keyframes sf-spark-float {
-          0% { transform: translateY(0) rotate(0deg); opacity: 0.8; }
-          100% { transform: translateY(-40px) rotate(45deg); opacity: 0; }
-        }
-      `}</style>
-
       {/* Left glow */}
       <div
         style={{

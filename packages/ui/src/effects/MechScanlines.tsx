@@ -7,23 +7,6 @@
 export default function MechScanlines() {
   return (
     <>
-      <style>{`
-        @keyframes sf-scanline {
-          0%   { transform: translateY(-100%); opacity: 0; }
-          5%   { opacity: 0.5; }
-          95%  { opacity: 0.3; }
-          100% { transform: translateY(100vh); opacity: 0; }
-        }
-        @keyframes sf-hud-blink {
-          0%, 100% { opacity: 0.6; }
-          50%      { opacity: 0.3; }
-        }
-        @keyframes sf-scanline-pulse {
-          0%, 100% { opacity: 0.08; }
-          50%      { opacity: 0.12; }
-        }
-      `}</style>
-
       {/* Moving scan line */}
       <div
         style={{

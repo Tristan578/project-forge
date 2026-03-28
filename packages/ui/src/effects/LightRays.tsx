@@ -6,19 +6,6 @@
 export default function LightRays() {
   return (
     <>
-      <style>{`
-        @keyframes sf-light-pulse {
-          0%, 100% { opacity: 0.4; }
-          50%      { opacity: 0.7; }
-        }
-        @keyframes sf-light-ray-sweep {
-          0%   { transform: rotate(0deg) scaleX(1); opacity: 0.06; }
-          33%  { transform: rotate(2deg) scaleX(1.02); opacity: 0.1; }
-          66%  { transform: rotate(-1deg) scaleX(0.99); opacity: 0.08; }
-          100% { transform: rotate(0deg) scaleX(1); opacity: 0.06; }
-        }
-      `}</style>
-
       {/* Primary warm glow — top-center (toolbar area) */}
       <div
         style={{

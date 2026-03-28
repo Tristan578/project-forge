@@ -36,11 +36,6 @@ function Gear({ size, style, duration, direction = 'cw' }: GearProps) {
 export default function RustGears() {
   return (
     <>
-      <style>{`
-        @keyframes sf-gear-cw  { from { transform: rotate(0deg); }   to { transform: rotate(360deg); } }
-        @keyframes sf-gear-ccw { from { transform: rotate(0deg); }   to { transform: rotate(-360deg); } }
-      `}</style>
-
       {/* Top-left corner gear */}
       <Gear size={16} duration={20} direction="cw"  style={{ top: '12%', left: '1%' }} />
       {/* Bottom-right corner gear */}

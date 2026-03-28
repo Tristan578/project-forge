@@ -1,0 +1,118 @@
+/**
+ * SpawnForge Theme Effects — shared keyframe definitions.
+ *
+ * All ambient effect keyframes are defined here once and imported by ThemeAmbient.
+ * This prevents duplicate <style> injection under React Strict Mode (where
+ * components mount/unmount twice in development), and keeps keyframe
+ * definitions in a single source of truth.
+ */
+
+/* ---- EmberGlow ---- */
+@keyframes sf-ember-pulse {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.05); }
+}
+
+@keyframes sf-spark-float {
+  0% { transform: translateY(0) rotate(0deg); opacity: 0.8; }
+  100% { transform: translateY(-40px) rotate(45deg); opacity: 0; }
+}
+
+/* ---- IceFrost ---- */
+@keyframes sf-frost-grow {
+  0% { stroke-dashoffset: 400; opacity: 0; }
+  20% { opacity: 0.6; }
+  80% { opacity: 0.4; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+
+@keyframes sf-shimmer {
+  0% { opacity: 0.05; }
+  50% { opacity: 0.12; }
+  100% { opacity: 0.05; }
+}
+
+/* ---- LeafDrift ---- */
+@keyframes sf-leaf-drift-1 {
+  0%   { transform: translate(0, 0) rotate(0deg);   opacity: 0; }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.5; }
+  100% { transform: translate(20px, -60px) rotate(30deg); opacity: 0; }
+}
+
+@keyframes sf-leaf-drift-2 {
+  0%   { transform: translate(0, 0) rotate(10deg);  opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.4; }
+  100% { transform: translate(15px, -50px) rotate(-20deg); opacity: 0; }
+}
+
+@keyframes sf-leaf-drift-3 {
+  0%   { transform: translate(0, 0) rotate(-5deg);  opacity: 0; }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.5; }
+  100% { transform: translate(-18px, -55px) rotate(25deg); opacity: 0; }
+}
+
+@keyframes sf-leaf-drift-4 {
+  0%   { transform: translate(0, 0) rotate(15deg);  opacity: 0; }
+  10%  { opacity: 0.5; }
+  90%  { opacity: 0.3; }
+  100% { transform: translate(-12px, -45px) rotate(-30deg); opacity: 0; }
+}
+
+@keyframes sf-leaf-drift-5 {
+  0%   { transform: translate(0, 0) rotate(-10deg); opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.4; }
+  100% { transform: translate(22px, -65px) rotate(20deg); opacity: 0; }
+}
+
+@keyframes sf-leaf-drift-6 {
+  0%   { transform: translate(0, 0) rotate(5deg);   opacity: 0; }
+  10%  { opacity: 0.7; }
+  90%  { opacity: 0.5; }
+  100% { transform: translate(-16px, -50px) rotate(-15deg); opacity: 0; }
+}
+
+/* ---- MechScanlines ---- */
+@keyframes sf-scanline {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  5%   { opacity: 0.5; }
+  95%  { opacity: 0.3; }
+  100% { transform: translateY(100vh); opacity: 0; }
+}
+
+@keyframes sf-hud-blink {
+  0%, 100% { opacity: 0.6; }
+  50%      { opacity: 0.3; }
+}
+
+@keyframes sf-scanline-pulse {
+  0%, 100% { opacity: 0.08; }
+  50%      { opacity: 0.12; }
+}
+
+/* ---- RustGears ---- */
+@keyframes sf-gear-cw {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes sf-gear-ccw {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(-360deg); }
+}
+
+/* ---- LightRays ---- */
+@keyframes sf-light-pulse {
+  0%, 100% { opacity: 0.4; }
+  50%      { opacity: 0.7; }
+}
+
+@keyframes sf-light-ray-sweep {
+  0%   { transform: rotate(0deg) scaleX(1); opacity: 0.06; }
+  33%  { transform: rotate(2deg) scaleX(1.02); opacity: 0.1; }
+  66%  { transform: rotate(-1deg) scaleX(0.99); opacity: 0.08; }
+  100% { transform: rotate(0deg) scaleX(1); opacity: 0.06; }
+}

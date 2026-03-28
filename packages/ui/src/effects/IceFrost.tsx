@@ -6,20 +6,6 @@
 export default function IceFrost() {
   return (
     <>
-      <style>{`
-        @keyframes sf-frost-grow {
-          0% { stroke-dashoffset: 400; opacity: 0; }
-          20% { opacity: 0.6; }
-          80% { opacity: 0.4; }
-          100% { stroke-dashoffset: 0; opacity: 0; }
-        }
-        @keyframes sf-shimmer {
-          0% { opacity: 0.05; }
-          50% { opacity: 0.12; }
-          100% { opacity: 0.05; }
-        }
-      `}</style>
-
       {/* Shimmer overlay */}
       <div
         style={{
