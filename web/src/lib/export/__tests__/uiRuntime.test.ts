@@ -255,3 +255,39 @@ describe('generateUIRuntimeCode: initialization', () => {
     expect(generate()).toContain("getElementById('forge-ui-root')");
   });
 });
+
+// ── script injection prevention (Fix 1) ───────────────────────────────────────
+
+describe('generateUIRuntimeCode: script injection prevention', () => {
+  it('escapes </script> in uiData to prevent early tag termination', () => {
+    const malicious = '{"screens":[],"name":"</script><script>alert(1)//"}';
+    const code = generateUIRuntimeCode(malicious);
+    expect(code).not.toContain('</script>');
+    expect(code).toContain('<\\/script>');
+  });
+
+  it('escapes <!-- in uiData to prevent HTML comment injection', () => {
+    const malicious = '{"screens":[],"name":"<!--"}';
+    const code = generateUIRuntimeCode(malicious);
+    expect(code).not.toContain('<!--');
+    expect(code).toContain('<\\!--');
+  });
+
+  it('does not alter safe JSON uiData', () => {
+    const safe = '{"screens":[]}';
+    const code = generateUIRuntimeCode(safe);
+    expect(code).toContain(`const uiData = ${safe}`);
+  });
+
+  it('rejects non-JSON uiData with JS injection payload', () => {
+    expect(() => generateUIRuntimeCode('}; alert(1) //')).toThrow('uiData must be valid JSON');
+  });
+
+  it('handles multiple </script> occurrences in uiData', () => {
+    const malicious = JSON.stringify({ a: '</script>', b: '</script>' });
+    const code = generateUIRuntimeCode(malicious);
+    expect(code).not.toContain('</script>');
+    const count = (code.match(/<\\\/script/g) ?? []).length;
+    expect(count).toBeGreaterThanOrEqual(2);
+  });
+});

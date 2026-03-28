@@ -301,3 +301,126 @@ describe('generateLoadingScript', () => {
     expect(script).toContain('.remove()');
   });
 });
+
+// ── logo data URL security (Fix 2) ───────────────────────────────────────────
+
+describe('generateLoadingHtml: logoDataUrl security', () => {
+  it('throws when logoDataUrl is a javascript: URI', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'javascript:alert(1)',
+      }),
+    ).toThrow('Invalid logo data URL');
+  });
+
+  it('throws when logoDataUrl contains an attribute breakout payload', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'data:text/html,<script>alert(1)</script>',
+      }),
+    ).toThrow('Invalid logo data URL');
+  });
+
+  it('throws when logoDataUrl is a plain http URL', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'https://evil.com/img.png',
+      }),
+    ).toThrow('Invalid logo data URL');
+  });
+
+  it('accepts data:image/png URLs', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+      }),
+    ).not.toThrow();
+  });
+
+  it('accepts data:image/jpeg URLs', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'data:image/jpeg;base64,/9j/4AAQ=',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects data:image/svg+xml URLs (XSS vector)', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'data:image/svg+xml;base64,PHN2Zy8+',
+      }),
+    ).toThrow('only PNG, JPEG, GIF, WebP');
+  });
+
+  it('escapes double-quote in logoDataUrl to prevent attribute breakout', () => {
+    const logoDataUrl = 'data:image/png;base64,abc" onload="alert(1)';
+    const html = generateLoadingHtml({
+      backgroundColor: '#000000',
+      progressBarColor: '#6366f1',
+      progressStyle: 'bar',
+      logoDataUrl,
+    });
+    expect(html).not.toContain('" onload="alert(1)');
+    expect(html).toContain('&quot;');
+  });
+
+  it('does not include img tag when logoDataUrl is undefined', () => {
+    const html = generateLoadingHtml({
+      backgroundColor: '#000000',
+      progressBarColor: '#6366f1',
+      progressStyle: 'bar',
+    });
+    expect(html).not.toContain('<img');
+  });
+
+  it('accepts data:image/webp;base64 URLs', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'data:image/webp;base64,UklGRiQAAABXRUJQ',
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects data:image/svg+xml with unencoded SVG (XSS vector)', () => {
+    expect(() =>
+      generateLoadingHtml({
+        backgroundColor: '#000000',
+        progressBarColor: '#6366f1',
+        progressStyle: 'bar',
+        logoDataUrl: 'data:image/svg+xml,<svg onload="alert(1)">',
+      }),
+    ).toThrow('only PNG, JPEG, GIF, WebP');
+  });
+
+  it('falls back to #000000 when backgroundColor contains CSS injection payload', () => {
+    const html = generateLoadingHtml({
+      backgroundColor: 'red; background: url(javascript:alert(1))',
+      progressBarColor: '#6366f1',
+      progressStyle: 'bar',
+    });
+    expect(html).toContain('background: #000000');
+    expect(html).not.toContain('javascript:');
+  });
+});
