@@ -510,6 +510,8 @@ jobs:
           npx wait-on http://localhost:3000 --timeout 30000
 
       - name: Collect baseline Lighthouse runs (effects off)
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
         run: |
           lhci collect \
             --url=http://localhost:3000/dev \
@@ -539,6 +541,8 @@ jobs:
           npx wait-on http://localhost:3001 --timeout 30000
 
       - name: Collect effects-on Lighthouse runs
+        env:
+          CHROME_PATH: /usr/bin/google-chrome
         run: |
           lhci collect \
             --url=http://localhost:3001/dev \
