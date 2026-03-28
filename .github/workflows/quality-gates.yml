@@ -518,6 +518,7 @@ jobs:
             --number-of-runs=3 \
             --output=json \
             --output-path=.lhci-baseline/ \
+            --chromePath=/usr/bin/google-chrome \
             --chrome-flags="--headless --no-sandbox --disable-gpu"
 
       - name: Stop baseline server
@@ -549,6 +550,7 @@ jobs:
             --number-of-runs=3 \
             --output=json \
             --output-path=.lhci-effects/ \
+            --chromePath=/usr/bin/google-chrome \
             --chrome-flags="--headless --no-sandbox --disable-gpu"
 
       - name: Assert effects delta less than 5 performance points
