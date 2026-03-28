@@ -316,3 +316,70 @@ where
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::EntityType;
+
+    // --- EntityType::from_str ---
+
+    #[test]
+    fn from_str_all_16_variants() {
+        let cases = [
+            ("cube", EntityType::Cube),
+            ("sphere", EntityType::Sphere),
+            ("plane", EntityType::Plane),
+            ("cylinder", EntityType::Cylinder),
+            ("cone", EntityType::Cone),
+            ("torus", EntityType::Torus),
+            ("capsule", EntityType::Capsule),
+            ("csg_result", EntityType::CsgResult),
+            ("terrain", EntityType::Terrain),
+            ("procedural_mesh", EntityType::ProceduralMesh),
+            ("point_light", EntityType::PointLight),
+            ("directional_light", EntityType::DirectionalLight),
+            ("spot_light", EntityType::SpotLight),
+            ("gltf_model", EntityType::GltfModel),
+            ("gltf_mesh", EntityType::GltfMesh),
+            ("sprite", EntityType::Sprite),
+        ];
+
+        for (s, expected) in &cases {
+            let result = EntityType::from_str(s);
+            assert_eq!(result, Some(*expected), "from_str({:?}) should return {:?}", s, expected);
+        }
+    }
+
+    #[test]
+    fn from_str_unknown_returns_none() {
+        assert_eq!(EntityType::from_str("unknown_type"), None);
+        assert_eq!(EntityType::from_str(""), None);
+        assert_eq!(EntityType::from_str("Cube"), None, "case-sensitive: 'Cube' != 'cube'");
+    }
+
+    #[test]
+    fn default_name_non_empty_for_all_variants() {
+        let all = [
+            EntityType::Cube,
+            EntityType::Sphere,
+            EntityType::Plane,
+            EntityType::Cylinder,
+            EntityType::Cone,
+            EntityType::Torus,
+            EntityType::Capsule,
+            EntityType::CsgResult,
+            EntityType::Terrain,
+            EntityType::ProceduralMesh,
+            EntityType::PointLight,
+            EntityType::DirectionalLight,
+            EntityType::SpotLight,
+            EntityType::GltfModel,
+            EntityType::GltfMesh,
+            EntityType::Sprite,
+        ];
+        for variant in &all {
+            let name = variant.default_name();
+            assert!(!name.is_empty(), "default_name for {:?} must not be empty", variant);
+        }
+    }
+}

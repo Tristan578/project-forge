@@ -147,3 +147,61 @@ pub fn snap_to_grid(value: f32, snap: f32) -> f32 {
     }
     (value / snap).round() * snap
 }
+
+#[cfg(test)]
+mod tests {
+    use super::snap_to_grid;
+
+    #[test]
+    fn snap_rounds_to_nearest_increment() {
+        // 0.6 snapped to 0.5 should be 0.5 (nearest half-unit)
+        let result = snap_to_grid(0.6, 0.5);
+        assert!((result - 0.5).abs() < 1e-5, "expected 0.5, got {}", result);
+    }
+
+    #[test]
+    fn snap_rounds_up_when_above_midpoint() {
+        // 0.76 snapped to 0.5 → nearest is 1.0
+        let result = snap_to_grid(0.76, 0.5);
+        assert!((result - 1.0).abs() < 1e-5, "expected 1.0, got {}", result);
+    }
+
+    #[test]
+    fn snap_zero_increment_returns_unchanged() {
+        // Zero snap = disabled; value must pass through unchanged
+        let result = snap_to_grid(1.23, 0.0);
+        assert!((result - 1.23).abs() < 1e-5, "expected 1.23, got {}", result);
+    }
+
+    #[test]
+    fn snap_negative_increment_returns_unchanged() {
+        let result = snap_to_grid(1.23, -0.5);
+        assert!((result - 1.23).abs() < 1e-5, "expected 1.23, got {}", result);
+    }
+
+    #[test]
+    fn snap_negative_value_works_correctly() {
+        // -0.6 snapped to 0.5 should be -0.5
+        let result = snap_to_grid(-0.6, 0.5);
+        assert!((result - (-0.5)).abs() < 1e-5, "expected -0.5, got {}", result);
+    }
+
+    #[test]
+    fn snap_already_aligned_value_unchanged() {
+        let result = snap_to_grid(1.0, 0.5);
+        assert!((result - 1.0).abs() < 1e-5, "expected 1.0, got {}", result);
+    }
+
+    #[test]
+    fn snap_zero_value_returns_zero() {
+        let result = snap_to_grid(0.0, 0.5);
+        assert!((result - 0.0).abs() < 1e-5, "expected 0.0, got {}", result);
+    }
+
+    #[test]
+    fn snap_rotation_15_degrees() {
+        // 17.0 snapped to 15.0 should be 15.0
+        let result = snap_to_grid(17.0, 15.0);
+        assert!((result - 15.0).abs() < 1e-3, "expected 15.0, got {}", result);
+    }
+}

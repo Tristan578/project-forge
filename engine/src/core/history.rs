@@ -640,3 +640,477 @@ pub fn push_action_from_bridge(action: UndoableAction) -> bool {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_transform_snapshot() -> TransformSnapshot {
+        TransformSnapshot {
+            position: [1.0, 2.0, 3.0],
+            rotation: [0.0, 0.0, 0.0, 1.0],
+            scale: [1.0, 1.0, 1.0],
+        }
+    }
+
+    fn make_transform_action(id: &str) -> UndoableAction {
+        UndoableAction::TransformChange {
+            entity_id: id.to_string(),
+            old_transform: make_transform_snapshot(),
+            new_transform: TransformSnapshot {
+                position: [4.0, 5.0, 6.0],
+                rotation: [0.0, 0.0, 0.0, 1.0],
+                scale: [1.0, 1.0, 1.0],
+            },
+        }
+    }
+
+    fn make_entity_snapshot() -> EntitySnapshot {
+        EntitySnapshot::new(
+            "test-entity-id".to_string(),
+            crate::core::pending_commands::EntityType::Cube,
+            "TestCube".to_string(),
+            make_transform_snapshot(),
+        )
+    }
+
+    // --- TransformSnapshot round-trip ---
+
+    #[test]
+    fn transform_snapshot_round_trip() {
+        use bevy::prelude::*;
+        let t = Transform {
+            translation: Vec3::new(1.0, 2.0, 3.0),
+            rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
+            scale: Vec3::new(2.0, 0.5, 1.0),
+        };
+        let snap = TransformSnapshot::from(&t);
+        let restored = snap.to_transform();
+
+        assert!((restored.translation.x - t.translation.x).abs() < 1e-5);
+        assert!((restored.translation.y - t.translation.y).abs() < 1e-5);
+        assert!((restored.translation.z - t.translation.z).abs() < 1e-5);
+        assert!((restored.scale.x - t.scale.x).abs() < 1e-5);
+        assert!((restored.scale.y - t.scale.y).abs() < 1e-5);
+        assert!((restored.scale.z - t.scale.z).abs() < 1e-5);
+        // Rotation: quaternion dot product close to 1 means same rotation
+        let dot = restored.rotation.dot(t.rotation).abs();
+        assert!(dot > 0.9999);
+    }
+
+    // --- HistoryStack: push clears redo ---
+
+    #[test]
+    fn push_clears_redo_stack() {
+        let mut stack = HistoryStack::default();
+        // Put something on the redo stack manually
+        stack.push_redo(make_transform_action("a"));
+        assert!(stack.can_redo());
+
+        // Pushing a new action must clear redo
+        stack.push(make_transform_action("b"));
+        assert!(!stack.can_redo(), "push() must clear redo stack");
+        assert!(stack.can_undo());
+    }
+
+    // --- HistoryStack: push enforces max_size ---
+
+    #[test]
+    fn push_enforces_max_size() {
+        let mut stack = HistoryStack {
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_size: 3,
+            dirty: false,
+        };
+        for i in 0..5 {
+            stack.push(UndoableAction::Rename {
+                entity_id: format!("e{}", i),
+                old_name: "old".to_string(),
+                new_name: format!("new{}", i),
+            });
+        }
+        assert_eq!(stack.undo_stack.len(), 3, "undo stack must not exceed max_size");
+        // Oldest entries should have been evicted — last pushed entry is most recent
+        match &stack.undo_stack[2] {
+            UndoableAction::Rename { new_name, .. } => assert_eq!(new_name, "new4"),
+            _ => panic!("unexpected action type"),
+        }
+    }
+
+    // --- HistoryStack: pop returns None when empty ---
+
+    #[test]
+    fn pop_undo_returns_none_when_empty() {
+        let mut stack = HistoryStack::default();
+        assert!(stack.pop_undo().is_none());
+    }
+
+    #[test]
+    fn pop_redo_returns_none_when_empty() {
+        let mut stack = HistoryStack::default();
+        assert!(stack.pop_redo().is_none());
+    }
+
+    // --- HistoryStack: push_undo_only does NOT clear redo ---
+
+    #[test]
+    fn push_undo_only_does_not_clear_redo() {
+        let mut stack = HistoryStack::default();
+        stack.push_redo(make_transform_action("a"));
+        assert!(stack.can_redo());
+
+        stack.push_undo_only(make_transform_action("b"));
+        assert!(stack.can_redo(), "push_undo_only must NOT clear redo stack");
+        assert!(stack.can_undo());
+    }
+
+    // --- HistoryStack: push_undo_only also enforces max_size ---
+
+    #[test]
+    fn push_undo_only_enforces_max_size() {
+        let mut stack = HistoryStack {
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            max_size: 2,
+            dirty: false,
+        };
+        for i in 0..4 {
+            stack.push_undo_only(make_transform_action(&format!("e{}", i)));
+        }
+        assert_eq!(stack.undo_stack.len(), 2);
+    }
+
+    // --- UndoableAction::description for all 29 variants ---
+
+    #[test]
+    fn description_transform_change() {
+        let action = make_transform_action("e1");
+        assert_eq!(action.description(), "Transform");
+    }
+
+    #[test]
+    fn description_multi_transform_change() {
+        let action = UndoableAction::MultiTransformChange {
+            transforms: vec![
+                ("a".to_string(), make_transform_snapshot(), make_transform_snapshot()),
+                ("b".to_string(), make_transform_snapshot(), make_transform_snapshot()),
+            ],
+        };
+        let desc = action.description();
+        assert!(desc.contains("2"), "should mention count: {}", desc);
+    }
+
+    #[test]
+    fn description_rename() {
+        let action = UndoableAction::Rename {
+            entity_id: "e".to_string(),
+            old_name: "old".to_string(),
+            new_name: "NewName".to_string(),
+        };
+        assert!(action.description().contains("NewName"));
+    }
+
+    #[test]
+    fn description_spawn() {
+        let snap = make_entity_snapshot();
+        let name = snap.name.clone();
+        let action = UndoableAction::Spawn { snapshot: snap };
+        assert!(action.description().contains(&name));
+    }
+
+    #[test]
+    fn description_delete() {
+        let snap = make_entity_snapshot();
+        let name = snap.name.clone();
+        let action = UndoableAction::Delete { snapshot: snap };
+        assert!(action.description().contains(&name));
+    }
+
+    #[test]
+    fn description_duplicate() {
+        let snap = make_entity_snapshot();
+        let name = snap.name.clone();
+        let action = UndoableAction::Duplicate {
+            source_entity_id: "src".to_string(),
+            snapshot: snap,
+        };
+        assert!(action.description().contains(&name));
+    }
+
+    #[test]
+    fn description_visibility_show() {
+        let action = UndoableAction::VisibilityChange {
+            entity_id: "e".to_string(),
+            old_visible: false,
+            new_visible: true,
+        };
+        assert_eq!(action.description(), "Show");
+    }
+
+    #[test]
+    fn description_visibility_hide() {
+        let action = UndoableAction::VisibilityChange {
+            entity_id: "e".to_string(),
+            old_visible: true,
+            new_visible: false,
+        };
+        assert_eq!(action.description(), "Hide");
+    }
+
+    #[test]
+    fn description_material_change() {
+        let mat = crate::core::material::MaterialData::default();
+        let action = UndoableAction::MaterialChange {
+            entity_id: "e".to_string(),
+            old_material: mat.clone(),
+            new_material: mat,
+        };
+        assert_eq!(action.description(), "Material Change");
+    }
+
+    #[test]
+    fn description_light_change() {
+        let light = crate::core::lighting::LightData::point();
+        let action = UndoableAction::LightChange {
+            entity_id: "e".to_string(),
+            old_light: light.clone(),
+            new_light: light,
+        };
+        assert_eq!(action.description(), "Light Change");
+    }
+
+    #[test]
+    fn description_physics_change() {
+        let phys = crate::core::physics::PhysicsData::default();
+        let action = UndoableAction::PhysicsChange {
+            entity_id: "e".to_string(),
+            old_physics: phys.clone(),
+            new_physics: phys,
+        };
+        assert_eq!(action.description(), "Physics Change");
+    }
+
+    #[test]
+    fn description_script_change() {
+        let action = UndoableAction::ScriptChange {
+            entity_id: "e".to_string(),
+            old_script: None,
+            new_script: None,
+        };
+        assert_eq!(action.description(), "Script Change");
+    }
+
+    #[test]
+    fn description_audio_change() {
+        let action = UndoableAction::AudioChange {
+            entity_id: "e".to_string(),
+            old_audio: None,
+            new_audio: None,
+        };
+        assert_eq!(action.description(), "Audio Change");
+    }
+
+    #[test]
+    fn description_reverb_zone_change() {
+        let action = UndoableAction::ReverbZoneChange {
+            entity_id: "e".to_string(),
+            old_reverb: None,
+            new_reverb: None,
+        };
+        assert_eq!(action.description(), "Reverb Zone Change");
+    }
+
+    #[test]
+    fn description_particle_change() {
+        let action = UndoableAction::ParticleChange {
+            entity_id: "e".to_string(),
+            old_particle: None,
+            new_particle: None,
+        };
+        assert_eq!(action.description(), "Particle Change");
+    }
+
+    #[test]
+    fn description_shader_change() {
+        let action = UndoableAction::ShaderChange {
+            entity_id: "e".to_string(),
+            old_shader: None,
+            new_shader: None,
+        };
+        assert_eq!(action.description(), "Shader Effect Change");
+    }
+
+    #[test]
+    fn description_csg_operation() {
+        let snap = make_entity_snapshot();
+        let name = snap.name.clone();
+        let action = UndoableAction::CsgOperation {
+            source_a_snapshot: None,
+            source_b_snapshot: None,
+            result_snapshot: snap,
+            sources_deleted: false,
+        };
+        assert!(action.description().contains(&name));
+    }
+
+    #[test]
+    fn description_terrain_change() {
+        let td = crate::core::terrain::TerrainData::default();
+        let tmd = crate::core::terrain::TerrainMeshData {
+            heights: vec![],
+            resolution: 64,
+            size: 50.0,
+        };
+        let action = UndoableAction::TerrainChange {
+            entity_id: "e".to_string(),
+            old_terrain: td.clone(),
+            new_terrain: td,
+            old_mesh_data: tmd.clone(),
+            new_mesh_data: tmd,
+        };
+        assert_eq!(action.description(), "Terrain Change");
+    }
+
+    #[test]
+    fn description_extrude_shape() {
+        let snap = make_entity_snapshot();
+        let name = snap.name.clone();
+        let action = UndoableAction::ExtrudeShape { snapshot: snap };
+        assert!(action.description().contains(&name));
+    }
+
+    #[test]
+    fn description_lathe_shape() {
+        let snap = make_entity_snapshot();
+        let name = snap.name.clone();
+        let action = UndoableAction::LatheShape { snapshot: snap };
+        assert!(action.description().contains(&name));
+    }
+
+    #[test]
+    fn description_array_entity() {
+        let action = UndoableAction::ArrayEntity {
+            source_id: "src".to_string(),
+            created_snapshots: vec![make_entity_snapshot(), make_entity_snapshot(), make_entity_snapshot()],
+        };
+        let desc = action.description();
+        assert!(desc.contains("3"), "should mention count: {}", desc);
+    }
+
+    #[test]
+    fn description_combine_meshes() {
+        let snap = make_entity_snapshot();
+        let name = snap.name.clone();
+        let action = UndoableAction::CombineMeshes {
+            source_snapshots: vec![],
+            result_snapshot: snap,
+        };
+        assert!(action.description().contains(&name));
+    }
+
+    #[test]
+    fn description_joint_change() {
+        let action = UndoableAction::JointChange {
+            entity_id: "e".to_string(),
+            old_joint: None,
+            new_joint: None,
+        };
+        assert_eq!(action.description(), "Joint Change");
+    }
+
+    #[test]
+    fn description_game_component_change() {
+        let action = UndoableAction::GameComponentChange {
+            entity_id: "e".to_string(),
+            old_components: None,
+            new_components: None,
+        };
+        assert_eq!(action.description(), "Game Component Change");
+    }
+
+    #[test]
+    fn description_animation_clip_change() {
+        let action = UndoableAction::AnimationClipChange {
+            entity_id: "e".to_string(),
+            old_clip: None,
+            new_clip: None,
+        };
+        assert_eq!(action.description(), "Animation Clip Change");
+    }
+
+    #[test]
+    fn description_sprite_change() {
+        let action = UndoableAction::SpriteChange {
+            entity_id: "e".to_string(),
+            old_sprite: None,
+            new_sprite: None,
+        };
+        assert_eq!(action.description(), "Sprite Change");
+    }
+
+    #[test]
+    fn description_physics2d_change() {
+        let action = UndoableAction::Physics2dChange {
+            entity_id: "e".to_string(),
+            old_physics: None,
+            new_physics: None,
+        };
+        assert_eq!(action.description(), "2D Physics Change");
+    }
+
+    #[test]
+    fn description_joint2d_change() {
+        let action = UndoableAction::Joint2dChange {
+            entity_id: "e".to_string(),
+            old_joint: None,
+            new_joint: None,
+        };
+        assert_eq!(action.description(), "2D Joint Change");
+    }
+
+    #[test]
+    fn description_tilemap_change() {
+        let action = UndoableAction::TilemapChange {
+            entity_id: "e".to_string(),
+            old_tilemap: None,
+            new_tilemap: None,
+        };
+        assert_eq!(action.description(), "Tilemap Change");
+    }
+
+    #[test]
+    fn description_skeleton_change() {
+        let action = UndoableAction::SkeletonChange {
+            entity_id: "e".to_string(),
+            old_skeleton: None,
+            new_skeleton: None,
+        };
+        assert_eq!(action.description(), "Skeleton 2D Change");
+    }
+
+    // --- EntitySnapshot::new defaults ---
+
+    #[test]
+    fn entity_snapshot_new_defaults() {
+        let snap = make_entity_snapshot();
+        assert_eq!(snap.entity_id, "test-entity-id");
+        assert_eq!(snap.name, "TestCube");
+        assert!(snap.visible);
+        assert!(!snap.physics_enabled);
+        assert!(!snap.particle_enabled);
+        assert!(!snap.reverb_zone_enabled);
+        assert!(!snap.active_game_camera);
+        assert!(!snap.physics2d_enabled);
+        assert!(!snap.tilemap_enabled);
+        assert!(!snap.skeleton2d_enabled);
+        assert!(snap.material_data.is_none());
+        assert!(snap.light_data.is_none());
+        assert!(snap.physics_data.is_none());
+        assert!(snap.script_data.is_none());
+        assert!(snap.audio_data.is_none());
+        assert!(snap.particle_data.is_none());
+        assert!(snap.terrain_data.is_none());
+        assert!(snap.lod_data.is_none());
+    }
+}

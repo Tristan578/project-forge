@@ -99,3 +99,125 @@ pub struct SelectionChangedEvent {
     pub primary_id: Option<String>,
     pub primary_name: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::prelude::Entity;
+
+    /// Helper: create a synthetic Bevy Entity for tests.
+    /// Entity::from_bits encodes index + generation into a u64.
+    fn entity(index: u32) -> Entity {
+        Entity::from_bits((index as u64) | (1u64 << 32))
+    }
+
+    #[test]
+    fn select_one_clears_previous_and_sets_primary() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        sel.select_one(entity(2), "e2".to_string());
+
+        assert_eq!(sel.count(), 1);
+        assert!(sel.is_selected(entity(2)));
+        assert!(!sel.is_selected(entity(1)));
+        assert_eq!(sel.primary_id.as_deref(), Some("e2"));
+    }
+
+    #[test]
+    fn add_accumulates_entities() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        sel.add(entity(2), "e2".to_string());
+
+        assert_eq!(sel.count(), 2);
+        assert!(sel.is_selected(entity(1)));
+        assert!(sel.is_selected(entity(2)));
+        // Primary should be the last added
+        assert_eq!(sel.primary_id.as_deref(), Some("e2"));
+    }
+
+    #[test]
+    fn remove_decrements_count() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        sel.add(entity(2), "e2".to_string());
+        sel.remove(entity(1), "e1");
+
+        assert_eq!(sel.count(), 1);
+        assert!(!sel.is_selected(entity(1)));
+        assert!(sel.is_selected(entity(2)));
+    }
+
+    #[test]
+    fn remove_primary_updates_primary() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        sel.add(entity(2), "e2".to_string());
+        // Primary is e2; remove it
+        sel.remove(entity(2), "e2");
+
+        // Primary should now be the remaining entity (e1)
+        assert!(sel.primary.is_some());
+        assert_ne!(sel.primary_id.as_deref(), Some("e2"));
+    }
+
+    #[test]
+    fn toggle_adds_when_not_selected() {
+        let mut sel = Selection::default();
+        sel.toggle(entity(1), "e1".to_string());
+        assert_eq!(sel.count(), 1);
+        assert!(sel.is_selected(entity(1)));
+    }
+
+    #[test]
+    fn toggle_removes_when_already_selected() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        sel.toggle(entity(1), "e1".to_string());
+        assert_eq!(sel.count(), 0);
+        assert!(!sel.is_selected(entity(1)));
+    }
+
+    #[test]
+    fn clear_removes_all() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        sel.add(entity(2), "e2".to_string());
+        sel.clear();
+
+        assert!(sel.is_empty());
+        assert_eq!(sel.count(), 0);
+        assert!(sel.primary.is_none());
+        assert!(sel.primary_id.is_none());
+    }
+
+    #[test]
+    fn is_selected_returns_false_for_unselected() {
+        let sel = Selection::default();
+        assert!(!sel.is_selected(entity(99)));
+    }
+
+    #[test]
+    fn is_id_selected_works() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        assert!(sel.is_id_selected("e1"));
+        assert!(!sel.is_id_selected("e2"));
+    }
+
+    #[test]
+    fn is_empty_on_default() {
+        let sel = Selection::default();
+        assert!(sel.is_empty());
+    }
+
+    #[test]
+    fn selected_ids_returns_all_ids() {
+        let mut sel = Selection::default();
+        sel.select_one(entity(1), "e1".to_string());
+        sel.add(entity(2), "e2".to_string());
+        let mut ids = sel.selected_ids();
+        ids.sort();
+        assert_eq!(ids, vec!["e1", "e2"]);
+    }
+}

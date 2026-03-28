@@ -77,3 +77,74 @@ impl EntityVisible {
         self.0 = !self.0;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- EntityId ---
+
+    #[test]
+    fn entity_id_default_produces_unique_uuids() {
+        let id1 = EntityId::default();
+        let id2 = EntityId::default();
+        assert_ne!(id1.0, id2.0, "default EntityId values must be unique UUIDs");
+    }
+
+    #[test]
+    fn entity_id_default_is_valid_uuid_format() {
+        let id = EntityId::default();
+        // UUID v4: 8-4-4-4-12 hex chars separated by '-'
+        let parts: Vec<&str> = id.0.split('-').collect();
+        assert_eq!(parts.len(), 5, "UUID should have 5 parts: {}", id.0);
+        assert_eq!(parts[0].len(), 8);
+        assert_eq!(parts[1].len(), 4);
+        assert_eq!(parts[2].len(), 4);
+        assert_eq!(parts[3].len(), 4);
+        assert_eq!(parts[4].len(), 12);
+    }
+
+    #[test]
+    fn entity_id_new_stores_given_value() {
+        let id = EntityId::new("my-custom-id");
+        assert_eq!(id.as_str(), "my-custom-id");
+    }
+
+    // --- EntityName ---
+
+    #[test]
+    fn entity_name_new_stores_value() {
+        let name = EntityName::new("TestEntity");
+        assert_eq!(name.as_str(), "TestEntity");
+    }
+
+    #[test]
+    fn entity_name_default_is_empty() {
+        let name = EntityName::default();
+        assert_eq!(name.as_str(), "");
+    }
+
+    // --- EntityVisible ---
+
+    #[test]
+    fn entity_visible_default_is_true() {
+        let vis = EntityVisible::default();
+        assert!(vis.is_visible());
+    }
+
+    #[test]
+    fn entity_visible_toggle_flips_state() {
+        let mut vis = EntityVisible::visible();
+        assert!(vis.is_visible());
+        vis.toggle();
+        assert!(!vis.is_visible());
+        vis.toggle();
+        assert!(vis.is_visible());
+    }
+
+    #[test]
+    fn entity_visible_hidden_constructor() {
+        let vis = EntityVisible::hidden();
+        assert!(!vis.is_visible());
+    }
+}
