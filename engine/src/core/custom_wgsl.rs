@@ -132,12 +132,47 @@ impl CustomShaderRegistry {
 
     /// Build the combined WGSL containing one function per registered slot.
     /// Unregistered slots get a passthrough stub.
+    /// Returns an error string if any slot's body would escape the wrapping function.
     pub fn build_combined_wgsl(&self) -> String {
         let mut functions = String::new();
         for i in 0..CUSTOM_SHADER_SLOT_COUNT {
             let fn_name = format!("custom_shader_{}", i + 1);
             match &self.slots[i] {
                 Some(slot) => {
+                    // Security: reject bodies that could escape the wrapping function.
+                    // Track brace balance — if it hits zero, the user code has closed
+                    // the wrapping function and anything after is injected at top-level.
+                    if slot.wgsl_function_body.contains("FORGE_USER_CODE_INJECTION_POINT") {
+                        tracing::warn!("Slot {} rejected: contains injection point marker", i);
+                        functions.push_str(&format!(
+                            "fn {fn_name}(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> {{\n    return color;\n}}\n\n"
+                        ));
+                        continue;
+                    }
+                    let mut balance: i32 = 0;
+                    let mut escaped = false;
+                    for ch in slot.wgsl_function_body.chars() {
+                        match ch {
+                            '{' => balance += 1,
+                            '}' => {
+                                balance -= 1;
+                                // balance == -1 means the user body has closed the wrapping '{',
+                                // which would terminate the enclosing function.
+                                if balance < 0 {
+                                    escaped = true;
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if escaped {
+                        tracing::warn!("Slot {} rejected: brace escape detected in WGSL body", i);
+                        functions.push_str(&format!(
+                            "fn {fn_name}(color: vec4<f32>, uv: vec2<f32>, time: f32, params: array<f32, 16>) -> vec4<f32> {{\n    return color;\n}}\n\n"
+                        ));
+                        continue;
+                    }
                     // Indent the user body by 4 spaces
                     let indented = slot
                         .wgsl_function_body
