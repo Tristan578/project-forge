@@ -246,7 +246,7 @@ describe('audioSlice', () => {
         bus: 'sfx',
       };
 
-      store.getState().setEntityAudio('entity-1', audioData);
+      store.getState().setPrimaryAudio(audioData);
 
       const state = store.getState();
       expect(state.primaryAudio).toEqual(audioData);
@@ -266,10 +266,10 @@ describe('audioSlice', () => {
         bus: 'sfx',
       };
 
-      store.getState().setEntityAudio('entity-1', audioData);
+      store.getState().setPrimaryAudio(audioData);
       expect(store.getState().primaryAudio).toEqual(audioData);
 
-      store.getState().setEntityAudio('entity-1', null);
+      store.getState().setPrimaryAudio(null);
 
       expect(store.getState().primaryAudio).toBeNull();
     });

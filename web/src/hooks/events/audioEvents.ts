@@ -33,7 +33,7 @@ export function handleAudioEvent(
         autoplay?: boolean;
         bus?: string;
       }>(data);
-      const { entityId, ...audioData } = payload;
+      const { entityId: _entityId, ...audioData } = payload;
       // If assetId is defined (even if null), it means audio exists
       if (audioData.assetId !== undefined) {
         const audio = {
@@ -48,9 +48,9 @@ export function handleAudioEvent(
           autoplay: audioData.autoplay ?? false,
           bus: audioData.bus ?? 'sfx',
         };
-        useEditorStore.getState().setEntityAudio(entityId, audio);
+        useEditorStore.getState().setPrimaryAudio(audio);
       } else {
-        useEditorStore.getState().setEntityAudio(entityId, null);
+        useEditorStore.getState().setPrimaryAudio(null);
       }
       return true;
     }
