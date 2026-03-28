@@ -87,6 +87,76 @@ describe('PATCH /api/jobs/[id]', () => {
     expect(body.updated).toBe(true);
   });
 
+  it('should return 400 for invalid status', async () => {
+    const mockDb = {
+      select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { PATCH } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/jobs/j1', {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'hacked' }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe('Invalid status');
+  });
+
+  it('should return 400 for negative progress', async () => {
+    const mockDb = {
+      select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { PATCH } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/jobs/j1', {
+      method: 'PATCH',
+      body: JSON.stringify({ progress: -5 }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain('progress');
+  });
+
+  it('should return 400 for progress > 100', async () => {
+    const mockDb = {
+      select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { PATCH } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/jobs/j1', {
+      method: 'PATCH',
+      body: JSON.stringify({ progress: 150 }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
+    expect(res.status).toBe(400);
+  });
+
+  it('should silently ignore refunded field', async () => {
+    const mockDb = {
+      select: vi.fn().mockReturnThis(), from: vi.fn().mockReturnThis(),
+      where: vi.fn().mockReturnThis(), limit: vi.fn().mockResolvedValue([{ id: 'j1' }]),
+      update: vi.fn().mockReturnThis(), set: vi.fn().mockReturnThis(),
+    };
+    vi.mocked(getDb).mockReturnValue(mockDb as never);
+
+    const { PATCH } = await import('./route');
+    const req = new NextRequest('http://localhost:3000/api/jobs/j1', {
+      method: 'PATCH',
+      body: JSON.stringify({ refunded: true }),
+    });
+    const res = await PATCH(req, { params: Promise.resolve({ id: 'j1' }) });
+    expect(res.status).toBe(200);
+    // Verify refunded was not included in the set() call
+    const setCall = mockDb.set.mock.calls[0][0];
+    expect(setCall.refunded).toBeUndefined();
+  });
+
   it('should return 500 on database error', async () => {
     vi.mocked(getDb).mockImplementation(() => { throw new Error('DB error'); });
 
