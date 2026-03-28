@@ -64,8 +64,16 @@ describe('themeStorage', () => {
   it('deleteCustomTheme removes the theme', async () => {
     const { deleteCustomTheme } = await import('../themeStorage');
     const { del } = await import('idb-keyval');
-    await deleteCustomTheme('test-id');
-    expect(del).toHaveBeenCalledWith('sf-theme-test-id');
+    const validId = '00000000-0000-4000-8000-000000000099';
+    await deleteCustomTheme(validId);
+    expect(del).toHaveBeenCalledWith(`sf-theme-${validId}`);
+  });
+
+  it('deleteCustomTheme is a no-op for invalid UUID', async () => {
+    const { deleteCustomTheme } = await import('../themeStorage');
+    const { del } = await import('idb-keyval');
+    await deleteCustomTheme('not-a-uuid');
+    expect(del).not.toHaveBeenCalled();
   });
 
   it('listCustomThemes returns only sf-theme- prefixed keys', async () => {

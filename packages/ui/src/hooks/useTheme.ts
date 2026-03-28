@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { THEME_NAMES, type ThemeName, THEME_DEFINITIONS } from '../tokens';
+import { applyThemeTokens } from '../utils/applyThemeTokens';
 
 const VALID_THEMES = new Set<string>(THEME_NAMES);
 const STORAGE_KEY_THEME = 'sf-theme';
@@ -18,13 +19,14 @@ function readEffects(): boolean {
   return stored !== 'off';
 }
 
-function applyThemeToDOM(theme: ThemeName) {
-  const tokens = THEME_DEFINITIONS[theme];
-  const root = document.documentElement;
-  root.setAttribute('data-sf-theme', theme);
-  for (const [key, value] of Object.entries(tokens)) {
-    root.style.setProperty(key, value);
-  }
+/**
+ * Apply a built-in theme to the DOM via the single authoritative write path
+ * (applyThemeTokens). Built-in themes are compile-time constants and do not
+ * need runtime validation — they are passed as trusted TrustedTokenSource.
+ */
+function applyBuiltInTheme(theme: ThemeName) {
+  document.documentElement.setAttribute('data-sf-theme', theme);
+  applyThemeTokens({ tokens: THEME_DEFINITIONS[theme] });
 }
 
 export interface UseThemeOptions {
@@ -47,7 +49,7 @@ export function useTheme(options?: UseThemeOptions) {
   }, [resolveTheme]);
 
   useEffect(() => {
-    applyThemeToDOM(theme);
+    applyBuiltInTheme(theme);
   }, [theme]);
 
   useEffect(() => {

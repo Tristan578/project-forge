@@ -558,15 +558,25 @@ jobs:
             echo "No internal stories directory -- nothing to check."
             exit 0
           fi
+          # Extract one title per line; use grep -F (fixed-string) so special regex
+          # characters in story titles (.  +  (  etc.) cannot cause false matches or
+          # ReDoS issues when the title is used as the search term.
           INTERNAL_TITLES=$(grep -r --include="*.stories.*" "title:" apps/design/stories/internal/ \
-            | sed "s/.*title:[[:space:]]*['\"]//;s/['\"].*//" \
-            | tr '\n' '|' | sed 's/|$//')
+            | sed "s/.*title:[[:space:]]*['\"]//;s/['\"].*//")
           if [ -z "$INTERNAL_TITLES" ]; then
             echo "No internal story titles found -- nothing to check."
             exit 0
           fi
-          echo "Checking for internal titles: $INTERNAL_TITLES"
-          if grep -r --include="*.js" -E "$INTERNAL_TITLES" apps/design/storybook-public/ 2>/dev/null | head -5; then
+          echo "Checking for internal titles:"
+          echo "$INTERNAL_TITLES"
+          FOUND=0
+          while IFS= read -r title; do
+            [ -z "$title" ] && continue
+            if grep -r --include="*.js" -F "$title" apps/design/storybook-public/ 2>/dev/null | head -1; then
+              FOUND=1
+            fi
+          done <<< "$INTERNAL_TITLES"
+          if [ "$FOUND" -eq 1 ]; then
             echo "::error::Public Storybook build contains internal story titles. Check INCLUDE_INTERNAL gating."
             exit 1
           fi
