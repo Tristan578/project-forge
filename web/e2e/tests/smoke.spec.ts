@@ -52,7 +52,7 @@ test.describe('Editor Smoke Tests @engine', () => {
 
     // Check that sidebar buttons are visible
     // Common sidebar buttons: Add Entity, Play/Pause controls, etc.
-    const sidebar = page.locator('[class*="sidebar"]').first();
+    const sidebar = page.locator('[data-testid="editor-sidebar"]');
     await expect(sidebar).toBeVisible();
 
     // Check for at least one button in the sidebar

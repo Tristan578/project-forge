@@ -210,7 +210,22 @@ test.describe('load_scene engine round-trip @engine', () => {
 
     const headingText = page.getByText('Scene Hierarchy', { exact: false });
 
-    await page.waitForTimeout(1_000); // allow scene to settle
+    // Wait for the hierarchy panel or heading to become visible rather than sleeping.
+    // This tolerates slow CI without hard-coding a fixed duration.
+    await page.waitForFunction(
+      () => {
+        const tabs = document.querySelectorAll('.dv-tab, [data-testid*="hierarchy"]');
+        for (const el of tabs) {
+          if (/hierarchy|scene/i.test(el.textContent ?? '')) return true;
+        }
+        const headings = document.querySelectorAll('*');
+        for (const el of headings) {
+          if (/scene hierarchy/i.test(el.textContent ?? '') && (el as HTMLElement).offsetParent !== null) return true;
+        }
+        return false;
+      },
+      { timeout: 5_000 },
+    ).catch(() => undefined); // panel visibility is checked below
 
     const panelVisible = await hierarchyPanel.isVisible().catch(() => false);
     const headingVisible = await headingText.isVisible().catch(() => false);

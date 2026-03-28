@@ -10,7 +10,7 @@ test.describe('Export @engine', () => {
 
 
     // Export dialog should be visible
-    const exportDialog = page.locator('[class*="fixed"]').filter({ hasText: /export.*game|export/i }).first();
+    const exportDialog = page.locator('[data-testid="export-dialog"]');
     await expect(exportDialog).toBeVisible();
   });
 
@@ -82,7 +82,7 @@ test.describe('Export @engine', () => {
 
 
     // Dialog should be gone
-    const exportDialog = page.locator('[class*="fixed"]').filter({ hasText: /export.*game|export/i }).first();
+    const exportDialog = page.locator('[data-testid="export-dialog"]');
     const visible = await exportDialog.isVisible().catch(() => false);
     expect(visible).toBe(false);
   });
