@@ -223,7 +223,7 @@ export function CommandFilter({
           aria-atomic="true"
           style={{
             fontSize: '0.75rem',
-            color: 'var(--sf-text-muted, #71717a)',
+            color: 'rgba(250,250,250,0.6)',
           }}
         >
           Showing {displayCount} {displayCount === 1 ? 'command' : 'commands'}
@@ -288,8 +288,7 @@ const clearButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
   fontSize: '0.75rem',
   fontWeight: 500,
-  padding: '0.625rem 0.875rem',
-  minHeight: '44px',
+  padding: '0.25rem 0.625rem',
 };
 
 const inlineTextButtonStyle: React.CSSProperties = {
@@ -298,7 +297,6 @@ const inlineTextButtonStyle: React.CSSProperties = {
   color: 'var(--accent, #3b82f6)',
   cursor: 'pointer',
   textDecoration: 'underline',
-  padding: '0.625rem 0',
-  minHeight: '44px',
+  padding: 0,
   fontSize: 'inherit',
 };

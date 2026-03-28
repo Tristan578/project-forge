@@ -5,9 +5,18 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./internal": { "types": "./dist/internal.d.ts", "default": "./dist/internal.js" },
-    "./tokens": { "types": "./dist/tokens/index.d.ts", "default": "./dist/tokens/index.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
+    },
+    "./tokens": {
+      "types": "./dist/tokens/index.d.ts",
+      "default": "./dist/tokens/index.js"
+    },
     "./tokens/theme.css": "./src/tokens/theme.css"
   },
   "scripts": {
@@ -22,15 +31,16 @@
   },
   "dependencies": {
     "clsx": "^2",
+    "idb-keyval": "^6.2.2",
     "tailwind-merge": "^3"
   },
   "devDependencies": {
-    "vitest": "^4",
-    "@testing-library/react": "^16",
     "@testing-library/jest-dom": "^6",
+    "@testing-library/react": "^16",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
     "jsdom": "^29",
     "typescript": "^5",
-    "@types/react": "^19",
-    "@types/react-dom": "^19"
+    "vitest": "^4"
   }
 }
