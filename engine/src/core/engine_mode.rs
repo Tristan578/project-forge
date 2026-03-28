@@ -315,6 +315,48 @@ pub fn restore_scene(
             if let Some(ref snap_particle) = snap.particle_data {
                 commands.entity(entity).insert(snap_particle.clone());
             }
+            if let Some(ref rzd) = snap.reverb_zone_data {
+                commands.entity(entity).insert(rzd.clone());
+            }
+            if snap.reverb_zone_enabled {
+                commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+            }
+            if let Some(ref sed) = snap.shader_effect_data {
+                commands.entity(entity).insert(sed.clone());
+            }
+            if let Some(ref jd) = snap.joint_data {
+                commands.entity(entity).insert(jd.clone());
+            }
+            if let Some(ref gc) = snap.game_components {
+                commands.entity(entity).insert(gc.clone());
+            }
+            if let Some(ref gcd) = snap.game_camera_data {
+                commands.entity(entity).insert(gcd.clone());
+            }
+            if snap.active_game_camera {
+                commands.entity(entity).insert(ActiveGameCamera);
+            }
+            if let Some(ref sd) = snap.sprite_data {
+                commands.entity(entity).insert(sd.clone());
+            }
+            if let Some(ref tmd) = snap.tilemap_data {
+                commands.entity(entity).insert(tmd.clone());
+            }
+            if snap.tilemap_enabled {
+                commands.entity(entity).insert(TilemapEnabled);
+            }
+            if let Some(ref s2d) = snap.skeleton2d_data {
+                commands.entity(entity).insert(s2d.clone());
+            }
+            if snap.skeleton2d_enabled {
+                commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+            }
+            if let Some(ref ld) = snap.lod_data {
+                commands.entity(entity).insert(ld.clone());
+            }
+            if snap.physics_enabled {
+                commands.entity(entity).insert(PhysicsEnabled);
+            }
         }
     }
 

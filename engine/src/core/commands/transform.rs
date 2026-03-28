@@ -157,8 +157,8 @@ fn handle_update_transform(payload: serde_json::Value) -> CommandResult {
         if s.iter().any(|v| !v.is_finite()) {
             return Err("update_transform: scale contains non-finite values".to_string());
         }
-        // Zero scale collapses entity geometry and can cause NaN in physics
-        if s.iter().any(|v| *v == 0.0) {
+        // Near-zero scale (including denormals) collapses entity geometry and can cause NaN in physics
+        if s.iter().any(|v| v.abs() < f32::EPSILON) {
             return Err("update_transform: scale components must be non-zero".to_string());
         }
     }

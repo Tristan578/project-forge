@@ -151,8 +151,9 @@ impl CustomShaderRegistry {
                     }
                     let mut balance: i32 = 0;
                     let mut escaped = false;
-                    // Comment-aware brace scanner: skip braces inside // line comments
-                    // and /* */ block comments so they do not affect balance.
+                    // Comment-and-string-aware brace scanner: skip braces inside
+                    // // line comments, /* */ block comments, and "..." string literals
+                    // so they do not affect balance.
                     let body = &slot.wgsl_function_body;
                     let bytes = body.as_bytes();
                     let len = bytes.len();
@@ -176,6 +177,23 @@ impl CustomShaderRegistry {
                             byte_i += 2;
                             // Advance until newline or end of string
                             while byte_i < len && bytes[byte_i] != b'\n' {
+                                byte_i += 1;
+                            }
+                            continue;
+                        }
+                        // Skip string literals — advance past the closing unescaped `"`
+                        if bytes[byte_i] == b'"' {
+                            byte_i += 1;
+                            while byte_i < len {
+                                if bytes[byte_i] == b'\\' {
+                                    // Escape sequence: skip the next character
+                                    byte_i += 2;
+                                    continue;
+                                }
+                                if bytes[byte_i] == b'"' {
+                                    byte_i += 1;
+                                    break;
+                                }
                                 byte_i += 1;
                             }
                             continue;
@@ -276,7 +294,8 @@ pub fn validate_wgsl_source(code: &str) -> WgslValidation {
     }
 
     // Check balanced braces to catch obvious syntax errors early.
-    // Comment-aware: skip braces inside // line comments and /* */ block comments.
+    // Comment-and-string-aware: skip braces inside // line comments,
+    // /* */ block comments, and "..." string literals.
     {
         let bytes = code.as_bytes();
         let len = bytes.len();
@@ -300,6 +319,23 @@ pub fn validate_wgsl_source(code: &str) -> WgslValidation {
             if i + 1 < len && bytes[i] == b'/' && bytes[i + 1] == b'/' {
                 i += 2;
                 while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+                continue;
+            }
+            // String literal — skip past the closing unescaped `"`
+            if bytes[i] == b'"' {
+                i += 1;
+                while i < len {
+                    if bytes[i] == b'\\' {
+                        // Escape sequence: skip the next character
+                        i += 2;
+                        continue;
+                    }
+                    if bytes[i] == b'"' {
+                        i += 1;
+                        break;
+                    }
                     i += 1;
                 }
                 continue;

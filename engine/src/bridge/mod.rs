@@ -232,7 +232,7 @@ pub fn handle_command(command: &str, payload: JsValue) -> Result<JsValue, JsValu
     // Reject oversized command strings before any allocation
     if command.len() > 128 {
         let response = CommandResponse::err(format!(
-            "Command name too long ({} chars, limit 128)", command.len()
+            "Command name too long ({} bytes, limit 128)", command.len()
         ));
         return response.serialize(&serde_wasm_bindgen::Serializer::json_compatible())
             .map_err(|e| JsValue::from_str(&e.to_string()));

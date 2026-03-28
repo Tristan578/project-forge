@@ -59,8 +59,8 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_physics" => Some(Err("Not yet implemented: set_physics (use update_physics)".to_string())),
         "remove_physics" => Some(Err("Not yet implemented: remove_physics (use toggle_physics with enabled=false)".to_string())),
         "set_physics_enabled" => Some(Err("Not yet implemented: set_physics_enabled (use toggle_physics)".to_string())),
-        "enable_physics_debug" => Some(handle_toggle_debug_physics(payload.clone())),
-        "disable_physics_debug" => Some(handle_toggle_debug_physics(payload.clone())),
+        "enable_physics_debug" => Some(handle_set_debug_physics(true)),
+        "disable_physics_debug" => Some(handle_set_debug_physics(false)),
         "apply_impulse" => Some(handle_apply_force(payload.clone())),
         "set_linear_velocity" => Some(Err("Not yet implemented: set_linear_velocity".to_string())),
         "set_angular_velocity" => Some(Err("Not yet implemented: set_angular_velocity".to_string())),
@@ -147,10 +147,20 @@ fn handle_toggle_physics(payload: serde_json::Value) -> super::CommandResult {
     }
 }
 
-/// Handle toggle_debug_physics command.
+/// Handle toggle_debug_physics command — toggles the current state.
 fn handle_toggle_debug_physics(_payload: serde_json::Value) -> super::CommandResult {
-    if queue_debug_physics_toggle_from_bridge() {
+    if queue_debug_physics_toggle_from_bridge(DebugPhysicsToggle { enabled: None }) {
         tracing::info!("Queued debug physics toggle");
+        Ok(())
+    } else {
+        Err("PendingCommands resource not initialized".to_string())
+    }
+}
+
+/// Handle enable_physics_debug / disable_physics_debug — sets explicit state.
+fn handle_set_debug_physics(enabled: bool) -> super::CommandResult {
+    if queue_debug_physics_toggle_from_bridge(DebugPhysicsToggle { enabled: Some(enabled) }) {
+        tracing::info!("Queued debug physics set enabled={}", enabled);
         Ok(())
     } else {
         Err("PendingCommands resource not initialized".to_string())
@@ -393,16 +403,22 @@ fn handle_update_joint(payload: serde_json::Value) -> super::CommandResult {
     });
 
     // Limits: None means "no update", Some(None) means "clear limits", Some(Some(limits)) means "set limits"
-    let limits = if payload.get("limits").is_some() {
-        Some(payload.get("limits").and_then(|v| {
-            let obj = v.as_object()?;
-            let min = obj.get("min")?.as_f64()? as f32;
-            let max = obj.get("max")?.as_f64()? as f32;
+    let limits = if let Some(limits_val) = payload.get("limits") {
+        if limits_val.is_null() {
+            // Explicit null: clear limits
+            Some(None)
+        } else {
+            let obj = limits_val.as_object()
+                .ok_or("Invalid joint limits: expected object")?;
+            let min = obj.get("min").and_then(|v| v.as_f64()).map(|v| v as f32)
+                .ok_or("Invalid joint limits: missing or non-numeric min")?;
+            let max = obj.get("max").and_then(|v| v.as_f64()).map(|v| v as f32)
+                .ok_or("Invalid joint limits: missing or non-numeric max")?;
             if !min.is_finite() || !max.is_finite() || min > max {
-                return None;
+                return Err("Invalid joint limits: min must be <= max and both must be finite".to_string());
             }
-            Some(JointLimits { min, max })
-        }))
+            Some(Some(JointLimits { min, max }))
+        }
     } else {
         None
     };
