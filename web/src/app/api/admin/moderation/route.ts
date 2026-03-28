@@ -90,8 +90,11 @@ export async function POST(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     const db = getDb();
-    const body = await req.json();
-    const { id, action } = body;
+    const body: unknown = await req.json();
+    if (typeof body !== 'object' || body === null) {
+      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+    }
+    const { id, action } = body as { id?: string; action?: string };
 
     if (!id || !action) {
       return NextResponse.json({ error: 'Missing id or action' }, { status: 400 });

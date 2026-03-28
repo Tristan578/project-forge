@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (durationSeconds < 15 || durationSeconds > 120) {
+  if (!(typeof durationSeconds === 'number' && Number.isFinite(durationSeconds)) || durationSeconds < 15 || durationSeconds > 120) {
     return NextResponse.json(
       { error: 'Duration must be between 15 and 120 seconds' },
       { status: 422 }

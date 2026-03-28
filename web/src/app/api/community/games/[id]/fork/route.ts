@@ -60,6 +60,11 @@ export async function POST(
       .from(projects)
       .where(eq(projects.userId, authResult.ctx.user.id));
 
+    // Intentional: fork limits are deliberately more generous than publish limits
+    // to encourage community remixing. They differ from publish limits and are
+    // not imported from a shared constant to keep the fork policy independent.
+    // TODO(PF): Consider extracting to web/src/lib/config/tierLimits.ts when
+    // a third consumer of project-count limits is added.
     const tierLimits: Record<string, number> = {
       starter: 3,
       hobbyist: 10,
