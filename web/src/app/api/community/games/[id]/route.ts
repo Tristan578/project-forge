@@ -129,7 +129,6 @@ export async function GET(
 
     return NextResponse.json({ game: formattedGame });
   } catch (error) {
-    console.error('Failed to fetch game:', error);
     captureException(error, { route: '/api/community/games/[id]' });
     return NextResponse.json(
       { error: 'Failed to fetch game' },

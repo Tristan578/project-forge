@@ -64,7 +64,7 @@ export function registerDocs(server: McpServer): void {
   server.resource(
     'doc-page',
     'forge://docs/{path}',
-    async (uri, params) => {
+    async (uri, _params) => {
       const { docIndex: idx } = ensureLoaded();
 
       // Extract path from URI: forge://docs/features/physics → features/physics
@@ -82,8 +82,6 @@ export function registerDocs(server: McpServer): void {
           ],
         };
       }
-
-      const meta = idx.meta.get(docPath);
 
       return {
         contents: [

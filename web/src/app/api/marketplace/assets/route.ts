@@ -122,7 +122,6 @@ export async function GET(req: NextRequest) {
     return response;
   } catch (error) {
     captureException(error, { route: '/api/marketplace/assets' });
-    console.error('Error fetching marketplace assets:', error);
     return NextResponse.json({ error: 'Failed to fetch assets' }, { status: 500 });
   }
 }

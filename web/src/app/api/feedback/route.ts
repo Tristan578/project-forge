@@ -45,7 +45,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, id: record.id });
   } catch (err) {
-    console.error('Feedback submission error:', err);
     captureException(err, { route: '/api/feedback' });
     return NextResponse.json(
       { error: 'Failed to submit feedback' },

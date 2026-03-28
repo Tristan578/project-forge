@@ -3,6 +3,7 @@
 import { MousePointer2, Move, RotateCw, Scaling, Grid3X3, Globe, Box, Settings, MessageSquare, SlidersHorizontal, Plus, Minus, CircleDot, Merge, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useEditorStore } from '@/stores/editorStore';
+import { useShallow } from 'zustand/react/shallow';
 import { useChatStore } from '@/stores/chatStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { AddEntityMenu, EntityType } from './AddEntityMenu';
@@ -37,32 +38,58 @@ function ToolButton({ icon, active, onClick, title }: ToolButtonProps) {
 export function Sidebar() {
   const [showSettings, setShowSettings] = useState(false);
   const [showComplexity, setShowComplexity] = useState(false);
-  const gizmoMode = useEditorStore((s) => s.gizmoMode);
-  const setGizmoMode = useEditorStore((s) => s.setGizmoMode);
-  const spawnEntity = useEditorStore((s) => s.spawnEntity);
-  const deleteSelectedEntities = useEditorStore((s) => s.deleteSelectedEntities);
-  const duplicateSelectedEntity = useEditorStore((s) => s.duplicateSelectedEntity);
-  const primaryId = useEditorStore((s) => s.primaryId);
-  const selectedIds = useEditorStore((s) => s.selectedIds);
-  const undo = useEditorStore((s) => s.undo);
-  const redo = useEditorStore((s) => s.redo);
-  const toggleGrid = useEditorStore((s) => s.toggleGrid);
-  const gridVisible = useEditorStore((s) => s.snapSettings.gridVisible);
-  const setCameraPreset = useEditorStore((s) => s.setCameraPreset);
-  const coordinateMode = useEditorStore((s) => s.coordinateMode);
-  const toggleCoordinateMode = useEditorStore((s) => s.toggleCoordinateMode);
-  const engineMode = useEditorStore((s) => s.engineMode);
-  const play = useEditorStore((s) => s.play);
-  const stop = useEditorStore((s) => s.stop);
+  const {
+    gizmoMode,
+    setGizmoMode,
+    spawnEntity,
+    deleteSelectedEntities,
+    duplicateSelectedEntity,
+    primaryId,
+    selectedIds,
+    undo,
+    redo,
+    toggleGrid,
+    gridVisible,
+    setCameraPreset,
+    coordinateMode,
+    toggleCoordinateMode,
+    engineMode,
+    play,
+    stop,
+    csgUnion,
+    csgSubtract,
+    csgIntersect,
+    combineMeshes,
+  } = useEditorStore(
+    useShallow((s) => ({
+      gizmoMode: s.gizmoMode,
+      setGizmoMode: s.setGizmoMode,
+      spawnEntity: s.spawnEntity,
+      deleteSelectedEntities: s.deleteSelectedEntities,
+      duplicateSelectedEntity: s.duplicateSelectedEntity,
+      primaryId: s.primaryId,
+      selectedIds: s.selectedIds,
+      undo: s.undo,
+      redo: s.redo,
+      toggleGrid: s.toggleGrid,
+      gridVisible: s.snapSettings.gridVisible,
+      setCameraPreset: s.setCameraPreset,
+      coordinateMode: s.coordinateMode,
+      toggleCoordinateMode: s.toggleCoordinateMode,
+      engineMode: s.engineMode,
+      play: s.play,
+      stop: s.stop,
+      csgUnion: s.csgUnion,
+      csgSubtract: s.csgSubtract,
+      csgIntersect: s.csgIntersect,
+      combineMeshes: s.combineMeshes,
+    }))
+  );
   const openPanel = useWorkspaceStore((s) => s.openPanel);
   const rightPanelTab = useChatStore((s) => s.rightPanelTab);
   const setRightPanelTab = useChatStore((s) => s.setRightPanelTab);
   const chatOverlayOpen = useWorkspaceStore((s) => s.chatOverlayOpen);
   const toggleChatOverlay = useWorkspaceStore((s) => s.toggleChatOverlay);
-  const csgUnion = useEditorStore((s) => s.csgUnion);
-  const csgSubtract = useEditorStore((s) => s.csgSubtract);
-  const csgIntersect = useEditorStore((s) => s.csgIntersect);
-  const combineMeshes = useEditorStore((s) => s.combineMeshes);
 
   // Keyboard shortcuts for gizmo modes, delete, duplicate, undo, and redo
   useEffect(() => {

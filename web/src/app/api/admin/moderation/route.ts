@@ -65,7 +65,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation', method: 'GET' });
-    console.error('Failed to fetch moderation queue:', error);
     return NextResponse.json(
       { error: 'Failed to fetch moderation queue' },
       { status: 500 }
@@ -120,7 +119,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: true, action: 'deleted' });
   } catch (error) {
     captureException(error, { route: '/api/admin/moderation', method: 'POST' });
-    console.error('Failed to perform moderation action:', error);
     return NextResponse.json(
       { error: 'Failed to perform moderation action' },
       { status: 500 }

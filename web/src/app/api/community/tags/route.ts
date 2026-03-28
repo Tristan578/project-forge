@@ -31,7 +31,6 @@ export async function GET(req: NextRequest) {
       })),
     });
   } catch (error) {
-    console.error('Failed to fetch tags:', error);
     captureException(error, { route: '/api/community/tags' });
     return NextResponse.json({ error: 'Failed to fetch tags' }, { status: 500 });
   }

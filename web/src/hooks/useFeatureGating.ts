@@ -71,16 +71,14 @@ interface CapabilitiesState {
 /** Module-level cache so multiple hook instances share one fetch */
 let cachedState: CapabilitiesState | null = null;
 let fetchPromise: Promise<void> | null = null;
-let subscribers: Array<() => void> = [];
+let subscribers: Set<() => void> = new Set();
 
 /** TTL for error states — allows retry after 30 seconds (PF-508). Re-exported from @/lib/config/timeouts */
 export { ERROR_TTL_MS } from '@/lib/config/timeouts';
 let errorCachedAt: number | null = null;
 
 function notifySubscribers(): void {
-  for (const cb of subscribers) {
-    cb();
-  }
+  subscribers.forEach((cb) => cb());
 }
 
 /** Check if the cached error state has expired and should be retried. */
@@ -130,7 +128,7 @@ function fetchCapabilities(): Promise<void> {
 export function _resetCapabilitiesCache(): void {
   cachedState = null;
   fetchPromise = null;
-  subscribers = [];
+  subscribers = new Set();
   errorCachedAt = null;
 }
 
@@ -155,7 +153,7 @@ export function useFeatureGating(featureId: FeatureId): FeatureGateResult {
 
   useEffect(() => {
     const cb = () => forceUpdate((n) => n + 1);
-    subscribers.push(cb);
+    subscribers.add(cb);
 
     // Trigger fetch if not started, or retry if error TTL expired (PF-508)
     if ((!cachedState && !fetchPromise) || isErrorExpired()) {
@@ -171,7 +169,7 @@ export function useFeatureGating(featureId: FeatureId): FeatureGateResult {
     }
 
     return () => {
-      subscribers = subscribers.filter((s) => s !== cb);
+      subscribers.delete(cb);
     };
   }, []);
 
@@ -222,7 +220,7 @@ export function useCapabilities() {
 
   useEffect(() => {
     const cb = () => forceUpdate((n) => n + 1);
-    subscribers.push(cb);
+    subscribers.add(cb);
 
     // Trigger fetch if not started, or retry if error TTL expired (PF-508)
     if ((!cachedState && !fetchPromise) || isErrorExpired()) {
@@ -238,7 +236,7 @@ export function useCapabilities() {
     }
 
     return () => {
-      subscribers = subscribers.filter((s) => s !== cb);
+      subscribers.delete(cb);
     };
   }, []);
 

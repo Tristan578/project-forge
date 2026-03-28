@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Shuffle, HelpCircle } from 'lucide-react';
 import { useEditorStore, type TerrainDataState } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
@@ -20,7 +20,7 @@ export function TerrainInspector() {
   const isTerrain = !!entityType || !!terrainData;
 
   const [localData, setLocalData] = useState<TerrainDataState | null>(terrainData);
-  const [updateTimer, setUpdateTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const updateTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync local state with store
   useEffect(() => {
@@ -30,12 +30,11 @@ export function TerrainInspector() {
   const debouncedUpdate = useCallback((updatedData: TerrainDataState) => {
     if (!primaryId) return;
 
-    if (updateTimer) clearTimeout(updateTimer);
-    const timer = setTimeout(() => {
+    if (updateTimer.current) clearTimeout(updateTimer.current);
+    updateTimer.current = setTimeout(() => {
       updateTerrain(primaryId, updatedData);
     }, 250);
-    setUpdateTimer(timer);
-  }, [primaryId, updateTimer, updateTerrain]);
+  }, [primaryId, updateTerrain]);
 
   const handleChange = (field: keyof TerrainDataState, value: number | string) => {
     if (!localData || !primaryId) return;

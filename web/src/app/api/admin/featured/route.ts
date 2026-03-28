@@ -52,7 +52,6 @@ export async function GET() {
     });
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'GET' });
-    console.error('Failed to fetch featured games:', error);
     return NextResponse.json(
       { error: 'Failed to fetch featured games' },
       { status: 500 }
@@ -116,7 +115,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ featured: entry }, { status: 201 });
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'POST' });
-    console.error('Failed to feature game:', error);
     return NextResponse.json(
       { error: 'Failed to feature game' },
       { status: 500 }
@@ -150,7 +148,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ removed: true });
   } catch (error) {
     captureException(error, { route: '/api/admin/featured', method: 'DELETE' });
-    console.error('Failed to unfeature game:', error);
     return NextResponse.json(
       { error: 'Failed to unfeature game' },
       { status: 500 }

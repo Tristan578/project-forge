@@ -128,7 +128,7 @@ export function VisualScriptEditor({ graph, onGraphChange, onCompile }: VisualSc
     };
 
     const newNode = {
-      id: `node_${Date.now()}`,
+      id: `node_${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
       type: 'custom' as const,
       position,
       data: { nodeType },

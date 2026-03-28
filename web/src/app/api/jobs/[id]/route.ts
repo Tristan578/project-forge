@@ -73,7 +73,6 @@ export async function PATCH(
 
     return NextResponse.json({ updated: true });
   } catch (error) {
-    console.error('Failed to update job:', error);
     captureException(error, { route: '/api/jobs/[id]', method: 'PATCH' });
     return NextResponse.json(
       { error: 'Failed to update job' },

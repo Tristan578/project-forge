@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useRef, useState, useMemo, memo } from 'react';
-import { Image as ImageIcon, X, ChevronDown, ChevronRight, BookmarkPlus, Sparkles, HelpCircle, Layers } from 'lucide-react';
+import { Image as ImageIcon, X, BookmarkPlus, Sparkles, HelpCircle, Layers } from 'lucide-react';
+import { CollapsibleSection } from './CollapsibleSection';
 import { useEditorStore, type MaterialData } from '@/stores/editorStore';
 import { useWorkspaceStore } from '@/stores/workspaceStore';
 import { useShaderEditorStore } from '@/stores/shaderEditorStore';
@@ -161,25 +162,6 @@ function TextureSlot({ label, slot, textureRef, entityId, tooltipTerm }: Texture
   );
 }
 
-function CollapsibleSection({ title, children, defaultOpen = false }: {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="mt-2 border-t border-zinc-800 pt-2">
-      <button
-        className="mb-2 flex w-full items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-400 hover:text-zinc-400"
-        onClick={() => setOpen(!open)}
-      >
-        {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        {title}
-      </button>
-      {open && <div className="space-y-2">{children}</div>}
-    </div>
-  );
-}
 
 function PresetSelector({ onApply, onSaveToLibrary }: { onApply: (preset: MaterialPreset) => void; onSaveToLibrary: () => void }) {
   const [selectedId, setSelectedId] = useState<string>('');
@@ -348,7 +330,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
 
       <div className="space-y-3">
         {/* Shader Effect */}
-        <CollapsibleSection title="Shader Effect" defaultOpen={shaderType !== 'none'}>
+        <CollapsibleSection id="material-shader-effect" title="Shader Effect">
           <div className="flex items-center gap-2">
             <label className="w-20 shrink-0 text-xs text-zinc-400">Type<InfoTooltip term="shaderType" /></label>
             <select
@@ -625,7 +607,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
         </div>
 
         {/* UV Transform (E-1a) */}
-        <CollapsibleSection title="UV Transform">
+        <CollapsibleSection id="material-uv-transform" title="UV Transform">
           <SliderRow label="Offset X" value={primaryMaterial.uvOffset?.[0] ?? 0} min={-10} max={10} step={0.01} onChange={(v) => handleUpdate({ uvOffset: [v, primaryMaterial.uvOffset?.[1] ?? 0] })} tooltipTerm="uvOffsetX" />
           <SliderRow label="Offset Y" value={primaryMaterial.uvOffset?.[1] ?? 0} min={-10} max={10} step={0.01} onChange={(v) => handleUpdate({ uvOffset: [primaryMaterial.uvOffset?.[0] ?? 0, v] })} tooltipTerm="uvOffsetY" />
           <SliderRow label="Scale X" value={primaryMaterial.uvScale?.[0] ?? 1} min={0.01} max={20} step={0.01} onChange={(v) => handleUpdate({ uvScale: [v, primaryMaterial.uvScale?.[1] ?? 1] })} tooltipTerm="uvScaleX" />
@@ -640,7 +622,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
         </CollapsibleSection>
 
         {/* Parallax Mapping (E-1b) */}
-        <CollapsibleSection title="Parallax Mapping">
+        <CollapsibleSection id="material-parallax-mapping" title="Parallax Mapping">
           <TextureSlot label="Depth Map" slot="depth_map" textureRef={primaryMaterial.depthMapTexture} entityId={primaryId} tooltipTerm="depthMap" />
           <SliderRow label="Depth Scale" value={primaryMaterial.parallaxDepthScale ?? 0.1} min={0} max={0.5} step={0.005} onChange={(v) => handleUpdate({ parallaxDepthScale: v })} tooltipTerm="depthScale" />
           <div className="flex items-center gap-2">
@@ -661,7 +643,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
         </CollapsibleSection>
 
         {/* Clearcoat (E-1c) */}
-        <CollapsibleSection title="Clearcoat">
+        <CollapsibleSection id="material-clearcoat" title="Clearcoat">
           <SliderRow label="Intensity" value={primaryMaterial.clearcoat ?? 0} onChange={(v) => handleUpdate({ clearcoat: v })} tooltipTerm="clearcoatIntensity" />
           <SliderRow label="Roughness" value={primaryMaterial.clearcoatPerceptualRoughness ?? 0.5} onChange={(v) => handleUpdate({ clearcoatPerceptualRoughness: v })} tooltipTerm="clearcoatRoughness" />
           <TextureSlot label="Coat Map" slot="clearcoat" textureRef={primaryMaterial.clearcoatTexture} entityId={primaryId} tooltipTerm="clearcoatMap" />
@@ -670,7 +652,7 @@ export const MaterialInspector = memo(function MaterialInspector() {
         </CollapsibleSection>
 
         {/* Transmission (E-1d) */}
-        <CollapsibleSection title="Transmission">
+        <CollapsibleSection id="material-transmission" title="Transmission">
           <SliderRow label="Specular" value={primaryMaterial.specularTransmission ?? 0} onChange={(v) => handleUpdate({ specularTransmission: v })} tooltipTerm="specularTransmission" />
           <SliderRow label="Diffuse" value={primaryMaterial.diffuseTransmission ?? 0} onChange={(v) => handleUpdate({ diffuseTransmission: v })} tooltipTerm="diffuseTransmission" />
           <div>

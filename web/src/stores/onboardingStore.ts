@@ -283,6 +283,7 @@ export const useOnboardingStore = create<OnboardingState>()(
     }),
     {
       name: 'forge-onboarding-v2',
+      skipHydration: true,
       // Migrate legacy key if it exists — users on old key should not see wizard
       onRehydrateStorage: () => (state) => {
         if (!state) return;
