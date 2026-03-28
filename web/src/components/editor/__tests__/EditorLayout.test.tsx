@@ -165,6 +165,24 @@ function setupStores(mode: 'desktop' | 'compact' = 'desktop') {
 describe('EditorLayout', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // ThemeAmbient (from @spawnforge/ui) calls window.matchMedia in a useEffect.
+    // jsdom does not implement matchMedia — stub it to prevent unhandled errors.
+    if (typeof window !== 'undefined' && !window.matchMedia) {
+      Object.defineProperty(window, 'matchMedia', {
+        writable: true,
+        configurable: true,
+        value: vi.fn().mockImplementation((query: string) => ({
+          matches: false,
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        })),
+      });
+    }
   });
 
   afterEach(() => {

@@ -6,10 +6,8 @@ import type { VisualScriptGraph } from '@/lib/scripting/visualScriptTypes';
 // ---- Mock @xyflow/react ----
 // ReactFlow is a heavy dependency that requires a real DOM and canvas APIs.
 // We mock it with a minimal stub that renders children / panels.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const _React = require('react');
-vi.mock('@xyflow/react', () => {
-  const React = _React;
+vi.mock('@xyflow/react', async () => {
+  const React = await vi.importActual<typeof import('react')>('react');
   const ReactFlow = ({
     children,
     onConnect,
@@ -62,8 +60,8 @@ vi.mock('../visual-script/CustomNode', () => ({
   CustomNode: () => null,
 }));
 
-vi.mock('../visual-script/NodePalette', () => {
-  const React = _React;
+vi.mock('../visual-script/NodePalette', async () => {
+  const React = await vi.importActual<typeof import('react')>('react');
   return {
     NodePalette: ({ onClose }: { onClose: () => void }) =>
       React.createElement(
