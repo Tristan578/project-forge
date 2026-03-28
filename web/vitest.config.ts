@@ -7,6 +7,10 @@ export default defineConfig({
     environment: 'jsdom',
     testTimeout: VITEST_TEST_TIMEOUT_MS,
     hookTimeout: VITEST_HOOK_TIMEOUT_MS,
+    // 'threads' is faster than 'forks' (shared memory, no process overhead).
+    // Changed from 'forks' during quality sweep optimization. If flaky tests
+    // appear due to reduced isolation (shared globals, localStorage leaks),
+    // revert to 'forks'. The vitest.setup.ts afterEach cleanup should prevent this.
     pool: 'threads',
     teardownTimeout: 5000,
     isolate: true,
