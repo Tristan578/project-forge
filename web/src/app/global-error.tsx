@@ -9,6 +9,11 @@ interface GlobalErrorProps {
 }
 
 export default function GlobalError({ error, reset }: GlobalErrorProps) {
+  const displayMessage =
+    process.env.NODE_ENV === 'development'
+      ? error.message
+      : 'A critical error occurred and the page could not be rendered.';
+
   useEffect(() => {
     captureException(error);
   }, [error]);
@@ -56,7 +61,7 @@ export default function GlobalError({ error, reset }: GlobalErrorProps) {
               margin: "0 auto 1.5rem",
             }}
           >
-            {error.message || "A critical error occurred and the page could not be rendered."}
+            {displayMessage}
           </p>
           <button
             onClick={reset}

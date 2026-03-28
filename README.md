@@ -106,7 +106,7 @@ The MCP server and the visual editor share the same command interface — there 
 
 - [Rust](https://rustup.rs/) (stable) with the `wasm32-unknown-unknown` target
 - [wasm-bindgen-cli](https://rustwasm.github.io/wasm-bindgen/reference/cli.html)
-- [Node.js](https://nodejs.org/) 18+
+- [Node.js](https://nodejs.org/) 20-24
 - Bash (macOS/Linux) or PowerShell (Windows) for build scripts
 
 ### Install the WASM target
@@ -148,8 +148,8 @@ npm install
 ### 4. Set up environment variables
 
 ```bash
-cp .env.example .env
-# Edit .env with your API keys (Clerk, Stripe, database, etc.)
+cp web/.env.example web/.env.local
+# Edit web/.env.local with your API keys (Clerk, Stripe, database, etc.)
 ```
 
 ### 5. Start the development server
