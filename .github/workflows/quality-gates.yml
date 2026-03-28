@@ -534,12 +534,14 @@ jobs:
 
   storybook-internal-gate:
     name: Storybook Internal Leak Gate
+    needs: [ci-gate]
+    if: ${{ contains(github.event.pull_request.changed_files || '', 'apps/design') || contains(github.event.pull_request.changed_files || '', 'packages/ui') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           cache: npm

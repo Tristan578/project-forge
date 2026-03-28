@@ -30,7 +30,7 @@ const COLOR_TOKEN_KEYS = new Set<string>([
   '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
   '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
   '--sf-border', '--sf-border-strong',
-  '--sf-accent', '--sf-accent-hover', '--sf-destructive', '--sf-success', '--sf-warning',
+  '--sf-accent', '--sf-accent-hover', '--sf-on-accent', '--sf-destructive', '--sf-success', '--sf-warning',
 ]);
 
 const LENGTH_TOKEN_KEYS = new Set<string>([

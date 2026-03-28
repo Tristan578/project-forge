@@ -177,7 +177,7 @@ export function ThemeImportExport() {
       )}
 
       {/* Reading indicator */}
-      {state.status === 'reading' && <Toast variant="info" message="Reading file..." />}
+      {state.status === 'reading' && <Toast variant="info" message="Reading file..." onDismiss={() => {}} />}
 
       {/* Error toast */}
       {state.status === 'error' && (

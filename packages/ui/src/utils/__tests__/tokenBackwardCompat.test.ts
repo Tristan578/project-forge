@@ -10,7 +10,7 @@ describe('Token backward compatibility', () => {
     '--sf-bg-app', '--sf-bg-surface', '--sf-bg-elevated', '--sf-bg-overlay',
     '--sf-text', '--sf-text-secondary', '--sf-text-muted', '--sf-text-disabled',
     '--sf-border', '--sf-border-strong',
-    '--sf-accent', '--sf-accent-hover', '--sf-destructive', '--sf-success', '--sf-warning',
+    '--sf-accent', '--sf-accent-hover', '--sf-on-accent', '--sf-destructive', '--sf-success', '--sf-warning',
     '--sf-radius-sm', '--sf-radius-md', '--sf-radius-lg', '--sf-radius-xl', '--sf-radius-full',
     '--sf-border-width', '--sf-font-ui', '--sf-font-mono', '--sf-transition',
   ];
