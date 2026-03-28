@@ -137,13 +137,13 @@ const GRAPH_WITH_NODES: VisualScriptGraph = {
 };
 
 describe('VisualScriptEditor', () => {
-  let onGraphChange: ReturnType<typeof vi.fn>;
-  let onCompile: ReturnType<typeof vi.fn>;
+  let onGraphChange: (graph: VisualScriptGraph) => void;
+  let onCompile: () => void;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    onGraphChange = vi.fn();
-    onCompile = vi.fn();
+    onGraphChange = vi.fn() as unknown as (graph: VisualScriptGraph) => void;
+    onCompile = vi.fn() as unknown as () => void;
     // Set up default useNodesState/useEdgesState behavior
     vi.mocked(useNodesState).mockImplementation((initial) => [
       initial as never,

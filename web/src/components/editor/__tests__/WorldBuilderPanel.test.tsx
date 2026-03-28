@@ -16,7 +16,7 @@ const { mockWorld } = vi.hoisted(() => {
         leader: 'Commander Varek',
         territory: 'Northern Citadel',
         traits: ['disciplined', 'ruthless'],
-        relationships: { 'Silver Guild': 'enemy' },
+        relationships: { 'Silver Guild': 'enemy' as const },
       },
     ],
     regions: [
@@ -42,7 +42,7 @@ const { mockWorld } = vi.hoisted(() => {
     lore: [
       {
         title: 'The Lost Spells',
-        category: 'magic',
+        category: 'magic' as const,
         content: 'Ancient magic was sealed away after the collapse.',
       },
     ],

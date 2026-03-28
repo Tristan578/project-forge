@@ -125,11 +125,10 @@ describe('ModifyPanel', () => {
     vi.mocked(planModification).mockResolvedValue({
       summary: 'Increase enemy speed by 50%',
       steps: [
-        { command: 'set_physics', entityId: 'enemy-1', params: {}, description: 'Increase speed', reversible: true },
+        { command: 'set_physics', entityId: 'enemy-1', action: 'update', component: 'physics', changes: {} },
       ],
       affectedEntities: ['enemy-1'],
       confidence: 0.92,
-      scope: 'scene' as const,
     });
     render(<ModifyPanel />);
     fireEvent.change(screen.getByLabelText('What would you like to change?'), {

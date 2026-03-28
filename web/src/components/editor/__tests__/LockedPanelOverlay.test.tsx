@@ -4,16 +4,16 @@ import { LockedPanelOverlay } from '../LockedPanelOverlay';
 
 vi.mock('@/lib/ai/tierAccess', () => ({
   TIER_LABELS: {
-    free: 'Free',
     starter: 'Starter',
+    hobbyist: 'Hobbyist',
+    creator: 'Creator',
     pro: 'Pro',
-    studio: 'Studio',
   },
   getRequiredTier: vi.fn((panelId: string) => {
-    const tiers: Record<string, string> = {
+    const tiers: Record<string, 'starter' | 'hobbyist' | 'creator' | 'pro'> = {
       'physics-feel': 'pro',
-      'accessibility': 'starter',
-      'economy': 'studio',
+      'accessibility': 'hobbyist',
+      'economy': 'creator',
     };
     return tiers[panelId] ?? null;
   }),
@@ -31,10 +31,10 @@ describe('LockedPanelOverlay', () => {
     vi.clearAllMocks();
     // Re-establish default implementation after clearAllMocks
     vi.mocked(getRequiredTier).mockImplementation((panelId: string) => {
-      const tiers: Record<string, 'free' | 'starter' | 'pro' | 'studio'> = {
+      const tiers: Record<string, 'starter' | 'hobbyist' | 'creator' | 'pro'> = {
         'physics-feel': 'pro',
-        'accessibility': 'starter',
-        'economy': 'studio',
+        'accessibility': 'hobbyist',
+        'economy': 'creator',
       };
       return tiers[panelId] ?? null;
     });
@@ -54,8 +54,8 @@ describe('LockedPanelOverlay', () => {
   });
 
   it('uses override requiredTier when provided', () => {
-    render(<LockedPanelOverlay panelId="unknown-panel" requiredTier="studio" />);
-    expect(screen.getByText('Studio plan required')).toBeInTheDocument();
+    render(<LockedPanelOverlay panelId="unknown-panel" requiredTier="creator" />);
+    expect(screen.getByText('Creator plan required')).toBeInTheDocument();
     // getRequiredTier should NOT be called when requiredTier is provided
     expect(vi.mocked(getRequiredTier)).not.toHaveBeenCalled();
   });
@@ -69,20 +69,18 @@ describe('LockedPanelOverlay', () => {
   it('shows fallback "a higher plan" when no tier is found', () => {
     vi.mocked(getRequiredTier).mockReturnValue(null);
     render(<LockedPanelOverlay panelId="nonexistent-panel" />);
-    expect(screen.getByText('a higher plan plan required')).toBeUndefined;
-    // The component renders "a higher plan plan required" — this is a known quirk
-    // where the fallback string is used as both label and tier. Verify the actual text:
+    // The component renders "a higher plan" as fallback tier text
     expect(screen.getByText(/plan required/)).toBeInTheDocument();
   });
 
-  it('shows starter tier for accessibility panel', () => {
+  it('shows hobbyist tier for accessibility panel', () => {
     render(<LockedPanelOverlay panelId="accessibility" />);
-    expect(screen.getByText('Starter plan required')).toBeInTheDocument();
+    expect(screen.getByText('Hobbyist plan required')).toBeInTheDocument();
   });
 
-  it('shows studio tier for economy panel', () => {
+  it('shows creator tier for economy panel', () => {
     render(<LockedPanelOverlay panelId="economy" />);
-    expect(screen.getByText('Studio plan required')).toBeInTheDocument();
+    expect(screen.getByText('Creator plan required')).toBeInTheDocument();
   });
 
   it('upgrade link text mentions the tier name', () => {
