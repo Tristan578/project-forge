@@ -315,11 +315,22 @@ pub fn restore_scene(
             if let Some(ref snap_particle) = snap.particle_data {
                 commands.entity(entity).insert(snap_particle.clone());
             }
+            // Restore ParticleEnabled marker (was missing — particles stopped after Play→Stop)
+            if snap.particle_enabled {
+                commands.entity(entity).insert(ParticleEnabled);
+            } else {
+                commands.entity(entity).remove::<ParticleEnabled>();
+            }
             if let Some(ref rzd) = snap.reverb_zone_data {
                 commands.entity(entity).insert(rzd.clone());
             }
+            // Restore marker components — insert when enabled, REMOVE when disabled
+            // (without remove, components enabled before play but disabled during play
+            // would remain enabled after stop, corrupting scene state)
             if snap.reverb_zone_enabled {
                 commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+            } else {
+                commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
             }
             if let Some(ref sed) = snap.shader_effect_data {
                 commands.entity(entity).insert(sed.clone());
@@ -335,6 +346,8 @@ pub fn restore_scene(
             }
             if snap.active_game_camera {
                 commands.entity(entity).insert(ActiveGameCamera);
+            } else {
+                commands.entity(entity).remove::<ActiveGameCamera>();
             }
             if let Some(ref sd) = snap.sprite_data {
                 commands.entity(entity).insert(sd.clone());
@@ -344,18 +357,24 @@ pub fn restore_scene(
             }
             if snap.tilemap_enabled {
                 commands.entity(entity).insert(TilemapEnabled);
+            } else {
+                commands.entity(entity).remove::<TilemapEnabled>();
             }
             if let Some(ref s2d) = snap.skeleton2d_data {
                 commands.entity(entity).insert(s2d.clone());
             }
             if snap.skeleton2d_enabled {
                 commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+            } else {
+                commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
             }
             if let Some(ref ld) = snap.lod_data {
                 commands.entity(entity).insert(ld.clone());
             }
             if snap.physics_enabled {
                 commands.entity(entity).insert(PhysicsEnabled);
+            } else {
+                commands.entity(entity).remove::<PhysicsEnabled>();
             }
         }
     }
