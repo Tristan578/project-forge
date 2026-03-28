@@ -516,7 +516,7 @@ jobs:
           CHROME_PATH: /usr/bin/google-chrome
         run: |
           lhci collect \
-            --url=http://localhost:3000/dev \
+            --url=http://localhost:3000 \
             --number-of-runs=3 \
             --output=json \
             --output-path=.lhci-baseline/ \

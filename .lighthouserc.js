@@ -12,7 +12,7 @@ module.exports = {
   ci: {
     collect: {
       url: [
-        'http://localhost:3000/dev',
+        'http://localhost:3000',
       ],
       // No startServerCommand — the CI workflow manages servers directly
       // (next build + next start) to avoid Portless dependency and env var issues.
