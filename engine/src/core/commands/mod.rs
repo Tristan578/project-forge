@@ -89,17 +89,24 @@ fn route_domain(command: &str) -> u8 {
         | "apply_custom_shader" | "remove_custom_shader_slot" => 1,
 
         // --- physics domain ---
-        "set_physics" | "remove_physics" | "set_physics_enabled"
-        | "get_physics" | "enable_physics_debug" | "disable_physics_debug"
-        | "apply_force" | "apply_impulse" | "set_linear_velocity"
-        | "set_angular_velocity" | "get_velocity" | "raycast"
-        | "set_joint" | "remove_joint" | "get_joint" | "list_joints"
+        "update_physics" | "toggle_physics" | "toggle_debug_physics"
+        | "get_physics" | "apply_force" | "raycast_query"
+        | "create_joint" | "update_joint" | "remove_joint" | "list_joints"
+        | "set_physics2d" | "remove_physics2d"
+        | "set_2d_collider_shape" | "set_2d_body_type"
+        | "get_physics2d" | "create_2d_joint" | "update_2d_joint" | "remove_2d_joint"
+        | "apply_force2d" | "apply_impulse2d"
+        | "raycast2d" | "set_gravity2d" | "set_debug_physics2d"
+        // Aliases from route_domain for backward compat → mapped to stub handlers
+        | "set_physics" | "remove_physics" | "set_physics_enabled"
+        | "enable_physics_debug" | "disable_physics_debug"
+        | "apply_impulse" | "set_linear_velocity" | "set_angular_velocity"
+        | "get_velocity" | "raycast" | "get_joint"
         | "set_physics_2d" | "remove_physics_2d" | "set_physics_2d_enabled"
         | "get_physics_2d" | "set_joint_2d" | "remove_joint_2d" | "get_joint_2d"
         | "list_joints_2d" | "apply_force_2d" | "apply_impulse_2d"
         | "set_linear_velocity_2d" | "set_angular_velocity_2d"
-        | "get_velocity_2d" | "raycast_2d" | "get_collisions"
-        | "get_collisions_2d" => 2,
+        | "get_velocity_2d" | "get_collisions" | "get_collisions_2d" => 2,
 
         // --- audio domain ---
         "set_audio" | "remove_audio" | "play_audio" | "stop_audio"
@@ -116,7 +123,8 @@ fn route_domain(command: &str) -> u8 {
         | "get_animation_graph" | "create_animation_clip" | "add_keyframe"
         | "remove_keyframe" | "update_keyframe" | "get_animation_clips"
         | "play_animation_clip" | "stop_animation_clip"
-        | "set_animation_state_machine" | "remove_animation_state_machine" => 4,
+        | "set_animation_state_machine" | "remove_animation_state_machine"
+        | "list_skeleton_animations" | "get_skeleton_animation" => 4,
 
         // --- particles domain ---
         "set_particle" | "remove_particle" | "toggle_particle"
@@ -141,7 +149,9 @@ fn route_domain(command: &str) -> u8 {
         | "get_script" | "list_script_templates" | "apply_script_template"
         | "query_play_state" | "list_scenes" | "create_scene" | "switch_scene"
         | "delete_scene" | "duplicate_scene" | "rename_scene" | "export_scene_json"
-        | "import_scene_json" => 8,
+        | "import_scene_json"
+        // Additional scene management commands
+        | "save_scene" | "get_scene_info" | "list_scene_assets" => 8,
 
         // --- game domain ---
         "add_game_component" | "update_game_component" | "remove_game_component"

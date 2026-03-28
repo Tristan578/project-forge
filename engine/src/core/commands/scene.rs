@@ -40,6 +40,19 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "list_script_templates" => Some(super::handle_query(QueryRequest::ScriptTemplates)),
         "apply_script_template" => Some(handle_apply_script_template(payload.clone())),
         "query_play_state" => Some(super::handle_query(QueryRequest::PlayState)),
+        // Multi-scene management stubs (scene management handled JS-side)
+        "list_scenes" => Some(Err("Not yet implemented: list_scenes".to_string())),
+        "create_scene" => Some(Err("Not yet implemented: create_scene".to_string())),
+        "switch_scene" => Some(Err("Not yet implemented: switch_scene".to_string())),
+        "delete_scene" => Some(Err("Not yet implemented: delete_scene".to_string())),
+        "duplicate_scene" => Some(Err("Not yet implemented: duplicate_scene".to_string())),
+        "rename_scene" => Some(Err("Not yet implemented: rename_scene".to_string())),
+        "export_scene_json" => Some(handle_export_scene(payload.clone())),
+        "import_scene_json" => Some(handle_load_scene(payload.clone())),
+        "save_scene" => Some(Err("Not yet implemented: save_scene".to_string())),
+        "get_scene_info" => Some(Err("Not yet implemented: get_scene_info".to_string())),
+        "list_scene_assets" => Some(super::handle_query(QueryRequest::AssetList)),
+
         _ => None,
     }
 }

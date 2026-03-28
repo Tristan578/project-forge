@@ -1696,29 +1696,85 @@ fn execute_undo(
                 }
             }
         }
-        UndoableAction::ReverbZoneChange { entity_id, .. } => {
-            // Clone entity_id for logging
-            let _eid = entity_id.clone();
+        UndoableAction::ReverbZoneChange { entity_id, old_reverb, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref rz) = old_reverb {
+                        commands.entity(entity).insert(rz.clone());
+                        commands.entity(entity).insert(super::reverb_zone::ReverbZoneEnabled);
+                    } else {
+                        commands.entity(entity).remove::<super::reverb_zone::ReverbZoneData>();
+                        commands.entity(entity).remove::<super::reverb_zone::ReverbZoneEnabled>();
+                    }
+                    break;
+                }
+            }
         }
-        UndoableAction::SpriteChange { entity_id, .. } => {
-            // Clone entity_id for logging
-            let _eid = entity_id.clone();
+        UndoableAction::SpriteChange { entity_id, old_sprite, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref sd) = old_sprite {
+                        commands.entity(entity).insert(sd.clone());
+                    } else {
+                        commands.entity(entity).remove::<super::sprite::SpriteData>();
+                    }
+                    break;
+                }
+            }
         }
-        UndoableAction::Physics2dChange { entity_id, .. } => {
-            // Clone entity_id for logging
-            let _eid = entity_id.clone();
+        UndoableAction::Physics2dChange { entity_id, old_physics, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref pd) = old_physics {
+                        commands.entity(entity).insert(pd.clone());
+                        commands.entity(entity).insert(super::physics_2d::Physics2dEnabled);
+                    } else {
+                        commands.entity(entity).remove::<super::physics_2d::Physics2dData>();
+                        commands.entity(entity).remove::<super::physics_2d::Physics2dEnabled>();
+                    }
+                    break;
+                }
+            }
         }
-        UndoableAction::Joint2dChange { entity_id, .. } => {
-            // Clone entity_id for logging
-            let _eid = entity_id.clone();
+        UndoableAction::Joint2dChange { entity_id, old_joint, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref jd) = old_joint {
+                        commands.entity(entity).insert(jd.clone());
+                    } else {
+                        commands.entity(entity).remove::<super::physics_2d::PhysicsJoint2d>();
+                    }
+                    break;
+                }
+            }
         }
-        UndoableAction::TilemapChange { entity_id, .. } => {
-            // Clone entity_id for logging
-            let _eid = entity_id.clone();
+        UndoableAction::TilemapChange { entity_id, old_tilemap, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref td) = old_tilemap {
+                        commands.entity(entity).insert(td.clone());
+                        commands.entity(entity).insert(TilemapEnabled);
+                    } else {
+                        commands.entity(entity).remove::<super::tilemap::TilemapData>();
+                        commands.entity(entity).remove::<TilemapEnabled>();
+                    }
+                    break;
+                }
+            }
         }
-        UndoableAction::SkeletonChange { entity_id, .. } => {
-            // Clone entity_id for logging
-            let _eid = entity_id.clone();
+        UndoableAction::SkeletonChange { entity_id, old_skeleton, .. } => {
+            for (entity, eid, _, _, _) in query.iter() {
+                if &eid.0 == entity_id {
+                    if let Some(ref sk) = old_skeleton {
+                        commands.entity(entity).insert(sk.clone());
+                        commands.entity(entity).insert(super::skeleton2d::SkeletonEnabled2d);
+                    } else {
+                        commands.entity(entity).remove::<super::skeleton2d::SkeletonData2d>();
+                        commands.entity(entity).remove::<super::skeleton2d::SkeletonEnabled2d>();
+                    }
+                    break;
+                }
+            }
         }
     }
 }

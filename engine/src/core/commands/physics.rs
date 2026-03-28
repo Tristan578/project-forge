@@ -46,6 +46,37 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
             Some(super::handle_query(QueryRequest::Physics2dState { entity_id }))
         }
 
+        // Stub handlers for legacy / aliased command names not yet implemented
+        "set_physics" => Some(Err("Not yet implemented: set_physics (use update_physics)".to_string())),
+        "remove_physics" => Some(Err("Not yet implemented: remove_physics (use toggle_physics with enabled=false)".to_string())),
+        "set_physics_enabled" => Some(Err("Not yet implemented: set_physics_enabled (use toggle_physics)".to_string())),
+        "enable_physics_debug" => Some(handle_toggle_debug_physics(payload.clone())),
+        "disable_physics_debug" => Some(handle_toggle_debug_physics(payload.clone())),
+        "apply_impulse" => Some(handle_apply_force(payload.clone())),
+        "set_linear_velocity" => Some(Err("Not yet implemented: set_linear_velocity".to_string())),
+        "set_angular_velocity" => Some(Err("Not yet implemented: set_angular_velocity".to_string())),
+        "get_velocity" => Some(Err("Not yet implemented: get_velocity".to_string())),
+        "raycast" => Some(handle_raycast_query(payload.clone())),
+        "get_joint" => Some(super::handle_query(QueryRequest::ListJoints)),
+        "set_physics_2d" => Some(handle_set_physics2d(payload.clone())),
+        "remove_physics_2d" => Some(handle_remove_physics2d(payload.clone())),
+        "set_physics_2d_enabled" => Some(Err("Not yet implemented: set_physics_2d_enabled".to_string())),
+        "get_physics_2d" => {
+            let entity_id = payload.get("entityId")?.as_str()?.to_string();
+            Some(super::handle_query(QueryRequest::Physics2dState { entity_id }))
+        }
+        "set_joint_2d" => Some(handle_create_2d_joint(payload.clone())),
+        "remove_joint_2d" => Some(handle_remove_2d_joint(payload.clone())),
+        "get_joint_2d" => Some(Err("Not yet implemented: get_joint_2d".to_string())),
+        "list_joints_2d" => Some(Err("Not yet implemented: list_joints_2d".to_string())),
+        "apply_force_2d" => Some(handle_apply_force2d(payload.clone())),
+        "apply_impulse_2d" => Some(handle_apply_impulse2d(payload.clone())),
+        "set_linear_velocity_2d" => Some(Err("Not yet implemented: set_linear_velocity_2d".to_string())),
+        "set_angular_velocity_2d" => Some(Err("Not yet implemented: set_angular_velocity_2d".to_string())),
+        "get_velocity_2d" => Some(Err("Not yet implemented: get_velocity_2d".to_string())),
+        "get_collisions" => Some(Err("Not yet implemented: get_collisions".to_string())),
+        "get_collisions_2d" => Some(Err("Not yet implemented: get_collisions_2d".to_string())),
+
         _ => None,
     }
 }
