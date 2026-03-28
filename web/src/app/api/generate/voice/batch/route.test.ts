@@ -32,6 +32,13 @@ vi.mock('@/lib/tokens/service', () => ({
 vi.mock('@/lib/monitoring/sentry-server', () => ({
   captureException: vi.fn(),
 }));
+vi.mock('@/lib/rateLimit/distributed', () => ({
+  distributedRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 9, resetAt: Date.now() + 300000 }),
+  aggregateGenerationRateLimit: vi.fn().mockResolvedValue({ allowed: true, remaining: 29, resetAt: Date.now() + 900000 }),
+}));
+vi.mock('@/lib/ai/contentSafety', () => ({
+  sanitizePrompt: vi.fn((p: string) => ({ safe: true, filtered: p })),
+}));
 
 interface BatchItem {
   nodeId: string;
@@ -81,10 +88,11 @@ describe('POST /api/generate/voice/batch', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns 429 if rate limited', async () => {
+  it('returns 429 if distributed rate limited', async () => {
     const user = makeUser();
     vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
-    vi.mocked(rateLimit).mockResolvedValue({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
+    const { distributedRateLimit } = await import('@/lib/rateLimit/distributed');
+    vi.mocked(distributedRateLimit).mockResolvedValueOnce({ allowed: false, remaining: 0, resetAt: Date.now() + 60000 });
 
     const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
     expect(res.status).toBe(429);
@@ -310,5 +318,19 @@ describe('POST /api/generate/voice/batch', () => {
       // 2 failed items * 5 tokens = 10 tokens refunded
       expect(refundTokenAmount).toHaveBeenCalledWith(user.id, 10, expect.any(String), 'usage_abc');
     });
+  });
+
+  it('returns 422 when sanitizePrompt returns safe:false on combined batch text', async () => {
+    const user = makeUser();
+    vi.mocked(authenticateRequest).mockResolvedValue({ ok: true, ctx: { clerkId: '123', user } });
+    const { sanitizePrompt } = await import('@/lib/ai/contentSafety');
+    vi.mocked(sanitizePrompt).mockReturnValueOnce({ safe: false, filtered: '', reason: 'Injection detected' });
+
+    const res = await POST(makeRequest({ items: defaultItems, voiceSettings: defaultVoiceSettings }));
+    const data = await res.json();
+
+    expect(res.status).toBe(422);
+    expect(typeof data.error).toBe('string');
+    expect(data.error.length).toBeGreaterThan(0);
   });
 });
