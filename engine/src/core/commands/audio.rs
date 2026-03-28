@@ -23,10 +23,11 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "stop_audio" => Some(handle_stop_audio(payload.clone())),
         "pause_audio" => Some(handle_pause_audio(payload.clone())),
         "get_audio" => {
-            let entity_id = payload.get("entityId")
+            let result = payload.get("entityId")
                 .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            entity_id.map(|id| super::handle_query(QueryRequest::AudioData { entity_id: id }))
+                .map(|id| super::handle_query(QueryRequest::AudioData { entity_id: id.to_string() }))
+                .unwrap_or_else(|| Err("Missing entityId".to_string()));
+            Some(result)
         }
 
         // Audio bus commands

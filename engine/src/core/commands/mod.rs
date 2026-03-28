@@ -252,8 +252,9 @@ fn handle_mode_change(request: ModeChangeRequest) -> CommandResult {
 /// at minimum a `"command"` string field and an optional `"payload"` object.
 /// Returns a `Vec<CommandResponse>` in the same order as the input.
 ///
-/// Processing is sequential (WASM is single-threaded). If a command fails,
-/// execution continues — all responses are returned.
+/// **Fail-continue semantics:** every command is executed regardless of
+/// whether earlier commands in the batch succeed or fail. Per-command
+/// results are returned individually so callers can inspect each outcome.
 pub fn dispatch_batch(batch: serde_json::Value) -> Vec<CommandResponse> {
     let items = match batch.as_array() {
         Some(arr) => arr,

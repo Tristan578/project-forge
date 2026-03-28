@@ -31,11 +31,11 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "set_script" => Some(handle_set_script(payload.clone())),
         "remove_script" => Some(handle_remove_script(payload.clone())),
         "get_script" => {
-            let entity_id = payload.get("entityId")
+            let result = payload.get("entityId")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            Some(super::handle_query(QueryRequest::ScriptData { entity_id }))
+                .map(|id| super::handle_query(QueryRequest::ScriptData { entity_id: id.to_string() }))
+                .unwrap_or_else(|| Err("Missing entityId".to_string()));
+            Some(result)
         }
         "list_script_templates" => Some(super::handle_query(QueryRequest::ScriptTemplates)),
         "apply_script_template" => Some(handle_apply_script_template(payload.clone())),

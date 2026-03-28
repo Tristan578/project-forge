@@ -162,8 +162,10 @@ pub fn snapshot_scene(
 
     let mut entities = Vec::new();
 
-    for (_, eid, ename, transform, visible, ent_type, mat_data, light_data, phys_data, phys_enabled, mesh, point_light, dir_light, spot_light, asset_ref) in query.iter() {
-        // Use EntityType component if available, else guess from components
+    for (_, eid, ename, transform, visible, ent_type, mat_data, light_data, phys_data, phys_enabled, _mesh, point_light, dir_light, spot_light, asset_ref) in query.iter() {
+        // Use EntityType component if available. Skip entities that lack an
+        // explicit EntityType — guessing (e.g. Cube from mesh presence) would
+        // corrupt the snapshot on Play→Stop by assigning the wrong type.
         let entity_type = if let Some(et) = ent_type {
             *et
         } else if point_light.is_some() {
@@ -172,10 +174,8 @@ pub fn snapshot_scene(
             EntityType::DirectionalLight
         } else if spot_light.is_some() {
             EntityType::SpotLight
-        } else if mesh.is_some() {
-            EntityType::Cube
         } else {
-            continue; // Skip non-forge entities (camera, lights from scene setup, etc.)
+            continue; // Skip: no EntityType component means not a forge entity
         };
 
         // O(1) lookups via pre-built HashMaps (was O(N) per entity)

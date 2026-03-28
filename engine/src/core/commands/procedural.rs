@@ -27,11 +27,11 @@ pub fn dispatch(command: &str, payload: &serde_json::Value) -> Option<super::Com
         "update_terrain" => Some(handle_update_terrain(payload.clone())),
         "sculpt_terrain" => Some(handle_sculpt_terrain(payload.clone())),
         "get_terrain" => {
-            let entity_id = payload.get("entityId")
+            let result = payload.get("entityId")
                 .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            Some(super::handle_query(QueryRequest::TerrainState { entity_id }))
+                .map(|id| super::handle_query(QueryRequest::TerrainState { entity_id: id.to_string() }))
+                .unwrap_or_else(|| Err("Missing entityId".to_string()));
+            Some(result)
         }
         "extrude_shape" => Some(handle_extrude_shape(payload.clone())),
         "lathe_shape" => Some(handle_lathe_shape(payload.clone())),
