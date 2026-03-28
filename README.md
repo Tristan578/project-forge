@@ -11,6 +11,14 @@ An open-source, AI-native 2D/3D game engine for the browser. Every capability �
 
 Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a React-based visual editor.
 
+## Project Sites
+
+| Site | URL | Description |
+|------|-----|-------------|
+| Editor | `spawnforge.localhost:1355` (dev) | Main SpawnForge editor and platform |
+| MCP & API Docs | [docs.spawnforge.ai](https://docs.spawnforge.ai) | Public MCP command reference and API documentation |
+| Design System | `design.spawnforge.ai` | Storybook component library and design tokens |
+
 ## Features
 
 ### AI & Automation
@@ -19,7 +27,7 @@ Powered by WebGPU (with WebGL2 fallback), Rust compiled to WebAssembly, and a Re
 - **Extended Thinking** — Toggle deep reasoning mode for complex multi-step requests like full game setup
 - **Visual Scripting** — React Flow node graph editor with 73 node types across 10 categories. Non-programmers create game logic by connecting visual blocks; graphs compile to TypeScript
 - **AI Asset Generation** — Generate 3D models, textures, sound effects, voice lines, and music via 5 provider integrations (Meshy, ElevenLabs, Suno, DALL-E, Stable Diffusion)
-- **MCP Server** — 350 commands across 41 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required
+- **MCP Server** — 350 commands across 41 categories. Any MCP-compatible agent or LLM can create scenes, configure materials, set up physics, write game scripts, and export finished games — no UI interaction required. See the [MCP command reference](https://docs.spawnforge.ai/mcp) for the full public command listing.
 - **Command-Driven Architecture** — Every engine operation is a JSON command through `handle_command()`. The visual editor and AI agents use the exact same API
 - **Scene Context** — Built-in context builder provides LLMs with full scene state for informed decision-making
 - **Documentation System** — 28+ structured docs searchable via MCP tools (`search_docs`, `get_doc`, `list_doc_topics`), enabling AI agents to learn features on demand

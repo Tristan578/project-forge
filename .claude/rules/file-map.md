@@ -113,6 +113,72 @@ EditorLayout, SceneHierarchy, InspectorPanel, MaterialInspector, LightInspector,
 - `src/manifest.test.ts` — Schema validation (update `validCategories` when adding categories)
 - `src/docs/` — Doc loader, BM25 search, MCP resource/tool registration
 
+## Design System (`packages/ui/`)
+
+Published as `@spawnforge/ui`. The one allowed cross-package import in `next.config.ts` (`transpilePackages`).
+
+### `packages/ui/src/tokens/` — Design tokens (single source of truth)
+- `colors.ts` — Semantic color palette per theme (`ember`, `ice`, `leaf`, `rust`, `mech`, `light`, `dark`)
+- `spacing.ts` — 4px-grid spacing scale
+- `radius.ts` — Border radius constants
+- `typography.ts` — Font size, weight, line-height scale
+- `z-index.ts` — `Z_INDEX` object (e.g. `Z_INDEX.effects = 5`)
+- `themes.ts` — `ThemeName` union type and theme metadata
+- `theme.css` — CSS custom properties for all theme tokens
+- `index.ts` — Re-exports all tokens
+
+### `packages/ui/src/primitives/` — Unstyled base components
+Headless building blocks: `Accordion`, `Avatar`, `Badge`, `Button`, `Card`, `Checkbox`, `Dialog`, `Input`, `Label`, `Popover`, `Progress`, `ScrollArea`, `Select`, `Separator`, `Skeleton`, `Switch`, `Tabs`, `Textarea`, `Toast`, `Tooltip`.
+Each has a co-located `__tests__/` directory.
+
+### `packages/ui/src/effects/` — Theme ambient visual effects
+- `ThemeAmbient.tsx` — Effect router: reads `data-sf-theme` + `data-sf-effects` from `document.documentElement` via `MutationObserver`, lazily renders the matching effect component. Dark theme → no effect. Must be imported with `next/dynamic({ ssr: false })`.
+- `EmberGlow.tsx`, `IceFrost.tsx`, `LeafDrift.tsx`, `RustGears.tsx`, `MechScanlines.tsx`, `LightRays.tsx` — Individual CSS-animation effect components
+- `effects.css` — Keyframe animations shared by all effects
+- `__tests__/ThemeAmbient.test.tsx` — Unit tests (jsdom environment, MutationObserver simulation)
+
+### `packages/ui/src/hooks/` — Shared React hooks
+- `useTheme.ts` — Reads/writes `data-sf-theme` on `document.documentElement`
+- `useDialogA11y.ts` — Focus trap + aria helpers for modal dialogs
+- `__tests__/` — Unit tests per hook
+
+### `packages/ui/src/utils/` — Utility functions
+- `cn.ts` — `cn()` helper: `clsx` + `tailwind-merge` for conditional class names
+- `__tests__/` — Unit tests
+
+### `packages/ui/src/composites/` — Higher-order composed components (built from primitives + tokens)
+- `internal.ts` — Internal-only composite exports
+- `index.ts` — Public surface of the package
+
+## Documentation Site (`apps/docs/`)
+
+Fumadocs-based docs site for the SpawnForge platform API and MCP command reference.
+
+### `apps/docs/components/` — Docs-site React components
+- `CommandFilter.tsx` — Accessible faceted filter for the MCP command index. Accepts `categories`, `scopes`, `totalCommands`, optional `visibleCount` + `onFilterChange`. Uses `role="group"`, native checkboxes, and `aria-live="polite"` status region.
+
+### `apps/docs/lib/` — Shared docs-site utilities
+- `commands.ts` — `readCommandsManifest()`: reads `mcp-server/manifest/commands.json`, returns `{ categories, scopes, publicCount }` for public commands only. Scope prefixes extracted via `/^([a-z_]+)_/` regex.
+
+### `apps/docs/scripts/` — Build-time Node scripts
+- `check-manifest-sync.ts` — Asserts `mcp-server/manifest/commands.json` matches `web/src/data/commands.json`
+- `ci-gate-check.ts` — CI gate: fails if public command count drops below threshold
+- `generate-mcp-docs.ts` — Generates MDX pages from the MCP command manifest
+- `__tests__/` — Vitest unit tests for each script (environment: node)
+
+### `apps/docs/content/` — MDX documentation content
+### `apps/docs/public/` — Static assets
+
+**vitest config:** `apps/docs/vitest.config.ts` — includes `scripts/__tests__/**/*.test.ts` and `components/__tests__/**/*.test.tsx` and `lib/__tests__/**/*.test.ts` (environment: node for scripts, jsdom for components).
+
+## Design Workbench (`apps/design/`)
+
+Storybook-based catalogue for `@spawnforge/ui` components and effects.
+
+### `apps/design/stories/` — Story files
+- `effects/` — Stories for each theme ambient effect (EmberGlow, IceFrost, etc.)
+- `primitives/` — Stories for each primitive component (Button, Input, etc.)
+
 ## Communication Pattern
 
 **JS -> Rust:** `editorStore` slice action -> `dispatchCommand()` -> `handle_command()` -> `commands::dispatch()` chain -> domain `dispatch()` -> `pending/` queue -> Bevy drains next frame

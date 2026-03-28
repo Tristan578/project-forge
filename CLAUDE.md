@@ -28,6 +28,8 @@ cd web && npm install && npm run dev
 ### Quick validation (run after every feature change)
 ```bash
 cd web && npx eslint --max-warnings 0 . && npx tsc --noEmit && npx vitest run
+cd packages/ui && npx vitest run
+cd apps/docs && npx vitest run
 ```
 
 ### Full suite
@@ -43,6 +45,12 @@ cd web && npx vitest run
 
 # Unit tests with coverage
 cd web && npx vitest run --coverage
+
+# UI library tests
+cd packages/ui && npx vitest run
+
+# Docs scripts tests
+cd apps/docs && npx vitest run
 
 # MCP server tests
 cd mcp-server && npx vitest run
