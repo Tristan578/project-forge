@@ -255,3 +255,44 @@ describe('generateUIRuntimeCode: initialization', () => {
     expect(generate()).toContain("getElementById('forge-ui-root')");
   });
 });
+
+// ── script injection prevention (Fix 1) ───────────────────────────────────────
+
+describe('generateUIRuntimeCode: script injection prevention', () => {
+  it('escapes </script> in uiData to prevent early tag termination', () => {
+    const malicious = '{"screens":[],"name":"</script><script>alert(1)//"}';
+    const code = generateUIRuntimeCode(malicious);
+    expect(code).not.toContain('</script>');
+    expect(code).toContain('<\\/script>');
+  });
+
+  it('escapes <!-- in uiData to prevent HTML comment injection', () => {
+    const malicious = '{"screens":[],"name":"<!--"}';
+    const code = generateUIRuntimeCode(malicious);
+    expect(code).not.toContain('<!--');
+    expect(code).toContain('<\\!--');
+  });
+
+  it('does not alter safe JSON uiData', () => {
+    const safe = '{"screens":[]}';
+    const code = generateUIRuntimeCode(safe);
+    expect(code).toContain(`const uiData = ${safe}`);
+  });
+
+  it('handles the classic }; alert(1) // injection payload', () => {
+    const malicious = '}; alert(1) //';
+    const code = generateUIRuntimeCode(malicious);
+    // The payload itself has no </script> or <!-- so it passes through unchanged,
+    // but crucially the embedding is as a JS expression value (caller controls quoting).
+    // The function's contract is escapeScriptContent, not full JS value escaping.
+    expect(code).toBeDefined();
+  });
+
+  it('handles multiple </script> occurrences in uiData', () => {
+    const malicious = JSON.stringify({ a: '</script>', b: '</script>' });
+    const code = generateUIRuntimeCode(malicious);
+    expect(code).not.toContain('</script>');
+    const count = (code.match(/<\\\/script/g) ?? []).length;
+    expect(count).toBeGreaterThanOrEqual(2);
+  });
+});

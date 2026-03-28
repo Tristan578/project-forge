@@ -233,6 +233,67 @@ describe('exportHandlers', () => {
         expect(mockEditorState.setLoadingScreenConfig).toHaveBeenCalledWith(expect.objectContaining({ progressStyle: style }));
       }
     });
+
+    // -----------------------------------------------------------------------
+    // CSS color injection prevention (Fix 3)
+    // -----------------------------------------------------------------------
+    it('rejects CSS injection payload in backgroundColor', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        backgroundColor: 'red; } body { display: none',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('backgroundColor');
+    });
+
+    it('rejects script injection in backgroundColor via </style>', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        backgroundColor: '</style><script>alert(1)</script>',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects non-hex string in progressBarColor', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        progressBarColor: 'rgb(255, 0, 0)',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('progressBarColor');
+    });
+
+    it('accepts valid 3-digit hex in backgroundColor', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        backgroundColor: '#abc',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts valid 6-digit hex in backgroundColor', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        backgroundColor: '#18181b',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('accepts valid 8-digit hex in progressBarColor', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        progressBarColor: '#6366f180',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects plain color name in progressBarColor', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        progressBarColor: 'blue',
+      });
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects hex without leading # in backgroundColor', async () => {
+      const { result } = await invokeHandler(exportHandlers, 'set_loading_screen', {
+        backgroundColor: '18181b',
+      });
+      expect(result.success).toBe(false);
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -27,8 +27,11 @@ export function generateLoadingHtml(config: LoadingScreenConfig): string {
   const backgroundColor = validateCssColor(rawBgColor);
   const progressBarColor = validateCssColor(rawProgressColor);
 
+  if (logoDataUrl && !logoDataUrl.startsWith('data:image/')) {
+    throw new Error('Invalid logo data URL: must start with data:image/');
+  }
   const logoHtml = logoDataUrl
-    ? `<img src="${logoDataUrl}" alt="Game Logo" style="max-width: 200px; max-height: 100px; margin-bottom: 20px;" />`
+    ? `<img src="${escapeHtml(logoDataUrl)}" alt="Game Logo" style="max-width: 200px; max-height: 100px; margin-bottom: 20px;" />`
     : '';
 
   const titleHtml = title ? `<h1 style="font-size: 28px; font-weight: bold; margin: 0 0 8px 0; color: white;">${escapeHtml(title)}</h1>` : '';

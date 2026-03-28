@@ -85,9 +85,10 @@ export const exportHandlers: Record<string, ToolHandler> = {
   },
 
   set_loading_screen: async (args) => {
+    const CSS_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/;
     const p = parseArgs(z.object({
-      backgroundColor: z.string().optional(),
-      progressBarColor: z.string().optional(),
+      backgroundColor: z.string().regex(CSS_COLOR_RE, 'backgroundColor must be a hex color (e.g. #18181b)').optional(),
+      progressBarColor: z.string().regex(CSS_COLOR_RE, 'progressBarColor must be a hex color (e.g. #6366f1)').optional(),
       progressStyle: z.enum(['bar', 'spinner', 'dots', 'none']).optional(),
       title: z.string().optional(),
       subtitle: z.string().optional(),
