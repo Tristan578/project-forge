@@ -166,6 +166,13 @@ fn handle_camera_shake(payload: serde_json::Value) -> super::CommandResult {
         .and_then(|v| v.as_f64())
         .ok_or("Missing duration")? as f32;
 
+    if !intensity.is_finite() || !duration.is_finite() {
+        return Err("camera_shake: intensity and duration must be finite numbers".to_string());
+    }
+
+    let intensity = intensity.clamp(0.0, 100.0);
+    let duration = duration.clamp(0.0, 30.0);
+
     if queue_camera_shake_from_bridge(CameraShakeRequest {
         intensity,
         duration,
@@ -181,6 +188,10 @@ fn handle_camera_shake(payload: serde_json::Value) -> super::CommandResult {
 fn handle_mouse_delta(payload: serde_json::Value) -> super::CommandResult {
     let dx = payload.get("dx").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
     let dy = payload.get("dy").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+
+    if !dx.is_finite() || !dy.is_finite() {
+        return Err("mouse_delta values must be finite".into());
+    }
 
     if queue_mouse_delta_from_bridge(dx, dy) {
         Ok(())
