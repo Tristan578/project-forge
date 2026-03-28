@@ -13,11 +13,11 @@ export async function GET(request: NextRequest) {
   const rl = await rateLimit(`user:publish-check-slug:${session.clerkId}`, 30, 60_000);
   if (!rl.allowed) return rateLimitResponse(rl.remaining, rl.resetAt);
 
+  const slug = request.nextUrl.searchParams.get('slug');
+  if (!slug) return NextResponse.json({ error: 'slug is required' }, { status: 400 });
+
   const user = await getUserByClerkId(session.clerkId);
   if (!user) return NextResponse.json({ available: true });
-
-  const slug = request.nextUrl.searchParams.get('slug');
-  if (!slug) return NextResponse.json({ available: false });
 
   const db = getDb();
 

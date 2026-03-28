@@ -49,14 +49,14 @@ describe('GET /api/publish/check-slug', () => {
     expect(body.available).toBe(true);
   });
 
-  it('should return available false when slug param missing', async () => {
+  it('should return 400 when slug param missing', async () => {
     const { GET } = await import('./route');
     const req = new NextRequest('http://localhost:3000/api/publish/check-slug');
     const res = await GET(req);
     const body = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(body.available).toBe(false);
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('slug is required');
   });
 
   it('should return available true when slug not taken', async () => {

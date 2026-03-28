@@ -28,6 +28,19 @@ export async function PUT(request: NextRequest) {
     const db = getDb();
 
     if (body.type === 'token_config') {
+      if (
+        typeof body.tokenCost !== 'number' || !Number.isFinite(body.tokenCost) || body.tokenCost < 0
+      ) {
+        return NextResponse.json({ error: 'tokenCost must be a non-negative finite number' }, { status: 400 });
+      }
+      if (
+        typeof body.estimatedCostCents !== 'number' || !Number.isFinite(body.estimatedCostCents) || body.estimatedCostCents < 0
+      ) {
+        return NextResponse.json({ error: 'estimatedCostCents must be a non-negative finite number' }, { status: 400 });
+      }
+      if (typeof body.id !== 'string' || body.id.trim() === '') {
+        return NextResponse.json({ error: 'id is required' }, { status: 400 });
+      }
       await db.update(tokenConfig)
         .set({
           tokenCost: body.tokenCost,
@@ -37,6 +50,29 @@ export async function PUT(request: NextRequest) {
         })
         .where(eq(tokenConfig.id, body.id));
     } else if (body.type === 'tier_config') {
+      if (
+        typeof body.monthlyTokens !== 'number' || !Number.isFinite(body.monthlyTokens) || body.monthlyTokens < 0
+      ) {
+        return NextResponse.json({ error: 'monthlyTokens must be a non-negative finite number' }, { status: 400 });
+      }
+      if (
+        typeof body.maxProjects !== 'number' || !Number.isFinite(body.maxProjects) || body.maxProjects < 0
+      ) {
+        return NextResponse.json({ error: 'maxProjects must be a non-negative finite number' }, { status: 400 });
+      }
+      if (
+        typeof body.maxPublished !== 'number' || !Number.isFinite(body.maxPublished) || body.maxPublished < 0
+      ) {
+        return NextResponse.json({ error: 'maxPublished must be a non-negative finite number' }, { status: 400 });
+      }
+      if (
+        typeof body.priceCentsMonthly !== 'number' || !Number.isFinite(body.priceCentsMonthly) || body.priceCentsMonthly < 0
+      ) {
+        return NextResponse.json({ error: 'priceCentsMonthly must be a non-negative finite number' }, { status: 400 });
+      }
+      if (typeof body.id !== 'string' || body.id.trim() === '') {
+        return NextResponse.json({ error: 'id is required' }, { status: 400 });
+      }
       await db.update(tierConfig)
         .set({
           monthlyTokens: body.monthlyTokens,

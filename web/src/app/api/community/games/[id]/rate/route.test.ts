@@ -73,7 +73,7 @@ describe('POST /api/community/games/[id]/rate', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Rating must be between 1 and 5');
+    expect(body.error).toBe('Rating must be an integer between 1 and 5');
   });
 
   it('should return 400 for rating above 5', async () => {
@@ -89,7 +89,7 @@ describe('POST /api/community/games/[id]/rate', () => {
     const body = await res.json();
 
     expect(res.status).toBe(400);
-    expect(body.error).toBe('Rating must be between 1 and 5');
+    expect(body.error).toBe('Rating must be an integer between 1 and 5');
   });
 
   it('should create a new rating and return stats', async () => {

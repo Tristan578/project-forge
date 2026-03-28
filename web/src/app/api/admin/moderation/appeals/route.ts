@@ -26,8 +26,10 @@ export async function GET(req: NextRequest) {
 
     const db = getDb();
     const searchParams = req.nextUrl.searchParams;
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50', 10), 100);
-    const offset = parseInt(searchParams.get('offset') || '0', 10);
+    const parsedLimit = parseInt(searchParams.get('limit') || '50', 10);
+    const limit = Math.min(Number.isFinite(parsedLimit) ? parsedLimit : 50, 100);
+    const parsedOffset = parseInt(searchParams.get('offset') || '0', 10);
+    const offset = Number.isFinite(parsedOffset) ? parsedOffset : 0;
     const statusFilter = searchParams.get('status') || 'pending';
 
     const validStatuses = ['pending', 'approved', 'rejected'];

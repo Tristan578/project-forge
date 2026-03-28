@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
   } = body;
 
   // Validate
-  if (!prompt || prompt.trim().length < 3) {
+  if (!prompt || typeof prompt !== 'string' || prompt.trim().length < 3) {
     return NextResponse.json(
       { error: 'prompt is required (min 3 characters)' },
       { status: 422 }
@@ -118,6 +118,7 @@ export async function POST(request: NextRequest) {
         provider: DB_PROVIDER.sprite,
         status: result.status,
         estimatedSeconds: frameCount * 10,
+        usageId,
       },
       { status: 201 }
     );

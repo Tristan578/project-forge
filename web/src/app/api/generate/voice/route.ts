@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   const style = body.voiceStyle ? (voiceStyleMap[body.voiceStyle] ?? 0) : body.style;
 
   // Validate
-  if (!text || text.length < 1 || text.length > 1000) {
+  if (!text || typeof text !== 'string' || text.length < 1 || text.length > 1000) {
     return NextResponse.json(
       { error: 'Text must be between 1 and 1000 characters' },
       { status: 422 }

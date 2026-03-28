@@ -3,6 +3,7 @@ import { withApiMiddleware } from '@/lib/api/middleware';
 import { getDb } from '@/lib/db/client';
 import { publishedGames } from '@/lib/db/schema';
 import { eq, and } from 'drizzle-orm';
+import { captureException } from '@/lib/monitoring/sentry-server';
 
 export async function DELETE(
   request: NextRequest,
@@ -16,11 +17,17 @@ export async function DELETE(
   if (mid.error) return mid.error;
 
   const { id } = await params;
-  const db = getDb();
 
-  await db.update(publishedGames)
-    .set({ status: 'unpublished', updatedAt: new Date() })
-    .where(and(eq(publishedGames.id, id), eq(publishedGames.userId, mid.userId!)));
+  try {
+    const db = getDb();
 
-  return NextResponse.json({ success: true });
+    await db.update(publishedGames)
+      .set({ status: 'unpublished', updatedAt: new Date() })
+      .where(and(eq(publishedGames.id, id), eq(publishedGames.userId, mid.userId!)));
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    captureException(error, { route: '/api/publish/[id]', method: 'DELETE' });
+    return NextResponse.json({ error: 'Failed to unpublish game' }, { status: 500 });
+  }
 }

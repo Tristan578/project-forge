@@ -39,7 +39,13 @@ export async function PATCH(
     // Build update object
     const updates: Record<string, unknown> = { updatedAt: new Date() };
 
-    if (body.status) updates.status = body.status;
+    const VALID_STATUSES = ['pending', 'processing', 'downloading', 'completed', 'failed', 'cancelled'] as const;
+    if (body.status !== undefined) {
+      if (!VALID_STATUSES.includes(body.status)) {
+        return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
+      }
+      updates.status = body.status;
+    }
     if (typeof body.progress === 'number') updates.progress = body.progress;
     if (body.errorMessage !== undefined) updates.errorMessage = body.errorMessage;
     if (body.resultUrl !== undefined) updates.resultUrl = body.resultUrl;

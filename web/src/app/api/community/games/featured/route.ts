@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDb } from '@/lib/db/client';
 import { publishedGames, users, gameLikes, gameRatings, gameTags, gameComments, featuredGames } from '@/lib/db/schema';
-import { eq, sql, and, gt } from 'drizzle-orm';
+import { eq, sql, and, gt, isNull, or } from 'drizzle-orm';
 import { rateLimitPublicRoute } from '@/lib/rateLimit';
 import { captureException } from '@/lib/monitoring/sentry-server';
 
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
       .from(featuredGames)
       .where(
         and(
-          gt(featuredGames.expiresAt, new Date()),
+          or(isNull(featuredGames.expiresAt), gt(featuredGames.expiresAt, new Date())),
           eq(publishedGames.status, 'published')
         )
       )

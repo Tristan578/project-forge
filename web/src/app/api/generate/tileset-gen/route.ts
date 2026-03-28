@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
         provider: DB_PROVIDER.sprite,
         status: result.status,
         estimatedSeconds: 60,
+        usageId,
       },
       { status: 201 }
     );

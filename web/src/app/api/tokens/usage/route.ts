@@ -11,10 +11,11 @@ export async function GET(req: NextRequest) {
   });
   if (mid.error) return mid.error;
 
-  const days = parseInt(req.nextUrl.searchParams.get('days') ?? '30', 10);
+  const parsedDays = parseInt(req.nextUrl.searchParams.get('days') ?? '30', 10);
+  const days = Number.isFinite(parsedDays) ? Math.min(parsedDays, 90) : 30;
 
   try {
-    const usage = await getUsageHistory(mid.userId!, Math.min(days, 90));
+    const usage = await getUsageHistory(mid.userId!, days);
     return NextResponse.json({ usage });
   } catch (error) {
     captureException(error, { route: '/api/tokens/usage', method: 'GET' });
