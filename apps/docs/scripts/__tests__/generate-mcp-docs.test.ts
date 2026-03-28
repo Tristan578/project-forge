@@ -175,6 +175,98 @@ describe('generateMcpDocs', () => {
   });
 });
 
+describe('command name validation', () => {
+  it('skips commands with invalid name format and adds error', () => {
+    const badNameCommand = {
+      ...publicCommand,
+      name: 'bad-name!',
+    };
+    fs.writeFileSync(manifestPath, makeManifest([badNameCommand]));
+    const result = generateMcpDocs(manifestPath, outputDir);
+
+    expect(result.generatedCount).toBe(0);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors[0]).toMatch(/invalid name format/i);
+    expect(fs.existsSync(path.join(outputDir, 'bad-name!.mdx'))).toBe(false);
+  });
+
+  it('accepts valid snake_case command names', () => {
+    const validCommand = { ...publicCommand, name: 'spawn_entity_2d' };
+    fs.writeFileSync(manifestPath, makeManifest([validCommand]));
+    const result = generateMcpDocs(manifestPath, outputDir);
+
+    expect(result.errors).toHaveLength(0);
+    expect(result.generatedCount).toBe(1);
+  });
+
+  it('rejects command names starting with a digit', () => {
+    const badCommand = { ...publicCommand, name: '1bad_name' };
+    fs.writeFileSync(manifestPath, makeManifest([badCommand]));
+    const result = generateMcpDocs(manifestPath, outputDir);
+
+    expect(result.generatedCount).toBe(0);
+    expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('YAML frontmatter injection prevention', () => {
+  it('escapes HTML in command name in frontmatter', () => {
+    // Name will fail validation, but we test via category injection
+    const injectionCommand = {
+      ...publicCommand,
+      name: 'safe_name',
+      category: 'scene"injected: true\nfoo',
+    };
+    fs.writeFileSync(manifestPath, makeManifest([injectionCommand]));
+    generateMcpDocs(manifestPath, outputDir);
+
+    const content = fs.readFileSync(path.join(outputDir, 'safe_name.mdx'), 'utf-8');
+    // The injected newline + key must not appear as a separate frontmatter field
+    expect(content).not.toMatch(/^foo:/m);
+    expect(content).not.toMatch(/^injected: true/m);
+  });
+
+  it('escapes HTML special chars in param type in table', () => {
+    const cmdWithHtmlType = {
+      ...publicCommand,
+      name: 'test_cmd',
+      parameters: {
+        type: 'object',
+        properties: {
+          val: { type: 'string<script>', description: 'A value' },
+        },
+        required: ['val'],
+      },
+    };
+    fs.writeFileSync(manifestPath, makeManifest([cmdWithHtmlType]));
+    generateMcpDocs(manifestPath, outputDir);
+
+    const content = fs.readFileSync(path.join(outputDir, 'test_cmd.mdx'), 'utf-8');
+    expect(content).not.toContain('<script>');
+    expect(content).toContain('&lt;script&gt;');
+  });
+
+  it('escapes HTML in enum values in table', () => {
+    const cmdWithHtmlEnum = {
+      ...publicCommand,
+      name: 'enum_cmd',
+      parameters: {
+        type: 'object',
+        properties: {
+          mode: { type: 'string', enum: ['safe', '<evil>'], description: 'Mode' },
+        },
+        required: ['mode'],
+      },
+    };
+    fs.writeFileSync(manifestPath, makeManifest([cmdWithHtmlEnum]));
+    generateMcpDocs(manifestPath, outputDir);
+
+    const content = fs.readFileSync(path.join(outputDir, 'enum_cmd.mdx'), 'utf-8');
+    expect(content).not.toContain('<evil>');
+    expect(content).toContain('&lt;evil&gt;');
+  });
+});
+
 describe('author sanitization', () => {
   it('is tested via sanitizeAuthor helper', async () => {
     const { sanitizeAuthor } = await import('../generate-mcp-docs.js');

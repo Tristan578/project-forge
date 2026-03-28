@@ -119,6 +119,11 @@ function getGitMetadata(filePath: string): { date: string; author: string | null
   }
 }
 
+/** Validate that a command name matches the expected safe format. */
+function isValidCommandName(name: string): boolean {
+  return /^[a-z_][a-z0-9_]*$/.test(name);
+}
+
 /** Build the parameters table for a command. */
 function buildParametersTable(cmd: Command): string {
   const props = cmd.parameters?.properties ?? {};
@@ -132,10 +137,10 @@ function buildParametersTable(cmd: Command): string {
   const rows = entries.map(([name, param]) => {
     const isRequired = required.has(name) ? 'Yes' : 'No';
     const typeStr = param.enum
-      ? param.enum.map(v => `\`${v}\``).join(', ')
-      : param.type;
+      ? param.enum.map(v => `\`${htmlEscape(v)}\``).join(', ')
+      : htmlEscape(param.type);
     const desc = param.description ? htmlEscape(param.description) : '';
-    return `| \`${name}\` | ${typeStr} | ${isRequired} | ${desc} |`;
+    return `| \`${htmlEscape(name)}\` | ${typeStr} | ${isRequired} | ${desc} |`;
   });
 
   return [
@@ -183,11 +188,13 @@ function buildExampleJson(cmd: Command): string {
 /** Generate a single MDX page for a public command. */
 function generateCommandMdx(cmd: Command, metadata: { date: string; author: string | null } | null): string {
   const escapedDesc = htmlEscape(cmd.description);
+  const escapedName = htmlEscape(cmd.name);
+  const escapedCategory = htmlEscape(cmd.category);
 
   const frontmatter = [
     '---',
-    `commandName: "${cmd.name}"`,
-    `category: "${cmd.category}"`,
+    `commandName: "${escapedName}"`,
+    `category: "${escapedCategory}"`,
     `visibility: "${cmd.visibility ?? 'internal'}"`,
     `description: "${escapedDesc}"`,
     ...(metadata ? [`lastUpdated: "${metadata.date}"`] : []),
@@ -254,6 +261,10 @@ export function generateMcpDocs(manifestPath: string, outputDir: string): Genera
   let generatedCount = 0;
 
   for (const cmd of publicCommands) {
+    if (!isValidCommandName(cmd.name)) {
+      errors.push(`Skipping command with invalid name format: "${cmd.name}" (must match /^[a-z_][a-z0-9_]*$/)`);
+      continue;
+    }
     try {
       const mdx = generateCommandMdx(cmd, metadata);
       const filePath = path.join(outputDir, `${cmd.name}.mdx`);
