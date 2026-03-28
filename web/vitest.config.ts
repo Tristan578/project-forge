@@ -7,7 +7,7 @@ export default defineConfig({
     environment: 'jsdom',
     testTimeout: VITEST_TEST_TIMEOUT_MS,
     hookTimeout: VITEST_HOOK_TIMEOUT_MS,
-    pool: 'forks',
+    pool: 'threads',
     teardownTimeout: 5000,
     isolate: true,
     retry: process.env.CI ? 1 : 0,

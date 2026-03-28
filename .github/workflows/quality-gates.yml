@@ -79,7 +79,15 @@ jobs:
 
       - run: npm ci
 
+      - name: Cache @spawnforge/ui build
+        id: ui-cache-lint
+        uses: actions/cache@v4
+        with:
+          path: packages/ui/dist
+          key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
+
       - name: Build @spawnforge/ui
+        if: steps.ui-cache-lint.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
 
       - run: npx eslint --max-warnings 0
@@ -103,7 +111,15 @@ jobs:
 
       - run: npm ci
 
+      - name: Cache @spawnforge/ui build
+        id: ui-cache-typecheck
+        uses: actions/cache@v4
+        with:
+          path: packages/ui/dist
+          key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
+
       - name: Build @spawnforge/ui
+        if: steps.ui-cache-typecheck.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
 
       - run: npx tsc --noEmit
@@ -127,7 +143,15 @@ jobs:
 
       - run: npm ci
 
+      - name: Cache @spawnforge/ui build
+        id: ui-cache-test-web
+        uses: actions/cache@v4
+        with:
+          path: packages/ui/dist
+          key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
+
       - name: Build @spawnforge/ui
+        if: steps.ui-cache-test-web.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
 
       - name: Test @spawnforge/ui
@@ -451,7 +475,15 @@ jobs:
 
       - run: npm ci
 
+      - name: Cache @spawnforge/ui build
+        id: ui-cache-lighthouse
+        uses: actions/cache@v4
+        with:
+          path: packages/ui/dist
+          key: ui-build-${{ hashFiles('packages/ui/src/**', 'packages/ui/package.json', 'packages/ui/tsconfig.json') }}
+
       - name: Build @spawnforge/ui
+        if: steps.ui-cache-lighthouse.outputs.cache-hit != 'true'
         run: cd packages/ui && npm run build
 
       - name: Install web dependencies
@@ -460,15 +492,21 @@ jobs:
       - name: Install @lhci/cli
         run: npm install -g @lhci/cli
 
-      - name: Start dev server for baseline (effects off)
+      - name: Build Next.js for baseline (effects off)
         working-directory: web
         env:
           NEXT_TELEMETRY_DISABLED: '1'
           NEXT_PUBLIC_EFFECTS: 'off'
+        run: npm run build
+
+      - name: Start production server for baseline (effects off)
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
           PORT: '3000'
         run: |
-          npm run dev &
-          npx wait-on http://localhost:3000 --timeout 120000
+          npx next start -p 3000 &
+          npx wait-on http://localhost:3000 --timeout 30000
 
       - name: Collect baseline Lighthouse runs (effects off)
         run: |
@@ -479,15 +517,21 @@ jobs:
             --output-path=.lhci-baseline/ \
             --chrome-flags="--headless --no-sandbox --disable-gpu"
 
-      - name: Start dev server for effects-on run
+      - name: Build Next.js for effects-on run
         working-directory: web
         env:
           NEXT_TELEMETRY_DISABLED: '1'
           NEXT_PUBLIC_EFFECTS: 'on'
+        run: npm run build
+
+      - name: Start production server for effects-on run
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
           PORT: '3001'
         run: |
-          npm run dev &
-          npx wait-on http://localhost:3001 --timeout 60000
+          npx next start -p 3001 &
+          npx wait-on http://localhost:3001 --timeout 30000
 
       - name: Collect effects-on Lighthouse runs
         run: |
@@ -500,14 +544,14 @@ jobs:
 
       - name: Assert effects delta less than 5 performance points
         run: |
-          node << 'NODE_EOF'
-          const fs = require('fs');
-          const path = require('path');
+          node --input-type=module << 'NODE_EOF'
+          import { readdirSync, readFileSync } from 'fs';
+          import { join } from 'path';
 
           function getMedianPerformance(dir) {
-            const files = fs.readdirSync(dir).filter(f => f.endsWith('.json'));
+            const files = readdirSync(dir).filter(f => f.endsWith('.json'));
             const scores = files.map(f => {
-              const report = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+              const report = JSON.parse(readFileSync(join(dir, f), 'utf8'));
               return report.categories && report.categories.performance
                 ? report.categories.performance.score
                 : 0;

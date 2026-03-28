@@ -214,9 +214,10 @@ jobs:
   # a local build. Only runs when VERCEL_DEPLOY_ENABLED is set and web/mcp files changed.
   preview-deploy:
     name: Preview Deployment
-    needs: [ci-gate]
+    needs: [ci-gate, quality-gates]
     if: |
       vars.VERCEL_DEPLOY_ENABLED == 'true' &&
+      needs.quality-gates.result == 'success' &&
       (needs.ci-gate.outputs.needs-web == 'true' || needs.ci-gate.outputs.needs-mcp == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -281,6 +282,11 @@ jobs:
           gh pr comment "$PR_NUMBER" \
             --body "**Preview deployment ready** — [\`${short_sha}\`](${DEPLOY_URL}): ${DEPLOY_URL}" \
             --repo "$REPO"
+
+      - name: Verify preview is reachable
+        if: steps.deploy.outputs.url
+        run: |
+          curl -sf "${{ steps.deploy.outputs.url }}" -o /dev/null --retry 3 --retry-delay 5 || echo "::warning::Preview URL not reachable"
 
   # Engine-dependent E2E tests (@engine) require WASM + GPU which CI runners lack.
   # Only UI-only E2E tests (@ui) run in CI — they test React shell without WASM.
