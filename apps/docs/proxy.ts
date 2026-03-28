@@ -1,64 +1,35 @@
+import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-import type { NextRequest } from 'next/server';
 
 /**
- * Docs site auth gate.
+ * Docs site auth gate using Clerk.
  *
- * When DOCS_AUTH_TOKEN is set, visitors must authenticate with the token
- * via a simple login page. The token is stored in a cookie after login.
- * When DOCS_AUTH_TOKEN is not set (local dev), the site is open.
+ * All pages require Clerk authentication. Unauthenticated users are
+ * redirected to the Clerk sign-in page. In local dev without Clerk keys,
+ * the site is open (clerkMiddleware passes through gracefully).
+ *
+ * Future: add admin/internal role check to restrict to SpawnForge team members.
  */
-export function proxy(request: NextRequest) {
-  const authToken = process.env.DOCS_AUTH_TOKEN;
 
-  // No token configured — site is open (local dev)
-  if (!authToken) {
+const isPublicRoute = createRouteMatcher([
+  '/sign-in(.*)',
+  '/sign-up(.*)',
+  '/api/webhooks(.*)',
+]);
+
+export default clerkMiddleware(async (auth, request) => {
+  // In development without Clerk keys, allow all access
+  if (!process.env.CLERK_SECRET_KEY) {
     return NextResponse.next();
   }
 
-  // Allow the login API route through
-  if (request.nextUrl.pathname === '/api/login') {
-    return NextResponse.next();
+  if (!isPublicRoute(request)) {
+    await auth.protect();
   }
-
-  // Check cookie
-  const cookie = request.cookies.get('docs_auth');
-  if (cookie?.value === authToken) {
-    return NextResponse.next();
-  }
-
-  // Check query param (for direct links with token)
-  const tokenParam = request.nextUrl.searchParams.get('token');
-  if (tokenParam === authToken) {
-    const url = request.nextUrl.clone();
-    url.searchParams.delete('token');
-    const response = NextResponse.redirect(url);
-    response.cookies.set('docs_auth', authToken, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
-      path: '/',
-    });
-    return response;
-  }
-
-  // Not authenticated — show login page
-  const loginUrl = request.nextUrl.clone();
-  loginUrl.pathname = '/login';
-  loginUrl.searchParams.set('next', request.nextUrl.pathname);
-  return NextResponse.rewrite(loginUrl);
-}
+});
 
 export const config = {
   matcher: [
-    /*
-     * Match all paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization)
-     * - favicon.ico
-     * - login page itself
-     */
-    '/((?!_next/static|_next/image|favicon.ico|login).*)',
+    '/((?!_next/static|_next/image|favicon.ico).*)',
   ],
 };

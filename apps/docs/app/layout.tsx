@@ -1,5 +1,8 @@
 import './globals.css';
 import type { ReactNode } from 'react';
+import { ClerkProvider } from '@clerk/nextjs';
+
+export const dynamic = 'force-dynamic';
 
 export const metadata = {
   title: 'SpawnForge Documentation',
@@ -8,8 +11,10 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark">
-      <body>{children}</body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" className="dark">
+        <body>{children}</body>
+      </html>
+    </ClerkProvider>
   );
 }
