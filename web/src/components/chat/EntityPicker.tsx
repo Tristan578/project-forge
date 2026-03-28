@@ -115,7 +115,11 @@ export function EntityPicker({ onSelect, onClose }: EntityPickerProps) {
   }
 
   return (
-    <div className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-md border border-zinc-700 bg-zinc-900 shadow-lg">
+    <div
+      role="listbox"
+      aria-label="Select entity"
+      className="absolute bottom-full left-0 z-50 mb-1 w-64 rounded-md border border-zinc-700 bg-zinc-900 shadow-lg"
+    >
       <div
         ref={listRef}
         className="max-h-[200px] overflow-y-auto py-1"
@@ -124,6 +128,8 @@ export function EntityPicker({ onSelect, onClose }: EntityPickerProps) {
           <button
             key={entity.entityId}
             data-entity-item
+            role="option"
+            aria-selected={i === selectedIndex}
             className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs ${
               i === selectedIndex
                 ? 'bg-zinc-800 text-zinc-200'

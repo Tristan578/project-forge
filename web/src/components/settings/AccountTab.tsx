@@ -67,11 +67,14 @@ export function AccountTab() {
               value={confirmText}
               onChange={(e) => setConfirmText(e.target.value)}
               placeholder="Type DELETE"
+              aria-label="Confirm account deletion by typing DELETE"
               autoFocus
               className="w-full rounded border border-zinc-600 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-red-500"
             />
             {error && (
-              <p className="text-xs text-red-400">{error}</p>
+              <p role="alert" className="text-xs text-red-400">
+                {error} Please try again or contact support if the issue persists.
+              </p>
             )}
             <div className="flex gap-2">
               <button

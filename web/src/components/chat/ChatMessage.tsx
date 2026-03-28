@@ -56,7 +56,7 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <img
               key={i}
               src={img}
-              alt="Attached"
+              alt={`Attached image ${i + 1}`}
               className="h-20 w-20 rounded border border-zinc-700 object-cover"
             />
           ))}
@@ -148,6 +148,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
               message.id,
               message.feedback === 'positive' ? null : 'positive'
             )}
+            aria-label="Good response"
+            aria-pressed={message.feedback === 'positive'}
             className={`rounded p-1 transition-colors ${
               message.feedback === 'positive'
                 ? 'text-green-400'
@@ -162,6 +164,8 @@ export function ChatMessage({ message }: ChatMessageProps) {
               message.id,
               message.feedback === 'negative' ? null : 'negative'
             )}
+            aria-label="Bad response"
+            aria-pressed={message.feedback === 'negative'}
             className={`rounded p-1 transition-colors ${
               message.feedback === 'negative'
                 ? 'text-red-400'
