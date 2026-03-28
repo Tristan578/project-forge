@@ -424,16 +424,19 @@ fn handle_update_joint(payload: serde_json::Value) -> super::CommandResult {
     };
 
     // Motor: None means "no update", Some(None) means "clear motor", Some(Some(motor)) means "set motor"
-    let motor = if payload.get("motor").is_some() {
-        Some(payload.get("motor").and_then(|v| {
-            let obj = v.as_object()?;
-            let target_velocity = obj.get("targetVelocity")?.as_f64()? as f32;
-            let max_force = obj.get("maxForce")?.as_f64()? as f32;
+    let motor = if let Some(motor_val) = payload.get("motor") {
+        if motor_val.is_null() {
+            Some(None) // Explicit null = clear motor
+        } else if let Some(obj) = motor_val.as_object() {
+            let target_velocity = obj.get("targetVelocity").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+            let max_force = obj.get("maxForce").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
             if !target_velocity.is_finite() || !max_force.is_finite() {
-                return None;
+                return Err("Motor values must be finite".into());
             }
-            Some(JointMotor { target_velocity, max_force })
-        }))
+            Some(Some(JointMotor { target_velocity, max_force }))
+        } else {
+            None // Invalid motor shape, ignore
+        }
     } else {
         None
     };
