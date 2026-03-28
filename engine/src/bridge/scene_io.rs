@@ -1,5 +1,14 @@
 //! Scene import/export and asset loading systems.
 
+/// Maximum size of a scene JSON payload in bytes (50 MB).
+pub const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024;
+/// Maximum number of entities permitted in a loaded scene.
+pub const MAX_SCENE_ENTITIES: usize = 10_000;
+/// Maximum byte length of a glTF base64 payload (~50 MB decoded, 1.33× overhead).
+pub const MAX_GLTF_BASE64_LEN: usize = 67_500_000;
+/// Maximum byte length of a texture base64 payload (~50 MB decoded, 1.33× overhead).
+pub const MAX_TEXTURE_BASE64_LEN: usize = 67_500_000;
+
 use bevy::prelude::*;
 use crate::core::{
     asset_manager::{AssetRef, AssetRegistry},
@@ -206,7 +215,6 @@ pub(super) fn apply_scene_load(
     };
 
     // Guard against pathologically large scene payloads that could cause OOM during deser.
-    const MAX_SCENE_JSON_BYTES: usize = 50 * 1024 * 1024; // 50MB
     if request.json.len() > MAX_SCENE_JSON_BYTES {
         tracing::error!(
             "Scene load rejected: JSON payload {} bytes exceeds 50MB limit",
@@ -229,7 +237,6 @@ pub(super) fn apply_scene_load(
     }
 
     // Cap entity count to prevent runaway scene loading.
-    const MAX_SCENE_ENTITIES: usize = 10_000;
     if scene_file.entities.len() > MAX_SCENE_ENTITIES {
         tracing::error!(
             "Scene load rejected: {} entities exceeds limit of {}",
